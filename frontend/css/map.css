@@ -1,0 +1,422 @@
+/* =====================================================
+   MAP PAGE STYLES - Fixed UI/UX Layout
+   File: css/map.css
+===================================================== */
+
+/* === ROOT VARIABLES & RESET === */
+:root {
+    --sidebar-width: 340px;
+    --sidebar-expanded-width: 720px;
+    --sidebar-collapsed-width: 60px;
+    --transition-speed: 0.3s;
+}
+
+* { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+}
+
+body {
+    background: var(--bg-primary);
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text-primary);
+}
+
+/* === TOP NAVBAR === */
+.top-navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 64px;
+    background: var(--bg-overlay);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-color);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    box-shadow: var(--shadow-md);
+}
+
+.brand-text {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1.25rem;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: color 0.2s;
+}
+
+.brand-text:hover {
+    color: var(--accent-primary);
+}
+
+/* === MAP CONTAINER === */
+#map {
+    position: absolute;
+    top: 64px;
+    left: 0;
+    width: 100vw;
+    height: calc(100vh - 64px);
+    z-index: 1;
+}
+
+/* === TOGGLE BUTTON (Mobile/Desktop) === */
+.toggle-list-btn {
+    position: fixed;
+    top: 140px;  
+    left: 16px;
+    z-index: 2000;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    color: white;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.2s, background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (max-width: 768px) {
+    .toggle-list-btn {
+        top: 80px;
+    }
+}
+
+.toggle-list-btn:hover {
+    transform: scale(1.1);
+    background: var(--accent-secondary);
+}
+
+/* === STATION LIST SIDEBAR (Left) === */
+.station-list-sidebar {
+    position: fixed;
+    top: 64px;
+    left: 0;
+    width: var(--sidebar-width);
+    height: calc(100vh - 64px);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    z-index: 1000;
+    transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+}
+
+.station-list-sidebar.hidden {
+    transform: translateX(-100%);
+}
+
+.station-list-sidebar.collapsed {
+    transform: translateX(calc(-1 * var(--sidebar-width) + var(--sidebar-collapsed-width)));
+}
+
+.sidebar-header {
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.station-list-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.station-item {
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    margin-bottom: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.station-item:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-overlay);
+}
+
+/* Admin Button in Navbar */
+#admin-nav-btn {
+    background: transparent;
+    border: 1px solid var(--accent-primary);
+    color: var(--accent-primary);
+    font-weight: 600;
+    padding: 6px 16px;
+    border-radius: 8px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#admin-nav-btn:hover {
+    background: var(--accent-primary);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+    text-decoration: none;
+}
+
+#admin-nav-btn i {
+    font-size: 0.9rem;
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] #admin-nav-btn {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+[data-theme="dark"] #admin-nav-btn:hover {
+    background: var(--accent-primary);
+    color: white;
+}
+
+/* === DETAIL SIDEBAR (Right) === */
+.detail-sidebar {
+    position: fixed;
+    top: 64px;
+    right: 0;
+    width: 420px;
+    height: calc(100vh - 64px);
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    z-index: 1000;
+    transition: all var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+    box-shadow: var(--shadow-xl);
+    transform: translateX(100%);
+}
+
+/* ✅ FIXED: Hiện sidebar */
+.detail-sidebar.active {
+    transform: translateX(0);
+}
+
+/* ✅ FIXED: Mở rộng sidebar (khi xem biểu đồ) - Sang phải */
+.detail-sidebar.expanded {
+    width: var(--sidebar-expanded-width);
+}
+
+/* ✅ FIXED: Full width (khi phân tích dài hạn) */
+.detail-sidebar.fullwidth {
+    width: 100vw;
+    left: 0;
+    right: auto;
+}
+
+.sidebar-content {
+    padding: 20px;
+}
+
+/* === SENSOR COMPACT VIEW === */
+.sensor-compact {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.sensor-item {
+    background: var(--bg-tertiary);
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.sensor-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.sensor-value-large {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent-primary);
+}
+
+.sensor-unit {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-left: 4px;
+    font-weight: normal;
+}
+
+/* IMU Axes Display */
+.imu-axes {
+    display: flex;
+    gap: 8px;
+}
+
+.axis-value {
+    flex: 1;
+    text-align: center;
+}
+
+.axis-label {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+}
+
+.axis-num {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent-warning);
+}
+
+/* === ACTION BUTTONS === */
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.btn-action {
+    flex: 1;
+    padding: 10px;
+    background: var(--gradient-button);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-action:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-action.secondary {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+}
+
+/* === CHARTS CONTAINER === */
+.charts-container {
+    display: none;
+    margin-top: 16px;
+}
+
+.charts-container.active {
+    display: block;
+    animation: fadeInUp 0.4s ease;
+}
+
+.chart-box {
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.chart-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+/* === LONG TERM ANALYSIS === */
+#longterm-view {
+    animation: fadeInUp 0.4s ease;
+}
+
+.longterm-metric-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+}
+
+/* === RISK BADGE === */
+.risk-badge {
+    padding: 10px;
+    border-radius: 8px;
+    text-align: center;
+    margin-bottom: 16px;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+
+.risk-badge.LOW {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-success);
+    border: 2px solid var(--accent-success);
+}
+
+.risk-badge.HIGH, .risk-badge.EXTREME {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--accent-danger);
+    border: 2px solid var(--accent-danger);
+}
+
+/* === SEARCH INPUT === */
+#search-station {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+#search-station:focus {
+    box-shadow: none;
+    border-color: var(--accent-primary);
+}
+
+/* === SCROLLBAR === */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--accent-primary); border-radius: 3px; }
+
+/* === ANIMATIONS === */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+    .station-list-sidebar { 
+        width: 100%; 
+        max-width: 300px; 
+    }
+    
+    .detail-sidebar { 
+        width: 100% !important; 
+    }
+    
+    .detail-sidebar.expanded,
+    .detail-sidebar.fullwidth { 
+        width: 100% !important; 
+    }
+    
+    .sensor-compact { 
+        grid-template-columns: 1fr; 
+    }
+}

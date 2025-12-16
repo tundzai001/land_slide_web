@@ -1,0 +1,553 @@
+/* ========================================
+   ADMIN PAGE - Improved Dark Mode Contrast
+======================================== */
+
+:root {
+    --sidebar-width: 260px;
+    --navbar-height: 64px;
+}
+
+body {
+    background: var(--bg-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: var(--text-primary);
+}
+
+/* ========================================
+   SIDEBAR
+======================================== */
+.admin-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    padding: 24px 0;
+    z-index: 1000;
+    overflow-y: auto;
+}
+
+.sidebar-brand {
+    padding: 0 24px 24px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 24px;
+}
+
+.sidebar-brand h4 {
+    font-weight: 800;
+    background: var(--gradient-hero);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+}
+
+.sidebar-brand small {
+    color: var(--text-muted);
+}
+
+.sidebar-actions {
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 24px;
+    margin-bottom: 16px;
+}
+
+.nav-item {
+    padding: 0 16px;
+    margin-bottom: 4px;
+}
+
+.nav-link {
+    color: var(--text-secondary);
+    padding: 12px 16px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all 0.3s;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.nav-link:hover {
+    background: rgba(14, 165, 233, 0.1);
+    color: var(--accent-primary);
+    transform: translateX(4px);
+}
+
+.nav-link.active {
+    background: var(--gradient-button);
+    color: white;
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.nav-link i {
+    font-size: 1.2rem;
+    width: 24px;
+}
+
+/* ========================================
+   TOP NAVBAR
+======================================== */
+.admin-navbar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: var(--sidebar-width);
+    height: var(--navbar-height);
+    background: var(--bg-overlay);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 0 32px;
+    z-index: 900;
+}
+
+.navbar-left,
+.navbar-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.avatar-circle {
+    width: 36px;
+    height: 36px;
+    background: var(--gradient-button);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: white;
+}
+
+.theme-toggle-mini {
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.theme-toggle-mini:hover {
+    background: rgba(14, 165, 233, 0.1);
+    color: var(--accent-primary);
+}
+
+/* ========================================
+   MAIN CONTENT
+======================================== */
+.admin-main {
+    margin-left: var(--sidebar-width);
+    padding: 32px;
+    padding-top: calc(var(--navbar-height) + 32px);
+    min-height: 100vh;
+}
+
+.page-header {
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.page-title {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+/* ========================================
+   TABS
+======================================== */
+.main-tabs {
+    border: none;
+    margin-bottom: 32px;
+}
+
+.main-tabs .nav-link {
+    border: none;
+    padding: 12px 24px;
+    border-radius: 10px 10px 0 0;
+    color: var(--text-secondary);
+    font-weight: 600;
+    transition: all 0.3s;
+    background: transparent;
+}
+
+.main-tabs .nav-link:hover {
+    background: rgba(14, 165, 233, 0.1);
+    color: var(--accent-primary);
+}
+
+.main-tabs .nav-link.active {
+    background: rgba(14, 165, 233, 0.15);
+    color: var(--accent-primary);
+    border-bottom: 3px solid var(--accent-primary);
+}
+
+/* ========================================
+   TABLES
+======================================== */
+.custom-table {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.table {
+    margin-bottom: 0;
+}
+
+.table thead {
+    background: rgba(14, 165, 233, 0.05);
+}
+
+.table th {
+    color: var(--text-primary);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px;
+}
+
+.table td {
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: middle;
+    padding: 16px;
+}
+
+.table tbody tr {
+    transition: all 0.2s;
+}
+
+.table tbody tr:hover {
+    background: rgba(14, 165, 233, 0.05);
+}
+
+/* ========================================
+   STATION CARDS
+======================================== */
+.station-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: all 0.3s;
+    cursor: pointer;
+}
+
+.station-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-primary);
+    box-shadow: 0 8px 24px rgba(14, 165, 233, 0.2);
+}
+
+.station-card h5 {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+/* Badge tọa độ trong thẻ trạm */
+.station-card .badge.bg-light {
+    background-color: rgba(255, 255, 255, 0.1) !important; /* Nền mờ */
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
+    font-weight: 500;
+    font-family: monospace; /* Font chữ số đẹp hơn */
+}
+
+.sensor-badge {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-right: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    display: inline-block;
+}
+
+.sensor-badge.active {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--accent-success);
+    font-weight: 600;
+}
+
+/* ========================================
+   BUTTONS
+======================================== */
+.btn-gradient {
+    background: var(--gradient-button);
+    border: none;
+    color: white;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+    transition: all 0.3s;
+}
+
+.btn-gradient:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(14, 165, 233, 0.4);
+    color: white;
+}
+
+/* ========================================
+   MODALS
+======================================== */
+.modal-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+}
+
+.modal-header,
+.modal-footer {
+    border-color: var(--border-color);
+}
+
+.modal-title {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+/* ========================================
+   FORMS
+======================================== */
+.form-label {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.form-control,
+.form-select {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 10px 16px;
+    transition: all 0.3s;
+}
+
+.form-control:focus,
+.form-select:focus {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+
+.form-control::placeholder {
+    color: var(--text-muted);
+}
+
+/* ========================================
+   WIZARD STEPS
+======================================== */
+.wizard-steps {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    position: relative;
+}
+
+.wizard-steps::before {
+    content: '';
+    position: absolute;
+    top: 20px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--border-color);
+    z-index: 0;
+}
+
+.wizard-step {
+    position: relative;
+    text-align: center;
+    flex: 1;
+    z-index: 1;
+}
+
+.step-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    margin: 0 auto 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: var(--text-muted);
+    transition: all 0.3s;
+}
+
+.wizard-step.active .step-circle {
+    background: var(--gradient-button);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
+    color: white;
+}
+
+.wizard-step.completed .step-circle {
+    background: var(--accent-success);
+    border-color: var(--accent-success);
+    color: white;
+}
+
+.step-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.wizard-step.active .step-label {
+    color: var(--accent-primary);
+    font-weight: 700;
+}
+
+/* ========================================
+   GNSS CONFIG BOX
+======================================== */
+.gnss-config-box {
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 16px;
+}
+
+.gnss-config-box h6 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent-warning);
+}
+
+/* ========================================
+   WIZARD CONTENT
+======================================== */
+.wizard-content {
+    display: none;
+    animation: fadeInUp 0.4s ease;
+}
+
+.wizard-content.active {
+    display: block;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========================================
+   MQTT SECTION
+======================================== */
+.mqtt-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+.mqtt-section h6 {
+    color: var(--text-primary);
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+/* ========================================
+   ALERTS
+======================================== */
+.alert {
+    border-radius: 8px;
+}
+
+.alert-info {
+    background: rgba(14, 165, 233, 0.1);
+    border-color: rgba(14, 165, 233, 0.3);
+    color: var(--accent-info);
+}
+
+.alert-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: var(--accent-warning);
+}
+
+/* ========================================
+   BADGES
+======================================== */
+.badge {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+/* ========================================
+   RESPONSIVE
+======================================== */
+@media (max-width: 768px) {
+    .admin-sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.3s;
+    }
+
+    .admin-navbar {
+        left: 0;
+        padding: 0 16px;
+    }
+
+    .admin-main {
+        margin-left: 0;
+        padding: 20px;
+        padding-top: calc(var(--navbar-height) + 20px);
+    }
+    
+    .page-title {
+        font-size: 1.5rem;
+    }
+}
+
+/* ========================================
+   SCROLLBAR
+======================================== */
+.admin-sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.admin-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(14, 165, 233, 0.3);
+    border-radius: 3px;
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+}
