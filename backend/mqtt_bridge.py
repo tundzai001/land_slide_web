@@ -1,19 +1,17 @@
 # ==============================================================================
-# == backend/mqtt_bridge.py - MQTT to Database Bridge (FIXED)
+# == backend/mqtt_bridge.py - MQTT to Database Bridge (INTEGRATED)            ==
 # ==============================================================================
 
 import asyncio
 import json
 import logging
 import time
-import signal
-import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import paho.mqtt.client as mqtt
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+# Import nội bộ
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import config as model_config
 from app.models import data as model_data
@@ -37,12 +35,11 @@ logger = logging.getLogger(__name__)
 
 class MQTTBridge:
     def __init__(self):
-        logger.info("🚀 Initializing MQTT Bridge...")
+        logger.info("🛠️ Initializing MQTT Bridge Instance...")
         
-        # 1. Khởi tạo Analyzer (Bộ não phân tích rủi ro)
         self.analyzer = LandslideAnalyzer()
         
-        # 2. Khởi tạo MQTT Client
+        # MQTT Client setup (same)
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         if settings.MQTT_USER:
             self.client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
@@ -51,24 +48,17 @@ class MQTTBridge:
         self.client.on_message = self.on_message
         self.client.on_disconnect = self.on_disconnect
         
-        # 3. Quản lý Topic & Processor
-        # topic_map[topic] = {station_id, type, processor, config}
+        # Topic management
         self.topic_map: Dict[str, Dict[str, Any]] = {}
-        
-        # Cache processors để giữ trạng thái (history, origin...) qua các lần gọi
         self.processors_cache: Dict[str, Any] = {}
-        
-        # 4. Quản lý thời gian lưu DB (Throttling)
-        # Key: "station_id_sensor_type" -> Value: timestamp lần lưu cuối
         self.last_save_time: Dict[str, float] = {}
         
-        # 5. Event loop reference
         self.loop = None
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("✅ MQTT Connected to Broker.")
-            # Subscribe lại khi reconnect
+            # Subscribe lại các topic đã biết
             for topic in self.topic_map.keys():
                 client.subscribe(topic)
                 logger.info(f"   ✓ Subscribed: {topic}")
@@ -80,76 +70,115 @@ class MQTTBridge:
             logger.warning(f"⚠️ Unexpected MQTT disconnect: rc={rc}. Reconnecting...")
 
     def on_message(self, client, userdata, msg):
-        """Callback nhận tin nhắn -> Đẩy vào Event Loop Async"""
+        """Callback khi nhận tin nhắn - Đẩy vào Loop của FastAPI"""
         try:
             topic = msg.topic
-            payload_str = msg.payload.decode('utf-8')
             
-            # Đẩy vào async queue
-            if self.loop:
+            # --- [FIX START] XỬ LÝ DỮ LIỆU BINARY/RTCM ---
+            try:
+                # 1. Cố gắng giải mã sang UTF-8 (Dành cho NMEA hoặc JSON)
+                payload_str = msg.payload.decode('utf-8')
+            except UnicodeDecodeError:
+                # 2. Nếu lỗi -> Đây là dữ liệu Binary (RTCM, Raw bytes...)
+                # Byte 0xd3 thường là header của RTCM. Chúng ta bỏ qua không xử lý.
+                # logger.debug(f"⚠️ Ignored binary data on {topic} (RTCM/Raw)")
+                return
+            # --- [FIX END] -------------------------------
+            
+            # QUAN TRỌNG: Chỉ xử lý khi Loop chính đang chạy
+            if self.loop and self.loop.is_running():
                 asyncio.run_coroutine_threadsafe(
                     self.process_pipeline(topic, payload_str), 
                     self.loop
                 )
         except Exception as e:
-            logger.error(f"Error in on_message: {e}", exc_info=True)
+            logger.error(f"Error in on_message: {e}")
+
+    # --- HÀM START/STOP CHO FASTAPI GỌI ---
+    def start(self):
+        """Được gọi bởi FastAPI khi khởi động"""
+        logger.info("🚀 Starting MQTT Bridge inside FastAPI...")
+        
+        # Lấy Event Loop đang chạy của Uvicorn/FastAPI
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.error("❌ No running event loop found! Bridge cannot start.")
+            return
+
+        try:
+            # Kết nối MQTT
+            self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 60)
+            self.client.loop_start()  # Chạy thread riêng cho Network I/O
+            
+            # Chạy task reload DB trên loop chính
+            self.loop.create_task(self.reload_topics_from_db())
+            logger.info("✅ MQTT Bridge started successfully.")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to start MQTT Bridge: {e}")
+
+    def stop(self):
+        """Được gọi bởi FastAPI khi tắt"""
+        logger.info("🛑 Stopping MQTT Bridge...")
+        self.client.loop_stop()
+        self.client.disconnect()
+    # --------------------------------------
 
     async def reload_topics_from_db(self):
-        """
-        Định kỳ đọc DB Config để cập nhật danh sách Topic cần subscribe.
-        ✅ FIXED: Đọc topics từ config JSON thay vì attributes trực tiếp
-        """
+        """✅ FIXED: Load theo cấu trúc Project → Station → Device"""
+        logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
-                # Dùng Config DB để đọc danh sách trạm
+                from app.models.config import Device, Station
+                from sqlalchemy import select
+                
                 async with ConfigSessionLocal() as db:
-                    result = await db.execute(select(model_config.Station))
-                    stations = result.scalars().all()
+                    # Load all active devices
+                    result = await db.execute(
+                        select(Device, Station)
+                        .join(Station, Device.station_id == Station.id)
+                        .where(Device.is_active == True)
+                    )
+                    devices_with_stations = result.all()
                 
                 new_map = {}
                 
-                for s in stations:
-                    # ✅ FIXED: Đọc topics từ JSON config
-                    mqtt_topics = s.config.get('mqtt_topics', {}) if s.config else {}
+                for device, station in devices_with_stations:
+                    if not device.mqtt_topic or device.mqtt_topic.strip() == "":
+                        continue
                     
-                    # Helper đăng ký sensor
-                    def register(topic, sensor_type):
-                        if not topic or topic.strip() == "":
-                            return
-                        
-                        # Key duy nhất cho processor cache (VD: "1_gnss")
-                        proc_key = f"{s.id}_{sensor_type}"
-                        
-                        # Tạo mới hoặc lấy lại processor cũ
-                        if proc_key not in self.processors_cache:
-                            if sensor_type == 'gnss':
-                                self.processors_cache[proc_key] = GNSSVelocityProcessor()
-                            elif sensor_type == 'rain':
-                                self.processors_cache[proc_key] = RainEngine()
-                            elif sensor_type == 'water':
-                                self.processors_cache[proc_key] = WaterEngine()
-                            elif sensor_type == 'imu':
-                                self.processors_cache[proc_key] = IMUEngine()
-                        
-                        new_map[topic] = {
-                            "station_id": s.id,
-                            "station_name": s.name,
-                            "type": sensor_type,
-                            "processor": self.processors_cache[proc_key],
-                            "config": s.config or {}
-                        }
+                    topic = device.mqtt_topic
+                    sensor_type = device.device_type
+                    
+                    # ✅ Cache processor theo device_id (không phải station_id)
+                    proc_key = f"device_{device.id}"
+                    
+                    if proc_key not in self.processors_cache:
+                        if sensor_type == 'gnss':
+                            # ✅ PASS session factory để GNSS có thể load origin
+                            self.processors_cache[proc_key] = GNSSVelocityProcessor(
+                                device_id=device.id,
+                                db_session_factory=ConfigSessionLocal
+                            )
+                        elif sensor_type == 'rain':
+                            self.processors_cache[proc_key] = RainEngine()
+                        elif sensor_type == 'water':
+                            self.processors_cache[proc_key] = WaterEngine()
+                        elif sensor_type == 'imu':
+                            self.processors_cache[proc_key] = IMUEngine()
+                    
+                    new_map[topic] = {
+                        "device_id": device.id,
+                        "device_name": device.name,
+                        "station_id": station.id,
+                        "station_name": station.name,
+                        "type": sensor_type,
+                        "processor": self.processors_cache[proc_key],
+                        "config": station.config or {}
+                    }
 
-                    # ✅ FIXED: Đọc từ mqtt_topics trong config
-                    if s.has_gnss:
-                        register(mqtt_topics.get('gnss'), 'gnss')
-                    if s.has_rain:
-                        register(mqtt_topics.get('rain'), 'rain')
-                    if s.has_water:
-                        register(mqtt_topics.get('water'), 'water')
-                    if s.has_imu:
-                        register(mqtt_topics.get('imu'), 'imu')
-
-                # Xử lý Subscribe/Unsubscribe thay đổi
+                # Diff and subscribe
                 current_topics = set(self.topic_map.keys())
                 new_topics = set(new_map.keys())
                 
@@ -162,25 +191,18 @@ class MQTTBridge:
                     logger.info(f"➖ Unsubscribed: {t}")
                 
                 self.topic_map = new_map
-                logger.debug(f"♻️ Topics reloaded. Active: {len(self.topic_map)}")
 
             except Exception as e:
-                logger.error(f"Error reloading topics: {e}", exc_info=True)
+                logger.error(f"Error reloading topics: {e}")
             
-            # ✅ FIXED: Dùng settings.TOPIC_RELOAD_INTERVAL
             await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
 
     async def process_pipeline(self, topic: str, raw_payload: str):
-        """
-        Pipeline xử lý chính:
-        1. MQTT -> 2. Processor -> 3. Analyzer -> 4. DB (Có điều kiện)
-        """
-        # 1. Xác định trạm & sensor
+        """✅ FIXED: Update status và lưu DB đúng"""
         info = self.topic_map.get(topic)
-        if not info:
-            logger.debug(f"Unknown topic: {topic}")
-            return
+        if not info: return
             
+        device_id = info['device_id']
         station_id = info['station_id']
         station_name = info['station_name']
         sensor_type = info['type']
@@ -190,41 +212,31 @@ class MQTTBridge:
         current_timestamp = int(time.time())
         processed_data = None
         
-        # 2. XỬ LÝ DỮ LIỆU (Processor)
+        # 1. Process data (same as before)
         try:
             if sensor_type == 'gnss':
-                # GNSS Processor nhận raw string (GNGGA)
                 res = processor.process_gngga(raw_payload)
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
                 elif res and res.get('type') == 'origin_locked':
-                    # ✅ NEW: Log khi origin được khóa
                     logger.info(f"🎯 [{station_name}] GNSS Origin locked: {res.get('data')}")
                     return
             else:
-                # Các sensor khác nhận JSON Dict
                 try:
                     payload_json = json.loads(raw_payload)
-                    if sensor_type == 'rain':
-                        processed_data = processor.process(payload_json, current_timestamp)
-                    elif sensor_type == 'water':
-                        processed_data = processor.process(payload_json, current_timestamp)
-                    elif sensor_type == 'imu':
-                        processed_data = processor.process(payload_json)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON decode error ({sensor_type}): {e}")
+                    if sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
+                    elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
+                    elif sensor_type == 'imu': processed_data = processor.process(payload_json)
+                except json.JSONDecodeError:
                     return
         except Exception as e:
-            logger.error(f"Processing error ({sensor_type}): {e}", exc_info=True)
+            logger.error(f"Processing error ({sensor_type}): {e}")
             return
 
-        if not processed_data:
-            return
+        if not processed_data: return
 
-        # 3. PHÂN TÍCH RỦI RO (Analyzer) - Luôn chạy để cảnh báo tức thời
+        # 2. Analyze (same)
         alert = None
-        
-        # Tạo list wrapper vì Analyzer nhận list data history
         data_wrapper = [{"timestamp": current_timestamp, "data": processed_data}]
         
         try:
@@ -237,67 +249,67 @@ class MQTTBridge:
             elif sensor_type == 'imu':
                 alert = self.analyzer.analyze_tilt(station_id, data_wrapper, station_config)
         except Exception as e:
-            logger.error(f"Analyzer error ({sensor_type}): {e}", exc_info=True)
+            logger.error(f"Analyzer error: {e}")
 
-        # 4. QUYẾT ĐỊNH LƯU DB (Throttling Strategy)
+        # 3. Save to DB
         save_data_now = False
         is_dangerous = False
 
-        # A. Nếu có cảnh báo NGUY HIỂM -> Lưu ngay lập tức
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
             save_data_now = True
             is_dangerous = True
             logger.warning(f"🚨 [{station_name}] {sensor_type.upper()}: {alert['message']}")
-        
-        # B. Nếu không nguy hiểm -> Kiểm tra định kỳ
         else:
-            throttle_key = f"{station_id}_{sensor_type}"
+            throttle_key = f"{device_id}_{sensor_type}"
             last_saved = self.last_save_time.get(throttle_key, 0)
             
-            # ✅ FIXED: Lấy interval từ settings
             interval = settings.SAVE_INTERVAL_DEFAULT
-            if sensor_type == 'gnss':
-                interval = settings.SAVE_INTERVAL_GNSS
-            elif sensor_type == 'imu':
-                interval = settings.SAVE_INTERVAL_IMU
-            elif sensor_type == 'rain':
-                interval = settings.SAVE_INTERVAL_RAIN
-            elif sensor_type == 'water':
-                interval = settings.SAVE_INTERVAL_WATER
+            if sensor_type == 'gnss': interval = settings.SAVE_INTERVAL_GNSS
+            elif sensor_type == 'imu': interval = settings.SAVE_INTERVAL_IMU
+            elif sensor_type == 'rain': interval = settings.SAVE_INTERVAL_RAIN
+            elif sensor_type == 'water': interval = settings.SAVE_INTERVAL_WATER
             
             if current_timestamp - last_saved >= interval:
                 save_data_now = True
 
-        # 5. THỰC THI LƯU TRỮ
         try:
-            # A. Update trạng thái trạm (Online) -> CONFIG DB
+            # ✅ FIX 1: Update Device last_data_time
             async with ConfigSessionLocal() as db_config:
+                from app.models.config import Device, Station
+                
+                # Update device
                 await db_config.execute(
-                    model_config.Station.__table__.update()
-                    .where(model_config.Station.id == station_id)
-                    .values(last_update=current_timestamp, status="online")
+                    Device.__table__.update()
+                    .where(Device.id == device_id)
+                    .values(last_data_time=current_timestamp)
+                )
+                
+                # ✅ FIX 2: Update Station status = "online"
+                await db_config.execute(
+                    Station.__table__.update()
+                    .where(Station.id == station_id)
+                    .values(
+                        last_update=current_timestamp,
+                        status="online"  # ← ĐÂY LÀ CHÌA KHÓA!
+                    )
                 )
                 await db_config.commit()
 
-            # B. Lưu Dữ liệu & Alert -> DATA DB
+            # ✅ FIX 3: Save sensor data to Data DB
             if save_data_now or is_dangerous:
                 async with DataSessionLocal() as db_data:
-                    # Lưu Sensor Data
                     if save_data_now:
                         db_data.add(model_data.SensorData(
-                            station_id=station_id,
+                            station_id=station_id,  # Note: Vẫn group theo station
                             timestamp=current_timestamp,
                             sensor_type=sensor_type,
-                            data=processed_data
+                            data=processed_data,
+                            # ✅ Cache values for fast query
+                            value_1=processed_data.get('speed_2d_mm_s') if sensor_type == 'gnss' else processed_data.get('water_level'),
+                            value_2=processed_data.get('total_displacement_mm') if sensor_type == 'gnss' else processed_data.get('intensity_mm_h'),
                         ))
-                        # Cập nhật thời gian lưu
-                        self.last_save_time[f"{station_id}_{sensor_type}"] = current_timestamp
-                        
-                        # Log nhẹ cho periodic save
-                        if not is_dangerous:
-                            logger.debug(f"💾 [{station_name}] {sensor_type}: Saved")
+                        self.last_save_time[f"{device_id}_{sensor_type}"] = current_timestamp
 
-                    # Lưu Alert History
                     if is_dangerous:
                         db_data.add(model_data.Alert(
                             station_id=station_id,
@@ -307,47 +319,8 @@ class MQTTBridge:
                             message=alert['message'],
                             is_resolved=False
                         ))
-                    
                     await db_data.commit()
 
         except Exception as e:
-            logger.error(f"❌ DB Error: {e}", exc_info=True)
+            logger.error(f"❌ DB Error: {e}")
 
-    def run(self):
-        """Khởi chạy Bridge"""
-        logger.info("=" * 70)
-        logger.info("🚀 Starting MQTT Bridge")
-        logger.info(f"   Broker: {settings.MQTT_BROKER}:{settings.MQTT_PORT}")
-        logger.info(f"   User: {settings.MQTT_USER or 'anonymous'}")
-        logger.info("=" * 70)
-        
-        try:
-            # Setup AsyncIO Loop
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            
-            # Connect MQTT
-            self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 60)
-            self.client.loop_start()
-            
-            # Chạy task reload DB song song
-            self.loop.create_task(self.reload_topics_from_db())
-            
-            logger.info("✅ Bridge is running. Press Ctrl+C to stop.")
-            
-            # Giữ process chạy
-            self.loop.run_forever()
-            
-        except KeyboardInterrupt:
-            logger.info("🛑 Stopping Bridge (KeyboardInterrupt)...")
-            self.client.loop_stop()
-            self.client.disconnect()
-            self.loop.stop()
-        except Exception as e:
-            logger.critical(f"🔥 Fatal Error: {e}", exc_info=True)
-        finally:
-            logger.info("✅ Bridge stopped.")
-
-if __name__ == "__main__":
-    bridge = MQTTBridge()
-    bridge.run()

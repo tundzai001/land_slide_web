@@ -1,4 +1,3 @@
-<!--frontend/pages/admin.html-->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -17,7 +16,7 @@
 
 <style>
 /* ============================================
-   SENSOR CONFIG SECTIONS - Smooth Slide Down
+   STYLES CHO ADMIN & WIZARD
 ============================================ */
 .sensor-config-section {
     background: var(--bg-tertiary);
@@ -29,16 +28,8 @@
 }
 
 @keyframes slideDown {
-    from {
-        opacity: 0;
-        max-height: 0;
-        transform: translateY(-10px);
-    }
-    to {
-        opacity: 1;
-        max-height: 500px;
-        transform: translateY(0);
-    }
+    from { opacity: 0; max-height: 0; transform: translateY(-10px); }
+    to { opacity: 1; max-height: 500px; transform: translateY(0); }
 }
 
 .sensor-config-header {
@@ -52,13 +43,7 @@
     border-bottom: 1px solid var(--border-color);
 }
 
-.sensor-config-header i {
-    font-size: 1.2rem;
-}
-
-.sensor-config-body {
-    padding: 16px;
-}
+.sensor-config-body { padding: 16px; }
 
 /* Coordinate Lock Box */
 .coordinate-lock-box {
@@ -69,12 +54,7 @@
     margin-top: 16px;
 }
 
-.coordinate-lock-box h6 {
-    color: var(--accent-warning);
-    font-weight: 700;
-}
-
-/* Wizard - Adjust for 3 steps */
+/* Wizard Steps */
 .wizard-steps {
     display: flex;
     justify-content: space-between;
@@ -93,7 +73,45 @@
     z-index: 0;
 }
 
-/* Button Gradient */
+.wizard-step {
+    flex: 1;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+}
+
+.step-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-bottom: 8px;
+    transition: all 0.3s;
+}
+
+.wizard-step.active .step-circle {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
+}
+
+.step-label { font-size: 0.85rem; color: var(--text-muted); }
+.wizard-step.active .step-label { color: var(--accent-primary); font-weight: 600; }
+
+.wizard-content { display: none; }
+.wizard-content.active { display: block; animation: fadeIn 0.3s; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .btn-gradient {
     background: var(--gradient-button);
     border: none;
@@ -101,7 +119,6 @@
     font-weight: 600;
     transition: all 0.3s;
 }
-
 .btn-gradient:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 20px rgba(14, 165, 233, 0.4);
@@ -114,12 +131,6 @@
         <div class="sidebar-brand">
             <h4><i class="bi bi-shield-lock-fill me-2"></i>Admin Panel</h4>
             <small class="text-muted">Landslide Monitor</small>
-        </div>
-
-        <div class="sidebar-actions px-3 mb-4">
-            <button class="btn btn-gradient w-100" onclick="window.adminManager.openAddStationModal()">
-                <i class="bi bi-plus-circle-fill me-2"></i>Thêm Trạm Mới
-            </button>
         </div>
 
         <nav>
@@ -170,7 +181,7 @@
                 <i class="bi bi-gear-wide-connected me-2"></i>
                 Quản lý Hệ thống
             </h1>
-            <p class="text-muted">Quản lý người dùng và thiết bị</p>
+            <p class="text-muted">Quản lý người dùng và dự án</p>
         </div>
 
         <!-- Main Tabs -->
@@ -180,9 +191,10 @@
                     <i class="bi bi-people me-2"></i>Quản lý Người dùng
                 </button>
             </li>
+            <!-- Cập nhật Tab này thành Quản lý Dự án -->
             <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-devices">
-                    <i class="bi bi-hdd-network me-2"></i>Quản lý Thiết bị
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-projects">
+                    <i class="bi bi-folder me-2"></i>Quản lý Dự án
                 </button>
             </li>
         </ul>
@@ -223,17 +235,34 @@
                 </div>
             </div>
 
-            <!-- TAB 2: DEVICES -->
-            <div class="tab-pane fade" id="tab-devices">
+            <!-- TAB 2: PROJECTS (Thay thế cho TAB Devices cũ) -->
+            <div class="tab-pane fade" id="tab-projects">
+                <!-- Breadcrumb Navigation cho phép quay lại danh sách dự án -->
+                <nav aria-label="breadcrumb" class="mb-3">
+                    <ol class="breadcrumb" id="project-breadcrumb">
+                        <li class="breadcrumb-item active">Dự án</li>
+                    </ol>
+                </nav>
+
+                <!-- Action Bar & Title -->
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h4>Danh sách Trạm</h4>
-                    <button class="btn btn-gradient" onclick="window.adminManager.openAddStationModal()">
-                        <i class="bi bi-plus-circle me-2"></i>Thêm trạm
-                    </button>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-outline-secondary" id="btn-back-nav" style="display: none;" onclick="window.adminManager.navigateBack()">
+                            <i class="bi bi-arrow-left me-1"></i> Quay lại
+                        </button>
+                        <h4 id="current-view-title" class="mb-0">Danh sách Dự án</h4>
+                    </div>
+                    <!-- Nơi JS sẽ render nút Tạo dự án hoặc Thêm trạm -->
+                    <div id="action-buttons-container">
+                        <button class="btn btn-gradient" onclick="window.adminManager.openCreateProjectModal()">
+                            <i class="bi bi-plus-circle me-2"></i>Tạo Dự án
+                        </button>
+                    </div>
                 </div>
 
-                <div id="station-list" class="row">
-                    <div class="text-center mt-5">
+                <!-- Content Area: Nơi JS render danh sách dự án hoặc danh sách trạm -->
+                <div id="projects-content-area">
+                    <div class="text-center py-5">
                         <div class="spinner-border text-primary"></div>
                         <p class="text-muted mt-2">Đang tải...</p>
                     </div>
@@ -243,7 +272,11 @@
         </div>
     </div>
 
-    <!-- Add User Modal -->
+    <!-- ============================================
+         MODALS
+    ============================================ -->
+
+    <!-- 1. Add User Modal -->
     <div class="modal fade" id="addUserModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -283,7 +316,46 @@
         </div>
     </div>
 
-    <!-- ✅ Station Config Modal - 3 STEPS ONLY -->
+    <!-- 2. Create Project Modal (MỚI) -->
+    <div class="modal fade" id="createProjectModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tạo Dự án Mới</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createProjectForm">
+                        <div class="mb-3">
+                            <label class="form-label">Mã dự án <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="project-code" required>
+                            <small class="text-muted">VD: DA_QUANGNINH_2024</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Tên dự án <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="project-name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Mô tả</label>
+                            <textarea class="form-control" id="project-desc" rows="3"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Vị trí</label>
+                            <input type="text" class="form-control" id="project-location" placeholder="VD: Quảng Ninh">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-gradient" onclick="window.adminManager.createProject()">
+                        <i class="bi bi-save me-1"></i> Tạo Dự án
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Station Config Modal - 3 STEPS WIZARD -->
     <div class="modal fade" id="stationConfigModal" tabindex="-1">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
@@ -292,7 +364,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- Wizard Steps - 3 STEPS -->
+                    <!-- Wizard Steps UI -->
                     <div class="wizard-steps" id="wizard-steps">
                         <div class="wizard-step active" data-step="1">
                             <div class="step-circle">1</div>
@@ -310,6 +382,8 @@
 
                     <form id="stationConfigForm">
                         <input type="hidden" id="edit-station-id">
+                        <!-- Thêm ID này để JS không bị lỗi khi gán Project ID -->
+                        <input type="hidden" id="edit-project-id">
                         
                         <!-- ============ STEP 1: MÃ TRẠM & TÊN ============ -->
                         <div class="wizard-content active" data-step="1">
@@ -339,33 +413,25 @@
                             <div class="d-flex flex-wrap gap-3 mb-4 p-3 border rounded">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-gnss">
-                                    <label class="form-check-label">
-                                        <i class="bi bi-geo-alt-fill text-danger me-1"></i> GNSS
-                                    </label>
+                                    <label class="form-check-label"><i class="bi bi-geo-alt-fill text-danger me-1"></i> GNSS</label>
                                 </div>
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-rain">
-                                    <label class="form-check-label">
-                                        <i class="bi bi-cloud-rain-fill me-1" style="color: var(--accent-primary);"></i> Rain
-                                    </label>
+                                    <label class="form-check-label"><i class="bi bi-cloud-rain-fill me-1" style="color: var(--accent-primary);"></i> Rain</label>
                                 </div>
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-water">
-                                    <label class="form-check-label">
-                                        <i class="bi bi-water me-1" style="color: var(--accent-info);"></i> Water
-                                    </label>
+                                    <label class="form-check-label"><i class="bi bi-water me-1" style="color: var(--accent-info);"></i> Water</label>
                                 </div>
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-imu">
-                                    <label class="form-check-label">
-                                        <i class="bi bi-compass-fill me-1" style="color: var(--accent-warning);"></i> IMU
-                                    </label>
+                                    <label class="form-check-label"><i class="bi bi-compass-fill me-1" style="color: var(--accent-warning);"></i> IMU</label>
                                 </div>
                             </div>
 
                             <h6 class="mb-3">2. Cấu hình MQTT Topics:</h6>
 
-                            <!-- GNSS Section -->
+                            <!-- Các Section cho từng sensor -->
                             <div id="mqtt-gnss-section" class="sensor-config-section" style="display: none;">
                                 <div class="sensor-config-header">
                                     <i class="bi bi-geo-alt-fill text-danger"></i>
@@ -376,77 +442,36 @@
                                     <input type="text" class="form-control mb-3" id="topic-gnss" placeholder="station/ST01/gnss">
                                     
                                     <div class="coordinate-lock-box">
-                                        <h6 class="mb-2">
-                                            <i class="bi bi-crosshair me-2"></i>Khóa Tọa độ Gốc (Origin)
-                                        </h6>
-                                        <div class="alert alert-info small mb-3">
-                                            <i class="bi bi-info-circle me-1"></i>
-                                            <strong>Cách lấy tọa độ:</strong><br>
-                                            1. Nhập MQTT Topic bên trên<br>
-                                            2. Click "Lấy tọa độ hiện tại"<br>
-                                            3. Hệ thống sẽ <strong>subscribe vào topic</strong> và đợi dữ liệu GNSS<br>
-                                            4. Tọa độ sẽ tự động điền vào form (timeout: 30s)
-                                        </div>
+                                        <h6 class="mb-2"><i class="bi bi-crosshair me-2"></i>Khóa Tọa độ Gốc (Origin)</h6>
                                         <div class="row g-2 mb-3">
-                                            <div class="col-md-4">
-                                                <label class="form-label small">Latitude</label>
-                                                <input type="number" step="0.00000001" class="form-control form-control-sm" id="origin-lat" readonly>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <label class="form-label small">Longitude</label>
-                                                <input type="number" step="0.00000001" class="form-control form-control-sm" id="origin-lon" readonly>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <label class="form-label small">Height (m)</label>
-                                                <input type="number" step="0.001" class="form-control form-control-sm" id="origin-h" readonly>
-                                            </div>
+                                            <div class="col-md-4"><label class="form-label small">Lat</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="origin-lat" readonly></div>
+                                            <div class="col-md-4"><label class="form-label small">Lon</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="origin-lon" readonly></div>
+                                            <div class="col-md-4"><label class="form-label small">Height</label><input type="number" step="0.001" class="form-control form-control-sm" id="origin-h" readonly></div>
                                         </div>
                                         <div class="d-flex justify-content-between align-items-center">
                                             <small id="origin-status" class="text-muted">Chưa có dữ liệu gốc</small>
                                             <button type="button" class="btn btn-sm btn-warning" id="btn-fetch-origin" onclick="window.adminManager.fetchLatestOrigin()">
-                                                <i class="bi bi-arrow-repeat me-1"></i> Lấy tọa độ hiện tại
+                                                <i class="bi bi-arrow-repeat me-1"></i> Lấy tọa độ
                                             </button>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- RAIN Section -->
                             <div id="mqtt-rain-section" class="sensor-config-section" style="display: none;">
-                                <div class="sensor-config-header">
-                                    <i class="bi bi-cloud-rain-fill" style="color: var(--accent-primary);"></i>
-                                    <span>Rain Configuration</span>
-                                </div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label">MQTT Topic</label>
-                                    <input type="text" class="form-control" id="topic-rain" placeholder="station/ST01/rain">
-                                </div>
+                                <div class="sensor-config-header"><i class="bi bi-cloud-rain-fill text-primary"></i><span>Rain Configuration</span></div>
+                                <div class="sensor-config-body"><label class="form-label">MQTT Topic</label><input type="text" class="form-control" id="topic-rain"></div>
                             </div>
-
-                            <!-- WATER Section -->
                             <div id="mqtt-water-section" class="sensor-config-section" style="display: none;">
-                                <div class="sensor-config-header">
-                                    <i class="bi bi-water" style="color: var(--accent-info);"></i>
-                                    <span>Water Level Configuration</span>
-                                </div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label">MQTT Topic</label>
-                                    <input type="text" class="form-control" id="topic-water" placeholder="station/ST01/water">
-                                </div>
+                                <div class="sensor-config-header"><i class="bi bi-water text-info"></i><span>Water Configuration</span></div>
+                                <div class="sensor-config-body"><label class="form-label">MQTT Topic</label><input type="text" class="form-control" id="topic-water"></div>
                             </div>
-
-                            <!-- IMU Section -->
                             <div id="mqtt-imu-section" class="sensor-config-section" style="display: none;">
-                                <div class="sensor-config-header">
-                                    <i class="bi bi-compass-fill" style="color: var(--accent-warning);"></i>
-                                    <span>IMU Configuration</span>
-                                </div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label">MQTT Topic</label>
-                                    <input type="text" class="form-control" id="topic-imu" placeholder="station/ST01/imu">
-                                </div>
+                                <div class="sensor-config-header"><i class="bi bi-compass-fill text-warning"></i><span>IMU Configuration</span></div>
+                                <div class="sensor-config-body"><label class="form-label">MQTT Topic</label><input type="text" class="form-control" id="topic-imu"></div>
                             </div>
 
+                            <!-- QUAN TRỌNG: ID này là nguyên nhân gây lỗi, phải có nó -->
                             <div id="mqtt-empty-state" class="text-center py-5 text-muted">
                                 <i class="bi bi-inbox fs-1"></i>
                                 <p class="mt-2">Chưa có thiết bị nào được chọn</p>
@@ -455,80 +480,33 @@
 
                         <!-- ============ STEP 3: NGƯỠNG ============ -->
                         <div class="wizard-content" data-step="3">
-                            <div class="alert alert-warning small mb-4">
-                                <i class="bi bi-exclamation-triangle me-1"></i>
-                                Các ngưỡng này quyết định mức độ cảnh báo.
-                            </div>
-
-                            <!-- 1. Cấu hình Water / Displacement Thresholds -->
-                            <h6 class="mb-2 text-primary"><i class="bi bi-water me-2"></i>Water & Displacement Thresholds</h6>
+                            <h6 class="mb-2 text-primary"><i class="bi bi-water me-2"></i>Water & Displacement</h6>
                             <div class="row g-3 mb-4 p-3 border rounded bg-light">
-                                <div class="col-md-6">
-                                    <label class="form-label">⚠️ Warning (m)</label>
-                                    <input type="number" step="0.01" class="form-control" id="cfg-water-warning" value="0.15">
-                                    <small class="text-muted">Ngưỡng cảnh báo cấp 1</small>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">🚨 Critical (m)</label>
-                                    <input type="number" step="0.01" class="form-control" id="cfg-water-critical" value="0.30">
-                                    <small class="text-muted">Ngưỡng cảnh báo cấp 2</small>
-                                </div>
+                                <div class="col-md-6"><label class="form-label">Warning (m)</label><input type="number" step="0.01" class="form-control" id="cfg-water-warning" value="0.15"></div>
+                                <div class="col-md-6"><label class="form-label">Critical (m)</label><input type="number" step="0.01" class="form-control" id="cfg-water-critical" value="0.30"></div>
                             </div>
 
-                            <!-- 2. Cấu hình Rain -->
-                            <h6 class="mb-2 text-info"><i class="bi bi-cloud-rain me-2"></i>Rain Alerting (mm/h)</h6>
+                            <h6 class="mb-2 text-info"><i class="bi bi-cloud-rain me-2"></i>Rain (mm/h)</h6>
                             <div class="row g-3 mb-4 p-3 border rounded bg-light">
-                                <div class="col-md-4">
-                                    <label class="form-label">👁️ Watch</label>
-                                    <input type="number" class="form-control" id="cfg-rain-watch" value="10.0">
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label">⚠️ Warning</label>
-                                    <input type="number" class="form-control" id="cfg-rain-warning" value="25.0">
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label">🚨 Critical</label>
-                                    <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
-                                </div>
+                                <div class="col-md-4"><label class="form-label">Watch</label><input type="number" class="form-control" id="cfg-rain-watch" value="10.0"></div>
+                                <div class="col-md-4"><label class="form-label">Warning</label><input type="number" class="form-control" id="cfg-rain-warning" value="25.0"></div>
+                                <div class="col-md-4"><label class="form-label">Critical</label><input type="number" class="form-control" id="cfg-rain-critical" value="50.0"></div>
                             </div>
 
-                            <!-- 3. Cấu hình GNSS Quality & Velocity -->
                             <div class="d-flex justify-content-between align-items-center mb-2">
-                                <h6 class="text-danger mb-0"><i class="bi bi-geo-alt me-2"></i>GNSS Quality Control</h6>
-                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="window.adminManager.openVelocityModal()">
-                                    <i class="bi bi-speedometer2 me-1"></i> Bảng phân cấp vận tốc
-                                </button>
+                                <h6 class="text-danger mb-0"><i class="bi bi-geo-alt me-2"></i>GNSS Quality</h6>
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="window.adminManager.openVelocityModal()">Bảng vận tốc</button>
                             </div>
-                            
                             <div class="row g-3 mb-4 p-3 border rounded bg-light">
-                                <!-- Các input HDOP cũ giữ nguyên -->
-                                <div class="col-md-6">
-                                    <label class="form-label">Max HDOP</label>
-                                    <input type="number" step="0.1" class="form-control" id="cfg-gnss-hdop">
-                                    <small class="text-muted">Chỉ số pha loãng độ chính xác tối đa</small>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Confirm Steps</label>
-                                    <input type="number" class="form-control" id="cfg-gnss-steps">
-                                    <small class="text-muted">Số lần lặp để xác nhận</small>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Safe Streak</label>
-                                    <input type="number" class="form-control" id="cfg-gnss-streak">
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Degraded Timeout (s)</label>
-                                    <input type="number" class="form-control" id="cfg-gnss-timeout">
-                                </div>
+                                <div class="col-md-6"><label class="form-label">Max HDOP</label><input type="number" step="0.1" class="form-control" id="cfg-gnss-hdop" value="4.0"></div>
+                                <div class="col-md-6"><label class="form-label">Confirm Steps</label><input type="number" class="form-control" id="cfg-gnss-steps" value="3"></div>
+                                <div class="col-md-6"><label class="form-label">Safe Streak</label><input type="number" class="form-control" id="cfg-gnss-streak" value="5"></div>
+                                <div class="col-md-6"><label class="form-label">Degraded Timeout (s)</label><input type="number" class="form-control" id="cfg-gnss-timeout" value="300"></div>
                             </div>
 
-                            <!-- 4. Cấu hình IMU -->
-                            <h6 class="mb-2 text-warning"><i class="bi bi-activity me-2"></i>IMU Alerting</h6>
+                            <h6 class="mb-2 text-warning"><i class="bi bi-activity me-2"></i>IMU Shock</h6>
                             <div class="row g-3 p-3 border rounded bg-light">
-                                <div class="col-md-6">
-                                    <label class="form-label">💥 Shock Threshold (m/s²)</label>
-                                    <input type="number" step="0.1" class="form-control" id="cfg-imu-shock" value="5.0">
-                                </div>
+                                <div class="col-md-6"><label class="form-label">Shock Threshold (m/s²)</label><input type="number" step="0.1" class="form-control" id="cfg-imu-shock" value="5.0"></div>
                             </div>
                         </div>
 
@@ -539,10 +517,10 @@
                         <i class="bi bi-trash"></i> Xóa trạm
                     </button>
                     <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-secondary" id="btn-wizard-back" style="display: none;">
+                        <button type="button" class="btn btn-secondary" id="btn-wizard-back" style="display: none;" onclick="window.adminManager.wizardPrev()">
                             <i class="bi bi-arrow-left me-1"></i> Quay lại
                         </button>
-                        <button type="button" class="btn btn-primary" id="btn-wizard-next">
+                        <button type="button" class="btn btn-primary" id="btn-wizard-next" onclick="window.adminManager.wizardNext()">
                             Tiếp theo <i class="bi bi-arrow-right ms-1"></i>
                         </button>
                         <button type="button" class="btn btn-success" id="btn-wizard-save" style="display: none;" onclick="window.adminManager.saveStation()">
@@ -554,7 +532,7 @@
         </div>
     </div>
 
-    <!-- Modal Cấu hình Bảng Cruden & Varnes -->
+    <!-- 4. Modal Velocity Config -->
     <div class="modal fade" id="velocityConfigModal" tabindex="-1" data-bs-backdrop="static">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -564,11 +542,7 @@
                 </div>
                 <div class="modal-body p-0">
                     <div class="alert alert-light m-3 border">
-                        <small class="text-muted">
-                            <i class="bi bi-info-circle-fill me-1"></i>
-                            Hệ thống sẽ so sánh vận tốc trượt hiện tại với bảng này để đưa ra đánh giá (Ví dụ: "Very Rapid", "Slow"...).
-                            Sắp xếp theo thứ tự giảm dần.
-                        </small>
+                        <small class="text-muted"><i class="bi bi-info-circle-fill me-1"></i> Bảng phân cấp vận tốc trượt.</small>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-striped table-hover mb-0 align-middle">
@@ -579,9 +553,7 @@
                                     <th>Mô tả / Ghi chú</th>
                                 </tr>
                             </thead>
-                            <tbody id="velocity-table-body">
-                                <!-- Dữ liệu sẽ được JS render vào đây -->
-                            </tbody>
+                            <tbody id="velocity-table-body"></tbody>
                         </table>
                     </div>
                 </div>
@@ -594,7 +566,6 @@
             </div>
         </div>
     </div>
-
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -617,6 +588,27 @@
             if (icon) {
                 icon.className = e.detail.theme === 'light' ? 'bi bi-moon-stars-fill' : 'bi bi-sun-fill';
             }
+        });
+        
+        // Setup wizard sensor checkboxes
+        document.addEventListener('DOMContentLoaded', () => {
+            ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
+                const checkbox = document.getElementById(`edit-${sensor}`);
+                if (checkbox) {
+                    checkbox.addEventListener('change', (e) => {
+                        const section = document.getElementById(`mqtt-${sensor}-section`);
+                        const emptyState = document.getElementById('mqtt-empty-state');
+                        
+                        if (section) section.style.display = e.target.checked ? 'block' : 'none';
+                        
+                        const anySensorSelected = ['gnss', 'rain', 'water', 'imu'].some(s => 
+                            document.getElementById(`edit-${s}`)?.checked
+                        );
+                        
+                        if (emptyState) emptyState.style.display = anySensorSelected ? 'none' : 'block';
+                    });
+                }
+            });
         });
     </script>
 </body>
