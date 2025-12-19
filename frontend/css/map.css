@@ -1,5 +1,5 @@
 /* =====================================================
-   MAP PAGE STYLES - Fixed UI/UX Layout
+   MAP PAGE STYLES - Complete Fixed Version
    File: css/map.css
 ===================================================== */
 
@@ -67,35 +67,48 @@ body {
     z-index: 1;
 }
 
-/* === TOGGLE BUTTON (Mobile/Desktop) === */
+/* === TOGGLE BUTTON - ✅ FIXED: Hiện đúng vị trí === */
 .toggle-list-btn {
     position: fixed;
-    top: 140px;  
+    top: 80px;
     left: 16px;
     z-index: 2000;
     background: var(--accent-primary);
     border: none;
     border-radius: 50%;
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     color: white;
+    font-size: 1.2rem;
     cursor: pointer;
     box-shadow: var(--shadow-lg);
-    transition: transform 0.2s, background 0.2s;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-@media (max-width: 768px) {
-    .toggle-list-btn {
-        top: 80px;
-    }
-}
-
 .toggle-list-btn:hover {
     transform: scale(1.1);
     background: var(--accent-secondary);
+    box-shadow: 0 8px 24px rgba(14, 165, 233, 0.5);
+}
+
+.toggle-list-btn:active {
+    transform: scale(0.95);
+}
+
+.toggle-list-btn i {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 768px) {
+    .toggle-list-btn {
+        top: 76px;
+        width: 40px;
+        height: 40px;
+        font-size: 1.1rem;
+    }
 }
 
 /* === STATION LIST SIDEBAR (Left) === */
@@ -111,6 +124,7 @@ body {
     transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
+    box-shadow: var(--shadow-lg);
 }
 
 .station-list-sidebar.hidden {
@@ -125,9 +139,25 @@ body {
     padding: 20px;
     background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-header h6 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 8px;
+}
+
+.sidebar-header h6 i {
+    color: var(--accent-primary);
+}
+
+.sidebar-search {
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
 }
 
 .station-list-content {
@@ -149,6 +179,92 @@ body {
 .station-item:hover {
     border-color: var(--accent-primary);
     background: var(--bg-overlay);
+    transform: translateX(4px);
+}
+
+/* === NÚT ĐÓNG SIDEBAR - Tab ở mép phải === */
+.sidebar-close-tab {
+    position: absolute;
+    top: 50%;
+    right: -20px; /* Nhô ra ngoài mép phải sidebar */
+    transform: translateY(-50%);
+    width: 20px;
+    height: 60px;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 0 8px 8px 0;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 10;
+}
+
+.sidebar-close-tab:hover {
+    width: 24px;
+    background: var(--accent-secondary);
+    box-shadow: 3px 0 12px rgba(14, 165, 233, 0.4);
+}
+
+.sidebar-close-tab:active {
+    transform: translateY(-50%) scale(0.95);
+}
+
+/* ✅ Khi sidebar đóng → Ẩn nút */
+.station-list-sidebar.hidden .sidebar-close-tab {
+    display: none;
+}
+
+/* ✅ Icon xoay khi hover */
+.sidebar-close-tab i {
+    transition: transform 0.3s ease;
+}
+
+.sidebar-close-tab:hover i {
+    transform: translateX(-2px);
+}
+
+/* === TOGGLE BUTTON - Hiện khi sidebar đóng === */
+.toggle-list-btn {
+    position: fixed;
+    top: 80px;
+    left: 16px;
+    z-index: 2000;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    color: white;
+    font-size: 1.2rem;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+}
+
+/* ✅ Khi sidebar MỞ → Ẩn nút toggle */
+.station-list-sidebar:not(.hidden) ~ #map .toggle-list-btn,
+body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.toggle-list-btn:hover {
+    transform: scale(1.1);
+    background: var(--accent-secondary);
+}
+
+/* === ✅ XÓA NÚT THEME TOGGLE GÓC DƯỚI PHẢI === */
+.theme-toggle {
+    display: none !important;
 }
 
 /* Admin Button in Navbar */
@@ -210,7 +326,7 @@ body {
     transform: translateX(0);
 }
 
-/* ✅ FIXED: Mở rộng sidebar (khi xem biểu đồ) - Sang phải */
+/* ✅ FIXED: Mở rộng sidebar (khi xem biểu đồ) */
 .detail-sidebar.expanded {
     width: var(--sidebar-expanded-width);
 }
@@ -239,6 +355,12 @@ body {
     padding: 12px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.sensor-item:hover {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-sm);
 }
 
 .sensor-label {
@@ -248,6 +370,7 @@ body {
     margin-bottom: 4px;
     display: flex;
     align-items: center;
+    font-weight: 600;
 }
 
 .sensor-value-large {
@@ -272,17 +395,23 @@ body {
 .axis-value {
     flex: 1;
     text-align: center;
+    background: rgba(14, 165, 233, 0.05);
+    padding: 8px 4px;
+    border-radius: 6px;
 }
 
 .axis-label {
     font-size: 0.65rem;
     color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
 .axis-num {
     font-size: 1.1rem;
     font-weight: 600;
     color: var(--accent-warning);
+    margin-top: 4px;
 }
 
 /* === ACTION BUTTONS === */
@@ -312,6 +441,10 @@ body {
     box-shadow: var(--shadow-md);
 }
 
+.btn-action:active {
+    transform: translateY(0);
+}
+
 .btn-action.secondary {
     background: linear-gradient(135deg, #7c3aed, #a855f7);
 }
@@ -333,6 +466,11 @@ body {
     padding: 16px;
     margin-bottom: 16px;
     border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.chart-box:hover {
+    border-color: var(--accent-primary);
 }
 
 .chart-title {
@@ -353,6 +491,12 @@ body {
     border-radius: 12px;
     padding: 16px;
     text-align: center;
+    transition: all 0.2s;
+}
+
+.longterm-metric-card:hover {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-sm);
 }
 
 /* === RISK BADGE === */
@@ -363,12 +507,19 @@ body {
     margin-bottom: 16px;
     font-weight: 700;
     font-size: 0.9rem;
+    animation: fadeIn 0.3s ease;
 }
 
 .risk-badge.LOW {
     background: rgba(16, 185, 129, 0.15);
     color: var(--accent-success);
     border: 2px solid var(--accent-success);
+}
+
+.risk-badge.MEDIUM {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--accent-warning);
+    border: 2px solid var(--accent-warning);
 }
 
 .risk-badge.HIGH, .risk-badge.EXTREME {
@@ -382,22 +533,76 @@ body {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 12px;
+    width: 100%;
+    transition: all 0.2s;
 }
 
 #search-station:focus {
-    box-shadow: none;
+    outline: none;
     border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+#search-station::placeholder {
+    color: var(--text-muted);
 }
 
 /* === SCROLLBAR === */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--accent-primary); border-radius: 3px; }
+::-webkit-scrollbar { 
+    width: 6px; 
+}
+
+::-webkit-scrollbar-track { 
+    background: transparent; 
+}
+
+::-webkit-scrollbar-thumb { 
+    background: var(--accent-primary); 
+    border-radius: 3px; 
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-secondary);
+}
 
 /* === ANIMATIONS === */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from { 
+        opacity: 0; 
+        transform: translateY(10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* === EMPTY STATE === */
+.station-list-content .text-center {
+    padding: 40px 20px;
+}
+
+.station-list-content .text-center i {
+    color: var(--text-muted);
+    opacity: 0.5;
 }
 
 /* === RESPONSIVE === */
@@ -419,4 +624,55 @@ body {
     .sensor-compact { 
         grid-template-columns: 1fr; 
     }
+    
+    .action-buttons {
+        flex-direction: column;
+    }
+}
+
+/* === LOADING STATES === */
+.spinner-border {
+    border-color: var(--border-color);
+    border-right-color: var(--accent-primary);
+}
+
+/* === TOOLTIPS & POPOVERS === */
+.leaflet-tooltip {
+    background: var(--bg-overlay) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-primary) !important;
+    border-radius: 6px !important;
+    padding: 6px 10px !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+}
+
+.leaflet-tooltip::before {
+    border-top-color: var(--border-color) !important;
+}
+
+/* === DARK MODE SPECIFIC === */
+[data-theme="dark"] .station-list-sidebar {
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .detail-sidebar {
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .toggle-list-btn {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* === LIGHT MODE SPECIFIC === */
+[data-theme="light"] .station-item {
+    background: white;
+}
+
+[data-theme="light"] .sensor-item {
+    background: white;
+}
+
+[data-theme="light"] .chart-box {
+    background: white;
 }

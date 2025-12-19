@@ -1,5 +1,5 @@
 // =============================================
-// THEME MANAGER - Light Mode Default
+// THEME MANAGER - Light Mode Default ( frontend/js/theme-manager.js )
 // =============================================
 
 class ThemeManager {

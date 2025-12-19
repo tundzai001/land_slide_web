@@ -1,5 +1,5 @@
 // =============================================
-// NAV MANAGER - Quản lý Navbar & Sidebars
+// NAV MANAGER - Quản lý Navbar & Sidebars (frontend/js/nav-manager.js)
 // =============================================
 
 class NavManager {

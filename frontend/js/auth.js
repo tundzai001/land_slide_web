@@ -1,6 +1,5 @@
 // =============================================
-// AUTHENTICATION HANDLER - UNIVERSAL VERSION
-// Handles both Landing Page & Map Page
+// AUTHENTICATION HANDLER ( frontend/js/auth.js )
 // =============================================
 
 class AuthManager {

@@ -1,3 +1,4 @@
+<!--frontend/pages/map.html-->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -50,15 +51,16 @@
             <h6><i class="bi bi-hdd-network me-2"></i>Danh sách Trạm</h6>
         </div>
         
-        <div class="p-3 border-bottom" style="border-color: rgba(255,255,255,0.1) !important;">
+        <button class="sidebar-close-tab" id="sidebar-close-tab">
+            <i class="bi bi-chevron-left"></i>
+        </button>
+        
+        <div class="sidebar-search">
             <input type="text" class="form-control form-control-sm" placeholder="Tìm kiếm trạm..." id="search-station">
         </div>
         
         <div class="station-list-content" id="station-list-container">
-            <div class="text-center text-muted mt-4">
-                <div class="spinner-border spinner-border-sm mb-2"></div>
-                <p>Đang tải dữ liệu...</p>
-            </div>
+            <!-- Station list here -->
         </div>
     </div>
 

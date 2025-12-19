@@ -1,5 +1,5 @@
 // =============================================
-// TOAST NOTIFICATION SYSTEM
+// TOAST NOTIFICATION SYSTEM ( frontend/js/toast-notifications.js )
 // Hiển thị thông báo đẹp thay thế alert()
 // =============================================
 

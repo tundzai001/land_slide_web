@@ -1,5 +1,5 @@
 // =====================================================
-// ADMIN MANAGER - FIXED: Better error handling & debugging
+// ADMIN MANAGER ( frontend/js/admin-manager.js )
 // =====================================================
 
 class AdminManager {

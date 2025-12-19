@@ -8,7 +8,6 @@ def create_pg_engine(url):
     return create_async_engine(
         url,
         echo=False,
-        # XÓA connect_args={"check_same_thread": False} VÌ POSTGRES KHÔNG CẦN
         pool_pre_ping=True, # Tự động kết nối lại nếu bị ngắt
     )
 

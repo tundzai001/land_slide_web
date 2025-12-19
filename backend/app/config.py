@@ -1,38 +1,24 @@
 # backend/app/config.py
+import os
 from pydantic_settings import BaseSettings
-from urllib.parse import quote_plus # Thư viện để xử lý ký tự đặc biệt trong mật khẩu
 
 class Settings(BaseSettings):
-    # Cấu hình PostgreSQL
-    DB_USER: str = "postgres"
-    # Mật khẩu gốc là 'password', quote_plus sẽ chuyển nó thành 'password'
-    DB_PASSWORD: str = quote_plus("password")
-    DB_HOST: str = "localhost"
-    DB_PORT: str = "5432"
-
-    # --- 1. DATABASE URLs (Đã chuyển sang PostgreSQL) ---
-    # Cấu trúc: postgresql+asyncpg://user:pass@host:port/dbname
+    # --- 1. DATABASE URLs ---
+    # Pydantic sẽ tự động đọc giá trị từ file .env khớp với tên biến
+    # Nếu không đọc được .env, nó sẽ dùng giá trị mặc định bên phải (dự phòng)
     
-    @property
-    def AUTH_DB_URL(self) -> str:
-        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/landslide_auth"
+    AUTH_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_auth"
+    CONFIG_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_config"
+    DATA_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_data"
 
-    @property
-    def CONFIG_DB_URL(self) -> str:
-        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/landslide_config"
-
-    @property
-    def DATA_DB_URL(self) -> str:
-        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/landslide_data"
-    
-    # --- 2. CÁC CẤU HÌNH KHÁC (GIỮ NGUYÊN) ---
+    # --- 2. CÁC CẤU HÌNH KHÁC ---
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     
-    MQTT_BROKER: str = "localhost"
+    MQTT_BROKER: str = "aitogy.click"
     MQTT_PORT: int = 1883
-    MQTT_USER: str = ""
+    MQTT_USER: str = "mqttUser"
     MQTT_PASSWORD: str = ""
     TOPIC_RELOAD_INTERVAL: int = 60
 
@@ -43,7 +29,9 @@ class Settings(BaseSettings):
     SAVE_INTERVAL_IMU: int = 2592000
 
     class Config:
-        env_file = ".env"
+        # Chỉ định đường dẫn tuyệt đối tới file .env để chạy ổn định trên IIS
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        env_file_encoding = 'utf-8'
         extra = "ignore"
 
 settings = Settings()

@@ -1,5 +1,5 @@
 // =====================================================
-// MAP MAIN LOGIC - Fixed UI/UX & Error Handling
+// MAP MAIN LOGIC ( frontend/js/map-main.js )
 // =====================================================
 
 console.log('🚀 [MAP] Script loaded, waiting for DOM...');
@@ -28,6 +28,20 @@ function initialize() {
     setupEventListeners();
     loadStations();
     
+    // ✅ FIXED: Ẩn sidebar khi vừa load trang
+    const stationSidebar = document.getElementById('station-list-sidebar');
+    if (stationSidebar) {
+        stationSidebar.classList.add('hidden');
+        console.log('✅ [MAP] Station sidebar hidden by default');
+    }
+    
+    // ✅ FIXED: Đặt icon ban đầu là hamburger (list)
+    const toggleBtn = document.getElementById('toggle-list-btn');
+    if (toggleBtn) {
+        toggleBtn.innerHTML = '<i class="bi bi-list"></i>';
+        console.log('✅ [MAP] Toggle button initialized');
+    }
+    
     setInterval(loadStations, 30000);
     
     console.log('✅ [MAP] Initialization complete!');
@@ -42,23 +56,22 @@ function setupEventListeners() {
     
     // ✅ Toggle station list sidebar
     const toggleListBtn = document.getElementById('toggle-list-btn');
+    const sidebarCloseTab = document.getElementById('sidebar-close-tab');
     const stationSidebar = document.getElementById('station-list-sidebar');
     
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
-            const isHidden = stationSidebar.classList.contains('hidden');
-            
-            if (isHidden) {
-                // Mở sidebar
-                stationSidebar.classList.remove('hidden');
-                toggleListBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
-            } else {
-                // Đóng sidebar
-                stationSidebar.classList.add('hidden');
-                toggleListBtn.innerHTML = '<i class="bi bi-list"></i>';
-            }
+            stationSidebar.classList.remove('hidden');
+            console.log('📂 [MAP] Sidebar opened');
         });
-        console.log('✅ [MAP] Toggle list button connected');
+    }
+    
+    // ✅ NÚT ĐÓNG SIDEBAR (Close tab - trong sidebar)
+    if (sidebarCloseTab && stationSidebar) {
+        sidebarCloseTab.addEventListener('click', () => {
+            stationSidebar.classList.add('hidden');
+            console.log('📁 [MAP] Sidebar closed');
+        });
     }
     
     // Close detail sidebar
@@ -153,14 +166,7 @@ function setupEventListeners() {
         });
     }
     
-    // ============================================
-    // ✅ NOTE: Auth UI & Admin button are handled
-    //    automatically by auth.js - no need to call
-    //    updateAuthUI() here!
-    // ============================================
-    
     console.log('✅ [MAP] All event listeners setup complete');
-    console.log('ℹ️ [MAP] Auth UI handled by auth.js');
 }
 
 // =====================================================
