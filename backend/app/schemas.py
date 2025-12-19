@@ -12,7 +12,8 @@ class StationBase(BaseModel):
     has_rain: bool = False
     has_imu: bool = False
     sensor_positions: Optional[Dict] = None
-    config: Optional[Dict[str, Any]] = None 
+    config: Optional[Dict[str, Any]] = None
+    sensors: Optional[Dict[str, Any]] = None 
 
 class StationCreate(StationBase):
     pass

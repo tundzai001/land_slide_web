@@ -45,6 +45,18 @@ class AdminManager {
         if (velocityModalEl) {
             this.velocityModal = new bootstrap.Modal(velocityModalEl);
         }
+
+        ['gnss', 'rain', 'water', 'imu'].forEach(type => {
+            const cb = document.getElementById(`edit-${type}`);
+            if (cb) {
+                cb.addEventListener('change', (e) => {
+                    document.getElementById(`mqtt-${type}-section`).style.display = e.target.checked ? 'block' : 'none';
+                    // Cập nhật trạng thái empty state
+                    const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => document.getElementById(`edit-${t}`).checked);
+                    document.getElementById('mqtt-empty-state').style.display = anyChecked ? 'none' : 'block';
+                });
+            }
+        });
         
         this.loadUsers();
         this.setupTabHandlers();
@@ -392,6 +404,10 @@ class AdminManager {
         // Reset form
         document.getElementById('stationConfigForm').reset();
         document.getElementById('edit-station-id').value = '';
+        document.getElementById('origin-lat').value = '';
+        document.getElementById('origin-lon').value = '';
+        document.getElementById('origin-h').value = '';
+        document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
         document.getElementById('edit-project-id').value = this.currentProjectId;
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
         
@@ -411,18 +427,119 @@ class AdminManager {
     }
 
     async editStation(stationId) {
-        this.isEditMode = true;
-        this.currentStationId = stationId;
-        this.currentStep = 1;
-        
-        // TODO: Load station data from API
-        document.getElementById('edit-station-id').value = stationId;
-        document.getElementById('edit-project-id').value = this.currentProjectId;
-        document.getElementById('modal-title').textContent = 'Cấu hình Trạm';
-        document.getElementById('btn-delete-station').style.display = 'inline-block';
-        
-        this.updateWizardStep();
-        if (this.stationModal) this.stationModal.show();
+        try {
+            // 1. Khởi tạo trạng thái Edit
+            this.isEditMode = true;
+            this.currentStationId = stationId;
+            this.currentStep = 1;
+
+            // Hiển thị trạng thái đang tải (Optional)
+            window.toast?.info('Đang tải dữ liệu trạm...');
+
+            // 2. Fetch đồng thời thông tin Trạm và danh sách Thiết bị (Devices)
+            const [resConfig, resDevices] = await Promise.all([
+                fetch(`/api/admin/stations/${stationId}/config`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                }),
+                fetch(`/api/admin/stations/${stationId}/devices`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                })
+            ]);
+
+            if (!resConfig.ok || !resDevices.ok) throw new Error('Không thể tải dữ liệu từ máy chủ');
+
+            const stationData = await resConfig.json();
+            const devices = await resDevices.json();
+
+            // 3. Đổ dữ liệu vào STEP 1: THÔNG TIN CHUNG
+            document.getElementById('edit-station-id').value = stationId;
+            document.getElementById('edit-project-id').value = this.currentProjectId;
+            document.getElementById('edit-code').value = stationData.station_code || '';
+            document.getElementById('edit-name').value = stationData.name || '';
+
+            // 4. Đổ dữ liệu vào STEP 2: CẢM BIẾN & MQTT TOPICS
+            // Reset tất cả checkbox và ẩn các section topic trước khi điền mới
+            const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
+            sensorTypes.forEach(type => {
+                const checkbox = document.getElementById(`edit-${type}`);
+                const section = document.getElementById(`mqtt-${type}-section`);
+                const input = document.getElementById(`topic-${type}`);
+                
+                if (checkbox) checkbox.checked = false;
+                if (section) section.style.display = 'none';
+                if (input) input.value = '';
+            });
+
+            // Duyệt qua danh sách thiết bị trả về từ DB để tick và điền Topic
+            if (Array.isArray(devices)) {
+                devices.forEach(dev => {
+                    const type = dev.device_type; // gnss, rain, water, imu
+                    const checkbox = document.getElementById(`edit-${type}`);
+                    const section = document.getElementById(`mqtt-${type}-section`);
+                    const input = document.getElementById(`topic-${type}`);
+
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        if (section) section.style.display = 'block';
+                        if (input) input.value = dev.mqtt_topic || '';
+                    }
+                });
+                // Ẩn thông báo "Chưa chọn cảm biến" nếu có ít nhất 1 thiết bị
+                const emptyState = document.getElementById('mqtt-empty-state');
+                if (emptyState) emptyState.style.display = devices.length > 0 ? 'none' : 'block';
+            }
+
+            // 5. Đổ dữ liệu vào STEP 3: CẤU HÌNH NGƯỠNG (THRESHOLDS)
+            const cfg = stationData.config || {};
+            
+            // Mực nước
+            const waterCfg = cfg.Water || {};
+            document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
+            document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
+
+            // Lượng mưa
+            const rainCfg = cfg.RainAlerting || {};
+            document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
+            document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
+            document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
+
+            // GNSS
+            const gnssCfg = cfg.GnssAlerting || {};
+            document.getElementById('cfg-gnss-hdop').value = gnssCfg.gnss_max_hdop ?? 4.0;
+            document.getElementById('cfg-gnss-steps').value = gnssCfg.gnss_confirm_steps ?? 3;
+            document.getElementById('cfg-gnss-streak').value = gnssCfg.gnss_safe_streak ?? 10;
+            document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
+
+            // IMU
+            const imuCfg = cfg.ImuAlerting || {};
+            document.getElementById('cfg-imu-shock').value = imuCfg.shock_threshold_ms2 ?? 5.0;
+
+            // Điền tọa độ gốc (Nếu có trong config)
+            const gnssOrigin = cfg.gnss_origin || {};
+            if (gnssOrigin.lat) {
+                document.getElementById('origin-lat').value = gnssOrigin.lat;
+                document.getElementById('origin-lon').value = gnssOrigin.lon;
+                document.getElementById('origin-h').value = gnssOrigin.h || 0;
+                document.getElementById('origin-status').innerHTML = '<span class="text-success">✅ Đã có tọa độ gốc từ cấu hình</span>';
+            } else {
+                document.getElementById('origin-lat').value = '';
+                document.getElementById('origin-lon').value = '';
+                document.getElementById('origin-h').value = '';
+                document.getElementById('origin-status').textContent = 'Chưa thiết lập tọa độ gốc';
+            }
+
+            // 6. Cập nhật UI Modal
+            document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
+            document.getElementById('btn-delete-station').style.display = 'inline-block';
+            
+            // Quay về step 1 và hiển thị modal
+            this.updateWizardStep();
+            if (this.stationModal) this.stationModal.show();
+
+        } catch (e) {
+            console.error('❌ Error in editStation:', e);
+            window.toast?.error('Lỗi khi tải thông tin trạm: ' + e.message);
+        }
     }
 
     updateWizardStep() {
@@ -471,62 +588,84 @@ class AdminManager {
         const name = document.getElementById('edit-name').value.trim();
         const projectId = document.getElementById('edit-project-id').value;
         
-        if (!code || !name) {
-            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
-            return;
-        }
-        
-        // Collect sensor data
+        // 1. Thu thập Sensor + Tọa độ riêng của từng sensor
         const sensors = {};
-        ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
-            const checkbox = document.getElementById(`edit-${sensor}`);
+        ['gnss', 'rain', 'water', 'imu'].forEach(type => {
+            const checkbox = document.getElementById(`edit-${type}`);
             if (checkbox && checkbox.checked) {
-                const topic = document.getElementById(`topic-${sensor}`)?.value.trim();
+                const topic = document.getElementById(`topic-${type}`)?.value.trim();
                 if (topic) {
-                    sensors[sensor] = { topic };
+                    sensors[type] = { topic: topic };
+                    
+                    // Gán tọa độ GNSS vào info của sensor này để Backend tính trung bình
+                    if (type === 'gnss') {
+                        sensors[type].lat = document.getElementById('origin-lat').value;
+                        sensors[type].lon = document.getElementById('origin-lon').value;
+                        sensors[type].h = document.getElementById('origin-h').value;
+                    }
                 }
             }
         });
-        
-        // Collect thresholds
+
+        // 2. Thu thập cấu hình thresholds
         const config = {
-            water_warning: parseFloat(document.getElementById('cfg-water-warning').value),
-            water_critical: parseFloat(document.getElementById('cfg-water-critical').value),
-            rain_watch: parseFloat(document.getElementById('cfg-rain-watch').value),
-            rain_warning: parseFloat(document.getElementById('cfg-rain-warning').value),
-            rain_critical: parseFloat(document.getElementById('cfg-rain-critical').value),
-            gnss_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value),
-            gnss_steps: parseInt(document.getElementById('cfg-gnss-steps').value),
-            gnss_streak: parseInt(document.getElementById('cfg-gnss-streak').value),
-            gnss_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value),
-            imu_shock: parseFloat(document.getElementById('cfg-imu-shock').value)
+            Water: {
+                warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
+                critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value)
+            },
+            RainAlerting: {
+                rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch').value),
+                rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning').value),
+                rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value)
+            },
+            GnssAlerting: {
+                gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
+                gnss_confirm_steps: parseInt(document.getElementById('cfg-gnss-steps').value) || 3,
+                gnss_safe_streak: parseInt(document.getElementById('cfg-gnss-streak').value) || 10,
+                gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
+            },
+            ImuAlerting: {
+                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
+            },
+            // Lưu tọa độ gốc GNSS vào config để hiển thị lại khi cần
+            gnss_origin: {
+                lat: document.getElementById('origin-lat').value,
+                lon: document.getElementById('origin-lon').value,
+                h: document.getElementById('origin-h').value
+            }
         };
-        
+
+        const payload = {
+            station_code: code,
+            name: name,
+            sensors: sensors,
+            config: config,
+            location: null // Backend sẽ tự tính toán dựa trên sensors gửi lên
+        };
+
         try {
-            const res = await fetch(`/api/admin/projects/${projectId}/stations`, {
-                method: 'POST',
+            let url = this.isEditMode 
+                ? `/api/admin/stations/${this.currentStationId}/config`
+                : `/api/admin/projects/${projectId}/stations`;
+            
+            let method = this.isEditMode ? 'PUT' : 'POST';
+
+            const res = await fetch(url, {
+                method: method,
                 headers: {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    station_code: code,
-                    name: name,
-                    sensors: sensors,
-                    config: config
-                })
+                body: JSON.stringify(payload)
             });
-            
-            if (!res.ok) throw new Error('Failed to save station');
-            
-            window.toast?.success('✅ Lưu trạm thành công!');
-            
-            if (this.stationModal) this.stationModal.hide();
+
+            if (!res.ok) throw new Error('Lỗi lưu trạm');
+
+            window.toast?.success('✅ Đã lưu cấu hình trạm thành công!');
+            this.stationModal.hide();
             this.loadStations(projectId);
-            
         } catch (e) {
-            console.error('Error saving station:', e);
-            window.toast?.error('❌ Lỗi lưu trạm');
+            window.toast?.error('❌ ' + e.message);
         }
     }
 
@@ -601,29 +740,45 @@ class AdminManager {
     async fetchLatestOrigin() {
         const topic = document.getElementById('topic-gnss')?.value.trim();
         if (!topic) {
-            window.toast?.warning('Vui lòng nhập MQTT Topic trước');
+            window.toast?.warning('Vui lòng nhập MQTT Topic của GNSS trước');
             return;
         }
         
         const statusEl = document.getElementById('origin-status');
         const btnEl = document.getElementById('btn-fetch-origin');
         
-        if (statusEl) statusEl.textContent = '⏳ Đang đợi dữ liệu GNSS...';
-        if (btnEl) btnEl.disabled = true;
+        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Đang kết nối Broker lấy tọa độ thực...';
+        btnEl.disabled = true;
         
-        // TODO: Implement MQTT subscription to get latest GNSS data
-        // For now, simulate with timeout
-        setTimeout(() => {
-            // Simulate getting coordinates
-            document.getElementById('origin-lat').value = '21.028511';
-            document.getElementById('origin-lon').value = '105.804817';
-            document.getElementById('origin-h').value = '15.234';
+        try {
+            const res = await fetch('/api/admin/gnss/fetch-live-origin', {
+                method: 'POST',
+                headers: { 
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json' 
+                },
+                body: JSON.stringify({ topic: topic })
+            });
             
-            if (statusEl) statusEl.textContent = '✅ Đã cập nhật tọa độ gốc';
-            if (btnEl) btnEl.disabled = false;
+            const result = await res.json();
             
-            window.toast?.success('✅ Đã lấy tọa độ hiện tại');
-        }, 2000);
+            if (res.ok) {
+                // ĐIỀN TỌA ĐỘ THẬT TỪ THIẾT BỊ VÀO FORM
+                document.getElementById('origin-lat').value = result.lat;
+                document.getElementById('origin-lon').value = result.lon;
+                document.getElementById('origin-h').value = result.h;
+                
+                statusEl.innerHTML = `<span class="text-success">✅ Thành công (Sats: ${result.num_sats}, Fix: ${result.fix_quality})</span>`;
+                window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
+            } else {
+                throw new Error(result.detail || 'Timeout');
+            }
+        } catch (e) {
+            statusEl.innerHTML = `<span class="text-danger">❌ Lỗi: ${e.message}</span>`;
+            window.toast?.error('Không lấy được tọa độ. Hãy chắc chắn thiết bị đang gửi GNGGA.');
+        } finally {
+            btnEl.disabled = false;
+        }
     }
 
     // =========================================================================

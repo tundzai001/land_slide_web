@@ -321,154 +321,226 @@ async def delete_project(
 # ============================================================================
 # ADMIN - STATIONS API
 # ============================================================================
-@app.post("/api/admin/projects/{project_id}/stations")
-async def create_station_in_project(
-    project_id: int,
-    station_data: schemas.StationCreate, # Dùng Schema để lấy dữ liệu sensors
-    db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
-):
-    try:
-        result = await db.execute(
-            select(
-                model_config.Station,
-                func.count(model_config.Device.id).label('device_count')
-            )
-            .outerjoin(model_config.Device, model_config.Device.station_id == model_config.Station.id)
-            .where(model_config.Station.project_id == project_id)
-            .group_by(model_config.Station.id)
-            .order_by(model_config.Station.created_at.desc())
-        )
-        
-        stations_with_counts = result.all()
-        
-        return [
-            {
-                "id": s.id,
-                "station_code": s.station_code,
-                "name": s.name,
-                "location": s.location,
-                "status": s.status,
-                "last_update": s.last_update,
-                "device_count": count
-            }
-            for s, count in stations_with_counts
-        ]
-        
-    except Exception as e:
-        logger.error(f"Error loading stations: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-# ============================================================================
-# SỬA TRONG FILE: backend/app/main.py
-# ============================================================================
+def calculate_station_location(sensors: dict, manual_location: dict = None):
+    """
+    Logic tính tọa độ trạm:
+    - Nếu có dữ liệu tọa độ từ các cảm biến (thường gửi kèm trong Sensors Dict):
+        - 1 cảm biến: Lấy tọa độ cảm biến đó.
+        - >1 cảm biến: Tính trung bình cộng lat, lon, h.
+    - Nếu không có dữ liệu từ cảm biến: Dùng manual_location từ Step 1.
+    """
+    coords = []
+    if sensors:
+        for s_type, info in sensors.items():
+            # Kiểm tra nếu sensor info có chứa lat/lon
+            if isinstance(info, dict) and info.get('lat') is not None and info.get('lon') is not None:
+                try:
+                    coords.append({
+                        "lat": float(info['lat']),
+                        "lon": float(info['lon']),
+                        "h": float(info.get('h', 0))
+                    })
+                except (ValueError, TypeError):
+                    continue
+
+    if not coords:
+        return manual_location
+
+    if len(coords) == 1:
+        return {
+            "lat": coords[0]['lat'],
+            "lon": coords[0]['lon'],
+            "h": coords[0]['h'],
+            "source": "Single Sensor (Auto)"
+        }
+    else:
+        avg_lat = sum(c['lat'] for c in coords) / len(coords)
+        avg_lon = sum(c['lon'] for c in coords) / len(coords)
+        avg_h = sum(c['h'] for c in coords) / len(coords)
+        return {
+            "lat": round(avg_lat, 8),
+            "lon": round(avg_lon, 8),
+            "h": round(avg_h, 3),
+            "source": f"Average of {len(coords)} sensors"
+        }
+
+@app.get("/api/admin/projects/{project_id}/stations")
+async def get_stations_by_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.get_current_user)
+):
+    result = await db.execute(
+        select(model_config.Station).where(model_config.Station.project_id == project_id)
+    )
+    return result.scalars().all()
+
+@app.get("/api/admin/stations/{station_id}/config")
+async def get_station_config(
+    station_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.get_current_user)
+):
+    """Fix lỗi 404 khi nhấn nút Cấu hình trên giao diện"""
+    result = await db.execute(
+        select(model_config.Station).where(model_config.Station.id == station_id)
+    )
+    station = result.scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trạm")
+    
+    # Trả về cả ID, thông tin cơ bản và config
+    return {
+        "id": station.id,
+        "station_code": station.station_code,
+        "name": station.name,
+        "location": station.location,
+        "config": station.config
+    }
 
 @app.post("/api/admin/projects/{project_id}/stations", response_model=schemas.StationResponse)
 async def create_station_in_project(
     project_id: int,
-    station_data: schemas.StationCreate, # Dùng Schema để nhận cả object 'sensors'
+    station_data: schemas.StationCreate,
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
-        # 1. Kiểm tra Dự án có tồn tại không
-        project_res = await db.execute(select(model_config.Project).where(model_config.Project.id == project_id))
-        if not project_res.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Dự án không tồn tại")
+        # 1. Kiểm tra mã trạm
+        exist = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_data.station_code))
+        if exist.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Mã trạm đã tồn tại")
 
-        # 2. Kiểm tra Mã trạm đã tồn tại chưa (Tránh lỗi 500 DB Crash)
-        stmt = select(model_config.Station).where(model_config.Station.station_code == station_data.station_code)
-        existing = await db.execute(stmt)
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"Mã trạm '{station_data.station_code}' đã tồn tại. Vui lòng chọn mã khác.")
+        # 2. TỰ ĐỘNG TÍNH TOẠ ĐỘ TRẠM
+        final_location = calculate_station_location(station_data.sensors, station_data.location)
 
-        # 3. Tạo Trạm (Station)
+        # 3. Tạo trạm
         new_station = model_config.Station(
             station_code=station_data.station_code,
             name=station_data.name,
             project_id=project_id,
-            location=station_data.location,
+            location=final_location, # Dùng tọa độ đã tính toán
             status="offline",
-            last_update=0,
             config=station_data.config or {},
             created_at=int(time.time()),
             updated_at=int(time.time())
         )
         db.add(new_station)
-        
-        # Flush để lấy ID của trạm vừa tạo (dùng cho foreign key của device)
         await db.flush() 
 
-        # 4. TỰ ĐỘNG TẠO THIẾT BỊ (DEVICES) TỪ DỮ LIỆU GIAO DIỆN
-        
+        # 4. Tạo thiết bị
         if station_data.sensors:
-            for sensor_type, info in station_data.sensors.items():
-                # Chỉ tạo nếu có thông tin và có topic
-                if info and isinstance(info, dict) and info.get('topic'):
-                    mqtt_topic = info['topic'].strip()
-                    if not mqtt_topic:
-                        continue
-
-                    # Tạo mã thiết bị tự động: MÃTRẠM_LOẠI (VD: ST01_GNSS)
-                    dev_code = f"{new_station.station_code}_{sensor_type.upper()}"
-                    
-                    new_device = model_config.Device(
-                        device_code=dev_code,
-                        name=f"{new_station.name} - {sensor_type.upper()}",
+            for s_type, info in station_data.sensors.items():
+                topic = info.get('topic', '').strip()
+                if topic:
+                    db.add(model_config.Device(
+                        device_code=f"{new_station.station_code}_{s_type.upper()}",
+                        name=f"{new_station.name} - {s_type.upper()}",
                         station_id=new_station.id,
-                        device_type=sensor_type, # gnss, rain, water, imu
-                        mqtt_topic=mqtt_topic,
+                        device_type=s_type,
+                        mqtt_topic=topic,
                         is_active=True,
-                        last_data_time=0,
-                        config={}, # Có thể lưu config riêng từng sensor nếu cần
                         created_at=int(time.time()),
                         updated_at=int(time.time())
-                    )
-                    db.add(new_device)
-                    logger.info(f"➕ Auto-created Device: {dev_code} (Topic: {mqtt_topic})")
+                    ))
+        
         await db.commit()
         await db.refresh(new_station)
-        
         return new_station
-        
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error creating station: {e}", exc_info=True)
-        # Trả về lỗi rõ ràng hơn là 500 chung chung
-        raise HTTPException(status_code=500, detail=f"Lỗi khi tạo trạm: {str(e)}")
+        logger.error(f"Error creating station: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.put("/api/admin/stations/{station_id}/config")
+async def update_station_full_config(
+    station_id: int,
+    update_data: schemas.StationCreate,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
+        station = res.scalar_one_or_none()
+        if not station: raise HTTPException(status_code=404)
+
+        # TÍNH LẠI TOẠ ĐỘ TỰ ĐỘNG
+        station.location = calculate_station_location(update_data.sensors, update_data.location)
+        station.name = update_data.name
+        station.config = update_data.config
+        station.updated_at = int(time.time())
+
+        # Sync Devices
+        if update_data.sensors:
+            for s_type, info in update_data.sensors.items():
+                topic = info.get('topic', '').strip()
+                if not topic: continue
+                
+                dev_res = await db.execute(select(model_config.Device).where(and_(model_config.Device.station_id == station_id, model_config.Device.device_type == s_type)))
+                device = dev_res.scalar_one_or_none()
+                if device:
+                    device.mqtt_topic = topic
+                else:
+                    db.add(model_config.Device(
+                        device_code=f"{station.station_code}_{s_type.upper()}",
+                        name=f"{station.name} - {s_type.upper()}",
+                        station_id=station_id,
+                        device_type=s_type,
+                        mqtt_topic=topic,
+                        created_at=int(time.time()),
+                        updated_at=int(time.time())
+                    ))
+        await db.commit()
+        return {"status": "success"}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.delete("/api/admin/stations/{station_id}")
 async def delete_station(
     station_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
-    try:
-        result = await db.execute(
-            select(model_config.Station).where(model_config.Station.id == station_id)
-        )
-        station = result.scalar_one_or_none()
-        
-        if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
-        
+    res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
+    station = res.scalar_one_or_none()
+    if station:
         await db.delete(station)
         await db.commit()
-        
-        return {"status": "success", "message": f"Deleted station {station_id}"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error deleting station: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "success"}
+    raise HTTPException(status_code=404)
 
+@app.post("/api/admin/gnss/fetch-live-origin")
+async def fetch_live_gnss_origin(
+    request_data: dict,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        topic = request_data.get('topic')
+        if not topic: raise HTTPException(status_code=400, detail="Topic required")
+        
+        # Sử dụng Import nội bộ để tránh lỗi vòng lặp
+        from app.routers.admin import GNSSLiveFetcher
+        
+        fetcher = GNSSLiveFetcher(
+            broker=config.settings.MQTT_BROKER,
+            port=config.settings.MQTT_PORT,
+            username=config.settings.MQTT_USER,
+            password=config.settings.MQTT_PASSWORD
+        )
+        result = await fetcher.fetch_origin(topic, timeout=30)
+        if not result: raise HTTPException(status_code=408, detail="Timeout")
+        
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error(f"GNSS Fetch Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+        
 # ============================================================================
 # ADMIN - DEVICES API
 # ============================================================================
+
 @app.get("/api/admin/stations/{station_id}/devices")
 async def get_station_devices(
     station_id: int,

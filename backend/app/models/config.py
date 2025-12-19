@@ -1,13 +1,9 @@
-# backend/app/models/config.py - CẤU TRÚC MỚI
+# backend/app/models/config.py 
 from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, BigInteger, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from app.database import BaseConfig
 
 class Project(BaseConfig):
-    """
-    DỰ ÁN: Nhóm các trạm lại với nhau
-    VD: "Dự án giám sát Quảng Ninh", "Dự án Đà Nẵng"
-    """
     __tablename__ = "projects"
     
     id = Column(Integer, primary_key=True, index=True)

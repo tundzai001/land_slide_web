@@ -155,12 +155,8 @@ class MQTTBridge:
                     proc_key = f"device_{device.id}"
                     
                     if proc_key not in self.processors_cache:
-                        if sensor_type == 'gnss':
-                            # ✅ PASS session factory để GNSS có thể load origin
-                            self.processors_cache[proc_key] = GNSSVelocityProcessor(
-                                device_id=device.id,
-                                db_session_factory=ConfigSessionLocal
-                            )
+                        if device.device_type == 'gnss':
+                            self.processors_cache[proc_key] = GNSSVelocityProcessor(device.id, ConfigSessionLocal)
                         elif sensor_type == 'rain':
                             self.processors_cache[proc_key] = RainEngine()
                         elif sensor_type == 'water':
@@ -173,7 +169,7 @@ class MQTTBridge:
                         "device_name": device.name,
                         "station_id": station.id,
                         "station_name": station.name,
-                        "type": sensor_type,
+                        "type": device.device_type,
                         "processor": self.processors_cache[proc_key],
                         "config": station.config or {}
                     }
