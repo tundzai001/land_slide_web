@@ -45,7 +45,6 @@
 
 .sensor-config-body { padding: 16px; }
 
-/* Coordinate Lock Box */
 .coordinate-lock-box {
     background: rgba(245, 158, 11, 0.08);
     border: 1px solid rgba(245, 158, 11, 0.3);
@@ -54,7 +53,6 @@
     margin-top: 16px;
 }
 
-/* Wizard Steps */
 .wizard-steps {
     display: flex;
     justify-content: space-between;
@@ -124,6 +122,14 @@
     box-shadow: 0 8px 20px rgba(14, 165, 233, 0.4);
     color: white;
 }
+
+/* Database Tab Styles */
+.sticky-top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg-secondary);
+}
 </style>
 
     <!-- Sidebar -->
@@ -181,20 +187,24 @@
                 <i class="bi bi-gear-wide-connected me-2"></i>
                 Quản lý Hệ thống
             </h1>
-            <p class="text-muted">Quản lý người dùng và dự án</p>
+            <p class="text-muted">Quản lý người dùng, dự án và database</p>
         </div>
 
         <!-- Main Tabs -->
         <ul class="nav nav-tabs main-tabs" id="mainTabs" role="tablist">
             <li class="nav-item">
                 <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-users">
-                    <i class="bi bi-people me-2"></i>Quản lý Người dùng
+                    <i class="bi bi-people me-2"></i>Người dùng
                 </button>
             </li>
-            <!-- Cập nhật Tab này thành Quản lý Dự án -->
             <li class="nav-item">
                 <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-projects">
-                    <i class="bi bi-folder me-2"></i>Quản lý Dự án
+                    <i class="bi bi-folder me-2"></i>Dự án
+                </button>
+            </li>
+            <li class="nav-item">   
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-database">
+                    <i class="bi bi-database me-2"></i>Database
                 </button>
             </li>
         </ul>
@@ -235,16 +245,14 @@
                 </div>
             </div>
 
-            <!-- TAB 2: PROJECTS (Thay thế cho TAB Devices cũ) -->
+            <!-- TAB 2: PROJECTS -->
             <div class="tab-pane fade" id="tab-projects">
-                <!-- Breadcrumb Navigation cho phép quay lại danh sách dự án -->
                 <nav aria-label="breadcrumb" class="mb-3">
                     <ol class="breadcrumb" id="project-breadcrumb">
                         <li class="breadcrumb-item active">Dự án</li>
                     </ol>
                 </nav>
 
-                <!-- Action Bar & Title -->
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-outline-secondary" id="btn-back-nav" style="display: none;" onclick="window.adminManager.navigateBack()">
@@ -252,7 +260,6 @@
                         </button>
                         <h4 id="current-view-title" class="mb-0">Danh sách Dự án</h4>
                     </div>
-                    <!-- Nơi JS sẽ render nút Tạo dự án hoặc Thêm trạm -->
                     <div id="action-buttons-container">
                         <button class="btn btn-gradient" onclick="window.adminManager.openCreateProjectModal()">
                             <i class="bi bi-plus-circle me-2"></i>Tạo Dự án
@@ -260,11 +267,111 @@
                     </div>
                 </div>
 
-                <!-- Content Area: Nơi JS render danh sách dự án hoặc danh sách trạm -->
                 <div id="projects-content-area">
                     <div class="text-center py-5">
                         <div class="spinner-border text-primary"></div>
                         <p class="text-muted mt-2">Đang tải...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: DATABASE -->
+            <div class="tab-pane fade" id="tab-database">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4><i class="bi bi-database me-2"></i>Quản lý Database</h4>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                        </button>
+                        <button class="btn btn-outline-success" onclick="window.dbManager.exportToJSON()">
+                            <i class="bi bi-download me-1"></i>Export JSON
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter & Search -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <select class="form-select" id="db-filter-table" onchange="window.dbManager.applyFilter()">
+                                    <option value="all">Tất cả bảng</option>
+                                    <option value="stations">Stations</option>
+                                    <option value="devices">Devices</option>
+                                    <option value="sensor_data">Sensor Data</option>
+                                    <option value="alerts">Alerts</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <input type="text" class="form-control" id="db-search" placeholder="Tìm kiếm..." oninput="window.dbManager.applyFilter()">
+                            </div>
+                            <div class="col-md-3">
+                                <select class="form-select" id="db-limit" onchange="window.dbManager.applyFilter()">
+                                    <option value="50">50 dòng</option>
+                                    <option value="100" selected>100 dòng</option>
+                                    <option value="500">500 dòng</option>
+                                    <option value="1000">1000 dòng</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Database Viewer -->
+                <div class="custom-table" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead id="db-table-head" class="sticky-top">
+                            <tr>
+                                <th style="width: 80px;">ID</th>
+                                <th style="width: 120px;">Table</th>
+                                <th>Data Preview</th>
+                                <th style="width: 150px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="db-table-body">
+                            <tr>
+                                <td colspan="4" class="text-center py-4">
+                                    <div class="spinner-border text-primary"></div>
+                                    <p class="mt-2 text-muted">Đang tải...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Stats -->
+                <div class="row g-3 mt-3">
+                    <div class="col-md-3">
+                        <div class="card bg-primary text-white">
+                            <div class="card-body">
+                                <h6 class="mb-1">Stations</h6>
+                                <h3 id="stat-stations" class="mb-0">--</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-success text-white">
+                            <div class="card-body">
+                                <h6 class="mb-1">Devices</h6>
+                                <h3 id="stat-devices" class="mb-0">--</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-info text-white">
+                            <div class="card-body">
+                                <h6 class="mb-1">Sensor Data</h6>
+                                <h3 id="stat-data" class="mb-0">--</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-warning text-white">
+                            <div class="card-body">
+                                <h6 class="mb-1">Active Alerts</h6>
+                                <h3 id="stat-alerts" class="mb-0">--</h3>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -316,7 +423,7 @@
         </div>
     </div>
 
-    <!-- 2. Create Project Modal (MỚI) -->
+    <!-- 2. Create Project Modal -->
     <div class="modal fade" id="createProjectModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -382,10 +489,9 @@
 
                     <form id="stationConfigForm">
                         <input type="hidden" id="edit-station-id">
-                        <!-- Thêm ID này để JS không bị lỗi khi gán Project ID -->
                         <input type="hidden" id="edit-project-id">
                         
-                        <!-- ============ STEP 1: MÃ TRẠM & TÊN ============ -->
+                        <!-- STEP 1: MÃ TRẠM & TÊN -->
                         <div class="wizard-content active" data-step="1">
                             <div class="row g-3">
                                 <div class="col-md-6">
@@ -401,14 +507,13 @@
                             </div>
                         </div>
 
-                        <!-- ============ STEP 2: MQTT & TỌA ĐỘ ============ -->
+                        <!-- STEP 2: MQTT & TỌA ĐỘ -->
                         <div class="wizard-content" data-step="2">
                             <div class="alert alert-info small mb-3">
                                 <i class="bi bi-info-circle me-1"></i>
                                 Chọn thiết bị → Nhập MQTT Topic → Cấu hình tọa độ (nếu cần)
                             </div>
 
-                            <!-- Sensor Selection -->
                             <h6 class="mb-3">1. Chọn thiết bị cần kích hoạt:</h6>
                             <div class="d-flex flex-wrap gap-3 mb-4 p-3 border rounded">
                                 <div class="form-check form-switch">
@@ -431,7 +536,6 @@
 
                             <h6 class="mb-3">2. Cấu hình MQTT Topics:</h6>
 
-                            <!-- Các Section cho từng sensor -->
                             <div id="mqtt-gnss-section" class="sensor-config-section" style="display: none;">
                                 <div class="sensor-config-header">
                                     <i class="bi bi-geo-alt-fill text-danger"></i>
@@ -471,14 +575,13 @@
                                 <div class="sensor-config-body"><label class="form-label">MQTT Topic</label><input type="text" class="form-control" id="topic-imu"></div>
                             </div>
 
-                            <!-- QUAN TRỌNG: ID này là nguyên nhân gây lỗi, phải có nó -->
                             <div id="mqtt-empty-state" class="text-center py-5 text-muted">
                                 <i class="bi bi-inbox fs-1"></i>
                                 <p class="mt-2">Chưa có thiết bị nào được chọn</p>
                             </div>
                         </div>
 
-                        <!-- ============ STEP 3: NGƯỠNG ============ -->
+                        <!-- STEP 3: NGƯỠNG -->
                         <div class="wizard-content" data-step="3">
                             <h6 class="mb-2 text-primary"><i class="bi bi-water me-2"></i>Water & Displacement</h6>
                             <div class="row g-3 mb-4 p-3 border rounded bg-light">
@@ -567,12 +670,46 @@
         </div>
     </div>
 
+    <!-- 5. Edit Database Record Modal -->
+    <div class="modal fade" id="editRecordModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Chỉnh sửa Record</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Table</label>
+                        <input type="text" class="form-control" id="edit-table" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Record ID</label>
+                        <input type="text" class="form-control" id="edit-id" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">JSON Data</label>
+                        <textarea class="form-control" id="edit-json" rows="15" style="font-family: 'Courier New', monospace; font-size: 0.9rem;"></textarea>
+                        <small class="text-muted">Chỉnh sửa JSON, sau đó bấm Save</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-primary" onclick="window.dbManager.saveRecord()">
+                        <i class="bi bi-save me-1"></i>Lưu
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/theme-manager.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/toast-notifications.js"></script>
     <script src="/js/admin-manager.js"></script>
+    <script src="/js/db-manager.js"></script>
     
     <script>
         function updateTime() {
