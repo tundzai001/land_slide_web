@@ -1,5 +1,5 @@
 // =====================================================
-// MAP MAIN LOGIC ( frontend/js/map-main.js )
+// MAP MAIN LOGIC 
 // =====================================================
 
 console.log('🚀 [MAP] Script loaded, waiting for DOM...');
@@ -9,7 +9,8 @@ let markers = {};
 let charts = {};
 let currentStationData = null;
 let allStations = [];
-let currentView = 'realtime'; // 'realtime' or 'longterm'
+let currentView = 'realtime';
+let wsConnection = null; 
 
 // =====================================================
 // MAIN INITIALIZATION
@@ -27,24 +28,123 @@ function initialize() {
     initMap();
     setupEventListeners();
     loadStations();
+    setupWebSocket(); 
     
-    // ✅ FIXED: Ẩn sidebar khi vừa load trang
     const stationSidebar = document.getElementById('station-list-sidebar');
     if (stationSidebar) {
         stationSidebar.classList.add('hidden');
-        console.log('✅ [MAP] Station sidebar hidden by default');
     }
     
-    // ✅ FIXED: Đặt icon ban đầu là hamburger (list)
     const toggleBtn = document.getElementById('toggle-list-btn');
     if (toggleBtn) {
         toggleBtn.innerHTML = '<i class="bi bi-list"></i>';
-        console.log('✅ [MAP] Toggle button initialized');
     }
     
     setInterval(loadStations, 30000);
     
     console.log('✅ [MAP] Initialization complete!');
+}
+
+// =====================================================
+// ✅ WEBSOCKET REALTIME CONNECTION
+// =====================================================
+
+function setupWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/updates`;
+    
+    console.log('🔌 [WS] Connecting to:', wsUrl);
+    
+    wsConnection = new WebSocket(wsUrl);
+    
+    wsConnection.onopen = () => {
+        console.log('✅ [WS] Connected');
+    };
+    
+    wsConnection.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            handleRealtimeUpdate(message);
+        } catch (e) {
+            console.error('❌ [WS] Parse error:', e);
+        }
+    };
+    
+    wsConnection.onerror = (error) => {
+        console.error('❌ [WS] Error:', error);
+    };
+    
+    wsConnection.onclose = () => {
+        console.warn('⚠️ [WS] Disconnected, reconnecting in 5s...');
+        setTimeout(setupWebSocket, 5000);
+    };
+    
+    // Keepalive ping
+    setInterval(() => {
+        if (wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send('ping');
+        }
+    }, 30000);
+}
+
+function handleRealtimeUpdate(message) {
+    console.log('📡 [WS] Received:', message);
+    
+    if (message.type === 'sensor_data' && currentStationData && message.station_id === currentStationData.id) {
+        // ✅ Cập nhật UI realtime
+        updateRealtimeSensorValues(message);
+    }
+    
+    if (message.type === 'station_status') {
+        updateStationMarker(message.station_id, message.risk_level);
+    }
+}
+
+function updateRealtimeSensorValues(message) {
+    const { sensor_type, data } = message;
+    
+    if (sensor_type === 'gnss' && data) {
+        // ✅ GNSS Velocity - Số nhảy liên tục
+        const velocityMmS = data.speed_2d_mm_s || data.speed_2d * 1000 || 0;
+        setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
+        
+        console.log(`🔄 [REALTIME] GNSS velocity updated: ${velocityMmS.toFixed(4)} mm/s`);
+    }
+    
+    if (sensor_type === 'rain' && data) {
+        const intensity = data.intensity_mm_h || 0;
+        setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
+    }
+    
+    if (sensor_type === 'water' && data) {
+        const level = data.water_level || data.processed_value_meters || 0;
+        setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
+    }
+    
+    if (sensor_type === 'imu' && data) {
+        setText('val-imu-roll', `${safeNumber(data.roll, 1)}°`);
+        setText('val-imu-pitch', `${safeNumber(data.pitch, 1)}°`);
+        setText('val-imu-yaw', `${safeNumber(data.yaw, 1)}°`);
+    }
+}
+
+function updateStationMarker(stationId, riskLevel) {
+    const marker = markers[stationId];
+    if (!marker) return;
+    
+    const colors = {
+        'EXTREME': '#fa5252',
+        'HIGH': '#ff922b',
+        'MEDIUM': '#ffd43b',
+        'LOW': '#51cf66'
+    };
+    
+    const color = colors[riskLevel] || '#adb5bd';
+    const el = marker.getElement();
+    if (el) {
+        const circle = el.querySelector('div');
+        if (circle) circle.style.background = color;
+    }
 }
 
 // =====================================================
@@ -54,7 +154,6 @@ function initialize() {
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
     
-    // ✅ Toggle station list sidebar
     const toggleListBtn = document.getElementById('toggle-list-btn');
     const sidebarCloseTab = document.getElementById('sidebar-close-tab');
     const stationSidebar = document.getElementById('station-list-sidebar');
@@ -62,19 +161,15 @@ function setupEventListeners() {
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
             stationSidebar.classList.remove('hidden');
-            console.log('📂 [MAP] Sidebar opened');
         });
     }
     
-    // ✅ NÚT ĐÓNG SIDEBAR (Close tab - trong sidebar)
     if (sidebarCloseTab && stationSidebar) {
         sidebarCloseTab.addEventListener('click', () => {
             stationSidebar.classList.add('hidden');
-            console.log('📁 [MAP] Sidebar closed');
         });
     }
     
-    // Close detail sidebar
     const closeDetailBtn = document.getElementById('close-btn');
     const detailSidebar = document.getElementById('detail-sidebar');
     
@@ -84,19 +179,16 @@ function setupEventListeners() {
             detailSidebar.classList.remove('expanded');
             detailSidebar.classList.remove('fullwidth');
             
-            // Reset views
             document.getElementById('realtime-view').style.display = 'block';
             document.getElementById('longterm-view').style.display = 'none';
             document.getElementById('charts-container').classList.remove('active');
             
-            // Show station list again
             if (stationSidebar) {
                 stationSidebar.classList.remove('hidden');
             }
         });
     }
     
-    // Theme toggle
     const themeToggleBtn = document.getElementById('theme-toggle-btn');
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', () => {
@@ -106,7 +198,6 @@ function setupEventListeners() {
         });
     }
     
-    // Search
     const searchInput = document.getElementById('search-station');
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
@@ -114,7 +205,6 @@ function setupEventListeners() {
         });
     }
     
-    // ✅ "Xem biểu đồ" button
     const btnShowCharts = document.getElementById('btn-show-charts');
     if (btnShowCharts) {
         btnShowCharts.addEventListener('click', () => {
@@ -122,13 +212,11 @@ function setupEventListeners() {
             const isActive = chartsContainer.classList.contains('active');
             
             if (isActive) {
-                // Đóng charts
                 detailSidebar.classList.remove('expanded');
                 chartsContainer.classList.remove('active');
                 stationSidebar.classList.remove('collapsed');
                 btnShowCharts.innerHTML = '<i class="bi bi-graph-up me-2"></i>Xem biểu đồ';
             } else {
-                // Mở charts
                 detailSidebar.classList.add('expanded');
                 chartsContainer.classList.add('active');
                 stationSidebar.classList.add('collapsed');
@@ -141,7 +229,6 @@ function setupEventListeners() {
         });
     }
     
-    // ✅ "Phân tích dài hạn" button
     const btnLongTerm = document.getElementById('btn-long-term');
     if (btnLongTerm) {
         btnLongTerm.addEventListener('click', () => {
@@ -149,13 +236,11 @@ function setupEventListeners() {
             const isActive = longtermView.style.display === 'block';
             
             if (isActive) {
-                // Đóng long-term
                 switchView('realtime');
                 detailSidebar.classList.remove('fullwidth');
                 stationSidebar.classList.remove('hidden');
                 btnLongTerm.innerHTML = '<i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn';
             } else {
-                // Mở long-term
                 switchView('longterm');
                 detailSidebar.classList.add('fullwidth');
                 stationSidebar.classList.add('hidden');
@@ -170,12 +255,10 @@ function setupEventListeners() {
 }
 
 // =====================================================
-// VIEW SWITCHING
+// OTHER FUNCTIONS (Keep existing implementations)
 // =====================================================
 
 function switchView(view) {
-    console.log(`🔄 [MAP] Switching to ${view} view`);
-    
     currentView = view;
     
     const realtimeView = document.getElementById('realtime-view');
@@ -189,10 +272,6 @@ function switchView(view) {
         longtermView.style.display = 'block';
     }
 }
-
-// =====================================================
-// MAP INITIALIZATION
-// =====================================================
 
 function initMap() {
     try {
@@ -210,22 +289,12 @@ function initMap() {
     }
 }
 
-// =====================================================
-// DATA LOADING
-// =====================================================
-
 async function loadStations() {
     try {
-        console.log('📡 [MAP] Loading stations...');
-        
         const res = await fetch('/api/stations');
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         
         const stations = await res.json();
-        console.log(`✅ [MAP] Loaded ${stations.length} stations`);
-        
         allStations = stations;
 
         stations.forEach(station => {
@@ -238,17 +307,6 @@ async function loadStations() {
 
     } catch (e) {
         console.error('❌ [MAP] Error loading stations:', e);
-        
-        const container = document.getElementById('station-list-container');
-        if (container) {
-            container.innerHTML = `
-                <div class="text-center text-muted mt-4">
-                    <i class="bi bi-exclamation-triangle fs-1"></i>
-                    <p class="mt-2">Không thể tải dữ liệu trạm</p>
-                    <small>${e.message}</small>
-                </div>
-            `;
-        }
     }
 }
 
@@ -284,19 +342,14 @@ function renderStationList(stations) {
         div.addEventListener('click', () => {
             selectStation(st.id);
             
-            // Auto-hide station list on mobile
             if (window.innerWidth < 768) {
                 const sidebar = document.getElementById('station-list-sidebar');
-                if (sidebar) {
-                    sidebar.classList.add('hidden');
-                }
+                if (sidebar) sidebar.classList.add('hidden');
             }
         });
         
         container.appendChild(div);
     });
-    
-    console.log(`✅ [MAP] Rendered ${stations.length} stations in list`);
 }
 
 function getRiskBadgeClass(level) {
@@ -349,14 +402,9 @@ function updateMarker(station) {
     }
 }
 
-// =====================================================
-// STATION SELECTION & UI
-// =====================================================
-
 async function selectStation(stationId) {
     console.log(`🎯 [MAP] Selecting station: ${stationId}`);
     
-    // Reset to realtime view
     switchView('realtime');
     
     const sidebar = document.getElementById('detail-sidebar');
@@ -378,7 +426,6 @@ async function selectStation(stationId) {
         }
         
         updateSidebarUI(data);
-        console.log(`✅ [MAP] Station detail loaded: ${data.name}`);
         
     } catch (e) {
         console.error('❌ [MAP] Error loading station detail:', e);
@@ -386,7 +433,6 @@ async function selectStation(stationId) {
     }
 }
 
-// ✅ FIXED: Safe number parsing to prevent toFixed errors
 function safeNumber(value, decimals = 2, defaultValue = '--') {
     if (value === null || value === undefined || value === '') {
         return defaultValue;
@@ -411,25 +457,20 @@ function updateSidebarUI(data) {
         riskEl.innerText = `Cảnh báo: ${risk}`;
     }
 
-    // ✅ FIXED: Safe value extraction with proper null checks
     const gnssLatest = data.sensors?.gnss?.latest;
     const rainLatest = data.sensors?.rain?.latest;
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
 
-    // GNSS - Use speed_2d or fallback to 0
-    const gnssSpeed = gnssLatest?.speed_2d ?? gnssLatest?.vel_2d ?? null;
+    const gnssSpeed = gnssLatest?.speed_2d_mm_s || gnssLatest?.speed_2d * 1000 || null;
     setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
 
-    // Rain - Use intensity_mm_h
     const rainIntensity = rainLatest?.intensity_mm_h ?? null;
     setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
 
-    // Water - Use water_level or processed_value_meters
     const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
     setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
 
-    // IMU - Roll, Pitch, Yaw
     setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
     setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
     setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
@@ -437,9 +478,59 @@ function updateSidebarUI(data) {
     renderCharts(data);
 }
 
-// =====================================================
-// LONG-TERM ANALYSIS
-// =====================================================
+function renderCharts(data) {
+    if (!data.sensors) return;
+    
+    renderChart('chart-gnss', data.sensors.gnss?.history, 'total_displacement_mm', '#fa5252', 'Displacement');
+    renderChart('chart-rain', data.sensors.rain?.history, 'intensity_mm_h', '#06b6d4', 'Intensity');
+    renderChart('chart-water', data.sensors.water?.history, 'water_level', '#10b981', 'Level');
+}
+
+function renderChart(id, history, key, color, label) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    
+    const labels = (history || []).map(h => {
+        const date = new Date(h.timestamp * 1000);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+    
+    const values = (history || []).map(h => {
+        const val = h.data?.[key];
+        return val !== null && val !== undefined ? parseFloat(val) : 0;
+    });
+
+    if (charts[id]) {
+        charts[id].destroy();
+    }
+    
+    charts[id] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: label,
+                data: values,
+                borderColor: color,
+                tension: 0.3,
+                borderWidth: 2,
+                pointRadius: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { display: false },
+                y: { 
+                    grid: { color: '#333' },
+                    ticks: { color: 'var(--text-secondary)' }
+                }
+            }
+        }
+    });
+}
 
 async function loadLongTermAnalysis() {
     console.log('📊 [MAP] Loading long-term analysis...');
@@ -451,7 +542,6 @@ async function loadLongTermAnalysis() {
     
     const stationId = currentStationData.id;
     
-    // Show loading
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'none';
@@ -465,7 +555,6 @@ async function loadLongTermAnalysis() {
         }
         
         const data = await res.json();
-        console.log('✅ [MAP] Long-term analysis loaded:', data);
         
         if (data.status === 'insufficient_data') {
             showLongTermError(data.message);
@@ -487,7 +576,6 @@ function renderLongTermAnalysis(data) {
     
     const analysis = data.analysis;
     
-    // Warning banner
     const warningEl = document.getElementById('longterm-warning');
     const warningTextEl = document.getElementById('warning-text');
     
@@ -499,14 +587,11 @@ function renderLongTermAnalysis(data) {
         warningEl.style.display = 'none';
     }
     
-    // ✅ FIXED: Safe number rendering
     setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
     setText('lt-classification', analysis.classification || 'N/A');
     setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
     setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
     
-    // Trend indicator
-    const trendEl = document.getElementById('trend-indicator');
     const trendIconEl = document.getElementById('trend-icon');
     const trendValueEl = document.getElementById('trend-value');
     
@@ -524,7 +609,6 @@ function renderLongTermAnalysis(data) {
     
     trendIconEl.textContent = trendIcons[analysis.trend] || '❓';
     trendValueEl.textContent = trendTexts[analysis.trend] || 'Không xác định';
-    trendEl.className = `trend-indicator ${analysis.trend}`;
     
     renderClassificationScale(analysis.classification, analysis.velocity_mm_year);
     renderLongTermChart(data);
@@ -612,10 +696,6 @@ function showLongTermError(message) {
     }
 }
 
-// =====================================================
-// UTILITY FUNCTIONS
-// =====================================================
-
 function setText(id, val) {
     const el = document.getElementById(id);
     if (el) el.innerText = val || '--';
@@ -635,69 +715,6 @@ function filterStations(searchTerm) {
         item.style.display = text.includes(term) ? 'block' : 'none';
     });
 }
-
-// =====================================================
-// CHARTS
-// =====================================================
-
-function renderCharts(data) {
-    if (!data.sensors) return;
-    
-    renderChart('chart-gnss', data.sensors.gnss?.history, 'total_displacement_mm', '#fa5252', 'Displacement');
-    renderChart('chart-rain', data.sensors.rain?.history, 'intensity_mm_h', '#06b6d4', 'Intensity');
-    renderChart('chart-water', data.sensors.water?.history, 'water_level', '#10b981', 'Level');
-}
-
-function renderChart(id, history, key, color, label) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
-    
-    const labels = (history || []).map(h => {
-        const date = new Date(h.timestamp * 1000);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    });
-    
-    // ✅ FIXED: Safe value extraction
-    const values = (history || []).map(h => {
-        const val = h.data?.[key];
-        return val !== null && val !== undefined ? parseFloat(val) : 0;
-    });
-
-    if (charts[id]) {
-        charts[id].destroy();
-    }
-    
-    charts[id] = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: label,
-                data: values,
-                borderColor: color,
-                tension: 0.3,
-                borderWidth: 2,
-                pointRadius: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { display: false },
-                y: { 
-                    grid: { color: '#333' },
-                    ticks: { color: 'var(--text-secondary)' }
-                }
-            }
-        }
-    });
-}
-
-// =====================================================
-// GLOBAL EXPORTS
-// =====================================================
 
 window.mapManager = {
     loadLongTermAnalysis,
