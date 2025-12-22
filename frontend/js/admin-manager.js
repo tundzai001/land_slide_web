@@ -1,5 +1,5 @@
 // =====================================================
-// ADMIN MANAGER - COMPLETE WITH PROJECTS + WIZARD
+// ADMIN MANAGER - COMPLETE VERSION WITH ALL FEATURES
 // =====================================================
 
 class AdminManager {
@@ -7,7 +7,7 @@ class AdminManager {
         this.token = localStorage.getItem('token');
         
         // Navigation state
-        this.currentView = 'projects'; // 'projects' | 'stations'
+        this.currentView = 'projects';
         this.currentProjectId = null;
         this.navigationStack = [];
         
@@ -22,8 +22,18 @@ class AdminManager {
         // Data cache
         this.projectsData = null;
         this.stationsData = null;
-        this.tempClassificationData = [];
         
+        // Velocity classification (Cruden & Varnes)
+        this.velocityConfig = [
+            { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
+            { name: 'Very slow', threshold: 0.0005, unit: 'mm/s', description: '16 mm/year to 1.6 m/year', editable: true },
+            { name: 'Slow', threshold: 0.05, unit: 'mm/s', description: '1.6 m/year to 13 mm/month', editable: true },
+            { name: 'Moderate', threshold: 0.5, unit: 'mm/s', description: '13 mm/month to 1.8 m/hour', editable: true },
+            { name: 'Rapid', threshold: 50, unit: 'mm/s', description: '1.8 m/hour to 3 m/min', editable: true },
+            { name: 'Very rapid', threshold: 833, unit: 'mm/s', description: '3 m/min to 5 m/s', editable: true },
+            { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
+        ];
+
         if (!this.token) {
             window.location.href = '/pages/login.html';
             return;
@@ -46,14 +56,19 @@ class AdminManager {
             this.velocityModal = new bootstrap.Modal(velocityModalEl);
         }
 
+        // Setup sensor checkboxes
         ['gnss', 'rain', 'water', 'imu'].forEach(type => {
             const cb = document.getElementById(`edit-${type}`);
             if (cb) {
                 cb.addEventListener('change', (e) => {
-                    document.getElementById(`mqtt-${type}-section`).style.display = e.target.checked ? 'block' : 'none';
-                    // Cập nhật trạng thái empty state
-                    const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => document.getElementById(`edit-${t}`).checked);
-                    document.getElementById('mqtt-empty-state').style.display = anyChecked ? 'none' : 'block';
+                    const section = document.getElementById(`mqtt-${type}-section`);
+                    if (section) section.style.display = e.target.checked ? 'block' : 'none';
+                    
+                    const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => 
+                        document.getElementById(`edit-${t}`)?.checked
+                    );
+                    const emptyState = document.getElementById('mqtt-empty-state');
+                    if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
                 });
             }
         });
@@ -61,7 +76,7 @@ class AdminManager {
         this.loadUsers();
         this.setupTabHandlers();
         this.setupLogout();
-        
+
         console.log('✅ [ADMIN] Initialized successfully');
     }
 
@@ -103,12 +118,10 @@ class AdminManager {
     navigateBack() {
         if (this.navigationStack.length === 0) return;
         
-        const previous = this.navigationStack.pop();
+        this.navigationStack.pop();
         
-        if (previous.view === 'projects') {
-            this.resetNavigation();
-            this.loadProjects();
-        }
+        this.resetNavigation();
+        this.loadProjects();
         
         this.updateBreadcrumb();
         this.updateBackButton();
@@ -299,7 +312,6 @@ class AdminManager {
     
     async loadStations(projectId) {
         try {
-            // Save navigation state
             if (this.currentView === 'projects') {
                 this.navigationStack.push({ view: 'projects' });
             }
@@ -371,7 +383,7 @@ class AdminManager {
                                 ${s.location ? `
                                     <div class="text-muted small mb-2">
                                         <i class="bi bi-geo-alt me-1"></i>
-                                        ${s.location}
+                                        Lat: ${s.location.lat?.toFixed(6)}, Lon: ${s.location.lon?.toFixed(6)}
                                     </div>
                                 ` : ''}
                             </div>
@@ -401,7 +413,6 @@ class AdminManager {
         this.currentStationId = null;
         this.currentStep = 1;
         
-        // Reset form
         document.getElementById('stationConfigForm').reset();
         document.getElementById('edit-station-id').value = '';
         document.getElementById('origin-lat').value = '';
@@ -411,7 +422,6 @@ class AdminManager {
         document.getElementById('edit-project-id').value = this.currentProjectId;
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
         
-        // Reset checkboxes
         ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
             const checkbox = document.getElementById(`edit-${sensor}`);
             if (checkbox) checkbox.checked = false;
@@ -428,15 +438,12 @@ class AdminManager {
 
     async editStation(stationId) {
         try {
-            // 1. Khởi tạo trạng thái Edit
             this.isEditMode = true;
             this.currentStationId = stationId;
             this.currentStep = 1;
 
-            // Hiển thị trạng thái đang tải (Optional)
             window.toast?.info('Đang tải dữ liệu trạm...');
 
-            // 2. Fetch đồng thời thông tin Trạm và danh sách Thiết bị (Devices)
             const [resConfig, resDevices] = await Promise.all([
                 fetch(`/api/admin/stations/${stationId}/config`, {
                     headers: { 'Authorization': `Bearer ${this.token}` }
@@ -446,19 +453,18 @@ class AdminManager {
                 })
             ]);
 
-            if (!resConfig.ok || !resDevices.ok) throw new Error('Không thể tải dữ liệu từ máy chủ');
+            if (!resConfig.ok || !resDevices.ok) throw new Error('Không thể tải dữ liệu');
 
             const stationData = await resConfig.json();
             const devices = await resDevices.json();
 
-            // 3. Đổ dữ liệu vào STEP 1: THÔNG TIN CHUNG
+            // STEP 1: Basic info
             document.getElementById('edit-station-id').value = stationId;
             document.getElementById('edit-project-id').value = this.currentProjectId;
             document.getElementById('edit-code').value = stationData.station_code || '';
             document.getElementById('edit-name').value = stationData.name || '';
 
-            // 4. Đổ dữ liệu vào STEP 2: CẢM BIẾN & MQTT TOPICS
-            // Reset tất cả checkbox và ẩn các section topic trước khi điền mới
+            // STEP 2: Sensors & MQTT
             const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
             sensorTypes.forEach(type => {
                 const checkbox = document.getElementById(`edit-${type}`);
@@ -470,10 +476,9 @@ class AdminManager {
                 if (input) input.value = '';
             });
 
-            // Duyệt qua danh sách thiết bị trả về từ DB để tick và điền Topic
             if (Array.isArray(devices)) {
                 devices.forEach(dev => {
-                    const type = dev.device_type; // gnss, rain, water, imu
+                    const type = dev.device_type;
                     const checkbox = document.getElementById(`edit-${type}`);
                     const section = document.getElementById(`mqtt-${type}-section`);
                     const input = document.getElementById(`topic-${type}`);
@@ -484,82 +489,68 @@ class AdminManager {
                         if (input) input.value = dev.mqtt_topic || '';
                     }
                 });
-                // Ẩn thông báo "Chưa chọn cảm biến" nếu có ít nhất 1 thiết bị
+                
                 const emptyState = document.getElementById('mqtt-empty-state');
                 if (emptyState) emptyState.style.display = devices.length > 0 ? 'none' : 'block';
             }
 
-            // 5. Đổ dữ liệu vào STEP 3: CẤU HÌNH NGƯỠNG (THRESHOLDS)
+            // STEP 3: Thresholds
             const cfg = stationData.config || {};
             
-            // Mực nước
             const waterCfg = cfg.Water || {};
             document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
             document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
 
-            // Lượng mưa
             const rainCfg = cfg.RainAlerting || {};
             document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
             document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
             document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
 
-            // GNSS
             const gnssCfg = cfg.GnssAlerting || {};
             document.getElementById('cfg-gnss-hdop').value = gnssCfg.gnss_max_hdop ?? 4.0;
             document.getElementById('cfg-gnss-steps').value = gnssCfg.gnss_confirm_steps ?? 3;
             document.getElementById('cfg-gnss-streak').value = gnssCfg.gnss_safe_streak ?? 10;
             document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
 
-            // IMU
             const imuCfg = cfg.ImuAlerting || {};
             document.getElementById('cfg-imu-shock').value = imuCfg.shock_threshold_ms2 ?? 5.0;
 
-            // Điền tọa độ gốc (Nếu có trong config)
             const gnssOrigin = cfg.gnss_origin || {};
             if (gnssOrigin.lat) {
                 document.getElementById('origin-lat').value = gnssOrigin.lat;
                 document.getElementById('origin-lon').value = gnssOrigin.lon;
                 document.getElementById('origin-h').value = gnssOrigin.h || 0;
-                document.getElementById('origin-status').innerHTML = '<span class="text-success">✅ Đã có tọa độ gốc từ cấu hình</span>';
+                document.getElementById('origin-status').innerHTML = '<span class="text-success">✅ Đã có tọa độ gốc</span>';
             } else {
                 document.getElementById('origin-lat').value = '';
                 document.getElementById('origin-lon').value = '';
                 document.getElementById('origin-h').value = '';
-                document.getElementById('origin-status').textContent = 'Chưa thiết lập tọa độ gốc';
+                document.getElementById('origin-status').textContent = 'Chưa thiết lập';
             }
 
-            // 6. Cập nhật UI Modal
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
             document.getElementById('btn-delete-station').style.display = 'inline-block';
             
-            // Quay về step 1 và hiển thị modal
             this.updateWizardStep();
             if (this.stationModal) this.stationModal.show();
 
         } catch (e) {
             console.error('❌ Error in editStation:', e);
-            window.toast?.error('Lỗi khi tải thông tin trạm: ' + e.message);
+            window.toast?.error('Lỗi: ' + e.message);
         }
     }
 
     updateWizardStep() {
-        // Update wizard steps UI
         document.querySelectorAll('.wizard-step').forEach(step => {
             const stepNum = parseInt(step.dataset.step);
-            if (stepNum === this.currentStep) {
-                step.classList.add('active');
-            } else {
-                step.classList.remove('active');
-            }
+            step.classList.toggle('active', stepNum === this.currentStep);
         });
         
-        // Update wizard content
         document.querySelectorAll('.wizard-content').forEach(content => {
             const stepNum = parseInt(content.dataset.step);
             content.classList.toggle('active', stepNum === this.currentStep);
         });
         
-        // Update buttons
         const btnBack = document.getElementById('btn-wizard-back');
         const btnNext = document.getElementById('btn-wizard-next');
         const btnSave = document.getElementById('btn-wizard-save');
@@ -588,7 +579,11 @@ class AdminManager {
         const name = document.getElementById('edit-name').value.trim();
         const projectId = document.getElementById('edit-project-id').value;
         
-        // 1. Thu thập Sensor + Tọa độ riêng của từng sensor
+        if (!code || !name) {
+            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
+            return;
+        }
+        
         const sensors = {};
         ['gnss', 'rain', 'water', 'imu'].forEach(type => {
             const checkbox = document.getElementById(`edit-${type}`);
@@ -597,17 +592,21 @@ class AdminManager {
                 if (topic) {
                     sensors[type] = { topic: topic };
                     
-                    // Gán tọa độ GNSS vào info của sensor này để Backend tính trung bình
                     if (type === 'gnss') {
-                        sensors[type].lat = document.getElementById('origin-lat').value;
-                        sensors[type].lon = document.getElementById('origin-lon').value;
-                        sensors[type].h = document.getElementById('origin-h').value;
+                        const lat = document.getElementById('origin-lat').value;
+                        const lon = document.getElementById('origin-lon').value;
+                        const h = document.getElementById('origin-h').value;
+                        
+                        if (lat && lon) {
+                            sensors[type].lat = parseFloat(lat);
+                            sensors[type].lon = parseFloat(lon);
+                            sensors[type].h = parseFloat(h) || 0;
+                        }
                     }
                 }
             }
         });
 
-        // 2. Thu thập cấu hình thresholds
         const config = {
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
@@ -627,12 +626,12 @@ class AdminManager {
             ImuAlerting: {
                 shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
             },
-            // Lưu tọa độ gốc GNSS vào config để hiển thị lại khi cần
             gnss_origin: {
                 lat: document.getElementById('origin-lat').value,
                 lon: document.getElementById('origin-lon').value,
                 h: document.getElementById('origin-h').value
-            }
+            },
+            velocity_classification: this.velocityConfig
         };
 
         const payload = {
@@ -640,7 +639,7 @@ class AdminManager {
             name: name,
             sensors: sensors,
             config: config,
-            location: null // Backend sẽ tự tính toán dựa trên sensors gửi lên
+            location: null
         };
 
         try {
@@ -661,7 +660,7 @@ class AdminManager {
 
             if (!res.ok) throw new Error('Lỗi lưu trạm');
 
-            window.toast?.success('✅ Đã lưu cấu hình trạm thành công!');
+            window.toast?.success('✅ Lưu thành công!');
             this.stationModal.hide();
             this.loadStations(projectId);
         } catch (e) {
@@ -695,7 +694,7 @@ class AdminManager {
     // =========================================================================
     
     openVelocityModal() {
-        // TODO: Load velocity classification data
+        console.log('📊 [VELOCITY] Opening modal...');
         this.renderVelocityTable();
         if (this.velocityModal) this.velocityModal.show();
     }
@@ -707,34 +706,52 @@ class AdminManager {
     renderVelocityTable() {
         const tbody = document.getElementById('velocity-table-body');
         if (!tbody) return;
-        
-        // Default Cruden & Varnes classification
-        const defaultData = [
-            { name: 'Extremely Rapid', threshold: 5000, desc: '> 5 m/s' },
-            { name: 'Very Rapid', threshold: 50, desc: '3 m/min to 5 m/s' },
-            { name: 'Rapid', threshold: 0.5, desc: '1.8 m/h to 3 m/min' },
-            { name: 'Moderate', threshold: 0.05, desc: '13 m/month to 1.8 m/h' },
-            { name: 'Slow', threshold: 0.0005, desc: '1.6 m/year to 13 m/month' },
-            { name: 'Very Slow', threshold: 0.00001, desc: '16 mm/year to 1.6 m/year' },
-            { name: 'Extremely Slow', threshold: 0, desc: '< 16 mm/year' }
-        ];
-        
-        tbody.innerHTML = defaultData.map(v => `
+
+        tbody.innerHTML = this.velocityConfig.map((vel, index) => `
             <tr>
-                <td><strong>${v.name}</strong></td>
-                <td><code>${v.threshold}</code></td>
-                <td class="text-muted">${v.desc}</td>
+                <td><strong>${vel.name}</strong></td>
+                <td>
+                    ${vel.editable ? `
+                        <div class="input-group input-group-sm">
+                            <input type="number" 
+                                   class="form-control" 
+                                   value="${vel.threshold}" 
+                                   step="0.00001"
+                                   data-index="${index}"
+                                   onchange="window.adminManager.updateVelocityThreshold(${index}, this.value)">
+                            <span class="input-group-text">${vel.unit}</span>
+                        </div>
+                    ` : `<code>${vel.threshold} ${vel.unit}</code>`}
+                </td>
+                <td class="text-muted small">${vel.description}</td>
             </tr>
         `).join('');
     }
 
-    applyVelocityConfig() {
-        window.toast?.success('✅ Đã áp dụng cấu hình vận tốc');
-        this.closeVelocityModal();
+    updateVelocityThreshold(index, newValue) {
+        const value = parseFloat(newValue);
+        if (!isNaN(value)) {
+            this.velocityConfig[index].threshold = value;
+        }
+    }
+
+    resetVelocityConfig() {
+        // Khôi phục về mặc định Cruden & Varnes nếu cần
+        this.velocityConfig = [
+            { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
+            { name: 'Very slow', threshold: 0.0005, unit: 'mm/s', description: '16 mm/year to 1.6 m/year', editable: true },
+            { name: 'Slow', threshold: 0.05, unit: 'mm/s', description: '1.6 m/year to 13 mm/month', editable: true },
+            { name: 'Moderate', threshold: 0.5, unit: 'mm/s', description: '13 mm/month to 1.8 m/hour', editable: true },
+            { name: 'Rapid', threshold: 50, unit: 'mm/s', description: '1.8 m/hour to 3 m/min', editable: true },
+            { name: 'Very rapid', threshold: 833, unit: 'mm/s', description: '3 m/min to 5 m/s', editable: true },
+            { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
+        ];
+        this.renderVelocityTable();
+        window.toast?.info('Đã khôi phục cấu hình vận tốc mặc định');
     }
 
     // =========================================================================
-    // FETCH ORIGIN COORDINATES
+    // FETCH ORIGIN COORDINATES (LIVE FROM DEVICE)
     // =========================================================================
     
     async fetchLatestOrigin() {
@@ -747,10 +764,11 @@ class AdminManager {
         const statusEl = document.getElementById('origin-status');
         const btnEl = document.getElementById('btn-fetch-origin');
         
-        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Đang kết nối Broker lấy tọa độ thực...';
-        btnEl.disabled = true;
+        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Đang kết nối thiết bị...';
+        if (btnEl) btnEl.disabled = true;
         
         try {
+            // Gọi API backend để subscribe tạm thời vào topic và lấy message mới nhất
             const res = await fetch('/api/admin/gnss/fetch-live-origin', {
                 method: 'POST',
                 headers: { 
@@ -763,26 +781,27 @@ class AdminManager {
             const result = await res.json();
             
             if (res.ok) {
-                // ĐIỀN TỌA ĐỘ THẬT TỪ THIẾT BỊ VÀO FORM
+                // Điền tọa độ nhận được vào form
                 document.getElementById('origin-lat').value = result.lat;
                 document.getElementById('origin-lon').value = result.lon;
                 document.getElementById('origin-h').value = result.h;
                 
-                statusEl.innerHTML = `<span class="text-success">✅ Thành công (Sats: ${result.num_sats}, Fix: ${result.fix_quality})</span>`;
+                statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
                 window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
             } else {
-                throw new Error(result.detail || 'Timeout');
+                throw new Error(result.detail || 'Timeout hoặc thiết bị offline');
             }
         } catch (e) {
+            console.error(e);
             statusEl.innerHTML = `<span class="text-danger">❌ Lỗi: ${e.message}</span>`;
-            window.toast?.error('Không lấy được tọa độ. Hãy chắc chắn thiết bị đang gửi GNGGA.');
+            window.toast?.error('Không lấy được tọa độ. Kiểm tra lại Topic hoặc thiết bị.');
         } finally {
-            btnEl.disabled = false;
+            if (btnEl) btnEl.disabled = false;
         }
     }
 
     // =========================================================================
-    // USER MANAGEMENT
+    // USER MANAGEMENT (MISSING IN YOUR EDIT)
     // =========================================================================
     
     async loadUsers() {
@@ -802,24 +821,16 @@ class AdminManager {
             this.renderUsers(users);
         } catch (e) {
             console.error('Error loading users:', e);
-            window.toast?.error('Không thể tải danh sách người dùng');
+            // Silent fail or toast
         }
     }
 
     renderUsers(users) {
         const tbody = document.getElementById('user-table-body');
-        
         if (!tbody) return;
 
-        if (users.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="text-center py-4">
-                        <i class="bi bi-inbox fs-1 text-muted"></i>
-                        <p class="text-muted mt-2">Chưa có người dùng</p>
-                    </td>
-                </tr>
-            `;
+        if (!users || users.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Chưa có người dùng</td></tr>`;
             return;
         }
 
@@ -828,16 +839,8 @@ class AdminManager {
                 <td>${u.id}</td>
                 <td><strong>${u.username}</strong></td>
                 <td>${u.full_name || '--'}</td>
-                <td>
-                    <span class="badge bg-${u.role === 'admin' ? 'danger' : u.role === 'operator' ? 'warning' : 'info'}">
-                        ${u.role.toUpperCase()}
-                    </span>
-                </td>
-                <td>
-                    <span class="badge bg-${u.is_active ? 'success' : 'secondary'}">
-                        ${u.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                </td>
+                <td><span class="badge bg-${u.role === 'admin' ? 'danger' : 'info'}">${u.role}</span></td>
+                <td><span class="badge bg-${u.is_active ? 'success' : 'secondary'}">${u.is_active ? 'Active' : 'Locked'}</span></td>
                 <td>
                     <button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')">
                         <i class="bi bi-trash"></i>
@@ -854,7 +857,7 @@ class AdminManager {
         const role = document.getElementById('new-role').value;
 
         if (!username || !password) {
-            window.toast?.warning('Vui lòng nhập tài khoản và mật khẩu');
+            window.toast?.warning('Thiếu tài khoản hoặc mật khẩu');
             return;
         }
 
@@ -865,50 +868,37 @@ class AdminManager {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    username,
-                    password,
-                    full_name: fullname,
-                    role
-                })
+                body: JSON.stringify({ username, password, full_name: fullname, role })
             });
 
             if (res.ok) {
-                window.toast?.success('✅ Tạo tài khoản thành công!');
-                
-                const modal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
-                if (modal) modal.hide();
-                
+                window.toast?.success('✅ Tạo tài khoản thành công');
+                bootstrap.Modal.getInstance(document.getElementById('addUserModal'))?.hide();
                 document.getElementById('addUserForm').reset();
                 this.loadUsers();
             } else {
-                const error = await res.json();
-                throw new Error(error.detail || 'Lỗi tạo tài khoản');
+                throw new Error((await res.json()).detail || 'Lỗi tạo user');
             }
         } catch (e) {
-            console.error('Create user error:', e);
-            window.toast?.error('❌ Lỗi: ' + e.message);
+            window.toast?.error('❌ ' + e.message);
         }
     }
 
     async deleteUser(userId, username) {
-        if (!confirm(`Bạn có chắc muốn xóa người dùng "${username}"?`)) return;
-
+        if (!confirm(`Xóa người dùng ${username}?`)) return;
         try {
             const res = await fetch(`/api/admin/users/${userId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-
             if (res.ok) {
-                window.toast?.success('✅ Xóa thành công!');
+                window.toast?.success('Đã xóa người dùng');
                 this.loadUsers();
             } else {
-                throw new Error('Lỗi xóa người dùng');
+                throw new Error('Lỗi xóa');
             }
         } catch (e) {
-            console.error('Delete user error:', e);
-            window.toast?.error('❌ Lỗi: ' + e.message);
+            window.toast?.error(e.message);
         }
     }
 
@@ -922,7 +912,10 @@ class AdminManager {
 // INITIALIZATION
 // =========================================================================
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('✅ [ADMIN] DOM loaded, initializing AdminManager...');
-    window.adminManager = new AdminManager();
-    console.log('✅ [ADMIN] AdminManager initialized');
+    // Đảm bảo các modal và components đã load xong
+    if(document.getElementById('projects-content-area')) {
+        window.adminManager = new AdminManager();
+    } else {
+        console.error('❌ Admin Dashboard DOM element missing');
+    }
 });

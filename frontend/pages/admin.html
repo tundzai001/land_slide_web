@@ -123,12 +123,19 @@
     color: white;
 }
 
-/* Database Tab Styles */
 .sticky-top {
     position: sticky;
     top: 0;
     z-index: 10;
     background: var(--bg-secondary);
+}
+
+/* Session Time Display */
+.session-time {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 1px;
 }
 </style>
 
@@ -165,8 +172,8 @@
     <nav class="admin-navbar">
         <div class="d-flex justify-content-between align-items-center w-100">
             <div class="navbar-left">
-                <span class="text-muted small">Current Session:</span>
-                <span class="fw-bold ms-2" id="current-time" style="color: var(--accent-primary);">--:--</span>
+                <span class="text-muted small">Session Time:</span>
+                <span class="fw-bold ms-2 session-time" id="current-time" style="color: var(--accent-primary);">00:00:00</span>
             </div>
             <div class="navbar-right d-flex align-items-center gap-3">
                 <div class="theme-toggle-mini" id="theme-toggle" onclick="window.themeManager.toggle()">
@@ -616,7 +623,7 @@
                     </form>
                 </div>
                 <div class="modal-footer justify-content-between">
-                    <button type="button" class="btn btn-outline-danger" onclick="window.adminManager.deleteStation()" id="btn-delete-station" style="display: none;">
+                    <button type="button" class="btn btn-outline-danger" onclick="window.adminManager.deleteStation(window.adminManager.currentStationId)" id="btn-delete-station" style="display: none;">
                         <i class="bi bi-trash"></i> Xóa trạm
                     </button>
                     <div class="d-flex gap-2">
@@ -645,7 +652,7 @@
                 </div>
                 <div class="modal-body p-0">
                     <div class="alert alert-light m-3 border">
-                        <small class="text-muted"><i class="bi bi-info-circle-fill me-1"></i> Bảng phân cấp vận tốc trượt.</small>
+                        <small class="text-muted"><i class="bi bi-info-circle-fill me-1"></i> Bảng phân cấp vận tốc trượt. Bạn có thể sửa ngưỡng (threshold) và nhấn "Áp dụng".</small>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-striped table-hover mb-0 align-middle">
@@ -712,40 +719,34 @@
     <script src="/js/db-manager.js"></script>
     
     <script>
-        function updateTime() {
-            const now = new Date();
-            document.getElementById('current-time').innerText = 
-                now.toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'});
+        // ✅ SESSION TIME WITH SECONDS
+        let sessionStartTime = Date.now();
+        
+        function updateSessionTime() {
+            const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000); // seconds
+            
+            const hours = Math.floor(elapsed / 3600);
+            const minutes = Math.floor((elapsed % 3600) / 60);
+            const seconds = elapsed % 60;
+            
+            const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            
+            const timeEl = document.getElementById('current-time');
+            if (timeEl) {
+                timeEl.textContent = timeStr;
+            }
         }
-        setInterval(updateTime, 1000);
-        updateTime();
+        
+        // Update every second
+        setInterval(updateSessionTime, 1000);
+        updateSessionTime();
 
+        // Theme toggle icon update
         window.addEventListener('themeChanged', (e) => {
             const icon = document.querySelector('#theme-toggle i');
             if (icon) {
                 icon.className = e.detail.theme === 'light' ? 'bi bi-moon-stars-fill' : 'bi bi-sun-fill';
             }
-        });
-        
-        // Setup wizard sensor checkboxes
-        document.addEventListener('DOMContentLoaded', () => {
-            ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
-                const checkbox = document.getElementById(`edit-${sensor}`);
-                if (checkbox) {
-                    checkbox.addEventListener('change', (e) => {
-                        const section = document.getElementById(`mqtt-${sensor}-section`);
-                        const emptyState = document.getElementById('mqtt-empty-state');
-                        
-                        if (section) section.style.display = e.target.checked ? 'block' : 'none';
-                        
-                        const anySensorSelected = ['gnss', 'rain', 'water', 'imu'].some(s => 
-                            document.getElementById(`edit-${s}`)?.checked
-                        );
-                        
-                        if (emptyState) emptyState.style.display = anySensorSelected ? 'none' : 'block';
-                    });
-                }
-            });
         });
     </script>
 </body>
