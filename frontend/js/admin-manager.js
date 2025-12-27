@@ -735,6 +735,17 @@ class AdminManager {
         }
     }
 
+    applyVelocityConfig() {
+        
+        console.log('✅ [VELOCITY] Applied config:', this.velocityConfig);
+        
+        // Thông báo cho người dùng biết
+        window.toast?.success('✅ Đã áp dụng bảng vận tốc. Hãy bấm "Lưu cấu hình" để lưu trạm.');
+        
+        // Đóng modal
+        this.closeVelocityModal();
+    }
+
     resetVelocityConfig() {
         // Khôi phục về mặc định Cruden & Varnes nếu cần
         this.velocityConfig = [
@@ -749,6 +760,7 @@ class AdminManager {
         this.renderVelocityTable();
         window.toast?.info('Đã khôi phục cấu hình vận tốc mặc định');
     }
+
 
     // =========================================================================
     // FETCH ORIGIN COORDINATES (LIVE FROM DEVICE)

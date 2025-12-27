@@ -65,9 +65,11 @@ class MQTTBridge:
         else:
             logger.error(f"❌ MQTT Connection failed: rc={rc}")
 
-    def on_disconnect(self, client, userdata, rc):
-        if rc != 0:
-            logger.warning(f"⚠️ Unexpected MQTT disconnect: rc={rc}. Reconnecting...")
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        if reason_code != 0:
+            logger.warning(f"⚠️ Unexpected MQTT disconnect: rc={reason_code}. Reconnecting...")
+        else:
+            logger.info("✅ MQTT Disconnected successfully.")
 
     def on_message(self, client, userdata, msg):
         """Callback khi nhận tin nhắn - Đẩy vào Loop của FastAPI"""
