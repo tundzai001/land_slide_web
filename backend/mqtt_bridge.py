@@ -1,5 +1,5 @@
 # ==============================================================================
-# == backend/mqtt_bridge.py - MQTT to Database Bridge (INTEGRATED)            ==
+# == backend/mqtt_bridge.py - MQTT to Database Bridge (FINAL FIXED)           ==
 # ==============================================================================
 
 import asyncio
@@ -10,8 +10,7 @@ from typing import Dict, Any
 
 import paho.mqtt.client as mqtt
 from sqlalchemy import select
-
-# Import nội bộ
+from app.websocket import manager
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import config as model_config
 from app.models import data as model_data
@@ -39,7 +38,7 @@ class MQTTBridge:
         
         self.analyzer = LandslideAnalyzer()
         
-        # MQTT Client setup (same)
+        # MQTT Client setup
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         if settings.MQTT_USER:
             self.client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
@@ -58,7 +57,6 @@ class MQTTBridge:
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("✅ MQTT Connected to Broker.")
-            # Subscribe lại các topic đã biết
             for topic in self.topic_map.keys():
                 client.subscribe(topic)
                 logger.info(f"   ✓ Subscribed: {topic}")
@@ -67,27 +65,33 @@ class MQTTBridge:
 
     def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         if reason_code != 0:
-            logger.warning(f"⚠️ Unexpected MQTT disconnect: rc={reason_code}. Reconnecting...")
+            logger.warning(f"⚠️ MQTT disconnect: rc={reason_code}. Reconnecting...")
+            try:
+                client.reconnect()
+                logger.info("✅ MQTT Reconnected successfully")
+            except Exception as e:
+                logger.error(f"❌ Reconnect failed: {e}. Will retry in 5s...")
+                if self.loop and self.loop.is_running():
+                    self.loop.call_later(5, self._retry_connect)
         else:
-            logger.info("✅ MQTT Disconnected successfully.")
+            logger.info("✅ MQTT Disconnected gracefully")
+
+    def _retry_connect(self):
+        try:
+            self.client.reconnect()
+            logger.info("✅ MQTT Reconnected after retry")
+        except Exception as e:
+            logger.error(f"❌ Retry failed: {e}. Next retry in 10s...")
+            self.loop.call_later(10, self._retry_connect)
 
     def on_message(self, client, userdata, msg):
-        """Callback khi nhận tin nhắn - Đẩy vào Loop của FastAPI"""
         try:
             topic = msg.topic
-            
-            # --- [FIX START] XỬ LÝ DỮ LIỆU BINARY/RTCM ---
             try:
-                # 1. Cố gắng giải mã sang UTF-8 (Dành cho NMEA hoặc JSON)
                 payload_str = msg.payload.decode('utf-8')
             except UnicodeDecodeError:
-                # 2. Nếu lỗi -> Đây là dữ liệu Binary (RTCM, Raw bytes...)
-                # Byte 0xd3 thường là header của RTCM. Chúng ta bỏ qua không xử lý.
-                # logger.debug(f"⚠️ Ignored binary data on {topic} (RTCM/Raw)")
-                return
-            # --- [FIX END] -------------------------------
+                return # Bỏ qua dữ liệu nhị phân (RTCM)
             
-            # QUAN TRỌNG: Chỉ xử lý khi Loop chính đang chạy
             if self.loop and self.loop.is_running():
                 asyncio.run_coroutine_threadsafe(
                     self.process_pipeline(topic, payload_str), 
@@ -96,39 +100,28 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"Error in on_message: {e}")
 
-    # --- HÀM START/STOP CHO FASTAPI GỌI ---
     def start(self):
-        """Được gọi bởi FastAPI khi khởi động"""
         logger.info("🚀 Starting MQTT Bridge inside FastAPI...")
-        
-        # Lấy Event Loop đang chạy của Uvicorn/FastAPI
         try:
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
-            logger.error("❌ No running event loop found! Bridge cannot start.")
+            logger.error("❌ No running event loop found!")
             return
 
         try:
-            # Kết nối MQTT
             self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 60)
-            self.client.loop_start()  # Chạy thread riêng cho Network I/O
-            
-            # Chạy task reload DB trên loop chính
+            self.client.loop_start()
             self.loop.create_task(self.reload_topics_from_db())
             logger.info("✅ MQTT Bridge started successfully.")
-            
         except Exception as e:
             logger.error(f"❌ Failed to start MQTT Bridge: {e}")
 
     def stop(self):
-        """Được gọi bởi FastAPI khi tắt"""
         logger.info("🛑 Stopping MQTT Bridge...")
         self.client.loop_stop()
         self.client.disconnect()
-    # --------------------------------------
 
     async def reload_topics_from_db(self):
-        """✅ FIXED: Load theo cấu trúc Project → Station → Device"""
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
@@ -136,7 +129,6 @@ class MQTTBridge:
                 from sqlalchemy import select
                 
                 async with ConfigSessionLocal() as db:
-                    # Load all active devices
                     result = await db.execute(
                         select(Device, Station)
                         .join(Station, Device.station_id == Station.id)
@@ -145,15 +137,11 @@ class MQTTBridge:
                     devices_with_stations = result.all()
                 
                 new_map = {}
-                
                 for device, station in devices_with_stations:
-                    if not device.mqtt_topic or device.mqtt_topic.strip() == "":
-                        continue
+                    if not device.mqtt_topic or device.mqtt_topic.strip() == "": continue
                     
                     topic = device.mqtt_topic
                     sensor_type = device.device_type
-                    
-                    # ✅ Cache processor theo device_id (không phải station_id)
                     proc_key = f"device_{device.id}"
                     
                     if proc_key not in self.processors_cache:
@@ -176,27 +164,18 @@ class MQTTBridge:
                         "config": station.config or {}
                     }
 
-                # Diff and subscribe
+                # Diff subscribe/unsubscribe
                 current_topics = set(self.topic_map.keys())
                 new_topics = set(new_map.keys())
-                
-                for t in new_topics - current_topics:
-                    self.client.subscribe(t)
-                    logger.info(f"➕ Subscribed: {t}")
-                
-                for t in current_topics - new_topics:
-                    self.client.unsubscribe(t)
-                    logger.info(f"➖ Unsubscribed: {t}")
-                
+                for t in new_topics - current_topics: self.client.subscribe(t)
+                for t in current_topics - new_topics: self.client.unsubscribe(t)
                 self.topic_map = new_map
 
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
-            
             await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
 
     async def process_pipeline(self, topic: str, raw_payload: str):
-        """✅ FIXED: Update status và lưu DB đúng"""
         info = self.topic_map.get(topic)
         if not info: return
             
@@ -210,14 +189,14 @@ class MQTTBridge:
         current_timestamp = int(time.time())
         processed_data = None
         
-        # 1. Process data (same as before)
+        # 1. PROCESS DATA
         try:
             if sensor_type == 'gnss':
                 res = processor.process_gngga(raw_payload)
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
                 elif res and res.get('type') == 'origin_locked':
-                    logger.info(f"🎯 [{station_name}] GNSS Origin locked: {res.get('data')}")
+                    logger.info(f"🎯 [{station_name}] GNSS Origin locked")
                     return
             else:
                 try:
@@ -233,7 +212,22 @@ class MQTTBridge:
 
         if not processed_data: return
 
-        # 2. Analyze (same)
+        # ---------------------------------------------------------
+        # ✅ REALTIME BROADCAST 1: SENSOR DATA (Số liệu)
+        # Gửi ngay lập tức, không chờ DB
+        # ---------------------------------------------------------
+        try:
+            await manager.broadcast({
+                "type": "sensor_data",
+                "station_id": station_id,
+                "sensor_type": sensor_type,
+                "timestamp": current_timestamp,
+                "data": processed_data
+            })
+        except Exception as e:
+            logger.error(f"❌ WS Sensor Error: {e}")
+
+        # 2. ANALYZE
         alert = None
         data_wrapper = [{"timestamp": current_timestamp, "data": processed_data}]
         
@@ -249,14 +243,39 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"Analyzer error: {e}")
 
-        # 3. Save to DB
-        save_data_now = False
+        # ---------------------------------------------------------
+        # ✅ REALTIME BROADCAST 2: STATION STATUS (Màu sắc)
+        # Gửi ngay lập tức sau khi phân tích xong
+        # ---------------------------------------------------------
         is_dangerous = False
-
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
-            save_data_now = True
             is_dangerous = True
-            logger.warning(f"🚨 [{station_name}] {sensor_type.upper()}: {alert['message']}")
+            try:
+                await manager.broadcast({
+                    "type": "station_status",
+                    "station_id": station_id,
+                    "risk_level": alert['level']
+                })
+                logger.warning(f"🚨 [{station_name}] Alert sent: {alert['message']}")
+            except Exception as e:
+                logger.error(f"❌ WS Alert Error: {e}")
+        else:
+            # Nếu AN TOÀN -> Gửi LOW để UI chuyển về màu xanh ngay lập tức
+            try:
+                await manager.broadcast({
+                    "type": "station_status",
+                    "station_id": station_id,
+                    "risk_level": "LOW"
+                })
+            except Exception as e:
+                logger.error(f"❌ WS Low Status Error: {e}")
+
+        # 3. SAVE TO DB (THROTTLED)
+        # Chỉ lưu khi nguy hiểm HOẶC đến chu kỳ lưu
+        save_data_now = False
+
+        if is_dangerous:
+            save_data_now = True
         else:
             throttle_key = f"{device_id}_{sensor_type}"
             last_saved = self.last_save_time.get(throttle_key, 0)
@@ -271,43 +290,31 @@ class MQTTBridge:
                 save_data_now = True
 
         try:
-            # ✅ FIX 1: Update Device last_data_time
-            async with ConfigSessionLocal() as db_config:
-                from app.models.config import Device, Station
-                
-                # Update device
-                await db_config.execute(
-                    Device.__table__.update()
-                    .where(Device.id == device_id)
-                    .values(last_data_time=current_timestamp)
-                )
-                
-                # ✅ FIX 2: Update Station status = "online"
-                await db_config.execute(
-                    Station.__table__.update()
-                    .where(Station.id == station_id)
-                    .values(
-                        last_update=current_timestamp,
-                        status="online"  # ← ĐÂY LÀ CHÌA KHÓA!
+            if save_data_now:
+                 async with ConfigSessionLocal() as db_config:
+                    from app.models.config import Device, Station
+                    await db_config.execute(
+                        Device.__table__.update().where(Device.id == device_id).values(last_data_time=current_timestamp)
                     )
-                )
-                await db_config.commit()
+                    await db_config.execute(
+                        Station.__table__.update().where(Station.id == station_id).values(last_update=current_timestamp, status="online")
+                    )
+                    await db_config.commit()
 
-            # ✅ FIX 3: Save sensor data to Data DB
-            if save_data_now or is_dangerous:
+            if save_data_now:
                 async with DataSessionLocal() as db_data:
-                    if save_data_now:
-                        db_data.add(model_data.SensorData(
-                            station_id=station_id,  # Note: Vẫn group theo station
-                            timestamp=current_timestamp,
-                            sensor_type=sensor_type,
-                            data=processed_data,
-                            # ✅ Cache values for fast query
-                            value_1=processed_data.get('speed_2d_mm_s') if sensor_type == 'gnss' else processed_data.get('water_level'),
-                            value_2=processed_data.get('total_displacement_mm') if sensor_type == 'gnss' else processed_data.get('intensity_mm_h'),
-                        ))
-                        self.last_save_time[f"{device_id}_{sensor_type}"] = current_timestamp
+                    # Lưu dữ liệu cảm biến
+                    db_data.add(model_data.SensorData(
+                        station_id=station_id,  
+                        timestamp=current_timestamp,
+                        sensor_type=sensor_type,
+                        data=processed_data,
+                        value_1=processed_data.get('speed_2d_mm_s') if sensor_type == 'gnss' else processed_data.get('water_level'),
+                        value_2=processed_data.get('total_displacement_mm') if sensor_type == 'gnss' else processed_data.get('intensity_mm_h'),
+                    ))
+                    self.last_save_time[f"{device_id}_{sensor_type}"] = current_timestamp
 
+                    # Chỉ lưu cảnh báo nếu nguy hiểm
                     if is_dangerous:
                         db_data.add(model_data.Alert(
                             station_id=station_id,
@@ -321,4 +328,3 @@ class MQTTBridge:
 
         except Exception as e:
             logger.error(f"❌ DB Error: {e}")
-

@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, desc
 
 from .. import schemas, auth, config
-# ✅ IMPORT DATABASE & MODELS THEO CẤU TRÚC MỚI (3 DB)
 from ..database import get_auth_db, get_config_db, get_data_db
 from ..models import auth as model_auth
 from ..models import config as model_config

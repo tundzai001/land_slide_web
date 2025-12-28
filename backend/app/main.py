@@ -1,5 +1,5 @@
 # ==============================================================================
-# == backend/app/main.py - Landslide Monitoring System (Complete Version)   ==
+# == backend/app/main.py   ==
 # ==============================================================================
 
 import logging

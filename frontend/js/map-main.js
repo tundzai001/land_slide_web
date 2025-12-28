@@ -1,5 +1,5 @@
 // =====================================================
-// MAP MAIN LOGIC 
+// MAP MAIN LOGIC - COMPLETE FIXED VERSION
 // =====================================================
 
 console.log('🚀 [MAP] Script loaded, waiting for DOM...');
@@ -46,7 +46,7 @@ function initialize() {
 }
 
 // =====================================================
-// ✅ WEBSOCKET REALTIME CONNECTION
+// ✅ FIXED: WEBSOCKET REALTIME CONNECTION
 // =====================================================
 
 function setupWebSocket() {
@@ -90,35 +90,116 @@ function setupWebSocket() {
 function handleRealtimeUpdate(message) {
     console.log('📡 [WS] Received:', message);
     
-    if (message.type === 'sensor_data' && currentStationData && message.station_id === currentStationData.id) {
-        // ✅ Cập nhật UI realtime
-        updateRealtimeSensorValues(message);
+    if (message.type === 'sensor_data') {
+        if (currentStationData && message.station_id === currentStationData.id) {
+            updateRealtimeSensorValues(message);
+        }
     }
     
+    // Khi nhận được trạng thái mới (VD: LOW)
     if (message.type === 'station_status') {
+        // 1. Cập nhật chấm trên bản đồ
         updateStationMarker(message.station_id, message.risk_level);
+
+        // 2. Cập nhật Sidebar chi tiết (nếu đang mở)
+        if (currentStationData && message.station_id === currentStationData.id) {
+            const riskEl = document.getElementById('st-risk');
+            if (riskEl) {
+                riskEl.className = `risk-badge ${message.risk_level}`;
+                riskEl.innerText = `Cảnh báo: ${message.risk_level}`;
+            }
+        }
+
+        // 3. ✅ CẬP NHẬT DANH SÁCH BÊN TRÁI NGAY LẬP TỨC
+        const listBadge = document.getElementById(`list-badge-${message.station_id}`);
+        if (listBadge) {
+            listBadge.className = `badge ${getRiskBadgeClass(message.risk_level)}`;
+            listBadge.innerText = message.risk_level;
+            
+            // Hiệu ứng nháy nhẹ để biết vừa cập nhật
+            listBadge.style.transition = '0.3s';
+            listBadge.style.transform = 'scale(1.2)';
+            setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
+        }
     }
 }
 
+function updateSidebarRiskBadge(level) {
+    const riskEl = document.getElementById('st-risk');
+    if (!riskEl) return;
+
+    riskEl.className = `risk-badge ${level}`; 
+    riskEl.innerText = `Cảnh báo: ${level}`;
+    
+    riskEl.style.opacity = '0.5';
+    setTimeout(() => riskEl.style.opacity = '1', 300);
+}
+
 function updateRealtimeSensorValues(message) {
-    const { sensor_type, data } = message;
+    const { sensor_type, data, timestamp } = message;
+    
+    console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
     
     if (sensor_type === 'gnss' && data) {
-        // ✅ GNSS Velocity - Số nhảy liên tục
-        const velocityMmS = data.speed_2d_mm_s || data.speed_2d * 1000 || 0;
+        // GNSS Velocity
+        const velocityMmS = data.speed_2d_mm_s || (data.speed_2d * 1000) || 0;
         setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
         
-        console.log(`🔄 [REALTIME] GNSS velocity updated: ${velocityMmS.toFixed(4)} mm/s`);
+        // Displacement
+        const displacement = data.total_displacement_mm || 0;
+        
+        // ✅ Cập nhật chart nếu đang mở
+        if (charts['chart-gnss']) {
+            const chart = charts['chart-gnss'];
+            chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            chart.data.datasets[0].data.push(displacement);
+            
+            // Giữ tối đa 50 điểm
+            if (chart.data.labels.length > 50) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            
+            chart.update('none'); // Update without animation
+        }
     }
     
     if (sensor_type === 'rain' && data) {
         const intensity = data.intensity_mm_h || 0;
         setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
+        
+        // Update chart
+        if (charts['chart-rain']) {
+            const chart = charts['chart-rain'];
+            chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            chart.data.datasets[0].data.push(intensity);
+            
+            if (chart.data.labels.length > 50) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            
+            chart.update('none');
+        }
     }
     
     if (sensor_type === 'water' && data) {
         const level = data.water_level || data.processed_value_meters || 0;
         setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
+        
+        // Update chart
+        if (charts['chart-water']) {
+            const chart = charts['chart-water'];
+            chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            chart.data.datasets[0].data.push(level);
+            
+            if (chart.data.labels.length > 50) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            
+            chart.update('none');
+        }
     }
     
     if (sensor_type === 'imu' && data) {
@@ -278,7 +359,7 @@ function initMap() {
         map = L.map('map', { zoomControl: false }).setView([16.047079, 108.206230], 6);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        L.tileLayer('http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
             maxZoom: 20,
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
         }).addTo(map);
@@ -335,7 +416,9 @@ function renderStationList(stations) {
                     <div class="fw-bold text-white">${st.name}</div>
                     <small class="text-muted">${st.station_code}</small>
                 </div>
-                <span class="badge ${getRiskBadgeClass(st.risk_level)}">${st.risk_level || 'N/A'}</span>
+                <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(st.risk_level)}">
+                    ${st.risk_level || 'N/A'}
+                </span>
             </div>
         `;
         
@@ -716,9 +799,16 @@ function filterStations(searchTerm) {
     });
 }
 
+// =====================================================
+// EXPORTS & FINAL SETUP
+// =====================================================
+
 window.mapManager = {
     loadLongTermAnalysis,
-    safeNumber
+    safeNumber,
+    // Export thêm để tiện debug nếu cần
+    updateRealtimeSensorValues,
+    charts
 };
 
 console.log('✅ [MAP] Script fully loaded');
