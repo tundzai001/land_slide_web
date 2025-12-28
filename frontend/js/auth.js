@@ -1,35 +1,83 @@
 // =============================================
-// AUTHENTICATION HANDLER ( frontend/js/auth.js )
+// AUTHENTICATION HANDLER - COMPLETE FIXED VERSION
 // =============================================
 
 class AuthManager {
     constructor() {
         this.token = localStorage.getItem('token');
         this.user = null;
+        this.tokenCheckInterval = null;
+    }
+
+    // ✅ CRITICAL: Verify token on init
+    async init() {
+        console.log('🔒 [AUTH] Initializing...');
+        
+        if (this.token) {
+            const isValid = await this.verifyToken();
+            
+            if (!isValid) {
+                console.warn('⚠️ [AUTH] Token expired or invalid');
+                this.logout(false); // Don't redirect immediately
+                return false;
+            }
+            
+            console.log('✅ [AUTH] Token valid');
+            
+            // ✅ Start periodic token check (every 5 minutes)
+            this.startTokenCheck();
+            
+            return true;
+        }
+        
+        console.log('ℹ️ [AUTH] No token found');
+        return false;
+    }
+
+    // ✅ NEW: Periodic token validation
+    startTokenCheck() {
+        if (this.tokenCheckInterval) {
+            clearInterval(this.tokenCheckInterval);
+        }
+        
+        this.tokenCheckInterval = setInterval(async () => {
+            const isValid = await this.verifyToken();
+            if (!isValid) {
+                console.warn('⚠️ [AUTH] Token expired during session');
+                this.logout();
+            }
+        }, 5 * 60 * 1000); // Check every 5 minutes
+    }
+
+    // ✅ NEW: Verify token by calling backend
+    async verifyToken() {
+        if (!this.token) return false;
+        
+        try {
+            const res = await fetch('/api/auth/me', {
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                }
+            });
+
+            if (res.ok) {
+                this.user = await res.json();
+                return true;
+            } else {
+                return false;
+            }
+        } catch (e) {
+            console.error('❌ [AUTH] Verify failed:', e);
+            return false;
+        }
     }
 
     isAuthenticated() {
-        return !!this.token;
+        return !!this.token && !!this.user;
     }
 
     getUserInfo() {
-        if (!this.token) return null;
-        
-        try {
-            const base64Url = this.token.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonPayload = decodeURIComponent(
-                atob(base64).split('').map(c => 
-                    '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
-                ).join('')
-            );
-            
-            return JSON.parse(jsonPayload);
-        } catch (e) {
-            console.error('Token decode error:', e);
-            this.logout();
-            return null;
-        }
+        return this.user;
     }
 
     async login(username, password) {
@@ -57,7 +105,12 @@ class AuthManager {
             
             this.token = data.access_token;
             localStorage.setItem('token', data.access_token);
-            this.user = this.getUserInfo();
+            
+            // Fetch user info immediately
+            await this.verifyToken();
+            
+            // Start token check
+            this.startTokenCheck();
             
             return { success: true, user: this.user };
 
@@ -67,12 +120,23 @@ class AuthManager {
         }
     }
 
-    logout() {
+    logout(redirect = true) {
+        // Clear interval
+        if (this.tokenCheckInterval) {
+            clearInterval(this.tokenCheckInterval);
+            this.tokenCheckInterval = null;
+        }
+        
+        // Clear data
         this.token = null;
         this.user = null;
         localStorage.removeItem('token');
         sessionStorage.removeItem('justLoggedIn');
-        window.location.href = '/';
+        
+        // Redirect
+        if (redirect) {
+            window.location.href = '/';
+        }
     }
 
     // ✅ UNIVERSAL: Works for both Landing & Map pages
@@ -86,24 +150,19 @@ class AuthManager {
         }
 
         if (this.isAuthenticated()) {
-            const user = this.getUserInfo();
-            
-            if (!user) {
-                console.error('❌ [AUTH] Failed to get user info');
-                return;
-            }
-
-            console.log('✅ [AUTH] User authenticated:', user.sub, '| Role:', user.role);
+            console.log('✅ [AUTH] User authenticated:', this.user.username, '| Role:', this.user.role);
             
             // ============================================
             // UPDATE AUTH BUTTON (All Pages)
             // ============================================
-            authBtn.innerHTML = `<i class="bi bi-person-check me-1"></i> ${user.sub}`;
+            authBtn.innerHTML = `<i class="bi bi-person-check me-1"></i> ${this.user.username}`;
             authBtn.classList.remove('btn-primary');
             authBtn.classList.add('btn-outline-danger');
             authBtn.onclick = (e) => {
                 e.preventDefault();
-                this.logout();
+                if (confirm('Bạn muốn đăng xuất?')) {
+                    this.logout();
+                }
             };
             
             // ============================================
@@ -111,13 +170,13 @@ class AuthManager {
             // ============================================
             const userDisplay = document.getElementById('user-display');
             if (userDisplay) {
-                userDisplay.textContent = `Hi, ${user.sub}`;
+                userDisplay.textContent = `Hi, ${this.user.username}`;
                 userDisplay.classList.remove('d-none');
                 console.log('✅ [AUTH] Landing: User display updated');
             }
             
             const adminCard = document.getElementById('admin-card');
-            if (adminCard && user.role === 'admin') {
+            if (adminCard && this.user.role === 'admin') {
                 adminCard.classList.remove('d-none');
                 console.log('✅ [AUTH] Landing: Admin card shown');
             }
@@ -127,7 +186,7 @@ class AuthManager {
             // ============================================
             const adminNavBtn = document.getElementById('admin-nav-btn');
             if (adminNavBtn) {
-                if (user.role === 'admin') {
+                if (this.user.role === 'admin') {
                     adminNavBtn.style.display = 'inline-flex';
                     console.log('✅ [AUTH] Map: Admin button shown');
                 } else {
@@ -173,8 +232,7 @@ class AuthManager {
     }
 
     requireAdmin() {
-        const user = this.getUserInfo();
-        if (!user || user.role !== 'admin') {
+        if (!this.user || this.user.role !== 'admin') {
             alert('Bạn không có quyền truy cập trang này');
             window.location.href = '/';
             return false;
@@ -209,7 +267,7 @@ class AuthManager {
 // ============================================
 window.authManager = new AuthManager();
 
-const initAuthUI = () => {
+const initAuthUI = async () => {
     console.log('🚀 [AUTH] Initializing UI...');
     
     if (!window.authManager) {
@@ -217,13 +275,15 @@ const initAuthUI = () => {
         return;
     }
     
-    // Try immediately
+    // ✅ Verify token first
+    await window.authManager.init();
+    
+    // Update UI
     window.authManager.updateAuthUI();
     
-    // Retry with delays (handle timing issues)
+    // ✅ Retry with delays (handle timing issues)
     setTimeout(() => window.authManager.updateAuthUI(), 100);
     setTimeout(() => window.authManager.updateAuthUI(), 300);
-    setTimeout(() => window.authManager.updateAuthUI(), 500);
 };
 
 // Run on DOM ready

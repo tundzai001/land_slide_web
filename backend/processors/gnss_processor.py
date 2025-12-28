@@ -1,4 +1,4 @@
-# backend/processors/gnss_processor.py - ✅ FIXED VERSION
+# backend/processors/gnss_processor.py - ✅ FIXED DEADLOCK
 import numpy as np
 import math
 import logging
@@ -26,7 +26,7 @@ class GNSSVelocityProcessor:
     def __init__(
         self, 
         device_id: int,
-        db_session_factory,  # ✅ Nhận session factory để truy vấn DB
+        db_session_factory, 
         required_points=5, 
         max_spread_m=5.0, 
         filter_window_size=5, 
@@ -42,7 +42,7 @@ class GNSSVelocityProcessor:
         self.filter_window_size = filter_window_size
         
         # State
-        self.state = "AWAITING_CANDIDATES"  # AWAITING_CANDIDATES | ORIGIN_LOCKED
+        self.state = "AWAITING_CANDIDATES" 
         self.origin = None
         self.origin_candidates = []
         
@@ -56,49 +56,56 @@ class GNSSVelocityProcessor:
             'origin_resets': 0
         }
         
-        # ✅ LOAD ORIGIN TỪ DB KHI KHỞI TẠO
-        self._load_origin_from_db()
+        # ✅ FIX: Gọi hàm load không block (Non-blocking init)
+        self._schedule_load_origin()
         
         logger.info(f"GNSS Processor init for device {device_id}: State={self.state}")
 
-    def _load_origin_from_db(self):
-        """✅ Load origin từ DB nếu có"""
+    def _schedule_load_origin(self):
+        """✅ Schedule việc load DB vào background task để tránh Deadlock trong __init__"""
         try:
             import asyncio
+            try:
+                # Kiểm tra xem có đang chạy trong Event Loop không
+                loop = asyncio.get_running_loop()
+                # Nếu có, tạo task chạy ngầm, KHÔNG chờ result() tại đây
+                loop.create_task(self._async_load_origin_task())
+            except RuntimeError:
+                # Nếu không có loop (chạy trong Thread thường), cảnh báo bỏ qua
+                # (Hoặc logic phức tạp hơn nếu cần thread-safe call, nhưng ở đây thường là có loop)
+                logger.warning(f"⚠️ Device {self.device_id}: Init outside event loop, origin will be collected manually.")
+        except Exception as e:
+            logger.error(f"❌ Device {self.device_id}: Error scheduling DB load: {e}")
+
+    async def _async_load_origin_task(self):
+        """✅ Hàm thực thi việc load DB (Async)"""
+        try:
             from app.models.config import GNSSOrigin
             from sqlalchemy import select
             
-            # Chạy sync vì __init__ không async được
-            async def _async_load():
-                async with self.db_session_factory() as db:
-                    result = await db.execute(
-                        select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
-                    )
-                    return result.scalar_one_or_none()
-            
-            # Get running loop
-            try:
-                loop = asyncio.get_running_loop()
-                task = asyncio.run_coroutine_threadsafe(_async_load(), loop)
-                origin_record = task.result(timeout=2)
-            except RuntimeError:
-                # Nếu không có loop đang chạy (unlikely)
-                logger.warning("No running event loop, skip loading origin")
-                return
+            async with self.db_session_factory() as db:
+                result = await db.execute(
+                    select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
+                )
+                origin_record = result.scalar_one_or_none()
             
             if origin_record:
-                self.origin = {
-                    'lat': origin_record.lat,
-                    'lon': origin_record.lon,
-                    'h': origin_record.h,
-                    'R': np.array(origin_record.rotation_matrix),
-                    'ecef': np.array(origin_record.ecef_origin)
-                }
-                self.state = "ORIGIN_LOCKED"
-                logger.info(f"✅ Loaded origin from DB for device {self.device_id}")
+                # Validate dữ liệu trước khi dùng
+                if origin_record.rotation_matrix and origin_record.ecef_origin:
+                    self.origin = {
+                        'lat': origin_record.lat,
+                        'lon': origin_record.lon,
+                        'h': origin_record.h,
+                        'R': np.array(origin_record.rotation_matrix),
+                        'ecef': np.array(origin_record.ecef_origin)
+                    }
+                    self.state = "ORIGIN_LOCKED"
+                    logger.info(f"✅ [ASYNC LOAD] Loaded origin for device {self.device_id}: ({origin_record.lat}, {origin_record.lon})")
+                else:
+                    logger.warning(f"⚠️ Device {self.device_id}: Found origin record but matrix data is missing.")
             
         except Exception as e:
-            logger.error(f"Error loading origin from DB: {e}")
+            logger.error(f"❌ Device {self.device_id}: Failed to load origin from DB: {repr(e)}")
 
     async def _save_origin_to_db(self):
         """✅ Lưu origin vào DB"""
@@ -107,43 +114,43 @@ class GNSSVelocityProcessor:
             from sqlalchemy import select
             
             async with self.db_session_factory() as db:
-                # Check existing
                 result = await db.execute(
                     select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
                 )
                 existing = result.scalar_one_or_none()
                 
+                # Convert numpy array to list for JSON serialization
+                rot_matrix = self.origin['R'].tolist() if hasattr(self.origin['R'], 'tolist') else self.origin['R']
+                ecef_origin = self.origin['ecef'].tolist() if hasattr(self.origin['ecef'], 'tolist') else self.origin['ecef']
+
                 if existing:
-                    # Update
                     existing.lat = self.origin['lat']
                     existing.lon = self.origin['lon']
                     existing.h = self.origin['h']
                     existing.locked_at = int(time.time())
-                    existing.rotation_matrix = self.origin['R'].tolist()
-                    existing.ecef_origin = self.origin['ecef'].tolist()
+                    existing.rotation_matrix = rot_matrix
+                    existing.ecef_origin = ecef_origin
                 else:
-                    # Create new
                     new_origin = GNSSOrigin(
                         device_id=self.device_id,
                         lat=self.origin['lat'],
                         lon=self.origin['lon'],
                         h=self.origin['h'],
                         locked_at=int(time.time()),
-                        spread_meters=0.0,  # Calculate if needed
+                        spread_meters=0.0,
                         num_points=len(self.origin_candidates),
-                        rotation_matrix=self.origin['R'].tolist(),
-                        ecef_origin=self.origin['ecef'].tolist()
+                        rotation_matrix=rot_matrix,
+                        ecef_origin=ecef_origin
                     )
                     db.add(new_origin)
                 
                 await db.commit()
-                logger.info(f"✅ Saved origin to DB for device {self.device_id}")
+                logger.info(f"💾 Saved new origin for device {self.device_id} to DB")
                 
         except Exception as e:
-            logger.error(f"Error saving origin to DB: {e}")
+            logger.error(f"❌ Error saving origin to DB: {e}")
 
     def process_gngga(self, raw_payload: str) -> Optional[Dict[str, Any]]:
-        """Điểm vào chính"""
         try:
             parts = raw_payload.split(',')
             if len(parts) < 10 or not parts[2] or not parts[4]:
@@ -163,7 +170,6 @@ class GNSSVelocityProcessor:
             return None
 
     def _handle_origin_collection(self, gngga_string, fix_quality):
-        """Thu thập điểm để khóa gốc"""
         if fix_quality < self.min_fix_quality:
             self.stats['low_quality_rejected'] += 1
             return {
@@ -202,11 +208,11 @@ class GNSSVelocityProcessor:
                 self.state = "ORIGIN_LOCKED"
                 logger.info(f"ORIGIN LOCKED (Device {self.device_id}): ({center_lat:.6f}, {center_lon:.6f}), Spread: {max_dist:.3f}m")
                 
-                # ✅ LƯU VÀO DB ASYNC
+                # ✅ Save Async
                 import asyncio
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(self._save_origin_to_db(), loop)
+                    loop.create_task(self._save_origin_to_db())
                 except RuntimeError:
                     logger.warning("Cannot save origin: No running event loop")
                 
@@ -233,7 +239,6 @@ class GNSSVelocityProcessor:
         }
 
     def _handle_processing(self, gngga_string, fix_quality):
-        """Tính toán vận tốc khi đã có gốc"""
         if fix_quality < self.min_fix_quality:
             self.stats['low_quality_rejected'] += 1
             return None
@@ -256,7 +261,6 @@ class GNSSVelocityProcessor:
 
         if len(self.history) < 2: return None
 
-        # ✅ FIX: Tính vận tốc giữa 2 điểm liên tiếp
         p_new = self.history[-1]
         p_old = self.history[-2]
         dt = p_new['ts'] - p_old['ts']
@@ -266,7 +270,6 @@ class GNSSVelocityProcessor:
         v_ecef_raw = (p_new['ecef'] - p_old['ecef']) / dt
         v_enu_raw = self.origin['R'] @ v_ecef_raw
 
-        # ✅ FIX: Lọc trung bình động (Moving Average)
         if len(self.history) >= self.filter_window_size:
             velocities_enu = []
             for i in range(1, len(self.history)):
@@ -281,10 +284,7 @@ class GNSSVelocityProcessor:
         else:
             v_enu_filtered = v_enu_raw
 
-        # ✅ FIX: Tính chuyển dịch tích lũy (từ gốc)
         pos_enu = self.origin['R'] @ (ecef_coords - self.origin['ecef'])
-        
-        # ✅ FIX: Tính tổng chuyển dịch 3D
         total_displacement_m = float(np.sqrt(pos_enu[0]**2 + pos_enu[1]**2 + pos_enu[2]**2))
         
         self.stats['total_processed'] += 1
@@ -296,32 +296,21 @@ class GNSSVelocityProcessor:
                 'lat': point['wgs']['lat'], 
                 'lon': point['wgs']['lon'], 
                 'h': point['wgs']['h'],
-                
-                # Vị trí tương đối (m)
                 'pos_e': float(pos_enu[0]), 
                 'pos_n': float(pos_enu[1]), 
                 'pos_u': float(pos_enu[2]),
-                
-                # ✅ Chuyển dịch tổng (mm)
                 'total_displacement_mm': total_displacement_m * 1000,
-                
-                # Vận tốc (m/s → mm/s)
                 'vel_e': float(v_enu_filtered[0]), 
                 'vel_n': float(v_enu_filtered[1]), 
                 'vel_u': float(v_enu_filtered[2]),
                 'speed_2d': float(np.sqrt(v_enu_filtered[0]**2 + v_enu_filtered[1]**2)),
-                
-                # ✅ Vận tốc mm/s (dễ đọc)
                 'speed_2d_mm_s': float(np.sqrt(v_enu_filtered[0]**2 + v_enu_filtered[1]**2) * 1000),
-                
-                # Metadata
                 'fix_quality': point['fix_quality'], 
                 'num_sats': point['num_sats'], 
                 'hdop': point['hdop']
             }
         }
 
-    # === MATH HELPERS (giữ nguyên) ===
     def _parse_gngga(self, gngga_string):
         try:
             parts = gngga_string.split(',')

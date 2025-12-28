@@ -2,7 +2,6 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 
-# ✅ Schema trạm giám sát
 class StationBase(BaseModel):
     station_code: str
     name: str
@@ -23,7 +22,6 @@ class StationConfigUpdate(BaseModel):
     imu: Dict[str, float]
     gnss: Dict[str, float]
     rain: Dict[str, float]
-    # gnss_classification có thể phức tạp, tạm thời để list dict
     gnss_classification: List[Dict]
     
 class StationResponse(StationBase):
@@ -34,7 +32,6 @@ class StationResponse(StationBase):
     class Config:
         from_attributes = True
 
-# ✅ Schema dữ liệu cảm biến
 class SensorDataCreate(BaseModel):
     station_id: int
     timestamp: int
@@ -47,7 +44,6 @@ class SensorDataResponse(SensorDataCreate):
     class Config:
         from_attributes = True
 
-# ✅ Schema cảnh báo
 class AlertCreate(BaseModel):
     station_id: int
     timestamp: int
@@ -62,7 +58,6 @@ class AlertResponse(AlertCreate):
     class Config:
         from_attributes = True
 
-# ✅ Schema tọa độ gốc GNSS
 class GNSSOriginResponse(BaseModel):
     station_id: int
     lat: float
