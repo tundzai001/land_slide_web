@@ -1,4 +1,4 @@
-# backend/processors/gnss_processor.py - ✅ FIXED DEADLOCK
+# backend/processors/gnss_processor.py
 import numpy as np
 import math
 import logging
@@ -56,29 +56,22 @@ class GNSSVelocityProcessor:
             'origin_resets': 0
         }
         
-        # ✅ FIX: Gọi hàm load không block (Non-blocking init)
         self._schedule_load_origin()
         
         logger.info(f"GNSS Processor init for device {device_id}: State={self.state}")
 
     def _schedule_load_origin(self):
-        """✅ Schedule việc load DB vào background task để tránh Deadlock trong __init__"""
         try:
             import asyncio
             try:
-                # Kiểm tra xem có đang chạy trong Event Loop không
                 loop = asyncio.get_running_loop()
-                # Nếu có, tạo task chạy ngầm, KHÔNG chờ result() tại đây
                 loop.create_task(self._async_load_origin_task())
             except RuntimeError:
-                # Nếu không có loop (chạy trong Thread thường), cảnh báo bỏ qua
-                # (Hoặc logic phức tạp hơn nếu cần thread-safe call, nhưng ở đây thường là có loop)
                 logger.warning(f"⚠️ Device {self.device_id}: Init outside event loop, origin will be collected manually.")
         except Exception as e:
             logger.error(f"❌ Device {self.device_id}: Error scheduling DB load: {e}")
 
     async def _async_load_origin_task(self):
-        """✅ Hàm thực thi việc load DB (Async)"""
         try:
             from app.models.config import GNSSOrigin
             from sqlalchemy import select
