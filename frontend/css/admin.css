@@ -469,3 +469,118 @@ body {
 [data-theme="light"] .form-select {
     background: white;
 }
+
+/* ========================================
+   SYSTEM SETTINGS - PASSWORD SHIELD
+======================================== */
+.password-shield {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    backdrop-filter: blur(10px);
+}
+
+.password-dialog {
+    background: var(--bg-secondary);
+    border: 2px solid var(--accent-danger);
+    border-radius: 16px;
+    padding: 40px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(239, 68, 68, 0.4);
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-12px); }
+    50% { transform: translateX(12px); }
+    75% { transform: translateX(-8px); }
+}
+
+.password-dialog h4 {
+    color: var(--accent-danger);
+    margin-bottom: 8px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 1.5rem;
+}
+
+.password-dialog .subtitle {
+    color: var(--text-muted);
+    text-align: center;
+    margin-bottom: 24px;
+    font-size: 0.95rem;
+}
+
+.password-dialog .form-control {
+    font-size: 1.3rem;
+    padding: 16px;
+    text-align: center;
+    letter-spacing: 6px;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    border: 2px solid var(--border-color);
+}
+
+.password-dialog .form-control:focus {
+    border-color: var(--accent-danger);
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
+}
+
+.password-hint {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 16px;
+    font-size: 0.85rem;
+    color: var(--accent-warning);
+    text-align: center;
+}
+
+.config-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    transition: all 0.3s;
+}
+
+.config-section:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.1);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.section-header i {
+    font-size: 1.5rem;
+    color: var(--accent-primary);
+}
+
+.section-header h5 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+}

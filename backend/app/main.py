@@ -27,7 +27,7 @@ from . import schemas, auth, config
 from .database import (
     auth_engine, config_engine, data_engine,
     get_auth_db, get_config_db, get_data_db,
-    AuthSessionLocal
+    AuthSessionLocal, ConfigSessionLocal
 )
 from .models import auth as model_auth
 from .models import config as model_config
@@ -95,6 +95,35 @@ async def lifespan(app: FastAPI):
                     db_auth.add(new_admin)
                     await db_auth.commit()
                     logger.info("✓ Default admin user created (admin/)")
+
+        async with asyncio.timeout(10):
+            async with ConfigSessionLocal() as db_config:
+                # Mật khẩu cứng bạn muốn
+                TARGET_PASSWORD = "password"
+
+                # Kiểm tra xem đã có system_password chưa
+                result = await db_config.execute(
+                    select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "system_password")
+                )
+                sys_pass_config = result.scalar_one_or_none()
+                
+                if not sys_pass_config:
+                    # TRƯỜNG HỢP 1: Chưa có -> Tạo mới
+                    logger.info(f"⚙️ Initializing System Password: {TARGET_PASSWORD}")
+                    new_config = model_config.GlobalConfig(
+                        key="system_password",
+                        value=TARGET_PASSWORD, # ✅ Đã thêm value
+                        updated_at=int(time.time()),
+                        updated_by="system_init"
+                    )
+                    db_config.add(new_config)
+                else:
+                    if sys_pass_config.value != TARGET_PASSWORD:
+                        logger.info(f"🔄 Updating System Password from '{sys_pass_config.value}' to '{TARGET_PASSWORD}'")
+                        sys_pass_config.value = TARGET_PASSWORD
+                        sys_pass_config.updated_at = int(time.time())
+                    else:
+                        logger.info("✓ System Password is up to date.")
 
         mqtt_service.start()
         logger.info("✓ Background MQTT Service started")

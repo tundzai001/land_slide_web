@@ -214,6 +214,11 @@
                     <i class="bi bi-database me-2"></i>Database
                 </button>
             </li>
+            <li class="nav-item" id="system-tab" style="display: none;">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-system">
+                    <i class="bi bi-cpu me-2"></i>Hệ thống
+                </button>
+            </li>
         </ul>
 
         <!-- Tab Content -->
@@ -382,7 +387,240 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- ✅ THÊM TAB 4: HỆ THỐNG -->
+            <div class="tab-pane fade" id="tab-system">
+                
+                <!-- ⚠️ Warning Header -->
+                <div class="alert alert-danger mb-4">
+                    <div class="d-flex align-items-center gap-3">
+                        <i class="bi bi-shield-exclamation fs-1"></i>
+                        <div>
+                            <h5 class="mb-1"><strong>CẢNH BÁO:</strong> Cài đặt toàn hệ thống</h5>
+                            <p class="mb-0">Thay đổi ở đây sẽ ảnh hưởng tới <strong>TẤT CẢ</strong> trạm giám sát. Hãy cẩn thận!</p>
+                        </div>
+                    </div>
+                </div>
 
+                <form id="systemConfigForm">
+
+                    <!-- 1. MQTT Configuration -->
+                    <div class="config-section">
+                        <div class="section-header">
+                            <i class="bi bi-hdd-network-fill"></i>
+                            <h5>MQTT Broker Configuration</h5>
+                            <span class="badge bg-success ms-auto">CONNECTED</span>
+                        </div>
+                        
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-server me-1"></i> Broker Address
+                                </label>
+                                <input type="text" class="form-control" id="sys-mqtt-broker" placeholder="aitogy.click">
+                                <small class="text-muted">Địa chỉ MQTT Broker (IP hoặc Domain)</small>
+                            </div>
+                            
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-plug me-1"></i> Port
+                                </label>
+                                <input type="number" class="form-control" id="sys-mqtt-port" value="1883">
+                                <small class="text-muted">Mặc định: 1883</small>
+                            </div>
+                            
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-arrow-clockwise me-1"></i> Reload Interval
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-reload-interval" value="60">
+                                    <span class="input-group-text">giây</span>
+                                </div>
+                                <small class="text-muted">Tần suất reload topics</small>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-person-badge me-1"></i> Username
+                                </label>
+                                <input type="text" class="form-control" id="sys-mqtt-user" placeholder="mqttUser">
+                                <small class="text-muted">Tài khoản MQTT</small>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-key-fill me-1"></i> Password
+                                </label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="sys-mqtt-password" placeholder="••••••••">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('sys-mqtt-password')">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                <small class="text-muted">Mật khẩu MQTT</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Alert Confirmation Settings -->
+                    <div class="config-section">
+                        <div class="section-header">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                            <h5>Cơ chế Đếm Xác Nhận Cảnh Báo</h5>
+                            <span class="badge bg-warning text-dark ms-auto">CRITICAL</span>
+                        </div>
+
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle-fill me-2"></i>
+                            <strong>Cơ chế đếm xác nhận:</strong> Hệ thống sẽ chỉ gửi cảnh báo khi phát hiện vượt ngưỡng <strong>liên tục N lần</strong> (tránh false alarm)
+                        </div>
+                        
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-geo-alt-fill text-danger me-1"></i> GNSS
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-confirm-gnss" value="3" min="1" max="10">
+                                    <span class="input-group-text">lần</span>
+                                </div>
+                                <small class="text-muted">Số lần xác nhận GNSS</small>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-cloud-rain-fill text-primary me-1"></i> Rain
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-confirm-rain" value="2" min="1" max="10">
+                                    <span class="input-group-text">lần</span>
+                                </div>
+                                <small class="text-muted">Số lần xác nhận Mưa</small>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-water text-info me-1"></i> Water
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-confirm-water" value="3" min="1" max="10">
+                                    <span class="input-group-text">lần</span>
+                                </div>
+                                <small class="text-muted">Số lần xác nhận Nước</small>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-activity text-warning me-1"></i> IMU
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-confirm-imu" value="1" min="1" max="5">
+                                    <span class="input-group-text">lần</span>
+                                </div>
+                                <small class="text-muted">Shock thường báo ngay</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Data Save Intervals -->
+                    <div class="config-section">
+                        <div class="section-header">
+                            <i class="bi bi-clock-history"></i>
+                            <h5>Chu Kỳ Lưu Database</h5>
+                            <span class="badge bg-info ms-auto">DATABASE</span>
+                        </div>
+
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle-fill me-2"></i>
+                            <strong>Chu kỳ lưu DB:</strong> Để tránh quá tải, dữ liệu chỉ lưu vào DB theo chu kỳ. Khi có cảnh báo, sẽ lưu ngay lập tức.
+                        </div>
+                        
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-geo-alt-fill text-danger me-1"></i> GNSS
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-save-gnss" value="86400">
+                                    <span class="input-group-text">giây</span>
+                                </div>
+                                <small class="text-muted">Mặc định: 86400s (1 ngày)</small>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-cloud-rain-fill text-primary me-1"></i> Rain
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-save-rain" value="3600">
+                                    <span class="input-group-text">giây</span>
+                                </div>
+                                <small class="text-muted">Mặc định: 3600s (1 giờ)</small>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-water text-info me-1"></i> Water
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-save-water" value="3600">
+                                    <span class="input-group-text">giây</span>
+                                </div>
+                                <small class="text-muted">Mặc định: 3600s (1 giờ)</small>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">
+                                    <i class="bi bi-activity text-warning me-1"></i> IMU
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="sys-save-imu" value="2592000">
+                                    <span class="input-group-text">giây</span>
+                                </div>
+                                <small class="text-muted">Mặc định: 2592000s (30 ngày)</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Quick Presets -->
+                    <div class="config-section">
+                        <div class="section-header">
+                            <i class="bi bi-lightning-charge-fill"></i>
+                            <h5>Quick Presets</h5>
+                        </div>
+                        
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-primary w-100" onclick="window.systemManager.applyPreset('conservative')">
+                                    <i class="bi bi-shield-check me-2"></i>
+                                    Conservative (Ít cảnh báo sai)
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-warning w-100" onclick="window.systemManager.applyPreset('balanced')">
+                                    <i class="bi bi-sliders me-2"></i>
+                                    Balanced (Cân bằng)
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-danger w-100" onclick="window.systemManager.applyPreset('sensitive')">
+                                    <i class="bi bi-exclamation-diamond me-2"></i>
+                                    Sensitive (Nhạy cảm)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Save Button -->
+                    <div class="text-end">
+                        <button type="button" class="btn btn-lg btn-danger" onclick="window.systemManager.saveSystemConfig()">
+                            <i class="bi bi-save me-2"></i> Lưu cấu hình toàn hệ thống
+                        </button>
+                    </div>
+
+                </form>
+            </div>
         </div>
     </div>
 
@@ -710,6 +948,45 @@
         </div>
     </div>
 
+    <div id="password-shield" class="password-shield" style="display: none;">
+        <div class="password-dialog">
+            <h4><i class="bi bi-shield-lock-fill me-2"></i>SYSTEM ACCESS</h4>
+            <p class="subtitle">
+                Nhập System Password để truy cập<br>
+                cài đặt toàn hệ thống
+            </p>
+            
+            <div class="mb-3">
+                <input 
+                    type="password" 
+                    class="form-control" 
+                    id="system-password-input" 
+                    placeholder="••••" 
+                    maxlength="20"
+                    autofocus
+                >
+            </div>
+            
+            <!-- Hint box -->
+            <div id="password-hint" class="password-hint" style="display: none;"></div>
+            
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-secondary flex-1" onclick="window.systemManager.cancelPasswordCheck()">
+                    <i class="bi bi-x-circle me-1"></i> Hủy
+                </button>
+                <button class="btn btn-danger flex-1" onclick="window.systemManager.verifyPassword()">
+                    <i class="bi bi-unlock me-1"></i> Xác nhận
+                </button>
+            </div>
+            
+            <!-- Error message -->
+            <p class="text-center mt-3 mb-0 small" id="password-error" style="display: none; color: var(--accent-danger);">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i> 
+                <span id="error-message">Sai mật khẩu!</span>
+            </p>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/theme-manager.js"></script>
@@ -717,6 +994,7 @@
     <script src="/js/toast-notifications.js"></script>
     <script src="/js/admin-manager.js"></script>
     <script src="/js/db-manager.js"></script>
+    <script src="/js/system-manager.js"></script>
     
     <script>
         // ✅ SESSION TIME WITH SECONDS

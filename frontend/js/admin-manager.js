@@ -947,3 +947,34 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('❌ Admin Dashboard DOM element missing');
     }
 });
+
+// Update UI: set username and reveal System tab for admins (moved from inline HTML)
+document.addEventListener('DOMContentLoaded', async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    // Prefer using authManager if available
+    try {
+        let user = window.authManager?.getUserInfo() || window.authManager?.user;
+
+        if (!user) {
+            const res = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (res.ok) user = await res.json();
+        }
+
+        if (user) {
+            const usernameEl = document.querySelector('.user-profile span');
+            if (usernameEl) usernameEl.textContent = user.full_name || user.username;
+
+            if (user.role === 'admin') {
+                const systemTab = document.getElementById('system-tab');
+                if (systemTab) {
+                    systemTab.style.display = 'block';
+                    console.log('✅ System tab enabled (admin)');
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error updating admin UI:', e);
+    }
+});
