@@ -1,19 +1,23 @@
-# backend/app/landslide_analyzer.py - FIXED VERSION
+# backend/app/landslide_analyzer.py - FIXED WITH CONFIRMATION COUNTER
 import logging
 import math
 import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 class LandslideAnalyzer:
-    """
-    Bộ não phân tích rủi ro.
-    Nhận dữ liệu đã qua xử lý (Clean Data) và Cấu hình trạm (Station Config).
-    Trả về Cảnh báo (Alert) nếu vượt ngưỡng.
-    """
-
+    def __init__(self):
+        # ✅ Bộ đếm xác nhận cho từng station
+        self.alert_counters = defaultdict(lambda: {
+            'gnss': {'count': 0, 'last_level': None},
+            'rain': {'count': 0, 'last_level': None},
+            'water': {'count': 0, 'last_level': None},
+            'imu': {'count': 0, 'last_level': None}
+        })
+        
     def _get_cfg(self, config: Dict, section: str, key: str, default: float) -> float:
         try:
             return float(config.get(section, {}).get(key, default))
@@ -57,7 +61,6 @@ class LandslideAnalyzer:
             velocity_mm_per_year = velocity_mm_per_day * 365
             velocity_mm_per_second = velocity_m_per_day / 86400 * 1000
 
-            # 1. Phân loại dựa trên Config (Quan trọng)
             classification = self._classify_velocity_extended(
                 velocity_mm_per_second, 
                 velocity_mm_per_day,
@@ -67,7 +70,6 @@ class LandslideAnalyzer:
 
             trend = self._detect_trend(sorted_data)
 
-            # 2. Đánh giá rủi ro dựa trên Classification (Thay vì hardcode)
             risk_level, warning_message = self._assess_long_term_risk(
                 classification,
                 trend,
@@ -102,22 +104,19 @@ class LandslideAnalyzer:
         velocity_mm_year: float,
         config: Dict
     ) -> str:
-        # Lấy bảng phân loại từ config người dùng
         classification_table = config.get('velocity_classification') or config.get('GNSS_Classification', [])
         
-        # Nếu config rỗng, dùng mặc định
         if not classification_table:
             classification_table = [
                 {"name": "Extremely Rapid", "threshold": 5000, "unit": "mm/s"},
                 {"name": "Very Rapid", "threshold": 50, "unit": "mm/s"},
                 {"name": "Rapid", "threshold": 0.5, "unit": "mm/s"},
-                {"name": "Moderate", "threshold": 0.05, "unit": "mm/s"}, # ~1.8m/h
-                {"name": "Slow", "threshold": 0.00005, "unit": "mm/s"},  # ~13mm/tháng
+                {"name": "Moderate", "threshold": 0.05, "unit": "mm/s"},
+                {"name": "Slow", "threshold": 0.00005, "unit": "mm/s"},
                 {"name": "Very Slow", "threshold": 0.0000005, "unit": "mm/s"},
                 {"name": "Extremely Slow", "threshold": 0, "unit": "mm/s"}
             ]
         
-        # Chuẩn hóa về mm/s để so sánh
         normalized_table = []
         for cls in classification_table:
             thresh = float(cls.get('threshold', 0))
@@ -133,10 +132,8 @@ class LandslideAnalyzer:
                 "threshold_mm_s": thresh_mm_s
             })
 
-        # Sort giảm dần
         sorted_classes = sorted(normalized_table, key=lambda x: x['threshold_mm_s'], reverse=True)
         
-        # So sánh
         for cls in sorted_classes:
             if velocity_mm_s >= cls['threshold_mm_s']:
                 return cls['name']
@@ -153,7 +150,6 @@ class LandslideAnalyzer:
             ]
             if len(velocities) < 5: return "stable"
             
-            # Tính độ dốc (slope) của vận tốc
             x = np.arange(len(velocities))
             y = np.array(velocities)
             slope = np.polyfit(x, y, 1)[0]
@@ -167,7 +163,6 @@ class LandslideAnalyzer:
     def _assess_long_term_risk(self, classification: str, trend: str, vel_year: float) -> tuple:
         cls_upper = classification.upper()
         
-        # Mapping Class -> Risk
         if "EXTREMELY RAPID" in cls_upper or "VERY RAPID" in cls_upper:
             return "EXTREME", f"🚨 NGUY HIỂM: Vận tốc rất cao ({classification})"
         
@@ -177,19 +172,16 @@ class LandslideAnalyzer:
         elif "MODERATE" in cls_upper:
             return "MEDIUM", f"⚠️ Trung bình: Đất đang trượt ({classification})"
         
-        # Các mức độ thấp hơn
         elif "SLOW" in cls_upper or "STABLE" in cls_upper:
-            # Nếu Slow mà đang tăng tốc -> Cảnh báo nhẹ
             if trend == "accelerating":
                 return "MEDIUM", f"⚠️ Chú ý: Đang tăng tốc ({classification})"
             return "LOW", f"✅ Ổn định ({classification})"
             
         else:
-            # Fallback nếu tên lạ
             return "LOW", f"Trạng thái: {classification}"
 
     # =========================================================================
-    # 1. PHÂN TÍCH GNSS (REALTIME - CHỈ DỰA VÀO VẬN TỐC TỨC THỜI)
+    # 1. PHÂN TÍCH GNSS - ✅ CÓ ĐẾM XÁC NHẬN
     # =========================================================================
     def analyze_gnss_displacement(
         self, 
@@ -197,124 +189,199 @@ class LandslideAnalyzer:
         recent_data: List[Dict[str, Any]], 
         config: Dict
     ) -> Optional[Dict]:
-        """
-        Phân tích dựa trên VẬN TỐC TỨC THỜI (Instantaneous Velocity)
-        theo bảng phân cấp Cruden & Varnes người dùng cấu hình.
-        """
+        
         if not recent_data: return None
         
         try:
             latest = recent_data[-1]['data']
-            
-            # 1. Lấy vận tốc tức thời (từ GNSS Processor gửi lên)
-            # Đơn vị gốc thường là m/s hoặc mm/s tùy processor, ở đây ta quy về mm/s để chuẩn hóa
             velocity_ms = latest.get('speed_2d', 0.0) 
             velocity_mms = velocity_ms * 1000.0
             
-            # 2. Phân loại dựa trên bảng cấu hình Admin
-            # Hàm này sẽ lấy tên class: "Extremely Slow", "Rapid", v.v...
+            # Lấy cấu hình xác nhận
+            gnss_config = config.get('GnssAlerting', {})
+            confirm_steps = int(gnss_config.get('gnss_confirm_steps', 3))  # Mặc định 3 lần
+            safe_streak = int(gnss_config.get('gnss_safe_streak', 5))      # Mặc định 5 lần an toàn
+            
             velocity_class = self._classify_velocity_extended(
-                velocity_mms,           # mm/s
-                velocity_mms * 86400,   # mm/day
-                velocity_mms * 31536000,# mm/year
+                velocity_mms,
+                velocity_mms * 86400,
+                velocity_mms * 31536000,
                 config
             )
             
-            # 3. Ánh xạ từ Tên Class sang Mức độ Cảnh báo (Alert Level)
-            level = "INFO"
-            message = f"ℹ️ Tốc độ: {velocity_mms:.4f} mm/s ({velocity_class})"
-            category = "gnss_velocity"
-            
-            # Chuyển tên class về chữ hoa để so sánh
             cls_upper = velocity_class.upper()
             
-            # --- LOGIC CẢNH BÁO DỰA TRÊN TÊN PHÂN CẤP ---
+            # ✅ XÁC ĐỊNH MỨC ĐỘ NGUY HIỂM (chưa gửi alert)
+            current_level = "INFO"
             if "EXTREMELY RAPID" in cls_upper:
-                level = "CRITICAL"
-                message = f"🚨 CỰC KỲ NGUY HIỂM: {velocity_mms:.2f} mm/s ({velocity_class})"
-            
+                current_level = "CRITICAL"
             elif "VERY RAPID" in cls_upper:
-                level = "CRITICAL"
-                message = f"🚨 NGUY HIỂM CAO: {velocity_mms:.2f} mm/s ({velocity_class})"
-            
+                current_level = "CRITICAL"
             elif "RAPID" in cls_upper:
-                level = "WARNING"
-                message = f"⚠️ Tốc độ nhanh: {velocity_mms:.4f} mm/s ({velocity_class})"
-            
+                current_level = "WARNING"
             elif "MODERATE" in cls_upper:
-                level = "WARNING"
-                message = f"⚠️ Tốc độ trung bình: {velocity_mms:.4f} mm/s ({velocity_class})"
+                current_level = "WARNING"
             
-            # Các mức độ Slow, Very Slow, Extremely Slow -> INFO (An toàn)
+            # ✅ LẤY BỘ ĐẾM CỦA TRẠM NÀY
+            counter_info = self.alert_counters[station_id]['gnss']
+            
+            # ✅ LOGIC ĐẾM XÁC NHẬN
+            if current_level in ["WARNING", "CRITICAL"]:
+                # Nếu level thay đổi → Reset bộ đếm
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    logger.info(f"🔄 [GNSS-{station_id}] Level changed to {current_level}, reset counter to 1")
+                    return None  # Chưa đủ → Không gửi
+                else:
+                    # Level giữ nguyên → Tăng đếm
+                    counter_info['count'] += 1
+                    logger.info(f"⏳ [GNSS-{station_id}] {current_level} count: {counter_info['count']}/{confirm_steps}")
+                    
+                    # ✅ CHỈ GỬI ALERT KHI ĐỦ SỐ LẦN XÁC NHẬN
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"🚨 [GNSS-{station_id}] ✅ CONFIRMED {current_level} after {confirm_steps} times!")
+                        
+                        message = f"🚨 CỰC KỲ NGUY HIỂM: {velocity_mms:.2f} mm/s ({velocity_class})" if current_level == "CRITICAL" else f"⚠️ Tốc độ nhanh: {velocity_mms:.4f} mm/s ({velocity_class})"
+                        
+                        return {
+                            "level": current_level,
+                            "category": "gnss_velocity",
+                            "message": message,
+                            "details": {
+                                "velocity_mm_s": velocity_mms,
+                                "classification": velocity_class,
+                                "confirmed_after": confirm_steps
+                            }
+                        }
+                    else:
+                        return None  # Chưa đủ số lần
+            
             else:
-                level = "INFO"
-                message = f"✅ Ổn định: {velocity_mms:.4f} mm/s ({velocity_class})"
-
-            # Chỉ trả về cảnh báo nếu mức độ là WARNING hoặc CRITICAL
-            if level in ["WARNING", "CRITICAL"]:
-                return {
-                    "level": level,
-                    "category": category,
-                    "message": message,
-                    "details": {
-                        "velocity_mm_s": velocity_mms,
-                        "classification": velocity_class
-                    }
-                }
+                # ✅ AN TOÀN → Đếm ngược để reset
+                if counter_info['count'] > 0:
+                    counter_info['count'] = max(0, counter_info['count'] - 1)
+                    logger.info(f"✅ [GNSS-{station_id}] Safe reading, decrement to {counter_info['count']}")
+                
+                # Reset sau khi liên tục an toàn
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
             
-            # Nếu an toàn, trả về None (không tạo Alert mới)
             return None
 
         except Exception as e:
-            logger.error(f"Error analyzing GNSS Velocity for station {station_id}: {e}")
+            logger.error(f"Error analyzing GNSS for station {station_id}: {e}")
             return None
 
+    # =========================================================================
+    # 2. PHÂN TÍCH MƯA - ✅ CÓ ĐẾM XÁC NHẬN
+    # =========================================================================
     def analyze_rainfall(self, station_id: int, recent_data: List[Dict], past_72h: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
         try:
             watch = self._get_cfg(config, 'RainAlerting', 'rain_intensity_watch_threshold', 10.0)
             warning = self._get_cfg(config, 'RainAlerting', 'rain_intensity_warning_threshold', 25.0)
             critical = self._get_cfg(config, 'RainAlerting', 'rain_intensity_critical_threshold', 50.0)
+            confirm_steps = int(config.get('RainAlerting', {}).get('rain_confirm_steps', 2))  # ✅ Mặc định 2 lần
 
             intensity = recent_data[-1]['data'].get('intensity_mm_h', 0.0)
-            level = "INFO"
             
-            if intensity >= critical: level = "CRITICAL"
-            elif intensity >= warning: level = "WARNING"
-            elif intensity >= watch: level = "INFO"
+            current_level = "INFO"
+            if intensity >= critical: current_level = "CRITICAL"
+            elif intensity >= warning: current_level = "WARNING"
+            elif intensity >= watch: current_level = "INFO"
             
-            if level in ["WARNING", "CRITICAL"]:
-                return {"level": level, "category": "rainfall", "message": f"Mưa lớn: {intensity}mm/h", "details": {"val": intensity}}
+            counter_info = self.alert_counters[station_id]['rain']
+            
+            if current_level in ["WARNING", "CRITICAL"]:
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    return None
+                else:
+                    counter_info['count'] += 1
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"🌧️ [RAIN-{station_id}] ✅ CONFIRMED {current_level}")
+                        return {"level": current_level, "category": "rainfall", "message": f"Mưa lớn: {intensity:.1f}mm/h", "details": {"val": intensity}}
+                    return None
+            else:
+                counter_info['count'] = max(0, counter_info['count'] - 1)
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
             return None
         except Exception:
             return None
 
+    # =========================================================================
+    # 3. PHÂN TÍCH MỰC NƯỚC - ✅ CÓ ĐẾM XÁC NHẬN
+    # =========================================================================
     def analyze_water_level(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
         try:
             val = recent_data[-1]['data'].get('water_level', 0.0)
             warn = self._get_cfg(config, 'Water', 'warning_threshold', 999.0)
             crit = self._get_cfg(config, 'Water', 'critical_threshold', 999.0)
+            confirm_steps = int(config.get('Water', {}).get('water_confirm_steps', 3))  # ✅ Mặc định 3 lần
             
-            level = "INFO"
-            if val >= crit: level = "CRITICAL"
-            elif val >= warn: level = "WARNING"
+            current_level = "INFO"
+            if val >= crit: current_level = "CRITICAL"
+            elif val >= warn: current_level = "WARNING"
             
-            if level in ["WARNING", "CRITICAL"]:
-                return {"level": level, "category": "water_level", "message": f"Nước cao: {val}m", "details": {"val": val}}
+            counter_info = self.alert_counters[station_id]['water']
+            
+            if current_level in ["WARNING", "CRITICAL"]:
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    return None
+                else:
+                    counter_info['count'] += 1
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"💧 [WATER-{station_id}] ✅ CONFIRMED {current_level}")
+                        return {"level": current_level, "category": "water_level", "message": f"Nước cao: {val:.2f}m", "details": {"val": val}}
+                    return None
+            else:
+                counter_info['count'] = max(0, counter_info['count'] - 1)
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
             return None
         except Exception:
             return None
 
+    # =========================================================================
+    # 4. PHÂN TÍCH IMU - ✅ CÓ ĐẾM XÁC NHẬN
+    # =========================================================================
     def analyze_tilt(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
         try:
             latest = recent_data[-1]['data']
             accel = latest.get('total_accel', 0.0)
             thresh = self._get_cfg(config, 'ImuAlerting', 'shock_threshold_ms2', 20.0)
+            confirm_steps = int(config.get('ImuAlerting', {}).get('imu_confirm_steps', 1))  # ✅ Mặc định 1 lần (shock tức thì)
+            
+            counter_info = self.alert_counters[station_id]['imu']
             
             if accel > thresh:
-                return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "details": {"val": accel}}
+                if counter_info['last_level'] != "CRITICAL":
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = "CRITICAL"
+                    if confirm_steps == 1:  # Shock thường báo ngay
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED SHOCK")
+                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "details": {"val": accel}}
+                    return None
+                else:
+                    counter_info['count'] += 1
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED SHOCK after {confirm_steps} times")
+                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "details": {"val": accel}}
+                    return None
+            else:
+                counter_info['count'] = max(0, counter_info['count'] - 1)
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
             return None
         except Exception:
             return None
