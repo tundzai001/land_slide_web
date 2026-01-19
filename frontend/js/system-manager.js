@@ -17,11 +17,8 @@ class SystemManager {
         
         if (!systemTabBtn) return;
 
-        // ✅ QUAN TRỌNG: Dùng sự kiện 'show.bs.tab' thay vì 'click'
-        // Sự kiện này kích hoạt TRƯỚC khi tab chuyển đổi
         systemTabBtn.addEventListener('show.bs.tab', (event) => {
             if (!this.isVerified) {
-                // ⛔ CHẶN ĐỨNG việc chuyển tab ngay lập tức
                 event.preventDefault(); 
                 
                 // Hiện bảng nhập mật khẩu

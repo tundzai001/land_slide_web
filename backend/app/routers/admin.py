@@ -9,15 +9,24 @@ import time
 from typing import Optional, Dict, List
 
 import paho.mqtt.client as mqtt
+import pandas as pd
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, desc
+from sqlalchemy import select, delete, desc, text
 from datetime import datetime, timedelta
 from .. import schemas, auth, config
 from ..database import get_auth_db, get_config_db, get_data_db
 from ..models import auth as model_auth
 from ..models import config as model_config
 from ..models import data as model_data
+
+# Schema cho request
+class ExportExcelRequest(BaseModel):
+    tables: List[str]  # Danh sách bảng cần export: ['projects', 'stations', 'devices', 'sensor_data', 'alerts']
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -127,6 +136,275 @@ async def delete_user(
     await db.commit()
     return {"status": "success"}
 
+@router.post("/db/export-excel")
+async def export_database_excel(
+    request: ExportExcelRequest,
+    config_db: AsyncSession = Depends(get_config_db),
+    data_db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """
+    ✅ Export database ra Excel theo bảng được chọn
+    """
+    try:
+        output = BytesIO()
+        dataframes = {}  # Lưu các DataFrame cần export
+        
+        # ============================================
+        # 1. PROJECTS
+        # ============================================
+        if 'projects' in request.tables:
+            try:
+                projects_result = await config_db.execute(select(model_config.Project))
+                projects = [
+                    {
+                        'id': p.id,
+                        'project_code': p.project_code,
+                        'name': p.name,
+                        'description': p.description,
+                        'location': str(p.location) if p.location else None,
+                        'created_at': p.created_at,
+                        'updated_at': p.updated_at,
+                        'is_active': p.is_active
+                    }
+                    for p in projects_result.scalars().all()
+                ]
+                dataframes['Projects'] = pd.DataFrame(projects)
+                logger.info(f"✅ Exported {len(projects)} projects")
+            except Exception as e:
+                logger.error(f"❌ Error exporting projects: {e}")
+        
+        # ============================================
+        # 2. STATIONS
+        # ============================================
+        if 'stations' in request.tables:
+            try:
+                stations_result = await config_db.execute(select(model_config.Station))
+                stations = [
+                    {
+                        'id': s.id,
+                        'station_code': s.station_code,
+                        'name': s.name,
+                        'project_id': s.project_id,
+                        'status': s.status,
+                        'last_update': s.last_update,
+                        'location': str(s.location) if s.location else None,
+                        'config': str(s.config) if s.config else None,
+                        'created_at': s.created_at,
+                        'updated_at': s.updated_at
+                    }
+                    for s in stations_result.scalars().all()
+                ]
+                dataframes['Stations'] = pd.DataFrame(stations)
+                logger.info(f"✅ Exported {len(stations)} stations")
+            except Exception as e:
+                logger.error(f"❌ Error exporting stations: {e}")
+        
+        # ============================================
+        # 3. DEVICES
+        # ============================================
+        if 'devices' in request.tables:
+            try:
+                devices_result = await config_db.execute(select(model_config.Device))
+                devices = [
+                    {
+                        'id': d.id,
+                        'device_code': d.device_code,
+                        'name': d.name,
+                        'station_id': d.station_id,
+                        'device_type': d.device_type,
+                        'mqtt_topic': d.mqtt_topic,
+                        'is_active': d.is_active,
+                        'last_data_time': d.last_data_time,
+                        'position': str(d.position) if d.position else None,
+                        'config': str(d.config) if d.config else None,
+                        'created_at': d.created_at,
+                        'updated_at': d.updated_at
+                    }
+                    for d in devices_result.scalars().all()
+                ]
+                dataframes['Devices'] = pd.DataFrame(devices)
+                logger.info(f"✅ Exported {len(devices)} devices")
+            except Exception as e:
+                logger.error(f"❌ Error exporting devices: {e}")
+        
+        # ============================================
+        # 4. SENSOR DATA
+        # ============================================
+        if 'sensor_data' in request.tables:
+            try:
+                sensor_data_result = await data_db.execute(
+                    select(model_data.SensorData)
+                    .order_by(desc(model_data.SensorData.timestamp))
+                    .limit(10000)  # Giới hạn 10k records gần nhất
+                )
+                sensor_data = [
+                    {
+                        'id': sd.id,
+                        'station_id': sd.station_id,
+                        'timestamp': sd.timestamp,
+                        'sensor_type': sd.sensor_type,
+                        'value_1': sd.value_1,
+                        'value_2': sd.value_2,
+                        'value_3': sd.value_3,
+                        'data': str(sd.data)
+                    }
+                    for sd in sensor_data_result.scalars().all()
+                ]
+                dataframes['Sensor Data'] = pd.DataFrame(sensor_data)
+                logger.info(f"✅ Exported {len(sensor_data)} sensor data records")
+            except Exception as e:
+                logger.error(f"❌ Error exporting sensor data: {e}")
+        
+        # ============================================
+        # 5. ALERTS
+        # ============================================
+        if 'alerts' in request.tables:
+            try:
+                alerts_result = await data_db.execute(
+                    select(model_data.Alert)
+                    .order_by(desc(model_data.Alert.timestamp))
+                    .limit(5000)
+                )
+                alerts = [
+                    {
+                        'id': a.id,
+                        'station_id': a.station_id,
+                        'timestamp': a.timestamp,
+                        'level': a.level,
+                        'category': a.category,
+                        'message': a.message,
+                        'is_resolved': a.is_resolved
+                    }
+                    for a in alerts_result.scalars().all()
+                ]
+                dataframes['Alerts'] = pd.DataFrame(alerts)
+                logger.info(f"✅ Exported {len(alerts)} alerts")
+            except Exception as e:
+                logger.error(f"❌ Error exporting alerts: {e}")
+        
+        # ============================================
+        # 6. TẠO FILE EXCEL
+        # ============================================
+        if not dataframes:
+            raise HTTPException(status_code=400, detail="No tables selected or no data available")
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name, df in dataframes.items():
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        output.seek(0)
+        
+        logger.info(f"✅ Excel file created with {len(dataframes)} sheets by {current_user.username}")
+        
+        # ============================================
+        # 7. TRẢ VỀ FILE
+        # ============================================
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename=landslide_db_{int(time.time())}.xlsx"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Export Excel error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# CLEAR ALL DATABASE
+# ============================================================================
+
+@router.post("/db/clear-all")
+async def clear_all_database(
+    config_db: AsyncSession = Depends(get_config_db),
+    data_db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """
+    ✅ XÓA TOÀN BỘ dữ liệu trong Data DB
+    Chỉ xóa sensor_data và alerts, GIỮ LẠI stations & devices
+    """
+    try:
+        # ⚠️ NGUY HIỂM: Chỉ dành cho Admin
+        if current_user.role != 'admin':
+            raise HTTPException(status_code=403, detail="Only admin can clear database")
+        
+        # 1. Đếm số records trước khi xóa
+        sensor_count = await data_db.execute(text("SELECT COUNT(*) FROM sensor_data"))
+        alert_count = await data_db.execute(text("SELECT COUNT(*) FROM alerts"))
+        
+        total_before = sensor_count.scalar() + alert_count.scalar()
+        
+        # 2. XÓA DỮ LIỆU
+        await data_db.execute(delete(model_data.SensorData))
+        await data_db.execute(delete(model_data.Alert))
+        await data_db.commit()
+        
+        logger.warning(f"⚠️ Database cleared by {current_user.username} - Deleted {total_before} records")
+        
+        return {
+            "status": "success",
+            "message": "Database cleared successfully",
+            "deleted_count": total_before
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await data_db.rollback()
+        logger.error(f"❌ Clear database error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# THÊM ENDPOINT ĐỂ XÓA RIÊNG TỪNG TABLE
+# ============================================================================
+
+@router.post("/db/clear-table/{table_name}")
+async def clear_specific_table(
+    table_name: str,
+    config_db: AsyncSession = Depends(get_config_db),
+    data_db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """
+    ✅ Xóa dữ liệu của 1 bảng cụ thể
+    Hỗ trợ: sensor_data, alerts
+    """
+    try:
+        if current_user.role != 'admin':
+            raise HTTPException(status_code=403, detail="Only admin")
+        
+        if table_name == 'sensor_data':
+            count = await data_db.execute(text("SELECT COUNT(*) FROM sensor_data"))
+            await data_db.execute(delete(model_data.SensorData))
+            
+        elif table_name == 'alerts':
+            count = await data_db.execute(text("SELECT COUNT(*) FROM alerts"))
+            await data_db.execute(delete(model_data.Alert))
+            
+        else:
+            raise HTTPException(status_code=400, detail="Table not supported")
+        
+        await data_db.commit()
+        
+        deleted = count.scalar()
+        logger.warning(f"⚠️ Table {table_name} cleared: {deleted} records")
+        
+        return {
+            "status": "success",
+            "table": table_name,
+            "deleted_count": deleted
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await data_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 # ============================================================================
 # SYSTEM CONFIG VIEW
 # ============================================================================
