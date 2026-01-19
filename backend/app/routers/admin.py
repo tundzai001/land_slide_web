@@ -222,11 +222,8 @@ async def verify_system_password(
     db: AsyncSession = Depends(get_config_db), # ✅ Cần DB Session
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
-    """
-    API kiểm tra mật khẩu cấp 2 (Lấy từ Database)
-    """
     # Log yêu cầu gửi vào, chứa địa chỉ nguôn, username và method
-    logger.info(f"Request from {payload.ip_address} - Method: {payload.method} - User: {current_user.username}")
+    #logger.info(f"Request from {payload.ip_address} - Method: {payload.method} - User: {current_user.username}")
     # 1. Lấy mật khẩu từ DB
     result = await db.execute(
         select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "system_password")
