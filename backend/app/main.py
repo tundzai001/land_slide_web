@@ -29,6 +29,7 @@ from .database import (
     get_auth_db, get_config_db, get_data_db,
     AuthSessionLocal, ConfigSessionLocal
 )
+from .routers import admin as admin_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
@@ -158,7 +159,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+app.include_router(admin_router.router)
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
@@ -352,13 +353,6 @@ async def delete_project(
 # ============================================================================
 
 def calculate_station_location(sensors: dict, manual_location: dict = None):
-    """
-    Logic tính tọa độ trạm:
-    - Nếu có dữ liệu tọa độ từ các cảm biến (thường gửi kèm trong Sensors Dict):
-        - 1 cảm biến: Lấy tọa độ cảm biến đó.
-        - >1 cảm biến: Tính trung bình cộng lat, lon, h.
-    - Nếu không có dữ liệu từ cảm biến: Dùng manual_location từ Step 1.
-    """
     coords = []
     if sensors:
         for s_type, info in sensors.items():
