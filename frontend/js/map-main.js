@@ -141,12 +141,19 @@ function updateRealtimeSensorValues(message) {
     console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
     
     if (sensor_type === 'gnss' && data) {
-        // GNSS Velocity
-        const velocityMmS = data.speed_2d_mm_s || (data.speed_2d * 1000) || 0;
+        // ✅ FIXED: Try multiple possible field names for velocity
+        const velocityMmS = data.velocity_mm_s || 
+                           data.speed_2d_mm_s || 
+                           data.speed_mm_s || 
+                           (data.speed_2d ? data.speed_2d * 1000 : null) || 
+                           (data.velocity ? data.velocity * 1000 : null) || 
+                           (data.speed ? data.speed * 1000 : null) || 0;
+        
+        console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
         
         // Displacement
-        const displacement = data.total_displacement_mm || 0;
+        const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
         
         // ✅ Cập nhật chart nếu đang mở
         if (charts['chart-gnss']) {
@@ -165,7 +172,7 @@ function updateRealtimeSensorValues(message) {
     }
     
     if (sensor_type === 'rain' && data) {
-        const intensity = data.intensity_mm_h || 0;
+        const intensity = data.intensity_mm_h || data.intensity || 0;
         setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
         
         // Update chart
@@ -184,7 +191,7 @@ function updateRealtimeSensorValues(message) {
     }
     
     if (sensor_type === 'water' && data) {
-        const level = data.water_level || data.processed_value_meters || 0;
+        const level = data.water_level || data.level || data.processed_value_meters || 0;
         setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
         
         // Update chart
@@ -391,6 +398,7 @@ async function loadStations() {
     }
 }
 
+// Tìm hàm renderStationList và sửa đoạn vòng lặp forEach:
 function renderStationList(stations) {
     const container = document.getElementById('station-list-container');
     if (!container) return;
@@ -408,6 +416,12 @@ function renderStationList(stations) {
     container.innerHTML = '';
     
     stations.forEach(st => {
+        // Ưu tiên check offline trước
+        let displayLevel = st.risk_level;
+        if (st.status === 'offline') {
+            displayLevel = 'OFFLINE';
+        }
+        
         const div = document.createElement('div');
         div.className = 'station-item';
         div.innerHTML = `
@@ -416,15 +430,14 @@ function renderStationList(stations) {
                     <div class="fw-bold text-white">${st.name}</div>
                     <small class="text-muted">${st.station_code}</small>
                 </div>
-                <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(st.risk_level)}">
-                    ${st.risk_level || 'N/A'}
+                <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
+                    ${displayLevel || 'N/A'}
                 </span>
             </div>
         `;
         
         div.addEventListener('click', () => {
             selectStation(st.id);
-            
             if (window.innerWidth < 768) {
                 const sidebar = document.getElementById('station-list-sidebar');
                 if (sidebar) sidebar.classList.add('hidden');
@@ -440,7 +453,8 @@ function getRiskBadgeClass(level) {
         'EXTREME': 'bg-danger',
         'HIGH': 'bg-warning text-dark',
         'MEDIUM': 'bg-warning text-dark',
-        'LOW': 'bg-success'
+        'LOW': 'bg-success',
+        'OFFLINE': 'bg-secondary'
     };
     return classes[level] || 'bg-success';
 }
@@ -450,10 +464,16 @@ function updateMarker(station) {
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
-        'LOW': '#51cf66'
+        'LOW': '#51cf66',
+        'OFFLINE': '#6c757d' // Màu xám đậm hơn chút cho dễ nhìn
     };
-    const color = colors[station.risk_level] || '#adb5bd';
-    
+
+    let currentLevel = station.risk_level;
+    if (station.status === 'offline') {
+        currentLevel = 'OFFLINE';
+    }
+    const color = colors[currentLevel] || '#adb5bd';
+
     if (markers[station.id]) {
         markers[station.id].setLatLng([station.location.lat, station.location.lon]);
         const el = markers[station.id].getElement();
@@ -535,9 +555,13 @@ function updateSidebarUI(data) {
     
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
-        const risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
+        let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
+        if (data.status === 'offline') {
+            risk = 'OFFLINE';
+        }
+        
         riskEl.className = `risk-badge ${risk}`;
-        riskEl.innerText = `Cảnh báo: ${risk}`;
+        riskEl.innerText = `Trạng thái: ${risk}`; // Đổi chữ Cảnh báo thành Trạng thái cho hợp lý
     }
 
     const gnssLatest = data.sensors?.gnss?.latest;
@@ -545,13 +569,23 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
 
-    const gnssSpeed = gnssLatest?.speed_2d_mm_s || gnssLatest?.speed_2d * 1000 || null;
+    // ✅ FIXED: Try multiple field names for GNSS velocity
+    const gnssSpeed = gnssLatest?.velocity_mm_s || 
+                     gnssLatest?.speed_2d_mm_s || 
+                     gnssLatest?.speed_mm_s || 
+                     (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || 
+                     (gnssLatest?.velocity ? gnssLatest.velocity * 1000 : null) ||
+                     (gnssLatest?.speed ? gnssLatest.speed * 1000 : null) || null;
+    
+    console.log('📍 [SIDEBAR] GNSS Latest:', gnssLatest);
+    console.log('📍 [SIDEBAR] GNSS Speed calculated:', gnssSpeed);
+    
     setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
 
-    const rainIntensity = rainLatest?.intensity_mm_h ?? null;
+    const rainIntensity = rainLatest?.intensity_mm_h ?? rainLatest?.intensity ?? null;
     setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
 
-    const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
+    const waterLevel = waterLatest?.water_level ?? waterLatest?.level ?? waterLatest?.processed_value_meters ?? null;
     setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
 
     setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
