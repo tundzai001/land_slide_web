@@ -556,12 +556,13 @@ function updateSidebarUI(data) {
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
         let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
+
         if (data.status === 'offline') {
             risk = 'OFFLINE';
         }
-        
+
         riskEl.className = `risk-badge ${risk}`;
-        riskEl.innerText = `Trạng thái: ${risk}`; // Đổi chữ Cảnh báo thành Trạng thái cho hợp lý
+        riskEl.innerText = `Cảnh báo: ${risk}`;
     }
 
     const gnssLatest = data.sensors?.gnss?.latest;
@@ -569,23 +570,13 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
 
-    // ✅ FIXED: Try multiple field names for GNSS velocity
-    const gnssSpeed = gnssLatest?.velocity_mm_s || 
-                     gnssLatest?.speed_2d_mm_s || 
-                     gnssLatest?.speed_mm_s || 
-                     (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || 
-                     (gnssLatest?.velocity ? gnssLatest.velocity * 1000 : null) ||
-                     (gnssLatest?.speed ? gnssLatest.speed * 1000 : null) || null;
-    
-    console.log('📍 [SIDEBAR] GNSS Latest:', gnssLatest);
-    console.log('📍 [SIDEBAR] GNSS Speed calculated:', gnssSpeed);
-    
+    const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
     setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
 
-    const rainIntensity = rainLatest?.intensity_mm_h ?? rainLatest?.intensity ?? null;
+    const rainIntensity = rainLatest?.intensity_mm_h ?? null;
     setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
 
-    const waterLevel = waterLatest?.water_level ?? waterLatest?.level ?? waterLatest?.processed_value_meters ?? null;
+    const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
     setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
 
     setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
