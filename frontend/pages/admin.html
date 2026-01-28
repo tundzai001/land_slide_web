@@ -172,8 +172,8 @@
     <nav class="admin-navbar">
         <div class="d-flex justify-content-between align-items-center w-100">
             <div class="navbar-left">
-                <span class="text-muted small">Session Time:</span>
-                <span class="fw-bold ms-2 session-time" id="current-time" style="color: var(--accent-primary);">00:00:00</span>
+                <span class="text-muted small">Time (UTC+7):</span>
+                <span class="fw-bold ms-2 session-time" id="current-time" style="color: var(--accent-primary);">--:--:--</span>
             </div>
             <div class="navbar-right d-flex align-items-center gap-3">
                 <div class="theme-toggle-mini" id="theme-toggle" onclick="window.themeManager.toggle()">
@@ -1006,17 +1006,16 @@
     <script src="/js/system-manager.js"></script>
     
     <script>
-        // ✅ SESSION TIME WITH SECONDS
-        let sessionStartTime = Date.now();
-        
-        function updateSessionTime() {
-            const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000); // seconds
-            
-            const hours = Math.floor(elapsed / 3600);
-            const minutes = Math.floor((elapsed % 3600) / 60);
-            const seconds = elapsed % 60;
-            
-            const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        // TIME (UTC+7)
+        function updateSystemTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('vi-VN', {
+                timeZone: 'Asia/Ho_Chi_Minh',
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
             
             const timeEl = document.getElementById('current-time');
             if (timeEl) {
@@ -1024,17 +1023,9 @@
             }
         }
         
-        // Update every second
-        setInterval(updateSessionTime, 1000);
-        updateSessionTime();
-
-        // Theme toggle icon update
-        window.addEventListener('themeChanged', (e) => {
-            const icon = document.querySelector('#theme-toggle i');
-            if (icon) {
-                icon.className = e.detail.theme === 'light' ? 'bi bi-moon-stars-fill' : 'bi bi-sun-fill';
-            }
-        });
+        // Cập nhật mỗi giây
+        setInterval(updateSystemTime, 1000);
+        updateSystemTime();
     </script>
 
 <!-- MODAL CHỌN BẢNG EXPORT EXCEL -->
