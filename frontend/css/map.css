@@ -67,7 +67,7 @@ body {
     z-index: 1;
 }
 
-/* === TOGGLE BUTTON - ✅ FIXED: Hiện đúng vị trí === */
+/* === TOGGLE BUTTON -  FIXED: Hiện đúng vị trí === */
 .toggle-list-btn {
     position: fixed;
     top: 80px;
@@ -214,12 +214,12 @@ body {
     transform: translateY(-50%) scale(0.95);
 }
 
-/* ✅ Khi sidebar đóng → Ẩn nút */
+/*  Khi sidebar đóng → Ẩn nút */
 .station-list-sidebar.hidden .sidebar-close-tab {
     display: none;
 }
 
-/* ✅ Icon xoay khi hover */
+/*  Icon xoay khi hover */
 .sidebar-close-tab i {
     transition: transform 0.3s ease;
 }
@@ -250,7 +250,7 @@ body {
     opacity: 1;
 }
 
-/* ✅ Khi sidebar MỞ → Ẩn nút toggle */
+/*  Khi sidebar MỞ → Ẩn nút toggle */
 .station-list-sidebar:not(.hidden) ~ #map .toggle-list-btn,
 body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     opacity: 0;
@@ -262,7 +262,7 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     background: var(--accent-secondary);
 }
 
-/* === ✅ XÓA NÚT THEME TOGGLE GÓC DƯỚI PHẢI === */
+/* ===  XÓA NÚT THEME TOGGLE GÓC DƯỚI PHẢI === */
 .theme-toggle {
     display: none !important;
 }
@@ -321,17 +321,17 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     transform: translateX(100%);
 }
 
-/* ✅ FIXED: Hiện sidebar */
+/*  FIXED: Hiện sidebar */
 .detail-sidebar.active {
     transform: translateX(0);
 }
 
-/* ✅ FIXED: Mở rộng sidebar (khi xem biểu đồ) */
+/*  FIXED: Mở rộng sidebar (khi xem biểu đồ) */
 .detail-sidebar.expanded {
     width: var(--sidebar-expanded-width);
 }
 
-/* ✅ FIXED: Full width (khi phân tích dài hạn) */
+/*  FIXED: Full width (khi phân tích dài hạn) */
 .detail-sidebar.fullwidth {
     width: 100vw;
     left: 0;
@@ -675,4 +675,319 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
 
 [data-theme="light"] .chart-box {
     background: white;
+}
+
+.station-list-sidebar.force-hidden {
+    transform: translateX(-100%) !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/*  Detail sidebar mở rộng khi xem biểu đồ */
+.detail-sidebar.charts-expanded {
+    width: 700px !important;
+    max-width: 90vw !important;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/*  Charts container với layout grid tối ưu */
+.charts-container {
+    display: none;
+    margin-top: 1.5rem;
+    animation: fadeInSlideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.charts-container.active {
+    display: block;
+}
+
+/*  Cải thiện chart box layout */
+.chart-box {
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.chart-box:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+    transform: translateY(-2px);
+}
+
+.chart-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.chart-title i {
+    font-size: 1.1rem;
+}
+
+/*  Animation cho charts */
+@keyframes fadeInSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/*  Cải thiện action buttons */
+.action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.btn-action {
+    padding: 0.875rem 1rem;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-action::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+
+.btn-action:hover::before {
+    width: 300px;
+    height: 300px;
+}
+
+.btn-action:active {
+    transform: scale(0.97);
+}
+
+.btn-action.primary,
+.btn-action:not(.secondary) {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+    color: white;
+}
+
+.btn-action.primary:hover,
+.btn-action:not(.secondary):hover {
+    background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
+    transform: translateY(-2px);
+}
+
+.btn-action.secondary {
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    color: white;
+}
+
+.btn-action.secondary:hover {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+    transform: translateY(-2px);
+}
+
+.btn-action i {
+    font-size: 1rem;
+    z-index: 1;
+}
+
+.btn-action span {
+    z-index: 1;
+}
+
+/*  Toggle button cải tiến */
+.toggle-list-btn {
+    position: fixed;
+    top: 80px;
+    left: 16px;
+    z-index: 2000;
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
+    border: none;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    color: white;
+    font-size: 1.25rem;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.toggle-list-btn:hover {
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 6px 24px rgba(6, 182, 212, 0.6);
+}
+
+.toggle-list-btn:active {
+    transform: scale(0.95);
+}
+
+/*  Ẩn toggle button khi sidebar đang mở */
+body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
+}
+
+/*  Responsive adjustments */
+@media (max-width: 768px) {
+    .detail-sidebar.charts-expanded {
+        width: 100vw !important;
+    }
+    
+    .action-buttons {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+    
+    .chart-box {
+        padding: 1rem;
+    }
+    
+    .toggle-list-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 1.1rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .charts-container {
+        margin-top: 1rem;
+    }
+    
+    .chart-box {
+        padding: 0.875rem;
+        margin-bottom: 1rem;
+    }
+    
+    .chart-title {
+        font-size: 0.85rem;
+        padding-bottom: 0.5rem;
+    }
+}
+
+/*  Cải thiện scrollbar trong charts container */
+.charts-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.charts-container::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 4px;
+}
+
+.charts-container::-webkit-scrollbar-thumb {
+    background: var(--accent-primary);
+    border-radius: 4px;
+}
+
+.charts-container::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-secondary);
+}
+
+/*  Dark mode adjustments */
+[data-theme="dark"] .chart-box {
+    background: rgba(26, 29, 46, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .chart-box:hover {
+    background: rgba(26, 29, 46, 0.8);
+    border-color: rgba(6, 182, 212, 0.5);
+}
+
+/*  Light mode adjustments */
+[data-theme="light"] .chart-box {
+    background: white;
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .chart-box:hover {
+    border-color: rgba(6, 182, 212, 0.5);
+    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.2);
+}
+
+[data-theme="light"] .chart-title {
+    color: #1a1d2e;
+    border-bottom-color: rgba(0, 0, 0, 0.1);
+}
+
+/*  Loading state cho charts */
+.chart-loading {
+    position: relative;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.chart-loading::after {
+    content: '';
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/*  Empty state cho charts */
+.chart-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--text-muted);
+}
+
+.chart-empty i {
+    font-size: 3rem;
+    opacity: 0.3;
+    margin-bottom: 1rem;
+}
+
+.chart-empty p {
+    margin: 0;
+    font-size: 0.9rem;
 }

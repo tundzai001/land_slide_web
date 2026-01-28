@@ -1,8 +1,8 @@
 // =====================================================
-// MAP MAIN LOGIC - COMPLETE FIXED VERSION
+// MAP MAIN LOGIC - FIXED VERSION
 // =====================================================
 
-console.log('🚀 [MAP] Script loaded, waiting for DOM...');
+console.log('[MAP] Script loaded, waiting for DOM...');
 
 let map;
 let markers = {};
@@ -23,7 +23,7 @@ if (document.readyState === 'loading') {
 }
 
 function initialize() {
-    console.log('✅ [MAP] DOM ready, initializing...');
+    console.log(' [MAP] DOM ready, initializing...');
     
     initMap();
     setupEventListeners();
@@ -42,11 +42,11 @@ function initialize() {
     
     setInterval(loadStations, 30000);
     
-    console.log('✅ [MAP] Initialization complete!');
+    console.log(' [MAP] Initialization complete!');
 }
 
 // =====================================================
-// ✅ FIXED: WEBSOCKET REALTIME CONNECTION
+// WEBSOCKET REALTIME CONNECTION
 // =====================================================
 
 function setupWebSocket() {
@@ -58,7 +58,7 @@ function setupWebSocket() {
     wsConnection = new WebSocket(wsUrl);
     
     wsConnection.onopen = () => {
-        console.log('✅ [WS] Connected');
+        console.log(' [WS] Connected');
     };
     
     wsConnection.onmessage = (event) => {
@@ -96,12 +96,9 @@ function handleRealtimeUpdate(message) {
         }
     }
     
-    // Khi nhận được trạng thái mới (VD: LOW)
     if (message.type === 'station_status') {
-        // 1. Cập nhật chấm trên bản đồ
         updateStationMarker(message.station_id, message.risk_level);
 
-        // 2. Cập nhật Sidebar chi tiết (nếu đang mở)
         if (currentStationData && message.station_id === currentStationData.id) {
             const riskEl = document.getElementById('st-risk');
             if (riskEl) {
@@ -110,13 +107,11 @@ function handleRealtimeUpdate(message) {
             }
         }
 
-        // 3. ✅ CẬP NHẬT DANH SÁCH BÊN TRÁI NGAY LẬP TỨC
         const listBadge = document.getElementById(`list-badge-${message.station_id}`);
         if (listBadge) {
             listBadge.className = `badge ${getRiskBadgeClass(message.risk_level)}`;
             listBadge.innerText = message.risk_level;
             
-            // Hiệu ứng nháy nhẹ để biết vừa cập nhật
             listBadge.style.transition = '0.3s';
             listBadge.style.transform = 'scale(1.2)';
             setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
@@ -141,7 +136,6 @@ function updateRealtimeSensorValues(message) {
     console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
     
     if (sensor_type === 'gnss' && data) {
-        // ✅ FIXED: Try multiple possible field names for velocity
         const velocityMmS = data.velocity_mm_s || 
                            data.speed_2d_mm_s || 
                            data.speed_mm_s || 
@@ -152,22 +146,19 @@ function updateRealtimeSensorValues(message) {
         console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
         
-        // Displacement
         const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
         
-        // ✅ Cập nhật chart nếu đang mở
         if (charts['chart-gnss']) {
             const chart = charts['chart-gnss'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(displacement);
             
-            // Giữ tối đa 50 điểm
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
             
-            chart.update('none'); // Update without animation
+            chart.update('none');
         }
     }
     
@@ -175,7 +166,6 @@ function updateRealtimeSensorValues(message) {
         const intensity = data.intensity_mm_h || data.intensity || 0;
         setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
         
-        // Update chart
         if (charts['chart-rain']) {
             const chart = charts['chart-rain'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -194,7 +184,6 @@ function updateRealtimeSensorValues(message) {
         const level = data.water_level || data.level || data.processed_value_meters || 0;
         setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
         
-        // Update chart
         if (charts['chart-water']) {
             const chart = charts['chart-water'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -236,7 +225,7 @@ function updateStationMarker(stationId, riskLevel) {
 }
 
 // =====================================================
-// EVENT LISTENERS SETUP
+// IMPROVED: EVENT LISTENERS SETUP
 // =====================================================
 
 function setupEventListeners() {
@@ -249,6 +238,7 @@ function setupEventListeners() {
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
             stationSidebar.classList.remove('hidden');
+            stationSidebar.classList.remove('force-hidden');
         });
     }
     
@@ -264,15 +254,23 @@ function setupEventListeners() {
     if (closeDetailBtn && detailSidebar) {
         closeDetailBtn.addEventListener('click', () => {
             detailSidebar.classList.remove('active');
-            detailSidebar.classList.remove('expanded');
+            detailSidebar.classList.remove('charts-expanded');
             detailSidebar.classList.remove('fullwidth');
             
             document.getElementById('realtime-view').style.display = 'block';
             document.getElementById('longterm-view').style.display = 'none';
             document.getElementById('charts-container').classList.remove('active');
             
+            // Mở lại sidebar khi đóng detail
             if (stationSidebar) {
                 stationSidebar.classList.remove('hidden');
+                stationSidebar.classList.remove('force-hidden');
+            }
+            
+            // Reset button text
+            const btnShowCharts = document.getElementById('btn-show-charts');
+            if (btnShowCharts) {
+                btnShowCharts.innerHTML = '<i class="bi bi-graph-up me-2"></i>Xem biểu đồ';
             }
         });
     }
@@ -293,6 +291,7 @@ function setupEventListeners() {
         });
     }
     
+    // IMPROVED: Xem biểu đồ - Đóng hoàn toàn sidebar
     const btnShowCharts = document.getElementById('btn-show-charts');
     if (btnShowCharts) {
         btnShowCharts.addEventListener('click', () => {
@@ -300,16 +299,28 @@ function setupEventListeners() {
             const isActive = chartsContainer.classList.contains('active');
             
             if (isActive) {
-                detailSidebar.classList.remove('expanded');
+                // Đóng biểu đồ
+                detailSidebar.classList.remove('charts-expanded');
                 chartsContainer.classList.remove('active');
-                stationSidebar.classList.remove('collapsed');
+                stationSidebar.classList.remove('force-hidden');
+                stationSidebar.classList.remove('hidden');
                 btnShowCharts.innerHTML = '<i class="bi bi-graph-up me-2"></i>Xem biểu đồ';
+                
+                console.log('📊 [CHARTS] Charts closed');
             } else {
-                detailSidebar.classList.add('expanded');
+                // Mở biểu đồ
+                detailSidebar.classList.add('charts-expanded');
                 chartsContainer.classList.add('active');
-                stationSidebar.classList.add('collapsed');
+                
+                // CRITICAL: Đóng hoàn toàn sidebar bên trái
+                stationSidebar.classList.add('force-hidden');
+                stationSidebar.classList.add('hidden');
+                
                 btnShowCharts.innerHTML = '<i class="bi bi-x me-2"></i>Đóng biểu đồ';
                 
+                console.log('📊 [CHARTS] Charts opened, sidebar force hidden');
+                
+                // Render charts
                 if (currentStationData) {
                     renderCharts(currentStationData);
                 }
@@ -317,6 +328,7 @@ function setupEventListeners() {
         });
     }
     
+    // IMPROVED: Phân tích dài hạn
     const btnLongTerm = document.getElementById('btn-long-term');
     if (btnLongTerm) {
         btnLongTerm.addEventListener('click', () => {
@@ -324,26 +336,37 @@ function setupEventListeners() {
             const isActive = longtermView.style.display === 'block';
             
             if (isActive) {
+                // Đóng phân tích
                 switchView('realtime');
                 detailSidebar.classList.remove('fullwidth');
+                stationSidebar.classList.remove('force-hidden');
                 stationSidebar.classList.remove('hidden');
                 btnLongTerm.innerHTML = '<i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn';
+                
+                console.log('📊 [LONGTERM] Analysis closed');
             } else {
+                // Mở phân tích
                 switchView('longterm');
                 detailSidebar.classList.add('fullwidth');
+                
+                // CRITICAL: Đóng hoàn toàn sidebar bên trái
+                stationSidebar.classList.add('force-hidden');
                 stationSidebar.classList.add('hidden');
+                
                 btnLongTerm.innerHTML = '<i class="bi bi-x me-2"></i>Đóng phân tích';
+                
+                console.log('📊 [LONGTERM] Analysis opened, sidebar force hidden');
                 
                 loadLongTermAnalysis();
             }
         });
     }
     
-    console.log('✅ [MAP] All event listeners setup complete');
+    console.log(' [MAP] All event listeners setup complete');
 }
 
 // =====================================================
-// OTHER FUNCTIONS (Keep existing implementations)
+// OTHER FUNCTIONS
 // =====================================================
 
 function switchView(view) {
@@ -371,7 +394,7 @@ function initMap() {
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
         }).addTo(map);
         
-        console.log('✅ [MAP] Leaflet map initialized');
+        console.log(' [MAP] Leaflet map initialized');
     } catch (error) {
         console.error('❌ [MAP] Failed to initialize map:', error);
     }
@@ -398,7 +421,6 @@ async function loadStations() {
     }
 }
 
-// Tìm hàm renderStationList và sửa đoạn vòng lặp forEach:
 function renderStationList(stations) {
     const container = document.getElementById('station-list-container');
     if (!container) return;
@@ -416,7 +438,6 @@ function renderStationList(stations) {
     container.innerHTML = '';
     
     stations.forEach(st => {
-        // Ưu tiên check offline trước
         let displayLevel = st.risk_level;
         if (st.status === 'offline') {
             displayLevel = 'OFFLINE';
@@ -465,7 +486,7 @@ function updateMarker(station) {
         'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
         'LOW': '#51cf66',
-        'OFFLINE': '#6c757d' // Màu xám đậm hơn chút cho dễ nhìn
+        'OFFLINE': '#6c757d'
     };
 
     let currentLevel = station.risk_level;
@@ -513,8 +534,14 @@ async function selectStation(stationId) {
     const sidebar = document.getElementById('detail-sidebar');
     if (sidebar) {
         sidebar.classList.add('active');
-        sidebar.classList.remove('expanded');
+        sidebar.classList.remove('charts-expanded');
         sidebar.classList.remove('fullwidth');
+    }
+    
+    // Reset sidebar trái khi chọn station mới
+    const stationSidebar = document.getElementById('station-list-sidebar');
+    if (stationSidebar) {
+        stationSidebar.classList.remove('force-hidden');
     }
 
     try {
@@ -824,16 +851,11 @@ function filterStations(searchTerm) {
     });
 }
 
-// =====================================================
-// EXPORTS & FINAL SETUP
-// =====================================================
-
 window.mapManager = {
     loadLongTermAnalysis,
     safeNumber,
-    // Export thêm để tiện debug nếu cần
     updateRealtimeSensorValues,
     charts
 };
 
-console.log('✅ [MAP] Script fully loaded');
+console.log('[MAP] Script fully loaded');
