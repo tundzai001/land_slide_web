@@ -1,5 +1,5 @@
 // =====================================================
-// MAP MAIN LOGIC - FIXED VERSION
+// MAP MAIN - FIXED VERSION
 // =====================================================
 
 console.log('[MAP] Script loaded, waiting for DOM...');
@@ -23,7 +23,7 @@ if (document.readyState === 'loading') {
 }
 
 function initialize() {
-    console.log(' [MAP] DOM ready, initializing...');
+    console.log('✅ [MAP] DOM ready, initializing...');
     
     initMap();
     setupEventListeners();
@@ -42,7 +42,7 @@ function initialize() {
     
     setInterval(loadStations, 30000);
     
-    console.log(' [MAP] Initialization complete!');
+    console.log('✅ [MAP] Initialization complete!');
 }
 
 // =====================================================
@@ -58,7 +58,7 @@ function setupWebSocket() {
     wsConnection = new WebSocket(wsUrl);
     
     wsConnection.onopen = () => {
-        console.log(' [WS] Connected');
+        console.log('✅ [WS] Connected');
     };
     
     wsConnection.onmessage = (event) => {
@@ -117,17 +117,6 @@ function handleRealtimeUpdate(message) {
             setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
         }
     }
-}
-
-function updateSidebarRiskBadge(level) {
-    const riskEl = document.getElementById('st-risk');
-    if (!riskEl) return;
-
-    riskEl.className = `risk-badge ${level}`; 
-    riskEl.innerText = `Cảnh báo: ${level}`;
-    
-    riskEl.style.opacity = '0.5';
-    setTimeout(() => riskEl.style.opacity = '1', 300);
 }
 
 function updateRealtimeSensorValues(message) {
@@ -224,10 +213,6 @@ function updateStationMarker(stationId, riskLevel) {
     }
 }
 
-// =====================================================
-// IMPROVED: EVENT LISTENERS SETUP
-// =====================================================
-
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
     
@@ -235,6 +220,7 @@ function setupEventListeners() {
     const sidebarCloseTab = document.getElementById('sidebar-close-tab');
     const stationSidebar = document.getElementById('station-list-sidebar');
     
+    // Toggle sidebar trái
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
             stationSidebar.classList.remove('hidden');
@@ -248,33 +234,29 @@ function setupEventListeners() {
         });
     }
     
+    // Đóng detailed sidebar
     const closeDetailBtn = document.getElementById('close-btn');
     const detailSidebar = document.getElementById('detail-sidebar');
     
     if (closeDetailBtn && detailSidebar) {
         closeDetailBtn.addEventListener('click', () => {
             detailSidebar.classList.remove('active');
-            detailSidebar.classList.remove('charts-expanded');
-            detailSidebar.classList.remove('fullwidth');
             
-            document.getElementById('realtime-view').style.display = 'block';
-            document.getElementById('longterm-view').style.display = 'none';
-            document.getElementById('charts-container').classList.remove('active');
+            // Đóng tất cả panels
+            const chartsPanel = document.getElementById('charts-panel');
+            const longtermOverlay = document.getElementById('longterm-overlay');
+            if (chartsPanel) chartsPanel.classList.remove('active');
+            if (longtermOverlay) longtermOverlay.classList.remove('active');
             
-            // Mở lại sidebar khi đóng detail
+            // Mở lại sidebar trái
             if (stationSidebar) {
                 stationSidebar.classList.remove('hidden');
                 stationSidebar.classList.remove('force-hidden');
             }
-            
-            // Reset button text
-            const btnShowCharts = document.getElementById('btn-show-charts');
-            if (btnShowCharts) {
-                btnShowCharts.innerHTML = '<i class="bi bi-graph-up me-2"></i>Xem biểu đồ';
-            }
         });
     }
     
+    // Theme toggle
     const themeToggleBtn = document.getElementById('theme-toggle-btn');
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', () => {
@@ -284,6 +266,7 @@ function setupEventListeners() {
         });
     }
     
+    // Search
     const searchInput = document.getElementById('search-station');
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
@@ -291,98 +274,80 @@ function setupEventListeners() {
         });
     }
     
-    // IMPROVED: Xem biểu đồ - Đóng hoàn toàn sidebar
+    // ✅ NEW: Xem biểu đồ - Mở panel giữa màn hình
     const btnShowCharts = document.getElementById('btn-show-charts');
-    if (btnShowCharts) {
+    const chartsPanel = document.getElementById('charts-panel');
+    const closeChartsBtn = document.getElementById('close-charts-btn');
+    
+    if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', () => {
-            const chartsContainer = document.getElementById('charts-container');
-            const isActive = chartsContainer.classList.contains('active');
+            chartsPanel.classList.add('active');
             
-            if (isActive) {
-                // Đóng biểu đồ
-                detailSidebar.classList.remove('charts-expanded');
-                chartsContainer.classList.remove('active');
-                stationSidebar.classList.remove('force-hidden');
-                stationSidebar.classList.remove('hidden');
-                btnShowCharts.innerHTML = '<i class="bi bi-graph-up me-2"></i>Xem biểu đồ';
-                
-                console.log('📊 [CHARTS] Charts closed');
-            } else {
-                // Mở biểu đồ
-                detailSidebar.classList.add('charts-expanded');
-                chartsContainer.classList.add('active');
-                
-                // CRITICAL: Đóng hoàn toàn sidebar bên trái
-                stationSidebar.classList.add('force-hidden');
-                stationSidebar.classList.add('hidden');
-                
-                btnShowCharts.innerHTML = '<i class="bi bi-x me-2"></i>Đóng biểu đồ';
-                
-                console.log('📊 [CHARTS] Charts opened, sidebar force hidden');
-                
-                // Render charts
-                if (currentStationData) {
-                    renderCharts(currentStationData);
-                }
+            // Đóng sidebar trái khi mở biểu đồ
+            stationSidebar.classList.add('force-hidden');
+            
+            console.log('📊 [CHARTS] Charts panel opened');
+            
+            if (currentStationData) {
+                renderCharts(currentStationData);
             }
         });
     }
     
-    // IMPROVED: Phân tích dài hạn
+    if (closeChartsBtn && chartsPanel) {
+        closeChartsBtn.addEventListener('click', () => {
+            chartsPanel.classList.remove('active');
+            
+            // Mở lại sidebar trái
+            stationSidebar.classList.remove('force-hidden');
+            stationSidebar.classList.remove('hidden');
+            
+            console.log('📊 [CHARTS] Charts panel closed');
+        });
+    }
+    
+    // Phân tích dài hạn -> Mở fullscreen
     const btnLongTerm = document.getElementById('btn-long-term');
-    if (btnLongTerm) {
+    const longtermOverlay = document.getElementById('longterm-overlay');
+    const closeLongtermBtn = document.getElementById('close-longterm-btn');
+    
+    if (btnLongTerm && longtermOverlay) {
         btnLongTerm.addEventListener('click', () => {
-            const longtermView = document.getElementById('longterm-view');
-            const isActive = longtermView.style.display === 'block';
+            longtermOverlay.classList.add('active');
             
-            if (isActive) {
-                // Đóng phân tích
-                switchView('realtime');
-                detailSidebar.classList.remove('fullwidth');
-                stationSidebar.classList.remove('force-hidden');
-                stationSidebar.classList.remove('hidden');
-                btnLongTerm.innerHTML = '<i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn';
-                
-                console.log('📊 [LONGTERM] Analysis closed');
-            } else {
-                // Mở phân tích
-                switchView('longterm');
-                detailSidebar.classList.add('fullwidth');
-                
-                // CRITICAL: Đóng hoàn toàn sidebar bên trái
-                stationSidebar.classList.add('force-hidden');
-                stationSidebar.classList.add('hidden');
-                
-                btnLongTerm.innerHTML = '<i class="bi bi-x me-2"></i>Đóng phân tích';
-                
-                console.log('📊 [LONGTERM] Analysis opened, sidebar force hidden');
-                
-                loadLongTermAnalysis();
+            // Đóng sidebar trái
+            stationSidebar.classList.add('force-hidden');
+            
+            // Cập nhật tên trạm 
+            const longtermStationName = document.getElementById('longterm-station-name');
+            if (longtermStationName && currentStationData) {
+                longtermStationName.textContent = `${currentStationData.name} (${currentStationData.station_code})`;
             }
+            
+            console.log('📊 [LONGTERM] Analysis overlay opened');
+            
+            loadLongTermAnalysis();
         });
     }
     
-    console.log(' [MAP] All event listeners setup complete');
+    if (closeLongtermBtn && longtermOverlay) {
+        closeLongtermBtn.addEventListener('click', () => {
+            longtermOverlay.classList.remove('active');
+            
+            // Mở lại sidebar trái
+            stationSidebar.classList.remove('force-hidden');
+            stationSidebar.classList.remove('hidden');
+            
+            console.log('📊 [LONGTERM] Analysis overlay closed');
+        });
+    }
+    
+    console.log('✅ [MAP] All event listeners setup complete');
 }
 
 // =====================================================
 // OTHER FUNCTIONS
 // =====================================================
-
-function switchView(view) {
-    currentView = view;
-    
-    const realtimeView = document.getElementById('realtime-view');
-    const longtermView = document.getElementById('longterm-view');
-    
-    if (view === 'realtime') {
-        realtimeView.style.display = 'block';
-        longtermView.style.display = 'none';
-    } else if (view === 'longterm') {
-        realtimeView.style.display = 'none';
-        longtermView.style.display = 'block';
-    }
-}
 
 function initMap() {
     try {
@@ -394,7 +359,7 @@ function initMap() {
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
         }).addTo(map);
         
-        console.log(' [MAP] Leaflet map initialized');
+        console.log('✅ [MAP] Leaflet map initialized');
     } catch (error) {
         console.error('❌ [MAP] Failed to initialize map:', error);
     }
@@ -529,19 +494,9 @@ function updateMarker(station) {
 async function selectStation(stationId) {
     console.log(`🎯 [MAP] Selecting station: ${stationId}`);
     
-    switchView('realtime');
-    
     const sidebar = document.getElementById('detail-sidebar');
     if (sidebar) {
         sidebar.classList.add('active');
-        sidebar.classList.remove('charts-expanded');
-        sidebar.classList.remove('fullwidth');
-    }
-    
-    // Reset sidebar trái khi chọn station mới
-    const stationSidebar = document.getElementById('station-list-sidebar');
-    if (stationSidebar) {
-        stationSidebar.classList.remove('force-hidden');
     }
 
     try {
@@ -609,8 +564,6 @@ function updateSidebarUI(data) {
     setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
     setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
     setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
-
-    renderCharts(data);
 }
 
 function renderCharts(data) {

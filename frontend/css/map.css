@@ -3,7 +3,7 @@
    File: css/map.css
 ===================================================== */
 
-/* === ROOT VARIABLES & RESET === */
+/*  ROOT VARIABLES & RESET  */
 :root {
     --sidebar-width: 340px;
     --sidebar-expanded-width: 720px;
@@ -24,7 +24,7 @@ body {
     color: var(--text-primary);
 }
 
-/* === TOP NAVBAR === */
+/*  TOP NAVBAR  */
 .top-navbar {
     position: fixed;
     top: 0;
@@ -57,7 +57,7 @@ body {
     color: var(--accent-primary);
 }
 
-/* === MAP CONTAINER === */
+/*  MAP CONTAINER  */
 #map {
     position: absolute;
     top: 64px;
@@ -67,21 +67,21 @@ body {
     z-index: 1;
 }
 
-/* === TOGGLE BUTTON -  FIXED: Hiện đúng vị trí === */
+/*  TOGGLE BUTTON  */
 .toggle-list-btn {
     position: fixed;
     top: 80px;
     left: 16px;
     z-index: 2000;
-    background: var(--accent-primary);
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
     border: none;
     border-radius: 50%;
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     color: white;
-    font-size: 1.2rem;
+    font-size: 1.25rem;
     cursor: pointer;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
@@ -89,29 +89,22 @@ body {
 }
 
 .toggle-list-btn:hover {
-    transform: scale(1.1);
-    background: var(--accent-secondary);
-    box-shadow: 0 8px 24px rgba(14, 165, 233, 0.5);
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 6px 24px rgba(6, 182, 212, 0.6);
 }
 
 .toggle-list-btn:active {
     transform: scale(0.95);
 }
 
-.toggle-list-btn i {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/*  Ẩn toggle button khi sidebar đang mở */
+body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
 }
 
-@media (max-width: 768px) {
-    .toggle-list-btn {
-        top: 76px;
-        width: 40px;
-        height: 40px;
-        font-size: 1.1rem;
-    }
-}
-
-/* === STATION LIST SIDEBAR (Left) === */
+/*  STATION LIST SIDEBAR (Left)  */
 .station-list-sidebar {
     position: fixed;
     top: 64px;
@@ -131,8 +124,11 @@ body {
     transform: translateX(-100%);
 }
 
-.station-list-sidebar.collapsed {
-    transform: translateX(calc(-1 * var(--sidebar-width) + var(--sidebar-collapsed-width)));
+.station-list-sidebar.force-hidden {
+    transform: translateX(-100%) !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 .sidebar-header {
@@ -182,11 +178,11 @@ body {
     transform: translateX(4px);
 }
 
-/* === NÚT ĐÓNG SIDEBAR - Tab ở mép phải === */
+/*  NÚT ĐÓNG SIDEBAR - Tab ở mép phải  */
 .sidebar-close-tab {
     position: absolute;
     top: 50%;
-    right: -20px; /* Nhô ra ngoài mép phải sidebar */
+    right: -20px;
     transform: translateY(-50%);
     width: 20px;
     height: 60px;
@@ -214,57 +210,17 @@ body {
     transform: translateY(-50%) scale(0.95);
 }
 
-/*  Khi sidebar đóng → Ẩn nút */
-.station-list-sidebar.hidden .sidebar-close-tab {
+.station-list-sidebar.hidden .sidebar-close-tab,
+.station-list-sidebar.force-hidden .sidebar-close-tab {
     display: none;
 }
 
-/*  Icon xoay khi hover */
 .sidebar-close-tab i {
     transition: transform 0.3s ease;
 }
 
 .sidebar-close-tab:hover i {
     transform: translateX(-2px);
-}
-
-/* === TOGGLE BUTTON - Hiện khi sidebar đóng === */
-.toggle-list-btn {
-    position: fixed;
-    top: 80px;
-    left: 16px;
-    z-index: 2000;
-    background: var(--accent-primary);
-    border: none;
-    border-radius: 50%;
-    width: 44px;
-    height: 44px;
-    color: white;
-    font-size: 1.2rem;
-    cursor: pointer;
-    box-shadow: var(--shadow-lg);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 1;
-}
-
-/*  Khi sidebar MỞ → Ẩn nút toggle */
-.station-list-sidebar:not(.hidden) ~ #map .toggle-list-btn,
-body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
-    opacity: 0;
-    pointer-events: none;
-}
-
-.toggle-list-btn:hover {
-    transform: scale(1.1);
-    background: var(--accent-secondary);
-}
-
-/* ===  XÓA NÚT THEME TOGGLE GÓC DƯỚI PHẢI === */
-.theme-toggle {
-    display: none !important;
 }
 
 /* Admin Button in Navbar */
@@ -290,22 +246,7 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     text-decoration: none;
 }
 
-#admin-nav-btn i {
-    font-size: 0.9rem;
-}
-
-/* Dark mode adjustments */
-[data-theme="dark"] #admin-nav-btn {
-    border-color: var(--accent-primary);
-    color: var(--accent-primary);
-}
-
-[data-theme="dark"] #admin-nav-btn:hover {
-    background: var(--accent-primary);
-    color: white;
-}
-
-/* === DETAIL SIDEBAR (Right) === */
+/*  DETAIL SIDEBAR*/
 .detail-sidebar {
     position: fixed;
     top: 64px;
@@ -321,28 +262,15 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     transform: translateX(100%);
 }
 
-/*  FIXED: Hiện sidebar */
 .detail-sidebar.active {
     transform: translateX(0);
-}
-
-/*  FIXED: Mở rộng sidebar (khi xem biểu đồ) */
-.detail-sidebar.expanded {
-    width: var(--sidebar-expanded-width);
-}
-
-/*  FIXED: Full width (khi phân tích dài hạn) */
-.detail-sidebar.fullwidth {
-    width: 100vw;
-    left: 0;
-    right: auto;
 }
 
 .sidebar-content {
     padding: 20px;
 }
 
-/* === SENSOR COMPACT VIEW === */
+/*  SENSOR COMPACT VIEW  */
 .sensor-compact {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -414,341 +342,7 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     margin-top: 4px;
 }
 
-/* === ACTION BUTTONS === */
-.action-buttons {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-}
-
-.btn-action {
-    flex: 1;
-    padding: 10px;
-    background: var(--gradient-button);
-    border: none;
-    border-radius: 8px;
-    color: white;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.btn-action:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
-
-.btn-action:active {
-    transform: translateY(0);
-}
-
-.btn-action.secondary {
-    background: linear-gradient(135deg, #7c3aed, #a855f7);
-}
-
-/* === CHARTS CONTAINER === */
-.charts-container {
-    display: none;
-    margin-top: 16px;
-}
-
-.charts-container.active {
-    display: block;
-    animation: fadeInUp 0.4s ease;
-}
-
-.chart-box {
-    background: var(--bg-tertiary);
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
-    border: 1px solid var(--border-color);
-    transition: all 0.2s;
-}
-
-.chart-box:hover {
-    border-color: var(--accent-primary);
-}
-
-.chart-title {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 12px;
-}
-
-/* === LONG TERM ANALYSIS === */
-#longterm-view {
-    animation: fadeInUp 0.4s ease;
-}
-
-.longterm-metric-card {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 16px;
-    text-align: center;
-    transition: all 0.2s;
-}
-
-.longterm-metric-card:hover {
-    border-color: var(--accent-primary);
-    box-shadow: var(--shadow-sm);
-}
-
-/* === RISK BADGE === */
-.risk-badge {
-    padding: 10px;
-    border-radius: 8px;
-    text-align: center;
-    margin-bottom: 16px;
-    font-weight: 700;
-    font-size: 0.9rem;
-    animation: fadeIn 0.3s ease;
-}
-
-.risk-badge.LOW {
-    background: rgba(16, 185, 129, 0.15);
-    color: var(--accent-success);
-    border: 2px solid var(--accent-success);
-}
-
-.risk-badge.MEDIUM {
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--accent-warning);
-    border: 2px solid var(--accent-warning);
-}
-
-.risk-badge.HIGH, .risk-badge.EXTREME {
-    background: rgba(239, 68, 68, 0.15);
-    color: var(--accent-danger);
-    border: 2px solid var(--accent-danger);
-}
-
-/* === SEARCH INPUT === */
-#search-station {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    border-radius: 8px;
-    padding: 8px 12px;
-    width: 100%;
-    transition: all 0.2s;
-}
-
-#search-station:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
-}
-
-#search-station::placeholder {
-    color: var(--text-muted);
-}
-
-/* === SCROLLBAR === */
-::-webkit-scrollbar { 
-    width: 6px; 
-}
-
-::-webkit-scrollbar-track { 
-    background: transparent; 
-}
-
-::-webkit-scrollbar-thumb { 
-    background: var(--accent-primary); 
-    border-radius: 3px; 
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-secondary);
-}
-
-/* === ANIMATIONS === */
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes fadeInUp {
-    from { 
-        opacity: 0; 
-        transform: translateY(10px); 
-    }
-    to { 
-        opacity: 1; 
-        transform: translateY(0); 
-    }
-}
-
-@keyframes slideIn {
-    from {
-        opacity: 0;
-        transform: translateX(-20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(0);
-    }
-}
-
-/* === EMPTY STATE === */
-.station-list-content .text-center {
-    padding: 40px 20px;
-}
-
-.station-list-content .text-center i {
-    color: var(--text-muted);
-    opacity: 0.5;
-}
-
-/* === RESPONSIVE === */
-@media (max-width: 768px) {
-    .station-list-sidebar { 
-        width: 100%; 
-        max-width: 300px; 
-    }
-    
-    .detail-sidebar { 
-        width: 100% !important; 
-    }
-    
-    .detail-sidebar.expanded,
-    .detail-sidebar.fullwidth { 
-        width: 100% !important; 
-    }
-    
-    .sensor-compact { 
-        grid-template-columns: 1fr; 
-    }
-    
-    .action-buttons {
-        flex-direction: column;
-    }
-}
-
-/* === LOADING STATES === */
-.spinner-border {
-    border-color: var(--border-color);
-    border-right-color: var(--accent-primary);
-}
-
-/* === TOOLTIPS & POPOVERS === */
-.leaflet-tooltip {
-    background: var(--bg-overlay) !important;
-    border: 1px solid var(--border-color) !important;
-    color: var(--text-primary) !important;
-    border-radius: 6px !important;
-    padding: 6px 10px !important;
-    font-weight: 600 !important;
-    font-size: 0.85rem !important;
-}
-
-.leaflet-tooltip::before {
-    border-top-color: var(--border-color) !important;
-}
-
-/* === DARK MODE SPECIFIC === */
-[data-theme="dark"] .station-list-sidebar {
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
-}
-
-[data-theme="dark"] .detail-sidebar {
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
-}
-
-[data-theme="dark"] .toggle-list-btn {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-}
-
-/* === LIGHT MODE SPECIFIC === */
-[data-theme="light"] .station-item {
-    background: white;
-}
-
-[data-theme="light"] .sensor-item {
-    background: white;
-}
-
-[data-theme="light"] .chart-box {
-    background: white;
-}
-
-.station-list-sidebar.force-hidden {
-    transform: translateX(-100%) !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-
-/*  Detail sidebar mở rộng khi xem biểu đồ */
-.detail-sidebar.charts-expanded {
-    width: 700px !important;
-    max-width: 90vw !important;
-    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/*  Charts container với layout grid tối ưu */
-.charts-container {
-    display: none;
-    margin-top: 1.5rem;
-    animation: fadeInSlideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.charts-container.active {
-    display: block;
-}
-
-/*  Cải thiện chart box layout */
-.chart-box {
-    background: var(--bg-tertiary);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1.25rem;
-    border: 1px solid var(--border-color);
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.chart-box:hover {
-    border-color: var(--accent-primary);
-    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
-    transform: translateY(-2px);
-}
-
-.chart-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 2px solid var(--border-color);
-}
-
-.chart-title i {
-    font-size: 1.1rem;
-}
-
-/*  Animation cho charts */
-@keyframes fadeInSlideUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/*  Cải thiện action buttons */
+/*  ACTION BUTTONS  */
 .action-buttons {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -796,13 +390,11 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     transform: scale(0.97);
 }
 
-.btn-action.primary,
 .btn-action:not(.secondary) {
     background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
     color: white;
 }
 
-.btn-action.primary:hover,
 .btn-action:not(.secondary):hover {
     background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
     box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
@@ -820,174 +412,354 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     transform: translateY(-2px);
 }
 
-.btn-action i {
-    font-size: 1rem;
-    z-index: 1;
-}
-
+.btn-action i,
 .btn-action span {
     z-index: 1;
 }
 
-/*  Toggle button cải tiến */
-.toggle-list-btn {
+/* CENTER CHARTS PANEL  */
+.charts-panel {
     position: fixed;
-    top: 80px;
-    left: 16px;
-    z-index: 2000;
-    background: linear-gradient(135deg, #06b6d4, #0891b2);
-    border: none;
-    border-radius: 50%;
-    width: 48px;
-    height: 48px;
-    color: white;
-    font-size: 1.25rem;
-    cursor: pointer;
-    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.toggle-list-btn:hover {
-    transform: scale(1.1) rotate(5deg);
-    box-shadow: 0 6px 24px rgba(6, 182, 212, 0.6);
-}
-
-.toggle-list-btn:active {
-    transform: scale(0.95);
-}
-
-/*  Ẩn toggle button khi sidebar đang mở */
-body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn {
+    top: 64px;
+    /* Tính toán: (100vw - sidebar width) / 2 */
+    left: calc((100vw - 420px) / 2);
+    transform: translateX(-50%) translateY(-100%);
+    width: 85%;
+    max-width: 800px;
+    height: calc(100vh - 80px);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    box-shadow: var(--shadow-xl);
+    z-index: 1500;
     opacity: 0;
     pointer-events: none;
-    transform: scale(0.8);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
-/*  Responsive adjustments */
+.charts-panel.active {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: all;
+}
+
+.charts-panel-header {
+    padding: 1.25rem 1.5rem;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.charts-panel-header h5 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+}
+
+.charts-panel-header h5 i {
+    color: var(--accent-primary);
+}
+
+.charts-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+}
+
+/* === LONG-TERM FULLSCREEN OVERLAY  */
+.longterm-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    z-index: 2000;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.longterm-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.longterm-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    width: 95%;
+    max-width: 1400px;
+    height: 90%;
+    background: var(--bg-secondary);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.longterm-overlay.active .longterm-container {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.longterm-header {
+    padding: 1.5rem 2rem;
+    background: var(--bg-tertiary);
+    border-bottom: 2px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.longterm-header h4 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+}
+
+.longterm-header h4 i {
+    color: var(--accent-primary);
+}
+
+.longterm-content-wrapper {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+}
+
+/*  CHART BOX (Dùng chung)  */
+.chart-box {
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.chart-box:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+    transform: translateY(-2px);
+}
+
+.chart-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+/*  LONG TERM METRICS  */
+.longterm-metric-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.longterm-metric-card:hover {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+/*  CLASSIFICATION SCALE  */
+#classification-scale {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.classification-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.classification-item.active {
+    background: rgba(14, 165, 233, 0.1);
+    border: 2px solid var(--accent-primary);
+    transform: scale(1.02);
+}
+
+.classification-color {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+}
+
+.classification-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.classification-range {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* RISK BADGE */
+.risk-badge {
+    padding: 10px;
+    border-radius: 8px;
+    text-align: center;
+    margin-bottom: 16px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    animation: fadeIn 0.3s ease;
+}
+
+.risk-badge.LOW {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-success);
+    border: 2px solid var(--accent-success);
+}
+
+.risk-badge.MEDIUM {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--accent-warning);
+    border: 2px solid var(--accent-warning);
+}
+
+.risk-badge.HIGH, .risk-badge.EXTREME {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--accent-danger);
+    border: 2px solid var(--accent-danger);
+}
+
+/*SEARCH INPUT */
+#search-station {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 12px;
+    width: 100%;
+    transition: all 0.2s;
+}
+
+#search-station:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+/*SCROLLBAR */
+::-webkit-scrollbar { 
+    width: 6px; 
+}
+
+::-webkit-scrollbar-track { 
+    background: transparent; 
+}
+
+::-webkit-scrollbar-thumb { 
+    background: var(--accent-primary); 
+    border-radius: 3px; 
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-secondary);
+}
+
+/*ANIMATIONS*/
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* LOADING STATES*/
+.spinner-border {
+    border-color: var(--border-color);
+    border-right-color: var(--accent-primary);
+}
+
+/* TOOLTIPS */
+.leaflet-tooltip {
+    background: var(--bg-overlay) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-primary) !important;
+    border-radius: 6px !important;
+    padding: 6px 10px !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+}
+
+/*  DARK MODE  */
+[data-theme="dark"] .station-list-sidebar {
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .detail-sidebar {
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+/* LIGHT MODE */
+[data-theme="light"] .station-item,
+[data-theme="light"] .sensor-item,
+[data-theme="light"] .chart-box {
+    background: white;
+}
+
 @media (max-width: 768px) {
-    .detail-sidebar.charts-expanded {
-        width: 100vw !important;
+    .station-list-sidebar { 
+        width: 100%; 
+        max-width: 300px; 
+    }
+    
+    .detail-sidebar { 
+        width: 100% !important; 
+    }
+    
+    .sensor-compact { 
+        grid-template-columns: 1fr; 
     }
     
     .action-buttons {
         grid-template-columns: 1fr;
-        gap: 0.5rem;
     }
     
-    .chart-box {
-        padding: 1rem;
+    .charts-panel {
+        width: 95%;
+        max-width: none;
+        transform: translateX(-50%) translateY(-100%);
+        margin-right: 0;
     }
     
-    .toggle-list-btn {
-        width: 44px;
-        height: 44px;
-        font-size: 1.1rem;
-    }
-}
-
-@media (max-width: 480px) {
-    .charts-container {
-        margin-top: 1rem;
+    .charts-panel.active {
+        transform: translateX(-50%) translateY(0);
     }
     
-    .chart-box {
-        padding: 0.875rem;
-        margin-bottom: 1rem;
+    .longterm-container {
+        width: 98%;
+        height: 95%;
     }
-    
-    .chart-title {
-        font-size: 0.85rem;
-        padding-bottom: 0.5rem;
-    }
-}
-
-/*  Cải thiện scrollbar trong charts container */
-.charts-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.charts-container::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-    border-radius: 4px;
-}
-
-.charts-container::-webkit-scrollbar-thumb {
-    background: var(--accent-primary);
-    border-radius: 4px;
-}
-
-.charts-container::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-secondary);
-}
-
-/*  Dark mode adjustments */
-[data-theme="dark"] .chart-box {
-    background: rgba(26, 29, 46, 0.6);
-    border-color: rgba(255, 255, 255, 0.1);
-}
-
-[data-theme="dark"] .chart-box:hover {
-    background: rgba(26, 29, 46, 0.8);
-    border-color: rgba(6, 182, 212, 0.5);
-}
-
-/*  Light mode adjustments */
-[data-theme="light"] .chart-box {
-    background: white;
-    border-color: rgba(0, 0, 0, 0.1);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme="light"] .chart-box:hover {
-    border-color: rgba(6, 182, 212, 0.5);
-    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.2);
-}
-
-[data-theme="light"] .chart-title {
-    color: #1a1d2e;
-    border-bottom-color: rgba(0, 0, 0, 0.1);
-}
-
-/*  Loading state cho charts */
-.chart-loading {
-    position: relative;
-    min-height: 200px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.chart-loading::after {
-    content: '';
-    width: 40px;
-    height: 40px;
-    border: 4px solid var(--border-color);
-    border-top-color: var(--accent-primary);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-/*  Empty state cho charts */
-.chart-empty {
-    text-align: center;
-    padding: 3rem 1rem;
-    color: var(--text-muted);
-}
-
-.chart-empty i {
-    font-size: 3rem;
-    opacity: 0.3;
-    margin-bottom: 1rem;
-}
-
-.chart-empty p {
-    margin: 0;
-    font-size: 0.9rem;
 }
