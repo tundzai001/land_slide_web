@@ -33,7 +33,7 @@
                 <i class="bi bi-moon-stars-fill"></i>
             </button>
             
-            <!-- ✅ Auth Button (Will be updated by auth.js) -->
+            <!-- Auth Button -->
             <button id="auth-btn" class="btn btn-primary btn-sm">
                 <i class="bi bi-person-circle me-1"></i> Account
             </button>
@@ -82,7 +82,7 @@
             <!-- Risk Badge -->
             <div id="st-risk" class="risk-badge">...</div>
 
-            <!-- ✅ REALTIME VIEW (Mặc định) -->
+            <!-- REALTIME VIEW -->
             <div id="realtime-view">
                 <!-- COMPACT SENSOR DATA -->
                 <div class="sensor-compact">
@@ -124,7 +124,7 @@
                     </div>
                 </div>
 
-                <!-- ✅ FIXED: ACTION BUTTONS với text động -->
+                <!-- ACTION BUTTONS -->
                 <div class="action-buttons">
                     <button class="btn-action" id="btn-show-charts">
                         <i class="bi bi-graph-up me-2"></i>Xem biểu đồ
@@ -133,39 +133,62 @@
                         <i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <!-- ✅ CHARTS CONTAINER (Hiện khi bấm "Xem biểu đồ") -->
-                <div class="charts-container" id="charts-container">
-                    <div class="chart-box">
-                        <div class="chart-title">📈 GNSS Displacement (24h)</div>
-                        <div style="height: 200px;">
-                            <canvas id="chart-gnss"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="chart-box">
-                        <div class="chart-title">🌧️ Rain Intensity (24h)</div>
-                        <div style="height: 200px;">
-                            <canvas id="chart-rain"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="chart-box">
-                        <div class="chart-title">🌊 Water Level (24h)</div>
-                        <div style="height: 200px;">
-                            <canvas id="chart-water"></canvas>
-                        </div>
-                    </div>
+    <!-- Biểu đò tách biệt ở giữa màn hình -->
+    <div class="charts-panel" id="charts-panel">
+        <div class="charts-panel-header">
+            <h5><i class="bi bi-graph-up me-2"></i>Biểu đồ 24h</h5>
+            <button class="btn btn-sm btn-outline-light" id="close-charts-btn">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+        
+        <div class="charts-panel-content">
+            <div class="chart-box">
+                <div class="chart-title">📈 GNSS Displacement (24h)</div>
+                <div style="height: 250px;">
+                    <canvas id="chart-gnss"></canvas>
                 </div>
             </div>
 
-            <!-- ✅ LONG-TERM ANALYSIS VIEW (Ẩn mặc định) -->
-            <div id="longterm-view" style="display: none;">
+            <div class="chart-box">
+                <div class="chart-title">🌧️ Rain Intensity (24h)</div>
+                <div style="height: 250px;">
+                    <canvas id="chart-rain"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-box">
+                <div class="chart-title">🌊 Water Level (24h)</div>
+                <div style="height: 250px;">
+                    <canvas id="chart-water"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LONG-TERM ANALYSIS FULLSCREEN -->
+    <div class="longterm-overlay" id="longterm-overlay">
+        <div class="longterm-container">
+            <div class="longterm-header">
+                <div>
+                    <h4><i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn</h4>
+                    <small class="text-muted" id="longterm-station-name">Station Name</small>
+                </div>
+                <button class="btn btn-lg btn-outline-light" id="close-longterm-btn">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+
+            <div class="longterm-content-wrapper">
                 <!-- Loading State -->
                 <div id="longterm-loading" style="display: none;">
                     <div class="text-center my-5">
-                        <div class="spinner-border text-primary mb-3"></div>
-                        <p>Đang phân tích dữ liệu...</p>
+                        <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
+                        <p class="fs-5">Đang phân tích dữ liệu...</p>
                     </div>
                 </div>
 
@@ -188,25 +211,25 @@
 
                     <!-- Main Metrics -->
                     <div class="row g-3 mb-4">
-                        <div class="col-6">
+                        <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
                                 <div class="text-muted small">Vận tốc trung bình</div>
                                 <div class="fs-4 fw-bold text-primary mt-1" id="lt-velocity">-- mm/năm</div>
                             </div>
                         </div>
-                        <div class="col-6">
+                        <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
                                 <div class="text-muted small">Phân loại</div>
                                 <div class="fs-5 fw-bold mt-1" id="lt-classification">--</div>
                             </div>
                         </div>
-                        <div class="col-6">
+                        <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
                                 <div class="text-muted small">Tổng chuyển dịch</div>
                                 <div class="fs-5 fw-bold text-danger mt-1" id="lt-total-disp">-- mm</div>
                             </div>
                         </div>
-                        <div class="col-6">
+                        <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
                                 <div class="text-muted small">Thời gian theo dõi</div>
                                 <div class="fs-5 fw-bold mt-1" id="lt-duration">-- ngày</div>
@@ -214,27 +237,33 @@
                         </div>
                     </div>
 
-                    <!-- Trend Indicator -->
-                    <div class="card mb-3">
-                        <div class="card-body">
-                            <h6 class="card-title">Xu hướng</h6>
-                            <div id="trend-indicator" class="d-flex align-items-center gap-2">
-                                <span id="trend-icon" class="fs-3">❓</span>
-                                <span id="trend-value" class="fs-5 fw-bold">Không xác định</span>
+                    <div class="row g-3">
+                        <!-- Trend Indicator -->
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h6 class="card-title">Xu hướng</h6>
+                                    <div id="trend-indicator" class="d-flex align-items-center gap-2">
+                                        <span id="trend-icon" class="fs-3">❓</span>
+                                        <span id="trend-value" class="fs-5 fw-bold">Không xác định</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Classification Scale -->
+                        <div class="col-md-6">
+                            <div class="chart-box h-100">
+                                <div class="chart-title">📊 Bảng phân loại Cruden & Varnes</div>
+                                <div id="classification-scale"></div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Classification Scale -->
-                    <div class="chart-box mb-3">
-                        <div class="chart-title">📊 Bảng phân loại Cruden & Varnes</div>
-                        <div id="classification-scale"></div>
-                    </div>
-
-                    <!-- Long-term Chart -->
-                    <div class="chart-box">
+                    <!-- Phân tích dài hạn -->
+                    <div class="chart-box mt-3">
                         <div class="chart-title">📈 Biểu đồ chuyển dịch tích lũy</div>
-                        <div style="height: 300px;">
+                        <div style="height: 400px;">
                             <canvas id="chart-longterm"></canvas>
                         </div>
                     </div>
