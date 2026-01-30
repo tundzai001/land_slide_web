@@ -3,7 +3,7 @@
    File: css/map.css
 ===================================================== */
 
-/*  ROOT VARIABLES & RESET  */
+/* ROOT VARIABLES & RESET  */
 :root {
     --sidebar-width: 340px;
     --sidebar-expanded-width: 720px;
@@ -99,6 +99,12 @@ body {
 
 /*  Ẩn toggle button khi sidebar đang mở */
 body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
+}
+
+body:has(.charts-panel.active) .toggle-list-btn {
     opacity: 0;
     pointer-events: none;
     transform: scale(0.8);
@@ -246,7 +252,7 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     text-decoration: none;
 }
 
-/*  DETAIL SIDEBAR*/
+/*  DETAIL SIDEBAR (Right)  */
 .detail-sidebar {
     position: fixed;
     top: 64px;
@@ -421,29 +427,46 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
 .charts-panel {
     position: fixed;
     top: 64px;
-    /* Tính toán: (100vw - sidebar width) / 2 */
-    left: calc((100vw - 420px) / 2);
-    transform: translateX(-50%) translateY(-100%);
-    width: 85%;
-    max-width: 800px;
-    height: calc(100vh - 80px);
+    left: 0;
+    width: calc(100vw - 420px);
+    height: calc(100vh - 64px);
     background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
+    border-right: 1px solid var(--border-color);
     box-shadow: var(--shadow-xl);
     z-index: 1500;
+    transform: translateX(100%);
     opacity: 0;
     pointer-events: none;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
     overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 
 .charts-panel.active {
-    transform: translateX(-50%) translateY(0);
+    transform: translateX(0);   
     opacity: 1;
     pointer-events: all;
+}
+
+/* Overlay backdrop khi charts mở */
+.charts-panel::before {
+    content: '';
+    position: fixed;
+    top: 64px;
+    left: 0;
+    width: 100vw;
+    height: calc(100vh - 64px);
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: -1;
+}
+
+.charts-panel.active::before {
+    opacity: 1;
 }
 
 .charts-panel-header {
@@ -467,13 +490,54 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     color: var(--accent-primary);
 }
 
+/* Nút đóng dạng chevron */
+.charts-panel-header .btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 1.2rem;
+    transition: all 0.3s;
+}
+
+.charts-panel-header .btn:hover {
+    background: var(--accent-primary);
+    color: white;
+    transform: translateX(3px);
+}
+
 .charts-panel-content {
     flex: 1;
     overflow-y: auto;
-    padding: 1.5rem;
+    padding: 2rem;
+    background: var(--bg-primary);
 }
 
-/* === LONG-TERM FULLSCREEN OVERLAY  */
+/* Cải thiện chart boxes */
+.charts-panel .chart-box {
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.charts-panel .chart-box:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.15);
+    transform: translateY(-2px);
+}
+
+.charts-panel .chart-box:last-child {
+    margin-bottom: 0;
+}
+
+/* LONG-TERM FULLSCREEN OVERLAY  */
 .longterm-overlay {
     position: fixed;
     top: 0;
@@ -626,7 +690,7 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     color: var(--text-secondary);
 }
 
-/* RISK BADGE */
+/*  RISK BADGE  */
 .risk-badge {
     padding: 10px;
     border-radius: 8px;
@@ -655,7 +719,7 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     border: 2px solid var(--accent-danger);
 }
 
-/*SEARCH INPUT */
+/*  SEARCH INPUT  */
 #search-station {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -672,7 +736,7 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
 }
 
-/*SCROLLBAR */
+/*  SCROLLBAR  */
 ::-webkit-scrollbar { 
     width: 6px; 
 }
@@ -690,19 +754,19 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     background: var(--accent-secondary);
 }
 
-/*ANIMATIONS*/
+/*  ANIMATIONS  */
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
 }
 
-/* LOADING STATES*/
+/*  LOADING STATES  */
 .spinner-border {
     border-color: var(--border-color);
     border-right-color: var(--accent-primary);
 }
 
-/* TOOLTIPS */
+/*  TOOLTIPS  */
 .leaflet-tooltip {
     background: var(--bg-overlay) !important;
     border: 1px solid var(--border-color) !important;
@@ -722,13 +786,14 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
 }
 
-/* LIGHT MODE */
+/*  LIGHT MODE  */
 [data-theme="light"] .station-item,
 [data-theme="light"] .sensor-item,
 [data-theme="light"] .chart-box {
     background: white;
 }
 
+/*  RESPONSIVE  */
 @media (max-width: 768px) {
     .station-list-sidebar { 
         width: 100%; 
@@ -748,14 +813,8 @@ body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn
     }
     
     .charts-panel {
-        width: 95%;
-        max-width: none;
-        transform: translateX(-50%) translateY(-100%);
-        margin-right: 0;
-    }
-    
-    .charts-panel.active {
-        transform: translateX(-50%) translateY(0);
+        width: 100vw;
+        left: 0;
     }
     
     .longterm-container {
