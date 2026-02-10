@@ -10,14 +10,13 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func, delete
+from sqlalchemy import select, and_, desc, func, delete, text
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mqtt_bridge import MQTTBridge
@@ -987,6 +986,44 @@ async def get_long_term_analysis(
 # ============================================================================
 # DATABASE MANAGEMENT ENDPOINTS (cho Admin Panel)
 # ============================================================================
+
+# ============================================================================
+# STATS API (Đếm tổng số lượng bản ghi thực tế)
+# ============================================================================
+@app.get("/api/admin/db/stats")  #
+async def get_database_stats(
+    config_db: AsyncSession = Depends(get_config_db),
+    data_db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    try:
+        # Đếm Stations
+        count_stations = await config_db.execute(select(func.count()).select_from(model_config.Station))
+        num_stations = count_stations.scalar()
+
+        # Đếm Devices
+        count_devices = await config_db.execute(select(func.count()).select_from(model_config.Device))
+        num_devices = count_devices.scalar()
+
+        # Đếm Sensor Data (Total)
+        count_data = await data_db.execute(select(func.count()).select_from(model_data.SensorData))
+        num_data = count_data.scalar()
+
+        # Đếm Active Alerts (Chưa xử lý)
+        count_alerts = await data_db.execute(
+            select(func.count()).select_from(model_data.Alert).where(model_data.Alert.is_resolved == False)
+        )
+        num_alerts = count_alerts.scalar()
+
+        return {
+            "stations": num_stations,
+            "devices": num_devices,
+            "sensor_data": num_data,
+            "alerts": num_alerts
+        }
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return {"stations": 0, "devices": 0, "sensor_data": 0, "alerts": 0}
 
 @app.get("/api/admin/db/stations")
 async def admin_get_all_stations(

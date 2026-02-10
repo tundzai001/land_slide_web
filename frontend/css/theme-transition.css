@@ -1,0 +1,29 @@
+/* Smooth theme switching */
+body.theme-switching,
+body.theme-switching * {
+    transition: none !important;
+}
+
+/* Re-enable transitions after switch */
+body:not(.theme-switching) {
+    transition: background-color 0.3s ease,
+                color 0.3s ease;
+}
+
+body:not(.theme-switching) * {
+    transition: background-color 0.3s ease,
+                color 0.3s ease,
+                border-color 0.3s ease,
+                box-shadow 0.3s ease;
+}
+
+/* Prevent layout shift during transition */
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+}

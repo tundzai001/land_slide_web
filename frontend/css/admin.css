@@ -3,9 +3,53 @@
    File: frontend/css/admin.css
 ======================================== */
 
+/* Force consistent font rendering and base metrics */
+body, * {
+    font-family: var(--font-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Fix table alignment */
+.table th,
+.table td {
+    vertical-align: middle !important;
+    line-height: 1.5;
+    padding: var(--spacing-md);
+}
+
+/* Fix button alignment */
+.btn {
+    line-height: 1.5;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Fix form inputs */
+.form-control,
+.form-select {
+    line-height: 1.5;
+    height: auto;
+    min-height: 42px;
+}
+
 :root {
     --sidebar-width: 260px;
     --navbar-height: 64px;
+    
+    /* Typography & Spacing Variables */
+    --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Courier New', monospace;
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
 }
 
 body {
@@ -44,8 +88,14 @@ body {
     margin-bottom: 4px;
 }
 
+[data-theme="dark"] .sidebar-brand h4 {
+    background: none;
+    -webkit-text-fill-color: var(--text-primary);
+    color: var(--text-primary) !important;
+}
+
 .sidebar-brand small {
-    color: var(--text-muted);
+    color: var(--text-muted) !important; 
 }
 
 .nav-item {
@@ -156,8 +206,12 @@ body {
 .page-title {
     font-size: 2rem;
     font-weight: 800;
-    color: var(--text-primary);
+    color: var(--text-primary) !important; 
     margin-bottom: 8px;
+}
+
+.page-header p {
+    color: var(--text-secondary) !important; 
 }
 
 /* ========================================
@@ -201,7 +255,7 @@ body {
     border: none;
     padding: 12px 24px;
     border-radius: 10px 10px 0 0;
-    color: var(--text-secondary);
+    color: var(--text-secondary) !important; 
     font-weight: 600;
     transition: all 0.3s;
     background: transparent;
@@ -214,7 +268,7 @@ body {
 
 .main-tabs .nav-link.active {
     background: rgba(14, 165, 233, 0.15);
-    color: var(--accent-primary);
+    color: var(--accent-primary) !important; 
     border-bottom: 3px solid var(--accent-primary);
 }
 
@@ -237,7 +291,8 @@ body {
 }
 
 .table th {
-    color: var(--text-primary);
+    color: var(--text-primary) !important; 
+    background: var(--bg-tertiary);
     text-transform: uppercase;
     font-size: 0.8rem;
     letter-spacing: 0.5px;
@@ -247,18 +302,19 @@ body {
 }
 
 .table td {
-    color: var(--text-primary);
+    color: var(--text-primary) !important; 
     border-bottom: 1px solid var(--border-light);
     vertical-align: middle;
     padding: 16px;
 }
 
 .table tbody tr {
+    background: var(--bg-secondary);
     transition: all 0.2s;
 }
 
 .table tbody tr:hover {
-    background: rgba(14, 165, 233, 0.05);
+    background: var(--bg-tertiary);
 }
 
 /* ========================================
@@ -323,13 +379,13 @@ body {
     border-radius: 16px;
 }
 
-.modal-header,
+.modal-body,
 .modal-footer {
-    border-color: var(--border-color);
+    color: var(--text-primary) !important; 
 }
 
 .modal-title {
-    color: var(--text-primary);
+    color: var(--text-primary) !important; 
     font-weight: 700;
 }
 
@@ -337,7 +393,7 @@ body {
    FORMS
 ======================================== */
 .form-label {
-    color: var(--text-primary);
+    color: var(--text-primary) !important; /* ← THÊM */
     font-weight: 600;
     margin-bottom: 8px;
 }
@@ -583,4 +639,83 @@ body {
     margin: 0;
     font-weight: 700;
     color: var(--text-primary);
+}
+
+[data-theme="dark"] {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] h5,
+[data-theme="dark"] h6 {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] p,
+[data-theme="dark"] span,
+[data-theme="dark"] div,
+[data-theme="dark"] label {
+    color: var(--text-primary) !important;
+}
+
+/* Table trong dark mode */
+[data-theme="dark"] .table thead {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .table th {
+    color: var(--text-primary) !important;
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .table td {
+    color: var(--text-primary) !important;
+    background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .table tbody tr {
+    background: var(--bg-secondary) !important;
+}
+
+[data-theme="dark"] .table tbody tr:hover {
+    background: var(--bg-tertiary) !important;
+}
+
+/* Form elements */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .form-label {
+    color: var(--text-primary) !important;
+}
+
+/* Buttons */
+[data-theme="dark"] .btn {
+    color: inherit;
+}
+
+[data-theme="dark"] .btn-outline-primary {
+    color: var(--accent-primary) !important;
+}
+
+/* Breadcrumb */
+[data-theme="dark"] .breadcrumb-item {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .breadcrumb-item.active {
+    color: var(--text-primary) !important;
+}
+
+/* Cards */
+[data-theme="dark"] .card {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .card-body,
+[data-theme="dark"] .card-header,
+[data-theme="dark"] .card-footer {
+    color: var(--text-primary) !important;
 }

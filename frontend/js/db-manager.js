@@ -1,5 +1,5 @@
 // =====================================================
-// DATABASE MANAGER - THÊM EXPORT EXCEL & XÓA DB
+// DATABASE MANAGER - CSV/ZIP EXPORT & CLEANUP
 // =====================================================
 
 class DatabaseManager {
@@ -51,6 +51,7 @@ class DatabaseManager {
         }
 
         try {
+            // Tải dữ liệu song song
             const [stations, devices, sensorData, alerts] = await Promise.all([
                 this.fetchTable('stations'),
                 this.fetchTable('devices'),
@@ -58,6 +59,7 @@ class DatabaseManager {
                 this.fetchTable('alerts')
             ]);
 
+            // Gộp dữ liệu và đánh dấu bảng nguồn (_table)
             this.allData = [
                 ...stations.map(s => ({ ...s, _table: 'stations' })),
                 ...devices.map(d => ({ ...d, _table: 'devices' })),
@@ -65,12 +67,8 @@ class DatabaseManager {
                 ...alerts.map(a => ({ ...a, _table: 'alerts' }))
             ];
 
-            this.updateStats({
-                stations: stations.length,
-                devices: devices.length,
-                sensor_data: sensorData.length,
-                alerts: alerts.filter(a => !a.is_resolved).length
-            });
+            // Cập nhật số liệu thống kê từ server (nhanh, chính xác)
+            this.fetchStats();
 
             this.applyFilter();
 
@@ -211,6 +209,24 @@ class DatabaseManager {
         document.getElementById('stat-alerts').textContent = stats.alerts;
     }
 
+    async fetchStats() {
+        try {
+            const res = await fetch('/api/admin/db/stats', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) {
+                console.warn('⚠️ Failed to fetch DB stats:', res.status);
+                return;
+            }
+
+            const stats = await res.json();
+            this.updateStats(stats);
+        } catch (e) {
+            console.warn('❌ Error fetching DB stats:', e);
+        }
+    }
+
     viewRecord(table, id) {
         const record = this.allData.find(r => r._table === table && r.id === id);
         if (!record) return;
@@ -290,13 +306,17 @@ class DatabaseManager {
         }
     }
 
-    // ✅ EXPORT RA EXCEL - BƯỚC 1: Hiện Modal Chọn Bảng
+    // =========================================================================
+    // EXPORT EXCEL/CSV & ZIP LOGIC (UPDATED)
+    // =========================================================================
+
+    // Hiện Modal Chọn Bảng
     exportToExcel() {
         const modal = new bootstrap.Modal(document.getElementById('exportExcelModal'));
         modal.show();
     }
     
-    // ✅ QUICK SELECT FUNCTIONS
+    // Quick Select Functions
     selectAllExport() {
         ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
             const checkbox = document.getElementById(`export-${table}`);
@@ -312,28 +332,26 @@ class DatabaseManager {
     }
     
     selectOnlyData() {
-        // Bỏ chọn tất cả
         this.deselectAllExport();
         // Chỉ chọn Sensor Data và Alerts
         document.getElementById('export-sensor-data').checked = true;
         document.getElementById('export-alerts').checked = true;
     }
     
-    // ✅ EXPORT RA EXCEL - BƯỚC 2: Xử Lý Export
+    // ✅ HÀM NÀY ĐÃ ĐƯỢC SỬA ĐỂ GỌI API /export-csv VÀ TẢI FILE ZIP
     async confirmExportExcel() {
         try {
             // Lấy các bảng được chọn
-            const selectedTables = [];
+            const tables = [];
+            if (document.getElementById('export-projects')?.checked) tables.push('projects');
+            if (document.getElementById('export-stations')?.checked) tables.push('stations');
+            if (document.getElementById('export-devices')?.checked) tables.push('devices');
+            if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
+            if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
             
-            if (document.getElementById('export-projects')?.checked) selectedTables.push('projects');
-            if (document.getElementById('export-stations')?.checked) selectedTables.push('stations');
-            if (document.getElementById('export-devices')?.checked) selectedTables.push('devices');
-            if (document.getElementById('export-sensor-data')?.checked) selectedTables.push('sensor_data');
-            if (document.getElementById('export-alerts')?.checked) selectedTables.push('alerts');
-            
-            // Kiểm tra có chọn bảng nào không
-            if (selectedTables.length === 0) {
-                window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng để export!');
+            // Kiểm tra
+            if (tables.length === 0) {
+                window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng!');
                 return;
             }
             
@@ -341,32 +359,35 @@ class DatabaseManager {
             const modal = bootstrap.Modal.getInstance(document.getElementById('exportExcelModal'));
             if (modal) modal.hide();
             
-            // Hiển thị toast đang xử lý
-            window.toast?.info('⏳ Đang tạo file Excel... Vui lòng chờ!', 0);
+            window.toast?.info('⏳ Đang tạo file CSV & nén ZIP... Vui lòng chờ!', 0);
             
-            // Gọi API với danh sách bảng được chọn
-            const res = await fetch('/api/admin/db/export-excel', {
+            // ✅ GỌI API MỚI: export-csv
+            const res = await fetch('/api/admin/db/export-csv', {
                 method: 'POST',
                 headers: { 
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ tables: selectedTables })
+                body: JSON.stringify({ tables: tables })
             });
             
             if (!res.ok) throw new Error('Export failed');
             
-            // Download file
+            // ✅ XỬ LÝ DOWNLOAD FILE ZIP
             const blob = await res.blob();
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `landslide_db_${Date.now()}.xlsx`;
-            link.click();
             
+            // Đặt tên file là .zip
+            link.download = `landslide_backup_${Date.now()}.zip`;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             URL.revokeObjectURL(url);
             
-            window.toast?.success(`✅ Export thành công ${selectedTables.length} bảng!`, 3000);
+            window.toast?.success(`✅ Đã tải xuống file ZIP chứa ${tables.length} bảng CSV!`, 5000);
             
         } catch (e) {
             console.error('❌ Export error:', e);
@@ -374,57 +395,80 @@ class DatabaseManager {
         }
     }
 
-    // ✅ XÓA SẠCH DATABASE - BƯỚC 1: Hiện Modal
+    // =========================================================================
+    // CLEAR DATABASE LOGIC
+    // =========================================================================
+
     clearDatabase() {
-        // Reset input và error
+        // Reset input and error UI if modal exists
         const input = document.getElementById('clear-db-confirm-input');
         const error = document.getElementById('clear-db-error');
-        
+
         if (input) input.value = '';
         if (error) error.style.display = 'none';
-        
-        // Hiện modal
-        const modal = new bootstrap.Modal(document.getElementById('clearDatabaseModal'));
-        modal.show();
-        
-        // Focus vào input
-        setTimeout(() => {
-            if (input) input.focus();
-        }, 500);
+
+        const modalEl = document.getElementById('clearDatabaseModal');
+        if (modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+
+            // focus input for convenience
+            setTimeout(() => { if (input) input.focus(); }, 300);
+            return;
+        }
+
+        // Fallback: simple confirm if no modal present
+        if (confirm('⚠️ CẢNH BÁO: Bạn có chắc muốn xóa dữ liệu?')) {
+            this.performClear();
+        }
     }
-    
-    // ✅ XÓA SẠCH DATABASE - BƯỚC 2: Xác nhận
+
     async confirmClearDatabase() {
         const input = document.getElementById('clear-db-confirm-input');
-        const error = document.getElementById('clear-db-error');
-        const errorMsg = document.getElementById('clear-db-error-message');
-        
         const confirmText = input?.value.trim();
         
-        // Kiểm tra cú pháp
-        if (confirmText !== 'XOA TAT CA') {
-            if (error && errorMsg) {
-                errorMsg.textContent = `Sai cú pháp! Bạn gõ: "${confirmText}" - Cần gõ chính xác: XOA TAT CA`;
-                error.style.display = 'block';
-            }
-            
-            // Shake animation cho input
-            if (input) {
-                input.style.animation = 'shake 0.5s';
-                setTimeout(() => input.style.animation = '', 500);
-            }
-            
-            window.toast?.warning('⚠️ Cú pháp không đúng!');
+        let apiEndpoint = '';
+
+        // 1. Xóa dữ liệu (Giữ trạm)
+        if (confirmText === 'XOA DATA') {
+            apiEndpoint = '/api/admin/db/clear-all';
+        } 
+        // 2. Xóa TẤT CẢ (Về ID 1)
+        else if (confirmText === 'FACTORY RESET') {
+            apiEndpoint = '/api/admin/db/factory-reset';
+        } 
+        else {
+            window.toast?.warning('⚠️ Cú pháp sai! Nhập "XOA DATA" hoặc "FACTORY RESET"');
             return;
         }
         
         try {
-            // Đóng modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('clearDatabaseModal'));
             if (modal) modal.hide();
             
-            // Hiển thị toast đang xử lý
-            window.toast?.warning('⏳ Đang xóa database... Vui lòng chờ!', 0);
+            window.toast?.warning('⏳ Đang xử lý...', 0);
+            
+            const res = await fetch(apiEndpoint, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            
+            if (!res.ok) throw new Error('Failed');
+            
+            const result = await res.json();
+            window.toast?.success(`✅ ${result.message}`, 5000);
+            
+            this.loadAllData(); // Reload lại bảng
+            
+        } catch (e) {
+            console.error(e);
+            window.toast?.error('Lỗi: ' + e.message);
+        }
+    }
+
+    async performClear() {
+        try {
+            window.toast?.warning('⏳ Đang xóa database...', 0);
             
             const res = await fetch('/api/admin/db/clear-all', {
                 method: 'POST',
@@ -434,16 +478,11 @@ class DatabaseManager {
             if (!res.ok) throw new Error('Clear failed');
             
             const result = await res.json();
-            
-            // Thành công
-            window.toast?.success(`✅ Đã xóa ${result.deleted_count.toLocaleString()} records!`, 5000);
-            
-            // Reload data
+            window.toast?.success(`✅ ${result.message || 'Đã xóa dữ liệu'}`);
             this.loadAllData();
             
         } catch (e) {
-            console.error('❌ Clear error:', e);
-            window.toast?.error('❌ Lỗi xóa database: ' + e.message);
+            window.toast?.error('Lỗi: ' + e.message);
         }
     }
 

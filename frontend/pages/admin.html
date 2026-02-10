@@ -9,6 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     
     <link rel="stylesheet" href="/css/theme-variables.css">
+    <link rel="stylesheet" href="/css/theme-transition.css">
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/admin.css">
 </head>
@@ -1185,6 +1186,68 @@
     background: linear-gradient(135deg, #10b981 0%, #059669 100%);
 }
 </style>
+
+
+<!-- ============================================
+     MODAL XÓA DATABASE (BẢO MẬT CAO)
+============================================ -->
+<div class="modal fade" id="clearDatabaseModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-danger">
+            <!-- Header màu đỏ cảnh báo -->
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>VÙNG NGUY HIỂM
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="alert alert-warning border-warning">
+                    <i class="bi bi-radioactive me-2"></i>
+                    <strong>Cảnh báo:</strong> Hành động này không thể hoàn tác!
+                </div>
+                
+                <p class="mb-2">Để xác nhận, vui lòng nhập chính xác lệnh tương ứng:</p>
+                
+                <div class="bg-light p-3 rounded border mb-3">
+                    <div class="d-flex align-items-center mb-2">
+                        <code class="fs-6 fw-bold text-dark me-2">XOA DATA</code>
+                        <span class="text-muted small">→ Xóa dữ liệu cảm biến (Sensor Data & Alerts). Giữ lại cấu hình Trạm/Thiết bị.</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <code class="fs-6 fw-bold text-danger me-2">FACTORY RESET</code>
+                        <span class="text-muted small">→ Xóa TRẮNG toàn bộ hệ thống (Project, Station, Device, Data...). Về trạng thái mới cài.</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label small text-muted">Nhập lệnh xác nhận:</label>
+                    <input type="text" class="form-control form-control-lg border-danger text-danger fw-bold" 
+                           id="clear-db-confirm-input" 
+                           placeholder="Ví dụ: XOA DATA" 
+                           autocomplete="off"
+                           style="letter-spacing: 1px;">
+                </div>
+
+                <!-- Thông báo lỗi khi nhập sai -->
+                <div id="clear-db-error" class="text-danger small fw-bold mt-2" style="display: none; animation: fadeIn 0.3s;">
+                    <i class="bi bi-x-circle-fill me-1"></i> <span id="clear-db-error-message">Sai cú pháp!</span>
+                </div>
+            </div>
+            
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-lg me-1"></i> Hủy bỏ
+                </button>
+                <!-- Nút này gọi hàm confirmClearDatabase trong JS -->
+                <button type="button" class="btn btn-danger" onclick="window.dbManager.confirmClearDatabase()">
+                    <i class="bi bi-trash3-fill me-1"></i> XÁC NHẬN XÓA
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
