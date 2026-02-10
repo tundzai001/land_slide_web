@@ -63,6 +63,11 @@ body::before {
     text-align: center;
     position: relative;
     z-index: 1;
+    /* Prevent shift */
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .hero-title {
@@ -98,6 +103,12 @@ body::before {
     overflow: hidden;
     transition: all var(--transition-base);
     box-shadow: var(--shadow-sm);
+}
+
+.feature-card {
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
 }
 
 .feature-card::before {
@@ -138,6 +149,7 @@ body::before {
     position: relative;
     z-index: 1;
     color: var(--accent-primary);
+    flex-shrink: 0; /* Prevent shrinking */
 }
 
 .feature-card:hover .icon-wrapper {
@@ -234,4 +246,22 @@ body::before {
     background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
                                 rgba(14, 165, 233, 0.2) 0%, 
                                 transparent 50%);
+}
+
+/* ========================================
+   DARK MODE TEXT FIX
+======================================== */
+[data-theme="dark"] .hero-title {
+    background: var(--gradient-hero);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+[data-theme="dark"] .hero-subtitle,
+[data-theme="dark"] .feature-card p {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .feature-card h3 {
+    color: var(--text-primary) !important;
 }

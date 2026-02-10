@@ -26,24 +26,30 @@ class ThemeManager {
     }
 
     applyTheme(theme) {
-        // Add switching class to prevent flicker
+        console.log('🎨 Switching to:', theme);
+
+        // Add transition class BEFORE changing theme
         document.body.classList.add('theme-switching');
-        
+
+        // Force layout calculation to ensure transition is applied
+        void document.body.offsetHeight;
+
         // Apply theme
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
         this.theme = theme;
-        
-        // Update button icon
+
+        // Update icons and favicon
         this.updateToggleIcon();
         this.updateFavicon();
-        
-        // Remove switching class after transition
+
+        // Remove transition class after completion (slightly longer for smoothness)
         setTimeout(() => {
             document.body.classList.remove('theme-switching');
-        }, 50);
+            console.log('✅ Theme applied:', theme);
+        }, 100);
 
-        // Dispatch event for other components
+        // Dispatch event
         window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme } }));
     }
 
