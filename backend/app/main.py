@@ -399,24 +399,43 @@ async def get_stations_by_project(
     )
     stations = result.scalars().all()
     
-    #Tính status động cho từng trạm
+    # Tính status động cho từng trạm
     current_time = int(time.time())
-    OFFLINE_THRESHOLD = 60
     
     stations_with_status = []
     for station in stations:
-        latest_data_result = await db_data.execute(
-            select(model_data.SensorData)
-            .where(model_data.SensorData.station_id == station.id)
-            .order_by(desc(model_data.SensorData.timestamp))
-            .limit(1)
+        # Lấy danh sách devices của trạm
+        devices_result = await db_config.execute(
+            select(model_config.Device).where(model_config.Device.station_id == station.id)
         )
-        latest_data = latest_data_result.scalar_one_or_none()
+        devices = devices_result.scalars().all()
         
-        if latest_data and (current_time - latest_data.timestamp) < OFFLINE_THRESHOLD:
-            computed_status = "online"
-        else:
-            computed_status = "offline"
+        # Kiểm tra status cho từng sensor type
+        station_online = False
+        
+        for device in devices:
+            sensor_type = device.device_type
+            threshold = get_offline_threshold(station.config, sensor_type)
+            
+            latest_data_result = await db_data.execute(
+                select(model_data.SensorData)
+                .where(
+                    and_(
+                        model_data.SensorData.station_id == station.id,
+                        model_data.SensorData.sensor_type == sensor_type
+                    )
+                )
+                .order_by(desc(model_data.SensorData.timestamp))
+                .limit(1)
+            )
+            latest_data = latest_data_result.scalar_one_or_none()
+            
+            # Nếu có ít nhất 1 sensor online -> station online
+            if latest_data and (current_time - latest_data.timestamp) < threshold:
+                station_online = True
+                break
+        
+        computed_status = "online" if station_online else "offline"
         
         stations_with_status.append({
             "id": station.id,
@@ -704,37 +723,71 @@ async def delete_device(
 # ============================================================================
 # STATION DATA ENDPOINTS 
 # ============================================================================
-
 @app.get("/api/stations")
 async def get_stations(
-    db_config: AsyncSession = Depends(get_config_db)
+    db_config: AsyncSession = Depends(get_config_db),
+    db_data: AsyncSession = Depends(get_data_db)
 ):
     """
-    ✅ Trả về danh sách tất cả các trạm
-    ✅ OPTIMIZED: Loại bỏ vòng lặp query - MQTT Bridge đã cập nhật status trực tiếp vào bảng Station
+    ✅ Trả về danh sách tất cả các trạm với offline threshold tùy chỉnh
     """
     try:
-        # ✅ BOOST 1: Chỉ lấy thông tin từ bảng Station (Bridge đã lo việc update status)
         result = await db_config.execute(select(model_config.Station))
         stations = result.scalars().all()
         
-        return [
-            {
-                "id": s.id,
-                "station_code": s.station_code,
-                "name": s.name,
-                "location": s.location,
-                "status": s.status,         # Bridge đã cập nhật cái này rồi
-                "last_update": s.last_update, 
-                "risk_level": "LOW"         # Frontend sẽ update màu qua WebSocket realtime
-            }
-            for s in stations
-        ]
+        current_time = int(time.time())
+        
+        stations_with_status = []
+        for station in stations:
+            # Lấy danh sách devices của trạm
+            devices_result = await db_config.execute(
+                select(model_config.Device).where(model_config.Device.station_id == station.id)
+            )
+            devices = devices_result.scalars().all()
+            
+            # Kiểm tra status cho từng sensor type
+            station_online = False
+            
+            for device in devices:
+                sensor_type = device.device_type
+                threshold = get_offline_threshold(station.config, sensor_type)
+                
+                # Lấy dữ liệu mới nhất của sensor này
+                latest_data_result = await db_data.execute(
+                    select(model_data.SensorData)
+                    .where(
+                        and_(
+                            model_data.SensorData.station_id == station.id,
+                            model_data.SensorData.sensor_type == sensor_type
+                        )
+                    )
+                    .order_by(desc(model_data.SensorData.timestamp))
+                    .limit(1)
+                )
+                latest_data = latest_data_result.scalar_one_or_none()
+                
+                # Nếu có ít nhất 1 sensor online -> station online
+                if latest_data and (current_time - latest_data.timestamp) < threshold:
+                    station_online = True
+                    break
+            
+            stations_with_status.append({
+                "id": station.id,
+                "station_code": station.station_code,
+                "name": station.name,
+                "location": station.location,
+                "status": "online" if station_online else "offline",
+                "last_update": station.last_update, 
+                "risk_level": "LOW"
+            })
+        
+        return stations_with_status
         
     except Exception as e:
         logger.error(f"Error loading stations: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 @app.get("/api/stations/{station_id}/detail")
 async def get_station_detail(
     station_id: int,
@@ -761,8 +814,9 @@ async def get_station_detail(
         cutoff_time = int(time.time()) - 86400  # 24h ago
         
         sensor_data = {}
-        has_recent_data = False  # ✅ Flag để check có dữ liệu gần đây không
-        latest_data_timestamp = 0  
+        has_recent_data = False
+        latest_data_timestamp = 0
+        station_online = False  # Flag để kiểm tra trạm có online không
         
         for device in devices:
             sensor_type = device.device_type
@@ -781,13 +835,18 @@ async def get_station_detail(
             )
             latest = latest_result.scalar_one_or_none()
             
-            # ✅ Check xem có dữ liệu gần đây không
-            if latest and latest.timestamp >= cutoff_time:
+            # ✅ Lấy offline threshold riêng cho sensor này
+            threshold = get_offline_threshold(station.config, sensor_type)
+            current_time = int(time.time())
+            
+            # Check xem sensor này có online không
+            if latest and (current_time - latest.timestamp) < threshold:
+                station_online = True  # Chỉ cần 1 sensor online là trạm online
                 has_recent_data = True
                 if latest.timestamp > latest_data_timestamp:
                     latest_data_timestamp = latest.timestamp
             
-            # ✅ BOOST 2: Lấy lịch sử 24h nhưng giới hạn số lượng (500 điểm đủ đẹp cho biểu đồ)
+            # Lấy lịch sử 24h
             history_result = await db_data.execute(
                 select(model_data.SensorData)
                 .where(
@@ -809,18 +868,12 @@ async def get_station_detail(
                         "timestamp": h.timestamp,
                         "data": h.data
                     }
-                    for h in reversed(history)  # Đảo ngược để cũ → mới
+                    for h in reversed(history)
                 ]
             }
         
-        # ✅ 3.5. Tính toán status động dựa trên dữ liệu
-        current_time = int(time.time())
-        OFFLINE_THRESHOLD = 300  # 5 phút không có dữ liệu = offline
-        
-        if has_recent_data and (current_time - latest_data_timestamp) < OFFLINE_THRESHOLD:
-            computed_status = "online"
-        else:
-            computed_status = "offline"
+        # ✅ Tính status dựa trên offline threshold tùy chỉnh
+        computed_status = "online" if station_online else "offline"
         
         # 4. Tính risk assessment
         risk_assessment = await _calculate_station_risk_assessment(db_data, station_id)
@@ -831,8 +884,8 @@ async def get_station_detail(
             "station_code": station.station_code,
             "name": station.name,
             "location": station.location,
-            "status": computed_status,  # ✅ FIXED: Dùng status tính toán động
-            "last_update": latest_data_timestamp if has_recent_data else station.last_update,  # ✅ Update với timestamp thật
+            "status": computed_status,
+            "last_update": latest_data_timestamp if has_recent_data else station.last_update,
             "config": station.config,
             "sensors": sensor_data,
             "risk_assessment": risk_assessment
@@ -1305,6 +1358,26 @@ app.mount("/", StaticFiles(directory="../frontend", html=True), name="static")
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+def get_offline_threshold(station_config: dict, sensor_type: str) -> int:
+    """
+    Lấy offline threshold từ config của station cho từng loại sensor
+    Args:
+        station_config: Dictionary config của station
+        sensor_type: Loại sensor ('gnss', 'rain', 'water', 'imu')
+    Returns:
+        Thời gian offline threshold (giây)
+    Mặc định:
+        - gnss: 300s (5 phút)
+        - rain: 300s (5 phút)  
+        - water: 300s (5 phút)
+        - imu: 300s (5 phút)
+    """
+    if not station_config:
+        return 60
+    
+    offline_config = station_config.get('offline_thresholds', {})
+    return offline_config.get(sensor_type, 60)
+
 async def _calculate_station_risk_simple(db_data: AsyncSession, station_id: int) -> str:
     try:
         result = await db_data.execute(
