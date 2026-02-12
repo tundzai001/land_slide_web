@@ -41,6 +41,28 @@
         </div>
     </nav>
 
+    <!-- ALERT BANNER - Hiển thị cảnh báo giữa màn hình -->
+    <div class="alert-banner" id="alert-banner">
+        <div class="alert-banner-content">
+            <div class="alert-icon">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <div class="alert-details">
+                <h4 class="alert-title" id="alert-title">CẢNH BÁO NGUY HIỂM!</h4>
+                <p class="alert-station" id="alert-station">Trạm: Loading...</p>
+                <p class="alert-message" id="alert-message">Message...</p>
+            </div>
+            <div class="alert-actions">
+                <button class="btn-alert-follow" id="btn-alert-follow">
+                    <i class="bi bi-geo-alt-fill me-1"></i> Theo dõi
+                </button>
+                <button class="btn-alert-dismiss" id="btn-alert-dismiss">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <button class="toggle-list-btn" id="toggle-list-btn">
         <i class="bi bi-list"></i>
     </button>
@@ -152,25 +174,34 @@
         </div>
         
         <div class="charts-panel-content">
-            <div class="chart-box">
+            <!-- GNSS Chart -->
+            <div class="chart-box" id="chart-box-gnss">
                 <div class="chart-title">📈 GNSS Displacement (24h)</div>
                 <div style="height: 250px;">
                     <canvas id="chart-gnss"></canvas>
                 </div>
             </div>
 
-            <div class="chart-box">
+            <!-- Rain Chart -->
+            <div class="chart-box" id="chart-box-rain">
                 <div class="chart-title">🌧️ Rain Intensity (24h)</div>
                 <div style="height: 250px;">
                     <canvas id="chart-rain"></canvas>
                 </div>
             </div>
 
-            <div class="chart-box">
+            <!-- Water Chart -->
+            <div class="chart-box" id="chart-box-water">
                 <div class="chart-title">🌊 Water Level (24h)</div>
                 <div style="height: 250px;">
                     <canvas id="chart-water"></canvas>
                 </div>
+            </div>
+            
+            <!-- Empty State -->
+            <div class="text-center py-5" id="charts-empty-state" style="display: none;">
+                <i class="bi bi-inbox fs-1 text-muted"></i>
+                <p class="text-muted mt-2">Chưa có dữ liệu biểu đồ</p>
             </div>
         </div>
     </div>

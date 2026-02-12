@@ -117,6 +117,11 @@ function handleRealtimeUpdate(message) {
             setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
         }
     }
+    
+    // ✅ XỬ LÝ CẢNH BÁO MỚI
+    if (message.type === 'alert') {
+        showAlertBanner(message);
+    }
 }
 
 function updateRealtimeSensorValues(message) {
@@ -636,9 +641,74 @@ function updateSidebarUI(data) {
 function renderCharts(data) {
     if (!data.sensors) return;
     
-    renderChart('chart-gnss', data.sensors.gnss?.history, 'total_displacement_mm', '#fa5252', 'Displacement');
-    renderChart('chart-rain', data.sensors.rain?.history, 'intensity_mm_h', '#06b6d4', 'Intensity');
-    renderChart('chart-water', data.sensors.water?.history, 'water_level', '#10b981', 'Level');
+    console.log('📊 [CHARTS] Rendering charts for available sensors...');
+    
+    // ✅ Chỉ render biểu đồ cho thiết bị có dữ liệu
+    const chartConfigs = [];
+    
+    // GNSS
+    if (data.sensors.gnss?.history && data.sensors.gnss.history.length > 0) {
+        chartConfigs.push({
+            id: 'chart-gnss',
+            history: data.sensors.gnss.history,
+            key: 'total_displacement_mm',
+            color: '#fa5252',
+            label: 'Displacement (mm)',
+            title: '📈 GNSS Displacement (24h)'
+        });
+    }
+    
+    // Rain
+    if (data.sensors.rain?.history && data.sensors.rain.history.length > 0) {
+        chartConfigs.push({
+            id: 'chart-rain',
+            history: data.sensors.rain.history,
+            key: 'intensity_mm_h',
+            color: '#06b6d4',
+            label: 'Intensity (mm/h)',
+            title: '🌧️ Rain Intensity (24h)'
+        });
+    }
+    
+    // Water
+    if (data.sensors.water?.history && data.sensors.water.history.length > 0) {
+        chartConfigs.push({
+            id: 'chart-water',
+            history: data.sensors.water.history,
+            key: 'water_level',
+            color: '#10b981',
+            label: 'Level (m)',
+            title: '🌊 Water Level (24h)'
+        });
+    }
+    
+    // ✅ Ẩn các chart box không có dữ liệu
+    const allChartIds = ['chart-box-gnss', 'chart-box-rain', 'chart-box-water'];
+    const activeChartBoxIds = chartConfigs.map(c => `chart-box-${c.id.split('-')[1]}`);
+    
+    allChartIds.forEach(chartBoxId => {
+        const chartBox = document.getElementById(chartBoxId);
+        if (chartBox) {
+            if (activeChartBoxIds.includes(chartBoxId)) {
+                chartBox.style.display = 'block';
+            } else {
+                chartBox.style.display = 'none';
+            }
+        }
+    });
+    
+    // Render các biểu đồ có dữ liệu
+    chartConfigs.forEach(config => {
+        renderChart(
+            config.id,
+            config.history,
+            config.key,
+            config.color,
+            config.label
+        );
+    });
+    
+    console.log(`✅ [CHARTS] Rendered ${chartConfigs.length} charts`);
 }
 
 function renderChart(id, history, key, color, label) {
@@ -871,11 +941,103 @@ function filterStations(searchTerm) {
     });
 }
 
+// =========================================================================
+// ALERT BANNER SYSTEM
+// =========================================================================
+
+let currentAlertStationId = null;
+
+function showAlertBanner(alertData) {
+    const banner = document.getElementById('alert-banner');
+    if (!banner) return;
+    
+    // Cập nhật nội dung
+    document.getElementById('alert-title').textContent = 
+        `⚠️ ${alertData.level.toUpperCase()} ALERT!`;
+    
+    document.getElementById('alert-station').textContent = 
+        `Trạm: ${alertData.station_name} (${alertData.station_code})`;
+    
+    document.getElementById('alert-message').textContent = 
+        alertData.message || 'Phát hiện bất thường!';
+    
+    // Lưu station ID
+    currentAlertStationId = alertData.station_id;
+    
+    // Hiển thị banner
+    banner.classList.add('show');
+    
+    // Phát âm thanh cảnh báo (optional)
+    playAlertSound();
+    
+    // Tự động ẩn sau 15 giây
+    setTimeout(() => {
+        banner.classList.remove('show');
+    }, 15000);
+}
+
+function playAlertSound() {
+    try {
+        // Tạo beep sound đơn giản
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+        console.warn('⚠️ [ALERT] Sound not available:', e);
+    }
+}
+
+// Setup event listeners cho Alert Banner
+document.addEventListener('DOMContentLoaded', () => {
+    // Nút "Theo dõi"
+    const btnFollow = document.getElementById('btn-alert-follow');
+    if (btnFollow) {
+        btnFollow.addEventListener('click', () => {
+            if (currentAlertStationId) {
+                // Ẩn banner
+                document.getElementById('alert-banner').classList.remove('show');
+                
+                // Zoom vào trạm
+                selectStation(currentAlertStationId);
+                
+                // Nếu có marker, zoom vào nó
+                if (markers[currentAlertStationId]) {
+                    map.flyTo(markers[currentAlertStationId].getLatLng(), 16, {
+                        duration: 1.5
+                    });
+                }
+            }
+        });
+    }
+    
+    // Nút "Đóng"
+    const btnDismiss = document.getElementById('btn-alert-dismiss');
+    if (btnDismiss) {
+        btnDismiss.addEventListener('click', () => {
+            document.getElementById('alert-banner').classList.remove('show');
+        });
+    }
+});
+
 window.mapManager = {
     loadLongTermAnalysis,
     safeNumber,
     updateRealtimeSensorValues,
     updateSidebarUI,
+    showAlertBanner,
+    playAlertSound,
     charts
 };
 

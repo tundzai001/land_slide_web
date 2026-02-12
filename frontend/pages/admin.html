@@ -985,7 +985,7 @@
                     <i class="bi bi-x-circle me-1"></i> Hủy
                 </button>
                 <button class="btn btn-danger flex-1" onclick="window.systemManager.verifyPassword()">
-                    <i class="bi bi-unlock me-1"></i> Xác nhận
+                    <i class="bi bi-shield-lock-fill me-1"></i> Xác nhận
                 </button>
             </div>
             
@@ -1248,6 +1248,22 @@
         </div>
     </div>
 </div>
+
+<script>
+// Hàm toggle hiển thị mật khẩu
+function togglePasswordVisibility(inputId) {
+    const input = document.getElementById(inputId);
+    const button = input.nextElementSibling.querySelector('i');
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        button.className = 'bi bi-eye-slash';
+    } else {
+        input.type = 'password';
+        button.className = 'bi bi-eye';
+    }
+}
+</script>
 
 </body>
 </html>
