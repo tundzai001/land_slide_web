@@ -16,6 +16,8 @@ class SensorData(BaseData):
     value_1 = Column(Float, nullable=True)  # VD: water_level, rainfall_mm
     value_2 = Column(Float, nullable=True)  # VD: intensity_mm_h, speed_2d
     value_3 = Column(Float, nullable=True)  # VD: total_displacement_mm
+    value_4 = Column(Float, nullable=True)  # Total Accel (Shock)
+    value_5 = Column(Float, nullable=True)  # Battery / Signal
 
 class Alert(BaseData):
     __tablename__ = "alerts"
