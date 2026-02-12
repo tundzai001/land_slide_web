@@ -244,10 +244,15 @@ class LandslideAnalyzer:
                         
                         message = f"🚨 CỰC KỲ NGUY HIỂM: {velocity_mms:.2f} mm/s ({velocity_class})" if current_level == "CRITICAL" else f"⚠️ Tốc độ nhanh: {velocity_mms:.4f} mm/s ({velocity_class})"
                         
+                        audio_code = "gnss_warning"
+                        if current_level == "CRITICAL":
+                            audio_code = "gnss_critical"
+                        
                         return {
                             "level": current_level,
                             "category": "gnss_velocity",
                             "message": message,
+                            "audio_code": audio_code,
                             "details": {
                                 "velocity_mm_s": velocity_mms,
                                 "classification": velocity_class,
@@ -302,7 +307,10 @@ class LandslideAnalyzer:
                     counter_info['count'] += 1
                     if counter_info['count'] >= confirm_steps:
                         logger.warning(f"🌧️ [RAIN-{station_id}] ✅ CONFIRMED {current_level}")
-                        return {"level": current_level, "category": "rainfall", "message": f"Mưa lớn: {intensity:.1f}mm/h", "details": {"val": intensity}}
+                        audio_code = "rain_warning"
+                        if current_level == "CRITICAL":
+                            audio_code = "rain_critical"
+                        return {"level": current_level, "category": "rainfall", "message": f"Mưa lớn: {intensity:.1f}mm/h", "audio_code": audio_code, "details": {"val": intensity}}
                     return None
             else:
                 counter_info['count'] = max(0, counter_info['count'] - 1)
@@ -339,7 +347,10 @@ class LandslideAnalyzer:
                     counter_info['count'] += 1
                     if counter_info['count'] >= confirm_steps:
                         logger.warning(f"💧 [WATER-{station_id}] ✅ CONFIRMED {current_level}")
-                        return {"level": current_level, "category": "water_level", "message": f"Nước cao: {val:.2f}m", "details": {"val": val}}
+                        audio_code = "water_warning"
+                        if current_level == "CRITICAL":
+                            audio_code = "water_critical"
+                        return {"level": current_level, "category": "water_level", "message": f"Nước cao: {val:.2f}m", "audio_code": audio_code, "details": {"val": val}}
                     return None
             else:
                 counter_info['count'] = max(0, counter_info['count'] - 1)
@@ -369,13 +380,13 @@ class LandslideAnalyzer:
                     counter_info['last_level'] = "CRITICAL"
                     if confirm_steps == 1:  # Shock thường báo ngay
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED SHOCK")
-                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "details": {"val": accel}}
+                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "audio_code": "imu_shock", "details": {"val": accel}}
                     return None
                 else:
                     counter_info['count'] += 1
                     if counter_info['count'] >= confirm_steps:
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED SHOCK after {confirm_steps} times")
-                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "details": {"val": accel}}
+                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "audio_code": "imu_shock", "details": {"val": accel}}
                     return None
             else:
                 counter_info['count'] = max(0, counter_info['count'] - 1)

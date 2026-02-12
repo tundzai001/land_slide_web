@@ -66,12 +66,10 @@ class GNSSOrigin(BaseConfig):
     rotation_matrix = Column(JSON, nullable=True)
     ecef_origin = Column(JSON, nullable=True)
 
-# ✅ THÊM CLASS NÀY ĐỂ FIX LỖI
 class GlobalConfig(BaseConfig):
     __tablename__ = "global_configs"
-    
     id = Column(Integer, primary_key=True)
-    key = Column(String(50), unique=True, index=True, nullable=False) # VD: "system_password", "main_config"
-    value = Column(JSON, nullable=False) # Lưu giá trị (string hoặc JSON object)
+    key = Column(String(50), unique=True, index=True, nullable=False) 
+    value = Column(JSON, nullable=False) 
     updated_at = Column(BigInteger, nullable=False)
     updated_by = Column(String, nullable=True)

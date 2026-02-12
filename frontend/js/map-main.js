@@ -121,6 +121,9 @@ function handleRealtimeUpdate(message) {
     // ✅ XỬ LÝ CẢNH BÁO MỚI
     if (message.type === 'alert') {
         showAlertBanner(message);
+        
+        // 🔊 KÍCH HOẠT ÂM THANH (Phát siren.mp3 từ Backend)
+        playSiren();
     }
 }
 
@@ -976,6 +979,16 @@ function showAlertBanner(alertData) {
     }, 15000);
 }
 
+function playSiren() {
+    try {
+        // 🔊 Phát file siren.mp3 từ backend
+        const sirenAudio = new Audio('/static/sounds/siren.mp3');
+        sirenAudio.play().catch(e => console.error('[ERROR] Siren auto-play blocked:', e));
+    } catch (e) {
+        console.error('[ERROR] playSiren error:', e);
+    }
+}
+
 function playAlertSound() {
     try {
         // Tạo beep sound đơn giản
@@ -1038,6 +1051,7 @@ window.mapManager = {
     updateSidebarUI,
     showAlertBanner,
     playAlertSound,
+    playSiren,
     charts
 };
 

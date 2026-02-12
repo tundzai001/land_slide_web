@@ -1088,6 +1088,21 @@
                             <div class="row g-3 p-3 border rounded bg-light">
                                 <div class="col-md-6"><label class="form-label">Shock Threshold (m/s²)</label><input type="number" step="0.1" class="form-control" id="cfg-imu-shock" value="5.0"></div>
                             </div>
+                            
+                            <!-- PENDING DEVICES (Pi) - shown when editing existing station -->
+                            <div id="pending-devices-section" class="config-section mb-4" style="display: none;">
+                                <div class="section-header">
+                                    <i class="bi bi-hdd-network-fill"></i>
+                                    <h5>Thiết bị Pi chờ kích hoạt</h5>
+                                    <span class="badge bg-warning ms-auto">Waiting</span>
+                                </div>
+                                <div class="sensor-config-body">
+                                    <div id="pending-devices-list">
+                                        <!-- dynamic list populated by admin-manager -->
+                                    </div>
+                                    <small class="text-muted d-block mt-2">Danh sách các Raspberry Pi đã đăng ký (serial). Chọn một thiết bị để gán vào trạm này.</small>
+                                </div>
+                            </div>
                         </div>
 
                     </form>
