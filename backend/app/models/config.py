@@ -1,3 +1,4 @@
+#backend/app/models/config.py
 from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, BigInteger, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from app.database import BaseConfig
