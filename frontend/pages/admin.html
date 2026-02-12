@@ -593,34 +593,6 @@
                         </div>
                     </div>
 
-                    <!-- 4. Quick Presets -->
-                    <div class="config-section">
-                        <div class="section-header">
-                            <i class="bi bi-lightning-charge-fill"></i>
-                            <h5>Quick Presets</h5>
-                        </div>
-                        
-                        <div class="row g-2">
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-primary w-100" onclick="window.systemManager.applyPreset('conservative')">
-                                    <i class="bi bi-shield-check me-2"></i>
-                                    Conservative (Ít cảnh báo sai)
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-warning w-100" onclick="window.systemManager.applyPreset('balanced')">
-                                    <i class="bi bi-sliders me-2"></i>
-                                    Balanced (Cân bằng)
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-danger w-100" onclick="window.systemManager.applyPreset('sensitive')">
-                                    <i class="bi bi-exclamation-diamond me-2"></i>
-                                    Sensitive (Nhạy cảm)
-                                </button>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- Save Button -->
                     <div class="text-end">
@@ -838,6 +810,50 @@
 
                         <!-- STEP 3: NGƯỠNG -->
                         <div class="wizard-content" data-step="3">
+                            
+                            <!-- ✅ QUICK PRESETS CHO TRẠM -->
+                            <div class="mb-4 p-3 border rounded" style="background: rgba(14, 165, 233, 0.05);">
+                                <h6 class="mb-2">
+                                    <i class="bi bi-lightning-charge-fill text-primary me-2"></i>
+                                    Quick Presets (Áp dụng cho trạm này)
+                                </h6>
+                                <small class="text-muted d-block mb-3">
+                                    Chọn preset để tự động điền các tham số bên dưới phù hợp với mức độ nguy hiểm của khu vực.
+                                </small>
+                                
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <button type="button" class="btn btn-sm btn-outline-primary w-100" onclick="window.adminManager.applyStationPreset('conservative')">
+                                            <i class="bi bi-shield-check me-1"></i>
+                                            <strong>Conservative</strong>
+                                            <small class="d-block text-muted">Ít cảnh báo sai</small>
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button type="button" class="btn btn-sm btn-outline-warning w-100" onclick="window.adminManager.applyStationPreset('balanced')">
+                                            <i class="bi bi-sliders me-1"></i>
+                                            <strong>Balanced</strong>
+                                            <small class="d-block text-muted">Cân bằng (Mặc định)</small>
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="window.adminManager.applyStationPreset('sensitive')">
+                                            <i class="bi bi-exclamation-diamond me-1"></i>
+                                            <strong>Sensitive</strong>
+                                            <small class="d-block text-muted">Nguy hiểm cao</small>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <strong>Conservative:</strong> GNSS 5 lần, Rain 3, Water 5, IMU 2<br>
+                                        <strong>Balanced:</strong> GNSS 3 lần, Rain 2, Water 3, IMU 1 (Mặc định)<br>
+                                        <strong>Sensitive:</strong> Tất cả 1 lần (Cảnh báo nhanh)
+                                    </small>
+                                </div>
+                            </div>
+                            
                             <h6 class="mb-2 text-primary"><i class="bi bi-water me-2"></i>Water & Displacement</h6>
                             <div class="row g-3 mb-4 p-3 border rounded bg-light">
                                 <div class="col-md-6"><label class="form-label">Warning (m)</label><input type="number" step="0.01" class="form-control" id="cfg-water-warning" value="0.15"></div>
