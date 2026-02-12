@@ -1,0 +1,18 @@
+⚠️ BOOTSTRAP NO LONGER NEEDED
+
+pi_bootstrap.py has been deprecated and removed.
+
+pi_audio_player.py now handles auto-registration on first run:
+- If ~/.landslide_device.json doesn't exist, it automatically registers with the backend
+- Device gets an enroll_token and waits for admin to provision (assign station + license)
+- Loads config from ~/.landslide_device.json on restart
+
+On Raspberry Pi, you only need:
+1. pi_audio_player.py (main service code)
+2. setup_service.sh (systemd installer)
+3. landslide_audio/ folder (for mp3 files)
+
+Installation:
+  sudo apt install python3 python3-pip mpg123
+  pip3 install paho-mqtt websocket-client requests
+  sudo bash setup_service.sh /path/to/repo

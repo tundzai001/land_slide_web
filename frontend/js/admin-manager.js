@@ -646,6 +646,15 @@ class AdminManager {
         if (btnBack) btnBack.style.display = this.currentStep > 1 ? 'inline-block' : 'none';
         if (btnNext) btnNext.style.display = this.currentStep < this.totalSteps ? 'inline-block' : 'none';
         if (btnSave) btnSave.style.display = this.currentStep === this.totalSteps ? 'inline-block' : 'none';
+
+        // When reaching step 3, load pending devices for provisioning (only if editing existing station)
+        const pendingSection = document.getElementById('pending-devices-section');
+        if (this.currentStep === 3 && this.currentStationId) {
+            if (pendingSection) pendingSection.style.display = 'block';
+            this.loadPendingDevices();
+        } else {
+            if (pendingSection) pendingSection.style.display = 'none';
+        }
     }
 
     wizardNext() {
@@ -1037,6 +1046,112 @@ class AdminManager {
             if (btnEl) btnEl.disabled = false;
         }
     }
+
+    // =========================================================================
+    // PENDING DEVICES (ADMIN PROVISIONING)
+    // =========================================================================
+
+    async loadPendingDevices() {
+        try {
+            const res = await fetch('/api/admin/devices/pending', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) throw new Error('Không thể tải danh sách thiết bị chờ');
+
+            const devices = await res.json();
+            this.renderPendingDevices(devices);
+        } catch (e) {
+            console.error('Error loading pending devices:', e);
+            window.toast?.error('Không lấy được danh sách Pi chờ');
+        }
+    }
+
+    renderPendingDevices(devices) {
+        const container = document.getElementById('pending-devices-list');
+        if (!container) return;
+
+        if (!devices || devices.length === 0) {
+            container.innerHTML = `<div class="text-muted small p-3">Không có Pi chờ kích hoạt</div>`;
+            return;
+        }
+
+        container.innerHTML = devices.map(d => `
+            <div class="d-flex align-items-center p-2 border rounded mb-2">
+                <div class="flex-grow-1">
+                    <div><strong>${d.device_code}</strong> <small class="text-muted">(${d.device_type})</small></div>
+                    <div class="small text-muted">${d.name || ''} · đăng ký: ${new Date((d.created_at||0)*1000).toLocaleString()}</div>
+                </div>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.adminManager.generateLicense('${d.device_code}')">Tạo license</button>
+                    <button class="btn btn-sm btn-primary" onclick="window.adminManager.provisionDevice('${d.device_code}')">Gán vào trạm</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async generateLicense(device_code) {
+        try {
+            const res = await fetch('/api/admin/devices/generate-license', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ device_code: device_code })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi tạo license');
+            }
+
+            const data = await res.json();
+            window.toast?.success('✅ License tạo xong');
+            // refresh pending list
+            this.loadPendingDevices();
+            return data;
+        } catch (e) {
+            console.error('Generate license error:', e);
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    async provisionDevice(device_code) {
+        if (!this.currentStationId) {
+            window.toast?.warning('Lưu trạm trước khi gán thiết bị');
+            return;
+        }
+
+        const license = prompt('Nhập mã license/serial để lưu (hoặc để trống):');
+        if (license === null) return; // cancelled
+
+        try {
+            const res = await fetch('/api/admin/devices/provision', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ device_code: device_code, station_id: this.currentStationId, license: license })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi khi gán thiết bị');
+            }
+
+            window.toast?.success('✅ Thiết bị đã được gán thành công');
+            // refresh lists
+            this.loadPendingDevices();
+            // reload station devices view if open
+            this.editStation(this.currentStationId);
+        } catch (e) {
+            console.error('Provision error:', e);
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
 
     // =========================================================================
     // USER MANAGEMENT

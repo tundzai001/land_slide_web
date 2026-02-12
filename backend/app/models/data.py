@@ -13,11 +13,11 @@ class SensorData(BaseData):
     
     data = Column(JSON, nullable=False)
     
-    value_1 = Column(Float, nullable=True)  # VD: water_level, rainfall_mm
-    value_2 = Column(Float, nullable=True)  # VD: intensity_mm_h, speed_2d
-    value_3 = Column(Float, nullable=True)  # VD: total_displacement_mm
-    value_4 = Column(Float, nullable=True)  # Total Accel (Shock)
-    value_5 = Column(Float, nullable=True)  # Battery / Signal
+    value_1 = Column(Float, nullable=True) 
+    value_2 = Column(Float, nullable=True)  
+    value_3 = Column(Float, nullable=True)  
+    value_4 = Column(Float, nullable=True)  
+    value_5 = Column(Float, nullable=True)  
 
 class Alert(BaseData):
     __tablename__ = "alerts"
