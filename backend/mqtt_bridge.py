@@ -303,14 +303,39 @@ class MQTTBridge:
 
             if save_data_now:
                 async with DataSessionLocal() as db_data:
-                    # Lưu dữ liệu cảm biến
+                    # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
+                    val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
+                    
+                    if sensor_type == 'gnss':
+                        val_1 = processed_data.get('speed_2d_mm_s', 0.0)
+                        val_2 = processed_data.get('total_displacement_mm', 0.0)
+                    
+                    elif sensor_type == 'rain':
+                        val_1 = processed_data.get('intensity_mm_h', 0.0)
+                        val_2 = processed_data.get('accumulated_mm', 0.0)
+                    
+                    elif sensor_type == 'water':
+                        val_1 = processed_data.get('water_level', 0.0)
+                        val_2 = processed_data.get('intensity_mm_h', 0.0)
+                    
+                    elif sensor_type == 'imu':
+                        val_1 = processed_data.get('roll', 0.0)
+                        val_2 = processed_data.get('pitch', 0.0)
+                        val_3 = processed_data.get('yaw', 0.0)
+                        val_4 = processed_data.get('total_accel', 0.0)
+                        val_5 = processed_data.get('battery', 0.0)
+                    
+                    # === LƯU VÀO DB ===
                     db_data.add(model_data.SensorData(
                         station_id=station_id,  
                         timestamp=current_timestamp,
                         sensor_type=sensor_type,
                         data=processed_data,
-                        value_1=processed_data.get('speed_2d_mm_s') if sensor_type == 'gnss' else processed_data.get('water_level'),
-                        value_2=processed_data.get('total_displacement_mm') if sensor_type == 'gnss' else processed_data.get('intensity_mm_h'),
+                        value_1=val_1,
+                        value_2=val_2,
+                        value_3=val_3,
+                        value_4=val_4,
+                        value_5=val_5
                     ))
                     self.last_save_time[f"{device_id}_{sensor_type}"] = current_timestamp
 

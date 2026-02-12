@@ -213,6 +213,57 @@ function updateStationMarker(stationId, riskLevel) {
     }
 }
 
+function updateSidebarUI(data) {
+    setText('st-name', data.name);
+    setText('st-code', data.station_code);
+    
+    const riskEl = document.getElementById('st-risk');
+    if (riskEl) {
+        let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
+
+        if (data.status === 'offline') {
+            risk = 'OFFLINE';
+        }
+
+        riskEl.className = `risk-badge ${risk}`;
+        riskEl.innerText = `Cảnh báo: ${risk}`;
+    }
+
+    const gnssLatest = data.sensors?.gnss?.latest;
+    const rainLatest = data.sensors?.rain?.latest;
+    const waterLatest = data.sensors?.water?.latest;
+    const imuLatest = data.sensors?.imu?.latest;
+
+    // GNSS
+    const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
+    setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
+
+    // Rain
+    const rainIntensity = rainLatest?.intensity_mm_h ?? null;
+    setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
+
+    // Water
+    const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
+    setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+
+    // IMU Angles
+    setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
+    setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
+    setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+
+    // ✅ LOGIC MỚI: Kiểm tra và hiển thị Pin
+    const batteryContainer = document.getElementById('battery-container');
+    const batteryVal = imuLatest?.battery; // Lấy giá trị Pin từ dữ liệu mới nhất
+    
+    // Nếu có Pin và Pin > 0 thì hiển thị, ngược lại thì ẩn
+    if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+        if (batteryContainer) batteryContainer.style.display = 'flex'; // Hiện
+        setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
+    } else {
+        if (batteryContainer) batteryContainer.style.display = 'none'; // Ẩn
+    }
+}
+
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
     
@@ -445,6 +496,9 @@ function getRiskBadgeClass(level) {
     return classes[level] || 'bg-success';
 }
 
+// ✅ BOOST 3: Cache trạng thái marker để tránh vẽ lại không cần thiết
+let stationStateCache = {};
+
 function updateMarker(station) {
     const colors = {
         'EXTREME': '#fa5252',
@@ -460,12 +514,24 @@ function updateMarker(station) {
     }
     const color = colors[currentLevel] || '#adb5bd';
 
+    // ✅ KIỂM TRA CACHE: Nếu trạng thái không đổi thì KHÔNG LÀM GÌ CẢ
+    const cacheKey = `${station.id}_${currentLevel}_${station.location.lat}_${station.location.lon}`;
+    if (stationStateCache[station.id] === cacheKey) {
+        return; // Dữ liệu y hệt cũ -> Bỏ qua, không vẽ lại (Giảm tải CPU)
+    }
+    
+    // Cập nhật Cache mới
+    stationStateCache[station.id] = cacheKey;
+
     if (markers[station.id]) {
         markers[station.id].setLatLng([station.location.lat, station.location.lon]);
         const el = markers[station.id].getElement();
         if (el) {
             const circle = el.querySelector('div');
-            if (circle) circle.style.background = color;
+            if (circle) {
+                circle.style.background = color;
+                circle.style.transition = 'background 0.3s ease';
+            }
         }
     } else {
         const div = document.createElement('div');
@@ -473,10 +539,11 @@ function updateMarker(station) {
             width: 18px; height: 18px; background: ${color};
             border-radius: 50%; border: 2px solid white;
             box-shadow: 0 0 8px rgba(0,0,0,0.5);
+            transition: background 0.3s ease;
         `;
         
         const icon = L.divIcon({ 
-            className: '', 
+            className: 'custom-map-marker', 
             html: div, 
             iconSize: [18, 18], 
             iconAnchor: [9, 9] 
@@ -808,6 +875,7 @@ window.mapManager = {
     loadLongTermAnalysis,
     safeNumber,
     updateRealtimeSensorValues,
+    updateSidebarUI,
     charts
 };
 

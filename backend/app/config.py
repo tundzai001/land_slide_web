@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     
-    MQTT_BROKER: str = "aitogy.click"
+    MQTT_BROKER: str = "aitogy.asia"
     MQTT_PORT: int = 1883
     MQTT_USER: str = "mqttUser"
     MQTT_PASSWORD: str = "MqttPassword123$%^"
