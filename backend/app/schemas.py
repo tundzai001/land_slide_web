@@ -37,6 +37,11 @@ class SensorDataCreate(BaseModel):
     timestamp: int
     sensor_type: str
     data: Dict
+    value_1: Optional[float] = None
+    value_2: Optional[float] = None
+    value_3: Optional[float] = None
+    value_4: Optional[float] = None
+    value_5: Optional[float] = None
 
 class SensorDataResponse(SensorDataCreate):
     id: int

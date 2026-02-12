@@ -707,56 +707,29 @@ async def delete_device(
 
 @app.get("/api/stations")
 async def get_stations(
-    db_config: AsyncSession = Depends(get_config_db),
-    db_data: AsyncSession = Depends(get_data_db)
+    db_config: AsyncSession = Depends(get_config_db)
 ):
     """
     ✅ Trả về danh sách tất cả các trạm
-    ✅ FIXED: Status được tính động dựa trên dữ liệu sensor thực tế
+    ✅ OPTIMIZED: Loại bỏ vòng lặp query - MQTT Bridge đã cập nhật status trực tiếp vào bảng Station
     """
     try:
-        # 1. Lấy tất cả stations
+        # ✅ BOOST 1: Chỉ lấy thông tin từ bảng Station (Bridge đã lo việc update status)
         result = await db_config.execute(select(model_config.Station))
         stations = result.scalars().all()
         
-        # 2. Tính toán status cho từng trạm
-        current_time = int(time.time())
-        OFFLINE_THRESHOLD = 60  # 1 phút không có dữ liệu = offline
-        
-        stations_with_status = []
-        
-        for station in stations:
-            # ✅ FIXED: Check dữ liệu sensor gần nhất
-            latest_data_result = await db_data.execute(
-                select(model_data.SensorData)
-                .where(model_data.SensorData.station_id == station.id)
-                .order_by(desc(model_data.SensorData.timestamp))
-                .limit(1)
-            )
-            latest_data = latest_data_result.scalar_one_or_none()
-            
-            # ✅ Tính status động
-            if latest_data and (current_time - latest_data.timestamp) < OFFLINE_THRESHOLD:
-                computed_status = "online"
-                last_update = latest_data.timestamp
-            else:
-                computed_status = "offline"
-                last_update = station.last_update
-            
-            # Tính risk level
-            risk_assessment = await _calculate_station_risk_simple(db_data, station.id)
-            
-            stations_with_status.append({
-                "id": station.id,
-                "station_code": station.station_code,
-                "name": station.name,
-                "location": station.location,
-                "status": computed_status,  
-                "last_update": last_update, 
-                "risk_level": risk_assessment
-            })
-
-        return stations_with_status
+        return [
+            {
+                "id": s.id,
+                "station_code": s.station_code,
+                "name": s.name,
+                "location": s.location,
+                "status": s.status,         # Bridge đã cập nhật cái này rồi
+                "last_update": s.last_update, 
+                "risk_level": "LOW"         # Frontend sẽ update màu qua WebSocket realtime
+            }
+            for s in stations
+        ]
         
     except Exception as e:
         logger.error(f"Error loading stations: {e}", exc_info=True)
@@ -814,7 +787,7 @@ async def get_station_detail(
                 if latest.timestamp > latest_data_timestamp:
                     latest_data_timestamp = latest.timestamp
             
-            # Lấy lịch sử 24h
+            # ✅ BOOST 2: Lấy lịch sử 24h nhưng giới hạn số lượng (500 điểm đủ đẹp cho biểu đồ)
             history_result = await db_data.execute(
                 select(model_data.SensorData)
                 .where(
@@ -825,7 +798,7 @@ async def get_station_detail(
                     )
                 )
                 .order_by(desc(model_data.SensorData.timestamp))
-                .limit(100)
+                .limit(500)
             )
             history = history_result.scalars().all()
             
@@ -1111,7 +1084,9 @@ async def admin_get_sensor_data(
                 "data": d.data,
                 "value_1": d.value_1,
                 "value_2": d.value_2,
-                "value_3": d.value_3
+                "value_3": d.value_3,
+                "value_4": d.value_4,
+                "value_5": d.value_5
             }
             for d in data
         ]
