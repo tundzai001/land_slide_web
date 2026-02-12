@@ -391,7 +391,7 @@ def calculate_station_location(sensors: dict, manual_location: dict = None):
 async def get_stations_by_project(
     project_id: int,
     db_config: AsyncSession = Depends(get_config_db),
-    db_data: AsyncSession = Depends(get_data_db),  # ✅ Thêm db_data
+    db_data: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
     result = await db_config.execute(
@@ -399,7 +399,7 @@ async def get_stations_by_project(
     )
     stations = result.scalars().all()
     
-    # ✅ Tính status động cho từng trạm
+    #Tính status động cho từng trạm
     current_time = int(time.time())
     OFFLINE_THRESHOLD = 60
     
@@ -423,7 +423,7 @@ async def get_stations_by_project(
             "station_code": station.station_code,
             "name": station.name,
             "location": station.location,
-            "status": computed_status,  # ✅ Status động
+            "status": computed_status, 
             "config": station.config
         })
     
