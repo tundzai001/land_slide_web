@@ -200,8 +200,9 @@ class SystemManager {
     }
 
     applyPreset(presetName) {
-        // Logic apply preset (nếu cần)
-        window.toast?.info('Chức năng Preset đang cập nhật...');
+        // ✅ Presets have been moved to per-station configuration
+        window.toast?.info('💡 Quick Presets áp dụng ở cấp trạm!', 2000);
+        window.toast?.info('Vào Quản lý Hệ thống → Chọn dự án → Chọn trạm → Cấu hình → Step 3', 4000);
     }
 }
 

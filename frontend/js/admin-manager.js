@@ -590,6 +590,134 @@ class AdminManager {
         }
     }
 
+    // =========================================================================
+    // STATION PRESET SYSTEM
+    // =========================================================================
+
+    applyStationPreset(presetName) {
+        const presets = {
+            conservative: {
+                // Confirmation steps
+                gnss_steps: 5,
+                water_confirm: 5,
+                rain_confirm: 3,
+                imu_confirm: 2,
+                
+                // GNSS Quality
+                gnss_hdop: 3.0,
+                gnss_streak: 10,
+                gnss_timeout: 600,
+                
+                // Water
+                water_warning: 0.20,
+                water_critical: 0.40,
+                
+                // Rain
+                rain_watch: 15.0,
+                rain_warning: 35.0,
+                rain_critical: 60.0,
+                
+                // IMU
+                imu_shock: 8.0
+            },
+            
+            balanced: {
+                gnss_steps: 3,
+                water_confirm: 3,
+                rain_confirm: 2,
+                imu_confirm: 1,
+                
+                gnss_hdop: 4.0,
+                gnss_streak: 5,
+                gnss_timeout: 300,
+                
+                water_warning: 0.15,
+                water_critical: 0.30,
+                
+                rain_watch: 10.0,
+                rain_warning: 25.0,
+                rain_critical: 50.0,
+                
+                imu_shock: 5.0
+            },
+            
+            sensitive: {
+                gnss_steps: 1,
+                water_confirm: 1,
+                rain_confirm: 1,
+                imu_confirm: 1,
+                
+                gnss_hdop: 5.0,
+                gnss_streak: 3,
+                gnss_timeout: 180,
+                
+                water_warning: 0.10,
+                water_critical: 0.20,
+                
+                rain_watch: 5.0,
+                rain_warning: 15.0,
+                rain_critical: 30.0,
+                
+                imu_shock: 3.0
+            }
+        };
+        
+        const preset = presets[presetName];
+        if (!preset) return;
+        
+        // ✅ ĐIỀN TỰ ĐỘNG CÁC GIÁ TRỊ VÀO FORM
+        
+        // GNSS Quality
+        const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
+        const gnssStepsEl = document.getElementById('cfg-gnss-steps');
+        const gnssStreakEl = document.getElementById('cfg-gnss-streak');
+        const gnssTimeoutEl = document.getElementById('cfg-gnss-timeout');
+        
+        if (gnssHdopEl) gnssHdopEl.value = preset.gnss_hdop;
+        if (gnssStepsEl) gnssStepsEl.value = preset.gnss_steps;
+        if (gnssStreakEl) gnssStreakEl.value = preset.gnss_streak;
+        if (gnssTimeoutEl) gnssTimeoutEl.value = preset.gnss_timeout;
+        
+        // Water
+        const waterWarningEl = document.getElementById('cfg-water-warning');
+        const waterCriticalEl = document.getElementById('cfg-water-critical');
+        
+        if (waterWarningEl) waterWarningEl.value = preset.water_warning;
+        if (waterCriticalEl) waterCriticalEl.value = preset.water_critical;
+        
+        // Rain
+        const rainWatchEl = document.getElementById('cfg-rain-watch');
+        const rainWarningEl = document.getElementById('cfg-rain-warning');
+        const rainCriticalEl = document.getElementById('cfg-rain-critical');
+        
+        if (rainWatchEl) rainWatchEl.value = preset.rain_watch;
+        if (rainWarningEl) rainWarningEl.value = preset.rain_warning;
+        if (rainCriticalEl) rainCriticalEl.value = preset.rain_critical;
+        
+        // IMU
+        const imuShockEl = document.getElementById('cfg-imu-shock');
+        if (imuShockEl) imuShockEl.value = preset.imu_shock;
+        
+        // ✅ HIỆU ỨNG FLASH (để user biết đã áp dụng)
+        const inputs = document.querySelectorAll('#stationConfigForm input[type="number"]');
+        inputs.forEach(input => {
+            input.style.transition = 'background 0.5s';
+            input.style.background = 'rgba(14, 165, 233, 0.2)';
+            setTimeout(() => {
+                input.style.background = '';
+            }, 500);
+        });
+        
+        // ✅ THÔNG BÁO
+        const presetLabels = {
+            'conservative': 'Conservative - Ít cảnh báo sai',
+            'balanced': 'Balanced - Cân bằng',
+            'sensitive': 'Sensitive - Phát hiện nhanh'
+        };
+        
+        window.toast?.success(`✅ Đã áp dụng preset: ${presetLabels[presetName]}`, 3000);
+    }
+
     async saveStation() {
         const code = document.getElementById('edit-code').value.trim();
         const name = document.getElementById('edit-name').value.trim();
@@ -626,12 +754,14 @@ class AdminManager {
         const config = {
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
-                critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value)
+                critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
+                water_confirm_steps: 3  // ✅ THÊM: Default confirmation steps
             },
             RainAlerting: {
                 rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch').value),
                 rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning').value),
-                rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value)
+                rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value),
+                rain_confirm_steps: 2  // ✅ THÊM: Default confirmation steps
             },
             GnssAlerting: {
                 gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
@@ -640,7 +770,8 @@ class AdminManager {
                 gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
             },
             ImuAlerting: {
-                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
+                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0,
+                imu_confirm_steps: 1  // ✅ THÊM: Default confirmation steps
             },
             gnss_origin: {
                 lat: document.getElementById('origin-lat').value,

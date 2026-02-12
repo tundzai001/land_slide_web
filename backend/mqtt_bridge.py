@@ -1,15 +1,16 @@
 # ==============================================================================
-# == backend/mqtt_bridge.py - MQTT to Database Bridge (FINAL FIXED)           ==
+# == backend/mqtt_bridge.py - MQTT to Database Bridge (FIXED WITH SAVE INTERVALS) ==
 # ==============================================================================
 
 import asyncio
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from collections import defaultdict
 
 import paho.mqtt.client as mqtt
-from sqlalchemy import select
+from sqlalchemy import select, update, and_, desc
 from app.websocket import manager
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import config as model_config
@@ -50,7 +51,9 @@ class MQTTBridge:
         # Topic management
         self.topic_map: Dict[str, Dict[str, Any]] = {}
         self.processors_cache: Dict[str, Any] = {}
-        self.last_save_time: Dict[str, float] = {}
+        
+        # ✅ THÊM: Save interval tracking (per station per sensor)
+        self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
         
         self.loop = None
 
@@ -271,14 +274,17 @@ class MQTTBridge:
                 logger.error(f"❌ WS Low Status Error: {e}")
 
         # 3. SAVE TO DB (THROTTLED)
-        # Chỉ lưu khi nguy hiểm HOẶC đến chu kỳ lưu
+        # ✅ CHỈ LƯU KHI: Alert XỬy ra HOẶC đã đủ chu kỳ lưu
         save_data_now = False
 
         if is_dangerous:
+            # ✅ ALERT → Lưu ngay lập tức / không quan tâm chu kỳ
             save_data_now = True
+            logger.warning(f"⚠️ [FORCED SAVE] Alert detected - saving immediately")
         else:
-            throttle_key = f"{device_id}_{sensor_type}"
-            last_saved = self.last_save_time.get(throttle_key, 0)
+            # ✅ KIỂM TRA CHU KỲ LƯU
+            throttle_key_station = f"{station_id}_{sensor_type}"
+            last_saved = self.last_save_time[station_id].get(sensor_type, 0)
             
             interval = settings.SAVE_INTERVAL_DEFAULT
             if sensor_type == 'gnss': interval = settings.SAVE_INTERVAL_GNSS
@@ -286,8 +292,19 @@ class MQTTBridge:
             elif sensor_type == 'rain': interval = settings.SAVE_INTERVAL_RAIN
             elif sensor_type == 'water': interval = settings.SAVE_INTERVAL_WATER
             
-            if current_timestamp - last_saved >= interval:
+            time_since_last_save = current_timestamp - last_saved
+            
+            if last_saved == 0:
+                # Lần đầu tiên → Lưu luôn
                 save_data_now = True
+                logger.info(f"💾 [FIRST SAVE] {station_name} - {sensor_type.upper()}")
+            elif time_since_last_save >= interval:
+                # Đã đủ chu kỳ → Lưu
+                save_data_now = True
+                logger.info(f"💾 [PERIODIC SAVE] {station_name} - {sensor_type.upper()} (Interval: {interval}s)")
+            else:
+                # Chưa đủ chu kỳ → Skip
+                logger.debug(f"⏭️ [SKIP SAVE] {station_name} - {sensor_type.upper()} ({time_since_last_save}/{interval}s)")
 
         try:
             if save_data_now:
@@ -337,7 +354,8 @@ class MQTTBridge:
                         value_4=val_4,
                         value_5=val_5
                     ))
-                    self.last_save_time[f"{device_id}_{sensor_type}"] = current_timestamp
+                    # ✅ CẬP NHẬT LAST SAVE TIME (theo station + sensor_type)
+                    self.last_save_time[station_id][sensor_type] = current_timestamp
 
                     # Chỉ lưu cảnh báo nếu nguy hiểm
                     if is_dangerous:

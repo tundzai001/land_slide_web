@@ -805,6 +805,132 @@ async def fetch_live_gnss_origin(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+# ============================================================================
+# SYSTEM CONFIG - QUICK PRESETS
+# ============================================================================
+
+@router.post("/system-config/apply-preset")
+async def apply_system_preset(
+    preset_data: dict,  # {"preset": "conservative" | "balanced" | "sensitive"}
+    db: AsyncSession = Depends(get_config_db),
+    current_user = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """
+    ✅ Áp dụng preset cho hệ thống
+    - Conservative: Ít cảnh báo sai (5/3/5/2 xác nhận, 2h-2 ngày chu kỳ lưu)
+    - Balanced: Cân bằng (3/2/3/1 xác nhận, 1h-1 ngày chu kỳ lưu)
+    - Sensitive: Nhạy cảm (1 xác nhận, 30 phút-1 giờ chu kỳ lưu)
+    """
+    try:
+        preset_name = preset_data.get("preset")
+        
+        # ✅ ĐỊNH NGHĨA CÁC PRESET
+        presets = {
+            "conservative": {
+                "confirmation": {
+                    "gnss": 5,   # 5 lần mới báo
+                    "rain": 3,
+                    "water": 5,
+                    "imu": 2
+                },
+                "save_intervals": {
+                    "gnss": 172800,   # 2 ngày
+                    "rain": 7200,     # 2 giờ
+                    "water": 7200,
+                    "imu": 5184000    # 60 ngày
+                }
+            },
+            "balanced": {
+                "confirmation": {
+                    "gnss": 3,
+                    "rain": 2,
+                    "water": 3,
+                    "imu": 1
+                },
+                "save_intervals": {
+                    "gnss": 86400,    # 1 ngày
+                    "rain": 3600,     # 1 giờ
+                    "water": 3600,
+                    "imu": 2592000    # 30 ngày
+                }
+            },
+            "sensitive": {
+                "confirmation": {
+                    "gnss": 1,   # Báo ngay
+                    "rain": 1,
+                    "water": 1,
+                    "imu": 1
+                },
+                "save_intervals": {
+                    "gnss": 3600,     # 1 giờ
+                    "rain": 1800,     # 30 phút
+                    "water": 1800,
+                    "imu": 604800     # 7 ngày
+                }
+            }
+        }
+        
+        if preset_name not in presets:
+            raise HTTPException(status_code=400, detail="Invalid preset name")
+        
+        selected_preset = presets[preset_name]
+        
+        # ✅ LƯU VÀO DATABASE
+        from sqlalchemy import select
+        
+        # Update Confirmation Config
+        result = await db.execute(
+            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "confirmation_config")
+        )
+        confirm_config = result.scalar_one_or_none()
+        
+        if confirm_config:
+            confirm_config.value = selected_preset["confirmation"]
+            confirm_config.updated_at = int(time.time())
+        else:
+            db.add(model_config.GlobalConfig(
+                key="confirmation_config",
+                value=selected_preset["confirmation"],
+                updated_at=int(time.time()),
+                updated_by=current_user.username
+            ))
+        
+        # Update Save Intervals Config
+        result = await db.execute(
+            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "save_intervals_config")
+        )
+        intervals_config = result.scalar_one_or_none()
+        
+        if intervals_config:
+            intervals_config.value = selected_preset["save_intervals"]
+            intervals_config.updated_at = int(time.time())
+        else:
+            db.add(model_config.GlobalConfig(
+                key="save_intervals_config",
+                value=selected_preset["save_intervals"],
+                updated_at=int(time.time()),
+                updated_by=current_user.username
+            ))
+        
+        await db.commit()
+        
+        logger.info(f"✅ Preset '{preset_name}' applied by {current_user.username}")
+        
+        return {
+            "status": "success",
+            "message": f"✅ Đã áp dụng preset: {preset_name}",
+            "config": selected_preset
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error applying preset: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # FACTORY RESET - XÓA TOÀN BỘ HỆ THỐNG
 # ============================================================================
