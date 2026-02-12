@@ -34,6 +34,14 @@ class AdminManager {
             { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
         ];
 
+        // ✅ Default offline thresholds (seconds)
+        this.defaultOfflineThresholds = {
+            gnss: 60,
+            rain: 60,    
+            water: 60,   
+            imu: 60      
+        };
+
         if (!this.token) {
             window.location.href = '/pages/login.html';
             return;
@@ -43,7 +51,7 @@ class AdminManager {
     }
 
     init() {
-        console.log('🚀 [ADMIN] Initializing...');
+        console.log('[ADMIN] Initializing...');
         
         // Initialize modals
         const stationModalEl = document.getElementById('stationConfigModal');
@@ -76,8 +84,44 @@ class AdminManager {
         this.loadUsers();
         this.setupTabHandlers();
         this.setupLogout();
+        this.setupOfflineThresholdListeners(); // ✅ THÊM MỚI
 
         console.log('✅ [ADMIN] Initialized successfully');
+    }
+
+    // ✅ THÊM HÀM MỚI: Setup listeners cho offline threshold inputs
+    setupOfflineThresholdListeners() {
+        const timeoutInputs = [
+            { id: 'offline-gnss', display: 'offline-gnss-display' },
+            { id: 'offline-rain', display: 'offline-rain-display' },
+            { id: 'offline-water', display: 'offline-water-display' },
+            { id: 'offline-imu', display: 'offline-imu-display' }
+        ];
+
+        timeoutInputs.forEach(({ id, display }) => {
+            const input = document.getElementById(id);
+            const displayEl = document.getElementById(display);
+            
+            if (input && displayEl) {
+                input.addEventListener('input', function() {
+                    const seconds = parseInt(this.value) || 0;
+                    displayEl.textContent = window.adminManager.formatOfflineTime(seconds);
+                });
+            }
+        });
+    }
+
+    // ✅ THÊM HÀM MỚI: Format thời gian offline
+    formatOfflineTime(seconds) {
+        if (seconds < 60) return `${seconds} giây`;
+        if (seconds < 3600) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return secs > 0 ? `${minutes} phút ${secs} giây` : `${minutes} phút`;
+        }
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return minutes > 0 ? `${hours} giờ ${minutes} phút` : `${hours} giờ`;
     }
 
     setupTabHandlers() {
@@ -429,6 +473,18 @@ class AdminManager {
             if (section) section.style.display = 'none';
         });
         
+        // ✅ Reset offline thresholds về mặc định
+        document.getElementById('offline-gnss').value = this.defaultOfflineThresholds.gnss;
+        document.getElementById('offline-rain').value = this.defaultOfflineThresholds.rain;
+        document.getElementById('offline-water').value = this.defaultOfflineThresholds.water;
+        document.getElementById('offline-imu').value = this.defaultOfflineThresholds.imu;
+        
+        // ✅ Update displays
+        document.getElementById('offline-gnss-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.gnss);
+        document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.rain);
+        document.getElementById('offline-water-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.water);
+        document.getElementById('offline-imu-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.imu);
+        
         document.getElementById('mqtt-empty-state').style.display = 'block';
         document.getElementById('btn-delete-station').style.display = 'none';
         
@@ -497,11 +553,27 @@ class AdminManager {
             // STEP 3: Thresholds
             const cfg = stationData.config || {};
 
+            // ✅ ĐỌC OFFLINE THRESHOLDS
+            const offlineThresholds = cfg.offline_thresholds || {};
+            const gnssThreshold = offlineThresholds.gnss || this.defaultOfflineThresholds.gnss;
+            const rainThreshold = offlineThresholds.rain || this.defaultOfflineThresholds.rain;
+            const waterThreshold = offlineThresholds.water || this.defaultOfflineThresholds.water;
+            const imuThreshold = offlineThresholds.imu || this.defaultOfflineThresholds.imu;
+            
+            document.getElementById('offline-gnss').value = gnssThreshold;
+            document.getElementById('offline-rain').value = rainThreshold;
+            document.getElementById('offline-water').value = waterThreshold;
+            document.getElementById('offline-imu').value = imuThreshold;
+            
+            // ✅ Update displays
+            document.getElementById('offline-gnss-display').textContent = this.formatOfflineTime(gnssThreshold);
+            document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(rainThreshold);
+            document.getElementById('offline-water-display').textContent = this.formatOfflineTime(waterThreshold);
+            document.getElementById('offline-imu-display').textContent = this.formatOfflineTime(imuThreshold);
+
             if (cfg.velocity_classification && Array.isArray(cfg.velocity_classification)) {
-                // Nếu có, gán đè vào biến cục bộ
                 this.velocityConfig = cfg.velocity_classification;
             } else {
-                // Nếu chưa có, reset về mặc định (để tránh lấy nhầm của trạm trước đó)
                 this.velocityConfig = [
                     { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
                     { name: 'Very slow', threshold: 0.0005, unit: 'mm/s', description: '16 mm/year to 1.6 m/year', editable: true },
@@ -751,7 +823,14 @@ class AdminManager {
             }
         });
 
+        // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
         const config = {
+            offline_thresholds: {
+                gnss: parseInt(document.getElementById('offline-gnss').value) || this.defaultOfflineThresholds.gnss,
+                rain: parseInt(document.getElementById('offline-rain').value) || this.defaultOfflineThresholds.rain,
+                water: parseInt(document.getElementById('offline-water').value) || this.defaultOfflineThresholds.water,
+                imu: parseInt(document.getElementById('offline-imu').value) || this.defaultOfflineThresholds.imu
+            },
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
@@ -960,7 +1039,7 @@ class AdminManager {
     }
 
     // =========================================================================
-    // USER MANAGEMENT (MISSING IN YOUR EDIT)
+    // USER MANAGEMENT
     // =========================================================================
     
     async loadUsers() {
