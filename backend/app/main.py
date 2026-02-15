@@ -29,6 +29,7 @@ from .database import (
     AuthSessionLocal, ConfigSessionLocal
 )
 from .routers import admin as admin_router
+from .routers import field as field_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
@@ -159,6 +160,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(admin_router.router)
+app.include_router(field_router.router)
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
@@ -543,26 +545,50 @@ async def update_station_full_config(
         station.config = update_data.config
         station.updated_at = int(time.time())
 
+
         # Sync Devices
+        # 1. Get all existing devices
+        existing_devices_res = await db.execute(select(model_config.Device).where(model_config.Device.station_id == station_id))
+        existing_devices = {d.device_type: d for d in existing_devices_res.scalars().all()}
+        
+        logger.info(f"📋 [UPDATE] Station {station_id}: existing_devices={list(existing_devices.keys())}")
+        logger.info(f"📋 [UPDATE] Incoming sensors: {update_data.sensors}")
+        
+        # 2. Update or create provided sensors based on payload
+        active_types = set()
         if update_data.sensors:
             for s_type, info in update_data.sensors.items():
                 topic = info.get('topic', '').strip()
                 if not topic: continue
                 
-                dev_res = await db.execute(select(model_config.Device).where(and_(model_config.Device.station_id == station_id, model_config.Device.device_type == s_type)))
-                device = dev_res.scalar_one_or_none()
-                if device:
-                    device.mqtt_topic = topic
+                active_types.add(s_type)
+                
+                if s_type in existing_devices:
+                    # Update existing
+                    existing_devices[s_type].mqtt_topic = topic
+                    existing_devices[s_type].is_active = True
+                    logger.info(f"  ✅ Updated device {s_type}: topic={topic}, is_active=True")
                 else:
+                    # Create new
                     db.add(model_config.Device(
                         device_code=f"{station.station_code}_{s_type.upper()}",
                         name=f"{station.name} - {s_type.upper()}",
                         station_id=station_id,
                         device_type=s_type,
                         mqtt_topic=topic,
+                        is_active=True,
                         created_at=int(time.time()),
                         updated_at=int(time.time())
                     ))
+                    logger.info(f"  🆕 Created device {s_type}: topic={topic}")
+
+        # 3. Deactivate missing sensors
+        for d_type, dev in existing_devices.items():
+            if d_type not in active_types:
+                dev.is_active = False
+                logger.info(f"  ❌ Deactivated device {d_type}")
+
+        logger.info(f"📋 [UPDATE] Active types after update: {active_types}")
         await db.commit()
         return {"status": "success"}
     except Exception as e:
