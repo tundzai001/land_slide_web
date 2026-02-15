@@ -315,15 +315,7 @@ function setupEventListeners() {
         });
     }
     
-    // Theme toggle
-    const themeToggleBtn = document.getElementById('theme-toggle-btn');
-    if (themeToggleBtn) {
-        themeToggleBtn.addEventListener('click', () => {
-            if (window.themeManager) {
-                window.themeManager.toggle();
-            }
-        });
-    }
+    // Theme toggle - handled by theme-manager.js (do NOT add duplicate listener)
     
     // Search
     const searchInput = document.getElementById('search-station');

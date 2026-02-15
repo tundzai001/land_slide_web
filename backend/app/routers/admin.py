@@ -234,17 +234,17 @@ async def generate_license_for_device(
         try:
             # late import to avoid circular
             from app.main import mqtt_service
-            topic = device.mqtt_topic or f"landslide/{device.station_id}"
-            if topic:
-                cmd_topic = f"{topic}/command"
-                payload_msg = json.dumps({
-                    "cmd": "install_license",
-                    "license": license_code,
-                    "device_code": device.device_code,
-                    "customer_base": customer_base
-                })
-                mqtt_service.client.publish(cmd_topic, payload_msg)
-                pushed = True
+            # Pi subscribes to landslide/{station_id}/command
+            cmd_topic = f"landslide/{device.station_id}/command"
+            payload_msg = json.dumps({
+                "cmd": "install_license",
+                "license": license_code,
+                "device_code": device.device_code,
+                "customer_base": customer_base
+            })
+            mqtt_service.client.publish(cmd_topic, payload_msg)
+            pushed = True
+            logger.info(f"📡 License pushed to {cmd_topic}")
         except Exception as e:
             logger.warning(f"Could not push license via MQTT: {e}")
 
@@ -703,72 +703,6 @@ async def update_system_config(
 # DEVICE PROVISIONING (Pending Devices)
 # ============================================================================
 
-@router.get("/devices/pending")
-async def get_pending_devices(
-    db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
-):
-    try:
-        # Find devices with station_id=0 (unassigned)
-        result = await db.execute(
-            select(model_config.Device)
-            .where(model_config.Device.station_id == 0)
-            .order_by(model_config.Device.created_at.desc())
-        )
-        devices = result.scalars().all()
-        return devices
-    except Exception as e:
-        logger.error(f"Error getting pending devices: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/devices/provision")
-async def provision_device(
-    payload: dict,
-    db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
-):
-    """
-    Assign a pending device to a station.
-    Payload: {"device_code": "...", "station_id": 123, "license": "optional"}
-    """
-    device_code = payload.get('device_code')
-    station_id = payload.get('station_id')
-    license_val = payload.get('license')
-    
-    if not device_code or not station_id:
-        raise HTTPException(status_code=400, detail="Missing device_code or station_id")
-
-    try:
-        # 1. Get Device
-        res_dev = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
-        device = res_dev.scalar_one_or_none()
-        if not device:
-            raise HTTPException(status_code=404, detail="Device not found")
-            
-        # 2. Get Station
-        res_st = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
-        station = res_st.scalar_one_or_none()
-        if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
-            
-        # 3. Update Device
-        device.station_id = station_id
-        if license_val:
-            cfg = device.config or {}
-            cfg['license'] = license_val
-            device.config = cfg
-            
-        await db.commit()
-        
-        logger.info(f"✅ Provisioned device {device_code} to station {station.name} (ID: {station.id})")
-        return {"status": "success", "message": f"Device assigned to {station.name}"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error provisioning device: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # SYSTEM PASSWORD VERIFICATION
@@ -928,10 +862,16 @@ async def update_station_config(
         if 'station_code' in config_data: station.station_code = config_data['station_code']
         if 'name' in config_data: station.name = config_data['name']
         
-        # Update config JSON (Deep merge simple)
+        # Update config JSON — ⚠️ PHẢI deepcopy để SQLAlchemy detect thay đổi
         if 'config' in config_data:
-            current_config = station.config or get_default_station_config()
+            import copy
+            from sqlalchemy.orm.attributes import flag_modified
+            
+            current_config = copy.deepcopy(station.config) if station.config else get_default_station_config()
             new_config = config_data['config']
+            
+            logger.info(f"📋 [CONFIG] Before merge, offline_thresholds: {current_config.get('offline_thresholds')}")
+            logger.info(f"📋 [CONFIG] Incoming config keys: {list(new_config.keys())}")
             
             for key, value in new_config.items():
                 if isinstance(value, dict) and key in current_config and isinstance(current_config[key], dict):
@@ -939,7 +879,10 @@ async def update_station_config(
                 else:
                     current_config[key] = value
             
-            station.config = current_config
+            logger.info(f"📋 [CONFIG] After merge, offline_thresholds: {current_config.get('offline_thresholds')}")
+            
+            station.config = current_config  # Assign NEW dict object
+            flag_modified(station, 'config')  # Force SQLAlchemy to detect change
         
         # ✅ SYNC DEVICES từ sensors payload
         if 'sensors' in config_data and isinstance(config_data['sensors'], dict):

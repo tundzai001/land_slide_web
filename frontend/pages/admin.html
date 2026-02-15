@@ -17,6 +17,55 @@
 
 <body>
 
+    <!-- SECURITY: Block page render until auth verified -->
+    <script>
+    (function() {
+        // Immediately hide body to prevent content flash
+        document.documentElement.style.visibility = 'hidden';
+        
+        const token = localStorage.getItem('token');
+        
+        // No token at all → redirect immediately (synchronous)
+        if (!token) {
+            window.location.replace('/pages/login.html');
+            return;
+        }
+        
+        // Try to decode JWT and check expiry client-side first (fast check)
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            const now = Math.floor(Date.now() / 1000);
+            if (payload.exp && payload.exp < now) {
+                // Token expired
+                localStorage.removeItem('token');
+                window.location.replace('/pages/login.html');
+                return;
+            }
+        } catch (e) {
+            // Malformed token
+            localStorage.removeItem('token');
+            window.location.replace('/pages/login.html');
+            return;
+        }
+        
+        // Token looks valid client-side, verify with server
+        fetch('/api/auth/me', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        }).then(function(res) {
+            if (!res.ok) {
+                localStorage.removeItem('token');
+                window.location.replace('/pages/login.html');
+            } else {
+                // Auth confirmed, show page
+                document.documentElement.style.visibility = 'visible';
+            }
+        }).catch(function() {
+            localStorage.removeItem('token');
+            window.location.replace('/pages/login.html');
+        });
+    })();
+    </script>
+
     <style>
         /* ============================================
    STYLES CHO ADMIN & WIZARD

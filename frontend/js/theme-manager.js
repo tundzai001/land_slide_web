@@ -13,7 +13,7 @@ class ThemeManager {
         // 1. Check localStorage
         const saved = localStorage.getItem('theme');
         if (saved) return saved;
-        
+
         // 2. Default to LIGHT (changed from dark)
         return 'light';
     }
@@ -56,7 +56,7 @@ class ThemeManager {
     toggle() {
         const newTheme = this.theme === 'dark' ? 'light' : 'dark';
         this.applyTheme(newTheme);
-        
+
         // Animate the button
         if (this.toggleButton) {
             this.toggleButton.style.transform = 'scale(0.9) rotate(180deg)';
@@ -67,38 +67,63 @@ class ThemeManager {
     }
 
     createToggleButton() {
-        // Check if button already exists
+        // Check if floating button already exists
         if (document.querySelector('.theme-toggle')) {
             this.toggleButton = document.querySelector('.theme-toggle');
             this.updateToggleIcon();
             this.toggleButton.onclick = () => this.toggle();
-            return;
         }
 
-        // Create new button
-        const button = document.createElement('button');
-        button.className = 'theme-toggle';
-        button.setAttribute('aria-label', 'Toggle theme');
-        button.innerHTML = '<i class="bi bi-sun-fill"></i>';
-        button.onclick = () => this.toggle();
-        
-        document.body.appendChild(button);
-        this.toggleButton = button;
-        
+        // Also wire up navbar toggle button (#theme-toggle-btn)
+        const navToggle = document.getElementById('theme-toggle-btn');
+        if (navToggle) {
+            navToggle.onclick = () => this.toggle();
+            this.navToggleButton = navToggle;
+        }
+
+        // Also wire up admin page mini toggle (.theme-toggle-mini)  
+        const miniToggle = document.querySelector('.theme-toggle-mini');
+        if (miniToggle) {
+            miniToggle.onclick = () => this.toggle();
+            this.miniToggleButton = miniToggle;
+        }
+
+        // Create floating button if none found anywhere
+        if (!this.toggleButton && !navToggle && !miniToggle) {
+            const button = document.createElement('button');
+            button.className = 'theme-toggle';
+            button.setAttribute('aria-label', 'Toggle theme');
+            button.innerHTML = '<i class="bi bi-sun-fill"></i>';
+            button.onclick = () => this.toggle();
+
+            document.body.appendChild(button);
+            this.toggleButton = button;
+        }
+
         this.updateToggleIcon();
     }
 
     updateToggleIcon() {
-        if (!this.toggleButton) return;
-        
-        const icon = this.toggleButton.querySelector('i');
-        if (!icon) return;
-        
-        // ✅ Updated: Light mode shows sun (current), click to go dark (moon)
-        if (this.theme === 'light') {
-            icon.className = 'bi bi-moon-stars-fill'; // Show moon = can switch to dark
-        } else {
-            icon.className = 'bi bi-sun-fill'; // Show sun = can switch to light
+        const iconClass = this.theme === 'light' ? 'bi bi-moon-stars-fill' : 'bi bi-sun-fill';
+
+        // Update floating toggle button
+        if (this.toggleButton) {
+            const icon = this.toggleButton.querySelector('i');
+            if (icon) icon.className = iconClass;
+        }
+
+        // Update navbar toggle (#theme-toggle-btn)
+        const navToggle = this.navToggleButton || document.getElementById('theme-toggle-btn');
+        if (navToggle) {
+            const icon = navToggle.querySelector('i');
+            if (icon) icon.className = iconClass;
+        }
+
+        // Update admin mini toggle (.theme-toggle-mini)
+        const miniToggle = this.miniToggleButton || document.querySelector('.theme-toggle-mini');
+        if (miniToggle) {
+            const icon = miniToggle.querySelector('i');
+            if (icon) icon.className = iconClass;
         }
     }
 
@@ -111,7 +136,7 @@ class ThemeManager {
 
     watchSystemTheme() {
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        
+
         mediaQuery.addEventListener('change', (e) => {
             // Only auto-switch if user hasn't manually set a preference
             if (!localStorage.getItem('theme')) {
@@ -136,10 +161,10 @@ class ThemeManager {
 window.themeManager = new ThemeManager();
 
 // Smooth scroll utility
-window.smoothScroll = function(target) {
+window.smoothScroll = function (target) {
     const element = typeof target === 'string' ? document.querySelector(target) : target;
     if (!element) return;
-    
+
     element.scrollIntoView({
         behavior: 'smooth',
         block: 'start'

@@ -96,7 +96,7 @@ class AudioPlayer:
                 stderr=subprocess.DEVNULL
             )
         except FileNotFoundError:
-            # Fallback: thử paplay (alsa-utils)
+            # Fallback 1: thử paplay (PulseAudio)
             try:
                 logger.info("   mpg123 not found, trying paplay...")
                 self.current_audio_process = subprocess.Popen(
@@ -105,9 +105,17 @@ class AudioPlayer:
                     stderr=subprocess.DEVNULL
                 )
             except FileNotFoundError:
-                logger.error("   ❌ Neither mpg123 nor paplay found. Install one:")
-                logger.error("      sudo apt-get install mpg123")
-                logger.error("      or: sudo apt-get install pulseaudio")
+                # Fallback 2: thử aplay (ALSA)
+                try:
+                    logger.info("   paplay not found, trying aplay...")
+                    self.current_audio_process = subprocess.Popen(
+                        ['aplay', str(audio_file)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except FileNotFoundError:
+                    logger.error("   ❌ No audio player found (mpg123/paplay/aplay).")
+                    logger.error("      Install: sudo apt-get install mpg123 alsa-utils")
     
     def _stop_current(self):
         """Dừng âm thanh đang phát"""
