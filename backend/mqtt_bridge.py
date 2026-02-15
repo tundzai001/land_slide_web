@@ -254,14 +254,39 @@ class MQTTBridge:
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
             is_dangerous = True
             try:
+                # 1. Update UI Status
                 await manager.broadcast({
                     "type": "station_status",
                     "station_id": station_id,
                     "risk_level": alert['level']
                 })
-                logger.warning(f"🚨 [{station_name}] Alert sent: {alert['message']}")
+
+                # 2. Send Alert to Pi Audio Player (and UI) via WebSocket
+                await manager.broadcast({
+                    "type": "alert",
+                    "station_id": station_id,
+                    "level": alert['level'],
+                    "message": alert['message'],
+                    "audio_code": alert.get('audio_code', ''),
+                    "details": alert.get('details', {})
+                })
+                
+                # 3. ✅ CRITICAL: Gửi MQTT command đến Pi để phát audio
+                audio_code = alert.get('audio_code', '')
+                if audio_code:
+                    cmd_topic = f"landslide/{station_id}/command"
+                    cmd_payload = json.dumps({
+                        "audio_code": audio_code,
+                        "level": alert['level'],
+                        "message": alert['message'],
+                        "ts": int(time.time())
+                    })
+                    self.client.publish(cmd_topic, cmd_payload, qos=1)
+                    logger.warning(f"🔊 [{station_name}] MQTT audio command → {cmd_topic}: {audio_code}")
+
+                logger.warning(f"🚨 [{station_name}] Alert broadcast: {alert['message']}")
             except Exception as e:
-                logger.error(f"❌ WS Alert Error: {e}")
+                logger.error(f"❌ WS Alert Broadcast Error: {e}")
         else:
             # Nếu AN TOÀN -> Gửi LOW để UI chuyển về màu xanh ngay lập tức
             try:
