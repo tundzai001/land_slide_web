@@ -1,21 +1,10 @@
-"""
-Pi Audio Player - Field Unit
-Lắng nghe MQTT (chính) / WebSocket (phụ) và phát file mp3 tương ứng với audio_code
-
-MQTT Topics:
-  - landslide/{station_id}/alert      : Nhận cảnh báo (JSON với audio_code)
-  - landslide/{station_id}/command    : Phát lệnh trực tiếp (audio_code)
-
-WebSocket (Fallback):
-  - ws://backend:8000/ws/updates      : Fallback nếu MQTT không kết nối
-"""
-
 import json
 import logging
 import time
 import subprocess
 import threading
 import sys
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -38,26 +27,27 @@ except ImportError:
 # CẤU HÌNH
 # =====================================================
 # MQTT (CHÍNH)
-MQTT_BROKER = "aitogy.click"              # 🔴 SỬA IP MQTT BROKER
-MQTT_PORT = 1883                          # Port MQTT (1883=plain, 8883=SSL)
-MQTT_USERNAME = ""                        # Username (bỏ trống nếu không dùng)
-MQTT_PASSWORD = ""                        # Password (bỏ trống nếu không dùng)
+MQTT_BROKER = "aitogy.asia"              #
+MQTT_PORT = 1883                          
+MQTT_USERNAME = "mqttUser"                       
+MQTT_PASSWORD = ""                        
 
 # WebSocket (PHỤ - Fallback)
-WEBSOCKET_BACKEND = "ws://aitogy.click:8000/ws/updates"  # 🔴 SỬA URL WebSocket
+WEBSOCKET_BACKEND = "ws://aitogy.click:8001/ws/updates"  
 
 # Station Config
-MY_STATION_ID = 1                         # 🔴 SỬA ID TRẠM
-AUDIO_DIR = Path.home() / "landslide_audio"  # Thư mục chứa file mp3
+MY_STATION_ID = 1                         
+AUDIO_DIR = Path(__file__).parent / "landslide_audio"  # Cùng thư mục với script
 LOCAL_CONFIG = Path.home() / ".landslide_device.json"
 
 # Backend registration (for initial setup)
-BACKEND_URL = os.getenv('BACKEND_URL', 'http://aitogy.click:8000')  # 🔴 SỬA NẾU CẦN
+# Backend registration (for initial setup)
+# Lưu ý: Chỉnh port 8000 hoặc 8001 tùy vào cấu hình backend của bạn
+BACKEND_URL = os.getenv('BACKEND_URL', 'http://127.0.0.1:8000')  
 
 # Runtime values (may be overridden by local config)
 DEVICE_CODE = None
 MY_STATION_ID = MY_STATION_ID
-
 
 # =====================================================
 # LOGGING
@@ -136,6 +126,7 @@ class AudioPlayer:
 # -------------------------
 def get_license_code_from_string(string_number: str) -> str:
     try:
+        import math
         length = len(string_number)
         if length == 0:
             return ""

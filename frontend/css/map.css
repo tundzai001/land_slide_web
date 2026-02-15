@@ -823,6 +823,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
    ALERT BANNER - Cảnh báo giữa màn hình
 ======================================== */
 .alert-banner {
+    display: none; /* Ẩn mặc định để tránh lỗi giao diện */
     position: fixed;
     top: 80px;
     left: 50%;
@@ -840,6 +841,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 }
 
 .alert-banner.show {
+    display: flex; /* Hiện lại khi có class .show */
     transform: translateX(-50%) translateY(0);
 }
 

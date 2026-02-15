@@ -5,12 +5,12 @@
 class AdminManager {
     constructor() {
         this.token = localStorage.getItem('token');
-        
+
         // Navigation state
         this.currentView = 'projects';
         this.currentProjectId = null;
         this.navigationStack = [];
-        
+
         // Wizard state
         this.currentStep = 1;
         this.totalSteps = 3;
@@ -18,11 +18,11 @@ class AdminManager {
         this.velocityModal = null;
         this.isEditMode = false;
         this.currentStationId = null;
-        
+
         // Data cache
         this.projectsData = null;
         this.stationsData = null;
-        
+
         // Velocity classification (Cruden & Varnes)
         this.velocityConfig = [
             { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
@@ -37,9 +37,9 @@ class AdminManager {
         // ✅ Default offline thresholds (seconds)
         this.defaultOfflineThresholds = {
             gnss: 60,
-            rain: 60,    
-            water: 60,   
-            imu: 60      
+            rain: 60,
+            water: 60,
+            imu: 60
         };
 
         if (!this.token) {
@@ -52,13 +52,13 @@ class AdminManager {
 
     init() {
         console.log('[ADMIN] Initializing...');
-        
+
         // Initialize modals
         const stationModalEl = document.getElementById('stationConfigModal');
         if (stationModalEl) {
             this.stationModal = new bootstrap.Modal(stationModalEl);
         }
-        
+
         const velocityModalEl = document.getElementById('velocityConfigModal');
         if (velocityModalEl) {
             this.velocityModal = new bootstrap.Modal(velocityModalEl);
@@ -71,8 +71,8 @@ class AdminManager {
                 cb.addEventListener('change', (e) => {
                     const section = document.getElementById(`mqtt-${type}-section`);
                     if (section) section.style.display = e.target.checked ? 'block' : 'none';
-                    
-                    const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => 
+
+                    const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t =>
                         document.getElementById(`edit-${t}`)?.checked
                     );
                     const emptyState = document.getElementById('mqtt-empty-state');
@@ -80,7 +80,7 @@ class AdminManager {
                 });
             }
         });
-        
+
         this.loadUsers();
         this.setupTabHandlers();
         this.setupLogout();
@@ -101,9 +101,9 @@ class AdminManager {
         timeoutInputs.forEach(({ id, display }) => {
             const input = document.getElementById(id);
             const displayEl = document.getElementById(display);
-            
+
             if (input && displayEl) {
-                input.addEventListener('input', function() {
+                input.addEventListener('input', function () {
                     const seconds = parseInt(this.value) || 0;
                     displayEl.textContent = window.adminManager.formatOfflineTime(seconds);
                 });
@@ -150,7 +150,7 @@ class AdminManager {
     // =========================================================================
     // NAVIGATION SYSTEM
     // =========================================================================
-    
+
     resetNavigation() {
         this.currentView = 'projects';
         this.currentProjectId = null;
@@ -161,12 +161,12 @@ class AdminManager {
 
     navigateBack() {
         if (this.navigationStack.length === 0) return;
-        
+
         this.navigationStack.pop();
-        
+
         this.resetNavigation();
         this.loadProjects();
-        
+
         this.updateBreadcrumb();
         this.updateBackButton();
     }
@@ -176,12 +176,12 @@ class AdminManager {
         if (!breadcrumb) return;
 
         let html = '<li class="breadcrumb-item"><a href="#" onclick="window.adminManager.resetNavigation(); window.adminManager.loadProjects();">Dự án</a></li>';
-        
+
         if (this.currentView === 'stations') {
             const projectName = this.getProjectName(this.currentProjectId);
             html += `<li class="breadcrumb-item active">${projectName}</li>`;
         }
-        
+
         breadcrumb.innerHTML = html;
     }
 
@@ -200,7 +200,7 @@ class AdminManager {
     // =========================================================================
     // PROJECTS MANAGEMENT
     // =========================================================================
-    
+
     async loadProjects() {
         try {
             const res = await fetch('/api/admin/projects', {
@@ -226,7 +226,7 @@ class AdminManager {
         const container = document.getElementById('projects-content-area');
         const title = document.getElementById('current-view-title');
         const actionButtons = document.getElementById('action-buttons-container');
-        
+
         if (title) title.textContent = 'Danh sách Dự án';
         if (actionButtons) {
             actionButtons.innerHTML = `
@@ -292,12 +292,12 @@ class AdminManager {
         const name = document.getElementById('project-name').value.trim();
         const desc = document.getElementById('project-desc').value.trim();
         const location = document.getElementById('project-location').value.trim();
-        
+
         if (!code || !name) {
             window.toast?.warning('Vui lòng nhập đầy đủ thông tin');
             return;
         }
-        
+
         try {
             const res = await fetch('/api/admin/projects', {
                 method: 'POST',
@@ -312,20 +312,20 @@ class AdminManager {
                     location: location
                 })
             });
-            
+
             if (!res.ok) {
                 const error = await res.json();
                 throw new Error(error.detail || 'Lỗi tạo dự án');
             }
-            
+
             window.toast?.success('✅ Tạo dự án thành công!');
-            
+
             const modal = bootstrap.Modal.getInstance(document.getElementById('createProjectModal'));
             modal.hide();
-            
+
             document.getElementById('createProjectForm').reset();
             this.loadProjects();
-            
+
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
         }
@@ -333,18 +333,18 @@ class AdminManager {
 
     async deleteProject(projectId) {
         if (!confirm('Bạn có chắc muốn xóa dự án này? Tất cả trạm bên trong sẽ bị xóa!')) return;
-        
+
         try {
             const res = await fetch(`/api/admin/projects/${projectId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            
+
             if (!res.ok) throw new Error('Failed');
-            
+
             window.toast?.success('✅ Xóa dự án thành công!');
             this.loadProjects();
-            
+
         } catch (e) {
             window.toast?.error('❌ Lỗi xóa dự án');
         }
@@ -353,16 +353,16 @@ class AdminManager {
     // =========================================================================
     // STATIONS MANAGEMENT
     // =========================================================================
-    
+
     async loadStations(projectId) {
         try {
             if (this.currentView === 'projects') {
                 this.navigationStack.push({ view: 'projects' });
             }
-            
+
             this.currentView = 'stations';
             this.currentProjectId = projectId;
-            
+
             const res = await fetch(`/api/admin/projects/${projectId}/stations`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
@@ -373,7 +373,7 @@ class AdminManager {
             this.renderStations();
             this.updateBreadcrumb();
             this.updateBackButton();
-            
+
         } catch (e) {
             console.error('Error loading stations:', e);
             window.toast?.error('Không thể tải danh sách trạm');
@@ -384,9 +384,9 @@ class AdminManager {
         const container = document.getElementById('projects-content-area');
         const title = document.getElementById('current-view-title');
         const actionButtons = document.getElementById('action-buttons-container');
-        
+
         const projectName = this.getProjectName(this.currentProjectId);
-        
+
         if (title) title.textContent = `Trạm trong "${projectName}"`;
         if (actionButtons) {
             actionButtons.innerHTML = `
@@ -451,12 +451,12 @@ class AdminManager {
     // =========================================================================
     // STATION WIZARD
     // =========================================================================
-    
+
     openAddStationModal() {
         this.isEditMode = false;
         this.currentStationId = null;
         this.currentStep = 1;
-        
+
         document.getElementById('stationConfigForm').reset();
         document.getElementById('edit-station-id').value = '';
         document.getElementById('origin-lat').value = '';
@@ -465,29 +465,29 @@ class AdminManager {
         document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
         document.getElementById('edit-project-id').value = this.currentProjectId;
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
-        
+
         ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
             const checkbox = document.getElementById(`edit-${sensor}`);
             if (checkbox) checkbox.checked = false;
             const section = document.getElementById(`mqtt-${sensor}-section`);
             if (section) section.style.display = 'none';
         });
-        
+
         // ✅ Reset offline thresholds về mặc định
         document.getElementById('offline-gnss').value = this.defaultOfflineThresholds.gnss;
         document.getElementById('offline-rain').value = this.defaultOfflineThresholds.rain;
         document.getElementById('offline-water').value = this.defaultOfflineThresholds.water;
         document.getElementById('offline-imu').value = this.defaultOfflineThresholds.imu;
-        
+
         // ✅ Update displays
         document.getElementById('offline-gnss-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.gnss);
         document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.rain);
         document.getElementById('offline-water-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.water);
         document.getElementById('offline-imu-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.imu);
-        
+
         document.getElementById('mqtt-empty-state').style.display = 'block';
         document.getElementById('btn-delete-station').style.display = 'none';
-        
+
         this.updateWizardStep();
         if (this.stationModal) this.stationModal.show();
     }
@@ -526,7 +526,7 @@ class AdminManager {
                 const checkbox = document.getElementById(`edit-${type}`);
                 const section = document.getElementById(`mqtt-${type}-section`);
                 const input = document.getElementById(`topic-${type}`);
-                
+
                 if (checkbox) checkbox.checked = false;
                 if (section) section.style.display = 'none';
                 if (input) input.value = '';
@@ -539,15 +539,24 @@ class AdminManager {
                     const section = document.getElementById(`mqtt-${type}-section`);
                     const input = document.getElementById(`topic-${type}`);
 
-                    if (checkbox) {
+                    console.log(`📋 [EDIT] Device ${type}: is_active=${dev.is_active}, topic=${dev.mqtt_topic}`);
+
+                    // Bật checkbox nếu device active (is_active !== false)
+                    if (checkbox && dev.is_active !== false) {
                         checkbox.checked = true;
                         if (section) section.style.display = 'block';
                         if (input) input.value = dev.mqtt_topic || '';
+                    } else if (checkbox) {
+                        // Explicitly uncheck if inactive
+                        checkbox.checked = false;
+                        if (section) section.style.display = 'none';
                     }
                 });
-                
+
+                // Show empty state if no active devices
+                const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => document.getElementById(`edit-${t}`)?.checked);
                 const emptyState = document.getElementById('mqtt-empty-state');
-                if (emptyState) emptyState.style.display = devices.length > 0 ? 'none' : 'block';
+                if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
             }
 
             // STEP 3: Thresholds
@@ -559,12 +568,12 @@ class AdminManager {
             const rainThreshold = offlineThresholds.rain || this.defaultOfflineThresholds.rain;
             const waterThreshold = offlineThresholds.water || this.defaultOfflineThresholds.water;
             const imuThreshold = offlineThresholds.imu || this.defaultOfflineThresholds.imu;
-            
+
             document.getElementById('offline-gnss').value = gnssThreshold;
             document.getElementById('offline-rain').value = rainThreshold;
             document.getElementById('offline-water').value = waterThreshold;
             document.getElementById('offline-imu').value = imuThreshold;
-            
+
             // ✅ Update displays
             document.getElementById('offline-gnss-display').textContent = this.formatOfflineTime(gnssThreshold);
             document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(rainThreshold);
@@ -584,7 +593,7 @@ class AdminManager {
                     { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
                 ];
             }
-            
+
             const waterCfg = cfg.Water || {};
             document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
             document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
@@ -618,7 +627,7 @@ class AdminManager {
 
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
             document.getElementById('btn-delete-station').style.display = 'inline-block';
-            
+
             this.updateWizardStep();
             if (this.stationModal) this.stationModal.show();
 
@@ -633,16 +642,16 @@ class AdminManager {
             const stepNum = parseInt(step.dataset.step);
             step.classList.toggle('active', stepNum === this.currentStep);
         });
-        
+
         document.querySelectorAll('.wizard-content').forEach(content => {
             const stepNum = parseInt(content.dataset.step);
             content.classList.toggle('active', stepNum === this.currentStep);
         });
-        
+
         const btnBack = document.getElementById('btn-wizard-back');
         const btnNext = document.getElementById('btn-wizard-next');
         const btnSave = document.getElementById('btn-wizard-save');
-        
+
         if (btnBack) btnBack.style.display = this.currentStep > 1 ? 'inline-block' : 'none';
         if (btnNext) btnNext.style.display = this.currentStep < this.totalSteps ? 'inline-block' : 'none';
         if (btnSave) btnSave.style.display = this.currentStep === this.totalSteps ? 'inline-block' : 'none';
@@ -683,102 +692,102 @@ class AdminManager {
                 water_confirm: 5,
                 rain_confirm: 3,
                 imu_confirm: 2,
-                
+
                 // GNSS Quality
                 gnss_hdop: 3.0,
                 gnss_streak: 10,
                 gnss_timeout: 600,
-                
+
                 // Water
                 water_warning: 0.20,
                 water_critical: 0.40,
-                
+
                 // Rain
                 rain_watch: 15.0,
                 rain_warning: 35.0,
                 rain_critical: 60.0,
-                
+
                 // IMU
                 imu_shock: 8.0
             },
-            
+
             balanced: {
                 gnss_steps: 3,
                 water_confirm: 3,
                 rain_confirm: 2,
                 imu_confirm: 1,
-                
+
                 gnss_hdop: 4.0,
                 gnss_streak: 5,
                 gnss_timeout: 300,
-                
+
                 water_warning: 0.15,
                 water_critical: 0.30,
-                
+
                 rain_watch: 10.0,
                 rain_warning: 25.0,
                 rain_critical: 50.0,
-                
+
                 imu_shock: 5.0
             },
-            
+
             sensitive: {
                 gnss_steps: 1,
                 water_confirm: 1,
                 rain_confirm: 1,
                 imu_confirm: 1,
-                
+
                 gnss_hdop: 5.0,
                 gnss_streak: 3,
                 gnss_timeout: 180,
-                
+
                 water_warning: 0.10,
                 water_critical: 0.20,
-                
+
                 rain_watch: 5.0,
                 rain_warning: 15.0,
                 rain_critical: 30.0,
-                
+
                 imu_shock: 3.0
             }
         };
-        
+
         const preset = presets[presetName];
         if (!preset) return;
-        
+
         // ✅ ĐIỀN TỰ ĐỘNG CÁC GIÁ TRỊ VÀO FORM
-        
+
         // GNSS Quality
         const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
         const gnssStepsEl = document.getElementById('cfg-gnss-steps');
         const gnssStreakEl = document.getElementById('cfg-gnss-streak');
         const gnssTimeoutEl = document.getElementById('cfg-gnss-timeout');
-        
+
         if (gnssHdopEl) gnssHdopEl.value = preset.gnss_hdop;
         if (gnssStepsEl) gnssStepsEl.value = preset.gnss_steps;
         if (gnssStreakEl) gnssStreakEl.value = preset.gnss_streak;
         if (gnssTimeoutEl) gnssTimeoutEl.value = preset.gnss_timeout;
-        
+
         // Water
         const waterWarningEl = document.getElementById('cfg-water-warning');
         const waterCriticalEl = document.getElementById('cfg-water-critical');
-        
+
         if (waterWarningEl) waterWarningEl.value = preset.water_warning;
         if (waterCriticalEl) waterCriticalEl.value = preset.water_critical;
-        
+
         // Rain
         const rainWatchEl = document.getElementById('cfg-rain-watch');
         const rainWarningEl = document.getElementById('cfg-rain-warning');
         const rainCriticalEl = document.getElementById('cfg-rain-critical');
-        
+
         if (rainWatchEl) rainWatchEl.value = preset.rain_watch;
         if (rainWarningEl) rainWarningEl.value = preset.rain_warning;
         if (rainCriticalEl) rainCriticalEl.value = preset.rain_critical;
-        
+
         // IMU
         const imuShockEl = document.getElementById('cfg-imu-shock');
         if (imuShockEl) imuShockEl.value = preset.imu_shock;
-        
+
         // ✅ HIỆU ỨNG FLASH (để user biết đã áp dụng)
         const inputs = document.querySelectorAll('#stationConfigForm input[type="number"]');
         inputs.forEach(input => {
@@ -788,14 +797,14 @@ class AdminManager {
                 input.style.background = '';
             }, 500);
         });
-        
+
         // ✅ THÔNG BÁO
         const presetLabels = {
             'conservative': 'Conservative - Ít cảnh báo sai',
             'balanced': 'Balanced - Cân bằng',
             'sensitive': 'Sensitive - Phát hiện nhanh'
         };
-        
+
         window.toast?.success(`✅ Đã áp dụng preset: ${presetLabels[presetName]}`, 3000);
     }
 
@@ -803,34 +812,46 @@ class AdminManager {
         const code = document.getElementById('edit-code').value.trim();
         const name = document.getElementById('edit-name').value.trim();
         const projectId = document.getElementById('edit-project-id').value;
-        
+
         if (!code || !name) {
             window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
             return;
         }
-        
+
         const sensors = {};
-        ['gnss', 'rain', 'water', 'imu'].forEach(type => {
+        const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
+        let hasError = false;
+
+        sensorTypes.forEach(type => {
             const checkbox = document.getElementById(`edit-${type}`);
             if (checkbox && checkbox.checked) {
-                const topic = document.getElementById(`topic-${type}`)?.value.trim();
-                if (topic) {
-                    sensors[type] = { topic: topic };
-                    
-                    if (type === 'gnss') {
-                        const lat = document.getElementById('origin-lat').value;
-                        const lon = document.getElementById('origin-lon').value;
-                        const h = document.getElementById('origin-h').value;
-                        
-                        if (lat && lon) {
-                            sensors[type].lat = parseFloat(lat);
-                            sensors[type].lon = parseFloat(lon);
-                            sensors[type].h = parseFloat(h) || 0;
-                        }
+                const topicInput = document.getElementById(`topic-${type}`);
+                const topic = topicInput?.value.trim();
+
+                if (!topic) {
+                    window.toast?.error(`Vui lòng nhập MQTT Topic cho ${type.toUpperCase()}`);
+                    topicInput.focus();
+                    hasError = true;
+                    return;
+                }
+
+                sensors[type] = { topic: topic };
+
+                if (type === 'gnss') {
+                    const lat = document.getElementById('origin-lat').value;
+                    const lon = document.getElementById('origin-lon').value;
+                    const h = document.getElementById('origin-h').value;
+
+                    if (lat && lon) {
+                        sensors[type].lat = parseFloat(lat);
+                        sensors[type].lon = parseFloat(lon);
+                        sensors[type].h = parseFloat(h) || 0;
                     }
                 }
             }
         });
+
+        if (hasError) return;
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
         const config = {
@@ -877,11 +898,14 @@ class AdminManager {
             location: null
         };
 
+        console.log('💾 [SAVE] isEditMode:', this.isEditMode, 'stationId:', this.currentStationId);
+        console.log('💾 [SAVE] Payload:', JSON.stringify(payload, null, 2));
+
         try {
-            let url = this.isEditMode 
+            let url = this.isEditMode
                 ? `/api/admin/stations/${this.currentStationId}/config`
                 : `/api/admin/projects/${projectId}/stations`;
-            
+
             let method = this.isEditMode ? 'PUT' : 'POST';
 
             const res = await fetch(url, {
@@ -905,20 +929,20 @@ class AdminManager {
 
     async deleteStation(stationId) {
         if (!confirm('Bạn có chắc muốn xóa trạm này?')) return;
-        
+
         try {
             const res = await fetch(`/api/admin/stations/${stationId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            
+
             if (!res.ok) throw new Error('Failed');
-            
+
             window.toast?.success('✅ Xóa trạm thành công!');
-            
+
             if (this.stationModal) this.stationModal.hide();
             this.loadStations(this.currentProjectId);
-            
+
         } catch (e) {
             window.toast?.error('❌ Lỗi xóa trạm');
         }
@@ -927,7 +951,7 @@ class AdminManager {
     // =========================================================================
     // VELOCITY CONFIG MODAL
     // =========================================================================
-    
+
     openVelocityModal() {
         console.log('📊 [VELOCITY] Opening modal...');
         this.renderVelocityTable();
@@ -971,12 +995,12 @@ class AdminManager {
     }
 
     applyVelocityConfig() {
-        
+
         console.log('✅ [VELOCITY] Applied config:', this.velocityConfig);
-        
+
         // Thông báo cho người dùng biết
         window.toast?.success('✅ Đã áp dụng bảng vận tốc. Hãy bấm "Lưu cấu hình" để lưu trạm.');
-        
+
         // Đóng modal
         this.closeVelocityModal();
     }
@@ -1000,39 +1024,39 @@ class AdminManager {
     // =========================================================================
     // FETCH ORIGIN COORDINATES (LIVE FROM DEVICE)
     // =========================================================================
-    
+
     async fetchLatestOrigin() {
         const topic = document.getElementById('topic-gnss')?.value.trim();
         if (!topic) {
             window.toast?.warning('Vui lòng nhập MQTT Topic của GNSS trước');
             return;
         }
-        
+
         const statusEl = document.getElementById('origin-status');
         const btnEl = document.getElementById('btn-fetch-origin');
-        
+
         statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Đang kết nối thiết bị...';
         if (btnEl) btnEl.disabled = true;
-        
+
         try {
             // Gọi API backend để subscribe tạm thời vào topic và lấy message mới nhất
             const res = await fetch('/api/admin/gnss/fetch-live-origin', {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json' 
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ topic: topic })
             });
-            
+
             const result = await res.json();
-            
+
             if (res.ok) {
                 // Điền tọa độ nhận được vào form
                 document.getElementById('origin-lat').value = result.lat;
                 document.getElementById('origin-lon').value = result.lon;
                 document.getElementById('origin-h').value = result.h;
-                
+
                 statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
                 window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
             } else {
@@ -1080,7 +1104,7 @@ class AdminManager {
             <div class="d-flex align-items-center p-2 border rounded mb-2">
                 <div class="flex-grow-1">
                     <div><strong>${d.device_code}</strong> <small class="text-muted">(${d.device_type})</small></div>
-                    <div class="small text-muted">${d.name || ''} · đăng ký: ${new Date((d.created_at||0)*1000).toLocaleString()}</div>
+                    <div class="small text-muted">${d.name || ''} · đăng ký: ${new Date((d.created_at || 0) * 1000).toLocaleString()}</div>
                 </div>
                 <div>
                     <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.adminManager.generateLicense('${d.device_code}')">Tạo license</button>
@@ -1156,7 +1180,7 @@ class AdminManager {
     // =========================================================================
     // USER MANAGEMENT
     // =========================================================================
-    
+
     async loadUsers() {
         try {
             const res = await fetch('/api/admin/users', {
@@ -1266,7 +1290,7 @@ class AdminManager {
 // =========================================================================
 document.addEventListener('DOMContentLoaded', () => {
     // Đảm bảo các modal và components đã load xong
-    if(document.getElementById('projects-content-area')) {
+    if (document.getElementById('projects-content-area')) {
         window.adminManager = new AdminManager();
     } else {
         console.error('❌ Admin Dashboard DOM element missing');

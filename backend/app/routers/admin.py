@@ -698,8 +698,81 @@ async def update_system_config(
         logger.error(f"❌ Error saving system config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ============================================================================
+# DEVICE PROVISIONING (Pending Devices)
+# ============================================================================
+
+@router.get("/devices/pending")
+async def get_pending_devices(
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        # Find devices with station_id=0 (unassigned)
+        result = await db.execute(
+            select(model_config.Device)
+            .where(model_config.Device.station_id == 0)
+            .order_by(model_config.Device.created_at.desc())
+        )
+        devices = result.scalars().all()
+        return devices
+    except Exception as e:
+        logger.error(f"Error getting pending devices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/devices/provision")
+async def provision_device(
+    payload: dict,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    """
+    Assign a pending device to a station.
+    Payload: {"device_code": "...", "station_id": 123, "license": "optional"}
+    """
+    device_code = payload.get('device_code')
+    station_id = payload.get('station_id')
+    license_val = payload.get('license')
+    
+    if not device_code or not station_id:
+        raise HTTPException(status_code=400, detail="Missing device_code or station_id")
+
+    try:
+        # 1. Get Device
+        res_dev = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
+        device = res_dev.scalar_one_or_none()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+            
+        # 2. Get Station
+        res_st = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
+        station = res_st.scalar_one_or_none()
+        if not station:
+            raise HTTPException(status_code=404, detail="Station not found")
+            
+        # 3. Update Device
+        device.station_id = station_id
+        if license_val:
+            cfg = device.config or {}
+            cfg['license'] = license_val
+            device.config = cfg
+            
+        await db.commit()
+        
+        logger.info(f"✅ Provisioned device {device_code} to station {station.name} (ID: {station.id})")
+        return {"status": "success", "message": f"Device assigned to {station.name}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error provisioning device: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ============================================================================
 # SYSTEM PASSWORD VERIFICATION
+
 # ============================================================================
 @router.post("/verify-system-password")
 async def verify_system_password(
@@ -836,7 +909,7 @@ async def get_station_config(
 async def update_station_config(
     station_id: int,
     config_data: dict,
-    db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
+    db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
@@ -854,10 +927,6 @@ async def update_station_config(
         # Update basic info
         if 'station_code' in config_data: station.station_code = config_data['station_code']
         if 'name' in config_data: station.name = config_data['name']
-        if 'has_gnss' in config_data: station.has_gnss = config_data['has_gnss']
-        if 'has_rain' in config_data: station.has_rain = config_data['has_rain']
-        if 'has_water' in config_data: station.has_water = config_data['has_water']
-        if 'has_imu' in config_data: station.has_imu = config_data['has_imu']
         
         # Update config JSON (Deep merge simple)
         if 'config' in config_data:
@@ -872,9 +941,74 @@ async def update_station_config(
             
             station.config = current_config
         
+        # ✅ SYNC DEVICES từ sensors payload
+        if 'sensors' in config_data and isinstance(config_data['sensors'], dict):
+            sensors = config_data['sensors']
+            logger.info(f"📋 [UPDATE] Station {station_id}: syncing sensors={list(sensors.keys())}")
+            
+            # 1. Get all existing devices
+            existing_res = await db.execute(
+                select(model_config.Device).where(model_config.Device.station_id == station_id)
+            )
+            existing_devices = {d.device_type: d for d in existing_res.scalars().all()}
+            logger.info(f"📋 [UPDATE] Existing devices: {list(existing_devices.keys())}")
+            
+            # 2. Update or create sensors
+            active_types = set()
+            for s_type, info in sensors.items():
+                topic = info.get('topic', '').strip() if isinstance(info, dict) else ''
+                if not topic:
+                    continue
+                
+                active_types.add(s_type)
+                
+                if s_type in existing_devices:
+                    existing_devices[s_type].mqtt_topic = topic
+                    existing_devices[s_type].is_active = True
+                    existing_devices[s_type].updated_at = int(time.time())
+                    logger.info(f"  ✅ Updated {s_type}: topic={topic}")
+                else:
+                    # Check if device_code already exists globally (orphaned or other station)
+                    dev_code = f"{station.station_code}_{s_type.upper()}"
+                    existing_by_code = await db.execute(
+                        select(model_config.Device).where(model_config.Device.device_code == dev_code)
+                    )
+                    found_dev = existing_by_code.scalar_one_or_none()
+                    
+                    if found_dev:
+                        # Reassign existing device to this station
+                        found_dev.station_id = station_id
+                        found_dev.device_type = s_type
+                        found_dev.mqtt_topic = topic
+                        found_dev.is_active = True
+                        found_dev.updated_at = int(time.time())
+                        logger.info(f"  🔄 Reassigned existing device {dev_code}: topic={topic}")
+                    else:
+                        db.add(model_config.Device(
+                            device_code=dev_code,
+                            name=f"{station.name} - {s_type.upper()}",
+                            station_id=station_id,
+                            device_type=s_type,
+                            mqtt_topic=topic,
+                            is_active=True,
+                            created_at=int(time.time()),
+                            updated_at=int(time.time())
+                        ))
+                        logger.info(f"  🆕 Created {s_type}: topic={topic}")
+            
+            # 3. Deactivate unchecked sensors
+            for d_type, dev in existing_devices.items():
+                if d_type not in active_types:
+                    dev.is_active = False
+                    dev.updated_at = int(time.time())
+                    logger.info(f"  ❌ Deactivated {d_type}")
+            
+            logger.info(f"📋 [UPDATE] Active types: {active_types}")
+        
+        station.updated_at = int(time.time())
         await db.commit()
-        await db.refresh(station)
-        return schemas.StationResponse.from_orm(station)
+        
+        return {"status": "success", "message": f"Updated station {station_id}"}
         
     except HTTPException:
         raise
@@ -1195,5 +1329,50 @@ async def factory_reset_database(
     except Exception as e:
         await config_db.rollback()
         await data_db.rollback()
-        logger.error(f"❌ Factory Reset error: {e}")
+
+# ============================================================================
+# COMMAND API
+# ============================================================================
+class PlayAudioRequest(BaseModel):
+    audio_code: str
+
+@router.post("/stations/{station_id}/command/play")
+async def send_audio_command(
+    station_id: int,
+    payload: PlayAudioRequest,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    """
+    Send a 'play audio' command to the station via MQTT.
+    """
+    try:
+        # Import mqtt_service here to avoid circular imports
+        from app.main import mqtt_service
+        
+        # 1. Verify station exists
+        res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
+        station = res.scalar_one_or_none()
+        if not station:
+            raise HTTPException(status_code=404, detail="Station not found")
+            
+        audio_code = payload.audio_code
+        if not audio_code:
+             raise HTTPException(status_code=400, detail="audio_code required")
+
+        # 2. Publish to MQTT
+        topic = f"landslide/{station_id}/command"
+        message = json.dumps({
+            "cmd": "play_audio",
+            "audio_code": audio_code,
+            "ts": int(time.time())
+        })
+        
+        mqtt_service.client.publish(topic, message, retain=False)
+        logger.info(f"📢 Command sent to {topic}: {message}")
+        
+        return {"status": "success", "message": f"Command sent: {audio_code}"}
+
+    except Exception as e:
+        logger.error(f"❌ Error sending command: {e}")
         raise HTTPException(status_code=500, detail=str(e))
