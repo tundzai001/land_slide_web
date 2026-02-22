@@ -102,7 +102,7 @@ class NavManager {
         
         if (user && user.role === 'admin') {
             adminBtn.style.display = 'inline-flex'; // Use inline-flex for proper icon+text alignment
-            console.log('✅ [NAV] Admin button shown for:', user.sub);
+            console.log('✅ [NAV] Admin button shown for:', user.username);
         } else {
             adminBtn.style.display = 'none';
             console.log('🔒 [NAV] Admin button hidden (not admin)');
@@ -174,7 +174,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const authBtn = document.getElementById('auth-btn');
         
         if (authBtn && user) {
-            authBtn.innerHTML = `<i class="bi bi-person-check me-1"></i> ${user.sub}`;
+            authBtn.innerHTML = `<i class="bi bi-person-check me-1"></i> ${user.username}`;
             authBtn.classList.remove('btn-primary');
             authBtn.classList.add('btn-outline-danger');
         }
