@@ -43,7 +43,7 @@ class AdminManager {
         };
 
         if (!this.token) {
-            window.location.href = '/pages/login.html';
+            window.location.replace('/pages/login.html');
             return;
         }
 

@@ -427,7 +427,7 @@
                     sessionStorage.setItem('justLoggedIn', 'true');
                     
                     setTimeout(() => {
-                        window.location.href = '/pages/admin.html';
+                        window.location.replace('/pages/admin.html');
                     }, 500);
                 } else {
                     throw new Error(result.error || 'Đăng nhập thất bại');
