@@ -4,11 +4,11 @@
 
 class DatabaseManager {
     constructor() {
-        this.token = localStorage.getItem('token');
+        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
         this.allData = [];
         this.filteredData = [];
         this.currentEditModal = null;
-        
+
         if (!this.token) {
             window.location.href = '/pages/login.html';
             return;
@@ -19,25 +19,25 @@ class DatabaseManager {
 
     init() {
         console.log('🗄️ [DB MANAGER] Initializing...');
-        
+
         const editModalEl = document.getElementById('editRecordModal');
         if (editModalEl) {
             this.currentEditModal = new bootstrap.Modal(editModalEl);
         }
-        
+
         const dbTabBtn = document.querySelector('button[data-bs-target="#tab-database"]');
         if (dbTabBtn) {
             dbTabBtn.addEventListener('shown.bs.tab', () => {
                 this.loadAllData();
             });
         }
-        
+
         console.log('✅ [DB MANAGER] Initialized');
     }
 
     async loadAllData() {
         console.log('📡 [DB MANAGER] Loading all database records...');
-        
+
         const tbody = document.getElementById('db-table-body');
         if (tbody) {
             tbody.innerHTML = `
@@ -95,12 +95,12 @@ class DatabaseManager {
             const res = await fetch(`/api/admin/db/${endpoint}`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            
+
             if (!res.ok) {
                 console.warn(`⚠️ Failed to load ${endpoint}: ${res.status}`);
                 return [];
             }
-            
+
             return await res.json();
         } catch (e) {
             console.error(`❌ Error fetching ${endpoint}:`, e);
@@ -113,8 +113,8 @@ class DatabaseManager {
         const searchTerm = document.getElementById('db-search')?.value.toLowerCase() || '';
         const limit = parseInt(document.getElementById('db-limit')?.value || '100');
 
-        let filtered = tableFilter === 'all' 
-            ? this.allData 
+        let filtered = tableFilter === 'all'
+            ? this.allData
             : this.allData.filter(item => item._table === tableFilter);
 
         if (searchTerm) {
@@ -137,7 +137,7 @@ class DatabaseManager {
                 <tr>
                     <td colspan="4" class="text-center py-4">
                         <i class="bi bi-inbox fs-1 text-muted"></i>
-                        <p class="text-muted mt-2">Không có dữ liệu</p>
+                        <p class="text-muted mt-2 font-monospace">NO_DATA_FOUND</p>
                     </td>
                 </tr>
             `;
@@ -147,25 +147,25 @@ class DatabaseManager {
         tbody.innerHTML = this.filteredData.map(item => {
             const badgeColor = this.getTableBadgeColor(item._table);
             const previewData = this.getPreviewData(item);
-            
+
             return `
-                <tr>
-                    <td><code>${item.id}</code></td>
-                    <td><span class="badge ${badgeColor}">${item._table}</span></td>
+                <tr class="db-row font-monospace" style="font-size: 0.9rem;">
+                    <td class="text-muted">#${item.id}</td>
+                    <td><span class="badge ${badgeColor} bg-opacity-10 border border-${badgeColor.replace('bg-', '')} text-${badgeColor.replace('bg-', '')}">${item._table.toUpperCase()}</span></td>
                     <td>
-                        <div style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            <small class="text-muted">${previewData}</small>
+                        <div class="terminal-text" style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary);">
+                            <span class="text-muted me-2">>></span>${previewData}
                         </div>
                     </td>
                     <td>
-                        <div class="btn-group btn-group-sm">
-                            <button class="btn btn-outline-primary" onclick="window.dbManager.viewRecord('${item._table}', ${item.id})" title="Xem chi tiết">
+                        <div class="btn-group btn-group-sm opacity-50 hover-opacity-100">
+                            <button class="btn btn-outline-secondary border-0" onclick="window.dbManager.viewRecord('${item._table}', ${item.id})" title="VIEW">
                                 <i class="bi bi-eye"></i>
                             </button>
-                            <button class="btn btn-outline-warning" onclick="window.dbManager.editRecord('${item._table}', ${item.id})" title="Chỉnh sửa">
+                            <button class="btn btn-outline-secondary border-0" onclick="window.dbManager.editRecord('${item._table}', ${item.id})" title="EDIT">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${item._table}', ${item.id})" title="Xóa">
+                            <button class="btn btn-outline-danger border-0" onclick="window.dbManager.deleteRecord('${item._table}', ${item.id})" title="DELETE">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -315,7 +315,7 @@ class DatabaseManager {
         const modal = new bootstrap.Modal(document.getElementById('exportExcelModal'));
         modal.show();
     }
-    
+
     // Quick Select Functions
     selectAllExport() {
         ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
@@ -323,21 +323,21 @@ class DatabaseManager {
             if (checkbox) checkbox.checked = true;
         });
     }
-    
+
     deselectAllExport() {
         ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
             const checkbox = document.getElementById(`export-${table}`);
             if (checkbox) checkbox.checked = false;
         });
     }
-    
+
     selectOnlyData() {
         this.deselectAllExport();
         // Chỉ chọn Sensor Data và Alerts
         document.getElementById('export-sensor-data').checked = true;
         document.getElementById('export-alerts').checked = true;
     }
-    
+
     // ✅ HÀM NÀY ĐÃ ĐƯỢC SỬA ĐỂ GỌI API /export-csv VÀ TẢI FILE ZIP
     async confirmExportExcel() {
         try {
@@ -348,47 +348,47 @@ class DatabaseManager {
             if (document.getElementById('export-devices')?.checked) tables.push('devices');
             if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
             if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
-            
+
             // Kiểm tra
             if (tables.length === 0) {
                 window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng!');
                 return;
             }
-            
+
             // Đóng modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('exportExcelModal'));
             if (modal) modal.hide();
-            
+
             window.toast?.info('⏳ Đang tạo file CSV & nén ZIP... Vui lòng chờ!', 0);
-            
+
             // ✅ GỌI API MỚI: export-csv
             const res = await fetch('/api/admin/db/export-csv', {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ tables: tables })
             });
-            
+
             if (!res.ok) throw new Error('Export failed');
-            
+
             // ✅ XỬ LÝ DOWNLOAD FILE ZIP
             const blob = await res.blob();
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            
+
             // Đặt tên file là .zip
             link.download = `landslide_backup_${Date.now()}.zip`;
-            
+
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
-            
+
             window.toast?.success(`✅ Đã tải xuống file ZIP chứa ${tables.length} bảng CSV!`, 5000);
-            
+
         } catch (e) {
             console.error('❌ Export error:', e);
             window.toast?.error('❌ Lỗi export: ' + e.message);
@@ -426,40 +426,40 @@ class DatabaseManager {
     async confirmClearDatabase() {
         const input = document.getElementById('clear-db-confirm-input');
         const confirmText = input?.value.trim();
-        
+
         let apiEndpoint = '';
 
         // 1. Xóa dữ liệu (Giữ trạm)
         if (confirmText === 'XOA DATA') {
             apiEndpoint = '/api/admin/db/clear-all';
-        } 
+        }
         // 2. Xóa TẤT CẢ (Về ID 1)
         else if (confirmText === 'FACTORY RESET') {
             apiEndpoint = '/api/admin/db/factory-reset';
-        } 
+        }
         else {
             window.toast?.warning('⚠️ Cú pháp sai! Nhập "XOA DATA" hoặc "FACTORY RESET"');
             return;
         }
-        
+
         try {
             const modal = bootstrap.Modal.getInstance(document.getElementById('clearDatabaseModal'));
             if (modal) modal.hide();
-            
+
             window.toast?.warning('⏳ Đang xử lý...', 0);
-            
+
             const res = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            
+
             if (!res.ok) throw new Error('Failed');
-            
+
             const result = await res.json();
             window.toast?.success(`✅ ${result.message}`, 5000);
-            
+
             this.loadAllData(); // Reload lại bảng
-            
+
         } catch (e) {
             console.error(e);
             window.toast?.error('Lỗi: ' + e.message);
@@ -469,18 +469,18 @@ class DatabaseManager {
     async performClear() {
         try {
             window.toast?.warning('⏳ Đang xóa database...', 0);
-            
+
             const res = await fetch('/api/admin/db/clear-all', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            
+
             if (!res.ok) throw new Error('Clear failed');
-            
+
             const result = await res.json();
             window.toast?.success(`✅ ${result.message || 'Đã xóa dữ liệu'}`);
             this.loadAllData();
-            
+
         } catch (e) {
             window.toast?.error('Lỗi: ' + e.message);
         }

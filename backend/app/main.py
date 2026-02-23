@@ -186,11 +186,21 @@ async def login(
             detail="Account is disabled"
         )
     
+    # Check remember_me from form scopes (OAuth2 extra fields)
+    remember_me = 'remember_me' in (form_data.scopes or [])
+    
+    # If remember_me, issue a 30-day token; otherwise use default
+    if remember_me:
+        expires = timedelta(days=30)
+    else:
+        expires = None  # Uses default from settings
+    
     access_token = auth.create_access_token(
-        data={"sub": user.username, "role": user.role}
+        data={"sub": user.username, "role": user.role},
+        expires_delta=expires
     )
     
-    logger.info(f"✅ Login successful: {user.username}")
+    logger.info(f"✅ Login successful: {user.username} (remember_me={remember_me})")
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/api/auth/me", response_model=schemas.UserResponse)

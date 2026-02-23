@@ -4,7 +4,7 @@
 
 class AdminManager {
     constructor() {
-        this.token = localStorage.getItem('token');
+        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
 
         // Navigation state
         this.currentView = 'projects';
@@ -250,25 +250,26 @@ class AdminManager {
             <div class="row g-3">
                 ${this.projectsData.map(p => `
                     <div class="col-md-6 col-xl-4">
-                        <div class="card hover-lift" style="cursor: pointer;" onclick="window.adminManager.loadStations(${p.id})">
-                            <div class="card-body">
+                        <div class="card hover-lift project-card" style="cursor: pointer;" onclick="window.adminManager.loadStations(${p.id})">
+                            <div class="card-body position-relative" style="z-index: 2;">
                                 <div class="d-flex justify-content-between align-items-start mb-3">
                                     <div>
-                                        <h5 class="card-title mb-1">
-                                            <i class="bi bi-folder-fill text-primary me-2"></i>
+                                        <h5 class="card-title mb-1 neon-text">
+                                            <i class="bi bi-folder-fill me-2"></i>
                                             ${p.name}
                                         </h5>
-                                        <small class="text-muted">${p.project_code}</small>
+                                        <small class="text-muted font-monospace">${p.project_code}</small>
                                     </div>
-                                    <span class="badge bg-primary">${p.station_count || 0} trạm</span>
+                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary">${p.station_count || 0} STATION</span>
                                 </div>
                                 ${p.description ? `<p class="text-muted small mb-0">${p.description}</p>` : ''}
                                 ${p.location ? `<p class="text-muted small mb-0 mt-2"><i class="bi bi-geo-alt"></i> ${p.location}</p>` : ''}
+                                
                             </div>
-                            <div class="card-footer bg-transparent border-top-0">
+                            <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-outline-primary flex-1" onclick="event.stopPropagation(); window.adminManager.loadStations(${p.id})">
-                                        <i class="bi bi-box-arrow-in-right me-1"></i> Xem trạm
+                                        <i class="bi bi-box-arrow-in-right me-1"></i> ACCESS
                                     </button>
                                     <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); window.adminManager.deleteProject(${p.id})">
                                         <i class="bi bi-trash"></i>
@@ -410,31 +411,37 @@ class AdminManager {
             <div class="row g-3">
                 ${this.stationsData.map(s => `
                     <div class="col-md-6">
-                        <div class="card hover-lift">
-                            <div class="card-body">
+                        <div class="card hover-lift station-card">
+                            <div class="card-body position-relative" style="z-index: 2;">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <div>
-                                        <h6 class="mb-1">
-                                            <i class="bi bi-broadcast-pin text-success me-2"></i>
+                                        <h6 class="mb-1 fw-bold neon-text" style="color: var(--accent-${s.status === 'online' ? 'success' : 'secondary'})">
+                                            <i class="bi bi-broadcast-pin me-2"></i>
                                             ${s.name}
                                         </h6>
-                                        <small class="text-muted">${s.station_code}</small>
+                                        <small class="text-muted font-monospace">${s.station_code}</small>
                                     </div>
-                                    <span class="badge bg-${s.status === 'online' ? 'success' : 'secondary'}">
-                                        ${s.status || 'offline'}
-                                    </span>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="status-dot ${s.status === 'online' ? 'pulsing' : ''}" 
+                                              style="background-color: var(--accent-${s.status === 'online' ? 'success' : 'secondary'})"></span>
+                                        <span class="small font-monospace text-uppercase" style="color: var(--accent-${s.status === 'online' ? 'success' : 'secondary'})">
+                                            ${s.status || 'OFFLINE'}
+                                        </span>
+                                    </div>
                                 </div>
                                 ${s.location ? `
-                                    <div class="text-muted small mb-2">
+                                    <div class="text-muted small mb-2 font-monospace">
                                         <i class="bi bi-geo-alt me-1"></i>
-                                        Lat: ${s.location.lat?.toFixed(6)}, Lon: ${s.location.lon?.toFixed(6)}
+                                        LAT: ${s.location.lat?.toFixed(6)} | LON: ${s.location.lon?.toFixed(6)}
                                     </div>
                                 ` : ''}
+                                
+
                             </div>
-                            <div class="card-footer bg-transparent border-top-0">
+                            <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-outline-primary flex-1" onclick="window.adminManager.editStation(${s.id})">
-                                        <i class="bi bi-pencil me-1"></i> Cấu hình
+                                        <i class="bi bi-pencil me-1"></i> CONFIGURE
                                     </button>
                                     <button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteStation(${s.id})">
                                         <i class="bi bi-trash"></i>
@@ -443,9 +450,10 @@ class AdminManager {
                             </div>
                         </div>
                     </div>
-                `).join('')}
-            </div>
-        `;
+                `).join('')
+            }
+            </div >
+    `;
     }
 
     // =========================================================================
@@ -467,9 +475,9 @@ class AdminManager {
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
 
         ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
-            const checkbox = document.getElementById(`edit-${sensor}`);
+            const checkbox = document.getElementById(`edit - ${sensor} `);
             if (checkbox) checkbox.checked = false;
-            const section = document.getElementById(`mqtt-${sensor}-section`);
+            const section = document.getElementById(`mqtt - ${sensor} -section`);
             if (section) section.style.display = 'none';
         });
 
@@ -501,7 +509,7 @@ class AdminManager {
             window.toast?.info('Đang tải dữ liệu trạm...');
 
             const [resConfig, resDevices] = await Promise.all([
-                fetch(`/api/admin/stations/${stationId}/config`, {
+                fetch(`/ api / admin / stations / ${stationId}/config`, {
                     headers: { 'Authorization': `Bearer ${this.token}` }
                 }),
                 fetch(`/api/admin/stations/${stationId}/devices`, {
@@ -1301,12 +1309,20 @@ class AdminManager {
         }
 
         tbody.innerHTML = users.map(u => `
-            <tr>
-                <td>${u.id}</td>
-                <td><strong>${u.username}</strong></td>
-                <td>${u.full_name || '--'}</td>
-                <td><span class="badge bg-${u.role === 'admin' ? 'danger' : 'info'}">${u.role}</span></td>
-                <td><span class="badge bg-${u.is_active ? 'success' : 'secondary'}">${u.is_active ? 'Active' : 'Locked'}</span></td>
+            <tr class="glass-row">
+                <td class="font-monospace text-muted">#${u.id}</td>
+                <td><strong class="text-primary">${u.username}</strong></td>
+                <td class="text-white">${u.full_name || '--'}</td>
+                <td><span class="badge bg-${u.role === 'admin' ? 'danger' : 'info'} bg-opacity-10 border border-${u.role === 'admin' ? 'danger' : 'info'} text-${u.role === 'admin' ? 'danger' : 'info'}">${u.role}</span></td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="status-dot ${u.is_active ? 'pulsing' : ''}" 
+                              style="background-color: var(--accent-${u.is_active ? 'success' : 'secondary'})"></span>
+                        <span class="small font-monospace" style="color: var(--accent-${u.is_active ? 'success' : 'secondary'})">
+                            ${u.is_active ? 'ACTIVE' : 'LOCKED'}
+                        </span>
+                    </div>
+                </td>
                 <td>
                     <button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')">
                         <i class="bi bi-trash"></i>
@@ -1388,7 +1404,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Update UI: set username and reveal System tab for admins (moved from inline HTML)
 document.addEventListener('DOMContentLoaded', async () => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (!token) return;
 
     // Prefer using authManager if available

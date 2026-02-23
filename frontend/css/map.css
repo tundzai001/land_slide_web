@@ -563,6 +563,20 @@ body:has(.charts-panel.active) .toggle-list-btn {
     margin-bottom: 0;
 }
 
+[data-theme="dark"] .charts-panel .chart-box {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .charts-panel-content {
+    background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .charts-panel {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+}
+
 /* LONG-TERM FULLSCREEN OVERLAY  */
 .longterm-overlay {
     position: fixed;

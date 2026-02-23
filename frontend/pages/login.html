@@ -1,15 +1,17 @@
 <!--frontend/pages/login.html-->
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Landslide Monitor</title>
-    
+
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    
+
     <script>
         tailwind.config = {
             theme: {
@@ -36,7 +38,10 @@
         }
     </script>
     <style>
-        body { font-family: 'Inter', sans-serif; margin: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+        }
 
         /* Carousel transition */
         .carousel-track {
@@ -45,11 +50,13 @@
             will-change: transform;
             height: 100%;
         }
+
         .carousel-track .slide {
             min-width: 100%;
             height: 100%;
             position: relative;
         }
+
         .carousel-track .slide img {
             width: 100%;
             height: 100%;
@@ -63,16 +70,19 @@
             transition: all 0.3s ease;
             cursor: pointer;
         }
+
         .dot.active {
             width: 32px;
             background: white;
         }
+
         .dot:not(.active) {
             width: 10px;
-            background: rgba(255,255,255,0.5);
+            background: rgba(255, 255, 255, 0.5);
         }
+
         .dot:not(.active):hover {
-            background: rgba(255,255,255,0.8);
+            background: rgba(255, 255, 255, 0.8);
         }
 
         /* Arrow buttons */
@@ -80,11 +90,15 @@
             opacity: 0;
             transition: opacity 0.2s, background 0.2s;
         }
+
         .carousel-wrapper:hover .arrow-btn {
             opacity: 1;
         }
+
         @media (min-width: 1024px) {
-            .arrow-btn { opacity: 1; }
+            .arrow-btn {
+                opacity: 1;
+            }
         }
 
         /* Input focus ring */
@@ -93,59 +107,110 @@
             border-color: #0ea5e9;
             box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
         }
-        .login-input:focus ~ .input-icon,
-        .login-input:focus + .input-icon {
+
+        .login-input:focus~.input-icon,
+        .login-input:focus+.input-icon {
             color: #0ea5e9;
         }
 
         /* Error shake */
         @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-            20%, 40%, 60%, 80% { transform: translateX(5px); }
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            10%,
+            30%,
+            50%,
+            70%,
+            90% {
+                transform: translateX(-5px);
+            }
+
+            20%,
+            40%,
+            60%,
+            80% {
+                transform: translateX(5px);
+            }
         }
-        .shake { animation: shake 0.5s; }
+
+        .shake {
+            animation: shake 0.5s;
+        }
 
         /* Slide up */
         @keyframes slideUp {
-            from { opacity: 0; transform: translateY(24px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(24px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
-        .animate-slide-up { animation: slideUp 0.6s cubic-bezier(0.23,1,0.32,1) both; }
+
+        .animate-slide-up {
+            animation: slideUp 0.6s cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
 
         /* Loading spinner */
         .spinner {
-            width: 18px; height: 18px;
-            border: 2px solid rgba(255,255,255,0.3);
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
             border-top-color: white;
             border-radius: 50%;
             animation: spin 0.6s linear infinite;
             display: inline-block;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
 
         /* Scrollbar for form side */
-        .form-side::-webkit-scrollbar { width: 4px; }
-        .form-side::-webkit-scrollbar-track { background: transparent; }
-        .form-side::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .form-side::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .form-side::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .form-side::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
     </style>
 </head>
+
 <body class="bg-white">
 
     <!-- Main Layout -->
     <div class="min-h-screen w-full flex flex-col lg:flex-row">
-        
+
         <!-- Left: Carousel -->
-        <div class="w-full lg:w-1/2 flex-shrink-0 h-[40vh] lg:h-screen lg:sticky lg:top-0 relative overflow-hidden carousel-wrapper">
+        <div
+            class="w-full lg:w-1/2 flex-shrink-0 h-[40vh] lg:h-screen lg:sticky lg:top-0 relative overflow-hidden carousel-wrapper">
             <div class="relative h-full w-full bg-gray-900">
                 <!-- Track -->
                 <div class="carousel-track" id="carouselTrack">
                     <!-- Slide 1 -->
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=2000&auto=format&fit=crop" alt="Slide 1">
+                        <img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=2000&auto=format&fit=crop"
+                            alt="Slide 1">
                         <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/80"></div>
-                        <div class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 md:p-12 z-10">
-                            <h1 class="text-2xl md:text-4xl lg:text-5xl font-bold text-white uppercase tracking-wide drop-shadow-lg mb-4 leading-tight">
+                        <div
+                            class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 md:p-12 z-10">
+                            <h1
+                                class="text-2xl md:text-4xl lg:text-5xl font-bold text-white uppercase tracking-wide drop-shadow-lg mb-4 leading-tight">
                                 HỆ THỐNG GIÁM SÁT SẠT LỞ
                             </h1>
                             <p class="text-base md:text-xl text-white/90 font-light drop-shadow-md max-w-2xl">
@@ -155,10 +220,13 @@
                     </div>
                     <!-- Slide 2 -->
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=2000&auto=format&fit=crop" alt="Slide 2">
+                        <img src="https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=2000&auto=format&fit=crop"
+                            alt="Slide 2">
                         <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/80"></div>
-                        <div class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 md:p-12 z-10">
-                            <h1 class="text-2xl md:text-4xl lg:text-5xl font-bold text-white uppercase tracking-wide drop-shadow-lg mb-4 leading-tight">
+                        <div
+                            class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 md:p-12 z-10">
+                            <h1
+                                class="text-2xl md:text-4xl lg:text-5xl font-bold text-white uppercase tracking-wide drop-shadow-lg mb-4 leading-tight">
                                 CẢNH BÁO SỚM THIÊN TAI
                             </h1>
                             <p class="text-base md:text-xl text-white/90 font-light drop-shadow-md max-w-2xl">
@@ -168,10 +236,13 @@
                     </div>
                     <!-- Slide 3 -->
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=2000&auto=format&fit=crop" alt="Slide 3">
+                        <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=2000&auto=format&fit=crop"
+                            alt="Slide 3">
                         <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/80"></div>
-                        <div class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 md:p-12 z-10">
-                            <h1 class="text-2xl md:text-4xl lg:text-5xl font-bold text-white uppercase tracking-wide drop-shadow-lg mb-4 leading-tight">
+                        <div
+                            class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 md:p-12 z-10">
+                            <h1
+                                class="text-2xl md:text-4xl lg:text-5xl font-bold text-white uppercase tracking-wide drop-shadow-lg mb-4 leading-tight">
                                 AN TOÀN LÀ TRÊN HẾT
                             </h1>
                             <p class="text-base md:text-xl text-white/90 font-light drop-shadow-md max-w-2xl">
@@ -182,17 +253,22 @@
                 </div>
 
                 <!-- Left Arrow -->
-                <button onclick="prevSlide()" class="arrow-btn absolute left-4 md:left-8 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white backdrop-blur-sm border border-white/10 z-20" aria-label="Previous">
+                <button onclick="prevSlide()"
+                    class="arrow-btn absolute left-4 md:left-8 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white backdrop-blur-sm border border-white/10 z-20"
+                    aria-label="Previous">
                     <i class="bi bi-chevron-left text-2xl"></i>
                 </button>
 
                 <!-- Right Arrow -->
-                <button onclick="nextSlide()" class="arrow-btn absolute right-4 md:right-8 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white backdrop-blur-sm border border-white/10 z-20" aria-label="Next">
+                <button onclick="nextSlide()"
+                    class="arrow-btn absolute right-4 md:right-8 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white backdrop-blur-sm border border-white/10 z-20"
+                    aria-label="Next">
                     <i class="bi bi-chevron-right text-2xl"></i>
                 </button>
 
                 <!-- Dots -->
-                <div class="absolute bottom-8 md:bottom-12 left-0 right-0 flex justify-center gap-3 z-20" id="carouselDots">
+                <div class="absolute bottom-8 md:bottom-12 left-0 right-0 flex justify-center gap-3 z-20"
+                    id="carouselDots">
                     <button class="dot active" onclick="goToSlide(0)" aria-label="Slide 1"></button>
                     <button class="dot" onclick="goToSlide(1)" aria-label="Slide 2"></button>
                     <button class="dot" onclick="goToSlide(2)" aria-label="Slide 3"></button>
@@ -203,18 +279,19 @@
         <!-- Right: Login Form -->
         <div class="w-full lg:w-1/2 flex-grow min-h-[60vh] lg:min-h-screen form-side overflow-y-auto">
             <div class="flex flex-col justify-center items-center h-full w-full p-8 md:p-12 lg:p-16 relative">
-                
+
                 <!-- Top Label -->
                 <div class="absolute top-6 md:top-8 w-full text-center">
                     <span class="text-gray-400 text-xs font-semibold uppercase tracking-[0.2em]">System Login</span>
                 </div>
 
                 <div class="w-full max-w-md space-y-8 animate-slide-up">
-                    
+
                     <!-- Header -->
                     <div class="text-center flex flex-col items-center">
                         <div class="flex items-center gap-3 mb-6">
-                            <div class="h-12 w-12 bg-brand-500 rounded-xl flex items-center justify-center shadow-lg" style="box-shadow: 0 8px 24px rgba(14,165,233,0.3);">
+                            <div class="h-12 w-12 bg-brand-500 rounded-xl flex items-center justify-center shadow-lg"
+                                style="box-shadow: 0 8px 24px rgba(14,165,233,0.3);">
                                 <i class="bi bi-shield-lock-fill text-white text-xl"></i>
                             </div>
                             <span class="text-2xl font-bold text-gray-900 tracking-tight">Landslide Monitor</span>
@@ -228,9 +305,11 @@
                         <div class="space-y-5">
                             <!-- Username -->
                             <div>
-                                <label for="username" class="block text-sm font-medium text-gray-700 mb-1.5">Tài khoản</label>
+                                <label for="username" class="block text-sm font-medium text-gray-700 mb-1.5">Tài
+                                    khoản</label>
                                 <div class="relative group">
-                                    <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 transition-colors input-icon-wrap">
+                                    <div
+                                        class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 transition-colors input-icon-wrap">
                                         <i class="bi bi-person text-lg"></i>
                                     </div>
                                     <input type="text" id="username" name="username"
@@ -241,15 +320,18 @@
 
                             <!-- Password -->
                             <div>
-                                <label for="password" class="block text-sm font-medium text-gray-700 mb-1.5">Mật khẩu</label>
+                                <label for="password" class="block text-sm font-medium text-gray-700 mb-1.5">Mật
+                                    khẩu</label>
                                 <div class="relative group">
-                                    <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 transition-colors input-icon-wrap">
+                                    <div
+                                        class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 transition-colors input-icon-wrap">
                                         <i class="bi bi-lock text-lg"></i>
                                     </div>
                                     <input type="password" id="password" name="password"
                                         class="login-input block w-full pl-11 pr-12 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 bg-white text-sm transition-all duration-200"
                                         placeholder="••••••••" required autocomplete="current-password">
-                                    <button type="button" onclick="togglePassword()" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-gray-400 hover:text-gray-600 transition-colors">
+                                    <button type="button" onclick="togglePassword()"
+                                        class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-gray-400 hover:text-gray-600 transition-colors">
                                         <i class="bi bi-eye text-lg" id="togglePwdIcon"></i>
                                     </button>
                                 </div>
@@ -259,10 +341,12 @@
                         <!-- Remember + Forgot -->
                         <div class="flex items-center justify-between">
                             <label class="flex items-center gap-2 cursor-pointer select-none">
-                                <input type="checkbox" id="rememberMe" class="h-4 w-4 text-brand-600 border-gray-300 rounded cursor-pointer accent-brand-500">
+                                <input type="checkbox" id="rememberMe"
+                                    class="h-4 w-4 text-brand-600 border-gray-300 rounded cursor-pointer accent-brand-500">
                                 <span class="text-sm text-gray-600">Remember me</span>
                             </label>
-                            <a href="https://aitogy.com/" target="_blank" class="text-sm font-medium text-brand-600 hover:text-brand-500 transition-colors">
+                            <a href="https://aitogy.com/" target="_blank"
+                                class="text-sm font-medium text-brand-600 hover:text-brand-500 transition-colors">
                                 Forgot password?
                             </a>
                         </div>
@@ -276,7 +360,8 @@
                         </button>
 
                         <!-- Error -->
-                        <div id="errorMsg" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 text-red-600 text-sm">
+                        <div id="errorMsg"
+                            class="hidden bg-red-50 border border-red-200 rounded-lg p-3 text-red-600 text-sm">
                             <i class="bi bi-exclamation-circle mr-2"></i>
                             <span id="errorText"></span>
                         </div>
@@ -294,7 +379,8 @@
 
                     <!-- Back -->
                     <div class="text-center">
-                        <a href="/" class="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-brand-600 transition-colors">
+                        <a href="/"
+                            class="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-brand-600 transition-colors">
                             <i class="bi bi-arrow-left"></i>
                             Quay lại trang chủ
                         </a>
@@ -306,7 +392,7 @@
 
     <!-- Scripts -->
     <script src="/js/auth.js"></script>
-    
+
     <script>
         // ============================
         // CAROUSEL
@@ -371,8 +457,8 @@
         // ============================
         // AUTH: Redirect if already logged in
         // ============================
-        (async function() {
-            const token = localStorage.getItem('token');
+        (async function () {
+            const token = localStorage.getItem('token') || sessionStorage.getItem('token');
             if (token) {
                 try {
                     const payload = JSON.parse(atob(token.split('.')[1]));
@@ -382,11 +468,11 @@
                             headers: { 'Authorization': 'Bearer ' + token }
                         });
                         if (res.ok) {
-                            window.location.replace('/pages/admin.html');
+                            window.location.replace('/pages/map.html');
                             return;
                         }
                     }
-                } catch(e) {}
+                } catch (e) { }
             }
         })();
 
@@ -402,13 +488,13 @@
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
 
             // Hide previous errors
             errorMsg.classList.add('hidden');
-            
+
             // Show loading
             submitBtn.disabled = true;
             submitBtn.classList.add('opacity-70');
@@ -416,18 +502,19 @@
             btnSpinner.classList.remove('hidden');
 
             try {
-                const result = await window.authManager.login(username, password);
-                
+                const rememberMe = document.getElementById('rememberMe').checked;
+                const result = await window.authManager.login(username, password, rememberMe);
+
                 if (result.success) {
                     btnText.textContent = 'Thành công!';
                     btnSpinner.classList.add('hidden');
                     submitBtn.classList.remove('opacity-70');
                     submitBtn.classList.add('bg-emerald-500', 'hover:bg-emerald-500');
-                    
+
                     sessionStorage.setItem('justLoggedIn', 'true');
-                    
+
                     setTimeout(() => {
-                        window.location.href = '/pages/admin.html';
+                        window.location.href = '/pages/map.html';
                     }, 500);
                 } else {
                     throw new Error(result.error || 'Đăng nhập thất bại');
@@ -435,12 +522,12 @@
             } catch (error) {
                 errorText.textContent = error.message;
                 errorMsg.classList.remove('hidden');
-                
+
                 submitBtn.disabled = false;
                 submitBtn.classList.remove('opacity-70');
                 btnText.textContent = 'Đăng nhập';
                 btnSpinner.classList.add('hidden');
-                
+
                 // Shake
                 errorMsg.classList.add('shake');
                 setTimeout(() => errorMsg.classList.remove('shake'), 500);
@@ -451,4 +538,5 @@
         document.getElementById('username').focus();
     </script>
 </body>
+
 </html>
