@@ -10,7 +10,7 @@ let charts = {};
 let currentStationData = null;
 let allStations = [];
 let currentView = 'realtime';
-let wsConnection = null; 
+let wsConnection = null;
 
 // =====================================================
 // MAIN INITIALIZATION
@@ -24,24 +24,24 @@ if (document.readyState === 'loading') {
 
 function initialize() {
     console.log('✅ [MAP] DOM ready, initializing...');
-    
+
     initMap();
     setupEventListeners();
     loadStations();
-    setupWebSocket(); 
-    
+    setupWebSocket();
+
     const stationSidebar = document.getElementById('station-list-sidebar');
     if (stationSidebar) {
         stationSidebar.classList.add('hidden');
     }
-    
+
     const toggleBtn = document.getElementById('toggle-list-btn');
     if (toggleBtn) {
         toggleBtn.innerHTML = '<i class="bi bi-list"></i>';
     }
-    
+
     setInterval(loadStations, 30000);
-    
+
     console.log('✅ [MAP] Initialization complete!');
 }
 
@@ -52,15 +52,15 @@ function initialize() {
 function setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/updates`;
-    
+
     console.log('🔌 [WS] Connecting to:', wsUrl);
-    
+
     wsConnection = new WebSocket(wsUrl);
-    
+
     wsConnection.onopen = () => {
         console.log('✅ [WS] Connected');
     };
-    
+
     wsConnection.onmessage = (event) => {
         try {
             const message = JSON.parse(event.data);
@@ -69,16 +69,16 @@ function setupWebSocket() {
             console.error('❌ [WS] Parse error:', e);
         }
     };
-    
+
     wsConnection.onerror = (error) => {
         console.error('❌ [WS] Error:', error);
     };
-    
+
     wsConnection.onclose = () => {
         console.warn('⚠️ [WS] Disconnected, reconnecting in 5s...');
         setTimeout(setupWebSocket, 5000);
     };
-    
+
     // Keepalive ping
     setInterval(() => {
         if (wsConnection.readyState === WebSocket.OPEN) {
@@ -89,13 +89,13 @@ function setupWebSocket() {
 
 function handleRealtimeUpdate(message) {
     console.log('📡 [WS] Received:', message);
-    
+
     if (message.type === 'sensor_data') {
         if (currentStationData && message.station_id === currentStationData.id) {
             updateRealtimeSensorValues(message);
         }
     }
-    
+
     if (message.type === 'station_status') {
         updateStationMarker(message.station_id, message.risk_level);
 
@@ -111,17 +111,17 @@ function handleRealtimeUpdate(message) {
         if (listBadge) {
             listBadge.className = `badge ${getRiskBadgeClass(message.risk_level)}`;
             listBadge.innerText = message.risk_level;
-            
+
             listBadge.style.transition = '0.3s';
             listBadge.style.transform = 'scale(1.2)';
             setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
         }
     }
-    
+
     // ✅ XỬ LÝ CẢNH BÁO MỚI
     if (message.type === 'alert') {
         showAlertBanner(message);
-        
+
         // 🔊 KÍCH HOẠT ÂM THANH (Phát siren.mp3 từ Backend)
         playSiren();
     }
@@ -129,90 +129,107 @@ function handleRealtimeUpdate(message) {
 
 function updateRealtimeSensorValues(message) {
     const { sensor_type, data, timestamp } = message;
-    
+
     console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
-    
+
     if (sensor_type === 'gnss' && data) {
-        const velocityMmS = data.velocity_mm_s || 
-                           data.speed_2d_mm_s || 
-                           data.speed_mm_s || 
-                           (data.speed_2d ? data.speed_2d * 1000 : null) || 
-                           (data.velocity ? data.velocity * 1000 : null) || 
-                           (data.speed ? data.speed * 1000 : null) || 0;
-        
+        const velocityMmS = data.velocity_mm_s ||
+            data.speed_2d_mm_s ||
+            data.speed_mm_s ||
+            (data.speed_2d ? data.speed_2d * 1000 : null) ||
+            (data.velocity ? data.velocity * 1000 : null) ||
+            (data.speed ? data.speed * 1000 : null) || 0;
+
         console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
-        
+
         const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
-        
+
         if (charts['chart-gnss']) {
             const chart = charts['chart-gnss'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(displacement);
-            
+
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
+
             chart.update('none');
         }
     }
-    
+
     if (sensor_type === 'rain' && data) {
         const intensity = data.intensity_mm_h || data.intensity || 0;
         setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
-        
+
         if (charts['chart-rain']) {
             const chart = charts['chart-rain'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(intensity);
-            
+
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
+
             chart.update('none');
         }
     }
-    
+
     if (sensor_type === 'water' && data) {
         const level = data.water_level || data.level || data.processed_value_meters || 0;
         setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
-        
+
         if (charts['chart-water']) {
             const chart = charts['chart-water'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(level);
-            
+
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
+
             chart.update('none');
         }
     }
-    
+
     if (sensor_type === 'imu' && data) {
         setText('val-imu-roll', `${safeNumber(data.roll, 1)}°`);
         setText('val-imu-pitch', `${safeNumber(data.pitch, 1)}°`);
         setText('val-imu-yaw', `${safeNumber(data.yaw, 1)}°`);
+
+        // Update IMU chart in real-time
+        if (charts['chart-imu']) {
+            const chart = charts['chart-imu'];
+            const timeLabel = new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            chart.data.labels.push(timeLabel);
+            chart.data.datasets[0].data.push(parseFloat(data.roll) || 0);
+            chart.data.datasets[1].data.push(parseFloat(data.pitch) || 0);
+            chart.data.datasets[2].data.push(parseFloat(data.yaw) || 0);
+
+            if (chart.data.labels.length > 50) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(ds => ds.data.shift());
+            }
+
+            chart.update('none');
+        }
     }
 }
 
 function updateStationMarker(stationId, riskLevel) {
     const marker = markers[stationId];
     if (!marker) return;
-    
+
     const colors = {
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
         'LOW': '#51cf66'
     };
-    
+
     const color = colors[riskLevel] || '#adb5bd';
     const el = marker.getElement();
     if (el) {
@@ -224,7 +241,7 @@ function updateStationMarker(stationId, riskLevel) {
 function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
-    
+
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
         let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
@@ -262,7 +279,7 @@ function updateSidebarUI(data) {
     // ✅ LOGIC MỚI: Kiểm tra và hiển thị Pin
     const batteryContainer = document.getElementById('battery-container');
     const batteryVal = imuLatest?.battery; // Lấy giá trị Pin từ dữ liệu mới nhất
-    
+
     // Nếu có Pin và Pin > 0 thì hiển thị, ngược lại thì ẩn
     if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
         if (batteryContainer) batteryContainer.style.display = 'flex'; // Hiện
@@ -274,11 +291,11 @@ function updateSidebarUI(data) {
 
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
-    
+
     const toggleListBtn = document.getElementById('toggle-list-btn');
     const sidebarCloseTab = document.getElementById('sidebar-close-tab');
     const stationSidebar = document.getElementById('station-list-sidebar');
-    
+
     // Toggle sidebar trái
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
@@ -286,27 +303,27 @@ function setupEventListeners() {
             stationSidebar.classList.remove('force-hidden');
         });
     }
-    
+
     if (sidebarCloseTab && stationSidebar) {
         sidebarCloseTab.addEventListener('click', () => {
             stationSidebar.classList.add('hidden');
         });
     }
-    
+
     // Đóng detailed sidebar
     const closeDetailBtn = document.getElementById('close-btn');
     const detailSidebar = document.getElementById('detail-sidebar');
-    
+
     if (closeDetailBtn && detailSidebar) {
         closeDetailBtn.addEventListener('click', () => {
             detailSidebar.classList.remove('active');
-            
+
             // Đóng tất cả panels
             const chartsPanel = document.getElementById('charts-panel');
             const longtermOverlay = document.getElementById('longterm-overlay');
             if (chartsPanel) chartsPanel.classList.remove('active');
             if (longtermOverlay) longtermOverlay.classList.remove('active');
-            
+
             // Mở lại sidebar trái
             if (stationSidebar) {
                 stationSidebar.classList.remove('hidden');
@@ -314,9 +331,9 @@ function setupEventListeners() {
             }
         });
     }
-    
+
     // Theme toggle - handled by theme-manager.js (do NOT add duplicate listener)
-    
+
     // Search
     const searchInput = document.getElementById('search-station');
     if (searchInput) {
@@ -324,75 +341,75 @@ function setupEventListeners() {
             filterStations(e.target.value);
         });
     }
-    
+
     // ✅ NEW: Xem biểu đồ - Mở panel giữa màn hình
     const btnShowCharts = document.getElementById('btn-show-charts');
     const chartsPanel = document.getElementById('charts-panel');
     const closeChartsBtn = document.getElementById('close-charts-btn');
-    
+
     if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', () => {
             chartsPanel.classList.add('active');
-            
+
             // Đóng sidebar trái khi mở biểu đồ
             stationSidebar.classList.add('force-hidden');
-            
+
             console.log('📊 [CHARTS] Charts panel opened');
-            
+
             if (currentStationData) {
                 renderCharts(currentStationData);
             }
         });
     }
-    
+
     if (closeChartsBtn && chartsPanel) {
         closeChartsBtn.addEventListener('click', () => {
             chartsPanel.classList.remove('active');
-            
+
             // Mở lại sidebar trái
             stationSidebar.classList.remove('force-hidden');
             stationSidebar.classList.remove('hidden');
-            
+
             console.log('📊 [CHARTS] Charts panel closed');
         });
     }
-    
+
     // Phân tích dài hạn -> Mở fullscreen
     const btnLongTerm = document.getElementById('btn-long-term');
     const longtermOverlay = document.getElementById('longterm-overlay');
     const closeLongtermBtn = document.getElementById('close-longterm-btn');
-    
+
     if (btnLongTerm && longtermOverlay) {
         btnLongTerm.addEventListener('click', () => {
             longtermOverlay.classList.add('active');
-            
+
             // Đóng sidebar trái
             stationSidebar.classList.add('force-hidden');
-            
+
             // Cập nhật tên trạm 
             const longtermStationName = document.getElementById('longterm-station-name');
             if (longtermStationName && currentStationData) {
                 longtermStationName.textContent = `${currentStationData.name} (${currentStationData.station_code})`;
             }
-            
+
             console.log('📊 [LONGTERM] Analysis overlay opened');
-            
+
             loadLongTermAnalysis();
         });
     }
-    
+
     if (closeLongtermBtn && longtermOverlay) {
         closeLongtermBtn.addEventListener('click', () => {
             longtermOverlay.classList.remove('active');
-            
+
             // Mở lại sidebar trái
             stationSidebar.classList.remove('force-hidden');
             stationSidebar.classList.remove('hidden');
-            
+
             console.log('📊 [LONGTERM] Analysis overlay closed');
         });
     }
-    
+
     console.log('✅ [MAP] All event listeners setup complete');
 }
 
@@ -409,7 +426,7 @@ function initMap() {
             maxZoom: 20,
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
         }).addTo(map);
-        
+
         console.log('✅ [MAP] Leaflet map initialized');
     } catch (error) {
         console.error('❌ [MAP] Failed to initialize map:', error);
@@ -420,7 +437,7 @@ async function loadStations() {
     try {
         const res = await fetch('/api/stations');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        
+
         const stations = await res.json();
         allStations = stations;
 
@@ -452,27 +469,27 @@ function renderStationList(stations) {
     }
 
     container.innerHTML = '';
-    
+
     stations.forEach(st => {
         let displayLevel = st.risk_level;
         if (st.status === 'offline') {
             displayLevel = 'OFFLINE';
         }
-        
+
         const div = document.createElement('div');
         div.className = 'station-item';
         div.innerHTML = `
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <div class="fw-bold text-white">${st.name}</div>
-                    <small class="text-muted">${st.station_code}</small>
+                    <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
+                    <small style="color: var(--text-secondary)">${st.station_code}</small>
                 </div>
                 <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
                     ${displayLevel || 'N/A'}
                 </span>
             </div>
         `;
-        
+
         div.addEventListener('click', () => {
             selectStation(st.id);
             if (window.innerWidth < 768) {
@@ -480,7 +497,7 @@ function renderStationList(stations) {
                 if (sidebar) sidebar.classList.add('hidden');
             }
         });
-        
+
         container.appendChild(div);
     });
 }
@@ -519,7 +536,7 @@ function updateMarker(station) {
     if (stationStateCache[station.id] === cacheKey) {
         return; // Dữ liệu y hệt cũ -> Bỏ qua, không vẽ lại (Giảm tải CPU)
     }
-    
+
     // Cập nhật Cache mới
     stationStateCache[station.id] = cacheKey;
 
@@ -541,18 +558,18 @@ function updateMarker(station) {
             box-shadow: 0 0 8px rgba(0,0,0,0.5);
             transition: background 0.3s ease;
         `;
-        
-        const icon = L.divIcon({ 
-            className: 'custom-map-marker', 
-            html: div, 
-            iconSize: [18, 18], 
-            iconAnchor: [9, 9] 
+
+        const icon = L.divIcon({
+            className: 'custom-map-marker',
+            html: div,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         });
-        
+
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
             .addTo(map)
             .bindTooltip(station.name, { direction: 'top', offset: [0, -10] });
-        
+
         marker.on('click', () => selectStation(station.id));
         markers[station.id] = marker;
     }
@@ -560,7 +577,7 @@ function updateMarker(station) {
 
 async function selectStation(stationId) {
     console.log(`🎯 [MAP] Selecting station: ${stationId}`);
-    
+
     const sidebar = document.getElementById('detail-sidebar');
     if (sidebar) {
         sidebar.classList.add('active');
@@ -569,16 +586,16 @@ async function selectStation(stationId) {
     try {
         const res = await fetch(`/api/stations/${stationId}/detail`);
         if (!res.ok) throw new Error('Failed to load station detail');
-        
+
         const data = await res.json();
         currentStationData = data;
 
         if (markers[stationId]) {
             map.flyTo(markers[stationId].getLatLng(), 16, { duration: 1 });
         }
-        
+
         updateSidebarUI(data);
-        
+
     } catch (e) {
         console.error('❌ [MAP] Error loading station detail:', e);
         window.toast?.error('Không thể tải thông tin trạm');
@@ -589,19 +606,19 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     if (value === null || value === undefined || value === '') {
         return defaultValue;
     }
-    
+
     const num = parseFloat(value);
     if (isNaN(num)) {
         return defaultValue;
     }
-    
+
     return num.toFixed(decimals);
 }
 
 function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
-    
+
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
         let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
@@ -628,93 +645,80 @@ function updateSidebarUI(data) {
     const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
     setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
 
-    setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-    setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-    setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+    // IMU — only show values if station is online
+    if (data.status === 'offline') {
+        setText('val-imu-roll', '--°');
+        setText('val-imu-pitch', '--°');
+        setText('val-imu-yaw', '--°');
+    } else {
+        setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
+        setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
+        setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+    }
 }
 
 function renderCharts(data) {
     if (!data.sensors) return;
-    
-    console.log('📊 [CHARTS] Rendering charts for available sensors...');
-    
-    // ✅ Chỉ render biểu đồ cho thiết bị có dữ liệu
-    const chartConfigs = [];
-    
+
+    console.log('📊 [CHARTS] Rendering charts for station devices...');
+
+    // Show charts based on DEVICE presence, not data existence
+    const allChartIds = ['chart-box-gnss', 'chart-box-rain', 'chart-box-water', 'chart-box-imu'];
+    const activeChartBoxIds = [];
+
     // GNSS
-    if (data.sensors.gnss?.history && data.sensors.gnss.history.length > 0) {
-        chartConfigs.push({
-            id: 'chart-gnss',
-            history: data.sensors.gnss.history,
-            key: 'total_displacement_mm',
-            color: '#fa5252',
-            label: 'Displacement (mm)',
-            title: '📈 GNSS Displacement (24h)'
-        });
+    if (data.sensors.gnss) {
+        activeChartBoxIds.push('chart-box-gnss');
+        const history = data.sensors.gnss.history || [];
+        renderChart('chart-gnss', history, 'total_displacement_mm', '#fa5252', 'Displacement (mm)');
     }
-    
+
     // Rain
-    if (data.sensors.rain?.history && data.sensors.rain.history.length > 0) {
-        chartConfigs.push({
-            id: 'chart-rain',
-            history: data.sensors.rain.history,
-            key: 'intensity_mm_h',
-            color: '#06b6d4',
-            label: 'Intensity (mm/h)',
-            title: '🌧️ Rain Intensity (24h)'
-        });
+    if (data.sensors.rain) {
+        activeChartBoxIds.push('chart-box-rain');
+        const history = data.sensors.rain.history || [];
+        renderChart('chart-rain', history, 'intensity_mm_h', '#06b6d4', 'Intensity (mm/h)');
     }
-    
+
     // Water
-    if (data.sensors.water?.history && data.sensors.water.history.length > 0) {
-        chartConfigs.push({
-            id: 'chart-water',
-            history: data.sensors.water.history,
-            key: 'water_level',
-            color: '#10b981',
-            label: 'Level (m)',
-            title: '🌊 Water Level (24h)'
-        });
+    if (data.sensors.water) {
+        activeChartBoxIds.push('chart-box-water');
+        const history = data.sensors.water.history || [];
+        renderChart('chart-water', history, 'water_level', '#10b981', 'Level (m)');
     }
-    
-    // ✅ Ẩn các chart box không có dữ liệu
-    const allChartIds = ['chart-box-gnss', 'chart-box-rain', 'chart-box-water'];
-    const activeChartBoxIds = chartConfigs.map(c => `chart-box-${c.id.split('-')[1]}`);
-    
+
+    // IMU (3-axis)
+    if (data.sensors.imu) {
+        activeChartBoxIds.push('chart-box-imu');
+        renderImuChart(data.sensors.imu.history || []);
+    }
+
+    // Show/hide chart boxes
     allChartIds.forEach(chartBoxId => {
         const chartBox = document.getElementById(chartBoxId);
         if (chartBox) {
-            if (activeChartBoxIds.includes(chartBoxId)) {
-                chartBox.style.display = 'block';
-            } else {
-                chartBox.style.display = 'none';
-            }
+            chartBox.style.display = activeChartBoxIds.includes(chartBoxId) ? 'block' : 'none';
         }
     });
-    
-    // Render các biểu đồ có dữ liệu
-    chartConfigs.forEach(config => {
-        renderChart(
-            config.id,
-            config.history,
-            config.key,
-            config.color,
-            config.label
-        );
-    });
-    
-    console.log(`✅ [CHARTS] Rendered ${chartConfigs.length} charts`);
+
+    // Show empty state if no sensors at all
+    const emptyState = document.getElementById('charts-empty-state');
+    if (emptyState) {
+        emptyState.style.display = activeChartBoxIds.length === 0 ? 'block' : 'none';
+    }
+
+    console.log(`✅ [CHARTS] Rendered ${activeChartBoxIds.length} charts`);
 }
 
 function renderChart(id, history, key, color, label) {
     const ctx = document.getElementById(id);
     if (!ctx) return;
-    
+
     const labels = (history || []).map(h => {
         const date = new Date(h.timestamp * 1000);
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     });
-    
+
     const values = (history || []).map(h => {
         const val = h.data?.[key];
         return val !== null && val !== undefined ? parseFloat(val) : 0;
@@ -723,7 +727,12 @@ function renderChart(id, history, key, color, label) {
     if (charts[id]) {
         charts[id].destroy();
     }
-    
+
+    // Theme-aware colors
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    const tickColor = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)';
+
     charts[id] = new Chart(ctx, {
         type: 'line',
         data: {
@@ -743,9 +752,102 @@ function renderChart(id, history, key, color, label) {
             plugins: { legend: { display: false } },
             scales: {
                 x: { display: false },
-                y: { 
-                    grid: { color: '#333' },
-                    ticks: { color: 'var(--text-secondary)' }
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: tickColor }
+                }
+            }
+        }
+    });
+}
+
+function renderImuChart(history) {
+    const ctx = document.getElementById('chart-imu');
+    if (!ctx) return;
+
+    const labels = (history || []).map(h => {
+        const date = new Date(h.timestamp * 1000);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+
+    const rollData = (history || []).map(h => parseFloat(h.data?.roll) || 0);
+    const pitchData = (history || []).map(h => parseFloat(h.data?.pitch) || 0);
+    const yawData = (history || []).map(h => parseFloat(h.data?.yaw) || 0);
+
+    if (charts['chart-imu']) {
+        charts['chart-imu'].destroy();
+    }
+
+    // Theme-aware colors
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    const tickColor = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)';
+    const legendColor = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)';
+
+    charts['chart-imu'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Roll (°)',
+                    data: rollData,
+                    borderColor: '#ff6384',
+                    backgroundColor: 'rgba(255, 99, 132, 0.08)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true
+                },
+                {
+                    label: 'Pitch (°)',
+                    data: pitchData,
+                    borderColor: '#4bc0c0',
+                    backgroundColor: 'rgba(75, 192, 192, 0.08)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true
+                },
+                {
+                    label: 'Yaw (°)',
+                    data: yawData,
+                    borderColor: '#36a2eb',
+                    backgroundColor: 'rgba(54, 162, 235, 0.08)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 },
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: {
+                        color: legendColor,
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                        font: { size: 11 }
+                    }
+                }
+            },
+            scales: {
+                x: { display: false },
+                y: {
+                    grid: { color: gridColor },
+                    ticks: {
+                        color: tickColor,
+                        callback: (v) => v + '°'
+                    }
                 }
             }
         }
@@ -754,35 +856,35 @@ function renderChart(id, history, key, color, label) {
 
 async function loadLongTermAnalysis() {
     console.log('📊 [MAP] Loading long-term analysis...');
-    
+
     if (!currentStationData) {
         console.error('❌ [MAP] No station selected');
         return;
     }
-    
+
     const stationId = currentStationData.id;
-    
+
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'none';
-    
+
     try {
         const res = await fetch(`/api/stations/${stationId}/long-term-analysis?days=30`);
-        
+
         if (!res.ok) {
             const error = await res.json();
             throw new Error(error.detail || 'Failed to load analysis');
         }
-        
+
         const data = await res.json();
-        
+
         if (data.status === 'insufficient_data') {
             showLongTermError(data.message);
             return;
         }
-        
+
         renderLongTermAnalysis(data);
-        
+
     } catch (e) {
         console.error('❌ [MAP] Error loading long-term analysis:', e);
         showLongTermError(e.message);
@@ -793,12 +895,12 @@ function renderLongTermAnalysis(data) {
     document.getElementById('longterm-loading').style.display = 'none';
     document.getElementById('longterm-content').style.display = 'block';
     document.getElementById('longterm-error').style.display = 'none';
-    
+
     const analysis = data.analysis;
-    
+
     const warningEl = document.getElementById('longterm-warning');
     const warningTextEl = document.getElementById('warning-text');
-    
+
     if (data.risk_level === 'EXTREME' || data.risk_level === 'HIGH') {
         warningEl.style.display = 'block';
         warningEl.className = `alert ${data.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'}`;
@@ -806,37 +908,37 @@ function renderLongTermAnalysis(data) {
     } else {
         warningEl.style.display = 'none';
     }
-    
+
     setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
     setText('lt-classification', analysis.classification || 'N/A');
     setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
     setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
-    
+
     const trendIconEl = document.getElementById('trend-icon');
     const trendValueEl = document.getElementById('trend-value');
-    
+
     const trendIcons = {
         'accelerating': '📈',
         'stable': '➡️',
         'decelerating': '📉'
     };
-    
+
     const trendTexts = {
         'accelerating': 'Đang tăng tốc',
         'stable': 'Ổn định',
         'decelerating': 'Đang giảm tốc'
     };
-    
+
     trendIconEl.textContent = trendIcons[analysis.trend] || '❓';
     trendValueEl.textContent = trendTexts[analysis.trend] || 'Không xác định';
-    
+
     renderClassificationScale(analysis.classification, analysis.velocity_mm_year);
     renderLongTermChart(data);
 }
 
 function renderClassificationScale(currentClass, velocity) {
     const scaleContainer = document.getElementById('classification-scale');
-    
+
     const classifications = [
         { name: 'Extremely rapid', color: '#dc2626', range: '> 5 m/s' },
         { name: 'Very rapid', color: '#ea580c', range: '3 m/min - 5 m/s' },
@@ -846,7 +948,7 @@ function renderClassificationScale(currentClass, velocity) {
         { name: 'Very slow', color: '#10b981', range: '16 mm/year - 1.6 m/year' },
         { name: 'Extremely slow', color: '#3b82f6', range: '< 16 mm/year' }
     ];
-    
+
     scaleContainer.innerHTML = classifications.map(cls => `
         <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
             <div class="classification-color" style="background: ${cls.color};"></div>
@@ -859,14 +961,14 @@ function renderClassificationScale(currentClass, velocity) {
 function renderLongTermChart(data) {
     const ctx = document.getElementById('chart-longterm');
     if (!ctx) return;
-    
+
     if (charts['chart-longterm']) {
         charts['chart-longterm'].destroy();
     }
-    
+
     const labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
     const values = [10, 25, 35, data.analysis.total_displacement_mm];
-    
+
     charts['chart-longterm'] = new Chart(ctx, {
         type: 'line',
         data: {
@@ -909,7 +1011,7 @@ function showLongTermError(message) {
     document.getElementById('longterm-loading').style.display = 'none';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'block';
-    
+
     const errorMessageEl = document.getElementById('error-message');
     if (errorMessageEl) {
         errorMessageEl.textContent = message;
@@ -929,7 +1031,7 @@ function setHTML(id, html) {
 function filterStations(searchTerm) {
     const items = document.querySelectorAll('.station-item');
     const term = searchTerm.toLowerCase();
-    
+
     items.forEach(item => {
         const text = item.textContent.toLowerCase();
         item.style.display = text.includes(term) ? 'block' : 'none';
@@ -945,26 +1047,26 @@ let currentAlertStationId = null;
 function showAlertBanner(alertData) {
     const banner = document.getElementById('alert-banner');
     if (!banner) return;
-    
+
     // Cập nhật nội dung
-    document.getElementById('alert-title').textContent = 
+    document.getElementById('alert-title').textContent =
         `⚠️ ${alertData.level.toUpperCase()} ALERT!`;
-    
-    document.getElementById('alert-station').textContent = 
+
+    document.getElementById('alert-station').textContent =
         `Trạm: ${alertData.station_name} (${alertData.station_code})`;
-    
-    document.getElementById('alert-message').textContent = 
+
+    document.getElementById('alert-message').textContent =
         alertData.message || 'Phát hiện bất thường!';
-    
+
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
-    
+
     // Hiển thị banner
     banner.classList.add('show');
-    
+
     // Phát âm thanh cảnh báo (optional)
     playAlertSound();
-    
+
     // Tự động ẩn sau 15 giây
     setTimeout(() => {
         banner.classList.remove('show');
@@ -987,16 +1089,16 @@ function playAlertSound() {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
-        
+
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
-        
+
         oscillator.frequency.value = 800;
         oscillator.type = 'sine';
-        
+
         gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-        
+
         oscillator.start(audioContext.currentTime);
         oscillator.stop(audioContext.currentTime + 0.5);
     } catch (e) {
@@ -1013,10 +1115,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentAlertStationId) {
                 // Ẩn banner
                 document.getElementById('alert-banner').classList.remove('show');
-                
+
                 // Zoom vào trạm
                 selectStation(currentAlertStationId);
-                
+
                 // Nếu có marker, zoom vào nó
                 if (markers[currentAlertStationId]) {
                     map.flyTo(markers[currentAlertStationId].getLatLng(), 16, {
@@ -1026,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    
+
     // Nút "Đóng"
     const btnDismiss = document.getElementById('btn-alert-dismiss');
     if (btnDismiss) {

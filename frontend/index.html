@@ -123,7 +123,8 @@
                 Map</a>
             <a href="#features" class="text-xl font-medium text-white hover:text-teal-400"
                 onclick="toggleMenu()">Features</a>
-            <a href="https://aitogy.com/" target="_blank" class="text-xl font-medium text-white hover:text-teal-400" onclick="toggleMenu()">About</a>
+            <a href="https://aitogy.com/" target="_blank" class="text-xl font-medium text-white hover:text-teal-400"
+                onclick="toggleMenu()">About</a>
             <a href="/pages/login.html"
                 class="w-full py-3 rounded-lg bg-teal-600 text-white font-bold mt-4 shadow-lg shadow-teal-500/30">
                 Đăng nhập
@@ -239,7 +240,8 @@
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <!-- Left: Station count card -->
-                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:bg-slate-800/60 transition-colors duration-300">
+                <div
+                    class="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:bg-slate-800/60 transition-colors duration-300">
                     <div class="flex items-center gap-3 mb-4">
                         <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0">
                             <i class="bi bi-broadcast-pin text-lg text-teal-400"></i>
@@ -266,7 +268,8 @@
                 </div>
 
                 <!-- Right: Mini activity chart -->
-                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:bg-slate-800/60 transition-colors duration-300">
+                <div
+                    class="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:bg-slate-800/60 transition-colors duration-300">
                     <div class="flex items-center justify-between mb-4">
                         <div class="flex items-center gap-2">
                             <i class="bi bi-graph-up text-teal-400"></i>
@@ -344,11 +347,11 @@
                     const total = stations.length;
                     const online = stations.filter(s => s.status === 'online' || s.is_online === true).length;
                     const offline = total - online;
-                    
+
                     const countEl = document.getElementById('active-station-count');
                     const onlineEl = document.getElementById('online-count');
                     const offlineEl = document.getElementById('offline-count');
-                    
+
                     if (countEl) countEl.textContent = total;
                     if (onlineEl) onlineEl.textContent = `${online} Online`;
                     if (offlineEl) offlineEl.textContent = `${offline} Offline`;
@@ -370,8 +373,8 @@
             }
         });
         // Update auth header button based on token
-        (async function() {
-            const token = localStorage.getItem('token');
+        (async function () {
+            const token = localStorage.getItem('token') || sessionStorage.getItem('token');
             const btn = document.getElementById('auth-header-btn');
             if (token && btn) {
                 try {
@@ -387,7 +390,7 @@
                             btn.innerHTML = '<i class="bi bi-person-check"></i> ' + user.username;
                         }
                     }
-                } catch(e) {}
+                } catch (e) { }
             }
         })();
     </script>

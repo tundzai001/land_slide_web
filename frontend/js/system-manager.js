@@ -4,9 +4,9 @@
 
 class SystemManager {
     constructor() {
-        this.token = localStorage.getItem('token');
+        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
         this.isVerified = false;
-        
+
         // Khởi tạo chặn tab ngay lập tức
         this.setupTabInterceptor();
     }
@@ -14,13 +14,13 @@ class SystemManager {
     setupTabInterceptor() {
         // Tìm nút bấm mở tab System
         const systemTabBtn = document.querySelector('button[data-bs-target="#tab-system"]');
-        
+
         if (!systemTabBtn) return;
 
         systemTabBtn.addEventListener('show.bs.tab', (event) => {
             if (!this.isVerified) {
-                event.preventDefault(); 
-                
+                event.preventDefault();
+
                 // Hiện bảng nhập mật khẩu
                 this.showPasswordShield();
             }
@@ -32,21 +32,21 @@ class SystemManager {
         const shield = document.getElementById('password-shield');
         const input = document.getElementById('system-password-input');
         const error = document.getElementById('password-error');
-        
+
         if (shield) {
             shield.style.display = 'flex';
-            
+
             if (input) {
                 input.value = '';
                 input.focus();
-                
+
                 // Xử lý sự kiện Enter
                 input.onkeyup = (e) => {
                     if (e.key === 'Enter') this.verifyPassword();
                     if (error) error.style.display = 'none';
                 };
             }
-            
+
             if (error) error.style.display = 'none';
         }
     }
@@ -74,7 +74,7 @@ class SystemManager {
                 // ✅ ĐÚNG MẬT KHẨU
                 this.isVerified = true;
                 window.toast?.success('✅ Xác thực thành công!');
-                
+
                 // 1. Ẩn khiên
                 const shield = document.getElementById('password-shield');
                 if (shield) shield.style.display = 'none';
@@ -193,7 +193,7 @@ class SystemManager {
             if (!res.ok) throw new Error('Failed to save');
 
             window.toast?.success('✅ Đã lưu cấu hình hệ thống!');
-            
+
         } catch (e) {
             window.toast?.error('❌ Lỗi: ' + e.message);
         }
