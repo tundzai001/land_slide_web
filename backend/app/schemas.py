@@ -81,11 +81,13 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    assigned_projects: List[int] = []
 
 class UserResponse(UserBase):
     id: int
     is_active: bool
     permissions: List[str] = []
+    assigned_projects: List[int] = []
     
     class Config:
         from_attributes = True

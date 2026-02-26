@@ -50,6 +50,32 @@ class AdminManager {
         this.init();
     }
 
+    /** Switch visible tab pane (called from sidebar icons) */
+    switchTab(tabId, linkEl) {
+        // Hide all tab panes
+        document.querySelectorAll('#admin-tab-content > .tab-pane').forEach(p => {
+            p.classList.remove('show', 'active');
+        });
+        // Show target pane
+        const target = document.getElementById(tabId);
+        if (target) {
+            target.classList.add('show', 'active');
+        }
+        // Update sidebar active state
+        document.querySelectorAll('.admin-sidebar .nav-link').forEach(l => l.classList.remove('active'));
+        if (linkEl) linkEl.classList.add('active');
+
+        // Trigger data loading for specific tabs
+        if (tabId === 'tab-projects') {
+            this.resetNavigation?.();
+            this.loadProjects?.();
+        } else if (tabId === 'tab-database') {
+            window.dbManager?.loadAllData?.();
+        } else if (tabId === 'tab-pi') {
+            this.loadPiDevices?.();
+        }
+    }
+
     init() {
         console.log('[ADMIN] Initializing...');
 
@@ -86,7 +112,68 @@ class AdminManager {
         this.setupLogout();
         this.setupOfflineThresholdListeners(); // ✅ THÊM MỚI
 
+        // Load project list for Add User modal
+        const addUserModal = document.getElementById('addUserModal');
+        if (addUserModal) {
+            addUserModal.addEventListener('show.bs.modal', () => {
+                this.loadProjectsForModal();
+            });
+        }
+
+        // Fetch current user role and apply restrictions
+        this.fetchCurrentUserRole();
+
         console.log('✅ [ADMIN] Initialized successfully');
+    }
+
+    /** Fetch current user role from API and apply role-based restrictions */
+    async fetchCurrentUserRole() {
+        try {
+            const res = await fetch('/api/auth/me', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) return;
+            const user = await res.json();
+            this.currentUserRole = user.role;
+            this.currentUserAssignedProjects = user.assigned_projects || [];
+
+            console.log(`[ADMIN] User role: ${user.role}, assigned projects: ${JSON.stringify(this.currentUserAssignedProjects)}`);
+
+            if (user.role === 'viewer') {
+                this.applyViewerRestrictions();
+            } else if (user.role === 'operator') {
+                this.applyOperatorRestrictions();
+            }
+        } catch (e) {
+            console.error('Error fetching user role:', e);
+        }
+    }
+
+    /** Apply operator restrictions — hide Users/DB/System tabs, but allow editing stations in assigned projects */
+    applyOperatorRestrictions() {
+        console.log('🔧 Applying operator restrictions');
+
+        // Hide sidebar tabs: Users, Database, System (keep Projects and Pi Devices)
+        document.querySelectorAll('.admin-sidebar .nav-item').forEach(item => {
+            const link = item.querySelector('[data-tab]');
+            if (link) {
+                const tab = link.getAttribute('data-tab');
+                if (['tab-users', 'tab-database', 'tab-system'].includes(tab)) {
+                    item.style.display = 'none';
+                }
+            }
+        });
+
+        // Hide "Tạo Dự án" button (operator can't create new projects)
+        const createProjBtn = document.querySelector('#action-buttons-container');
+        if (createProjBtn) createProjBtn.style.display = 'none';
+
+        // Switch to projects tab by default
+        const projLink = document.querySelector('[data-tab="tab-projects"]');
+        if (projLink) this.switchTab('tab-projects', projLink);
+
+        // Note: Operators CAN edit station config for their assigned projects
+        // The backend already filters projects by assigned_projects
     }
 
     // ✅ THÊM HÀM MỚI: Setup listeners cho offline threshold inputs
@@ -475,9 +562,9 @@ class AdminManager {
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
 
         ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
-            const checkbox = document.getElementById(`edit - ${sensor} `);
+            const checkbox = document.getElementById(`edit-${sensor}`);
             if (checkbox) checkbox.checked = false;
-            const section = document.getElementById(`mqtt - ${sensor} -section`);
+            const section = document.getElementById(`mqtt-${sensor}-section`);
             if (section) section.style.display = 'none';
         });
 
@@ -509,7 +596,7 @@ class AdminManager {
             window.toast?.info('Đang tải dữ liệu trạm...');
 
             const [resConfig, resDevices] = await Promise.all([
-                fetch(`/ api / admin / stations / ${stationId}/config`, {
+                fetch(`/api/admin/stations/${stationId}/config`, {
                     headers: { 'Authorization': `Bearer ${this.token}` }
                 }),
                 fetch(`/api/admin/stations/${stationId}/devices`, {
@@ -1295,7 +1382,6 @@ class AdminManager {
             this.renderUsers(users);
         } catch (e) {
             console.error('Error loading users:', e);
-            // Silent fail or toast
         }
     }
 
@@ -1308,12 +1394,29 @@ class AdminManager {
             return;
         }
 
-        tbody.innerHTML = users.map(u => `
+        const roleBadge = (role) => {
+            const colors = { admin: 'danger', operator: 'info', viewer: 'secondary' };
+            const labels = { admin: 'Admin', operator: 'Operator', viewer: 'Viewer' };
+            const c = colors[role] || 'secondary';
+            const l = labels[role] || role;
+            return `<span class="badge bg-${c} bg-opacity-10 border border-${c} text-${c}">${l}</span>`;
+        };
+
+        tbody.innerHTML = users.map(u => {
+            // Show assigned projects for operators
+            let projectBadges = '';
+            if (u.role === 'operator' && u.assigned_projects && u.assigned_projects.length > 0) {
+                projectBadges = `<br><small class="text-muted">Dự án: ${u.assigned_projects.map(
+                    pid => `<span class="badge bg-dark text-info border border-info" style="font-size:.65rem">#${pid}</span>`
+                ).join(' ')}</small>`;
+            }
+
+            return `
             <tr class="glass-row">
                 <td class="font-monospace text-muted">#${u.id}</td>
                 <td><strong class="text-primary">${u.username}</strong></td>
                 <td class="text-white">${u.full_name || '--'}</td>
-                <td><span class="badge bg-${u.role === 'admin' ? 'danger' : 'info'} bg-opacity-10 border border-${u.role === 'admin' ? 'danger' : 'info'} text-${u.role === 'admin' ? 'danger' : 'info'}">${u.role}</span></td>
+                <td>${roleBadge(u.role)}${projectBadges}</td>
                 <td>
                     <div class="d-flex align-items-center gap-2">
                         <span class="status-dot ${u.is_active ? 'pulsing' : ''}" 
@@ -1324,12 +1427,15 @@ class AdminManager {
                     </div>
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')">
-                        <i class="bi bi-trash"></i>
-                    </button>
+                    <div class="btn-group btn-group-sm">
+                        ${u.role === 'operator' ? `<button class="btn btn-outline-info" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="Gán dự án"><i class="bi bi-folder-plus"></i></button>` : ''}
+                        <button class="btn btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
     }
 
     async createUser() {
@@ -1337,6 +1443,12 @@ class AdminManager {
         const password = document.getElementById('new-password').value;
         const fullname = document.getElementById('new-fullname').value.trim();
         const role = document.getElementById('new-role').value;
+
+        // Collect assigned projects (checkboxes)
+        const assignedProjects = [];
+        document.querySelectorAll('#project-checkbox-list input[type="checkbox"]:checked').forEach(cb => {
+            assignedProjects.push(parseInt(cb.value));
+        });
 
         if (!username || !password) {
             window.toast?.warning('Thiếu tài khoản hoặc mật khẩu');
@@ -1350,13 +1462,17 @@ class AdminManager {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ username, password, full_name: fullname, role })
+                body: JSON.stringify({
+                    username, password, full_name: fullname, role,
+                    assigned_projects: role === 'operator' ? assignedProjects : []
+                })
             });
 
             if (res.ok) {
                 window.toast?.success('✅ Tạo tài khoản thành công');
                 bootstrap.Modal.getInstance(document.getElementById('addUserModal'))?.hide();
                 document.getElementById('addUserForm').reset();
+                document.getElementById('project-assign-group').style.display = 'none';
                 this.loadUsers();
             } else {
                 throw new Error((await res.json()).detail || 'Lỗi tạo user');
@@ -1381,6 +1497,634 @@ class AdminManager {
             }
         } catch (e) {
             window.toast?.error(e.message);
+        }
+    }
+
+    /** Load project list into the Add User modal checkboxes */
+    async loadProjectsForModal() {
+        try {
+            const res = await fetch('/api/admin/projects', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) return;
+            const projects = await res.json();
+
+            const container = document.getElementById('project-checkbox-list');
+            if (!container) return;
+
+            if (projects.length === 0) {
+                container.innerHTML = '<small class="text-muted">Chưa có dự án nào</small>';
+                return;
+            }
+
+            container.innerHTML = projects.map(p => `
+                <div class="form-check mb-1">
+                    <input class="form-check-input" type="checkbox" value="${p.id}" id="assign-proj-${p.id}">
+                    <label class="form-check-label small" for="assign-proj-${p.id}">${p.name} <span class="text-muted">(#${p.id})</span></label>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error('Error loading projects for modal:', e);
+        }
+    }
+
+    /** Show prompt to assign projects to an operator */
+    async showAssignProjectsModal(userId, username) {
+        try {
+            // Fetch current user data
+            const userRes = await fetch('/api/admin/users', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const users = await userRes.json();
+            const user = users.find(u => u.id === userId);
+            const currentAssigned = user?.assigned_projects || [];
+
+            // Fetch all projects
+            const projRes = await fetch('/api/admin/projects', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const projects = await projRes.json();
+
+            // Build HTML
+            const checkboxes = projects.map(p => {
+                const checked = currentAssigned.includes(p.id) ? 'checked' : '';
+                return `<div class="form-check mb-1">
+                    <input class="form-check-input assign-proj-cb" type="checkbox" value="${p.id}" ${checked}>
+                    <label class="form-check-label small">${p.name} (#${p.id})</label>
+                </div>`;
+            }).join('');
+
+            // Use a simple confirm dialog approach
+            const modal = document.createElement('div');
+            modal.innerHTML = `
+                <div class="modal fade" id="assignProjectModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Gán dự án cho ${username}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div style="max-height:300px;overflow-y:auto">${checkboxes || '<p class="text-muted">Chưa có dự án</p>'}</div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                                <button type="button" class="btn btn-gradient" id="save-assign-btn">Lưu</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+
+            const bsModal = new bootstrap.Modal(modal.querySelector('.modal'));
+            bsModal.show();
+
+            modal.querySelector('#save-assign-btn').addEventListener('click', async () => {
+                const selected = [];
+                modal.querySelectorAll('.assign-proj-cb:checked').forEach(cb => {
+                    selected.push(parseInt(cb.value));
+                });
+
+                const res = await fetch(`/api/admin/users/${userId}/projects`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${this.token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ assigned_projects: selected })
+                });
+
+                if (res.ok) {
+                    window.toast?.success(`✅ Đã gán ${selected.length} dự án cho ${username}`);
+                    bsModal.hide();
+                    this.loadUsers();
+                } else {
+                    window.toast?.error('❌ Lỗi gán dự án');
+                }
+            });
+
+            modal.querySelector('.modal').addEventListener('hidden.bs.modal', () => {
+                modal.remove();
+            });
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    /** Apply viewer restrictions — hide all edit/create/delete UI elements */
+    applyViewerRestrictions() {
+        console.log('🔒 Applying viewer restrictions');
+
+        // Hide sidebar tabs: Users, Database, System, Pi Devices (only show Projects)
+        document.querySelectorAll('.admin-sidebar .nav-item').forEach(item => {
+            const link = item.querySelector('[data-tab]');
+            if (link) {
+                const tab = link.getAttribute('data-tab');
+                if (tab !== 'tab-projects') {
+                    item.style.display = 'none';
+                }
+            }
+        });
+
+        // Hide all create/edit/delete buttons in Projects tab
+        document.querySelectorAll('#action-buttons-container, #btn-back-nav').forEach(el => {
+            // Keep back button but hide create buttons
+        });
+        const createProjBtn = document.querySelector('#action-buttons-container');
+        if (createProjBtn) createProjBtn.style.display = 'none';
+
+        // Hide "Thêm user" button
+        const addUserBtn = document.querySelector('[data-bs-target="#addUserModal"]');
+        if (addUserBtn) addUserBtn.style.display = 'none';
+
+        // Switch to projects tab by default
+        const projLink = document.querySelector('[data-tab="tab-projects"]');
+        if (projLink) this.switchTab('tab-projects', projLink);
+    }
+
+    // =========================================================================
+    // PI DEVICES MANAGEMENT
+    // =========================================================================
+
+    /** Load and render Pi devices in the "Pi Devices" tab */
+    async loadPiDevices() {
+        this._piSelectMode = false;
+        try {
+            const res = await fetch('/api/field/pi-devices', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Failed to load Pi devices');
+            const devices = await res.json();
+            this._piDevicesData = devices;
+
+            const pending = devices.filter(d => d.status === 'pending' || d.status === 'activating');
+            const activated = devices.filter(d => d.status === 'activated');
+            const assigned = devices.filter(d => d.status === 'assigned');
+
+            // ─── Update summary cards ───
+            const setCount = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+            setCount('pi-pending-count', pending.length);
+            setCount('pi-activated-count', activated.length);
+            setCount('pi-assigned-count', assigned.length);
+
+            const descEl = document.getElementById('pi-pending-desc');
+            if (descEl) descEl.textContent = pending.length === 0
+                ? 'No devices awaiting handshake'
+                : `${pending.length} device(s) awaiting activation`;
+
+            // ─── Render grid table ───
+            this._renderPiGrid(devices);
+
+            // ─── Inject action bar if not exists ───
+            if (!document.getElementById('pi-action-bar')) {
+                const bar = document.createElement('div');
+                bar.id = 'pi-action-bar';
+                bar.style.cssText = `
+                    position:fixed; bottom:-80px; left:50%; transform:translateX(-50%);
+                    z-index:9999; padding:12px 24px; border-radius:16px;
+                    background:rgba(15,23,42,.95); backdrop-filter:blur(12px);
+                    border:1px solid rgba(255,255,255,.1); box-shadow:0 -4px 30px rgba(0,0,0,.4);
+                    display:flex; gap:10px; align-items:center;
+                    transition: bottom .35s cubic-bezier(.4,0,.2,1);
+                `;
+                bar.innerHTML = `
+                    <span id="pi-sel-count" style="color:#94a3b8;font-size:.85rem;margin-right:6px">0 đã chọn</span>
+                    <button class="btn btn-sm btn-primary"   id="pi-act-activate" onclick="window.adminManager._piActionBatch('activate')" style="display:none">
+                        <i class="bi bi-key me-1"></i>Kích hoạt</button>
+                    <button class="btn btn-sm btn-warning"   id="pi-act-unassign" onclick="window.adminManager._piActionBatch('unassign')" style="display:none">
+                        <i class="bi bi-x-circle me-1"></i>Bỏ gán</button>
+                    <button class="btn btn-sm btn-info"      id="pi-act-reset"    onclick="window.adminManager._piActionBatch('reset')" style="display:none">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
+                    <button class="btn btn-sm btn-danger"    id="pi-act-delete"   onclick="window.adminManager._piActionBatch('delete')">
+                        <i class="bi bi-trash me-1"></i>Xóa</button>
+                    <button class="btn btn-sm btn-outline-light ms-2" onclick="window.adminManager.togglePiSelectMode()">
+                        <i class="bi bi-x-lg"></i></button>
+                `;
+                document.body.appendChild(bar);
+            }
+
+        } catch (e) {
+            console.error('Error loading Pi devices:', e);
+            window.toast?.error('Không thể tải danh sách Pi');
+        }
+    }
+
+    /** Render devices into the grid table */
+    _renderPiGrid(devices) {
+        const tbody = document.getElementById('pi-grid-body');
+        const infoEl = document.getElementById('pi-grid-info');
+        if (!tbody) return;
+
+        if (devices.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No devices found</td></tr>';
+            if (infoEl) infoEl.textContent = 'Showing 0 entries';
+            return;
+        }
+
+        tbody.innerHTML = devices.map(d => {
+            // Status badge
+            let statusBadge = '';
+            const statusColors = { pending: '#f59e0b', activating: '#f59e0b', activated: '#22c55e', assigned: '#0ea5e9' };
+            const statusLabels = { pending: 'Pending', activating: 'Activating', activated: 'Activated', assigned: 'Assigned' };
+            const color = statusColors[d.status] || '#6b7280';
+            statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">● ${statusLabels[d.status] || d.status}</span>`;
+
+            // Firmware / Device Type logic based on explicit device_type or serial string
+            let devType = 'Device';
+            if (d.device_type) {
+                if (d.device_type.toLowerCase() === 'pi') devType = 'Raspberry Pi';
+                else if (d.device_type.toLowerCase() === 'win') devType = 'PC Window';
+                else devType = d.device_type.toUpperCase();
+            } else if (d.serial) {
+                if (d.serial.toLowerCase().startsWith('pi-')) devType = 'Raspberry Pi';
+                else if (d.serial.toLowerCase().startsWith('win-')) devType = 'PC Window';
+                else devType = d.serial.split('-')[0].toUpperCase();
+            }
+
+            // Name column: station badge + name
+            const stationTag = d.station_id
+                ? `<span class="badge me-2" style="background:#1e293b;color:#0ea5e9;border:1px solid #0ea5e933;font-size:.7rem">${d.station_id}</span>`
+                : '';
+            const nameLabel = d.status === 'assigned'
+                ? `<strong>${d.station_name || d.name}</strong><br><small class="text-muted">${d.project_name ? d.project_name + ' · ' : ''}${devType}</small>`
+                : `<strong>${d.name}</strong>`;
+
+            // Last ping and Online/Offline status
+            const isOnline = d.last_seen && (Date.now() / 1000 - d.last_seen) < 120;
+            const pingColor = isOnline ? '#22c55e' : '#ef4444'; // Green or Red
+            const lastPingText = d.last_seen ? this._formatTimeAgo(d.last_seen, isOnline) : '—';
+
+            // Actions dropdown
+            let actions = '';
+            if (d.status === 'pending' || d.status === 'activating') {
+                actions = `<button class="btn btn-sm btn-outline-primary" onclick="window.adminManager.activatePiDevice(${d.id})"
+                    ${d.status === 'activating' ? 'disabled' : ''}>
+                    <i class="bi bi-key"></i></button>`;
+            } else if (d.status === 'assigned') {
+                actions = `<div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-warning" onclick="window.adminManager.unassignPiDevice(${d.id})" title="Bỏ gán"><i class="bi bi-x-circle"></i></button>
+                    <button class="btn btn-outline-info" onclick="window.adminManager.resetPiDevice(${d.id})" title="Reset"><i class="bi bi-arrow-counterclockwise"></i></button>
+                </div>`;
+            }
+
+            return `<tr class="pi-grid-row" data-pi-id="${d.id}" data-pi-status="${d.status}" data-search="${(d.name + d.serial + (d.station_name || '')).toLowerCase()}">
+                <td>
+                    <div class="pi-check-overlay" style="display:none">
+                        <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${d.id}"
+                            style="width:18px;height:18px;cursor:pointer" onchange="window.adminManager._onPiCheckChange()">
+                    </div>
+                </td>
+                <td>${stationTag}${nameLabel}</td>
+                <td><code style="font-size:.8rem;color:var(--text-muted)">${d.serial}</code></td>
+                <td>${statusBadge}</td>
+                <td><span class="${isOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${lastPingText}</small></td>
+                <td>${actions}</td>
+            </tr>`;
+        }).join('');
+
+        if (infoEl) infoEl.textContent = `Showing 1 to ${devices.length} of ${devices.length} entries`;
+    }
+
+    /** Format epoch timestamp to human-readable time ago */
+    _formatTimeAgo(epoch, isOnline) {
+        if (!epoch) return '—';
+        const now = Math.floor(Date.now() / 1000);
+        const diff = now - epoch;
+
+        if (isOnline) {
+            if (diff < 60) return 'Just now';
+            return `${Math.floor(diff / 60)}m ago`;
+        } else {
+            // Detailed offline duration formatting
+            if (diff < 3600) {
+                return `Off ${Math.floor(diff / 60)}m`;
+            } else if (diff < 86400) {
+                const h = Math.floor(diff / 3600);
+                const m = Math.floor((diff % 3600) / 60);
+                return `Off ${h}h ${m}m`;
+            } else {
+                const d = Math.floor(diff / 86400);
+                const h = Math.floor((diff % 86400) / 3600);
+                const m = Math.floor((diff % 3600) / 60);
+                return `Off ${d}d ${h}h ${m}m`;
+            }
+        }
+    }
+
+    /** Filter grid rows by search query */
+    _filterPiGrid(query) {
+        const q = query.toLowerCase().trim();
+        document.querySelectorAll('.pi-grid-row').forEach(row => {
+            const match = !q || row.dataset.search.includes(q);
+            row.style.display = match ? '' : 'none';
+        });
+    }
+
+
+    /** Toggle select mode on Pi cards */
+    togglePiSelectMode() {
+        this._piSelectMode = !this._piSelectMode;
+        const overlays = document.querySelectorAll('.pi-check-overlay');
+        const btn = document.getElementById('pi-select-toggle');
+        const bar = document.getElementById('pi-action-bar');
+
+        if (this._piSelectMode) {
+            overlays.forEach(el => el.style.display = 'block');
+            if (btn) { btn.classList.replace('btn-outline-secondary', 'btn-primary'); btn.innerHTML = '<i class="bi bi-x-lg me-1"></i>Hủy chọn'; }
+        } else {
+            overlays.forEach(el => { el.style.display = 'none'; el.querySelector('input').checked = false; });
+            if (btn) { btn.classList.replace('btn-primary', 'btn-outline-secondary'); btn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chọn'; }
+            if (bar) bar.style.bottom = '-80px';
+        }
+    }
+
+    /** Update action bar when checkboxes change */
+    _onPiCheckChange() {
+        const checked = document.querySelectorAll('.pi-checkbox:checked');
+        const bar = document.getElementById('pi-action-bar');
+        const countEl = document.getElementById('pi-sel-count');
+
+        if (checked.length > 0) {
+            bar.style.bottom = '24px';
+            countEl.textContent = `${checked.length} đã chọn`;
+
+            // Determine which actions to show based on selected statuses
+            const statuses = new Set();
+            checked.forEach(cb => {
+                const row = cb.closest('.pi-grid-row') || cb.closest('tr');
+                if (row) statuses.add(row.dataset.piStatus);
+            });
+
+            const show = (id, visible) => { const el = document.getElementById(id); if (el) el.style.display = visible ? '' : 'none'; };
+            show('pi-act-activate', statuses.has('pending') || statuses.has('activating'));
+            show('pi-act-unassign', statuses.has('assigned'));
+            show('pi-act-reset', statuses.has('activated') || statuses.has('assigned'));
+            show('pi-act-delete', true);
+        } else {
+            bar.style.bottom = '-80px';
+        }
+    }
+
+    /** Execute batch action on selected Pi devices */
+    async _piActionBatch(action) {
+        const checked = document.querySelectorAll('.pi-checkbox:checked');
+        const ids = Array.from(checked).map(cb => parseInt(cb.dataset.piId));
+        if (ids.length === 0) return;
+
+        const actionMap = {
+            'activate': { method: 'POST', path: id => `/api/field/pi-devices/${id}/activate`, label: 'Kích hoạt' },
+            'unassign': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/unassign`, label: 'Bỏ gán' },
+            'reset': { method: 'POST', path: id => `/api/field/pi-devices/${id}/reset`, label: 'Reset' },
+            'delete': { method: 'DELETE', path: id => `/api/field/pi-devices/${id}`, label: 'Xóa' },
+        };
+        const cfg = actionMap[action];
+        if (!cfg) return;
+
+        window.toast?.info(`⏳ Đang ${cfg.label} ${ids.length} thiết bị...`);
+
+        let ok = 0, fail = 0;
+        for (const id of ids) {
+            try {
+                const r = await fetch(cfg.path(id), {
+                    method: cfg.method,
+                    headers: { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' }
+                });
+                if (r.ok) ok++; else fail++;
+            } catch { fail++; }
+        }
+
+        if (ok > 0) window.toast?.success(`✅ ${cfg.label}: ${ok} thành công`);
+        if (fail > 0) window.toast?.error(`❌ ${fail} thất bại`);
+
+        this._piSelectMode = false;
+        const toggleBtn = document.getElementById('pi-select-toggle');
+        if (toggleBtn) { toggleBtn.classList.replace('btn-primary', 'btn-outline-secondary'); toggleBtn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chọn'; }
+        const bar = document.getElementById('pi-action-bar');
+        if (bar) bar.style.bottom = '-80px';
+
+        setTimeout(() => this.loadPiDevices(), 500);
+    }
+
+
+    /** Activate a Pi device - generate key and send via MQTT */
+    async activatePiDevice(piId) {
+        try {
+            window.toast?.info('⏳ Đang gửi yêu cầu kích hoạt...');
+            const res = await fetch(`/api/field/pi-devices/${piId}/activate`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi kích hoạt');
+            }
+            window.toast?.success('✅ Đã gửi key kích hoạt đến Pi qua MQTT. Vui lòng chờ Pi xác nhận...');
+            setTimeout(() => this.loadPiDevices(), 2000);
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    /** Assign Pi from the Pi Devices tab (using dropdown select) */
+    async assignPiFromTab(piId) {
+        const selectEl = document.getElementById(`assign-station-${piId}`);
+        const stationId = selectEl?.value;
+        if (!stationId) {
+            window.toast?.warning('Vui lòng chọn trạm trước');
+            return;
+        }
+        try {
+            const res = await fetch(`/api/field/pi-devices/${piId}/assign`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ station_id: parseInt(stationId) })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi gán trạm');
+            }
+            const data = await res.json();
+            window.toast?.success(`✅ Đã gán Pi vào trạm "${data.station_name}"`);
+            this.loadPiDevices();
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    /** Remove Pi assignment (set back to activated) */
+    async unassignPiDevice(piId) {
+        try {
+            const res = await fetch(`/api/field/pi-devices/${piId}/unassign`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Lỗi bỏ gán');
+            window.toast?.success('✅ Đã bỏ gán Pi khỏi trạm');
+            this.loadPiDevices();
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    /** Delete a Pi device record */
+    async deletePiDevice(piId) {
+        try {
+            const res = await fetch(`/api/field/pi-devices/${piId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Lỗi xóa');
+            window.toast?.success('✅ Đã xóa Pi');
+            setTimeout(() => this.loadPiDevices(), 500);
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    /** Factory-reset a Pi device: clear license, station, set back to pending */
+    async resetPiDevice(piId) {
+        try {
+            window.toast?.info('🔄 Đang reset thiết bị Pi...');
+            const res = await fetch(`/api/field/pi-devices/${piId}/reset`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi reset');
+            }
+            window.toast?.success('✅ Pi đã được reset về trạng thái ban đầu (pending)');
+            setTimeout(() => this.loadPiDevices(), 500);
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    // ---- Wizard: Pi section (step 3) ----
+
+    /** Called by updateWizardStep() when step 3 is opened in station wizard */
+    async loadPendingDevices() {
+        const listEl = document.getElementById('pending-devices-list');
+        const btnRow = document.getElementById('pi-assign-btn-row');
+        const currentPiInfo = document.getElementById('current-pi-info');
+
+        if (!listEl) return;
+
+        listEl.innerHTML = `<div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <small class="ms-2 text-muted">Đang tải...</small>
+        </div>`;
+
+        try {
+            // 1. Check if this station already has an assigned Pi
+            const allRes = await fetch('/api/field/pi-devices', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const allDevices = await allRes.json();
+            const assignedPi = allDevices.find(d => d.station_id === this.currentStationId && d.status === 'assigned');
+
+            if (assignedPi && currentPiInfo) {
+                currentPiInfo.style.display = 'flex';
+                currentPiInfo.style.alignItems = 'center';
+                const piNameEl = document.getElementById('current-pi-name');
+                if (piNameEl) piNameEl.textContent = `${assignedPi.name} (${assignedPi.serial})`;
+                this._assignedPiId = assignedPi.id;
+            } else if (currentPiInfo) {
+                currentPiInfo.style.display = 'none';
+                this._assignedPiId = null;
+            }
+
+            // 2. Load available Pi (activated, not assigned)
+            const available = allDevices.filter(d => d.status === 'activated');
+
+            if (available.length === 0) {
+                listEl.innerHTML = `<p class="text-muted small">
+                    Không có Pi nào đã kích hoạt và chưa được gán. 
+                    <a href="#" onclick="event.preventDefault(); bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target=&apos;#tab-pi&apos;]')).show(); window.adminManager.loadPiDevices();">
+                        Đến tab Pi Devices để kích hoạt
+                    </a>
+                </p>`;
+                if (btnRow) btnRow.style.display = 'none';
+                return;
+            }
+
+            listEl.innerHTML = `
+                <div class="list-group list-group-flush">
+                    ${available.map(d => `
+                        <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
+                               style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                            <input type="radio" name="pi-select" value="${d.id}" class="form-check-input">
+                            <div>
+                                <strong class="font-monospace">${d.name}</strong>
+                                <small class="d-block text-muted font-monospace">${d.serial}</small>
+                            </div>
+                            <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
+                        </label>
+                    `).join('')}
+                </div>`;
+
+            if (btnRow) btnRow.style.display = 'block';
+
+            // Show assign button row only when a radio is selected
+            listEl.querySelectorAll('input[name="pi-select"]').forEach(r => {
+                r.addEventListener('change', () => {
+                    if (btnRow) btnRow.style.display = 'block';
+                });
+            });
+
+        } catch (e) {
+            listEl.innerHTML = '<p class="text-danger small">Lỗi tải danh sách Pi</p>';
+            console.error(e);
+        }
+    }
+
+    /** Assign the selected Pi (from wizard radio) to the current station */
+    async assignSelectedPiToStation() {
+        const selected = document.querySelector('input[name="pi-select"]:checked');
+        if (!selected) {
+            window.toast?.warning('Vui lòng chọn một Pi');
+            return;
+        }
+        const piId = parseInt(selected.value);
+        try {
+            const res = await fetch(`/api/field/pi-devices/${piId}/assign`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ station_id: this.currentStationId })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi gán trạm');
+            }
+            const data = await res.json();
+            window.toast?.success(`✅ Đã gán Pi vào trạm "${data.station_name}"`);
+            // Reload the wizard Pi section
+            this.loadPendingDevices();
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    /** Unassign the currently-assigned Pi from the current station (wizard) */
+    async unassignPiFromStation() {
+        if (!this._assignedPiId) return;
+        try {
+            const res = await fetch(`/api/field/pi-devices/${this._assignedPiId}/unassign`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Lỗi');
+            window.toast?.success('✅ Đã bỏ gán Pi');
+            this._assignedPiId = null;
+            this.loadPendingDevices();
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
         }
     }
 

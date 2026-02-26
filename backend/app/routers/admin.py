@@ -339,7 +339,8 @@ async def create_user(
         hashed_password=hashed_pw,
         full_name=user_in.full_name,
         role=user_in.role,
-        is_active=True
+        is_active=True,
+        assigned_projects=user_in.assigned_projects or []
     )
     db.add(new_user)
     await db.commit()
@@ -358,6 +359,23 @@ async def delete_user(
     await db.execute(delete(model_auth.User).where(model_auth.User.id == user_id))
     await db.commit()
     return {"status": "success"}
+
+@router.put("/users/{user_id}/projects")
+async def update_user_projects(
+    user_id: int,
+    payload: dict,
+    db: AsyncSession = Depends(get_auth_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Update project assignments for a user (typically operator)."""
+    result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.assigned_projects = payload.get("assigned_projects", [])
+    await db.commit()
+    return {"status": "success", "assigned_projects": user.assigned_projects}
 
 @router.post("/db/export-csv")  
 async def export_database_csv(

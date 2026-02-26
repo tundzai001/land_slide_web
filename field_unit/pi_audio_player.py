@@ -1,3 +1,4 @@
+#pi_audio_player.py
 import json
 import logging
 import time
@@ -33,17 +34,15 @@ MQTT_USERNAME = "mqttUser"
 MQTT_PASSWORD = "MqttPassword123$%^"                        
 
 # WebSocket (PHỤ - Fallback)
-WEBSOCKET_BACKEND = "ws://aitogy.click:8001/ws/updates"  
-
+WEBSOCKET_BACKEND = "wss://monitoring.aitogy.com/ws/updates"  
 # Station Config
 MY_STATION_ID = 1                         
 AUDIO_DIR = Path(__file__).parent / "landslide_audio"  # Cùng thư mục với script
 LOCAL_CONFIG = Path.home() / ".landslide_device.json"
 
 # Backend registration (for initial setup)
-# Backend registration (for initial setup)
-# Lưu ý: Chỉnh port 8000 hoặc 8001 tùy vào cấu hình backend của bạn
-BACKEND_URL = os.getenv('BACKEND_URL', 'http://127.0.0.1:8000')  
+# Set BACKEND_URL env var to override (e.g. for local testing)
+BACKEND_URL = os.getenv('BACKEND_URL', 'https://monitoring.aitogy.com')  
 
 # Runtime values (may be overridden by local config)
 DEVICE_CODE = None
@@ -181,61 +180,85 @@ def generate_pi_license_base(serial_number: str) -> str:
         return base_code_str.ljust(12, '0')
 
 
-def generate_customer_license_base(identifier: str) -> str:
-    processed_id = ''.join(filter(str.isalnum, identifier.upper()))
-    if len(processed_id) > 12:
-        return processed_id[:12]
-    return processed_id.ljust(12, '0')
+def generate_customer_license_base(identifier: str = "CUSTOMER") -> str:
+    """Convert identifier to all-numeric base (same approach as pi_base) so
+    the combined string can be passed to get_license_code_from_string as a float."""
+    base_code_str = ""
+    for char in identifier.upper():
+        base_code_str += str(ord(char))
+    if len(base_code_str) > 12:
+        return base_code_str[:12]
+    return base_code_str.ljust(12, '0')
 
 
 def auto_register_device():
-    """Auto-register this device on first run if config not found."""
-    if LOCAL_CONFIG.exists():
-        return  # Already registered
-    
-    logger.info("🔄 First run detected. Auto-registering device...")
-    
+    """Register/heartbeat this device with backend on every startup.
+    - First run: creates pi_devices record (status=pending)
+    - Subsequent runs: updates last_seen, returns existing status + station_id
+    """
     try:
-        try:
-            import requests
-        except ImportError:
-            logger.warning("⚠️ requests module not available - skipping auto-register. Install with: pip install requests")
-            return
+        import requests
+    except ImportError:
+        logger.warning("⚠️ requests module not available - skipping register. Install: pip install requests")
+        return
+
+    try:
+        # Load existing config to get serial/device_id if already registered
+        existing_cfg = {}
+        if LOCAL_CONFIG.exists():
+            try:
+                with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
+                    existing_cfg = json.load(f)
+            except Exception:
+                pass
+
+        import sys
+        prefix = "win" if sys.platform.startswith("win") else "pi"
         
-        # Get serial number from device or use a default
-        serial = DEVICE_CODE or os.getenv('DEVICE_CODE') or f"pi-{int(time.time())}"
-        device_name = os.getenv('DEVICE_NAME', f'Pi-{serial}')
-        
-        # Register with backend
+        serial = (existing_cfg.get('device_code')
+                  or DEVICE_CODE
+                  or os.getenv('DEVICE_CODE')
+                  or f"{prefix}-{int(time.time())}")
+                  
+        name_prefix = "Win" if prefix == "win" else "Pi"
+        device_name = os.getenv('DEVICE_NAME', f'{name_prefix}-{serial[-8:]}')
+
         url = f"{BACKEND_URL}/api/field/register"
-        payload = {'device_code': serial, 'name': device_name, 'device_type': 'pi'}
-        
-        logger.info(f"📡 Registering to {url}")
+        # Use new schema: field "serial" (matches new PiDevice model)
+        payload = {'serial': serial, 'name': device_name, 'device_type': prefix}
+
+        logger.info(f"📡 Registering/heartbeat to {url} (serial={serial})")
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
-        
+
         result = resp.json()
-        enroll_token = result.get('enroll_token')
-        
-        # Save local config with registration info
+        device_id   = result.get('device_id')
+        status      = result.get('status', 'pending')
+        station_id  = result.get('station_id') or existing_cfg.get('station_id', 0)
+
+        logger.info(f"✅ Registration OK: device_id={device_id}, status={status}, station_id={station_id}")
+
+        # Update local config with fresh data from backend
         cfg = {
+            **existing_cfg,           # preserve any extra keys (license, mqtt overrides, etc.)
             'device_code': serial,
-            'device_id': result.get('device_id'),
-            'enroll_token': enroll_token,
-            'station_id': 0,
-            'mqtt': {'broker': MQTT_BROKER, 'port': MQTT_PORT},
-            'config': {}
+            'device_id':   device_id,
+            'station_id':  station_id or 0,
         }
-        
         with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
-        os.chmod(str(LOCAL_CONFIG), 0o600)
-        
-        logger.info(f"✅ Device registered: {serial}")
-        logger.info(f"   Enroll token saved. Waiting for admin to provision (assign station & license)...")
-        
+        try:
+            os.chmod(str(LOCAL_CONFIG), 0o600)
+        except Exception:
+            pass
+
+        if status == 'pending':
+            logger.info("   ⏳ Waiting for admin to activate this device...")
+        elif status in ('activated', 'assigned'):
+            logger.info(f"   ✅ Device is {status}, station_id={station_id}")
+
     except Exception as e:
-        logger.warning(f"⚠️ Auto-register failed (will retry on next restart): {e}")
+        logger.warning(f"⚠️ Register/heartbeat failed: {e}")
 
 
 def load_local_config():
@@ -274,7 +297,8 @@ class MQTTAudioClient:
         station_id: int,
         audio_player: AudioPlayer,
         username: str = "",
-        password: str = ""
+        password: str = "",
+        device_serial: str = ""
     ):
         self.broker = broker
         self.port = port
@@ -283,9 +307,11 @@ class MQTTAudioClient:
         self.username = username
         self.password = password
         
-        # MQTT Topics
+        # MQTT Topics for station alerts
         self.topic_alert = f"landslide/{station_id}/alert"
         self.topic_command = f"landslide/{station_id}/command"
+        # Per-device topic (used for activation before station is assigned)
+        self.topic_pi_command = f"landslide/pi/{device_serial}/command" if device_serial else None
         
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=f"pi-audio-{station_id}")
         self.client.on_connect = self._on_connect
@@ -330,6 +356,9 @@ class MQTTAudioClient:
             # Subscribe to topics
             client.subscribe(self.topic_alert)
             client.subscribe(self.topic_command)
+            if self.topic_pi_command:
+                client.subscribe(self.topic_pi_command)
+                logger.info(f"      - {self.topic_pi_command} (device command)")
             logger.info("✅ Subscribed to topics")
         else:
             logger.error(f"❌ MQTT connection failed with code: {rc}")
@@ -343,7 +372,7 @@ class MQTTAudioClient:
             # Xử lý dựa trên topic
             if msg.topic == self.topic_alert:
                 self._handle_alert(payload)
-            elif msg.topic == self.topic_command:
+            elif msg.topic == self.topic_command or (self.topic_pi_command and msg.topic == self.topic_pi_command):
                 self._handle_command(payload)
             
         except Exception as e:
@@ -380,6 +409,14 @@ class MQTTAudioClient:
                 if data.get('cmd') == 'install_license':
                     threading.Thread(target=self._handle_install_license, args=(data,), daemon=True).start()
                     return
+                # handle set_station command
+                if data.get('cmd') == 'set_station':
+                    threading.Thread(target=self._handle_set_station, args=(data,), daemon=True).start()
+                    return
+                # handle reset command
+                if data.get('cmd') == 'reset':
+                    threading.Thread(target=self._handle_reset, daemon=True).start()
+                    return
 
                 audio_code = data.get('audio_code', '')
             else:
@@ -410,12 +447,22 @@ class MQTTAudioClient:
                 return
 
             # compute expected
+            logger.info(f"   [verify] compute pi_base for {local_code}...")
             pi_base = generate_pi_license_base(local_code)
+            logger.info(f"   [verify] pi_base={pi_base}")
+
+            logger.info(f"   [verify] compute cust_base for {customer_base}...")
             cust_base = customer_base or generate_customer_license_base('CUSTOMER')
+            logger.info(f"   [verify] cust_base={cust_base}")
+
             combined = pi_base + cust_base
+            logger.info(f"   [verify] combined={combined}")
+
             expected = get_license_code_from_string(combined)
+            logger.info(f"   [verify] expected={expected}")
 
             ok = (expected == (license_str or ''))
+
 
             if ok:
                 logger.info(f"✅ License verified for device {local_code}")
@@ -432,25 +479,121 @@ class MQTTAudioClient:
                 except Exception as e:
                     logger.warning(f"Could not persist license locally: {e}")
 
+                # Notify backend via HTTP callback
+                device_id = data.get('device_id')
+                if device_id:
+                    try:
+                        import requests
+                        resp = requests.post(
+                            f"{BACKEND_URL}/api/field/pi-devices/{device_id}/confirm",
+                            json={"activated": True, "serial": local_code},
+                            timeout=10
+                        )
+                        logger.info(f"📡 Confirm sent: {resp.status_code}")
+                    except Exception as e:
+                        logger.warning(f"Could not send confirm to backend: {e}")
+
                 # send ack via MQTT status topic
                 try:
                     status_topic = f"landslide/{self.station_id}/status"
-                    payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": True})
-                    self.client.publish(status_topic, payload)
+                    ack_payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": True})
+                    self.client.publish(status_topic, ack_payload)
                 except Exception as e:
                     logger.warning(f"Failed to publish license ack: {e}")
 
             else:
                 logger.warning(f"❌ License mismatch: expected {expected} got {license_str}")
+                device_id = data.get('device_id')
+                if device_id:
+                    try:
+                        import requests
+                        requests.post(
+                            f"{BACKEND_URL}/api/field/pi-devices/{device_id}/confirm",
+                            json={"activated": False, "serial": local_code},
+                            timeout=10
+                        )
+                    except Exception:
+                        pass
                 try:
                     status_topic = f"landslide/{self.station_id}/status"
-                    payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": False})
-                    self.client.publish(status_topic, payload)
+                    fail_payload = json.dumps({"type": "license_installed", "device_code": local_code, "ok": False})
+                    self.client.publish(status_topic, fail_payload)
                 except Exception:
                     pass
 
         except Exception as e:
             logger.error(f"Error handling install_license: {e}")
+
+    def _handle_set_station(self, data: dict):
+        """Handle set_station command from backend after Pi is assigned to a station."""
+        try:
+            new_station_id = data.get('station_id')
+            if not new_station_id:
+                logger.warning("set_station: missing station_id")
+                return
+
+            logger.info(f"📍 Received set_station → station_id={new_station_id}")
+
+            # Update local config
+            try:
+                cfg = {}
+                if LOCAL_CONFIG.exists():
+                    with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
+                        cfg = json.load(f)
+                cfg['station_id'] = new_station_id
+                with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
+                    json.dump(cfg, f, ensure_ascii=False, indent=2)
+                logger.info(f"✅ station_id saved to local config: {new_station_id}")
+            except Exception as e:
+                logger.warning(f"Could not update local config: {e}")
+
+            # Update in-memory station_id and resubscribe topics
+            old_station = self.station_id
+            self.station_id = new_station_id
+            self.topic_alert   = f"landslide/{new_station_id}/alert"
+            self.topic_command = f"landslide/{new_station_id}/command"
+
+            # Unsubscribe old topics
+            self.client.unsubscribe(f"landslide/{old_station}/alert")
+            self.client.unsubscribe(f"landslide/{old_station}/command")
+            # Subscribe new topics
+            self.client.subscribe(self.topic_alert)
+            self.client.subscribe(self.topic_command)
+            logger.info(f"🔄 Resubscribed to station {new_station_id} topics")
+
+        except Exception as e:
+            logger.error(f"Error handling set_station: {e}")
+
+    def _handle_reset(self):
+        """Handle reset command from admin: delete local config (license, station, etc.)."""
+        try:
+            logger.warning("🔄 RESET command received from admin!")
+
+            # 1. Delete local config file (contains license + station_id)
+            if LOCAL_CONFIG.exists():
+                LOCAL_CONFIG.unlink()
+                logger.info(f"🗑️ Deleted local config: {LOCAL_CONFIG}")
+            else:
+                logger.info("   No local config file to delete")
+
+            # 2. Reset in-memory state
+            global DEVICE_CODE, MY_STATION_ID
+            DEVICE_CODE = None
+            old_station = self.station_id
+            self.station_id = 0
+            self.topic_alert   = "landslide/0/alert"
+            self.topic_command = "landslide/0/command"
+
+            # 3. Resubscribe to generic topics
+            self.client.unsubscribe(f"landslide/{old_station}/alert")
+            self.client.unsubscribe(f"landslide/{old_station}/command")
+            self.client.subscribe(self.topic_alert)
+            self.client.subscribe(self.topic_command)
+
+            logger.info("✅ Pi reset complete. Restart Pi to re-register.")
+
+        except Exception as e:
+            logger.error(f"Error handling reset: {e}")
     
     def _on_disconnect(self, client, userdata, rc):
         """Callback khi ngắt kết nối"""
@@ -591,7 +734,8 @@ def main():
         station_id=MY_STATION_ID,
         audio_player=audio_player,
         username=MQTT_USERNAME,
-        password=MQTT_PASSWORD
+        password=MQTT_PASSWORD,
+        device_serial=DEVICE_CODE or ""
     )
     
     # ✅ PHỤ: WebSocket Fallback (nếu có websocket library)
