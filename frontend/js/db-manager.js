@@ -25,9 +25,16 @@ class DatabaseManager {
             this.currentEditModal = new bootstrap.Modal(editModalEl);
         }
 
+        // Support both Bootstrap tabs (old) and sidebar links (new)
         const dbTabBtn = document.querySelector('button[data-bs-target="#tab-database"]');
         if (dbTabBtn) {
             dbTabBtn.addEventListener('shown.bs.tab', () => {
+                this.loadAllData();
+            });
+        }
+        const dbSidebarLink = document.querySelector('[data-tab="tab-database"]');
+        if (dbSidebarLink) {
+            dbSidebarLink.addEventListener('click', () => {
                 this.loadAllData();
             });
         }

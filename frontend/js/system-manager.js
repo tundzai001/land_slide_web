@@ -12,20 +12,19 @@ class SystemManager {
     }
 
     setupTabInterceptor() {
-        // Tìm nút bấm mở tab System
-        const systemTabBtn = document.querySelector('button[data-bs-target="#tab-system"]');
+        // Tìm nút bấm mở tab System trong sidebar
+        const systemTabLink = document.querySelector('[data-tab="tab-system"]');
 
-        if (!systemTabBtn) return;
+        if (!systemTabLink) return;
 
-        systemTabBtn.addEventListener('show.bs.tab', (event) => {
+        // Intercept click — prevent switching if not verified
+        systemTabLink.addEventListener('click', (event) => {
             if (!this.isVerified) {
                 event.preventDefault();
-
-                // Hiện bảng nhập mật khẩu
+                event.stopPropagation();
                 this.showPasswordShield();
             }
-            // Nếu đã verified (isVerified = true) thì cho phép chuyển tab bình thường
-        });
+        }, true); // capture phase to run before switchTab
     }
 
     showPasswordShield() {
@@ -79,10 +78,11 @@ class SystemManager {
                 const shield = document.getElementById('password-shield');
                 if (shield) shield.style.display = 'none';
 
-                // 2. Tự động chuyển sang tab System (vì lúc nãy mình đã chặn nó)
-                const systemTabBtn = document.querySelector('button[data-bs-target="#tab-system"]');
-                const tabInstance = new bootstrap.Tab(systemTabBtn);
-                tabInstance.show();
+                // 2. Tự động chuyển sang tab System
+                const systemLink = document.querySelector('[data-tab="tab-system"]');
+                if (window.adminManager) {
+                    window.adminManager.switchTab('tab-system', systemLink);
+                }
 
                 // 3. Load dữ liệu
                 this.loadSystemConfig();

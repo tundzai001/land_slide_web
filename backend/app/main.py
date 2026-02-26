@@ -33,6 +33,7 @@ from .routers import field as field_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
+from .models.pi_device import PiDevice  # noqa: F401 – ensures table is registered
 from .websocket import manager as ws_manager
 from .landslide_analyzer import LandslideAnalyzer
 
@@ -66,10 +67,10 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(model_auth.BaseAuth.metadata.create_all)
         logger.info("✓ Auth database initialized")
 
-        # 2. Khởi tạo CONFIG DB
+        # 2. Khởi tạo CONFIG DB (stations, devices, pi_devices, ...)
         async with config_engine.begin() as conn:
             await conn.run_sync(model_config.BaseConfig.metadata.create_all)
-        logger.info("✓ Config database initialized")
+        logger.info("✓ Config database initialized (incl. pi_devices)")
 
         # 3. Khởi tạo DATA DB
         async with data_engine.begin() as conn:
@@ -210,6 +211,7 @@ async def get_current_user_info(
     permissions = auth.get_user_permissions(current_user)
     user_response = schemas.UserResponse.from_orm(current_user)
     user_response.permissions = permissions
+    user_response.assigned_projects = getattr(current_user, 'assigned_projects', []) or []
     return user_response
 
 # ============================================================================
@@ -280,6 +282,11 @@ async def get_projects(
         )
         
         projects_with_counts = result.all()
+        
+        # Filter projects for operator role
+        assigned = getattr(current_user, 'assigned_projects', None) or []
+        if current_user.role == 'operator' and assigned:
+            projects_with_counts = [(p, c) for p, c in projects_with_counts if p.id in assigned]
         
         return [
             {
@@ -399,6 +406,29 @@ def calculate_station_location(sensors: dict, manual_location: dict = None):
             "source": f"Average of {len(coords)} sensors"
         }
 
+# ============================================================================
+# RBAC HELPER: Check operator project access
+# ============================================================================
+def check_operator_project_access(user, project_id: int):
+    """Raise 403 if operator tries to access a project not in their assigned_projects."""
+    if user.role == 'operator':
+        assigned = getattr(user, 'assigned_projects', None) or []
+        if project_id not in assigned:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập dự án này")
+    elif user.role == 'viewer':
+        pass  # Viewers can view all projects (read-only)
+
+async def check_operator_station_access(user, station_id: int, db: AsyncSession):
+    """Raise 403 if operator tries to access a station not in their assigned projects."""
+    if user.role == 'operator':
+        assigned = getattr(user, 'assigned_projects', None) or []
+        res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
+        station = res.scalar_one_or_none()
+        if not station or station.project_id not in assigned:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập trạm này")
+    elif user.role == 'viewer':
+        pass  # Viewers can view all stations (read-only via VIEW_STATIONS)
+
 @app.get("/api/admin/projects/{project_id}/stations")
 async def get_stations_by_project(
     project_id: int,
@@ -406,6 +436,8 @@ async def get_stations_by_project(
     db_data: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
+    # Enforce operator project access
+    check_operator_project_access(current_user, project_id)
     result = await db_config.execute(
         select(model_config.Station).where(model_config.Station.project_id == project_id)
     )
@@ -474,6 +506,9 @@ async def get_station_config(
     if not station:
         raise HTTPException(status_code=404, detail="Không tìm thấy trạm")
     
+    # Enforce operator project access
+    check_operator_project_access(current_user, station.project_id)
+    
     # Trả về cả ID, thông tin cơ bản và config
     return {
         "id": station.id,
@@ -490,6 +525,8 @@ async def create_station_in_project(
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
+    # Enforce operator project access
+    check_operator_project_access(current_user, project_id)
     try:
         # 1. Kiểm tra mã trạm
         exist = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_data.station_code))
@@ -548,6 +585,9 @@ async def update_station_full_config(
         res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
         station = res.scalar_one_or_none()
         if not station: raise HTTPException(status_code=404)
+
+        # Enforce operator project access
+        check_operator_project_access(current_user, station.project_id)
 
         # TÍNH LẠI TOẠ ĐỘ TỰ ĐỘNG
         station.location = calculate_station_location(update_data.sensors, update_data.location)
@@ -613,11 +653,15 @@ async def delete_station(
 ):
     res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
     station = res.scalar_one_or_none()
-    if station:
-        await db.delete(station)
-        await db.commit()
-        return {"status": "success"}
-    raise HTTPException(status_code=404)
+    if not station:
+        raise HTTPException(status_code=404)
+    
+    # Enforce operator project access
+    check_operator_project_access(current_user, station.project_id)
+    
+    await db.delete(station)
+    await db.commit()
+    return {"status": "success"}
 
 @app.post("/api/admin/gnss/fetch-live-origin")
 async def fetch_live_gnss_origin(

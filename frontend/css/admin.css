@@ -71,9 +71,19 @@ body {
     height: 100vh;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
-    padding: 24px 0;
+    padding: 0;
     z-index: 1000;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-sidebar nav {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    padding-top: 8px;
 }
 
 /* Glassmorphism Utilities */
@@ -118,8 +128,8 @@ body {
 }
 
 .sidebar-brand::after {
-    content: '\F53B';
-    /* Bootstrap Icon: Shield Lock Fill */
+    content: '\F4E3';
+    /* Bootstrap Icon: Map */
     font-family: 'bootstrap-icons';
     font-size: 1.8rem;
     color: var(--accent-primary);
@@ -1329,4 +1339,17 @@ input[type="number"] {
 
 .hover-opacity-100:hover {
     opacity: 1 !important;
+}
+
+/* ========================================
+   PI DEVICES GRID - PING STATUS DOT
+======================================== */
+.ping-online {
+    color: #22c55e !important;
+    font-size: .8rem;
+}
+
+.ping-offline {
+    color: #ef4444 !important;
+    font-size: .8rem;
 }

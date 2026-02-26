@@ -1,5 +1,5 @@
 #backend/app/models/auth.py
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, JSON
 from app.database import BaseAuth
 
 class User(BaseAuth):
@@ -10,3 +10,4 @@ class User(BaseAuth):
     full_name = Column(String, nullable=True)
     role = Column(String, default="user")
     is_active = Column(Boolean, default=True)
+    assigned_projects = Column(JSON, default=[])  # [1, 3, 5] = project IDs for operator
