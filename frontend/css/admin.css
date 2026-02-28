@@ -709,10 +709,7 @@ body {
 [data-theme="dark"] .table thead th {
     background: rgba(0, 242, 255, 0.05);
     color: var(--accent-primary) !important;
-    text-transform: uppercase;
-    letter-spacing: 1px;
     border-bottom: 1px solid var(--border-color);
-    font-family: var(--font-mono);
 }
 
 [data-theme="dark"] .table tbody tr {
@@ -1352,4 +1349,29 @@ input[type="number"] {
 .ping-offline {
     color: #ef4444 !important;
     font-size: .8rem;
+}
+
+/* Dark mode overrides for ping dots (override the broad [data-theme="dark"] span rule) */
+[data-theme="dark"] span.ping-offline {
+    color: #ef4444 !important;
+}
+
+[data-theme="dark"] span.ping-online {
+    color: #22c55e !important;
+}
+
+/* Assigned device detail (station · project) */
+.pi-assign-detail {
+    display: block;
+    font-size: .7rem !important;
+    color: #64748b !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    margin-top: 2px;
+}
+
+[data-theme="dark"] .pi-assign-detail {
+    color: #94a3b8 !important;
 }

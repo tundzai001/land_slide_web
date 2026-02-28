@@ -190,7 +190,7 @@ class AuthManager {
             }
 
             const adminCard = document.getElementById('admin-card');
-            if (adminCard && this.user.role === 'admin') {
+            if (adminCard && (this.user.role === 'admin' || this.user.role === 'operator')) {
                 adminCard.classList.remove('d-none');
                 console.log('✅ [AUTH] Landing: Admin card shown');
             }
@@ -200,12 +200,12 @@ class AuthManager {
             // ============================================
             const adminNavBtn = document.getElementById('admin-nav-btn');
             if (adminNavBtn) {
-                if (this.user.role === 'admin') {
+                if (this.user.role === 'admin' || this.user.role === 'operator') {
                     adminNavBtn.style.display = 'inline-flex';
                     console.log('✅ [AUTH] Map: Admin button shown');
                 } else {
                     adminNavBtn.style.display = 'none';
-                    console.log('🔒 [AUTH] Map: Admin button hidden (not admin)');
+                    console.log('🔒 [AUTH] Map: Admin button hidden (viewer)');
                 }
             }
 
