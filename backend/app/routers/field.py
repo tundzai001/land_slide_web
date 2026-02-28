@@ -155,6 +155,14 @@ async def register_pi_device(
             # Update last_seen and return existing record
             pi.last_seen = current_time
             pi.device_type = payload.device_type
+
+            # Auto-confirm: if status is stuck at 'activating' and license matches, promote to 'activated'
+            if pi.status == "activating" and pi.license_key:
+                expected_key = generate_activation_key(pi.serial)
+                if pi.license_key == expected_key:
+                    pi.status = "activated"
+                    logger.info(f"✅ Auto-confirmed Pi '{pi.serial}' (license matched on reconnect)")
+
             await db.commit()
             logger.info(f"🔄 Pi reconnect: {payload.serial} (status={pi.status})")
             return {
@@ -220,6 +228,7 @@ async def list_pi_devices(
             for s in stations:
                 station_info[s.id] = {
                     "name": s.name,
+                    "project_id": s.project_id,
                     "project_name": project_names.get(s.project_id, ""),
                 }
 
@@ -230,8 +239,10 @@ async def list_pi_devices(
                 "name":          d.name,
                 "device_type":   getattr(d, "device_type", "pi"),
                 "status":        d.status,
+                "is_locked":     getattr(d, 'is_locked', False),
                 "station_id":    d.station_id,
                 "station_name":  station_info.get(d.station_id, {}).get("name"),
+                "project_id":    station_info.get(d.station_id, {}).get("project_id"),
                 "project_name":  station_info.get(d.station_id, {}).get("project_name"),
                 "last_seen":     d.last_seen,
                 "registered_at": d.registered_at,
@@ -411,6 +422,37 @@ async def unassign_pi(
 
         logger.info(f"🔓 Pi '{pi.serial}' unassigned from station {old_station}")
         return {"status": "activated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/pi-devices/{pi_id}/lock")
+async def toggle_lock_pi_device(
+    pi_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Toggle lock/unlock a Pi device."""
+    try:
+        res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
+        pi = res.scalar_one_or_none()
+        if not pi:
+            raise HTTPException(status_code=404, detail="Pi device not found")
+
+        pi.is_locked = not getattr(pi, 'is_locked', False)
+        await db.commit()
+
+        state = "locked" if pi.is_locked else "unlocked"
+        logger.info(f"🔒 Pi '{pi.serial}' {state}")
+
+        # Notify Pi via MQTT
+        topic = f"landslide/pi/{pi.serial}/command"
+        _publish_mqtt(topic, {"cmd": "lock" if pi.is_locked else "unlock"})
+
+        return {"status": state, "is_locked": pi.is_locked}
 
     except HTTPException:
         raise

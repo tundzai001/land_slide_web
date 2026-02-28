@@ -312,6 +312,8 @@ class MQTTAudioClient:
         self.topic_command = f"landslide/{station_id}/command"
         # Per-device topic (used for activation before station is assigned)
         self.topic_pi_command = f"landslide/pi/{device_serial}/command" if device_serial else None
+        self.is_locked = False  # Lock state: khi bị khóa, Pi từ chối phát audio
+        self._load_lock_state()  # Restore saved lock state
         
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=f"pi-audio-{station_id}")
         self.client.on_connect = self._on_connect
@@ -390,6 +392,9 @@ class MQTTAudioClient:
             logger.warning(f"🚨 ALERT [{level}]: {message}")
             
             if audio_code:
+                if self.is_locked:
+                    logger.warning(f"🔒 Device locked, ignoring alert audio: {audio_code}")
+                    return
                 logger.info(f"   🔊 Audio Code: {audio_code}")
                 threading.Thread(
                     target=self.audio_player.play,
@@ -417,6 +422,17 @@ class MQTTAudioClient:
                 if data.get('cmd') == 'reset':
                     threading.Thread(target=self._handle_reset, daemon=True).start()
                     return
+                # handle lock/unlock command
+                if data.get('cmd') == 'lock':
+                    self.is_locked = True
+                    self._save_lock_state(True)
+                    logger.warning("🔒 Device LOCKED by admin")
+                    return
+                if data.get('cmd') == 'unlock':
+                    self.is_locked = False
+                    self._save_lock_state(False)
+                    logger.info("🔓 Device UNLOCKED by admin")
+                    return
 
                 audio_code = data.get('audio_code', '')
             else:
@@ -424,6 +440,9 @@ class MQTTAudioClient:
                 audio_code = payload.strip()
 
             if audio_code:
+                if self.is_locked:
+                    logger.warning(f"🔒 Device locked, ignoring audio command: {audio_code}")
+                    return
                 logger.info(f"🎵 Command: Play {audio_code}")
                 threading.Thread(
                     target=self.audio_player.play,
@@ -594,6 +613,31 @@ class MQTTAudioClient:
 
         except Exception as e:
             logger.error(f"Error handling reset: {e}")
+
+    def _save_lock_state(self, locked: bool):
+        """Persist lock state to local config."""
+        try:
+            cfg = {}
+            if LOCAL_CONFIG.exists():
+                with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+            cfg['is_locked'] = locked
+            with open(LOCAL_CONFIG, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not save lock state: {e}")
+
+    def _load_lock_state(self):
+        """Load lock state from local config."""
+        try:
+            if LOCAL_CONFIG.exists():
+                with open(LOCAL_CONFIG, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+                self.is_locked = cfg.get('is_locked', False)
+                if self.is_locked:
+                    logger.warning("🔒 Device is LOCKED (from local config)")
+        except Exception:
+            pass
     
     def _on_disconnect(self, client, userdata, rc):
         """Callback khi ngắt kết nối"""
@@ -748,6 +792,30 @@ def main():
         logger.info("✅ WebSocket fallback thread started")
     else:
         logger.warning("⚠️ websocket-client not installed, fallback disabled")
+
+    # ✅ Heartbeat: cập nhật last_seen định kỳ
+    def _heartbeat_loop():
+        while True:
+            time.sleep(60)
+            try:
+                import requests as _req
+                serial = DEVICE_CODE or ""
+                if not serial:
+                    continue
+                import sys as _sys
+                prefix = "win" if _sys.platform.startswith("win") else "pi"
+                name = f"{'Win' if prefix == 'win' else 'Pi'}-{serial[-8:]}"
+                _req.post(
+                    f"{BACKEND_URL}/api/field/register",
+                    json={"serial": serial, "name": name, "device_type": prefix},
+                    timeout=10
+                )
+            except Exception:
+                pass
+
+    hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    hb_thread.start()
+    logger.info("✅ Heartbeat thread started (60s interval)")
     
     try:
         # Kết nối MQTT (chính)

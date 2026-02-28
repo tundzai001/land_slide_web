@@ -107,10 +107,11 @@ class AdminManager {
             }
         });
 
-        this.loadUsers();
+        // Load projects first so project names are available for user rendering
+        this.loadProjects().then(() => this.loadUsers());
         this.setupTabHandlers();
         this.setupLogout();
-        this.setupOfflineThresholdListeners(); // ✅ THÊM MỚI
+        this.setupOfflineThresholdListeners();
 
         // Load project list for Add User modal
         const addUserModal = document.getElementById('addUserModal');
@@ -167,6 +168,14 @@ class AdminManager {
         // Hide "Tạo Dự án" button (operator can't create new projects)
         const createProjBtn = document.querySelector('#action-buttons-container');
         if (createProjBtn) createProjBtn.style.display = 'none';
+
+        // Hide Pi summary cards (admin-level info)
+        const summaryCards = document.getElementById('pi-summary-cards');
+        if (summaryCards) summaryCards.style.display = 'none';
+
+        // Hide Chọn (select) toggle button
+        const selectToggle = document.getElementById('pi-select-toggle');
+        if (selectToggle) selectToggle.style.display = 'none';
 
         // Switch to projects tab by default
         const projLink = document.querySelector('[data-tab="tab-projects"]');
@@ -1403,11 +1412,11 @@ class AdminManager {
         };
 
         tbody.innerHTML = users.map(u => {
-            // Show assigned projects for operators
+            // Show assigned projects for operators (by name)
             let projectBadges = '';
             if (u.role === 'operator' && u.assigned_projects && u.assigned_projects.length > 0) {
                 projectBadges = `<br><small class="text-muted">Dự án: ${u.assigned_projects.map(
-                    pid => `<span class="badge bg-dark text-info border border-info" style="font-size:.65rem">#${pid}</span>`
+                    pid => `<span class="badge bg-dark text-info border border-info" style="font-size:.65rem">${this.getProjectName(pid)}</span>`
                 ).join(' ')}</small>`;
             }
 
@@ -1654,29 +1663,46 @@ class AdminManager {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (!res.ok) throw new Error('Failed to load Pi devices');
-            const devices = await res.json();
+            let devices = await res.json();
+
+            const isOperator = this.currentUserRole === 'operator';
+
+            // ─── Operator: only show devices assigned to their projects ───
+            if (isOperator && this.currentUserAssignedProjects?.length > 0) {
+                const myProjects = this.currentUserAssignedProjects;
+                devices = devices.filter(d =>
+                    d.status === 'assigned' && d.project_id && myProjects.includes(d.project_id)
+                );
+            }
+
             this._piDevicesData = devices;
 
-            const pending = devices.filter(d => d.status === 'pending' || d.status === 'activating');
-            const activated = devices.filter(d => d.status === 'activated');
-            const assigned = devices.filter(d => d.status === 'assigned');
+            if (!isOperator) {
+                const pending = devices.filter(d => d.status === 'pending' || d.status === 'activating');
+                const activated = devices.filter(d => d.status === 'activated');
+                const assigned = devices.filter(d => d.status === 'assigned');
 
-            // ─── Update summary cards ───
-            const setCount = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-            setCount('pi-pending-count', pending.length);
-            setCount('pi-activated-count', activated.length);
-            setCount('pi-assigned-count', assigned.length);
+                // ─── Update summary cards ───
+                const setCount = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+                setCount('pi-pending-count', pending.length);
+                setCount('pi-activated-count', activated.length);
+                setCount('pi-assigned-count', assigned.length);
 
-            const descEl = document.getElementById('pi-pending-desc');
-            if (descEl) descEl.textContent = pending.length === 0
-                ? 'No devices awaiting handshake'
-                : `${pending.length} device(s) awaiting activation`;
+                const descEl = document.getElementById('pi-pending-desc');
+                if (descEl) descEl.textContent = pending.length === 0
+                    ? 'No devices awaiting handshake'
+                    : `${pending.length} device(s) awaiting activation`;
+            }
 
             // ─── Render grid table ───
             this._renderPiGrid(devices);
 
-            // ─── Inject action bar if not exists ───
-            if (!document.getElementById('pi-action-bar')) {
+            // ─── Inject action bar (admin only) ───
+            if (isOperator) {
+                // Operator: hide select toggle button, read-only view
+                const selectToggle = document.getElementById('pi-select-toggle');
+                if (selectToggle) selectToggle.style.display = 'none';
+            } else if (!document.getElementById('pi-action-bar')) {
                 const bar = document.createElement('div');
                 bar.id = 'pi-action-bar';
                 bar.style.cssText = `
@@ -1693,6 +1719,10 @@ class AdminManager {
                         <i class="bi bi-key me-1"></i>Kích hoạt</button>
                     <button class="btn btn-sm btn-warning"   id="pi-act-unassign" onclick="window.adminManager._piActionBatch('unassign')" style="display:none">
                         <i class="bi bi-x-circle me-1"></i>Bỏ gán</button>
+                    <button class="btn btn-sm btn-secondary" id="pi-act-lock"     onclick="window.adminManager._piActionBatch('lock')" style="display:none">
+                        <i class="bi bi-lock me-1"></i>Khóa</button>
+                    <button class="btn btn-sm btn-success"   id="pi-act-unlock"   onclick="window.adminManager._piActionBatch('unlock')" style="display:none">
+                        <i class="bi bi-unlock me-1"></i>Mở khóa</button>
                     <button class="btn btn-sm btn-info"      id="pi-act-reset"    onclick="window.adminManager._piActionBatch('reset')" style="display:none">
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
                     <button class="btn btn-sm btn-danger"    id="pi-act-delete"   onclick="window.adminManager._piActionBatch('delete')">
@@ -1728,6 +1758,12 @@ class AdminManager {
             const statusLabels = { pending: 'Pending', activating: 'Activating', activated: 'Activated', assigned: 'Assigned' };
             const color = statusColors[d.status] || '#6b7280';
             statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">● ${statusLabels[d.status] || d.status}</span>`;
+            if (d.is_locked) {
+                statusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+            }
+            if (d.status === 'assigned') {
+                statusBadge += `<br><small class="pi-assign-detail">${d.station_name || ''}${d.project_name ? ' · ' + d.project_name : ''}</small>`;
+            }
 
             // Firmware / Device Type logic based on explicit device_type or serial string
             let devType = 'Device';
@@ -1754,20 +1790,7 @@ class AdminManager {
             const pingColor = isOnline ? '#22c55e' : '#ef4444'; // Green or Red
             const lastPingText = d.last_seen ? this._formatTimeAgo(d.last_seen, isOnline) : '—';
 
-            // Actions dropdown
-            let actions = '';
-            if (d.status === 'pending' || d.status === 'activating') {
-                actions = `<button class="btn btn-sm btn-outline-primary" onclick="window.adminManager.activatePiDevice(${d.id})"
-                    ${d.status === 'activating' ? 'disabled' : ''}>
-                    <i class="bi bi-key"></i></button>`;
-            } else if (d.status === 'assigned') {
-                actions = `<div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-warning" onclick="window.adminManager.unassignPiDevice(${d.id})" title="Bỏ gán"><i class="bi bi-x-circle"></i></button>
-                    <button class="btn btn-outline-info" onclick="window.adminManager.resetPiDevice(${d.id})" title="Reset"><i class="bi bi-arrow-counterclockwise"></i></button>
-                </div>`;
-            }
-
-            return `<tr class="pi-grid-row" data-pi-id="${d.id}" data-pi-status="${d.status}" data-search="${(d.name + d.serial + (d.station_name || '')).toLowerCase()}">
+            return `<tr class="pi-grid-row" data-pi-id="${d.id}" data-pi-status="${d.status}" data-pi-locked="${d.is_locked ? '1' : '0'}" data-search="${(d.name + d.serial + (d.station_name || '')).toLowerCase()}">
                 <td>
                     <div class="pi-check-overlay" style="display:none">
                         <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${d.id}"
@@ -1778,7 +1801,6 @@ class AdminManager {
                 <td><code style="font-size:.8rem;color:var(--text-muted)">${d.serial}</code></td>
                 <td>${statusBadge}</td>
                 <td><span class="${isOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${lastPingText}</small></td>
-                <td>${actions}</td>
             </tr>`;
         }).join('');
 
@@ -1855,9 +1877,18 @@ class AdminManager {
                 if (row) statuses.add(row.dataset.piStatus);
             });
 
+            // Check lock states of selected items
+            const lockStates = new Set();
+            checked.forEach(cb => {
+                const row = cb.closest('.pi-grid-row') || cb.closest('tr');
+                if (row) lockStates.add(row.dataset.piLocked);
+            });
+
             const show = (id, visible) => { const el = document.getElementById(id); if (el) el.style.display = visible ? '' : 'none'; };
             show('pi-act-activate', statuses.has('pending') || statuses.has('activating'));
             show('pi-act-unassign', statuses.has('assigned'));
+            show('pi-act-lock', lockStates.has('0'));   // Show lock if any unlocked
+            show('pi-act-unlock', lockStates.has('1')); // Show unlock if any locked
             show('pi-act-reset', statuses.has('activated') || statuses.has('assigned'));
             show('pi-act-delete', true);
         } else {
@@ -1874,6 +1905,8 @@ class AdminManager {
         const actionMap = {
             'activate': { method: 'POST', path: id => `/api/field/pi-devices/${id}/activate`, label: 'Kích hoạt' },
             'unassign': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/unassign`, label: 'Bỏ gán' },
+            'lock': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/lock`, body: { is_locked: true }, label: 'Khóa' },
+            'unlock': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/lock`, body: { is_locked: false }, label: 'Mở khóa' },
             'reset': { method: 'POST', path: id => `/api/field/pi-devices/${id}/reset`, label: 'Reset' },
             'delete': { method: 'DELETE', path: id => `/api/field/pi-devices/${id}`, label: 'Xóa' },
         };
