@@ -162,6 +162,10 @@ app.add_middleware(
 )
 app.include_router(admin_router.router)
 app.include_router(field_router.router)
+
+# Mount static files directory (for sounds, etc.)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
