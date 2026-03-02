@@ -356,9 +356,37 @@ async def delete_user(
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
     
+    result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.username == 'admin':
+        raise HTTPException(status_code=400, detail="Cannot delete the admin user")
+    
     await db.execute(delete(model_auth.User).where(model_auth.User.id == user_id))
     await db.commit()
     return {"status": "success"}
+
+@router.put("/users/{user_id}/status")
+async def toggle_user_status(
+    user_id: int,
+    payload: dict,
+    db: AsyncSession = Depends(get_auth_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.username == 'admin':
+        raise HTTPException(status_code=400, detail="Cannot change status of the admin user")
+
+    is_active = payload.get("is_active", True)
+    user.is_active = is_active
+    await db.commit()
+    return {"status": "success", "is_active": user.is_active}
 
 @router.put("/users/{user_id}/projects")
 async def update_user_projects(
@@ -965,6 +993,27 @@ async def update_station_config(
                     logger.info(f"  ❌ Deactivated {d_type}")
             
             logger.info(f"📋 [UPDATE] Active types: {active_types}")
+        
+        # ✅ AUTO-COMPUTE station location from average of sensor coordinate origins
+        final_config = station.config or {}
+        origin_keys = ['gnss_origin', 'rain_origin', 'water_origin', 'imu_origin']
+        lats, lons = [], []
+        for key in origin_keys:
+            origin = final_config.get(key, {})
+            try:
+                lat_val = float(origin.get('lat', 0))
+                lon_val = float(origin.get('lon', 0))
+                if lat_val != 0 and lon_val != 0:
+                    lats.append(lat_val)
+                    lons.append(lon_val)
+            except (ValueError, TypeError, AttributeError):
+                continue
+        
+        if lats and lons:
+            avg_lat = sum(lats) / len(lats)
+            avg_lon = sum(lons) / len(lons)
+            station.location = {"lat": round(avg_lat, 8), "lon": round(avg_lon, 8)}
+            logger.info(f"📍 [LOCATION] Auto-set station {station_id} location to ({avg_lat:.6f}, {avg_lon:.6f}) from {len(lats)} origins")
         
         station.updated_at = int(time.time())
         await db.commit()

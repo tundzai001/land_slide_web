@@ -567,6 +567,16 @@ class AdminManager {
         document.getElementById('origin-lon').value = '';
         document.getElementById('origin-h').value = '';
         document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
+
+        // Reset sub-sensor coordinates
+        ['rain', 'water', 'imu'].forEach(s => {
+            const lat = document.getElementById(`origin-${s}-lat`);
+            const lon = document.getElementById(`origin-${s}-lon`);
+            const h = document.getElementById(`origin-${s}-h`);
+            if (lat) lat.value = '';
+            if (lon) lon.value = '';
+            if (h) h.value = '';
+        });
         document.getElementById('edit-project-id').value = this.currentProjectId;
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
 
@@ -731,6 +741,17 @@ class AdminManager {
                 document.getElementById('origin-h').value = '';
                 document.getElementById('origin-status').textContent = 'Chưa thiết lập';
             }
+
+            // Load extra sensor origins
+            ['rain', 'water', 'imu'].forEach(s => {
+                const sOrigin = cfg[`${s}_origin`] || {};
+                const latEl = document.getElementById(`origin-${s}-lat`);
+                const lonEl = document.getElementById(`origin-${s}-lon`);
+                const hEl = document.getElementById(`origin-${s}-h`);
+                if (latEl) latEl.value = sOrigin.lat !== undefined ? sOrigin.lat : '';
+                if (lonEl) lonEl.value = sOrigin.lon !== undefined ? sOrigin.lon : '';
+                if (hEl) hEl.value = sOrigin.h !== undefined ? sOrigin.h : '';
+            });
 
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
             document.getElementById('btn-delete-station').style.display = 'inline-block';
@@ -954,6 +975,16 @@ class AdminManager {
                         sensors[type].lon = parseFloat(lon);
                         sensors[type].h = parseFloat(h) || 0;
                     }
+                } else if (['rain', 'water', 'imu'].includes(type)) {
+                    const lat = document.getElementById(`origin-${type}-lat`)?.value;
+                    const lon = document.getElementById(`origin-${type}-lon`)?.value;
+                    const h = document.getElementById(`origin-${type}-h`)?.value;
+
+                    if (lat && lon) {
+                        sensors[type].lat = parseFloat(lat);
+                        sensors[type].lon = parseFloat(lon);
+                        sensors[type].h = parseFloat(h) || 0;
+                    }
                 }
             }
         });
@@ -993,6 +1024,21 @@ class AdminManager {
                 lat: document.getElementById('origin-lat').value,
                 lon: document.getElementById('origin-lon').value,
                 h: document.getElementById('origin-h').value
+            },
+            rain_origin: {
+                lat: document.getElementById('origin-rain-lat')?.value !== '' ? document.getElementById('origin-rain-lat').value : undefined,
+                lon: document.getElementById('origin-rain-lon')?.value !== '' ? document.getElementById('origin-rain-lon').value : undefined,
+                h: document.getElementById('origin-rain-h')?.value !== '' ? document.getElementById('origin-rain-h').value : undefined
+            },
+            water_origin: {
+                lat: document.getElementById('origin-water-lat')?.value !== '' ? document.getElementById('origin-water-lat').value : undefined,
+                lon: document.getElementById('origin-water-lon')?.value !== '' ? document.getElementById('origin-water-lon').value : undefined,
+                h: document.getElementById('origin-water-h')?.value !== '' ? document.getElementById('origin-water-h').value : undefined
+            },
+            imu_origin: {
+                lat: document.getElementById('origin-imu-lat')?.value !== '' ? document.getElementById('origin-imu-lat').value : undefined,
+                lon: document.getElementById('origin-imu-lon')?.value !== '' ? document.getElementById('origin-imu-lon').value : undefined,
+                h: document.getElementById('origin-imu-h')?.value !== '' ? document.getElementById('origin-imu-h').value : undefined
             },
             velocity_classification: this.velocityConfig
         };
@@ -1438,9 +1484,14 @@ class AdminManager {
                 <td>
                     <div class="btn-group btn-group-sm">
                         ${u.role === 'operator' ? `<button class="btn btn-outline-info" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="Gán dự án"><i class="bi bi-folder-plus"></i></button>` : ''}
-                        <button class="btn btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')">
+                        ${u.username === 'admin' ? '' : `
+                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'}" onclick="window.adminManager.toggleUserStatus(${u.id}, '${u.username}', ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}">
+                            <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
+                        </button>
+                        <button class="btn btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')" title="Xóa tài khoản">
                             <i class="bi bi-trash"></i>
                         </button>
+                        `}
                     </div>
                 </td>
             </tr>
@@ -1502,7 +1553,33 @@ class AdminManager {
                 window.toast?.success('Đã xóa người dùng');
                 this.loadUsers();
             } else {
-                throw new Error('Lỗi xóa');
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi xóa');
+            }
+        } catch (e) {
+            window.toast?.error(e.message);
+        }
+    }
+
+    async toggleUserStatus(userId, username, isActive) {
+        const action = isActive ? 'mở khóa' : 'khóa';
+        if (!confirm(`Bạn có chắc muốn ${action} người dùng ${username}?`)) return;
+        try {
+            const res = await fetch(`/api/admin/users/${userId}/status`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ is_active: isActive })
+            });
+
+            if (res.ok) {
+                window.toast?.success(`Đã ${action} người dùng ${username}`);
+                this.loadUsers();
+            } else {
+                const err = await res.json();
+                throw new Error(err.detail || `Lỗi ${action} tài khoản`);
             }
         } catch (e) {
             window.toast?.error(e.message);

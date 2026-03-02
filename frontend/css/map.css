@@ -806,6 +806,25 @@ body:has(.charts-panel.active) .toggle-list-btn {
     }
 }
 
+/* ✅ MARKER FLASHING ANIMATION for HIGH/EXTREME alerts */
+@keyframes markerPulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+    }
+
+    50% {
+        transform: scale(1.6);
+        box-shadow: 0 0 20px rgba(250, 82, 82, 0.9), 0 0 40px rgba(250, 82, 82, 0.5);
+    }
+}
+
+.marker-alert-pulse {
+    animation: markerPulse 1s ease-in-out infinite !important;
+}
+
 /*  LOADING STATES  */
 .spinner-border {
     border-color: var(--border-color);

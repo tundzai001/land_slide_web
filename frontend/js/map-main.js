@@ -118,11 +118,15 @@ function handleRealtimeUpdate(message) {
         }
     }
 
-    // ✅ XỬ LÝ CẢNH BÁO MỚI
+    // ✅ XỬ LÝ CẢNH BÁO MỚI — Chỉ hiện 1 lần per alert (dedup)
     if (message.type === 'alert') {
-        showAlertBanner(message);
-
-        // 🔊 KÍCH HOẠT ÂM THANH (Phát siren.mp3 từ Backend)
+        // Drop message.message from the key so dynamic numbers don't bypass dedup
+        const alertKey = `${message.station_id}_${message.level}`;
+        if (alertKey !== lastAlertKey) {
+            lastAlertKey = alertKey;
+            showAlertBanner(message);
+        }
+        // Always attempt to play siren (it will handle its own dedup/overlap)
         playSiren();
     }
 }
@@ -234,7 +238,15 @@ function updateStationMarker(stationId, riskLevel) {
     const el = marker.getElement();
     if (el) {
         const circle = el.querySelector('div');
-        if (circle) circle.style.background = color;
+        if (circle) {
+            circle.style.background = color;
+            // ✅ Nhấp nháy marker khi có cảnh báo cao
+            if (riskLevel === 'EXTREME' || riskLevel === 'HIGH') {
+                circle.classList.add('marker-alert-pulse');
+            } else {
+                circle.classList.remove('marker-alert-pulse');
+            }
+        }
     }
 }
 
@@ -548,6 +560,11 @@ function updateMarker(station) {
             if (circle) {
                 circle.style.background = color;
                 circle.style.transition = 'background 0.3s ease';
+                if (currentLevel === 'EXTREME' || currentLevel === 'HIGH') {
+                    circle.classList.add('marker-alert-pulse');
+                } else {
+                    circle.classList.remove('marker-alert-pulse');
+                }
             }
         }
     } else {
@@ -558,6 +575,9 @@ function updateMarker(station) {
             box-shadow: 0 0 8px rgba(0,0,0,0.5);
             transition: background 0.3s ease;
         `;
+        if (currentLevel === 'EXTREME' || currentLevel === 'HIGH') {
+            div.className = 'marker-alert-pulse';
+        }
 
         const icon = L.divIcon({
             className: 'custom-map-marker',
@@ -1043,17 +1063,23 @@ function filterStations(searchTerm) {
 // =========================================================================
 
 let currentAlertStationId = null;
+let lastAlertKey = null;
 
 function showAlertBanner(alertData) {
     const banner = document.getElementById('alert-banner');
     if (!banner) return;
+
+    // ✅ Lookup station info từ allStations (đã load sẵn)
+    const station = allStations.find(s => s.id === alertData.station_id);
+    const stationName = station?.name || `Station #${alertData.station_id}`;
+    const stationCode = station?.station_code || '';
 
     // Cập nhật nội dung
     document.getElementById('alert-title').textContent =
         `⚠️ ${alertData.level.toUpperCase()} ALERT!`;
 
     document.getElementById('alert-station').textContent =
-        `Trạm: ${alertData.station_name} (${alertData.station_code})`;
+        `Trạm: ${stationName} (${stationCode})`;
 
     document.getElementById('alert-message').textContent =
         alertData.message || 'Phát hiện bất thường!';
@@ -1061,25 +1087,31 @@ function showAlertBanner(alertData) {
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
 
-    // Hiển thị banner
+    // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
     banner.classList.add('show');
-
-    // Phát âm thanh cảnh báo (optional)
-    playAlertSound();
-
-    // Tự động ẩn sau 15 giây
-    setTimeout(() => {
-        banner.classList.remove('show');
-    }, 15000);
 }
+
+let currentSirenAudio = null;
 
 function playSiren() {
     try {
-        // 🔊 Phát file siren.mp3 từ backend
-        const sirenAudio = new Audio('/static/sounds/siren.mp3');
-        sirenAudio.play().catch(e => console.error('[ERROR] Siren auto-play blocked:', e));
+        if (!currentSirenAudio) {
+            currentSirenAudio = new Audio('/static/sounds/siren.mp3');
+            currentSirenAudio.loop = false; // Phát 1 lần cho mỗi sự kiện alert
+
+            // Xóa biến khi phát xong để cho phép phát lại
+            currentSirenAudio.addEventListener('ended', () => {
+                currentSirenAudio = null;
+            });
+
+            currentSirenAudio.play().catch(e => {
+                console.error('[ERROR] Siren auto-play blocked:', e);
+                currentSirenAudio = null;
+            });
+        }
     } catch (e) {
         console.error('[ERROR] playSiren error:', e);
+        currentSirenAudio = null;
     }
 }
 
