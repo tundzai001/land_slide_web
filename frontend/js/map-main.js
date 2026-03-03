@@ -234,17 +234,19 @@ function updateStationMarker(stationId, riskLevel) {
         'LOW': '#51cf66'
     };
 
-    const color = colors[riskLevel] || '#adb5bd';
-    const shouldPulse = riskLevel === 'EXTREME' || riskLevel === 'HIGH';
+    // ✅ Online mà không có risk_level → mặc định xanh (LOW)
+    const effectiveLevel = (riskLevel && colors[riskLevel]) ? riskLevel : 'LOW';
+    const color = colors[effectiveLevel];
+    const shouldPulse = effectiveLevel === 'EXTREME' || effectiveLevel === 'HIGH';
     const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
 
     // ✅ Dùng setIcon với HTML string để Leaflet giữ pulse class khi re-render
     const iconHtml = `<div class="marker-circle${pulseClass}" style="
-            width: 18px; height: 18px; background: ${color};
-            border-radius: 50%; border: 2px solid white;
-            box-shadow: 0 0 8px rgba(0,0,0,0.5);
-            transition: background 0.3s ease;
-        "></div>`;
+                width: 18px; height: 18px; background: ${color};
+                border-radius: 50%; border: 2px solid white;
+                box-shadow: 0 0 8px rgba(0,0,0,0.5);
+                transition: background 0.3s ease;
+            "></div>`;
 
     const newIcon = L.divIcon({
         className: 'custom-map-marker',
@@ -477,11 +479,11 @@ function renderStationList(stations) {
 
     if (stations.length === 0) {
         container.innerHTML = `
-                <div class="text-center text-muted mt-4">
-                    <i class="bi bi-inbox fs-1"></i>
-                    <p class="mt-2">Chưa có trạm nào</p>
-                </div>
-            `;
+                    <div class="text-center text-muted mt-4">
+                        <i class="bi bi-inbox fs-1"></i>
+                        <p class="mt-2">Chưa có trạm nào</p>
+                    </div>
+                `;
         return;
     }
 
@@ -496,16 +498,16 @@ function renderStationList(stations) {
         const div = document.createElement('div');
         div.className = 'station-item';
         div.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
-                        <small style="color: var(--text-secondary)">${st.station_code}</small>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
+                            <small style="color: var(--text-secondary)">${st.station_code}</small>
+                        </div>
+                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
+                            ${displayLevel || 'N/A'}
+                        </span>
                     </div>
-                    <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
-                        ${displayLevel || 'N/A'}
-                    </span>
-                </div>
-            `;
+                `;
 
         div.addEventListener('click', () => {
             selectStation(st.id);
@@ -545,6 +547,9 @@ function updateMarker(station) {
     let currentLevel = station.risk_level;
     if (station.status === 'offline') {
         currentLevel = 'OFFLINE';
+    } else if (!currentLevel || !colors[currentLevel]) {
+        // ✅ Online mà không có risk_level → mặc định xanh (LOW)
+        currentLevel = 'LOW';
     }
     const color = colors[currentLevel] || '#adb5bd';
     const shouldPulse = currentLevel === 'EXTREME' || currentLevel === 'HIGH';
@@ -561,11 +566,11 @@ function updateMarker(station) {
     // ✅ Tạo HTML string cho divIcon (giúp Leaflet giữ nguyên class khi re-render)
     const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
     const iconHtml = `<div class="marker-circle${pulseClass}" style="
-            width: 18px; height: 18px; background: ${color};
-            border-radius: 50%; border: 2px solid white;
-            box-shadow: 0 0 8px rgba(0,0,0,0.5);
-            transition: background 0.3s ease;
-        "></div>`;
+                width: 18px; height: 18px; background: ${color};
+                border-radius: 50%; border: 2px solid white;
+                box-shadow: 0 0 8px rgba(0,0,0,0.5);
+                transition: background 0.3s ease;
+            "></div>`;
 
     if (markers[station.id]) {
         markers[station.id].setLatLng([station.location.lat, station.location.lon]);
@@ -970,12 +975,12 @@ function renderClassificationScale(currentClass, velocity) {
     ];
 
     scaleContainer.innerHTML = classifications.map(cls => `
-            <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
-                <div class="classification-color" style="background: ${cls.color};"></div>
-                <div class="classification-name">${cls.name}</div>
-                <div class="classification-range">${cls.range}</div>
-            </div>
-        `).join('');
+                <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
+                    <div class="classification-color" style="background: ${cls.color};"></div>
+                    <div class="classification-name">${cls.name}</div>
+                    <div class="classification-range">${cls.range}</div>
+                </div>
+            `).join('');
 }
 
 function renderLongTermChart(data) {
