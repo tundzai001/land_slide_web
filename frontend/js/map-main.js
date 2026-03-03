@@ -235,19 +235,24 @@ function updateStationMarker(stationId, riskLevel) {
     };
 
     const color = colors[riskLevel] || '#adb5bd';
-    const el = marker.getElement();
-    if (el) {
-        const circle = el.querySelector('div');
-        if (circle) {
-            circle.style.background = color;
-            // ✅ Nhấp nháy marker khi có cảnh báo cao
-            if (riskLevel === 'EXTREME' || riskLevel === 'HIGH') {
-                circle.classList.add('marker-alert-pulse');
-            } else {
-                circle.classList.remove('marker-alert-pulse');
-            }
-        }
-    }
+    const shouldPulse = riskLevel === 'EXTREME' || riskLevel === 'HIGH';
+    const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
+
+    // ✅ Dùng setIcon với HTML string để Leaflet giữ pulse class khi re-render
+    const iconHtml = `<div class="marker-circle${pulseClass}" style="
+            width: 18px; height: 18px; background: ${color};
+            border-radius: 50%; border: 2px solid white;
+            box-shadow: 0 0 8px rgba(0,0,0,0.5);
+            transition: background 0.3s ease;
+        "></div>`;
+
+    const newIcon = L.divIcon({
+        className: 'custom-map-marker',
+        html: iconHtml,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+    });
+    marker.setIcon(newIcon);
 }
 
 function updateSidebarUI(data) {
@@ -472,11 +477,11 @@ function renderStationList(stations) {
 
     if (stations.length === 0) {
         container.innerHTML = `
-            <div class="text-center text-muted mt-4">
-                <i class="bi bi-inbox fs-1"></i>
-                <p class="mt-2">Chưa có trạm nào</p>
-            </div>
-        `;
+                <div class="text-center text-muted mt-4">
+                    <i class="bi bi-inbox fs-1"></i>
+                    <p class="mt-2">Chưa có trạm nào</p>
+                </div>
+            `;
         return;
     }
 
@@ -491,16 +496,16 @@ function renderStationList(stations) {
         const div = document.createElement('div');
         div.className = 'station-item';
         div.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
-                    <small style="color: var(--text-secondary)">${st.station_code}</small>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
+                        <small style="color: var(--text-secondary)">${st.station_code}</small>
+                    </div>
+                    <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
+                        ${displayLevel || 'N/A'}
+                    </span>
                 </div>
-                <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
-                    ${displayLevel || 'N/A'}
-                </span>
-            </div>
-        `;
+            `;
 
         div.addEventListener('click', () => {
             selectStation(st.id);
@@ -542,6 +547,7 @@ function updateMarker(station) {
         currentLevel = 'OFFLINE';
     }
     const color = colors[currentLevel] || '#adb5bd';
+    const shouldPulse = currentLevel === 'EXTREME' || currentLevel === 'HIGH';
 
     // ✅ KIỂM TRA CACHE: Nếu trạng thái không đổi thì KHÔNG LÀM GÌ CẢ
     const cacheKey = `${station.id}_${currentLevel}_${station.location.lat}_${station.location.lon}`;
@@ -552,36 +558,30 @@ function updateMarker(station) {
     // Cập nhật Cache mới
     stationStateCache[station.id] = cacheKey;
 
-    if (markers[station.id]) {
-        markers[station.id].setLatLng([station.location.lat, station.location.lon]);
-        const el = markers[station.id].getElement();
-        if (el) {
-            const circle = el.querySelector('div');
-            if (circle) {
-                circle.style.background = color;
-                circle.style.transition = 'background 0.3s ease';
-                if (currentLevel === 'EXTREME' || currentLevel === 'HIGH') {
-                    circle.classList.add('marker-alert-pulse');
-                } else {
-                    circle.classList.remove('marker-alert-pulse');
-                }
-            }
-        }
-    } else {
-        const div = document.createElement('div');
-        div.style.cssText = `
+    // ✅ Tạo HTML string cho divIcon (giúp Leaflet giữ nguyên class khi re-render)
+    const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
+    const iconHtml = `<div class="marker-circle${pulseClass}" style="
             width: 18px; height: 18px; background: ${color};
             border-radius: 50%; border: 2px solid white;
             box-shadow: 0 0 8px rgba(0,0,0,0.5);
             transition: background 0.3s ease;
-        `;
-        if (currentLevel === 'EXTREME' || currentLevel === 'HIGH') {
-            div.className = 'marker-alert-pulse';
-        }
+        "></div>`;
 
+    if (markers[station.id]) {
+        markers[station.id].setLatLng([station.location.lat, station.location.lon]);
+
+        // ✅ Cập nhật icon mới với HTML string (giữ pulse class)
+        const newIcon = L.divIcon({
+            className: 'custom-map-marker',
+            html: iconHtml,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+        });
+        markers[station.id].setIcon(newIcon);
+    } else {
         const icon = L.divIcon({
             className: 'custom-map-marker',
-            html: div,
+            html: iconHtml,
             iconSize: [18, 18],
             iconAnchor: [9, 9]
         });
@@ -970,12 +970,12 @@ function renderClassificationScale(currentClass, velocity) {
     ];
 
     scaleContainer.innerHTML = classifications.map(cls => `
-        <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
-            <div class="classification-color" style="background: ${cls.color};"></div>
-            <div class="classification-name">${cls.name}</div>
-            <div class="classification-range">${cls.range}</div>
-        </div>
-    `).join('');
+            <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
+                <div class="classification-color" style="background: ${cls.color};"></div>
+                <div class="classification-name">${cls.name}</div>
+                <div class="classification-range">${cls.range}</div>
+            </div>
+        `).join('');
 }
 
 function renderLongTermChart(data) {
@@ -1087,6 +1087,7 @@ function showAlertBanner(alertData) {
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
 
+
     // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
     banner.classList.add('show');
 }
@@ -1145,10 +1146,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnFollow) {
         btnFollow.addEventListener('click', () => {
             if (currentAlertStationId) {
-                // Ẩn banner
-                document.getElementById('alert-banner').classList.remove('show');
-
-                // Zoom vào trạm
+                // Zoom vào trạm (banner vẫn hiện, chỉ tắt khi bấm "X")
                 selectStation(currentAlertStationId);
 
                 // Nếu có marker, zoom vào nó
