@@ -1809,7 +1809,6 @@ class AdminManager {
                 `;
                 document.body.appendChild(bar);
             }
-
         } catch (e) {
             console.error('Error loading Pi devices:', e);
             window.toast?.error('Không thể tải danh sách Pi');
@@ -1822,65 +1821,116 @@ class AdminManager {
         const infoEl = document.getElementById('pi-grid-info');
         if (!tbody) return;
 
-        if (devices.length === 0) {
+        // Tách riêng pi center và pi point
+        const trueCenters = devices.filter(d => (d.pi_center_id === null || d.pi_center_id === undefined) && d.device_type !== 'pi_point');
+        const points = devices.filter(d => d.pi_center_id !== null && d.pi_center_id !== undefined);
+        const unassignedPoints = devices.filter(d => (d.pi_center_id === null || d.pi_center_id === undefined) && d.device_type === 'pi_point');
+
+        if (trueCenters.length === 0 && points.length === 0 && unassignedPoints.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No devices found</td></tr>';
             if (infoEl) infoEl.textContent = 'Showing 0 entries';
             return;
         }
 
-        tbody.innerHTML = devices.map(d => {
-            // Status badge
-            let statusBadge = '';
-            const statusColors = { pending: '#f59e0b', activating: '#f59e0b', activated: '#22c55e', assigned: '#0ea5e9' };
-            const statusLabels = { pending: 'Pending', activating: 'Activating', activated: 'Activated', assigned: 'Assigned' };
-            const color = statusColors[d.status] || '#6b7280';
-            statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">● ${statusLabels[d.status] || d.status}</span>`;
-            if (d.is_locked) {
+        let html = '';
+        const statusColors = { pending: '#f59e0b', activating: '#f59e0b', activated: '#22c55e', assigned: '#0ea5e9' };
+        const statusLabels = { pending: 'Pending', activating: 'Activating', activated: 'Activated', assigned: 'Assigned' };
+
+        // Render từng center
+        trueCenters.forEach(c => {
+            const childPoints = points.filter(p => p.pi_center_id === c.id);
+
+            // Status badge for center
+            const color = statusColors[c.status] || '#6b7280';
+            let statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">● ${statusLabels[c.status] || c.status}</span>`;
+            if (c.is_locked) {
                 statusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
             }
-            if (d.status === 'assigned') {
-                statusBadge += `<br><small class="pi-assign-detail">${d.station_name || ''}${d.project_name ? ' · ' + d.project_name : ''}</small>`;
+            if (c.status === 'assigned') {
+                statusBadge += `<br><small class="pi-assign-detail">${c.station_name || ''}${c.project_name ? ' · ' + c.project_name : ''}</small>`;
+
+                // Thêm nút gắn Pi Hiện trường (nếu chưa có thiết bị con nào được gắn)
+                if (childPoints.length === 0) {
+                    statusBadge += `<div class="mt-1"><button class="btn btn-sm btn-outline-success py-0 px-2" style="font-size:0.7rem" onclick="window.adminManager.openAssignPiPointModal(${c.id})"><i class="bi bi-plus"></i> Gắn Pi Hiện trường</button></div>`;
+                }
             }
 
-            // Firmware / Device Type logic based on explicit device_type or serial string
-            let devType = 'Device';
-            if (d.device_type) {
-                if (d.device_type.toLowerCase() === 'pi') devType = 'Raspberry Pi';
-                else if (d.device_type.toLowerCase() === 'win') devType = 'PC Window';
-                else devType = d.device_type.toUpperCase();
-            } else if (d.serial) {
-                if (d.serial.toLowerCase().startsWith('pi-')) devType = 'Raspberry Pi';
-                else if (d.serial.toLowerCase().startsWith('win-')) devType = 'PC Window';
-                else devType = d.serial.split('-')[0].toUpperCase();
+            let devType = 'Pi Trung tâm';
+            if (c.device_type && c.device_type.toLowerCase() === 'win') devType = 'PC Window Trung tâm';
+
+            let pointsHtml = '';
+            if (childPoints.length > 0) {
+                pointsHtml = childPoints.map(p => {
+                    const pIsOnline = p.last_seen && (Date.now() / 1000 - p.last_seen) < 120;
+                    const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : '—';
+                    return `
+                    <div style="margin-top: 6px; padding: 4px 8px; background-color: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; border-radius: 4px; font-size: 0.75rem; display: inline-block;">
+                        <span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span>
+                        <strong style="color:var(--text-color)">${p.name}</strong> 
+                        <code class="text-muted mx-1">${p.serial}</code>
+                        <span class="mx-1" style="font-size: 0.7rem; color: ${pIsOnline ? '#10b981' : '#ef4444'}">● ${pLastPingText}</span>
+                        <a href="javascript:void(0)" class="text-danger ms-2 text-decoration-none" title="Bỏ gán điểm này" onclick="window.adminManager.unassignPiDevice(${p.id}, event)">
+                            <i class="bi bi-x-circle"></i>
+                        </a>
+                    </div>`;
+                }).join('<br>');
             }
 
-            // Name column: station badge + name
-            const stationTag = d.station_id
-                ? `<span class="badge me-2" style="background:#1e293b;color:#0ea5e9;border:1px solid #0ea5e933;font-size:.7rem">${d.station_id}</span>`
+            // Box để bọc name
+            const stationTag = c.station_id
+                ? `<span class="badge me-2" style="background:#1e293b;color:#0ea5e9;border:1px solid #0ea5e933;font-size:.7rem">${c.station_id}</span>`
                 : '';
-            const nameLabel = d.status === 'assigned'
-                ? `<strong>${d.station_name || d.name}</strong><br><small class="text-muted">${d.project_name ? d.project_name + ' · ' : ''}${devType}</small>`
-                : `<strong>${d.name}</strong>`;
+            const nameLabel = c.status === 'assigned'
+                ? `<strong>${c.station_name || c.name}</strong><br><small class="text-muted"><span class="badge bg-secondary me-1" style="font-size:.6rem">${devType}</span></small>`
+                : `<strong>${c.name}</strong>`;
 
-            // Last ping and Online/Offline status
-            const isOnline = d.last_seen && (Date.now() / 1000 - d.last_seen) < 120;
-            const pingColor = isOnline ? '#22c55e' : '#ef4444'; // Green or Red
-            const lastPingText = d.last_seen ? this._formatTimeAgo(d.last_seen, isOnline) : '—';
+            const fullCellLabel = `<div style="line-height:1.4">${stationTag}${nameLabel}</div>${pointsHtml ? '<div>' + pointsHtml + '</div>' : ''}`;
 
-            return `<tr class="pi-grid-row" data-pi-id="${d.id}" data-pi-status="${d.status}" data-pi-locked="${d.is_locked ? '1' : '0'}" data-search="${(d.name + d.serial + (d.station_name || '')).toLowerCase()}">
-                <td>
-                    <div class="pi-check-overlay" style="display:none">
-                        <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${d.id}"
-                            style="width:18px;height:18px;cursor:pointer" onchange="window.adminManager._onPiCheckChange()">
-                    </div>
-                </td>
-                <td>${stationTag}${nameLabel}</td>
-                <td><code style="font-size:.8rem;color:var(--text-muted)">${d.serial}</code></td>
-                <td>${statusBadge}</td>
-                <td><span class="${isOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${lastPingText}</small></td>
-            </tr>`;
-        }).join('');
+            const isOnline = c.last_seen && (Date.now() / 1000 - c.last_seen) < 120;
+            const lastPingText = c.last_seen ? this._formatTimeAgo(c.last_seen, isOnline) : '—';
 
+            html += `<tr class="pi-grid-row" data-pi-id="${c.id}" data-pi-status="${c.status}" data-pi-locked="${c.is_locked ? '1' : '0'}" data-search="${(c.name + c.serial + (c.station_name || '')).toLowerCase()}" style="background-color: var(--bs-table-bg);">
+            <td>
+                <div class="pi-check-overlay" style="display:none">
+                    <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${c.id}"
+                        style="width:18px;height:18px;cursor:pointer" onchange="window.adminManager._onPiCheckChange()">
+                </div>
+            </td>
+            <td>${fullCellLabel}</td>
+            <td><code style="font-size:.8rem;color:var(--text-muted)">${c.serial}</code></td>
+            <td>${statusBadge}</td>
+            <td><span class="${isOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${lastPingText}</small></td>
+        </tr>`;
+        });
+
+        // Những điểm (pi points) chưa được gán pi_center_id sẽ nằm riêng ở cuối
+        // unassignedPoints đã được khai báo ở đầu hàm (line 1827)
+        unassignedPoints.forEach(p => {
+            const pColor = statusColors[p.status] || '#6b7280';
+            let pStatusBadge = `<span class="badge" style="background:${pColor};color:#000;font-size:.72rem">● ${statusLabels[p.status] || p.status}</span>`;
+            if (p.is_locked) {
+                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+            }
+
+            const nameLabel = `<strong>${p.name}</strong><br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;
+            const pIsOnline = p.last_seen && (Date.now() / 1000 - p.last_seen) < 120;
+            const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : '—';
+
+            html += `<tr class="pi-grid-row" data-pi-id="${p.id}" data-pi-status="${p.status}" data-pi-locked="${p.is_locked ? '1' : '0'}" data-search="${(p.name + p.serial).toLowerCase()}" style="background-color: var(--bs-table-bg);">
+            <td>
+                <div class="pi-check-overlay" style="display:none">
+                    <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${p.id}"
+                        style="width:18px;height:18px;cursor:pointer" onchange="window.adminManager._onPiCheckChange()">
+                </div>
+            </td>
+            <td><div style="line-height:1.4">${nameLabel}</div></td>
+            <td><code style="font-size:.8rem;color:var(--text-muted)">${p.serial}</code></td>
+            <td>${pStatusBadge}</td>
+            <td><span class="${pIsOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${pLastPingText}</small></td>
+        </tr>`;
+        });
+
+        tbody.innerHTML = html;
         if (infoEl) infoEl.textContent = `Showing 1 to ${devices.length} of ${devices.length} entries`;
     }
 
@@ -2065,7 +2115,10 @@ class AdminManager {
     }
 
     /** Remove Pi assignment (set back to activated) */
-    async unassignPiDevice(piId) {
+    async unassignPiDevice(piId, event) {
+        if (event) event.stopPropagation();
+        if (!confirm('Bạn có chắc chắn muốn BỎ GÁN thiết bị này không?')) return;
+
         try {
             const res = await fetch(`/api/field/pi-devices/${piId}/unassign`, {
                 method: 'PUT',
@@ -2113,6 +2166,80 @@ class AdminManager {
         }
     }
 
+    // =========================================================================
+    // FIELD STATION GẮN LIỀN VỚI PI CENTER
+    // =========================================================================
+
+    /** Open popup to assign an activated Pi Point to a Center */
+    async openAssignPiPointModal(centerId) {
+        document.getElementById('assign-center-id').value = centerId;
+        const select = document.getElementById('point-device-select');
+        select.innerHTML = '<option value="">-- Đang tải ... --</option>';
+
+        const modal = new bootstrap.Modal(document.getElementById('assignPiPointModal'));
+        modal.show();
+
+        try {
+            // Load ALL devices again
+            const res = await fetch('/api/field/pi-devices', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Failed to load devices');
+            const devices = await res.json();
+
+            // Filter ones that are pi_point, activated, and have no pi_center_id
+            const pointsToAssign = devices.filter(d =>
+                d.device_type === 'pi_point' &&
+                d.status === 'activated' &&
+                !d.pi_center_id
+            );
+
+            if (pointsToAssign.length === 0) {
+                select.innerHTML = '<option value="">(Không có Pi Hiện trường nào đang rảnh và đã Activated)</option>';
+            } else {
+                select.innerHTML = '<option value="">-- Chọn 1 Pi Hiện Trường --</option>' +
+                    pointsToAssign.map(p => `<option value="${p.id}">${p.name} (${p.serial})</option>`).join('');
+            }
+        } catch (e) {
+            console.error(e);
+            select.innerHTML = '<option value="">(Lỗi tải danh sách)</option>';
+        }
+    }
+
+    /** Call the PUT /assign-to-center endpoint */
+    async confirmAssignPiPoint() {
+        const centerId = document.getElementById('assign-center-id').value;
+        const select = document.getElementById('point-device-select');
+        const pointId = select.value;
+
+        if (!pointId) {
+            window.toast?.warning("Vui lòng chọn 1 Pi Hiện Trường");
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/field/pi-devices/${pointId}/assign-to-center`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ pi_center_id: parseInt(centerId) })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Lỗi gắn thiết bị');
+            }
+
+            window.toast?.success("✅ Đã gắn Pi Hiện Trường thành công!");
+            bootstrap.Modal.getInstance(document.getElementById('assignPiPointModal'))?.hide();
+            this.loadPiDevices();
+        } catch (e) {
+            window.toast?.error("❌ " + e.message);
+        }
+    }
+
     // ---- Wizard: Pi section (step 3) ----
 
     /** Called by updateWizardStep() when step 3 is opened in station wizard */
@@ -2124,9 +2251,9 @@ class AdminManager {
         if (!listEl) return;
 
         listEl.innerHTML = `<div class="text-center py-3">
-            <div class="spinner-border spinner-border-sm text-primary"></div>
-            <small class="ms-2 text-muted">Đang tải...</small>
-        </div>`;
+        <div class="spinner-border spinner-border-sm text-primary"></div>
+        <small class="ms-2 text-muted">Đang tải...</small>
+    </div>`;
 
         try {
             // 1. Check if this station already has an assigned Pi
@@ -2152,29 +2279,29 @@ class AdminManager {
 
             if (available.length === 0) {
                 listEl.innerHTML = `<p class="text-muted small">
-                    Không có Pi nào đã kích hoạt và chưa được gán. 
-                    <a href="#" onclick="event.preventDefault(); bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target=&apos;#tab-pi&apos;]')).show(); window.adminManager.loadPiDevices();">
-                        Đến tab Pi Devices để kích hoạt
-                    </a>
-                </p>`;
+                Không có Pi nào đã kích hoạt và chưa được gán. 
+                <a href="#" onclick="event.preventDefault(); bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target=&apos;#tab-pi&apos;]')).show(); window.adminManager.loadPiDevices();">
+                    Đến tab Pi Devices để kích hoạt
+                </a>
+            </p>`;
                 if (btnRow) btnRow.style.display = 'none';
                 return;
             }
 
             listEl.innerHTML = `
-                <div class="list-group list-group-flush">
-                    ${available.map(d => `
-                        <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
-                               style="cursor:pointer; background:transparent; border-color:var(--border-color)">
-                            <input type="radio" name="pi-select" value="${d.id}" class="form-check-input">
-                            <div>
-                                <strong class="font-monospace">${d.name}</strong>
-                                <small class="d-block text-muted font-monospace">${d.serial}</small>
-                            </div>
-                            <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
-                        </label>
-                    `).join('')}
-                </div>`;
+            <div class="list-group list-group-flush">
+                ${available.map(d => `
+                    <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
+                           style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                        <input type="radio" name="pi-select" value="${d.id}" class="form-check-input">
+                        <div>
+                            <strong class="font-monospace">${d.name}</strong>
+                            <small class="d-block text-muted font-monospace">${d.serial}</small>
+                        </div>
+                        <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
+                    </label>
+                `).join('')}
+            </div>`;
 
             if (btnRow) btnRow.style.display = 'block';
 

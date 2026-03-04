@@ -130,6 +130,8 @@ class PiConfirmRequest(BaseModel):
 class PiAssignRequest(BaseModel):
     station_id: int
 
+class PiAssignToCenterRequest(BaseModel):
+    pi_center_id: int
 
 # =============================================================================
 # ENDPOINTS
@@ -205,7 +207,9 @@ async def list_pi_devices(
 ):
     """List all registered Pi devices (admin only)."""
     try:
-        res = await db.execute(select(PiDevice).order_by(PiDevice.registered_at.desc()))
+        res = await db.execute(
+            select(PiDevice).order_by(PiDevice.registered_at.desc())
+        )
         devices = res.scalars().all()
 
         # Fetch station + project info for assigned devices
@@ -232,6 +236,16 @@ async def list_pi_devices(
                     "project_name": project_names.get(s.project_id, ""),
                 }
 
+        # Fetch Pi Center info for Pi Points
+        center_info = {} # center_id -> {name, serial}
+        center_ids = [getattr(d, "pi_center_id", None) for d in devices if getattr(d, "pi_center_id", None)]
+        if center_ids:
+            c_res = await db.execute(
+                select(PiDevice).where(PiDevice.id.in_(center_ids))
+            )
+            for c in c_res.scalars().all():
+                center_info[c.id] = {"name": c.name, "serial": c.serial}
+
         return [
             {
                 "id":            d.id,
@@ -244,6 +258,9 @@ async def list_pi_devices(
                 "station_name":  station_info.get(d.station_id, {}).get("name"),
                 "project_id":    station_info.get(d.station_id, {}).get("project_id"),
                 "project_name":  station_info.get(d.station_id, {}).get("project_name"),
+                "pi_center_id":  getattr(d, "pi_center_id", None),
+                "pi_center_name": center_info.get(getattr(d, "pi_center_id", None), {}).get("name"),
+                "pi_center_serial": center_info.get(getattr(d, "pi_center_id", None), {}).get("serial"),
                 "last_seen":     d.last_seen,
                 "registered_at": d.registered_at,
             }
@@ -417,10 +434,16 @@ async def unassign_pi(
 
         old_station = pi.station_id
         pi.station_id = None
+        pi.pi_center_id = None
         pi.status     = "activated"
         await db.commit()
 
-        logger.info(f"🔓 Pi '{pi.serial}' unassigned from station {old_station}")
+        logger.info(f"🔓 Pi '{pi.serial}' unassigned from station {old_station} and center")
+        
+        # Notify local Pi to clear its station_id
+        topic = f"landslide/pi/{pi.serial}/command"
+        _publish_mqtt(topic, {"cmd": "set_station", "station_id": None})
+
         return {"status": "activated"}
 
     except HTTPException:
@@ -524,3 +547,86 @@ async def reset_pi_device(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# PI FIELD STATION ASSIGNMENT (PI POINT -> PI CENTER)
+# =============================================================================
+
+@router.put("/pi-devices/{pi_id}/assign-to-center")
+async def assign_pi_to_center(
+    pi_id: int,
+    payload: PiAssignToCenterRequest,
+    db: AsyncSession = Depends(get_config_db),
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Assign a pi_point device to a pi_center device."""
+    try:
+        # 1. Tìm Pi Hiện Trường
+        res = await db.execute(select(PiDevice).where(PiDevice.id == pi_id))
+        pi_point = res.scalar_one_or_none()
+        if not pi_point:
+            raise HTTPException(status_code=404, detail="Pi Point device not found")
+        
+        if pi_point.status != "activated":
+            raise HTTPException(status_code=400, detail="Pi Point must be activated before assigning")
+            
+        # 2. Tìm Pi Trung Tâm
+        res_center = await db.execute(select(PiDevice).where(PiDevice.id == payload.pi_center_id))
+        pi_center = res_center.scalar_one_or_none()
+        if not pi_center:
+            raise HTTPException(status_code=404, detail="Pi Center device not found")
+            
+        if pi_center.pi_center_id is not None:
+             raise HTTPException(status_code=400, detail="Target device is also a pi_point. Must link to a pi_center.")
+             
+        if pi_center.status != "assigned" or not pi_center.station_id:
+            raise HTTPException(status_code=400, detail="Pi Center must be assigned to a station first")
+
+        # 3. Gắn Pi Point vào Pi Center
+        pi_point.pi_center_id = pi_center.id
+        pi_point.station_id = pi_center.station_id
+        pi_point.status = "assigned"
+
+        await db.commit()
+        
+        logger.info(f"✅ Assigned Pi Point {pi_point.serial} to Pi Center {pi_center.serial} (Station {pi_center.station_id})")
+
+        # 4. Gửi MQTT báo cho Pi Point biết nó đã thuộc trạm nào
+        try:
+            import json
+            import paho.mqtt.publish as publish
+            
+            # Use pi command topic to configure the field unit
+            pi_topic = f"landslide/pi/{pi_point.serial}/command"
+            payload_data = json.dumps({
+                "cmd": "set_station",
+                "station_id": pi_center.station_id
+            })
+            
+            # Optional: Lấy config MQTT
+            from app.config import settings
+            auth_info = None
+            if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
+                auth_info = {'username': settings.MQTT_USERNAME, 'password': settings.MQTT_PASSWORD}
+                
+            logger.info(f"📡 Sending set_station command to {pi_topic}")
+            publish.single(
+                topic=pi_topic,
+                payload=payload_data,
+                hostname=settings.MQTT_BROKER_HOST,
+                port=settings.MQTT_BROKER_PORT,
+                auth=auth_info,
+                qos=1
+            )
+        except Exception as e:
+            logger.error(f"Failed to send MQTT set_station for pi point: {e}")
+
+        return {"status": "assigned", "station_id": pi_center.station_id, "pi_center_id": pi_center.id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning pi to center: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
