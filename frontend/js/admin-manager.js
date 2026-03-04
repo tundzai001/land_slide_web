@@ -728,6 +728,12 @@ class AdminManager {
 
             const imuCfg = cfg.ImuAlerting || {};
             document.getElementById('cfg-imu-shock').value = imuCfg.shock_threshold_ms2 ?? 5.0;
+            const tiltWarnEl = document.getElementById('cfg-imu-tilt-warn');
+            if (tiltWarnEl) tiltWarnEl.value = imuCfg.tilt_warning_deg ?? 5.0;
+            const tiltCritEl = document.getElementById('cfg-imu-tilt-crit');
+            if (tiltCritEl) tiltCritEl.value = imuCfg.tilt_critical_deg ?? 15.0;
+            const imuConfirmEl = document.getElementById('cfg-imu-confirm');
+            if (imuConfirmEl) imuConfirmEl.value = imuCfg.imu_confirm_steps ?? 2;
 
             const gnssOrigin = cfg.gnss_origin || {};
             if (gnssOrigin.lat) {
@@ -1017,8 +1023,10 @@ class AdminManager {
                 gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
             },
             ImuAlerting: {
-                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0,
-                imu_confirm_steps: 1  // ✅ THÊM: Default confirmation steps
+                tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-warn').value) || 5.0,
+                tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
+                imu_confirm_steps: parseInt(document.getElementById('cfg-imu-confirm').value) || 2,
+                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
             },
             gnss_origin: {
                 lat: document.getElementById('origin-lat').value,

@@ -42,6 +42,9 @@ BACKEND_URL = os.getenv('BACKEND_URL', 'https://monitoring.aitogy.com')
 DEVICE_CODE = None
 MY_STATION_ID = 0
 
+# Flag to prevent standard 15s pulse from turning off a continuous IMU siren
+is_continuous_alert = False
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - PI_POINT - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -70,9 +73,12 @@ def light_off():
 
 def light_pulse(duration: int = 10):
     """Bật sáng một lúc rồi tắt"""
+    global is_continuous_alert
     light_on()
     time.sleep(duration)
-    light_off()
+    # Check flag before turning off, so we don't accidentally silence a critical IMU siren
+    if not is_continuous_alert:
+        light_off()
 
 def gpio_cleanup():
     if GPIO_AVAILABLE:
@@ -257,20 +263,33 @@ class MQTTPointClient:
             logger.error(f"Error handling message: {e}")
 
     def _handle_alert(self, payload):
+        global is_continuous_alert
         try:
             data = json.loads(payload)
             level = data.get('level', 'INFO').upper()
             
+            audio_code = data.get('audio_code', '')
+            category = data.get('category', '')
+
             # Kích hoạt GPIO nếu nhận lệnh cảnh báo nguy hiểm
             if level in ('WARNING', 'DANGER', 'CRITICAL'):
                 if self.is_locked:
                     logger.warning("🔒 Locked. Ignore alert.")
                     return
-                threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
+                
+                # Check if this is an IMU alert (requires continuous GPIO)
+                if audio_code.startswith('imu_') or 'tilt' in category or 'shock' in category:
+                    logger.info("🚨 IMU Alert received! Triggering continuous siren.")
+                    is_continuous_alert = True
+                    light_on()
+                else:
+                    logger.info("🚨 Standard Alert received. Triggering 15s GPIO pulse.")
+                    threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
         except Exception:
             pass
 
     def _handle_command(self, payload):
+        global is_continuous_alert
         try:
             if payload.startswith('{'):
                 data = json.loads(payload)
@@ -282,8 +301,11 @@ class MQTTPointClient:
                 elif cmd == 'set_station':
                     self._handle_set_station(data)
                     return
-                elif cmd == 'reset':
-                    self._handle_reset()
+                elif cmd == 'reset' or cmd == 'stop_siren':
+                    is_continuous_alert = False
+                    light_off()
+                    if cmd == 'reset':
+                        self._handle_reset()
                     return
                 elif cmd == 'lock':
                     self.is_locked = True
@@ -300,18 +322,30 @@ class MQTTPointClient:
                 
                 # Kích hoạt GPIO nếu payload có level nguy hiểm (từ command topic)
                 level = data.get('level', '').upper()
+                audio_code = data.get('audio_code', '')
+                category = data.get('category', '')
+                
                 if level in ('WARNING', 'DANGER', 'CRITICAL'):
                     if self.is_locked:
                         logger.warning("🔒 Locked. Ignore alert from command.")
                         return
-                    logger.info(f"🚨 Alert level={level} on command topic → activating GPIO")
-                    threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
+                    
+                    if audio_code.startswith('imu_') or 'tilt' in category or 'shock' in category:
+                        logger.info(f"🚨 IMU Alert level={level} on command topic → activating continuous GPIO")
+                        is_continuous_alert = True
+                        light_on()
+                    else:
+                        logger.info(f"🚨 Alert level={level} on command topic → activating GPIO pulse")
+                        threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
                     
             else:
                 # payload thô
                 cmd = payload.strip().lower()
                 if cmd == 'on': light_on()
                 if cmd == 'off': light_off()
+                if cmd == 'stop_siren' or cmd == 'reset':
+                    is_continuous_alert = False
+                    light_off()
         except:
             pass
 

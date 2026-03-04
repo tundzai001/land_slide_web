@@ -480,6 +480,32 @@ function setupEventListeners() {
         });
     }
 
+    // Nút tắt còi (IMU) trên Alert Banner
+    const stopSirenBtn = document.getElementById('btn-alert-stop-siren');
+    if (stopSirenBtn) {
+        stopSirenBtn.addEventListener('click', async () => {
+            if (!currentAlertStationId) return;
+            try {
+                stopSirenBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+                const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    window.toast?.success('Đã gửi lệnh tắt còi thành công');
+                    const banner = document.getElementById('alert-banner');
+                    if (banner) banner.classList.remove('show');
+                } else {
+                    window.toast?.error('Lỗi khi tắt còi');
+                }
+            } catch (error) {
+                console.error('Error stopping siren:', error);
+                window.toast?.error('Không thể kết nối với máy chủ');
+            } finally {
+                stopSirenBtn.innerHTML = '<i class="bi bi-volume-mute-fill"></i> Tắt còi (IMU)';
+            }
+        });
+    }
+
     console.log('✅ [MAP] All event listeners setup complete');
 }
 
@@ -1143,6 +1169,13 @@ function showAlertBanner(alertData) {
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
 
+    // Hiển thị nút Tắt còi nếu là cảnh báo IMU
+    const stopSirenBtn = document.getElementById('btn-alert-stop-siren');
+    if (stopSirenBtn) {
+        const isImuAlert = (alertData.category && (alertData.category.includes('tilt') || alertData.category.includes('shock'))) ||
+            (alertData.audio_code && alertData.audio_code.startsWith('imu_'));
+        stopSirenBtn.style.display = isImuAlert ? 'inline-block' : 'none';
+    }
 
     // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
     banner.classList.add('show');

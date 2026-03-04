@@ -362,31 +362,71 @@ class LandslideAnalyzer:
             return None
 
     # =========================================================================
-    # 4. PHÂN TÍCH IMU - ✅ CÓ ĐẾM XÁC NHẬN
+    # 4. PHÂN TÍCH IMU - GÓC NGHIÊNG & VA ĐẬP - ✅ CÓ ĐẾM XÁC NHẬN
     # =========================================================================
     def analyze_tilt(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
         try:
             latest = recent_data[-1]['data']
+            
+            # Góc nghiêng
+            roll = latest.get('roll', 0.0)
+            pitch = latest.get('pitch', 0.0)
+            delta_tilt = math.sqrt(roll**2 + pitch**2)
+            
+            tilt_warn = self._get_cfg(config, 'ImuAlerting', 'tilt_warning_deg', 5.0)
+            tilt_crit = self._get_cfg(config, 'ImuAlerting', 'tilt_critical_deg', 15.0)
+            
+            # Va đập
             accel = latest.get('total_accel', 0.0)
-            thresh = self._get_cfg(config, 'ImuAlerting', 'shock_threshold_ms2', 20.0)
-            confirm_steps = int(config.get('ImuAlerting', {}).get('imu_confirm_steps', 1))  # ✅ Mặc định 1 lần (shock tức thì)
+            shock_thresh = self._get_cfg(config, 'ImuAlerting', 'shock_threshold_ms2', 20.0)
+            
+            confirm_steps = int(config.get('ImuAlerting', {}).get('imu_confirm_steps', 2))
+            
+            # Xác định mức nguy hiểm cao nhất hiện tại
+            current_level = "INFO"
+            alert_category = "tilt"
+            alert_msg = ""
+            audio_code = ""
+            details = {"delta_tilt_deg": delta_tilt}
+            
+            # 1. Ưu tiên kiểm tra va đập (Shock) -> thường là CRITICAL ngay
+            if accel >= shock_thresh:
+                current_level = "CRITICAL"
+                alert_category = "shock"
+                alert_msg = f"Va đập: {accel:.1f} m/s²"
+                audio_code = "imu_shock"
+                details["shock_ms2"] = accel
+                # Shock có thể cần báo ngay lập tức
+                confirm_steps = 1 
+                
+            # 2. Xử lý độ nghiêng (Tilt)
+            elif delta_tilt >= tilt_crit:
+                current_level = "CRITICAL"
+                alert_category = "tilt_critical"
+                alert_msg = f"Nghiêng nguy hiểm: {delta_tilt:.1f}°"
+                audio_code = "imu_critical"
+            elif delta_tilt >= tilt_warn:
+                current_level = "WARNING"
+                alert_category = "tilt_warning"
+                alert_msg = f"Nghiêng nhanh: {delta_tilt:.1f}°"
+                audio_code = "imu_warning"
             
             counter_info = self.alert_counters[station_id]['imu']
             
-            if accel > thresh:
-                if counter_info['last_level'] != "CRITICAL":
+            if current_level in ["WARNING", "CRITICAL"]:
+                if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
-                    counter_info['last_level'] = "CRITICAL"
-                    if confirm_steps == 1:  # Shock thường báo ngay
-                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED SHOCK")
-                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "audio_code": "imu_shock", "details": {"val": accel}}
+                    counter_info['last_level'] = current_level
+                    if confirm_steps == 1:
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category})")
+                        return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
                     return None
                 else:
                     counter_info['count'] += 1
                     if counter_info['count'] >= confirm_steps:
-                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED SHOCK after {confirm_steps} times")
-                        return {"level": "CRITICAL", "category": "shock", "message": f"Va đập: {accel:.1f} m/s²", "audio_code": "imu_shock", "details": {"val": accel}}
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category}) after {confirm_steps} times")
+                        return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
                     return None
             else:
                 counter_info['count'] = max(0, counter_info['count'] - 1)
