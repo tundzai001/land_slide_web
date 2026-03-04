@@ -632,3 +632,44 @@ async def assign_pi_to_center(
         logger.error(f"Error assigning pi to center: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# =============================================================================
+# MANUAL CONTROLS
+# =============================================================================
+
+@router.post("/stations/{station_id}/stop-siren")
+async def stop_siren_command(
+    station_id: int,
+    db: AsyncSession = Depends(get_config_db)
+):
+    """
+    Publish an MQTT command to stop any continuous siren (e.g., from IMU tilt)
+    at the specified station without resetting the entire device state.
+    """
+    try:
+        import json
+        import paho.mqtt.publish as publish
+        
+        cmd_topic = f"landslide/{station_id}/command"
+        payload_data = json.dumps({
+            "cmd": "stop_siren"
+        })
+        
+        from app.config import settings
+        auth_info = None
+        if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
+            auth_info = {'username': settings.MQTT_USERNAME, 'password': settings.MQTT_PASSWORD}
+            
+        logger.info(f"📡 Sending stop_siren command to {cmd_topic}")
+        publish.single(
+            topic=cmd_topic,
+            payload=payload_data,
+            hostname=settings.MQTT_BROKER_HOST,
+            port=settings.MQTT_BROKER_PORT,
+            auth=auth_info,
+            qos=1
+        )
+        return {"status": "success", "message": "Stop siren command sent"}
+    except Exception as e:
+        logger.error(f"Failed to send MQTT stop_siren: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send command to device")
+

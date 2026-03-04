@@ -274,6 +274,9 @@ def get_default_station_config():
         },
         # Nhóm cảnh báo IMU
         "ImuAlerting": {
+            "tilt_warning_deg": 5.0,
+            "tilt_critical_deg": 15.0,
+            "imu_confirm_steps": 2,
             "shock_threshold_ms2": 5.0
         },
         # Nhóm cảnh báo GNSS (kỹ thuật)
