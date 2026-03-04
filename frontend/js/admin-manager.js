@@ -1804,6 +1804,8 @@ class AdminManager {
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
                     <button class="btn btn-sm btn-danger"    id="pi-act-delete"   onclick="window.adminManager._piActionBatch('delete')">
                         <i class="bi bi-trash me-1"></i>Xóa</button>
+                    <button class="btn btn-sm btn-outline-warning" id="pi-act-assign-center" onclick="window.adminManager.assignSelectedPointToCenter()" style="display:none">
+                        <i class="bi bi-link-45deg me-1"></i>Gán vào Pi Trung tâm</button>
                     <button class="btn btn-sm btn-outline-light ms-2" onclick="window.adminManager.togglePiSelectMode()">
                         <i class="bi bi-x-lg"></i></button>
                 `;
@@ -1889,7 +1891,7 @@ class AdminManager {
             const isOnline = c.last_seen && (Date.now() / 1000 - c.last_seen) < 120;
             const lastPingText = c.last_seen ? this._formatTimeAgo(c.last_seen, isOnline) : '—';
 
-            html += `<tr class="pi-grid-row" data-pi-id="${c.id}" data-pi-status="${c.status}" data-pi-locked="${c.is_locked ? '1' : '0'}" data-search="${(c.name + c.serial + (c.station_name || '')).toLowerCase()}" style="background-color: var(--bs-table-bg);">
+            html += `<tr class="pi-grid-row" data-pi-id="${c.id}" data-pi-status="${c.status}" data-pi-locked="${c.is_locked ? '1' : '0'}" data-pi-type="${c.device_type || 'pi'}" data-search="${(c.name + c.serial + (c.station_name || '')).toLowerCase()}" style="background-color: var(--bs-table-bg);">
             <td>
                 <div class="pi-check-overlay" style="display:none">
                     <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${c.id}"
@@ -1907,27 +1909,27 @@ class AdminManager {
         // unassignedPoints đã được khai báo ở đầu hàm (line 1827)
         unassignedPoints.forEach(p => {
             const pColor = statusColors[p.status] || '#6b7280';
-            let pStatusBadge = `<span class="badge" style="background:${pColor};color:#000;font-size:.72rem">● ${statusLabels[p.status] || p.status}</span>`;
+            let pStatusBadge = `< span class="badge" style = "background:${pColor};color:#000;font-size:.72rem" >● ${statusLabels[p.status] || p.status}</span > `;
             if (p.is_locked) {
-                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+                pStatusBadge += ` < span class="badge bg-danger" style = "font-size:.65rem" title = "Thiết bị bị khóa" >🔒</span > `;
             }
 
-            const nameLabel = `<strong>${p.name}</strong><br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;
+            const nameLabel = `< strong > ${p.name}</strong > <br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;
             const pIsOnline = p.last_seen && (Date.now() / 1000 - p.last_seen) < 120;
             const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : '—';
 
-            html += `<tr class="pi-grid-row" data-pi-id="${p.id}" data-pi-status="${p.status}" data-pi-locked="${p.is_locked ? '1' : '0'}" data-search="${(p.name + p.serial).toLowerCase()}" style="background-color: var(--bs-table-bg);">
-            <td>
-                <div class="pi-check-overlay" style="display:none">
-                    <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${p.id}"
-                        style="width:18px;height:18px;cursor:pointer" onchange="window.adminManager._onPiCheckChange()">
-                </div>
-            </td>
-            <td><div style="line-height:1.4">${nameLabel}</div></td>
-            <td><code style="font-size:.8rem;color:var(--text-muted)">${p.serial}</code></td>
-            <td>${pStatusBadge}</td>
-            <td><span class="${pIsOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${pLastPingText}</small></td>
-        </tr>`;
+            html += `<tr class="pi-grid-row" data-pi-id="${p.id}" data-pi-status="${p.status}" data-pi-locked="${p.is_locked ? '1' : '0'}" data-pi-type="pi_point" data-search="${(p.name + p.serial).toLowerCase()}" style="background-color: var(--bs-table-bg);">
+                <td>
+                    <div class="pi-check-overlay" style="display:none">
+                        <input type="checkbox" class="form-check-input pi-checkbox" data-pi-id="${p.id}"
+                            style="width:18px;height:18px;cursor:pointer" onchange="window.adminManager._onPiCheckChange()">
+                    </div>
+                </td>
+                <td><div style="line-height:1.4">${nameLabel}</div></td>
+                <td><code style="font-size:.8rem;color:var(--text-muted)">${p.serial}</code></td>
+                <td>${pStatusBadge}</td>
+                <td><span class="${pIsOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${pLastPingText}</small></td>
+            </tr>`;
         });
 
         tbody.innerHTML = html;
@@ -2018,6 +2020,14 @@ class AdminManager {
             show('pi-act-unlock', lockStates.has('1')); // Show unlock if any locked
             show('pi-act-reset', statuses.has('activated') || statuses.has('assigned'));
             show('pi-act-delete', true);
+
+            // Show "Gán vào Pi Trung tâm" if any selected is pi_point + activated
+            const types = new Set();
+            checked.forEach(cb => {
+                const row = cb.closest('.pi-grid-row') || cb.closest('tr');
+                if (row) types.add(row.dataset.piType);
+            });
+            show('pi-act-assign-center', types.has('pi_point') && statuses.has('activated'));
         } else {
             bar.style.bottom = '-80px';
         }
@@ -2170,6 +2180,127 @@ class AdminManager {
     // FIELD STATION GẮN LIỀN VỚI PI CENTER
     // =========================================================================
 
+    /** Assign selected pi_point(s) from the action bar to a Pi Center */
+    async assignSelectedPointToCenter() {
+        const checked = document.querySelectorAll('.pi-checkbox:checked');
+        const pointIds = [];
+        checked.forEach(cb => {
+            const row = cb.closest('.pi-grid-row') || cb.closest('tr');
+            if (row && row.dataset.piType === 'pi_point') {
+                pointIds.push(parseInt(cb.dataset.piId));
+            }
+        });
+        if (pointIds.length === 0) {
+            window.toast?.warning('Không có Pi Hiện trường nào được chọn');
+            return;
+        }
+
+        // Fetch available Pi Centers (activated or assigned, not pi_point)
+        try {
+            const res = await fetch('/api/field/pi-devices', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Failed to load devices');
+            const devices = await res.json();
+            const centers = devices.filter(d =>
+                d.device_type !== 'pi_point' &&
+                (d.status === 'activated' || d.status === 'assigned')
+            );
+
+            if (centers.length === 0) {
+                window.toast?.warning('Không có Pi Trung tâm nào khả dụng. Hãy kích hoạt Pi Trung tâm trước.');
+                return;
+            }
+
+            // Build a quick modal to pick center
+            const existing = document.getElementById('pickCenterModal');
+            if (existing) existing.remove();
+
+            const modal = document.createElement('div');
+            modal.innerHTML = `
+                <div class="modal fade" id="pickCenterModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff">
+                                <h5 class="modal-title"><i class="bi bi-link-45deg me-2"></i>Gán ${pointIds.length} Pi Hiện trường vào Pi Trung tâm</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="text-muted small mb-3">Chọn Pi Trung tâm để gán:</p>
+                                <div class="list-group list-group-flush" id="center-pick-list">
+                                    ${centers.map(c => `
+                                        <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
+                                               style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                                            <input type="radio" name="center-pick" value="${c.id}" class="form-check-input">
+                                            <div>
+                                                <strong>${c.name}</strong>
+                                                <small class="d-block text-muted font-monospace">${c.serial}</small>
+                                                ${c.station_name ? `<small class="text-info">📍 ${c.station_name}</small>` : ''}
+                                            </div>
+                                            <span class="badge ${c.status === 'assigned' ? 'bg-primary' : 'bg-success'} ms-auto">${c.status === 'assigned' ? '📍 Assigned' : '✅ Activated'}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                                <button type="button" class="btn btn-primary" id="btn-confirm-center-pick">
+                                    <i class="bi bi-check-lg me-1"></i>Gán
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+
+            const bsModal = new bootstrap.Modal(document.getElementById('pickCenterModal'));
+            bsModal.show();
+
+            document.getElementById('btn-confirm-center-pick').addEventListener('click', async () => {
+                const selected = document.querySelector('input[name="center-pick"]:checked');
+                if (!selected) {
+                    window.toast?.warning('Vui lòng chọn Pi Trung tâm');
+                    return;
+                }
+                const centerId = parseInt(selected.value);
+
+                let ok = 0, fail = 0;
+                for (const pointId of pointIds) {
+                    try {
+                        const r = await fetch(`/api/field/pi-devices/${pointId}/assign-to-center`, {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${this.token}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ pi_center_id: centerId })
+                        });
+                        if (r.ok) ok++; else fail++;
+                    } catch { fail++; }
+                }
+
+                bsModal.hide();
+                if (ok > 0) window.toast?.success(`✅ Đã gán ${ok} Pi Hiện trường thành công!`);
+                if (fail > 0) window.toast?.error(`❌ ${fail} thất bại`);
+
+                // Exit select mode and reload
+                this._piSelectMode = false;
+                const toggleBtn = document.getElementById('pi-select-toggle');
+                if (toggleBtn) { toggleBtn.classList.replace('btn-primary', 'btn-outline-secondary'); toggleBtn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chọn'; }
+                const bar = document.getElementById('pi-action-bar');
+                if (bar) bar.style.bottom = '-80px';
+                setTimeout(() => this.loadPiDevices(), 500);
+            });
+
+            document.getElementById('pickCenterModal').addEventListener('hidden.bs.modal', () => {
+                modal.remove();
+            });
+
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
     /** Open popup to assign an activated Pi Point to a Center */
     async openAssignPiPointModal(centerId) {
         document.getElementById('assign-center-id').value = centerId;
@@ -2251,9 +2382,9 @@ class AdminManager {
         if (!listEl) return;
 
         listEl.innerHTML = `<div class="text-center py-3">
-        <div class="spinner-border spinner-border-sm text-primary"></div>
-        <small class="ms-2 text-muted">Đang tải...</small>
-    </div>`;
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <small class="ms-2 text-muted">Đang tải...</small>
+                </div>`;
 
         try {
             // 1. Check if this station already has an assigned Pi
@@ -2289,8 +2420,8 @@ class AdminManager {
             }
 
             listEl.innerHTML = `
-            <div class="list-group list-group-flush">
-                ${available.map(d => `
+                <div class="list-group list-group-flush">
+                    ${available.map(d => `
                     <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
                            style="cursor:pointer; background:transparent; border-color:var(--border-color)">
                         <input type="radio" name="pi-select" value="${d.id}" class="form-check-input">
@@ -2301,7 +2432,7 @@ class AdminManager {
                         <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
                     </label>
                 `).join('')}
-            </div>`;
+                </div>`;
 
             if (btnRow) btnRow.style.display = 'block';
 
