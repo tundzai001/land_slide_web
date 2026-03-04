@@ -87,6 +87,23 @@ class AudioPlayer:
         
         logger.info(f"🔊 Playing: {audio_code} ({audio_file.name})")
         
+        import platform
+        if platform.system() == 'Windows':
+            try:
+                # Windows: dùng cmd /c start để phát qua default media player
+                self.current_audio_process = subprocess.Popen(
+                    ['cmd', '/c', 'start', '', '/B', str(audio_file)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    shell=False
+                )
+                logger.info("   ▶️ Playing via Windows default player")
+                return
+            except Exception as e:
+                logger.error(f"❌ Windows playback failed: {e}")
+                return
+        
+        # Linux / Raspberry Pi
         try:
             # Sử dụng mpg123 (nhẹ, tốt cho Raspberry Pi)
             self.current_audio_process = subprocess.Popen(
@@ -432,6 +449,22 @@ class MQTTAudioClient:
                     self.is_locked = False
                     self._save_lock_state(False)
                     logger.info("🔓 Device UNLOCKED by admin")
+                    return
+
+                # Kích hoạt audio nếu payload có level nguy hiểm (từ command topic)
+                level = data.get('level', '').upper()
+                if level in ('WARNING', 'DANGER', 'CRITICAL'):
+                    audio_code = data.get('audio_code', '')
+                    if audio_code:
+                        if self.is_locked:
+                            logger.warning(f"🔒 Locked, ignoring alert audio: {audio_code}")
+                            return
+                        logger.info(f"🚨 Alert level={level} on command topic → playing {audio_code}")
+                        threading.Thread(
+                            target=self.audio_player.play,
+                            args=(audio_code,),
+                            daemon=True
+                        ).start()
                     return
 
                 audio_code = data.get('audio_code', '')

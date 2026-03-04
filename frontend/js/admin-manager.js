@@ -2261,7 +2261,7 @@ class AdminManager {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             const allDevices = await allRes.json();
-            const assignedPi = allDevices.find(d => d.station_id === this.currentStationId && d.status === 'assigned');
+            const assignedPi = allDevices.find(d => d.station_id === this.currentStationId && d.status === 'assigned' && d.device_type !== 'pi_point');
 
             if (assignedPi && currentPiInfo) {
                 currentPiInfo.style.display = 'flex';
@@ -2275,7 +2275,7 @@ class AdminManager {
             }
 
             // 2. Load available Pi (activated, not assigned)
-            const available = allDevices.filter(d => d.status === 'activated');
+            const available = allDevices.filter(d => d.status === 'activated' && d.device_type !== 'pi_point');
 
             if (available.length === 0) {
                 listEl.innerHTML = `<p class="text-muted small">
