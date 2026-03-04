@@ -70,16 +70,17 @@ class AudioPlayer:
             logger.info(f"   Create it: mkdir -p {self.audio_dir}")
     
     def play(self, audio_code: str):
-        """Phát file mp3 dựa trên audio_code"""
+        """Phát siren khi nhận cảnh báo — luôn phát siren.mp3"""
         if not audio_code:
             logger.warning("⚠️ audio_code is empty")
             return
         
-        # Tìm file mp3
-        audio_file = self.audio_dir / f"{audio_code}.mp3"
+        # Pi Trung tâm chỉ kêu siren, không phát file theo audio_code
+        audio_file = self.audio_dir / "siren.mp3"
         
         if not audio_file.exists():
-            logger.error(f"❌ Audio file not found: {audio_file}")
+            logger.error(f"❌ Siren file not found: {audio_file}")
+            logger.info(f"   Hãy đặt file siren.mp3 vào: {self.audio_dir}")
             return
         
         # Dừng âm thanh đang phát
