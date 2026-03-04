@@ -1829,6 +1829,41 @@
         </div>
     </div>
 
+    <!-- 5. Assign Pi Point Modal -->
+    <div class="modal fade" id="assignPiPointModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header" style="border-bottom-color:var(--border-color)">
+                    <h5 class="modal-title">
+                        <i class="bi bi-link-45deg me-2" style="color:#10b981"></i>
+                        <span>Gắn Pi Hiện Trường</span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="assignPiPointForm">
+                        <input type="hidden" id="assign-center-id">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Chọn Pi Hiện trường cần gắn <span
+                                    class="text-danger">*</span></label>
+                            <select class="form-select" id="point-device-select" required>
+                                <option value="">-- Đang tải danh sách Pi hiện trường... --</option>
+                            </select>
+                            <small class="text-muted">Chỉ hiển thị các Pi Hiện trường đã được kích hoạt (Activated) và
+                                chưa gán.</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-success" onclick="window.adminManager.confirmAssignPiPoint()">
+                        <i class="bi bi-link me-1"></i> Gắn Thiết Bị
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Hàm toggle hiển thị mật khẩu
         function togglePasswordVisibility(inputId) {

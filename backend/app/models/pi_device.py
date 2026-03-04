@@ -18,8 +18,10 @@ class PiDevice(BaseConfig):
     status        = Column(String(20), default="pending")    # pending | activating | activated | assigned
     is_locked     = Column(Boolean, default=False)           # True = thiết bị bị khóa
     station_id    = Column(Integer, nullable=True)           # FK mềm (không ràng buộc DB để tránh vấn đề khi trạm bị xóa)
+    pi_center_id  = Column(Integer, nullable=True)           # FK mềm: pi_point links to pi_center PiDevice.id
     license_key   = Column(String(255), nullable=True)       # Key backend đã tạo
     last_seen     = Column(BigInteger, default=0)
     registered_at = Column(BigInteger, nullable=False)
+    mqtt_topic    = Column(String(255), nullable=True)       # MQTT topic cho pi_point (light/siren control)
     extra_config  = Column(JSON, default={})                 # MQTT info, firmware, v.v.
 
