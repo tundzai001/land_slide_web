@@ -126,6 +126,8 @@ function handleRealtimeUpdate(message) {
             lastAlertKey = alertKey;
             showAlertBanner(message);
         }
+        // ✅ Marker chuyển đỏ + nhấp nháy khi có cảnh báo
+        setMarkerAlert(message.station_id, true);
         // Always attempt to play siren (it will handle its own dedup/overlap)
         playSiren();
     }
@@ -227,6 +229,9 @@ function updateStationMarker(stationId, riskLevel) {
     const marker = markers[stationId];
     if (!marker) return;
 
+    // ✅ Nếu marker đang trong trạng thái alert (đỏ nhấp nháy), không cập nhật
+    if (markerAlertState[stationId]) return;
+
     const colors = {
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
@@ -255,6 +260,52 @@ function updateStationMarker(stationId, riskLevel) {
         iconAnchor: [9, 9]
     });
     marker.setIcon(newIcon);
+}
+
+// =====================================================
+// MARKER ALERT STATE — Đỏ + nhấp nháy khi có cảnh báo
+// =====================================================
+let markerAlertState = {};
+
+function setMarkerAlert(stationId, active) {
+    const marker = markers[stationId];
+    if (!marker) return;
+
+    if (active) {
+        markerAlertState[stationId] = true;
+
+        const iconHtml = `<div class="marker-circle marker-device-alert" style="
+                    width: 22px; height: 22px; background: #fa5252;
+                    border-radius: 50%; border: 3px solid white;
+                    box-shadow: 0 0 12px rgba(250, 82, 82, 0.8);
+                "></div>`;
+
+        const alertIcon = L.divIcon({
+            className: 'custom-map-marker',
+            html: iconHtml,
+            iconSize: [22, 22],
+            iconAnchor: [11, 11]
+        });
+        marker.setIcon(alertIcon);
+
+        console.log(`🔴 [MARKER] Station ${stationId} → ĐỎ + nhấp nháy`);
+    } else {
+        clearMarkerAlert(stationId);
+    }
+}
+
+function clearMarkerAlert(stationId) {
+    delete markerAlertState[stationId];
+
+    // Tìm station data để khôi phục màu gốc theo risk_level
+    const station = allStations.find(s => s.id === stationId);
+    if (station) {
+        // Xóa cache để bắt buộc vẽ lại marker
+        delete stationStateCache[stationId];
+        updateMarker(station);
+    }
+
+    console.log(`🟢 [MARKER] Station ${stationId} → Khôi phục màu gốc`);
 }
 
 function updateSidebarUI(data) {
@@ -1169,6 +1220,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnDismiss) {
         btnDismiss.addEventListener('click', () => {
             document.getElementById('alert-banner').classList.remove('show');
+            // ✅ Khi đóng banner, khôi phục marker về màu gốc
+            if (currentAlertStationId) {
+                clearMarkerAlert(currentAlertStationId);
+            }
         });
     }
 });
@@ -1181,6 +1236,8 @@ window.mapManager = {
     showAlertBanner,
     playAlertSound,
     playSiren,
+    setMarkerAlert,
+    clearMarkerAlert,
     charts
 };
 
