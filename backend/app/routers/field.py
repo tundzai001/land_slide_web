@@ -387,6 +387,8 @@ async def assign_pi_to_station(
         pi = res.scalar_one_or_none()
         if not pi:
             raise HTTPException(status_code=404, detail="Pi device not found")
+        if getattr(pi, 'device_type', '') == 'pi_point':
+            raise HTTPException(status_code=400, detail="Pi Point phải được gán qua Pi Center, không gán trực tiếp vào trạm")
         if pi.status not in ("activated", "assigned"):
             raise HTTPException(status_code=400, detail=f"Pi must be 'activated' first (current: {pi.status})")
 

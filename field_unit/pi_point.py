@@ -297,6 +297,15 @@ class MQTTPointClient:
                     light_on()
                 elif cmd == 'off':
                     light_off()
+                
+                # Kích hoạt GPIO nếu payload có level nguy hiểm (từ command topic)
+                level = data.get('level', '').upper()
+                if level in ('WARNING', 'DANGER', 'CRITICAL'):
+                    if self.is_locked:
+                        logger.warning("🔒 Locked. Ignore alert from command.")
+                        return
+                    logger.info(f"🚨 Alert level={level} on command topic → activating GPIO")
+                    threading.Thread(target=light_pulse, args=(15,), daemon=True).start()
                     
             else:
                 # payload thô
