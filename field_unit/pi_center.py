@@ -84,9 +84,13 @@ class AudioPlayer:
             logger.info(f"   Hãy đặt file siren.mp3 vào: {self.audio_dir}")
             return
         
-        # Nếu siren đang phát thì bỏ qua, đợi hết file rồi phát lại
-        if self.current_audio_process and self.current_audio_process.poll() is None:
+        # Cooldown: nếu file siren (2s) đang phát thì đợi hết
+        import time
+        now = time.time()
+        if now - self._last_siren_time < 2.5:
             return
+        
+        self._last_siren_time = now
         
         logger.info(f"🔊 Playing siren (triggered by: {audio_code})")
         
