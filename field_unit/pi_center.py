@@ -97,17 +97,20 @@ class AudioPlayer:
         import platform
         if platform.system() == 'Windows':
             try:
-                # Windows: dùng cmd /c start để phát qua default media player
-                self.current_audio_process = subprocess.Popen(
-                    ['cmd', '/c', 'start', '', '/B', str(audio_file)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    shell=False
-                )
-                logger.info("   ▶️ Playing via Windows default player")
+                # Windows: dùng ctypes winmm.dll để phát mp3 không cần UI
+                import ctypes
+                
+                # Đảm bảo handle cũ được đóng
+                ctypes.windll.winmm.mciSendStringW('close siren', None, 0, None)
+                
+                # Mở và phát
+                ctypes.windll.winmm.mciSendStringW(f'open "{audio_file}" type mpegvideo alias siren', None, 0, None)
+                ctypes.windll.winmm.mciSendStringW('play siren', None, 0, None)
+                
+                logger.info("   ▶️ Playing via Windows native winmm")
                 return
             except Exception as e:
-                logger.error(f"❌ Windows playback failed: {e}")
+                logger.error(f"❌ Windows native playback failed: {e}")
                 return
         
         # Linux / Raspberry Pi
@@ -142,8 +145,17 @@ class AudioPlayer:
     
     def _stop_current(self):
         """Dừng âm thanh đang phát"""
+        import platform
+        if platform.system() == 'Windows':
+            try:
+                import ctypes
+                ctypes.windll.winmm.mciSendStringW('stop siren', None, 0, None)
+                ctypes.windll.winmm.mciSendStringW('close siren', None, 0, None)
+            except Exception:
+                pass
+                
         if self.current_audio_process and self.current_audio_process.poll() is None:
-            logger.info("   ⏹️  Stopping current audio")
+            logger.info("   ⏹️  Stopping Linux audio process")
             self.current_audio_process.terminate()
             try:
                 self.current_audio_process.wait(timeout=2)
