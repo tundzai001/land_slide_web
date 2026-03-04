@@ -1909,12 +1909,12 @@ class AdminManager {
         // unassignedPoints đã được khai báo ở đầu hàm (line 1827)
         unassignedPoints.forEach(p => {
             const pColor = statusColors[p.status] || '#6b7280';
-            let pStatusBadge = `< span class="badge" style = "background:${pColor};color:#000;font-size:.72rem" >● ${statusLabels[p.status] || p.status}</span > `;
+            let pStatusBadge = `<span class="badge" style="background:${pColor};color:#000;font-size:.72rem">● ${statusLabels[p.status] || p.status}</span>`;
             if (p.is_locked) {
-                pStatusBadge += ` < span class="badge bg-danger" style = "font-size:.65rem" title = "Thiết bị bị khóa" >🔒</span > `;
+                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
             }
 
-            const nameLabel = `< strong > ${p.name}</strong > <br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;
+            const nameLabel = `<strong>${p.name}</strong><br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;
             const pIsOnline = p.last_seen && (Date.now() / 1000 - p.last_seen) < 120;
             const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : '—';
 
