@@ -64,6 +64,7 @@ class AudioPlayer:
     def __init__(self, audio_dir: Path):
         self.audio_dir = Path(audio_dir)
         self.current_audio_process = None
+        self._last_siren_time = 0  # cooldown: tránh restart siren liên tục
         
         if not self.audio_dir.exists():
             logger.warning(f"🎵 Audio directory not found: {self.audio_dir}")
@@ -83,10 +84,11 @@ class AudioPlayer:
             logger.info(f"   Hãy đặt file siren.mp3 vào: {self.audio_dir}")
             return
         
-        # Dừng âm thanh đang phát
-        self._stop_current()
+        # Nếu siren đang phát thì bỏ qua, đợi hết file rồi phát lại
+        if self.current_audio_process and self.current_audio_process.poll() is None:
+            return
         
-        logger.info(f"🔊 Playing: {audio_code} ({audio_file.name})")
+        logger.info(f"🔊 Playing siren (triggered by: {audio_code})")
         
         import platform
         if platform.system() == 'Windows':
@@ -399,26 +401,13 @@ class MQTTAudioClient:
             logger.error(f"❌ Error handling MQTT message: {e}")
     
     def _handle_alert(self, payload: str):
-        """Xử lý cảnh báo từ MQTT"""
+        """Xử lý cảnh báo từ MQTT — chỉ log, không phát audio (đã xử lý trong _handle_command)"""
         try:
             data = json.loads(payload)
-            
-            audio_code = data.get('audio_code', '')
             level = data.get('level', 'INFO')
             message = data.get('message', '')
-            
             logger.warning(f"🚨 ALERT [{level}]: {message}")
-            
-            if audio_code:
-                if self.is_locked:
-                    logger.warning(f"🔒 Device locked, ignoring alert audio: {audio_code}")
-                    return
-                logger.info(f"   🔊 Audio Code: {audio_code}")
-                threading.Thread(
-                    target=self.audio_player.play,
-                    args=(audio_code,),
-                    daemon=True
-                ).start()
+            # Audio đã được xử lý trong _handle_command, không phát lại ở đây
         except json.JSONDecodeError as e:
             logger.error(f"❌ Invalid JSON in alert: {e}")
     
