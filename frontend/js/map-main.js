@@ -206,6 +206,14 @@ function updateRealtimeSensorValues(message) {
         setText('val-imu-pitch', `${safeNumber(data.pitch, 1)}°`);
         setText('val-imu-yaw', `${safeNumber(data.yaw, 1)}°`);
 
+        // Update battery in real-time
+        const batteryContainer = document.getElementById('battery-container');
+        const batteryVal = data.battery;
+        if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+            if (batteryContainer) batteryContainer.style.display = '';
+            setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
+        }
+
         // Update IMU chart in real-time
         if (charts['chart-imu']) {
             const chart = charts['chart-imu'];
@@ -755,7 +763,7 @@ function updateSidebarUI(data) {
         const batteryContainer = document.getElementById('battery-container');
         const batteryVal = imuLatest?.battery;
         if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
-            if (batteryContainer) batteryContainer.style.display = 'flex';
+            if (batteryContainer) batteryContainer.style.display = '';
             setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
         } else {
             if (batteryContainer) batteryContainer.style.display = 'none';
