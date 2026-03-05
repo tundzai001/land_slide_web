@@ -102,8 +102,8 @@ function handleRealtimeUpdate(message) {
         if (currentStationData && message.station_id === currentStationData.id) {
             const riskEl = document.getElementById('st-risk');
             if (riskEl) {
-                riskEl.className = `risk-badge ${message.risk_level}`;
-                riskEl.innerText = `Cảnh báo: ${message.risk_level}`;
+                riskEl.className = `status-badge ${message.risk_level}`;
+                riskEl.innerHTML = `<span class="status-dot"></span> ${message.risk_level}`;
             }
         }
 
@@ -448,7 +448,7 @@ function setupEventListeners() {
                         method: 'POST'
                     });
                     if (response.ok) {
-                        window.toast?.success('Đã gửi lệnh tắt còi thành công');
+                        window.toast?.success('Mute alarm command sent successfully');
                         setSirenButtonState('muted');
                         // Tắt siren trên web
                         if (currentSirenAudio) {
@@ -457,7 +457,7 @@ function setupEventListeners() {
                             currentSirenAudio = null;
                         }
                     } else {
-                        window.toast?.error('Lỗi khi tắt còi');
+                        window.toast?.error('Failed to mute alarm');
                         setSirenButtonState('alerting');
                     }
                 } else if (state === 'muted') {
@@ -466,16 +466,16 @@ function setupEventListeners() {
                         method: 'POST'
                     });
                     if (response.ok) {
-                        window.toast?.success('Đã bật lại còi thành công');
+                        window.toast?.success('Alarm re-enabled successfully');
                         setSirenButtonState('alerting');
                     } else {
-                        window.toast?.error('Lỗi khi bật còi');
+                        window.toast?.error('Failed to enable alarm');
                         setSirenButtonState('muted');
                     }
                 }
             } catch (error) {
                 console.error('Error toggling siren:', error);
-                window.toast?.error('Không thể kết nối với máy chủ');
+                window.toast?.error('Cannot connect to server');
                 // Khôi phục trạng thái cũ
                 setSirenButtonState(state);
             }
@@ -684,7 +684,7 @@ async function selectStation(stationId) {
 
     } catch (e) {
         console.error('❌ [MAP] Error loading station detail:', e);
-        window.toast?.error('Không thể tải thông tin trạm');
+        window.toast?.error('Failed to load station info');
     }
 }
 
@@ -713,8 +713,8 @@ function updateSidebarUI(data) {
             risk = 'OFFLINE';
         }
 
-        riskEl.className = `risk-badge ${risk}`;
-        riskEl.innerText = `Cảnh báo: ${risk}`;
+        riskEl.className = `status-badge ${risk}`;
+        riskEl.innerHTML = `<span class="status-dot"></span> ${risk}`;
     }
 
     const gnssLatest = data.sensors?.gnss?.latest;
@@ -730,6 +730,9 @@ function updateSidebarUI(data) {
         setText('val-imu-roll', '--°');
         setText('val-imu-pitch', '--°');
         setText('val-imu-yaw', '--°');
+
+        // ✅ Khi offline, nút tắt còi chuyển xám (idle)
+        setSirenButtonState('idle');
 
         // Ẩn battery khi offline
         const batteryContainer = document.getElementById('battery-container');
@@ -1162,17 +1165,17 @@ function setSirenButtonState(state) {
         case 'idle':
             btn.disabled = true;
             btn.classList.add('disabled');
-            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Tắt âm báo';
+            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Mute Alarm';
             break;
         case 'alerting':
             btn.disabled = false;
             btn.classList.remove('disabled');
-            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Tắt âm báo';
+            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Mute Alarm';
             break;
         case 'muted':
             btn.disabled = false;
             btn.classList.remove('disabled');
-            btn.innerHTML = '<i class="bi bi-volume-up-fill me-2"></i>Bật âm báo';
+            btn.innerHTML = '<i class="bi bi-volume-up-fill me-2"></i>Enable Alarm';
             break;
     }
 }
@@ -1195,13 +1198,13 @@ function showAlertBanner(alertData) {
 
     // Cập nhật nội dung
     document.getElementById('alert-title').textContent =
-        `⚠️ ${alertData.level.toUpperCase()} ALERT!`;
+        `${alertData.level.toUpperCase()} ALERT!`;
 
     document.getElementById('alert-station').textContent =
-        `Trạm: ${stationName} (${stationCode})`;
+        `Station: ${stationName} (${stationCode})`;
 
     document.getElementById('alert-message').textContent =
-        alertData.message || 'Phát hiện bất thường!';
+        ` • ${alertData.message || 'Anomaly detected!'}`;
 
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
