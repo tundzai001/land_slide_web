@@ -431,28 +431,53 @@ function setupEventListeners() {
         });
     }
 
-    // Nút tắt còi (IMU) trên Alert Banner
-    const stopSirenBtn = document.getElementById('btn-alert-stop-siren');
-    if (stopSirenBtn) {
-        stopSirenBtn.addEventListener('click', async () => {
+    // Nút tắt/bật còi trong sidebar
+    const sirenToggleBtn = document.getElementById('btn-siren-toggle');
+    if (sirenToggleBtn) {
+        sirenToggleBtn.addEventListener('click', async () => {
             if (!currentAlertStationId) return;
+            const state = sirenToggleBtn.getAttribute('data-siren-state');
+            if (state === 'idle') return; // disabled, không làm gì
+
             try {
-                stopSirenBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
-                const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren`, {
-                    method: 'POST'
-                });
-                if (response.ok) {
-                    window.toast?.success('Đã gửi lệnh tắt còi thành công');
-                    const banner = document.getElementById('alert-banner');
-                    if (banner) banner.classList.remove('show');
-                } else {
-                    window.toast?.error('Lỗi khi tắt còi');
+                sirenToggleBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+
+                if (state === 'alerting') {
+                    // Đang kêu → Tắt còi
+                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren`, {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        window.toast?.success('Đã gửi lệnh tắt còi thành công');
+                        setSirenButtonState('muted');
+                        // Tắt siren trên web
+                        if (currentSirenAudio) {
+                            currentSirenAudio.pause();
+                            currentSirenAudio.currentTime = 0;
+                            currentSirenAudio = null;
+                        }
+                    } else {
+                        window.toast?.error('Lỗi khi tắt còi');
+                        setSirenButtonState('alerting');
+                    }
+                } else if (state === 'muted') {
+                    // Đã tắt → Bật lại còi
+                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/enable-siren`, {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        window.toast?.success('Đã bật lại còi thành công');
+                        setSirenButtonState('alerting');
+                    } else {
+                        window.toast?.error('Lỗi khi bật còi');
+                        setSirenButtonState('muted');
+                    }
                 }
             } catch (error) {
-                console.error('Error stopping siren:', error);
+                console.error('Error toggling siren:', error);
                 window.toast?.error('Không thể kết nối với máy chủ');
-            } finally {
-                stopSirenBtn.innerHTML = '<i class="bi bi-volume-mute-fill"></i> Tắt còi (IMU)';
+                // Khôi phục trạng thái cũ
+                setSirenButtonState(state);
             }
         });
     }
@@ -648,6 +673,14 @@ async function selectStation(stationId) {
         }
 
         updateSidebarUI(data);
+
+        // ✅ Cập nhật trạng thái nút còi khi chọn trạm
+        if (currentAlertStationId && currentAlertStationId === stationId) {
+            const sirenBtn = document.getElementById('btn-siren-toggle');
+            if (sirenBtn && sirenBtn.getAttribute('data-siren-state') === 'idle') {
+                setSirenButtonState('alerting');
+            }
+        }
 
     } catch (e) {
         console.error('❌ [MAP] Error loading station detail:', e);
@@ -1109,6 +1142,42 @@ function filterStations(searchTerm) {
 }
 
 // =========================================================================
+// SIREN TOGGLE BUTTON STATE MANAGEMENT
+// =========================================================================
+
+/**
+ * Cập nhật trạng thái nút còi
+ * @param {'idle'|'alerting'|'muted'} state
+ *   - idle: xám, disabled (mặc định, chưa có cảnh báo)
+ *   - alerting: đỏ, nhấp nháy (đang cảnh báo, bấm để tắt còi)
+ *   - muted: xanh (đã tắt còi, bấm để bật lại)
+ */
+function setSirenButtonState(state) {
+    const btn = document.getElementById('btn-siren-toggle');
+    if (!btn) return;
+
+    btn.setAttribute('data-siren-state', state);
+
+    switch (state) {
+        case 'idle':
+            btn.disabled = true;
+            btn.classList.add('disabled');
+            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Tắt âm báo';
+            break;
+        case 'alerting':
+            btn.disabled = false;
+            btn.classList.remove('disabled');
+            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Tắt âm báo';
+            break;
+        case 'muted':
+            btn.disabled = false;
+            btn.classList.remove('disabled');
+            btn.innerHTML = '<i class="bi bi-volume-up-fill me-2"></i>Bật âm báo';
+            break;
+    }
+}
+
+// =========================================================================
 // ALERT BANNER SYSTEM
 // =========================================================================
 
@@ -1137,13 +1206,8 @@ function showAlertBanner(alertData) {
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
 
-    // Hiển thị nút Tắt còi nếu là cảnh báo IMU
-    const stopSirenBtn = document.getElementById('btn-alert-stop-siren');
-    if (stopSirenBtn) {
-        const isImuAlert = (alertData.category && (alertData.category.includes('tilt') || alertData.category.includes('shock'))) ||
-            (alertData.audio_code && alertData.audio_code.startsWith('imu_'));
-        stopSirenBtn.style.display = isImuAlert ? 'inline-block' : 'none';
-    }
+    // ✅ Kích hoạt nút "Tắt âm báo" khi có cảnh báo
+    setSirenButtonState('alerting');
 
     // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
     banner.classList.add('show');
@@ -1221,6 +1285,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnDismiss) {
         btnDismiss.addEventListener('click', () => {
             document.getElementById('alert-banner').classList.remove('show');
+            // ✅ Reset nút còi về idle khi đóng banner
+            setSirenButtonState('idle');
             // ✅ Khi đóng banner, khôi phục marker về màu gốc
             if (currentAlertStationId) {
                 clearMarkerAlert(currentAlertStationId);
