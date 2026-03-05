@@ -213,6 +213,7 @@ class MQTTPointClient:
         self.topic_pi_command = f"landslide/pi/{device_serial}/command" if device_serial else None
         
         self.is_locked = False
+        self.siren_muted = False
         self._load_lock_state()
         
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=f"pi-point-{device_serial}")
@@ -301,16 +302,21 @@ class MQTTPointClient:
                 elif cmd == 'set_station':
                     self._handle_set_station(data)
                     return
-                elif cmd == 'reset' or cmd == 'stop_siren':
+                elif cmd == 'reset':
                     is_continuous_alert = False
                     light_off()
-                    if cmd == 'reset':
-                        self._handle_reset()
+                    self._handle_reset()
+                    return
+                elif cmd == 'stop_siren':
+                    logger.info("🔇 Muting siren")
+                    self.siren_muted = True
+                    is_continuous_alert = False
+                    light_off()
                     return
                 elif cmd == 'enable_siren':
                     # Re-arm: cho phép nhận cảnh báo lại
-                    is_continuous_alert = False
-                    logger.info("✅ Siren re-enabled, ready for alerts")
+                    self.siren_muted = False
+                    logger.info("🔊 Siren unmuted, ready for alerts")
                     return
                 elif cmd == 'lock':
                     self.is_locked = True
@@ -334,6 +340,9 @@ class MQTTPointClient:
                     if self.is_locked:
                         logger.warning("🔒 Locked. Ignore alert from command.")
                         return
+                    if self.siren_muted:
+                        logger.info("🔇 Siren muted. Ignore alert from command.")
+                        return
                     
                     if audio_code.startswith('imu_') or 'tilt' in category or 'shock' in category:
                         logger.info(f"🚨 IMU Alert level={level} on command topic → activating continuous GPIO")
@@ -348,7 +357,15 @@ class MQTTPointClient:
                 cmd = payload.strip().lower()
                 if cmd == 'on': light_on()
                 if cmd == 'off': light_off()
-                if cmd == 'stop_siren' or cmd == 'reset':
+                if cmd == 'stop_siren':
+                    logger.info("🔇 Muting siren")
+                    self.siren_muted = True
+                    is_continuous_alert = False
+                    light_off()
+                if cmd == 'enable_siren':
+                    self.siren_muted = False
+                    logger.info("🔊 Siren unmuted, ready for alerts")
+                if cmd == 'reset':
                     is_continuous_alert = False
                     light_off()
         except:
