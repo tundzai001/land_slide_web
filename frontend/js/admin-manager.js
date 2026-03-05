@@ -124,6 +124,14 @@ class AdminManager {
         // Fetch current user role and apply restrictions
         this.fetchCurrentUserRole();
 
+        // ✅ Auto-refresh Pi Devices tab every 15s to see online status quickly
+        setInterval(() => {
+            const piTab = document.getElementById('tab-pi');
+            if (piTab && piTab.classList.contains('active')) {
+                this.loadPiDevices(true);
+            }
+        }, 15000);
+
         console.log('✅ [ADMIN] Initialized successfully');
     }
 
@@ -1741,8 +1749,9 @@ class AdminManager {
     // =========================================================================
 
     /** Load and render Pi devices in the "Pi Devices" tab */
-    async loadPiDevices() {
-        this._piSelectMode = false;
+    async loadPiDevices(isAuto = false) {
+        if (isAuto && this._piSelectMode) return; // Skip auto-refresh when selecting to avoid wiping selection
+        if (!isAuto) this._piSelectMode = false;
         try {
             const res = await fetch('/api/field/pi-devices', {
                 headers: { 'Authorization': `Bearer ${this.token}` }

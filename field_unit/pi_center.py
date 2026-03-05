@@ -835,7 +835,7 @@ def main():
     # ✅ Heartbeat: cập nhật last_seen định kỳ
     def _heartbeat_loop():
         while True:
-            time.sleep(60)
+            time.sleep(15)
             try:
                 import requests as _req
                 serial = DEVICE_CODE or ""

@@ -442,6 +442,27 @@ def main():
     )
     
     client.connect()
+
+    def _heartbeat_loop():
+        while True:
+            time.sleep(15)
+            try:
+                import requests as _req
+                serial = DEVICE_CODE or ""
+                if not serial:
+                    continue
+                _req.post(
+                    f"{BACKEND_URL}/api/field/register",
+                    json={"serial": serial, "name": f"Point-{serial[-8:]}", "device_type": "pi_point"},
+                    timeout=10
+                )
+            except Exception:
+                pass
+
+    hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    hb_thread.start()
+    logger.info("✅ Heartbeat thread started (60s interval)")
+
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt:
