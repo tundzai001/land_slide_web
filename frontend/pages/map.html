@@ -28,7 +28,7 @@
 
             <a href="/pages/admin.html" id="admin-nav-btn" class="btn btn-sm btn-outline-primary"
                 style="display: none;">
-                <i class="bi bi-gear-fill me-1"></i> Quản lý
+                <i class="bi bi-stars me-1"></i> Management
             </a>
         </div>
 
@@ -51,13 +51,15 @@
                 <i class="bi bi-exclamation-triangle-fill"></i>
             </div>
             <div class="alert-details">
-                <h4 class="alert-title" id="alert-title">CẢNH BÁO NGUY HIỂM!</h4>
-                <p class="alert-station" id="alert-station">Trạm: Loading...</p>
-                <p class="alert-message" id="alert-message">Message...</p>
+                <h4 class="alert-title" id="alert-title">CRITICAL ALERT!</h4>
+                <div class="alert-info-line">
+                    <span class="alert-station" id="alert-station">Station: Loading...</span>
+                    <span class="alert-message" id="alert-message"> • Message...</span>
+                </div>
             </div>
             <div class="alert-actions">
                 <button class="btn-alert-follow" id="btn-alert-follow">
-                    <i class="bi bi-geo-alt-fill me-1"></i> Theo dõi
+                    <i class="bi bi-geo-alt-fill me-1"></i> Track
                 </button>
                 <button class="btn-alert-dismiss" id="btn-alert-dismiss">
                     <i class="bi bi-x-lg"></i>
@@ -73,7 +75,7 @@
     <!-- LEFT SIDEBAR (Station List) -->
     <div class="station-list-sidebar" id="station-list-sidebar">
         <div class="sidebar-header">
-            <h6><i class="bi bi-hdd-network me-2"></i>Danh sách Trạm</h6>
+            <h6><i class="bi bi-hdd-network me-2"></i>Station List</h6>
         </div>
 
         <button class="sidebar-close-tab" id="sidebar-close-tab">
@@ -81,7 +83,7 @@
         </button>
 
         <div class="sidebar-search">
-            <input type="text" class="form-control form-control-sm" placeholder="Tìm kiếm trạm..." id="search-station">
+            <input type="text" class="form-control form-control-sm" placeholder="Search station..." id="search-station">
         </div>
 
         <div class="station-list-content" id="station-list-container">
@@ -105,8 +107,11 @@
         </div>
 
         <div class="sidebar-content">
-            <!-- Risk Badge -->
-            <div id="st-risk" class="risk-badge">...</div>
+            <!-- Status Badge -->
+            <div class="status-bar">
+                <span class="status-label">Status:</span>
+                <span id="st-risk" class="status-badge">...</span>
+            </div>
 
             <!--REALTIME VIEW -->
             <div id="realtime-view">
@@ -125,13 +130,13 @@
                     </div>
 
                     <!-- Water Level -->
-                    <div class="sensor-item">
+                    <div class="sensor-item sensor-full-width">
                         <div class="sensor-label"><i class="bi bi-water me-1"></i>Water Level</div>
                         <div class="sensor-value-large" id="val-water">--<span class="sensor-unit">m</span></div>
                     </div>
 
                     <!-- IMU (3 axes) -->
-                    <div class="sensor-item">
+                    <div class="sensor-item sensor-full-width">
                         <div class="sensor-label"><i class="bi bi-compass-fill me-1"></i>IMU (Roll/Pitch/Yaw)</div>
                         <div class="imu-axes">
                             <div class="axis-value">
@@ -157,16 +162,16 @@
                 <!--ACTION BUTTONS -->
                 <div class="action-buttons">
                     <button class="btn-action" id="btn-show-charts">
-                        <i class="bi bi-graph-up me-2"></i>Xem biểu đồ
+                        <i class="bi bi-graph-up me-2"></i>View Chart
                     </button>
                     <button class="btn-action secondary" id="btn-long-term">
-                        <i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn
+                        <i class="bi bi-calendar-range me-2"></i>Analysis
                     </button>
                 </div>
 
-                <!-- NÚT TẮT/BẬT CÒI - Luôn hiển thị, mặc định disabled -->
+                <!-- MUTE/UNMUTE ALARM BUTTON - Always visible, disabled by default -->
                 <button class="btn-siren-toggle disabled" id="btn-siren-toggle" data-siren-state="idle" disabled>
-                    <i class="bi bi-volume-mute-fill me-2"></i>Tắt âm báo
+                    <i class="bi bi-volume-mute-fill me-2"></i>Mute Alarm
                 </button>
             </div>
         </div>
