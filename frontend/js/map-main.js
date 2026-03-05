@@ -308,56 +308,7 @@ function clearMarkerAlert(stationId) {
     console.log(`🟢 [MARKER] Station ${stationId} → Khôi phục màu gốc`);
 }
 
-function updateSidebarUI(data) {
-    setText('st-name', data.name);
-    setText('st-code', data.station_code);
-
-    const riskEl = document.getElementById('st-risk');
-    if (riskEl) {
-        let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
-
-        if (data.status === 'offline') {
-            risk = 'OFFLINE';
-        }
-
-        riskEl.className = `risk-badge ${risk}`;
-        riskEl.innerText = `Cảnh báo: ${risk}`;
-    }
-
-    const gnssLatest = data.sensors?.gnss?.latest;
-    const rainLatest = data.sensors?.rain?.latest;
-    const waterLatest = data.sensors?.water?.latest;
-    const imuLatest = data.sensors?.imu?.latest;
-
-    // GNSS
-    const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
-    setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
-
-    // Rain
-    const rainIntensity = rainLatest?.intensity_mm_h ?? null;
-    setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
-
-    // Water
-    const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
-    setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
-
-    // IMU Angles
-    setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-    setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-    setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
-
-    // ✅ LOGIC MỚI: Kiểm tra và hiển thị Pin
-    const batteryContainer = document.getElementById('battery-container');
-    const batteryVal = imuLatest?.battery; // Lấy giá trị Pin từ dữ liệu mới nhất
-
-    // Nếu có Pin và Pin > 0 thì hiển thị, ngược lại thì ẩn
-    if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
-        if (batteryContainer) batteryContainer.style.display = 'flex'; // Hiện
-        setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
-    } else {
-        if (batteryContainer) batteryContainer.style.display = 'none'; // Ẩn
-    }
-}
+// (updateSidebarUI đã được chuyển xuống dưới — duy nhất 1 bản)
 
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
@@ -738,24 +689,41 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
 
-    const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
-    setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
-
-    const rainIntensity = rainLatest?.intensity_mm_h ?? null;
-    setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
-
-    const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
-    setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
-
-    // IMU — only show values if station is online
+    // ✅ Khi thiết bị offline → hiển thị '--' cho TẤT CẢ sensor
     if (data.status === 'offline') {
+        setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+        setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
+        setHTML('val-water', `--<span class="sensor-unit">m</span>`);
         setText('val-imu-roll', '--°');
         setText('val-imu-pitch', '--°');
         setText('val-imu-yaw', '--°');
+
+        // Ẩn battery khi offline
+        const batteryContainer = document.getElementById('battery-container');
+        if (batteryContainer) batteryContainer.style.display = 'none';
     } else {
+        const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
+        setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
+
+        const rainIntensity = rainLatest?.intensity_mm_h ?? null;
+        setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
+
+        const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
+        setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+
         setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
         setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
         setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+
+        // ✅ Battery Voltage: hiển thị nếu có giá trị > 0
+        const batteryContainer = document.getElementById('battery-container');
+        const batteryVal = imuLatest?.battery;
+        if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+            if (batteryContainer) batteryContainer.style.display = 'flex';
+            setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
+        } else {
+            if (batteryContainer) batteryContainer.style.display = 'none';
+        }
     }
 }
 
