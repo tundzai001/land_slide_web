@@ -609,15 +609,15 @@ async def assign_pi_to_center(
             # Optional: Lấy config MQTT
             from app.config import settings
             auth_info = None
-            if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
-                auth_info = {'username': settings.MQTT_USERNAME, 'password': settings.MQTT_PASSWORD}
+            if settings.MQTT_USER and settings.MQTT_PASSWORD:
+                auth_info = {'username': settings.MQTT_USER, 'password': settings.MQTT_PASSWORD}
                 
             logger.info(f"📡 Sending set_station command to {pi_topic}")
             publish.single(
                 topic=pi_topic,
                 payload=payload_data,
-                hostname=settings.MQTT_BROKER_HOST,
-                port=settings.MQTT_BROKER_PORT,
+                hostname=settings.MQTT_BROKER,
+                port=settings.MQTT_PORT,
                 auth=auth_info,
                 qos=1
             )
@@ -656,15 +656,15 @@ async def stop_siren_command(
         
         from app.config import settings
         auth_info = None
-        if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
-            auth_info = {'username': settings.MQTT_USERNAME, 'password': settings.MQTT_PASSWORD}
+        if settings.MQTT_USER and settings.MQTT_PASSWORD:
+            auth_info = {'username': settings.MQTT_USER, 'password': settings.MQTT_PASSWORD}
             
         logger.info(f"📡 Sending stop_siren command to {cmd_topic}")
         publish.single(
             topic=cmd_topic,
             payload=payload_data,
-            hostname=settings.MQTT_BROKER_HOST,
-            port=settings.MQTT_BROKER_PORT,
+            hostname=settings.MQTT_BROKER,
+            port=settings.MQTT_PORT,
             auth=auth_info,
             qos=1
         )
@@ -673,3 +673,40 @@ async def stop_siren_command(
         logger.error(f"Failed to send MQTT stop_siren: {e}")
         raise HTTPException(status_code=500, detail="Failed to send command to device")
 
+
+@router.post("/stations/{station_id}/enable-siren")
+async def enable_siren_command(
+    station_id: int,
+    db: AsyncSession = Depends(get_config_db)
+):
+    """
+    Re-enable the siren at the specified station (undo a previous stop-siren).
+    Sends an MQTT 'enable_siren' command.
+    """
+    try:
+        import json
+        import paho.mqtt.publish as publish
+        
+        cmd_topic = f"landslide/{station_id}/command"
+        payload_data = json.dumps({
+            "cmd": "enable_siren"
+        })
+        
+        from app.config import settings
+        auth_info = None
+        if settings.MQTT_USER and settings.MQTT_PASSWORD:
+            auth_info = {'username': settings.MQTT_USER, 'password': settings.MQTT_PASSWORD}
+            
+        logger.info(f"📡 Sending enable_siren command to {cmd_topic}")
+        publish.single(
+            topic=cmd_topic,
+            payload=payload_data,
+            hostname=settings.MQTT_BROKER,
+            port=settings.MQTT_PORT,
+            auth=auth_info,
+            qos=1
+        )
+        return {"status": "success", "message": "Enable siren command sent"}
+    except Exception as e:
+        logger.error(f"Failed to send MQTT enable_siren: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send command to device")

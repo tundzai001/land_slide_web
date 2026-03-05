@@ -349,6 +349,7 @@ class MQTTAudioClient:
         # Per-device topic (used for activation before station is assigned)
         self.topic_pi_command = f"landslide/pi/{device_serial}/command" if device_serial else None
         self.is_locked = False  # Lock state: khi bị khóa, Pi từ chối phát audio
+        self.siren_muted = False  # Mute state: khi bị mute, Pi tạm dừng phát siren
         self._load_lock_state()  # Restore saved lock state
         
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=f"pi-audio-{station_id}")
@@ -457,6 +458,19 @@ class MQTTAudioClient:
                     logger.info("🔓 Device UNLOCKED by admin")
                     return
 
+                # handle stop_siren command — tắt còi
+                if data.get('cmd') == 'stop_siren':
+                    logger.info("🔇 Received stop_siren command — stopping audio")
+                    self.siren_muted = True
+                    self.audio_player._stop_current()
+                    return
+
+                # handle enable_siren command — bật lại còi
+                if data.get('cmd') == 'enable_siren':
+                    logger.info("🔊 Received enable_siren command — re-enabling siren")
+                    self.siren_muted = False
+                    return
+
                 # Kích hoạt audio nếu payload có level nguy hiểm (từ command topic)
                 level = data.get('level', '').upper()
                 if level in ('WARNING', 'DANGER', 'CRITICAL'):
@@ -464,6 +478,9 @@ class MQTTAudioClient:
                     if audio_code:
                         if self.is_locked:
                             logger.warning(f"🔒 Locked, ignoring alert audio: {audio_code}")
+                            return
+                        if self.siren_muted:
+                            logger.info(f"🔇 Siren muted, ignoring alert audio: {audio_code}")
                             return
                         logger.info(f"🚨 Alert level={level} on command topic → playing {audio_code}")
                         threading.Thread(
@@ -481,6 +498,9 @@ class MQTTAudioClient:
             if audio_code:
                 if self.is_locked:
                     logger.warning(f"🔒 Device locked, ignoring audio command: {audio_code}")
+                    return
+                if self.siren_muted:
+                    logger.info(f"🔇 Siren muted, ignoring audio command: {audio_code}")
                     return
                 logger.info(f"🎵 Command: Play {audio_code}")
                 threading.Thread(

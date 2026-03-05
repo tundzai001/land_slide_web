@@ -307,6 +307,11 @@ class MQTTPointClient:
                     if cmd == 'reset':
                         self._handle_reset()
                     return
+                elif cmd == 'enable_siren':
+                    # Re-arm: cho phép nhận cảnh báo lại
+                    is_continuous_alert = False
+                    logger.info("✅ Siren re-enabled, ready for alerts")
+                    return
                 elif cmd == 'lock':
                     self.is_locked = True
                     self._save_lock_state(True)
