@@ -525,6 +525,16 @@ async function loadStations() {
             if (station.location && station.location.lat && station.location.lon) {
                 updateMarker(station);
             }
+
+            // ✅ THÊM: Nếu trạm đang xem bị đổi status (ví dụ offline/online)
+            if (currentStationData && currentStationData.id === station.id) {
+                if (currentStationData.status !== station.status || currentStationData.risk_level !== station.risk_level) {
+                    console.log(`🔄 [STATE] Station ${station.id} changed state: ${currentStationData.status}->${station.status}, updating UI...`);
+                    currentStationData.status = station.status;
+                    currentStationData.risk_level = station.risk_level;
+                    updateSidebarUI(currentStationData);
+                }
+            }
         });
 
         renderStationList(stations);

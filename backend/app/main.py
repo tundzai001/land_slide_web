@@ -454,7 +454,12 @@ async def get_stations_by_project(
     for station in stations:
         # Lấy danh sách devices của trạm
         devices_result = await db_config.execute(
-            select(model_config.Device).where(model_config.Device.station_id == station.id)
+            select(model_config.Device).where(
+                and_(
+                    model_config.Device.station_id == station.id,
+                    model_config.Device.is_active == True
+                )
+            )
         )
         devices = devices_result.scalars().all()
         
@@ -890,7 +895,12 @@ async def get_station_detail(
         
         # 2. Lấy devices của trạm
         devices_result = await db_config.execute(
-            select(model_config.Device).where(model_config.Device.station_id == station_id)
+            select(model_config.Device).where(
+                and_(
+                    model_config.Device.station_id == station_id,
+                    model_config.Device.is_active == True
+                )
+            )
         )
         devices = devices_result.scalars().all()
         
