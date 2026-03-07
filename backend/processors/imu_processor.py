@@ -10,10 +10,39 @@ class IMUEngine:
         # Lưu trữ giá trị gần nhất để fallback nếu mất gói tin
         self.last_valid_data = {
             "roll": 0.0, "pitch": 0.0, "yaw": 0.0,
+            "raw_roll": 0.0, "raw_pitch": 0.0, "raw_yaw": 0.0,
             "ax": 0.0, "ay": 0.0, "az": 0.0,
             "total_accel": 0.0,
             "battery": 0.0,
             "status": "unknown"
+        }
+        
+        # ✅ IMU Baseline (Origin) — Giống GNSS Origin Locking
+        self.baseline = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+        self.origin_locked = False
+
+    def set_baseline(self, roll: float, pitch: float, yaw: float):
+        """Đặt baseline manually hoặc từ DB config."""
+        self.baseline = {"roll": float(roll), "pitch": float(pitch), "yaw": float(yaw)}
+        self.origin_locked = True
+        logger.info(f"🎯 [IMU] Baseline set: roll={roll:.2f}°, pitch={pitch:.2f}°, yaw={yaw:.2f}°")
+
+    def _auto_lock_baseline(self, roll: float, pitch: float, yaw: float):
+        """Tự động khóa baseline từ tin nhắn đầu tiên."""
+        if not self.origin_locked:
+            self.baseline = {"roll": roll, "pitch": pitch, "yaw": yaw}
+            self.origin_locked = True
+            logger.info(f"🎯 [IMU] Auto-locked baseline from first message: roll={roll:.2f}°, pitch={pitch:.2f}°, yaw={yaw:.2f}°")
+
+    def _apply_baseline(self, raw_roll: float, raw_pitch: float, raw_yaw: float) -> dict:
+        """Tính delta so với baseline."""
+        delta_roll = raw_roll - self.baseline["roll"]
+        delta_pitch = raw_pitch - self.baseline["pitch"]
+        delta_yaw = raw_yaw - self.baseline["yaw"]
+        return {
+            "roll": round(delta_roll, 2),
+            "pitch": round(delta_pitch, 2),
+            "yaw": round(delta_yaw, 2),
         }
 
     def process(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -40,11 +69,29 @@ class IMUEngine:
 
                     status = payload.get('status', 'unknown')
 
+                    # ✅ Auto-lock baseline nếu chưa có
+                    self._auto_lock_baseline(angle_x, angle_y, angle_z)
+
+                    # ✅ Tính delta so với baseline
+                    delta = self._apply_baseline(angle_x, angle_y, angle_z)
+
                     # Tạo kết quả chuẩn hóa
                     result = {
-                        "roll": round(angle_x, 2),
-                        "pitch": round(angle_y, 2),
-                        "yaw": round(angle_z, 2),
+                        # Delta angles (dùng cho alerting)
+                        "roll": delta["roll"],
+                        "pitch": delta["pitch"],
+                        "yaw": delta["yaw"],
+                        
+                        # Raw angles (góc tuyệt đối, để hiển thị tham khảo)
+                        "raw_roll": round(angle_x, 2),
+                        "raw_pitch": round(angle_y, 2),
+                        "raw_yaw": round(angle_z, 2),
+                        
+                        # Baseline info
+                        "baseline_roll": self.baseline["roll"],
+                        "baseline_pitch": self.baseline["pitch"],
+                        "baseline_yaw": self.baseline["yaw"],
+                        
                         "battery": round(battery, 2),
                         "status": status,
                         
@@ -81,25 +128,44 @@ class IMUEngine:
             total_accel = math.sqrt(ax**2 + ay**2 + az**2)
 
             # Tính toán góc từ gia tốc (nếu thiết bị không gửi góc sẵn)
-            roll = payload.get('roll')
-            pitch = payload.get('pitch')
-            yaw = payload.get('yaw')
+            raw_roll = payload.get('roll')
+            raw_pitch = payload.get('pitch')
+            raw_yaw = payload.get('yaw')
 
-            if roll is None and total_accel > 0:
-                roll = math.degrees(math.atan2(ay, az))
+            if raw_roll is None and total_accel > 0:
+                raw_roll = math.degrees(math.atan2(ay, az))
             
-            if pitch is None and total_accel > 0:
-                pitch = math.degrees(math.atan2(-ax, math.sqrt(ay**2 + az**2)))
+            if raw_pitch is None and total_accel > 0:
+                raw_pitch = math.degrees(math.atan2(-ax, math.sqrt(ay**2 + az**2)))
+
+            raw_roll = float(raw_roll or 0)
+            raw_pitch = float(raw_pitch or 0)
+            raw_yaw = float(raw_yaw or 0)
 
             # Lấy pin (nếu có)
             battery = float(payload.get('battery_voltage') or payload.get('battery') or self.last_valid_data.get('battery', 0.0))
 
+            # ✅ Auto-lock baseline nếu chưa có
+            self._auto_lock_baseline(raw_roll, raw_pitch, raw_yaw)
+
+            # ✅ Tính delta so với baseline
+            delta = self._apply_baseline(raw_roll, raw_pitch, raw_yaw)
+
             result = {
                 "ax": round(ax, 3), "ay": round(ay, 3), "az": round(az, 3),
                 "gx": round(gx, 3), "gy": round(gy, 3), "gz": round(gz, 3),
-                "roll": round(float(roll or 0), 2),
-                "pitch": round(float(pitch or 0), 2),
-                "yaw": round(float(yaw or 0), 2),
+                # Delta angles (dùng cho alerting)
+                "roll": delta["roll"],
+                "pitch": delta["pitch"],
+                "yaw": delta["yaw"],
+                # Raw angles
+                "raw_roll": round(raw_roll, 2),
+                "raw_pitch": round(raw_pitch, 2),
+                "raw_yaw": round(raw_yaw, 2),
+                # Baseline
+                "baseline_roll": self.baseline["roll"],
+                "baseline_pitch": self.baseline["pitch"],
+                "baseline_yaw": self.baseline["yaw"],
                 "total_accel": round(total_accel, 3),
                 "battery": round(battery, 2),
                 "status": "normal"

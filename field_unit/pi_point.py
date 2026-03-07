@@ -308,12 +308,26 @@ class MQTTPointClient:
                     self._handle_reset()
                     return
                 elif cmd == 'stop_siren':
+                    target = data.get('target', 'all')
+                    if target not in ['all', 'pi_point']:
+                        return
                     logger.info("🔇 Muting siren")
                     self.siren_muted = True
                     is_continuous_alert = False
                     light_off()
                     return
+                elif cmd == 'auto_stop_siren':
+                    target = data.get('target', 'all')
+                    if target not in ['all', 'pi_point']:
+                        return
+                    logger.info("🛑 Auto-stopping siren")
+                    is_continuous_alert = False
+                    light_off()
+                    return
                 elif cmd == 'enable_siren':
+                    target = data.get('target', 'all')
+                    if target not in ['all', 'pi_point']:
+                        return
                     # Re-arm: cho phép nhận cảnh báo lại
                     self.siren_muted = False
                     logger.info("🔊 Siren unmuted, ready for alerts")

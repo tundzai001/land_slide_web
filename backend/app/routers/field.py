@@ -639,6 +639,7 @@ async def assign_pi_to_center(
 @router.post("/stations/{station_id}/stop-siren")
 async def stop_siren_command(
     station_id: int,
+    target: Optional[str] = 'all',
     db: AsyncSession = Depends(get_config_db)
 ):
     """
@@ -649,9 +650,11 @@ async def stop_siren_command(
         import json
         import paho.mqtt.publish as publish
         
+        # Gửi lệnh stop_siren (tắt còi, và có thể mute tùy thuộc vào Pi logic)
         cmd_topic = f"landslide/{station_id}/command"
         payload_data = json.dumps({
-            "cmd": "stop_siren"
+            "cmd": "stop_siren",
+            "target": target
         })
         
         from app.config import settings
@@ -659,7 +662,7 @@ async def stop_siren_command(
         if settings.MQTT_USER and settings.MQTT_PASSWORD:
             auth_info = {'username': settings.MQTT_USER, 'password': settings.MQTT_PASSWORD}
             
-        logger.info(f"📡 Sending stop_siren command to {cmd_topic}")
+        logger.info(f"📡 Sending stop_siren command to {cmd_topic} (target: {target})")
         publish.single(
             topic=cmd_topic,
             payload=payload_data,
@@ -677,6 +680,7 @@ async def stop_siren_command(
 @router.post("/stations/{station_id}/enable-siren")
 async def enable_siren_command(
     station_id: int,
+    target: Optional[str] = 'all',
     db: AsyncSession = Depends(get_config_db)
 ):
     """
@@ -689,7 +693,8 @@ async def enable_siren_command(
         
         cmd_topic = f"landslide/{station_id}/command"
         payload_data = json.dumps({
-            "cmd": "enable_siren"
+            "cmd": "enable_siren",
+            "target": target
         })
         
         from app.config import settings

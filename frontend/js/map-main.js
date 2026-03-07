@@ -440,55 +440,58 @@ function setupEventListeners() {
     }
 
     // Nút tắt/bật còi trong sidebar
-    const sirenToggleBtn = document.getElementById('btn-siren-toggle');
-    if (sirenToggleBtn) {
+    const sirenToggleBtns = document.querySelectorAll('.btn-siren-toggle');
+    sirenToggleBtns.forEach(sirenToggleBtn => {
         sirenToggleBtn.addEventListener('click', async () => {
             if (!currentAlertStationId) return;
             const state = sirenToggleBtn.getAttribute('data-siren-state');
+            const target = sirenToggleBtn.getAttribute('data-target') || 'all';
             if (state === 'idle') return; // disabled, không làm gì
 
             try {
-                sirenToggleBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+                const iconBase = target === 'pi_center' ? 'Center' : 'Point';
+                sirenToggleBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>`;
 
                 if (state === 'alerting') {
                     // Đang kêu → Tắt còi
-                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren`, {
+                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren?target=${target}`, {
                         method: 'POST'
                     });
                     if (response.ok) {
-                        window.toast?.success('Mute alarm command sent successfully');
-                        setSirenButtonState('muted');
-                        // Tắt siren trên web
+                        window.toast?.success(`Mute command sent (${iconBase})`);
+                        setSirenButtonState('muted', target);
+                        // Tắt siren trên web (chỉ tắt khi mute center/point tùy logic, tạm thời cứ tắt JS audio)
                         if (currentSirenAudio) {
                             currentSirenAudio.pause();
                             currentSirenAudio.currentTime = 0;
                             currentSirenAudio = null;
                         }
                     } else {
-                        window.toast?.error('Failed to mute alarm');
-                        setSirenButtonState('alerting');
+                        window.toast?.error(`Failed to mute (${iconBase})`);
+                        setSirenButtonState('alerting', target);
                     }
                 } else if (state === 'muted') {
                     // Đã tắt → Bật lại còi
-                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/enable-siren`, {
+                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/enable-siren?target=${target}`, {
                         method: 'POST'
                     });
                     if (response.ok) {
-                        window.toast?.success('Alarm re-enabled successfully');
-                        setSirenButtonState('alerting');
+                        window.toast?.success(`Alarm re-enabled (${iconBase})`);
+                        setSirenButtonState('alerting', target);
                     } else {
-                        window.toast?.error('Failed to enable alarm');
-                        setSirenButtonState('muted');
+                        window.toast?.error(`Failed to enable (${iconBase})`);
+                        setSirenButtonState('muted', target);
                     }
                 }
             } catch (error) {
                 console.error('Error toggling siren:', error);
                 window.toast?.error('Cannot connect to server');
                 // Khôi phục trạng thái cũ
-                setSirenButtonState(state);
+                const target = sirenToggleBtn.getAttribute('data-target') || 'all';
+                setSirenButtonState(state, target);
             }
         });
-    }
+    });
 
     console.log('✅ [MAP] All event listeners setup complete');
 }
@@ -526,12 +529,15 @@ async function loadStations() {
                 updateMarker(station);
             }
 
-            // ✅ THÊM: Nếu trạm đang xem bị đổi status (ví dụ offline/online)
+            // ✅ THÊM: Nếu trạm đang xem bị đổi status (ví dụ offline/online, hoặc đổi risk_level)
             if (currentStationData && currentStationData.id === station.id) {
                 if (currentStationData.status !== station.status || currentStationData.risk_level !== station.risk_level) {
                     console.log(`🔄 [STATE] Station ${station.id} changed state: ${currentStationData.status}->${station.status}, updating UI...`);
                     currentStationData.status = station.status;
                     currentStationData.risk_level = station.risk_level;
+                    if (currentStationData.risk_assessment) {
+                        currentStationData.risk_assessment.overall_risk = station.risk_level;
+                    }
                     updateSidebarUI(currentStationData);
                 }
             }
@@ -692,12 +698,31 @@ async function selectStation(stationId) {
 
         updateSidebarUI(data);
 
-        // ✅ Cập nhật trạng thái nút còi khi chọn trạm
-        if (currentAlertStationId && currentAlertStationId === stationId) {
-            const sirenBtn = document.getElementById('btn-siren-toggle');
-            if (sirenBtn && sirenBtn.getAttribute('data-siren-state') === 'idle') {
-                setSirenButtonState('alerting');
+        // ✅ Cập nhật trạng thái nút còi và hiển thị popup nếu station đang báo động
+        const risk = data.risk_assessment?.overall_risk || data.risk_level;
+        const isAlerting = risk === 'EXTREME' || risk === 'HIGH' || risk === 'CRITICAL';
+
+        const popupStationName = document.getElementById('siren-popup-station');
+        if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
+
+        if ((currentAlertStationId === stationId) || isAlerting) {
+            currentAlertStationId = stationId; // Lưu lại ID để popup biết trạm nào
+            const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
+            if (sirenBtns.length > 0) {
+                // If any button is idle, setup alerting for all
+                const anyIdle = Array.from(sirenBtns).some(b => b.getAttribute('data-siren-state') === 'idle');
+                if (anyIdle) {
+                    setSirenButtonState('alerting');
+                } else {
+                    // Keep their current respective states but ensure popup is up
+                    sirenBtns.forEach(b => {
+                        const s = b.getAttribute('data-siren-state');
+                        setSirenButtonState(s === 'idle' ? 'alerting' : s, b.getAttribute('data-target'));
+                    });
+                }
             }
+        } else {
+            setSirenButtonState('idle'); // Ẩn popup nếu trạm bình thường
         }
 
     } catch (e) {
@@ -725,7 +750,7 @@ function updateSidebarUI(data) {
 
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
-        let risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
+        let risk = data.risk_assessment?.overall_risk || data.risk_level || 'UNKNOWN';
 
         if (data.status === 'offline') {
             risk = 'OFFLINE';
@@ -1173,28 +1198,48 @@ function filterStations(searchTerm) {
  *   - alerting: đỏ, nhấp nháy (đang cảnh báo, bấm để tắt còi)
  *   - muted: xanh (đã tắt còi, bấm để bật lại)
  */
-function setSirenButtonState(state) {
-    const btn = document.getElementById('btn-siren-toggle');
-    if (!btn) return;
+function setSirenButtonState(state, target = null) {
+    const popup = document.getElementById('siren-bottom-popup');
+    if (!popup) return;
 
-    btn.setAttribute('data-siren-state', state);
+    const btns = target
+        ? document.querySelectorAll(`.btn-siren-toggle[data-target="${target}"]`)
+        : document.querySelectorAll('.btn-siren-toggle');
 
-    switch (state) {
-        case 'idle':
-            btn.disabled = true;
-            btn.classList.add('disabled');
-            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Mute Alarm';
-            break;
-        case 'alerting':
-            btn.disabled = false;
-            btn.classList.remove('disabled');
-            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-2"></i>Mute Alarm';
-            break;
-        case 'muted':
-            btn.disabled = false;
-            btn.classList.remove('disabled');
-            btn.innerHTML = '<i class="bi bi-volume-up-fill me-2"></i>Enable Alarm';
-            break;
+    btns.forEach(btn => {
+        btn.setAttribute('data-siren-state', state);
+        const iconBase = btn.getAttribute('data-target') === 'pi_center' ? 'Center' : 'Point';
+
+        switch (state) {
+            case 'idle':
+                btn.disabled = true;
+                btn.classList.add('disabled', 'btn-danger');
+                btn.classList.remove('btn-success');
+                btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${iconBase}`;
+                break;
+            case 'alerting':
+                btn.disabled = false;
+                btn.classList.remove('disabled', 'btn-success');
+                btn.classList.add('btn-danger');
+                btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>Mute ${iconBase}`;
+                break;
+            case 'muted':
+                btn.disabled = false;
+                btn.classList.remove('disabled', 'btn-danger');
+                btn.classList.add('btn-success');
+                btn.innerHTML = `<i class="bi bi-volume-up-fill me-1"></i>On ${iconBase}`;
+                break;
+        }
+    });
+
+    // Check if any button is NOT idle, if so, show popup
+    const allBtns = document.querySelectorAll('.btn-siren-toggle');
+    const anyActive = Array.from(allBtns).some(b => b.getAttribute('data-siren-state') !== 'idle');
+
+    if (!anyActive) {
+        popup.style.bottom = '-120px';
+    } else {
+        popup.style.bottom = '20px';
     }
 }
 

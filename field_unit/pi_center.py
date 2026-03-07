@@ -460,13 +460,28 @@ class MQTTAudioClient:
 
                 # handle stop_siren command — tắt còi
                 if data.get('cmd') == 'stop_siren':
+                    target = data.get('target', 'all')
+                    if target not in ['all', 'pi_center']:
+                        return
                     logger.info("🔇 Received stop_siren command — stopping audio")
                     self.siren_muted = True
                     self.audio_player._stop_current()
                     return
 
+                # handle auto_stop_siren command — tắt còi tự động
+                if data.get('cmd') == 'auto_stop_siren':
+                    target = data.get('target', 'all')
+                    if target not in ['all', 'pi_center']:
+                        return
+                    logger.info("🛑 Received auto_stop_siren command — stopping audio")
+                    self.audio_player._stop_current()
+                    return
+
                 # handle enable_siren command — bật lại còi
                 if data.get('cmd') == 'enable_siren':
+                    target = data.get('target', 'all')
+                    if target not in ['all', 'pi_center']:
+                        return
                     logger.info("🔊 Received enable_siren command — re-enabling siren")
                     self.siren_muted = False
                     return

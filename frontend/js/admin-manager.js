@@ -743,6 +743,14 @@ class AdminManager {
             const imuConfirmEl = document.getElementById('cfg-imu-confirm');
             if (imuConfirmEl) imuConfirmEl.value = imuCfg.imu_confirm_steps ?? 2;
 
+            const imuBaseline = cfg.ImuBaseline || {};
+            const baseRollEl = document.getElementById('cfg-imu-base-roll');
+            if (baseRollEl) baseRollEl.value = imuBaseline.baseline_roll ?? 0;
+            const basePitchEl = document.getElementById('cfg-imu-base-pitch');
+            if (basePitchEl) basePitchEl.value = imuBaseline.baseline_pitch ?? 0;
+            const baseYawEl = document.getElementById('cfg-imu-base-yaw');
+            if (baseYawEl) baseYawEl.value = imuBaseline.baseline_yaw ?? 0;
+
             const gnssOrigin = cfg.gnss_origin || {};
             if (gnssOrigin.lat) {
                 document.getElementById('origin-lat').value = gnssOrigin.lat;
@@ -1035,6 +1043,11 @@ class AdminManager {
                 tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
                 imu_confirm_steps: parseInt(document.getElementById('cfg-imu-confirm').value) || 2,
                 shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
+            },
+            ImuBaseline: {
+                baseline_roll: parseFloat(document.getElementById('cfg-imu-base-roll')?.value) || 0.0,
+                baseline_pitch: parseFloat(document.getElementById('cfg-imu-base-pitch')?.value) || 0.0,
+                baseline_yaw: parseFloat(document.getElementById('cfg-imu-base-yaw')?.value) || 0.0
             },
             gnss_origin: {
                 lat: document.getElementById('origin-lat').value,

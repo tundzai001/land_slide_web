@@ -46,7 +46,7 @@ class AuthManager {
                 console.warn('⚠️ [AUTH] Token expired during session');
                 this.logout();
             }
-        }, 5 * 60 * 1000); // Check every 5 minutes
+        }, 15 * 1000); // Check every 15 seconds for faster kickout if locked
     }
 
     // ✅ NEW: Verify token by calling backend
@@ -146,6 +146,7 @@ class AuthManager {
         localStorage.removeItem('rememberMe');
         sessionStorage.removeItem('token');
         sessionStorage.removeItem('justLoggedIn');
+        sessionStorage.removeItem('kicked_alert_shown');
 
         // Redirect
         if (redirect) {
@@ -275,6 +276,25 @@ class AuthManager {
         return response;
     }
 }
+
+// ============================================
+// GLOBAL FETCH INTERCEPTOR
+// ============================================
+const originalFetch = window.fetch;
+window.fetch = async function (...args) {
+    const response = await originalFetch(...args);
+    if (response.status === 401 && window.authManager && window.authManager.isAuthenticated()) {
+        console.warn('⚠️ [AUTH] 401 Unauthorized response detected. Forcing logout...');
+
+        // Anti-spam cho alert
+        if (!sessionStorage.getItem('kicked_alert_shown')) {
+            sessionStorage.setItem('kicked_alert_shown', 'true');
+            alert('Tài khoản của bạn đã bị khóa hoặc phiên đăng nhập hết hạn.');
+            window.authManager.logout(true);
+        }
+    }
+    return response;
+};
 
 // ============================================
 // INITIALIZATION

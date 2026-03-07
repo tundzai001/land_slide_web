@@ -828,9 +828,14 @@ async def get_stations(
         
         stations_with_status = []
         for station in stations:
-            # Lấy danh sách devices của trạm
+            # ✅ Chỉ lấy devices ACTIVE
             devices_result = await db_config.execute(
-                select(model_config.Device).where(model_config.Device.station_id == station.id)
+                select(model_config.Device).where(
+                    and_(
+                        model_config.Device.station_id == station.id,
+                        model_config.Device.is_active == True
+                    )
+                )
             )
             devices = devices_result.scalars().all()
             
@@ -860,6 +865,10 @@ async def get_stations(
                     station_online = True
                     break
             
+            # ✅ Tính risk_level thực tế từ alerts (không hardcode LOW nữa)
+            risk_assessment = await _calculate_station_risk_assessment(db_data, station.id)
+            computed_risk = risk_assessment.get("overall_risk", "LOW")
+            
             stations_with_status.append({
                 "id": station.id,
                 "station_code": station.station_code,
@@ -867,7 +876,7 @@ async def get_stations(
                 "location": station.location,
                 "status": "online" if station_online else "offline",
                 "last_update": station.last_update, 
-                "risk_level": "LOW"
+                "risk_level": computed_risk
             })
         
         return stations_with_status

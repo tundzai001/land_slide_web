@@ -169,11 +169,28 @@
                     </button>
                 </div>
 
-                <!-- MUTE/UNMUTE ALARM BUTTON - Always visible, disabled by default -->
-                <button class="btn-siren-toggle disabled" id="btn-siren-toggle" data-siren-state="idle" disabled>
-                    <i class="bi bi-volume-mute-fill me-2"></i>Mute Alarm
-                </button>
+                <!-- SIREN BUTTON REMOVED FROM HERE, MOVED TO BOTTOM POPUP -->
             </div>
+        </div>
+    </div>
+
+    <!-- BOTTOM SIREN POPUP -->
+    <div class="siren-bottom-popup" id="siren-bottom-popup"
+        style="position: fixed; bottom: -120px; left: 50%; transform: translateX(-50%); background: var(--surface-card, #fff); border: 2px solid var(--accent-danger, #fa5252); box-shadow: 0 -5px 20px rgba(250, 82, 82, 0.3); border-radius: 16px 16px 0 0; padding: 15px 25px; z-index: 9999; transition: bottom 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); display: flex; align-items: center; gap: 20px; width: max-content; min-width: 300px; justify-content: space-between;">
+        <div class="d-flex flex-column">
+            <h6 class="mb-1 fw-bold" style="color: var(--accent-danger, #fa5252);"><i
+                    class="bi bi-speaker-fill me-1"></i> Pi Point / Pi Center</h6>
+            <small class="text-muted" id="siren-popup-station">No station selected</small>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-danger rounded-pill px-3 shadow-sm btn-siren-toggle" data-siren-state="idle"
+                data-target="pi_center" disabled style="transition: all 0.2s;">
+                <i class="bi bi-volume-mute-fill me-1"></i>Center
+            </button>
+            <button class="btn btn-danger rounded-pill px-3 shadow-sm btn-siren-toggle" data-siren-state="idle"
+                data-target="pi_point" disabled style="transition: all 0.2s;">
+                <i class="bi bi-volume-mute-fill me-1"></i>Point
+            </button>
         </div>
     </div>
 

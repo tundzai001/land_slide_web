@@ -155,7 +155,17 @@ class MQTTBridge:
                         elif sensor_type == 'water':
                             self.processors_cache[proc_key] = WaterEngine()
                         elif sensor_type == 'imu':
-                            self.processors_cache[proc_key] = IMUEngine()
+                            imu_engine = IMUEngine()
+                            # ✅ Load baseline từ station config nếu có
+                            imu_baseline = (station.config or {}).get('ImuBaseline', {})
+                            if imu_baseline.get('baseline_roll') is not None:
+                                imu_engine.set_baseline(
+                                    float(imu_baseline.get('baseline_roll', 0)),
+                                    float(imu_baseline.get('baseline_pitch', 0)),
+                                    float(imu_baseline.get('baseline_yaw', 0))
+                                )
+                                logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
+                            self.processors_cache[proc_key] = imu_engine
                     
                     new_map[topic] = {
                         "device_id": device.id,
@@ -177,6 +187,27 @@ class MQTTBridge:
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
             await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
+
+    async def _save_imu_baseline(self, station_id: int, baseline_data: dict):
+        """Lưu IMU baseline vào station config trong DB."""
+        try:
+            from app.models.config import Station
+            async with ConfigSessionLocal() as db:
+                result = await db.execute(
+                    select(Station).where(Station.id == station_id)
+                )
+                station = result.scalar_one_or_none()
+                if station:
+                    config = station.config or {}
+                    config['ImuBaseline'] = baseline_data
+                    station.config = config
+                    # Force SQLAlchemy to detect the change on mutable JSON
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(station, 'config')
+                    await db.commit()
+                    logger.info(f"💾 [IMU] Baseline saved to DB for station {station_id}: {baseline_data}")
+        except Exception as e:
+            logger.error(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
 
     async def process_pipeline(self, topic: str, raw_payload: str):
         info = self.topic_map.get(topic)
@@ -206,7 +237,17 @@ class MQTTBridge:
                     payload_json = json.loads(raw_payload)
                     if sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
                     elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
-                    elif sensor_type == 'imu': processed_data = processor.process(payload_json)
+                    elif sensor_type == 'imu': 
+                        processed_data = processor.process(payload_json)
+                        # ✅ Auto-save baseline to DB khi vừa khóa lần đầu
+                        if processed_data and processor.origin_locked and not hasattr(processor, '_baseline_saved'):
+                            processor._baseline_saved = True
+                            baseline_data = {
+                                "baseline_roll": processor.baseline["roll"],
+                                "baseline_pitch": processor.baseline["pitch"],
+                                "baseline_yaw": processor.baseline["yaw"]
+                            }
+                            asyncio.ensure_future(self._save_imu_baseline(station_id, baseline_data))
                 except json.JSONDecodeError:
                     return
         except Exception as e:
@@ -297,6 +338,36 @@ class MQTTBridge:
                 })
             except Exception as e:
                 logger.error(f"❌ WS Low Status Error: {e}")
+                
+            # ✅ Tự động đánh dấu Resolved cho Alert của sensor này và tắt còi
+            try:
+                categories_to_resolve = []
+                if sensor_type == 'gnss': categories_to_resolve = ['gnss_velocity']
+                elif sensor_type == 'rain': categories_to_resolve = ['rainfall']
+                elif sensor_type == 'water': categories_to_resolve = ['water_level']
+                elif sensor_type == 'imu': categories_to_resolve = ['tilt_critical', 'tilt_warning', 'shock', 'tilt']
+                
+                if categories_to_resolve:
+                    async with DataSessionLocal() as db_data:
+                        res = await db_data.execute(
+                            model_data.Alert.__table__.update()
+                            .where(and_(
+                                model_data.Alert.station_id == station_id,
+                                model_data.Alert.is_resolved == False,
+                                model_data.Alert.category.in_(categories_to_resolve)
+                            ))
+                            .values(is_resolved=True)
+                        )
+                        if res.rowcount > 0:
+                            await db_data.commit()
+                            logger.info(f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}). Sending stop_siren command...")
+                            
+                            # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
+                            cmd_topic = f"landslide/{station_id}/command"
+                            cmd_payload = json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())})
+                            self.client.publish(cmd_topic, cmd_payload, qos=1)
+            except Exception as e:
+                logger.error(f"❌ Error auto-resolving alerts: {e}")
 
         # 3. SAVE TO DB (THROTTLED)
         # ✅ CHỈ LƯU KHI: Alert XỬy ra HOẶC đã đủ chu kỳ lưu
