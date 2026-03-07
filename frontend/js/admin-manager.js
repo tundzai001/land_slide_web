@@ -610,6 +610,7 @@ class AdminManager {
         document.getElementById('mqtt-empty-state').style.display = 'block';
         document.getElementById('btn-delete-station').style.display = 'none';
 
+        this.highlightPreset(null);
         this.updateWizardStep();
         if (this.stationModal) this.stationModal.show();
     }
@@ -778,6 +779,7 @@ class AdminManager {
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
             document.getElementById('btn-delete-station').style.display = 'inline-block';
 
+            this.highlightPreset(cfg.active_preset);
             this.updateWizardStep();
             if (this.stationModal) this.stationModal.show();
 
@@ -834,7 +836,33 @@ class AdminManager {
     // STATION PRESET SYSTEM
     // =========================================================================
 
+    highlightPreset(presetName) {
+        this.activePreset = presetName || null;
+
+        // Reset all buttons visual styling to transparent/outlined
+        const buttons = document.querySelectorAll('.preset-btn');
+        buttons.forEach(btn => {
+            btn.classList.remove('active');
+            btn.style.opacity = '0.6';
+            btn.style.transform = 'scale(0.95)';
+            btn.style.boxShadow = 'none';
+        });
+
+        if (!this.activePreset || this.activePreset === 'custom') return;
+
+        // Add visual flair to the active one
+        const activeBtn = document.getElementById(`btn-preset-${this.activePreset}`);
+        if (activeBtn) {
+            activeBtn.classList.add('active');
+            activeBtn.style.opacity = '1';
+            activeBtn.style.transform = 'scale(1)';
+            activeBtn.style.boxShadow = '0 0 15px currentColor';
+        }
+    }
+
     applyStationPreset(presetName) {
+        this.highlightPreset(presetName);
+
         const presets = {
             conservative: {
                 // Confirmation steps
@@ -1015,6 +1043,7 @@ class AdminManager {
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
         const config = {
+            active_preset: this.activePreset || '',
             offline_thresholds: {
                 gnss: parseInt(document.getElementById('offline-gnss').value) || this.defaultOfflineThresholds.gnss,
                 rain: parseInt(document.getElementById('offline-rain').value) || this.defaultOfflineThresholds.rain,

@@ -567,9 +567,28 @@ function renderStationList(stations) {
     container.innerHTML = '';
 
     stations.forEach(st => {
-        let displayLevel = st.risk_level;
+        let rawLevel = st.risk_level || 'LOW';
         if (st.status === 'offline') {
-            displayLevel = 'OFFLINE';
+            rawLevel = 'OFFLINE';
+        }
+
+        let displayString = rawLevel;
+        let classLevel = rawLevel;
+
+        if (rawLevel === 'LOW') {
+            displayString = 'SAFE';
+            classLevel = 'LOW';
+        } else if (rawLevel === 'MEDIUM' || rawLevel === 'HIGH') {
+            displayString = 'WARNING';
+            classLevel = 'MEDIUM'; // maps to warning classes
+        } else if (rawLevel === 'EXTREME' || rawLevel === 'CRITICAL') {
+            displayString = 'CRITICAL';
+            classLevel = 'CRITICAL';
+        } else if (rawLevel === 'OFFLINE') {
+            displayString = 'OFFLINE';
+            classLevel = 'OFFLINE';
+        } else {
+            displayString = 'SAFE';
         }
 
         const div = document.createElement('div');
@@ -580,8 +599,8 @@ function renderStationList(stations) {
                             <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
                             <small style="color: var(--text-secondary)">${st.station_code}</small>
                         </div>
-                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(displayLevel)}">
-                            ${displayLevel || 'N/A'}
+                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(classLevel)}">
+                            ${displayString}
                         </span>
                     </div>
                 `;
@@ -600,9 +619,10 @@ function renderStationList(stations) {
 
 function getRiskBadgeClass(level) {
     const classes = {
-        'EXTREME': 'bg-danger',
-        'HIGH': 'bg-warning text-dark',
+        'CRITICAL': 'bg-danger',
+        'EXTREME': 'bg-danger', // fallback
         'MEDIUM': 'bg-warning text-dark',
+        'HIGH': 'bg-warning text-dark', // fallback
         'LOW': 'bg-success',
         'OFFLINE': 'bg-secondary'
     };
@@ -614,6 +634,7 @@ let stationStateCache = {};
 
 function updateMarker(station) {
     const colors = {
+        'CRITICAL': '#fa5252',
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
@@ -629,7 +650,7 @@ function updateMarker(station) {
         currentLevel = 'LOW';
     }
     const color = colors[currentLevel] || '#adb5bd';
-    const shouldPulse = currentLevel === 'EXTREME' || currentLevel === 'HIGH';
+    const shouldPulse = currentLevel === 'CRITICAL' || currentLevel === 'EXTREME' || currentLevel === 'HIGH' || currentLevel === 'MEDIUM';
 
     // ✅ KIỂM TRA CACHE: Nếu trạng thái không đổi thì KHÔNG LÀM GÌ CẢ
     const cacheKey = `${station.id}_${currentLevel}_${station.location.lat}_${station.location.lon}`;
@@ -698,14 +719,14 @@ async function selectStation(stationId) {
 
         updateSidebarUI(data);
 
-        // ✅ Cập nhật trạng thái nút còi và hiển thị popup nếu station đang báo động
+        // ✅ Chỉ hiển thị popup còi khi trạm đang báo động nguy hiểm (đỏ - CRITICAL/EXTREME) và đang ONLINE
         const risk = data.risk_assessment?.overall_risk || data.risk_level;
-        const isAlerting = risk === 'EXTREME' || risk === 'HIGH' || risk === 'CRITICAL';
+        const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
 
         const popupStationName = document.getElementById('siren-popup-station');
         if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
 
-        if ((currentAlertStationId === stationId) || isAlerting) {
+        if (isAlerting) {
             currentAlertStationId = stationId; // Lưu lại ID để popup biết trạm nào
             const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
             if (sirenBtns.length > 0) {
@@ -722,7 +743,10 @@ async function selectStation(stationId) {
                 }
             }
         } else {
-            setSirenButtonState('idle'); // Ẩn popup nếu trạm bình thường
+            if (currentAlertStationId === stationId) {
+                currentAlertStationId = null;
+            }
+            setSirenButtonState('idle'); // Ẩn popup nếu trạm bình thường hoặc offline
         }
 
     } catch (e) {
@@ -750,14 +774,34 @@ function updateSidebarUI(data) {
 
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
-        let risk = data.risk_assessment?.overall_risk || data.risk_level || 'UNKNOWN';
+        let rawRisk = data.risk_assessment?.overall_risk || data.risk_level || 'UNKNOWN';
 
         if (data.status === 'offline') {
-            risk = 'OFFLINE';
+            rawRisk = 'OFFLINE';
         }
 
-        riskEl.className = `status-badge ${risk}`;
-        riskEl.innerHTML = `<span class="status-dot"></span> ${risk}`;
+        let displayRisk = rawRisk;
+        let riskClass = rawRisk;
+
+        if (rawRisk === 'LOW') {
+            displayRisk = 'SAFE';
+            riskClass = 'LOW';
+        } else if (rawRisk === 'MEDIUM' || rawRisk === 'HIGH') {
+            displayRisk = 'WARNING';
+            riskClass = 'MEDIUM'; // Will use yellow/orange warning CSS
+        } else if (rawRisk === 'EXTREME' || rawRisk === 'CRITICAL') {
+            displayRisk = 'CRITICAL';
+            riskClass = 'CRITICAL';
+        } else if (rawRisk === 'OFFLINE') {
+            displayRisk = 'OFFLINE';
+            riskClass = 'OFFLINE';
+        } else {
+            displayRisk = 'SAFE'; // Default fallback
+            riskClass = 'LOW';
+        }
+
+        riskEl.className = `status-badge ${riskClass}`;
+        riskEl.innerHTML = `<span class="status-dot"></span> ${displayRisk}`;
     }
 
     const gnssLatest = data.sensors?.gnss?.latest;
@@ -1239,7 +1283,7 @@ function setSirenButtonState(state, target = null) {
     if (!anyActive) {
         popup.style.bottom = '-120px';
     } else {
-        popup.style.bottom = '20px';
+        popup.style.bottom = '8px';
     }
 }
 

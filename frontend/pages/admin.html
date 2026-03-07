@@ -1141,27 +1141,30 @@
 
                                 <div class="row g-2">
                                     <div class="col-md-4">
-                                        <button type="button" class="btn btn-sm btn-outline-primary w-100"
+                                        <button type="button" id="btn-preset-conservative"
+                                            class="btn btn-sm btn-outline-primary w-100 preset-btn"
                                             onclick="window.adminManager.applyStationPreset('conservative')">
                                             <i class="bi bi-shield-check me-1"></i>
                                             <strong>Conservative</strong>
-                                            <small class="d-block text-muted">Ít cảnh báo sai</small>
+                                            <small class="d-block text-muted">Ít báo sai</small>
                                         </button>
                                     </div>
                                     <div class="col-md-4">
-                                        <button type="button" class="btn btn-sm btn-outline-warning w-100"
+                                        <button type="button" id="btn-preset-balanced"
+                                            class="btn btn-sm btn-outline-warning w-100 preset-btn"
                                             onclick="window.adminManager.applyStationPreset('balanced')">
                                             <i class="bi bi-sliders me-1"></i>
                                             <strong>Balanced</strong>
-                                            <small class="d-block text-muted">Cân bằng (Mặc định)</small>
+                                            <small class="d-block text-muted">Cân bằng</small>
                                         </button>
                                     </div>
                                     <div class="col-md-4">
-                                        <button type="button" class="btn btn-sm btn-outline-danger w-100"
+                                        <button type="button" id="btn-preset-sensitive"
+                                            class="btn btn-sm btn-outline-danger w-100 preset-btn"
                                             onclick="window.adminManager.applyStationPreset('sensitive')">
                                             <i class="bi bi-exclamation-diamond me-1"></i>
                                             <strong>Sensitive</strong>
-                                            <small class="d-block text-muted">Nguy hiểm cao</small>
+                                            <small class="d-block text-muted">Báo sớm</small>
                                         </button>
                                     </div>
                                 </div>
