@@ -865,68 +865,55 @@ class AdminManager {
 
         const presets = {
             conservative: {
-                // Confirmation steps
                 gnss_steps: 5,
                 water_confirm: 5,
                 rain_confirm: 3,
-                imu_confirm: 2,
-
-                // GNSS Quality
                 gnss_hdop: 3.0,
                 gnss_streak: 10,
                 gnss_timeout: 600,
-
-                // Water
                 water_warning: 0.20,
                 water_critical: 0.40,
-
-                // Rain
                 rain_watch: 15.0,
                 rain_warning: 35.0,
                 rain_critical: 60.0,
-
-                // IMU
-                imu_shock: 8.0
+                imu_tilt_warn: 10.0,
+                imu_tilt_crit: 25.0,
+                imu_shock: 8.0,
+                imu_confirm: 2
             },
-
             balanced: {
                 gnss_steps: 3,
                 water_confirm: 3,
                 rain_confirm: 2,
-                imu_confirm: 1,
-
                 gnss_hdop: 4.0,
                 gnss_streak: 5,
                 gnss_timeout: 300,
-
                 water_warning: 0.15,
                 water_critical: 0.30,
-
                 rain_watch: 10.0,
                 rain_warning: 25.0,
                 rain_critical: 50.0,
-
-                imu_shock: 5.0
+                imu_tilt_warn: 5.0,
+                imu_tilt_crit: 15.0,
+                imu_shock: 5.0,
+                imu_confirm: 1
             },
-
             sensitive: {
                 gnss_steps: 1,
                 water_confirm: 1,
                 rain_confirm: 1,
-                imu_confirm: 1,
-
                 gnss_hdop: 5.0,
                 gnss_streak: 3,
                 gnss_timeout: 180,
-
                 water_warning: 0.10,
                 water_critical: 0.20,
-
                 rain_watch: 5.0,
                 rain_warning: 15.0,
                 rain_critical: 30.0,
-
-                imu_shock: 3.0
+                imu_tilt_warn: 3.0,
+                imu_tilt_crit: 8.0,
+                imu_shock: 3.0,
+                imu_confirm: 1
             }
         };
 
@@ -963,8 +950,15 @@ class AdminManager {
         if (rainCriticalEl) rainCriticalEl.value = preset.rain_critical;
 
         // IMU
+        const imuTiltWarnEl = document.getElementById('cfg-imu-tilt-warn');
+        const imuTiltCritEl = document.getElementById('cfg-imu-tilt-crit');
         const imuShockEl = document.getElementById('cfg-imu-shock');
+        const imuConfirmEl = document.getElementById('cfg-imu-confirm');
+
+        if (imuTiltWarnEl) imuTiltWarnEl.value = preset.imu_tilt_warn;
+        if (imuTiltCritEl) imuTiltCritEl.value = preset.imu_tilt_crit;
         if (imuShockEl) imuShockEl.value = preset.imu_shock;
+        if (imuConfirmEl) imuConfirmEl.value = preset.imu_confirm;
 
         // ✅ HIỆU ỨNG FLASH (để user biết đã áp dụng)
         const inputs = document.querySelectorAll('#stationConfigForm input[type="number"]');

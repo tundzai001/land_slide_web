@@ -137,7 +137,9 @@
 
                     <!-- IMU (3 axes) -->
                     <div class="sensor-item sensor-full-width">
-                        <div class="sensor-label"><i class="bi bi-compass-fill me-1"></i>IMU (Roll/Pitch/Yaw)</div>
+                        <div class="sensor-label d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-compass-fill me-1"></i>IMU (ROLL/PITCH/YAW)</span>
+                        </div>
                         <div class="imu-axes">
                             <div class="axis-value">
                                 <div class="axis-label">Roll</div>
@@ -150,6 +152,18 @@
                             <div class="axis-value">
                                 <div class="axis-label">Yaw</div>
                                 <div class="axis-num" id="val-imu-yaw">--°</div>
+                            </div>
+                        </div>
+
+                        <!-- Delta values for reference -->
+                        <div class="mt-2 pt-1 border-top" style="opacity: 0.6;">
+                            <div class="d-flex justify-content-between small px-1">
+                                <span style="font-size: 0.65rem;">Delta (từ baseline):</span>
+                                <div class="d-flex gap-2" style="font-family: monospace; font-size: 0.65rem;">
+                                    <span id="val-imu-delta-roll">--°</span>
+                                    <span id="val-imu-delta-pitch">--°</span>
+                                    <span id="val-imu-delta-yaw">--°</span>
+                                </div>
                             </div>
                         </div>
                     </div>

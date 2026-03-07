@@ -980,7 +980,29 @@ async def get_station_detail(
         
         # 4. Tính risk assessment
         risk_assessment = await _calculate_station_risk_assessment(db_data, station_id)
-        
+
+        # 4.5 Lấy Pi devices gắn với trạm (pi_point, pi_center)
+        pi_devices_status = []
+        try:
+            pi_result = await db_config.execute(
+                select(PiDevice).where(PiDevice.station_id == station_id)
+            )
+            pi_devs = pi_result.scalars().all()
+            PI_ONLINE_THRESHOLD = 300  # 5 phút
+            for pd in pi_devs:
+                is_online = (current_time - (pd.last_seen or 0)) < PI_ONLINE_THRESHOLD
+                pi_devices_status.append({
+                    "id": pd.id,
+                    "serial": pd.serial,
+                    "name": pd.name,
+                    "device_type": pd.device_type,
+                    "is_online": is_online,
+                    "last_seen": pd.last_seen,
+                    "is_locked": pd.is_locked
+                })
+        except Exception as e:
+            logger.error(f"Error fetching Pi devices for station {station_id}: {e}")
+
         # 5. Trả về response
         return {
             "id": station.id,
@@ -991,7 +1013,8 @@ async def get_station_detail(
             "last_update": latest_data_timestamp if has_recent_data else station.last_update,
             "config": station.config,
             "sensors": sensor_data,
-            "risk_assessment": risk_assessment
+            "risk_assessment": risk_assessment,
+            "pi_devices": pi_devices_status
         }
         
     except HTTPException:
@@ -1635,8 +1658,7 @@ async def _calculate_station_risk_simple(db_data: AsyncSession, station_id: int)
         critical = sum(1 for a in alerts if a.level == "CRITICAL")
         warning = sum(1 for a in alerts if a.level == "WARNING")
         
-        if critical >= 2: return "EXTREME"
-        elif critical == 1 or warning >= 3: return "HIGH"
+        if critical >= 1: return "EXTREME"
         elif warning >= 1: return "MEDIUM"
         return "LOW"
     except:

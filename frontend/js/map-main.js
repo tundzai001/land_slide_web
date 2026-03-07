@@ -97,20 +97,62 @@ function handleRealtimeUpdate(message) {
     }
 
     if (message.type === 'station_status') {
-        updateStationMarker(message.station_id, message.risk_level);
+        const riskLevel = message.risk_level;
+        const stationId = message.station_id;
 
-        if (currentStationData && message.station_id === currentStationData.id) {
-            const riskEl = document.getElementById('st-risk');
-            if (riskEl) {
-                riskEl.className = `status-badge ${message.risk_level}`;
-                riskEl.innerHTML = `<span class="status-dot"></span> ${message.risk_level}`;
+        // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan
+        if (riskLevel === 'LOW') {
+            // 1. Clear marker flashing (phải gọi TRƯỚC updateStationMarker)
+            if (markerAlertState[stationId]) {
+                clearMarkerAlert(stationId);
+            }
+
+            // 2. Dismiss alert banner nếu đang hiện cho trạm này
+            if (currentAlertStationId === stationId) {
+                const banner = document.getElementById('alert-banner');
+                if (banner) banner.classList.remove('show');
+                currentAlertStationId = null;
+                lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
+            }
+
+            // 3. Reset siren popup về idle nếu đang xem trạm này
+            if (currentStationData && stationId === currentStationData.id) {
+                setSirenButtonState('idle');
             }
         }
 
-        const listBadge = document.getElementById(`list-badge-${message.station_id}`);
+        // Update marker color on map
+        updateStationMarker(stationId, riskLevel);
+
+        // Update status badge in sidebar
+        if (currentStationData && stationId === currentStationData.id) {
+            const riskEl = document.getElementById('st-risk');
+            if (riskEl) {
+                let displayRisk = riskLevel;
+                let riskClass = riskLevel;
+
+                if (riskLevel === 'LOW') {
+                    displayRisk = 'SAFE';
+                    riskClass = 'LOW';
+                } else if (riskLevel === 'MEDIUM' || riskLevel === 'HIGH') {
+                    displayRisk = 'WARNING';
+                    riskClass = 'MEDIUM';
+                } else if (riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') {
+                    displayRisk = 'CRITICAL';
+                    riskClass = 'CRITICAL';
+                }
+
+                riskEl.className = `status-badge ${riskClass}`;
+                riskEl.innerHTML = `<span class="status-dot"></span> ${displayRisk}`;
+            }
+        }
+
+        // Update station list badge
+        const listBadge = document.getElementById(`list-badge-${stationId}`);
         if (listBadge) {
-            listBadge.className = `badge ${getRiskBadgeClass(message.risk_level)}`;
-            listBadge.innerText = message.risk_level;
+            const displayText = riskLevel === 'LOW' ? 'SAFE' : riskLevel;
+            listBadge.className = `badge ${getRiskBadgeClass(riskLevel)}`;
+            listBadge.innerText = displayText;
 
             listBadge.style.transition = '0.3s';
             listBadge.style.transform = 'scale(1.2)';
@@ -202,9 +244,14 @@ function updateRealtimeSensorValues(message) {
     }
 
     if (sensor_type === 'imu' && data) {
-        setText('val-imu-roll', `${safeNumber(data.roll, 1)}°`);
-        setText('val-imu-pitch', `${safeNumber(data.pitch, 1)}°`);
-        setText('val-imu-yaw', `${safeNumber(data.yaw, 1)}°`);
+        setText('val-imu-roll', `${safeNumber(data.raw_roll, 1)}°`);
+        setText('val-imu-pitch', `${safeNumber(data.raw_pitch, 1)}°`);
+        setText('val-imu-yaw', `${safeNumber(data.raw_yaw, 1)}°`);
+
+        // Delta values (secondary display)
+        setText('val-imu-delta-roll', `${safeNumber(data.roll, 1)}°`);
+        setText('val-imu-delta-pitch', `${safeNumber(data.pitch, 1)}°`);
+        setText('val-imu-delta-yaw', `${safeNumber(data.yaw, 1)}°`);
 
         // Update battery in real-time
         const batteryContainer = document.getElementById('battery-container');
@@ -698,8 +745,64 @@ function updateMarker(station) {
     }
 }
 
-async function selectStation(stationId) {
-    console.log(`🎯 [MAP] Selecting station: ${stationId}`);
+// =====================================================
+// SIREN POPUP HELPER — Dùng bởi selectStation và Track button
+// =====================================================
+function _showSirenIfAlerting(stationId, data) {
+    const risk = data.risk_assessment?.overall_risk || data.risk_level;
+    const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
+
+    const popupStationName = document.getElementById('siren-popup-station');
+    if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
+
+    // Default statuses based on pi_devices array from station detail API
+    let pointDeviceStatus = 'idle';
+    let centerDeviceStatus = 'idle';
+
+    if (data.pi_devices && Array.isArray(data.pi_devices)) {
+        const pPoint = data.pi_devices.find(d => d.device_type === 'pi_point');
+        const pCenter = data.pi_devices.find(d => d.device_type === 'pi_center');
+
+        if (pPoint && !pPoint.is_online) pointDeviceStatus = 'offline';
+        if (pCenter && !pCenter.is_online) centerDeviceStatus = 'offline';
+        // If there is no pi_point or pi_center registered for this station, maybe set to offline?
+        // But let's only override if explicitly offline to be safe.
+    }
+
+    if (isAlerting) {
+        currentAlertStationId = stationId;
+        const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
+        if (sirenBtns.length > 0) {
+            sirenBtns.forEach(b => {
+                const target = b.getAttribute('data-target');
+                let currentState = b.getAttribute('data-siren-state');
+
+                // Determine target default status (might be offline)
+                const isOffline = target === 'pi_center' ? centerDeviceStatus === 'offline' : pointDeviceStatus === 'offline';
+
+                if (isOffline) {
+                    setSirenButtonState('offline', target);
+                } else {
+                    // If online, transition idle to alerting, keep muted as is
+                    if (currentState === 'idle' || currentState === 'offline') currentState = 'alerting';
+                    setSirenButtonState(currentState, target);
+                }
+            });
+        }
+    } else {
+        if (currentAlertStationId === stationId) {
+            currentAlertStationId = null;
+        }
+
+        // Apply idle or offline if not alerting
+        setSirenButtonState(centerDeviceStatus === 'offline' ? 'offline' : 'idle', 'pi_center');
+        setSirenButtonState(pointDeviceStatus === 'offline' ? 'offline' : 'idle', 'pi_point');
+    }
+}
+
+async function selectStation(stationId, options = {}) {
+    const { skipZoom = false, skipSiren = false } = options;
+    console.log(`🎯 [MAP] Selecting station: ${stationId}`, options);
 
     const sidebar = document.getElementById('detail-sidebar');
     if (sidebar) {
@@ -713,40 +816,15 @@ async function selectStation(stationId) {
         const data = await res.json();
         currentStationData = data;
 
-        if (markers[stationId]) {
+        if (!skipZoom && markers[stationId]) {
             map.flyTo(markers[stationId].getLatLng(), 16, { duration: 1 });
         }
 
         updateSidebarUI(data);
 
-        // ✅ Chỉ hiển thị popup còi khi trạm đang báo động nguy hiểm (đỏ - CRITICAL/EXTREME) và đang ONLINE
-        const risk = data.risk_assessment?.overall_risk || data.risk_level;
-        const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
-
-        const popupStationName = document.getElementById('siren-popup-station');
-        if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
-
-        if (isAlerting) {
-            currentAlertStationId = stationId; // Lưu lại ID để popup biết trạm nào
-            const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
-            if (sirenBtns.length > 0) {
-                // If any button is idle, setup alerting for all
-                const anyIdle = Array.from(sirenBtns).some(b => b.getAttribute('data-siren-state') === 'idle');
-                if (anyIdle) {
-                    setSirenButtonState('alerting');
-                } else {
-                    // Keep their current respective states but ensure popup is up
-                    sirenBtns.forEach(b => {
-                        const s = b.getAttribute('data-siren-state');
-                        setSirenButtonState(s === 'idle' ? 'alerting' : s, b.getAttribute('data-target'));
-                    });
-                }
-            }
-        } else {
-            if (currentAlertStationId === stationId) {
-                currentAlertStationId = null;
-            }
-            setSirenButtonState('idle'); // Ẩn popup nếu trạm bình thường hoặc offline
+        // ✅ Siren popup logic — có thể bị skip bởi caller (ví dụ: Track button tự quản lý)
+        if (!skipSiren) {
+            _showSirenIfAlerting(stationId, data);
         }
 
     } catch (e) {
@@ -817,6 +895,9 @@ function updateSidebarUI(data) {
         setText('val-imu-roll', '--°');
         setText('val-imu-pitch', '--°');
         setText('val-imu-yaw', '--°');
+        setText('val-imu-delta-roll', '--°');
+        setText('val-imu-delta-pitch', '--°');
+        setText('val-imu-delta-yaw', '--°');
 
         // ✅ Khi offline, nút tắt còi chuyển xám (idle)
         setSirenButtonState('idle');
@@ -834,9 +915,14 @@ function updateSidebarUI(data) {
         const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
         setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
 
-        setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-        setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-        setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+        setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
+        setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
+        setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
+
+        // ✅ Delta values (secondary display)
+        setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
+        setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
+        setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
 
         // ✅ Battery Voltage: hiển thị nếu có giá trị > 0
         const batteryContainer = document.getElementById('battery-container');
@@ -1237,10 +1323,11 @@ function filterStations(searchTerm) {
 
 /**
  * Cập nhật trạng thái nút còi
- * @param {'idle'|'alerting'|'muted'} state
+ * @param {'idle'|'alerting'|'muted'|'offline'} state
  *   - idle: xám, disabled (mặc định, chưa có cảnh báo)
  *   - alerting: đỏ, nhấp nháy (đang cảnh báo, bấm để tắt còi)
  *   - muted: xanh (đã tắt còi, bấm để bật lại)
+ *   - offline: xám đen, disabled (thiết bị Pi mất kết nối)
  */
 function setSirenButtonState(state, target = null) {
     const popup = document.getElementById('siren-bottom-popup');
@@ -1258,27 +1345,40 @@ function setSirenButtonState(state, target = null) {
             case 'idle':
                 btn.disabled = true;
                 btn.classList.add('disabled', 'btn-danger');
-                btn.classList.remove('btn-success');
+                btn.classList.remove('btn-success', 'btn-secondary');
+                btn.style.opacity = '1';
                 btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${iconBase}`;
                 break;
             case 'alerting':
                 btn.disabled = false;
-                btn.classList.remove('disabled', 'btn-success');
+                btn.classList.remove('disabled', 'btn-success', 'btn-secondary');
                 btn.classList.add('btn-danger');
+                btn.style.opacity = '1';
                 btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>Mute ${iconBase}`;
                 break;
             case 'muted':
                 btn.disabled = false;
-                btn.classList.remove('disabled', 'btn-danger');
+                btn.classList.remove('disabled', 'btn-danger', 'btn-secondary');
                 btn.classList.add('btn-success');
+                btn.style.opacity = '1';
                 btn.innerHTML = `<i class="bi bi-volume-up-fill me-1"></i>On ${iconBase}`;
+                break;
+            case 'offline':
+                btn.disabled = true;
+                btn.classList.remove('btn-danger', 'btn-success');
+                btn.classList.add('btn-secondary', 'disabled');
+                btn.style.opacity = '0.6';
+                btn.innerHTML = `<i class="bi bi-plug-fill me-1"></i>Offline`;
                 break;
         }
     });
 
-    // Check if any button is NOT idle, if so, show popup
+    // Check if any button is NOT idle and NOT offline, if so, show popup
     const allBtns = document.querySelectorAll('.btn-siren-toggle');
-    const anyActive = Array.from(allBtns).some(b => b.getAttribute('data-siren-state') !== 'idle');
+    const anyActive = Array.from(allBtns).some(b => {
+        const s = b.getAttribute('data-siren-state');
+        return s !== 'idle' && s !== 'offline';
+    });
 
     if (!anyActive) {
         popup.style.bottom = '-120px';
@@ -1372,35 +1472,41 @@ function playAlertSound() {
 
 // Setup event listeners cho Alert Banner
 document.addEventListener('DOMContentLoaded', () => {
-    // Nút "Theo dõi"
+    // Nút "Theo dõi" → Zoom vào trạm + ẩn banner + hiện siren popup sau khi zoom xong
     const btnFollow = document.getElementById('btn-alert-follow');
     if (btnFollow) {
-        btnFollow.addEventListener('click', () => {
-            if (currentAlertStationId) {
-                // Zoom vào trạm (banner vẫn hiện, chỉ tắt khi bấm "X")
-                selectStation(currentAlertStationId);
+        btnFollow.addEventListener('click', async () => {
+            if (!currentAlertStationId) return;
 
-                // Nếu có marker, zoom vào nó
-                if (markers[currentAlertStationId]) {
-                    map.flyTo(markers[currentAlertStationId].getLatLng(), 16, {
-                        duration: 1.5
-                    });
-                }
+            const alertStationId = currentAlertStationId;
+
+            // 1. Ẩn banner ngay
+            const banner = document.getElementById('alert-banner');
+            if (banner) banner.classList.remove('show');
+
+            // 2. Load dữ liệu trạm (skip zoom và siren — tự quản lý bên dưới)
+            await selectStation(alertStationId, { skipZoom: true, skipSiren: true });
+
+            // 3. Zoom vào trạm
+            if (markers[alertStationId]) {
+                map.flyTo(markers[alertStationId].getLatLng(), 16, { duration: 1.5 });
+
+                // 4. Hiện siren popup SAU KHI zoom xong
+                map.once('moveend', () => {
+                    if (currentStationData && currentStationData.id === alertStationId) {
+                        _showSirenIfAlerting(alertStationId, currentStationData);
+                    }
+                });
             }
         });
     }
 
-    // Nút "Đóng"
+    // Nút "Đóng" → Chỉ ẩn banner, không zoom, không ảnh hưởng gì khác
     const btnDismiss = document.getElementById('btn-alert-dismiss');
     if (btnDismiss) {
         btnDismiss.addEventListener('click', () => {
-            document.getElementById('alert-banner').classList.remove('show');
-            // ✅ Reset nút còi về idle khi đóng banner
-            setSirenButtonState('idle');
-            // ✅ Khi đóng banner, khôi phục marker về màu gốc
-            if (currentAlertStationId) {
-                clearMarkerAlert(currentAlertStationId);
-            }
+            const banner = document.getElementById('alert-banner');
+            if (banner) banner.classList.remove('show');
         });
     }
 });

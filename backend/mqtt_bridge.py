@@ -292,6 +292,7 @@ class MQTTBridge:
         # Gửi ngay lập tức sau khi phân tích xong
         # ---------------------------------------------------------
         is_dangerous = False
+        is_just_resolved = False
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
             is_dangerous = True
             try:
@@ -360,6 +361,7 @@ class MQTTBridge:
                         )
                         if res.rowcount > 0:
                             await db_data.commit()
+                            is_just_resolved = True
                             logger.info(f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}). Sending stop_siren command...")
                             
                             # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
@@ -370,13 +372,17 @@ class MQTTBridge:
                 logger.error(f"❌ Error auto-resolving alerts: {e}")
 
         # 3. SAVE TO DB (THROTTLED)
-        # ✅ CHỈ LƯU KHI: Alert XỬy ra HOẶC đã đủ chu kỳ lưu
+        # ✅ CHỈ LƯU KHI: Alert xảy ra HOẶC vừa resolve alert HOẶC đã đủ chu kỳ lưu
         save_data_now = False
 
         if is_dangerous:
             # ✅ ALERT → Lưu ngay lập tức / không quan tâm chu kỳ
             save_data_now = True
             logger.warning(f"⚠️ [FORCED SAVE] Alert detected - saving immediately")
+        elif is_just_resolved:
+            # ✅ VỪA RESOLVE ALERT → Lưu ngay để DB có dữ liệu an toàn mới nhất
+            save_data_now = True
+            logger.info(f"💾 [RESOLVE SAVE] Alert just resolved - saving safe data for station {station_id}")
         else:
             # ✅ KIỂM TRA CHU KỲ LƯU
             throttle_key_station = f"{station_id}_{sensor_type}"
