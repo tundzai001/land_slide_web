@@ -4,7 +4,7 @@ import math
 import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,42 @@ class LandslideAnalyzer:
             return float(default)
 
     # =========================================================================
-    # PHÂN TÍCH DÀI HẠN (Long-term Analysis)
+    # PHÂN TÍCH DÀI HẠN (Long-term Analysis) - IMPROVED
     # =========================================================================
+
+    def _filter_outliers_iqr(self, data_points: List[Dict], field: str = 'pos_e') -> List[Dict]:
+        """Loại bỏ outlier bằng IQR trên trường pos_e/pos_n/pos_u."""
+        if len(data_points) < 4:
+            return data_points
+
+        values = np.array([p['data'].get(field, 0) for p in data_points])
+        q1, q3 = np.percentile(values, [25, 75])
+        iqr = q3 - q1
+        lower = q1 - 3.0 * iqr
+        upper = q3 + 3.0 * iqr
+
+        filtered = []
+        for i, p in enumerate(data_points):
+            v = values[i]
+            if lower <= v <= upper:
+                filtered.append(p)
+
+        removed = len(data_points) - len(filtered)
+        if removed > 0:
+            logger.info(f"🧹 Outlier filter ({field}): removed {removed}/{len(data_points)} points")
+        return filtered
+
+    def _filter_gnss_quality(self, data_points: List[Dict], min_fix: int = 4) -> List[Dict]:
+        """Lọc dữ liệu GNSS theo chất lượng fix (RTK Fixed = 4+)."""
+        filtered = [
+            p for p in data_points
+            if p['data'].get('fix_quality', min_fix) >= min_fix
+        ]
+        removed = len(data_points) - len(filtered)
+        if removed > 0:
+            logger.info(f"🛰️ Quality filter: removed {removed}/{len(data_points)} low-quality fixes")
+        return filtered if len(filtered) >= 2 else data_points
+
     def analyze_long_term_velocity(
         self,
         station_id: int,
@@ -39,36 +73,58 @@ class LandslideAnalyzer:
                 return {"status": "insufficient_data", "message": "Cần ít nhất 2 điểm dữ liệu."}
 
             sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
+
+            # --- Bước 1: Lọc chất lượng GNSS fix ---
+            sorted_data = self._filter_gnss_quality(sorted_data)
+
+            # --- Bước 2: Loại bỏ outlier bằng IQR trên E, N, U ---
+            for field in ['pos_e', 'pos_n', 'pos_u']:
+                sorted_data = self._filter_outliers_iqr(sorted_data, field)
+
+            if len(sorted_data) < 2:
+                return {"status": "insufficient_data", "message": "Không đủ dữ liệu sau khi lọc outlier."}
+
             first_point = sorted_data[0]
             last_point = sorted_data[-1]
-            
+
             duration_days = (last_point['timestamp'] - first_point['timestamp']) / 86400.0
             if duration_days < 0.1:
                 return {"status": "insufficient_data", "message": "Thời gian đo quá ngắn."}
 
+            # --- Bước 3: Tính cumulative displacement (tổng quỹ đạo) ---
+            cumulative_displacement_m = 0.0
+            for i in range(1, len(sorted_data)):
+                prev_data = sorted_data[i - 1]['data']
+                curr_data = sorted_data[i]['data']
+                de = curr_data.get('pos_e', 0) - prev_data.get('pos_e', 0)
+                dn = curr_data.get('pos_n', 0) - prev_data.get('pos_n', 0)
+                du = curr_data.get('pos_u', 0) - prev_data.get('pos_u', 0)
+                cumulative_displacement_m += math.sqrt(de**2 + dn**2 + du**2)
+
+            # Net displacement (first → last) cho so sánh
             first_data = first_point['data']
             last_data = last_point['data']
-            
             delta_e = last_data.get('pos_e', 0) - first_data.get('pos_e', 0)
             delta_n = last_data.get('pos_n', 0) - first_data.get('pos_n', 0)
             delta_u = last_data.get('pos_u', 0) - first_data.get('pos_u', 0)
-            
-            total_displacement_m = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2)
-            total_displacement_mm = total_displacement_m * 1000
+            net_displacement_m = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2)
 
-            velocity_m_per_day = total_displacement_m / duration_days
-            velocity_mm_per_day = velocity_m_per_day * 1000
+            total_displacement_mm = cumulative_displacement_m * 1000
+            net_displacement_mm = net_displacement_m * 1000
+
+            velocity_mm_per_day = total_displacement_mm / duration_days
             velocity_mm_per_year = velocity_mm_per_day * 365
-            velocity_mm_per_second = velocity_m_per_day / 86400 * 1000
+            velocity_mm_per_second = velocity_mm_per_day / 86400
 
             classification = self._classify_velocity_extended(
-                velocity_mm_per_second, 
+                velocity_mm_per_second,
                 velocity_mm_per_day,
                 velocity_mm_per_year,
                 config
             )
 
-            trend = self._detect_trend(sorted_data)
+            # --- Bước 4: Trend detection bằng sliding window velocity ---
+            trend = self._detect_displacement_trend(sorted_data)
 
             risk_level, warning_message = self._assess_long_term_risk(
                 classification,
@@ -76,21 +132,38 @@ class LandslideAnalyzer:
                 velocity_mm_per_year
             )
 
+            # --- Bước 5: Inverse Velocity Method (Fukuzono) ---
+            inverse_velocity = self._inverse_velocity_analysis(sorted_data)
+
+            # Nâng risk nếu Fukuzono dự báo sụp đổ gần
+            if inverse_velocity.get('predicted_failure'):
+                days_to_failure = inverse_velocity.get('days_to_failure', 999)
+                if days_to_failure <= 7:
+                    risk_level = "EXTREME"
+                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+                elif days_to_failure <= 30:
+                    if risk_level in ("LOW", "MEDIUM"):
+                        risk_level = "HIGH"
+                        warning_message = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+
             return {
                 "status": "success",
                 "analysis": {
                     "total_displacement_mm": round(total_displacement_mm, 2),
+                    "net_displacement_mm": round(net_displacement_mm, 2),
                     "velocity_mm_year": round(velocity_mm_per_year, 2),
                     "velocity_mm_day": round(velocity_mm_per_day, 4),
                     "velocity_mm_second": round(velocity_mm_per_second, 6),
                     "classification": classification,
                     "trend": trend,
                     "duration_days": round(duration_days, 1),
+                    "data_points_used": len(sorted_data),
                     "start_date": datetime.fromtimestamp(first_point['timestamp']).isoformat(),
                     "end_date": datetime.fromtimestamp(last_point['timestamp']).isoformat()
                 },
                 "risk_level": risk_level,
-                "warning_message": warning_message
+                "warning_message": warning_message,
+                "inverse_velocity": inverse_velocity
             }
 
         except Exception as e:
@@ -140,25 +213,362 @@ class LandslideAnalyzer:
         
         return "Stable"
 
-    def _detect_trend(self, sorted_data: List[Dict]) -> str:
-        if len(sorted_data) < 5: return "stable"
+    def _detect_displacement_trend(self, sorted_data: List[Dict], window_size: int = 5) -> str:
+        """
+        Phát hiện xu hướng bằng sliding window velocity tính từ displacement thực,
+        thay vì dùng speed_2d tức thời nhiễu cao.
+        """
+        if len(sorted_data) < window_size * 2:
+            return "stable"
         try:
-            velocities = [
-                point['data'].get('speed_2d', 0) 
-                for point in sorted_data 
-                if 'speed_2d' in point['data']
-            ]
-            if len(velocities) < 5: return "stable"
-            
-            x = np.arange(len(velocities))
-            y = np.array(velocities)
+            # Tính velocity trung bình mỗi window (mm/day)
+            window_velocities = []
+            for i in range(window_size, len(sorted_data)):
+                start = sorted_data[i - window_size]
+                end = sorted_data[i]
+                dt_days = (end['timestamp'] - start['timestamp']) / 86400.0
+                if dt_days < 0.001:
+                    continue
+                de = end['data'].get('pos_e', 0) - start['data'].get('pos_e', 0)
+                dn = end['data'].get('pos_n', 0) - start['data'].get('pos_n', 0)
+                du = end['data'].get('pos_u', 0) - start['data'].get('pos_u', 0)
+                disp_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
+                vel = disp_mm / dt_days
+                window_velocities.append(vel)
+
+            if len(window_velocities) < 5:
+                return "stable"
+
+            x = np.arange(len(window_velocities))
+            y = np.array(window_velocities)
+            # Chuẩn hóa slope theo mean velocity để có ý nghĩa tương đối
             slope = np.polyfit(x, y, 1)[0]
-            
-            if slope > 0.0001: return "accelerating"
-            elif slope < -0.0001: return "decelerating"
-            else: return "stable"
+            mean_vel = np.mean(y)
+            if mean_vel > 0:
+                relative_slope = slope / mean_vel
+            else:
+                relative_slope = 0
+
+            if relative_slope > 0.01:
+                return "accelerating"
+            elif relative_slope < -0.01:
+                return "decelerating"
+            else:
+                return "stable"
         except Exception:
             return "stable"
+
+    def _inverse_velocity_analysis(self, sorted_data: List[Dict], window_days: float = 3.0) -> Dict[str, Any]:
+        """
+        Phương pháp Inverse Velocity (Fukuzono/Saito) để dự báo thời điểm sụp đổ.
+        Nếu 1/v giảm tuyến tính về 0, đó là dấu hiệu sắp sụp đổ.
+        """
+        result = {
+            "available": False,
+            "predicted_failure": False,
+            "message": ""
+        }
+
+        if len(sorted_data) < 10:
+            result["message"] = "Cần ít nhất 10 điểm dữ liệu cho phân tích Inverse Velocity."
+            return result
+
+        try:
+            # Tính daily velocity (mm/day) bằng sliding window
+            window_sec = window_days * 86400
+            daily_velocities = []  # (timestamp, velocity_mm_day)
+
+            for i in range(len(sorted_data)):
+                # Tìm các điểm trong window trước đó
+                t_end = sorted_data[i]['timestamp']
+                t_start = t_end - window_sec
+                window_points = [p for p in sorted_data if t_start <= p['timestamp'] <= t_end]
+                if len(window_points) < 2:
+                    continue
+
+                first_wp = window_points[0]
+                last_wp = window_points[-1]
+                dt_days = (last_wp['timestamp'] - first_wp['timestamp']) / 86400.0
+                if dt_days < 0.1:
+                    continue
+
+                de = last_wp['data'].get('pos_e', 0) - first_wp['data'].get('pos_e', 0)
+                dn = last_wp['data'].get('pos_n', 0) - first_wp['data'].get('pos_n', 0)
+                du = last_wp['data'].get('pos_u', 0) - first_wp['data'].get('pos_u', 0)
+                disp_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
+                vel = disp_mm / dt_days
+
+                if vel > 0.001:  # Bỏ qua velocity gần 0
+                    daily_velocities.append((t_end, vel))
+
+            if len(daily_velocities) < 5:
+                result["message"] = "Không đủ dữ liệu velocity > 0 cho Inverse Velocity."
+                return result
+
+            # Tính 1/v
+            timestamps = np.array([dv[0] for dv in daily_velocities], dtype=float)
+            velocities = np.array([dv[1] for dv in daily_velocities])
+            inv_velocities = 1.0 / velocities
+
+            # Chuẩn hóa timestamps (ngày từ điểm đầu)
+            t0 = timestamps[0]
+            t_days = (timestamps - t0) / 86400.0
+
+            # Linear regression trên 1/v
+            coeffs = np.polyfit(t_days, inv_velocities, 1)
+            slope_inv_v = coeffs[0]
+            intercept_inv_v = coeffs[1]
+
+            # Tính R² để đánh giá độ tin cậy
+            inv_v_predicted = np.polyval(coeffs, t_days)
+            ss_res = np.sum((inv_velocities - inv_v_predicted) ** 2)
+            ss_tot = np.sum((inv_velocities - np.mean(inv_velocities)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+            result["available"] = True
+            result["r_squared"] = round(r_squared, 4)
+            result["slope"] = round(slope_inv_v, 6)
+
+            # Time-series cho chart
+            result["time_series"] = {
+                "labels": [datetime.fromtimestamp(ts).strftime('%d/%m') for ts in timestamps],
+                "inverse_velocity": [round(float(iv), 4) for iv in inv_velocities],
+                "trend_line": [round(float(v), 4) for v in inv_v_predicted]
+            }
+
+            # Nếu slope < 0 (1/v đang giảm) VÀ R² đủ cao → dự báo failure
+            if slope_inv_v < -0.0001 and r_squared > 0.6:
+                # Thời điểm 1/v = 0: t_failure = -intercept / slope
+                t_failure_days = -intercept_inv_v / slope_inv_v
+                t_last_days = t_days[-1]
+                days_to_failure = t_failure_days - t_last_days
+
+                if 0 < days_to_failure < 365:
+                    result["predicted_failure"] = True
+                    result["days_to_failure"] = round(days_to_failure, 1)
+                    failure_timestamp = timestamps[-1] + days_to_failure * 86400
+                    result["predicted_failure_date"] = datetime.fromtimestamp(failure_timestamp).isoformat()
+                    result["message"] = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (R²={r_squared:.2f})"
+                    result["confidence"] = "high" if r_squared > 0.85 else "medium"
+                else:
+                    result["message"] = "1/v đang giảm nhưng chưa hội tụ trong 1 năm tới."
+            elif slope_inv_v < 0:
+                result["message"] = "1/v đang giảm nhưng R² thấp — cần theo dõi thêm."
+            else:
+                result["message"] = "Không có dấu hiệu hội tụ (1/v ổn định hoặc tăng)."
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in inverse velocity analysis: {e}", exc_info=True)
+            result["message"] = f"Lỗi phân tích: {str(e)}"
+            return result
+
+    # =========================================================================
+    # PHÂN TÍCH TƯƠNG QUAN MƯA - DỊCH CHUYỂN
+    # =========================================================================
+    def analyze_rainfall_displacement_correlation(
+        self,
+        gnss_data: List[Dict[str, Any]],
+        rain_data: List[Dict[str, Any]],
+        window_days: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Phân tích tương quan giữa lượng mưa tích lũy và dịch chuyển.
+        Phương pháp: So sánh daily rainfall vs daily displacement.
+        """
+        result = {
+            "available": False,
+            "message": ""
+        }
+
+        if not gnss_data or not rain_data or len(gnss_data) < 2 or len(rain_data) < 2:
+            result["message"] = "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+            return result
+
+        try:
+            # Aggregate daily displacement
+            sorted_gnss = sorted(gnss_data, key=lambda x: x['timestamp'])
+            sorted_rain = sorted(rain_data, key=lambda x: x['timestamp'])
+
+            daily_disp = OrderedDict()  # day_key -> cumulative_disp_mm
+            cumulative = 0.0
+            for i in range(1, len(sorted_gnss)):
+                prev = sorted_gnss[i - 1]['data']
+                curr = sorted_gnss[i]['data']
+                de = curr.get('pos_e', 0) - prev.get('pos_e', 0)
+                dn = curr.get('pos_n', 0) - prev.get('pos_n', 0)
+                du = curr.get('pos_u', 0) - prev.get('pos_u', 0)
+                cumulative += math.sqrt(de**2 + dn**2 + du**2) * 1000
+                day_key = datetime.fromtimestamp(sorted_gnss[i]['timestamp']).strftime('%Y-%m-%d')
+                daily_disp[day_key] = cumulative
+
+            # Aggregate daily rainfall (tổng mm/ngày)
+            daily_rain = OrderedDict()
+            for point in sorted_rain:
+                day_key = datetime.fromtimestamp(point['timestamp']).strftime('%Y-%m-%d')
+                rain_val = point['data'].get('rainfall_mm', point['data'].get('rain_mm', point['data'].get('rainfall', 0)))
+                if day_key not in daily_rain:
+                    daily_rain[day_key] = 0.0
+                daily_rain[day_key] += float(rain_val) if rain_val else 0
+
+            # Tính cumulative rainfall
+            cumulative_rain = OrderedDict()
+            cum_r = 0.0
+            for day, val in daily_rain.items():
+                cum_r += val
+                cumulative_rain[day] = cum_r
+
+            # Match days
+            common_days = sorted(set(daily_disp.keys()) & set(cumulative_rain.keys()))
+            if len(common_days) < 5:
+                result["message"] = f"Chỉ có {len(common_days)} ngày chung — cần ít nhất 5."
+                return result
+
+            disp_values = np.array([daily_disp[d] for d in common_days])
+            rain_values = np.array([cumulative_rain[d] for d in common_days])
+
+            # Pearson correlation
+            if np.std(disp_values) > 0 and np.std(rain_values) > 0:
+                correlation = float(np.corrcoef(disp_values, rain_values)[0, 1])
+            else:
+                correlation = 0.0
+
+            # Đánh giá mức tương quan
+            abs_corr = abs(correlation)
+            if abs_corr >= 0.8:
+                strength = "Rất mạnh"
+                assessment = "Mưa có ảnh hưởng rõ rệt đến dịch chuyển đất."
+            elif abs_corr >= 0.6:
+                strength = "Mạnh"
+                assessment = "Mưa có tương quan đáng kể với dịch chuyển."
+            elif abs_corr >= 0.4:
+                strength = "Trung bình"
+                assessment = "Mưa có ảnh hưởng nhất định đến dịch chuyển."
+            elif abs_corr >= 0.2:
+                strength = "Yếu"
+                assessment = "Tương quan mưa-dịch chuyển yếu."
+            else:
+                strength = "Không đáng kể"
+                assessment = "Mưa không ảnh hưởng rõ đến dịch chuyển trong giai đoạn này."
+
+            # Daily rainfall (non-cumulative) cho chart
+            daily_rain_values = [daily_rain.get(d, 0) for d in common_days]
+
+            result["available"] = True
+            result["correlation"] = round(correlation, 4)
+            result["strength"] = strength
+            result["assessment"] = assessment
+            result["common_days"] = len(common_days)
+            result["time_series"] = {
+                "labels": [datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m') for d in common_days],
+                "cumulative_displacement_mm": [round(daily_disp[d], 2) for d in common_days],
+                "cumulative_rainfall_mm": [round(cumulative_rain[d], 1) for d in common_days],
+                "daily_rainfall_mm": [round(v, 1) for v in daily_rain_values]
+            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in rainfall-displacement correlation: {e}", exc_info=True)
+            result["message"] = f"Lỗi: {str(e)}"
+            return result
+
+    # =========================================================================
+    # PHÂN TÍCH ĐA CỬA SỔ (Multi-Window Analysis)
+    # =========================================================================
+    def analyze_multi_window(
+        self,
+        station_id: int,
+        historical_data: List[Dict[str, Any]],
+        config: Dict,
+        windows: List[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Phân tích trên nhiều cửa sổ thời gian (7, 30, 90 ngày) để phát hiện
+        sự thay đổi đột ngột giữa xu hướng ngắn hạn và dài hạn.
+        """
+        if windows is None:
+            windows = [7, 30, 90]
+
+        if not historical_data or len(historical_data) < 2:
+            return {"available": False, "message": "Không đủ dữ liệu."}
+
+        try:
+            sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
+            latest_ts = sorted_data[-1]['timestamp']
+
+            window_results = []
+            for w_days in windows:
+                cutoff = latest_ts - (w_days * 86400)
+                window_data = [p for p in sorted_data if p['timestamp'] >= cutoff]
+
+                if len(window_data) < 2:
+                    window_results.append({
+                        "window_days": w_days,
+                        "status": "insufficient_data",
+                        "velocity_mm_day": None,
+                        "trend": None
+                    })
+                    continue
+
+                # Tính cumulative displacement trong window
+                cumulative = 0.0
+                for i in range(1, len(window_data)):
+                    prev = window_data[i - 1]['data']
+                    curr = window_data[i]['data']
+                    de = curr.get('pos_e', 0) - prev.get('pos_e', 0)
+                    dn = curr.get('pos_n', 0) - prev.get('pos_n', 0)
+                    du = curr.get('pos_u', 0) - prev.get('pos_u', 0)
+                    cumulative += math.sqrt(de**2 + dn**2 + du**2) * 1000
+
+                duration = (window_data[-1]['timestamp'] - window_data[0]['timestamp']) / 86400.0
+                vel_mm_day = cumulative / duration if duration > 0 else 0
+                trend = self._detect_displacement_trend(window_data)
+
+                window_results.append({
+                    "window_days": w_days,
+                    "status": "success",
+                    "velocity_mm_day": round(vel_mm_day, 4),
+                    "velocity_mm_year": round(vel_mm_day * 365, 2),
+                    "displacement_mm": round(cumulative, 2),
+                    "data_points": len(window_data),
+                    "trend": trend
+                })
+
+            # Phát hiện acceleration qua so sánh windows
+            acceleration_alert = None
+            valid_windows = [w for w in window_results if w['status'] == 'success' and w['velocity_mm_day'] is not None]
+
+            if len(valid_windows) >= 2:
+                # So sánh window ngắn nhất vs dài nhất
+                short_window = valid_windows[0]
+                long_window = valid_windows[-1]
+
+                if long_window['velocity_mm_day'] > 0:
+                    ratio = short_window['velocity_mm_day'] / long_window['velocity_mm_day']
+                    if ratio > 3.0:
+                        acceleration_alert = {
+                            "type": "rapid_acceleration",
+                            "message": f"⚠️ Vận tốc {short_window['window_days']} ngày gần đây gấp {ratio:.1f}x so với {long_window['window_days']} ngày",
+                            "ratio": round(ratio, 2)
+                        }
+                    elif ratio > 1.5:
+                        acceleration_alert = {
+                            "type": "moderate_acceleration",
+                            "message": f"Vận tốc {short_window['window_days']} ngày tăng {ratio:.1f}x so với {long_window['window_days']} ngày",
+                            "ratio": round(ratio, 2)
+                        }
+
+            return {
+                "available": True,
+                "windows": window_results,
+                "acceleration_alert": acceleration_alert
+            }
+
+        except Exception as e:
+            logger.error(f"Error in multi-window analysis: {e}", exc_info=True)
+            return {"available": False, "message": f"Lỗi: {str(e)}"}
 
     def _assess_long_term_risk(self, classification: str, trend: str, vel_year: float) -> tuple:
         cls_upper = classification.upper()
