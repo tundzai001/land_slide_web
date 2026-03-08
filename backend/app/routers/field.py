@@ -200,6 +200,35 @@ async def register_pi_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/heartbeat")
+async def heartbeat_pi_device(
+    payload: PiRegisterRequest,
+    db: AsyncSession = Depends(get_config_db)
+):
+    """
+    Lightweight keep-alive used by Pi devices in their background loop.
+    Avoids spamming the main register logs and bypasses heavy DB creations.
+    """
+    try:
+        res = await db.execute(
+            select(PiDevice).where(PiDevice.serial == payload.serial)
+        )
+        pi = res.scalar_one_or_none()
+        current_time = int(time.time())
+
+        if pi:
+            pi.last_seen = current_time
+            await db.commit()
+            return {"status": "ok", "message": "Heartbeat accepted"}
+        else:
+            # If deleted or not found, tell it to register again
+            return {"status": "error", "message": "Not registered"}
+
+    except Exception:
+        # Ignore errors for heartbeats to prevent log spam
+        raise HTTPException(status_code=500, detail="Heartbeat failed")
+
+
 @router.get("/pi-devices")
 async def list_pi_devices(
     db: AsyncSession = Depends(get_config_db),

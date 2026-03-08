@@ -870,7 +870,7 @@ def main():
     # ✅ Heartbeat: cập nhật last_seen định kỳ
     def _heartbeat_loop():
         while True:
-            time.sleep(15)
+            time.sleep(120)  # Heartbeat every 2 minutes instead of 15s to reduce log spam
             try:
                 import requests as _req
                 serial = DEVICE_CODE or ""
@@ -880,7 +880,7 @@ def main():
                 prefix = "win" if _sys.platform.startswith("win") else "pi"
                 name = f"{'Win' if prefix == 'win' else 'Pi'}-{serial[-8:]}"
                 _req.post(
-                    f"{BACKEND_URL}/api/field/register",
+                    f"{BACKEND_URL}/api/field/heartbeat",
                     json={"serial": serial, "name": name, "device_type": prefix},
                     timeout=10
                 )
