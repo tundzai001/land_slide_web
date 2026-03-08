@@ -1129,22 +1129,50 @@ async def get_long_term_analysis(
                 window_days=days
             )
             
-            # Tạo time-series GNSS (trung bình theo ngày) cho chart
+            # Tạo time-series GNSS (trung bình theo ngày) cho chart & 3D
             if gnss_analysis.get("status") == "success":
                 from collections import OrderedDict
                 from datetime import datetime as dt
                 daily_gnss = OrderedDict()
+                
+                # Biến lưu trữ giá trị của ngày đầu tiên để tính delta
+                first_e, first_n, first_u = None, None, None
+
                 for point in historical_gnss:
                     day_key = dt.fromtimestamp(point['timestamp']).strftime('%d/%m')
-                    disp = point['data'].get('total_displacement_mm',
-                           point['data'].get('displacement_mm', 0))
+                    data = point['data']
+                    
+                    disp = data.get('total_displacement_mm', data.get('displacement_mm', 0))
+                    # Lấy pos E, N, U (cộng dồn hoặc base)
+                    e = data.get('pos_e', 0)
+                    n = data.get('pos_n', 0)
+                    u = data.get('pos_u', 0)
+                    
+                    if first_e is None:
+                        first_e, first_n, first_u = e, n, u
+
                     if day_key not in daily_gnss:
-                        daily_gnss[day_key] = []
-                    daily_gnss[day_key].append(float(disp))
+                        daily_gnss[day_key] = {'disp': [], 'e': [], 'n': [], 'u': []}
+                    
+                    daily_gnss[day_key]['disp'].append(float(disp))
+                    # Tính delta so với điểm đầu tiên (nếu data lưu raw coordinate)
+                    # hoặc nếu data đã tự lưu delta thì bỏ qua trừ
+                    
+                    # Chúng ta sẽ trả về delta (mm) để 3D dễ vẽ
+                    delta_e_mm = (e - first_e) * 1000
+                    delta_n_mm = (n - first_n) * 1000
+                    delta_u_mm = (u - first_u) * 1000
+                    
+                    daily_gnss[day_key]['e'].append(delta_e_mm)
+                    daily_gnss[day_key]['n'].append(delta_n_mm)
+                    daily_gnss[day_key]['u'].append(delta_u_mm)
                 
                 gnss_analysis["time_series"] = {
                     "labels": list(daily_gnss.keys()),
-                    "displacement": [round(sum(v) / len(v), 2) for v in daily_gnss.values()]
+                    "displacement": [round(sum(v['disp']) / len(v['disp']), 2) for v in daily_gnss.values()],
+                    "e": [round(sum(v['e']) / len(v['e']), 2) for v in daily_gnss.values()],
+                    "n": [round(sum(v['n']) / len(v['n']), 2) for v in daily_gnss.values()],
+                    "u": [round(sum(v['u']) / len(v['u']), 2) for v in daily_gnss.values()]
                 }
             
             result["gnss"] = gnss_analysis

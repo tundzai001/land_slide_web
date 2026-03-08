@@ -1245,6 +1245,265 @@ function renderLongTermAnalysis(data) {
 
     // === Combined Chart ===
     renderCombinedLongTermChart(data);
+
+    // === 3D Simulations ===
+    init3DVisualizations(data);
+}
+
+// Global references for 3D logic
+let gnssScene, gnssCamera, gnssRenderer, gnssControls, gnssAnimationId;
+let imuScene, imuCamera, imuRenderer, imuControls, imuAnimationId;
+
+async function init3DVisualizations(data) {
+    try {
+        const THREE = await import('three');
+        const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+
+        // GNSS
+        if (data.gnss && data.gnss.status === 'success' && data.gnss.time_series) {
+            document.getElementById('gnss-3d-loading').style.display = 'block';
+            setTimeout(() => {
+                initGNSS3D(data.gnss.time_series, THREE, OrbitControls);
+                document.getElementById('gnss-3d-loading').style.display = 'none';
+            }, 50);
+        } else {
+            const cGnss = document.getElementById('container-3d-gnss');
+            if (cGnss) cGnss.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu GNSS 3D</div>';
+        }
+
+        // IMU
+        if (data.imu && data.imu.status === 'success' && data.imu.time_series) {
+            document.getElementById('imu-3d-loading').style.display = 'block';
+            setTimeout(() => {
+                initIMU3D(data.imu.time_series, THREE, OrbitControls);
+                document.getElementById('imu-3d-loading').style.display = 'none';
+            }, 50);
+        } else {
+            const cImu = document.getElementById('container-3d-imu');
+            if (cImu) cImu.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu IMU 3D</div>';
+        }
+
+    } catch (error) {
+        console.error("Failed to load Three.js:", error);
+    }
+}
+
+function initGNSS3D(timeSeries, THREE, OrbitControls) {
+    const container = document.getElementById('container-3d-gnss');
+    if (!container) return;
+
+    // Cleanup previous
+    if (gnssAnimationId) cancelAnimationFrame(gnssAnimationId);
+    container.innerHTML = '';
+
+    gnssScene = new THREE.Scene();
+    gnssScene.background = new THREE.Color(0x0a0e17);
+
+    const aspect = container.clientWidth / container.clientHeight;
+    gnssCamera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+    gnssCamera.position.set(10, 10, 10);
+
+    gnssRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    gnssRenderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(gnssRenderer.domElement);
+
+    gnssControls = new OrbitControls(gnssCamera, gnssRenderer.domElement);
+    gnssControls.enableDamping = true;
+    gnssControls.dampingFactor = 0.05;
+
+    // Grid and Axes
+    const gridHelper = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+    gnssScene.add(gridHelper);
+
+    const axesHelper = new THREE.AxesHelper(5);
+    // Red=X(East), Green=Y(Up), Blue=Z(North)
+    gnssScene.add(axesHelper);
+
+    // Data points
+    const e = timeSeries.e || [];
+    const n = timeSeries.n || [];
+    const u = timeSeries.u || [];
+
+    // Default fallback if e,n,u missing
+    if (!e.length && timeSeries.displacement) {
+        // Just make a dummy random path if backend didn't update yet
+        for (let i = 0; i < timeSeries.displacement.length; i++) {
+            e.push(i * 2); n.push(Math.sin(i) * 2); u.push(Math.cos(i) * 2);
+        }
+    }
+
+    if (e.length === 0) return;
+
+    // Normalize scale to fit nicely in view
+    let maxVal = 0.01;
+    for (let i = 0; i < e.length; i++) {
+        maxVal = Math.max(maxVal, Math.abs(e[i]), Math.abs(n[i]), Math.abs(u[i]));
+    }
+    const scaleFactor = 5 / maxVal;
+
+    // Create Path Line
+    const points = [];
+    for (let i = 0; i < e.length; i++) {
+        // Note: in ThreeJS, Y is up. Data usually has E=X, N=Y, U=Z or similar.
+        // We'll map E -> X, U -> Y, N -> Z (standard right handed, Y up)
+        points.push(new THREE.Vector3(e[i] * scaleFactor, u[i] * scaleFactor, -n[i] * scaleFactor));
+    }
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color: 0x0ea5e9, linewidth: 2 });
+    const line = new THREE.Line(geometry, material);
+    gnssScene.add(line);
+
+    // Current point sphere
+    const sphereGeo = new THREE.SphereGeometry(0.3, 16, 16);
+    const sphereMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+    gnssScene.add(sphere);
+
+    let progress = 0;
+    const speed = 0.005;
+
+    function animate() {
+        gnssAnimationId = requestAnimationFrame(animate);
+
+        // Animate sphere along the path
+        if (points.length > 1) {
+            progress += speed;
+            if (progress >= 1) progress = 0; // loop
+
+            const totalSegments = points.length - 1;
+            const floatIndex = progress * totalSegments;
+            const index = Math.floor(floatIndex);
+            const remainder = floatIndex - index;
+
+            if (index < totalSegments) {
+                const p1 = points[index];
+                const p2 = points[index + 1];
+                sphere.position.lerpVectors(p1, p2, remainder);
+            }
+        } else if (points.length === 1) {
+            sphere.position.copy(points[0]);
+        }
+
+        gnssControls.update();
+        gnssRenderer.render(gnssScene, gnssCamera);
+    }
+    animate();
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        if (!container) return;
+        gnssCamera.aspect = container.clientWidth / container.clientHeight;
+        gnssCamera.updateProjectionMatrix();
+        gnssRenderer.setSize(container.clientWidth, container.clientHeight);
+    });
+}
+
+function initIMU3D(timeSeries, THREE, OrbitControls) {
+    const container = document.getElementById('container-3d-imu');
+    if (!container) return;
+
+    if (imuAnimationId) cancelAnimationFrame(imuAnimationId);
+    container.innerHTML = '';
+
+    imuScene = new THREE.Scene();
+    imuScene.background = new THREE.Color(0x0a0e17);
+
+    const aspect = container.clientWidth / container.clientHeight;
+    imuCamera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
+    imuCamera.position.set(5, 5, 8);
+
+    imuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(imuRenderer.domElement);
+
+    imuControls = new OrbitControls(imuCamera, imuRenderer.domElement);
+    imuControls.enableDamping = true;
+    imuControls.dampingFactor = 0.05;
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    imuScene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, 10, 5);
+    imuScene.add(dirLight);
+
+    // Grid Reference
+    const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    imuScene.add(grid);
+
+    // Sensor Block
+    const blockGeo = new THREE.BoxGeometry(2, 0.5, 3);
+    const materials = [
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // right
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // left
+        new THREE.MeshLambertMaterial({ color: 0xf59e0b }), // top
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // bottom
+        new THREE.MeshLambertMaterial({ color: 0x8b5cf6 }), // front
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // back
+    ];
+    const sensorBlock = new THREE.Mesh(blockGeo, materials);
+
+    // Add an arrow or label marker on top to indicate direction
+    const dirGeo = new THREE.ConeGeometry(0.2, 0.5, 16);
+    const dirMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const dirIndicator = new THREE.Mesh(dirGeo, dirMat);
+    dirIndicator.position.set(0, 0.3, 1);
+    dirIndicator.rotation.x = Math.PI / 2;
+    sensorBlock.add(dirIndicator);
+
+    imuScene.add(sensorBlock);
+
+    const rollData = timeSeries.roll || [];
+    const pitchData = timeSeries.pitch || [];
+    if (rollData.length === 0) return;
+
+    let progress = 0;
+    const speed = 0.005;
+
+    function animate() {
+        imuAnimationId = requestAnimationFrame(animate);
+
+        if (rollData.length > 1) {
+            progress += speed;
+            if (progress >= 1) progress = 0;
+
+            const total = rollData.length - 1;
+            const floatIndex = progress * total;
+            const index = Math.floor(floatIndex);
+            const remainder = floatIndex - index;
+
+            if (index < total) {
+                // Degrees to Radians
+                const r1 = rollData[index] * Math.PI / 180;
+                const r2 = rollData[index + 1] * Math.PI / 180;
+                const p1 = pitchData[index] * Math.PI / 180;
+                const p2 = pitchData[index + 1] * Math.PI / 180;
+
+                const currRoll = r1 + (r2 - r1) * remainder;
+                const currPitch = p1 + (p2 - p1) * remainder;
+
+                // Typical aviation/IMU mapping: X=Pitch, Z=Roll
+                sensorBlock.rotation.x = currPitch;
+                sensorBlock.rotation.z = currRoll;
+            }
+        } else if (rollData.length === 1) {
+            sensorBlock.rotation.x = pitchData[0] * Math.PI / 180;
+            sensorBlock.rotation.z = rollData[0] * Math.PI / 180;
+        }
+
+        imuControls.update();
+        imuRenderer.render(imuScene, imuCamera);
+    }
+    animate();
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        if (!container) return;
+        imuCamera.aspect = container.clientWidth / container.clientHeight;
+        imuCamera.updateProjectionMatrix();
+        imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    });
 }
 
 function renderImuLongTermSection(imuData) {
