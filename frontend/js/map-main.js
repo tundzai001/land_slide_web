@@ -500,6 +500,18 @@ function setupEventListeners() {
         });
     }
 
+    // Time range selector buttons for long-term analysis
+    const rangeSelector = document.getElementById('longterm-range-selector');
+    if (rangeSelector) {
+        rangeSelector.querySelectorAll('.btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                rangeSelector.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                loadLongTermAnalysis();
+            });
+        });
+    }
+
     // Nút tắt/bật còi trong sidebar
     const sirenToggleBtns = document.querySelectorAll('.btn-siren-toggle');
     sirenToggleBtns.forEach(sirenToggleBtn => {
@@ -1166,12 +1178,16 @@ async function loadLongTermAnalysis() {
 
     const stationId = currentStationData.id;
 
+    // Get selected days from range selector
+    const activeBtn = document.querySelector('#longterm-range-selector .btn.active');
+    const days = activeBtn ? parseInt(activeBtn.dataset.days) || 30 : 30;
+
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'none';
 
     try {
-        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?days=30`);
+        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?days=${days}`);
 
         if (!res.ok) {
             const error = await res.json();
@@ -1248,6 +1264,15 @@ function renderLongTermAnalysis(data) {
 
     // === 3D Simulations ===
     init3DVisualizations(data);
+
+    // === NEW: Inverse Velocity (Fukuzono) ===
+    renderInverseVelocitySection(data);
+
+    // === NEW: Rainfall-Displacement Correlation ===
+    renderRainfallCorrelationSection(data);
+
+    // === NEW: Multi-Window Analysis ===
+    renderMultiWindowSection(data);
 }
 
 // Global references for 3D logic
@@ -1713,6 +1738,275 @@ function showLongTermError(message) {
     if (errorMessageEl) {
         errorMessageEl.textContent = message;
     }
+}
+
+// =========================================================================
+// INVERSE VELOCITY (FUKUZONO) SECTION
+// =========================================================================
+function renderInverseVelocitySection(data) {
+    const section = document.getElementById('inverse-velocity-section');
+    if (!section) return;
+
+    const invVel = data.gnss?.inverse_velocity;
+    if (!invVel || !invVel.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Warning
+    const warningEl = document.getElementById('inv-vel-warning');
+    const warningTextEl = document.getElementById('inv-vel-warning-text');
+    if (invVel.predicted_failure) {
+        warningEl.style.display = 'block';
+        warningTextEl.textContent = invVel.message;
+    } else {
+        warningEl.style.display = 'none';
+    }
+
+    // Metrics
+    setText('inv-vel-prediction', invVel.predicted_failure
+        ? `⚠️ Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
+        : '✅ Không');
+    setText('inv-vel-days', invVel.predicted_failure
+        ? `~${invVel.days_to_failure} ngày`
+        : 'N/A');
+    setText('inv-vel-r2', invVel.r_squared !== undefined ? invVel.r_squared.toFixed(4) : '--');
+    setText('inv-vel-confidence', invVel.confidence
+        ? (invVel.confidence === 'high' ? '🔴 Cao' : '🟡 Trung bình')
+        : invVel.message || '--');
+
+    // Chart
+    if (invVel.time_series) {
+        const ctx = document.getElementById('chart-inverse-velocity');
+        if (!ctx) return;
+        if (charts['chart-inverse-velocity']) {
+            charts['chart-inverse-velocity'].destroy();
+        }
+
+        charts['chart-inverse-velocity'] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: invVel.time_series.labels,
+                datasets: [
+                    {
+                        label: '1/Velocity (thực tế)',
+                        data: invVel.time_series.inverse_velocity,
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.3,
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        fill: true
+                    },
+                    {
+                        label: 'Đường xu hướng (Linear)',
+                        data: invVel.time_series.trend_line,
+                        borderColor: '#fbbf24',
+                        borderWidth: 2,
+                        borderDash: [8, 4],
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: 'var(--text-primary)', usePointStyle: true }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        padding: 12
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: 'var(--text-secondary)' }
+                    },
+                    y: {
+                        title: { display: true, text: '1/Velocity (day/mm)', color: '#ef4444' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#ef4444' }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// =========================================================================
+// RAINFALL-DISPLACEMENT CORRELATION SECTION
+// =========================================================================
+function renderRainfallCorrelationSection(data) {
+    const section = document.getElementById('rainfall-correlation-section');
+    if (!section) return;
+
+    const rainCorr = data.rainfall_correlation;
+    if (!rainCorr || !rainCorr.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Metrics
+    const corrVal = rainCorr.correlation;
+    const corrColor = Math.abs(corrVal) >= 0.6 ? 'text-danger' : Math.abs(corrVal) >= 0.4 ? 'text-warning' : 'text-info';
+    const corrEl = document.getElementById('rain-correlation');
+    if (corrEl) {
+        corrEl.textContent = corrVal.toFixed(4);
+        corrEl.className = `fs-4 fw-bold mt-1 ${corrColor}`;
+    }
+    setText('rain-strength', rainCorr.strength || '--');
+    setText('rain-assessment', rainCorr.assessment || '--');
+
+    // Chart: Dual-axis — cumulative displacement + cumulative/daily rainfall
+    if (rainCorr.time_series) {
+        const ctx = document.getElementById('chart-rainfall-correlation');
+        if (!ctx) return;
+        if (charts['chart-rainfall-correlation']) {
+            charts['chart-rainfall-correlation'].destroy();
+        }
+
+        charts['chart-rainfall-correlation'] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: rainCorr.time_series.labels,
+                datasets: [
+                    {
+                        label: 'Dịch chuyển tích lũy (mm)',
+                        data: rainCorr.time_series.cumulative_displacement_mm,
+                        borderColor: '#0ea5e9',
+                        backgroundColor: 'rgba(14, 165, 233, 0.08)',
+                        tension: 0.4,
+                        borderWidth: 2.5,
+                        fill: true,
+                        pointRadius: 2,
+                        yAxisID: 'y-disp'
+                    },
+                    {
+                        label: 'Mưa tích lũy (mm)',
+                        data: rainCorr.time_series.cumulative_rainfall_mm,
+                        borderColor: '#10b981',
+                        backgroundColor: 'transparent',
+                        tension: 0.4,
+                        borderWidth: 2,
+                        borderDash: [5, 3],
+                        fill: false,
+                        pointRadius: 2,
+                        yAxisID: 'y-rain'
+                    },
+                    {
+                        label: 'Mưa ngày (mm)',
+                        type: 'bar',
+                        data: rainCorr.time_series.daily_rainfall_mm,
+                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                        borderColor: '#3b82f6',
+                        borderWidth: 1,
+                        yAxisID: 'y-rain'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 16 }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        padding: 12
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+                    },
+                    'y-disp': {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: 'Dịch chuyển (mm)', color: '#0ea5e9' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#0ea5e9' }
+                    },
+                    'y-rain': {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: 'Lượng mưa (mm)', color: '#10b981' },
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#10b981' }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// =========================================================================
+// MULTI-WINDOW ANALYSIS SECTION
+// =========================================================================
+function renderMultiWindowSection(data) {
+    const section = document.getElementById('multi-window-section');
+    if (!section) return;
+
+    const mw = data.multi_window;
+    if (!mw || !mw.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Acceleration alert
+    const alertEl = document.getElementById('multi-window-alert');
+    const alertTextEl = document.getElementById('multi-window-alert-text');
+    if (mw.acceleration_alert) {
+        alertEl.style.display = 'block';
+        alertEl.className = `alert ${mw.acceleration_alert.type === 'rapid_acceleration' ? 'alert-danger' : 'alert-warning'} mb-3`;
+        alertTextEl.textContent = mw.acceleration_alert.message;
+    } else {
+        alertEl.style.display = 'none';
+    }
+
+    // Window cards
+    const cardsContainer = document.getElementById('multi-window-cards');
+    if (!cardsContainer) return;
+
+    const windowLabels = { 7: '7 ngày', 30: '30 ngày', 90: '90 ngày' };
+    const windowIcons = { 7: 'bi-calendar-day', 30: 'bi-calendar-month', 90: 'bi-calendar3' };
+    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendTexts = { 'accelerating': 'Tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Giảm tốc' };
+
+    cardsContainer.innerHTML = (mw.windows || []).map(w => {
+        if (w.status !== 'success') {
+            return `
+                <div class="col-md-4">
+                    <div class="longterm-metric-card text-center opacity-50">
+                        <div class="text-muted small"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
+                        <div class="fs-6 mt-1">Không đủ dữ liệu</div>
+                    </div>
+                </div>`;
+        }
+
+        return `
+            <div class="col-md-4">
+                <div class="longterm-metric-card">
+                    <div class="text-muted small mb-2"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
+                    <div class="fs-4 fw-bold text-primary">${w.velocity_mm_year.toFixed(1)} <small class="fs-6 text-muted">mm/năm</small></div>
+                    <div class="small mt-1">Dịch chuyển: <strong>${w.displacement_mm.toFixed(1)} mm</strong></div>
+                    <div class="small">Xu hướng: ${trendIcons[w.trend] || '❓'} ${trendTexts[w.trend] || '--'}</div>
+                    <div class="small text-muted">${w.data_points} điểm dữ liệu</div>
+                </div>
+            </div>`;
+    }).join('');
 }
 
 function setText(id, val) {

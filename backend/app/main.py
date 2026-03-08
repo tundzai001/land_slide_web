@@ -1075,7 +1075,8 @@ async def get_long_term_analysis(
     db_data: AsyncSession = Depends(get_data_db)
 ):
     """
-    Phân tích dài hạn cho GNSS displacement + IMU tilt
+    Phân tích dài hạn cho GNSS displacement + IMU tilt + Rainfall correlation
+    + Multi-window analysis + Inverse Velocity (Fukuzono)
     """
     try:
         # 1. Lấy config trạm
@@ -1087,9 +1088,12 @@ async def get_long_term_analysis(
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        cutoff_time = int(time.time()) - (days * 86400)
+        # Lấy window lớn nhất cho multi-window (tối thiểu = days, mở rộng 90 ngày)
+        max_window = max(days, 90)
+        cutoff_time = int(time.time()) - (max_window * 86400)
+        cutoff_requested = int(time.time()) - (days * 86400)
         
-        # 2. Lấy dữ liệu GNSS
+        # 2. Lấy dữ liệu GNSS (mở rộng window cho multi-window)
         gnss_result = await db_data.execute(
             select(model_data.SensorData)
             .where(
@@ -1110,21 +1114,38 @@ async def get_long_term_analysis(
                 and_(
                     model_data.SensorData.station_id == station_id,
                     model_data.SensorData.sensor_type == "imu",
-                    model_data.SensorData.timestamp >= cutoff_time
+                    model_data.SensorData.timestamp >= cutoff_requested
                 )
             )
             .order_by(model_data.SensorData.timestamp.asc())
         )
         imu_data = imu_result.scalars().all()
         
+        # 4. Lấy dữ liệu mưa (cho rainfall-displacement correlation)
+        rain_result = await db_data.execute(
+            select(model_data.SensorData)
+            .where(
+                and_(
+                    model_data.SensorData.station_id == station_id,
+                    model_data.SensorData.sensor_type == "rain",
+                    model_data.SensorData.timestamp >= cutoff_requested
+                )
+            )
+            .order_by(model_data.SensorData.timestamp.asc())
+        )
+        rain_data = rain_result.scalars().all()
+        
         result = {"station_id": station_id, "days": days}
         
-        # 4. Phân tích GNSS
-        if len(gnss_data) >= 2:
-            historical_gnss = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
+        # Chuyển sang list dict chung
+        historical_gnss_full = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
+        historical_gnss_requested = [p for p in historical_gnss_full if p['timestamp'] >= cutoff_requested]
+        
+        # 5. Phân tích GNSS (trên window requested)
+        if len(historical_gnss_requested) >= 2:
             gnss_analysis = analyzer.analyze_long_term_velocity(
                 station_id=station_id,
-                historical_data=historical_gnss,
+                historical_data=historical_gnss_requested,
                 config=station.config or {},
                 window_days=days
             )
@@ -1135,15 +1156,13 @@ async def get_long_term_analysis(
                 from datetime import datetime as dt
                 daily_gnss = OrderedDict()
                 
-                # Biến lưu trữ giá trị của ngày đầu tiên để tính delta
                 first_e, first_n, first_u = None, None, None
 
-                for point in historical_gnss:
+                for point in historical_gnss_requested:
                     day_key = dt.fromtimestamp(point['timestamp']).strftime('%d/%m')
                     data = point['data']
                     
                     disp = data.get('total_displacement_mm', data.get('displacement_mm', 0))
-                    # Lấy pos E, N, U (cộng dồn hoặc base)
                     e = data.get('pos_e', 0)
                     n = data.get('pos_n', 0)
                     u = data.get('pos_u', 0)
@@ -1155,10 +1174,6 @@ async def get_long_term_analysis(
                         daily_gnss[day_key] = {'disp': [], 'e': [], 'n': [], 'u': []}
                     
                     daily_gnss[day_key]['disp'].append(float(disp))
-                    # Tính delta so với điểm đầu tiên (nếu data lưu raw coordinate)
-                    # hoặc nếu data đã tự lưu delta thì bỏ qua trừ
-                    
-                    # Chúng ta sẽ trả về delta (mm) để 3D dễ vẽ
                     delta_e_mm = (e - first_e) * 1000
                     delta_n_mm = (n - first_n) * 1000
                     delta_u_mm = (u - first_u) * 1000
@@ -1179,10 +1194,10 @@ async def get_long_term_analysis(
         else:
             result["gnss"] = {
                 "status": "insufficient_data",
-                "message": f"Cần ít nhất 2 điểm dữ liệu GNSS. Hiện có: {len(gnss_data)}"
+                "message": f"Cần ít nhất 2 điểm dữ liệu GNSS. Hiện có: {len(historical_gnss_requested)}"
             }
         
-        # 5. Phân tích IMU
+        # 6. Phân tích IMU
         if len(imu_data) >= 2:
             historical_imu = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
             imu_analysis = analyzer.analyze_long_term_tilt(
@@ -1197,7 +1212,34 @@ async def get_long_term_analysis(
                 "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(imu_data)}"
             }
         
-        # 6. Overall status
+        # 7. Phân tích tương quan Mưa - Dịch chuyển
+        if len(historical_gnss_requested) >= 2 and len(rain_data) >= 2:
+            historical_rain = [{"timestamp": d.timestamp, "data": d.data} for d in rain_data]
+            rain_correlation = analyzer.analyze_rainfall_displacement_correlation(
+                gnss_data=historical_gnss_requested,
+                rain_data=historical_rain,
+                window_days=days
+            )
+            result["rainfall_correlation"] = rain_correlation
+        else:
+            result["rainfall_correlation"] = {
+                "available": False,
+                "message": "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+            }
+        
+        # 8. Phân tích đa cửa sổ (Multi-Window) - dùng full GNSS data
+        if len(historical_gnss_full) >= 2:
+            multi_window = analyzer.analyze_multi_window(
+                station_id=station_id,
+                historical_data=historical_gnss_full,
+                config=station.config or {},
+                windows=[7, 30, 90]
+            )
+            result["multi_window"] = multi_window
+        else:
+            result["multi_window"] = {"available": False, "message": "Không đủ dữ liệu."}
+        
+        # 9. Overall status
         gnss_ok = result["gnss"].get("status") == "success"
         imu_ok = result["imu"].get("status") == "success"
         
