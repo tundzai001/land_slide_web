@@ -37,6 +37,12 @@ from .models.pi_device import PiDevice  # noqa: F401 – ensures table is regist
 from .websocket import manager as ws_manager
 from .landslide_analyzer import LandslideAnalyzer
 
+# Import security core
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from security_core import AdvancedSecurityMiddleware, start_ipc_server
+
 # Cấu hình Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +66,9 @@ mqtt_service = MQTTBridge()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Landslide Monitoring System starting...")
+    
+    # Start the Security IPC Server as a background task
+    asyncio.create_task(start_ipc_server())
     
     try:
         # 1. Khởi tạo AUTH DB
@@ -145,13 +154,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Shutdown complete")
 
 # ============================================================================
-# APP SETUP
+# FASTAPI APPLICATION SETUP
 # ============================================================================
-app = FastAPI(
-    title="Landslide Monitoring API",
-    lifespan=lifespan,
-    version="3.0.0"
-)
+app = FastAPI(title="Landslide System API", lifespan=lifespan)
+
+# Add Security Middleware FIRST (Before CORS or Routing)
+app.add_middleware(AdvancedSecurityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
