@@ -14,6 +14,17 @@
     <link rel="stylesheet" href="/css/theme-transition.css">
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/map.css">
+
+    <!-- Three.js for 3D Simulations -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
+        }
+      }
+    </script>
 </head>
 
 <body>
@@ -304,7 +315,13 @@
                         <strong id="warning-text">Cảnh báo!</strong>
                     </div>
 
-                    <!-- Main Metrics -->
+                    <!-- ============================================ -->
+                    <!-- TOP SECTION: ALL METRICS -->
+                    <!-- ============================================ -->
+
+                    <h5 class="mb-3 text-primary border-bottom pb-2"><i class="bi bi-geo-alt me-2"></i>Thông số GNSS
+                    </h5>
+                    <!-- GNSS Metrics -->
                     <div class="row g-3 mb-4">
                         <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
@@ -332,13 +349,13 @@
                         </div>
                     </div>
 
-                    <div class="row g-3">
+                    <div class="row g-3 mb-4">
                         <!-- Trend Indicator -->
                         <div class="col-md-6">
-                            <div class="card h-100">
+                            <div class="card h-100 border-0 shadow-sm">
                                 <div class="card-body">
-                                    <h6 class="card-title">Xu hướng</h6>
-                                    <div id="trend-indicator" class="d-flex align-items-center gap-2">
+                                    <h6 class="card-title text-muted">Xu hướng GNSS</h6>
+                                    <div id="trend-indicator" class="d-flex align-items-center gap-2 mt-2">
                                         <span id="trend-icon" class="fs-3">❓</span>
                                         <span id="trend-value" class="fs-5 fw-bold">Không xác định</span>
                                     </div>
@@ -348,37 +365,16 @@
 
                         <!-- Classification Scale -->
                         <div class="col-md-6">
-                            <div class="chart-box h-100">
-                                <div class="chart-title">📊 Bảng phân loại Cruden & Varnes</div>
+                            <div class="chart-box h-100 border-0 shadow-sm p-3">
+                                <div class="chart-title text-muted mb-2"><i class="bi bi-bar-chart-steps me-2"></i>Bảng
+                                    phân loại Cruden & Varnes</div>
                                 <div id="classification-scale"></div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- ============================================ -->
-                    <!-- COMBINED CHART with Time Range Selector -->
-                    <!-- ============================================ -->
-                    <div class="chart-box mt-3">
-                        <div class="chart-title d-flex justify-content-between align-items-center flex-wrap gap-2">
-                            <span>📊 Biểu đồ tổng hợp GNSS & IMU</span>
-                            <div class="btn-group btn-group-sm" id="longterm-range-selector">
-                                <button class="btn btn-outline-primary" data-days="7">1 tuần</button>
-                                <button class="btn btn-outline-primary active" data-days="30">1 tháng</button>
-                                <button class="btn btn-outline-primary" data-days="365">1 năm</button>
-                            </div>
-                        </div>
-                        <div style="height: 450px;">
-                            <canvas id="chart-longterm-combined"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- ============================================ -->
-                    <!-- IMU TILT LONG-TERM ANALYSIS METRICS -->
-                    <!-- ============================================ -->
-                    <hr class="my-4">
-                    <h5 class="mb-3"><i class="bi bi-compass me-2 text-warning"></i>Phân tích góc nghiêng dài hạn (IMU)
+                    <h5 class="mb-3 mt-4 text-warning border-bottom pb-2"><i class="bi bi-compass me-2"></i>Thông số IMU
                     </h5>
-
                     <div id="imu-longterm-section">
                         <!-- IMU insufficient data message -->
                         <div id="imu-longterm-nodata" style="display: none;">
@@ -388,36 +384,38 @@
                             </div>
                         </div>
 
-                        <!-- IMU content -->
+                        <!-- IMU metrics content -->
                         <div id="imu-longterm-content" style="display: none;">
                             <!-- IMU Warning -->
-                            <div id="imu-longterm-warning" class="alert alert-warning mb-3" style="display: none;">
-                                <i class="bi bi-exclamation-triangle me-2"></i>
-                                <strong id="imu-warning-text"></strong>
+                            <div id="imu-longterm-warning" class="alert alert-warning mb-3 border-0 shadow-sm"
+                                style="display: none;">
+                                <i class="bi bi-exclamation-triangle-fill fs-4 me-2 align-middle"></i>
+                                <strong id="imu-warning-text" class="align-middle"></strong>
                             </div>
 
                             <!-- IMU Metrics -->
                             <div class="row g-3 mb-4">
                                 <div class="col-md-3 col-6">
-                                    <div class="longterm-metric-card">
+                                    <div
+                                        class="longterm-metric-card bg-warning bg-opacity-10 border-warning border-opacity-25">
                                         <div class="text-muted small">Tổng thay đổi góc</div>
                                         <div class="fs-4 fw-bold text-warning mt-1" id="lt-imu-tilt-change">-- °</div>
                                     </div>
                                 </div>
                                 <div class="col-md-3 col-6">
-                                    <div class="longterm-metric-card">
+                                    <div class="longterm-metric-card border-0 shadow-sm">
                                         <div class="text-muted small">Tốc độ nghiêng TB</div>
                                         <div class="fs-5 fw-bold mt-1" id="lt-imu-rate">-- °/ngày</div>
                                     </div>
                                 </div>
                                 <div class="col-md-3 col-6">
-                                    <div class="longterm-metric-card">
+                                    <div class="longterm-metric-card border-0 shadow-sm">
                                         <div class="text-muted small">Roll max</div>
                                         <div class="fs-5 fw-bold text-info mt-1" id="lt-imu-max-roll">-- °</div>
                                     </div>
                                 </div>
                                 <div class="col-md-3 col-6">
-                                    <div class="longterm-metric-card">
+                                    <div class="longterm-metric-card border-0 shadow-sm">
                                         <div class="text-muted small">Pitch max</div>
                                         <div class="fs-5 fw-bold text-info mt-1" id="lt-imu-max-pitch">-- °</div>
                                     </div>
@@ -425,12 +423,12 @@
                             </div>
 
                             <!-- IMU Trend -->
-                            <div class="row g-3 mb-3">
+                            <div class="row g-3 mb-4">
                                 <div class="col-md-6">
-                                    <div class="card h-100">
+                                    <div class="card h-100 border-0 shadow-sm">
                                         <div class="card-body">
-                                            <h6 class="card-title">Xu hướng nghiêng</h6>
-                                            <div class="d-flex align-items-center gap-2">
+                                            <h6 class="card-title text-muted">Xu hướng nghiêng</h6>
+                                            <div class="d-flex align-items-center gap-2 mt-2">
                                                 <span id="imu-trend-icon" class="fs-3">❓</span>
                                                 <span id="imu-trend-value" class="fs-5 fw-bold">Không xác định</span>
                                             </div>
@@ -438,19 +436,88 @@
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <div class="card h-100">
+                                    <div class="card h-100 border-0 shadow-sm">
                                         <div class="card-body">
-                                            <h6 class="card-title">Thời gian & Dữ liệu</h6>
-                                            <div class="d-flex flex-column gap-1">
-                                                <span class="text-muted small">Số điểm: <strong
-                                                        id="lt-imu-points">--</strong></span>
-                                                <span class="text-muted small">Thời gian: <strong
-                                                        id="lt-imu-duration">-- ngày</strong></span>
+                                            <h6 class="card-title text-muted">Thời gian & Dữ liệu IMU</h6>
+                                            <div class="d-flex flex-column gap-2 mt-2">
+                                                <span class="fs-6"><i class="bi bi-database me-2 text-primary"></i>Số
+                                                    điểm: <strong id="lt-imu-points">--</strong></span>
+                                                <span class="fs-6"><i
+                                                        class="bi bi-clock-history me-2 text-info"></i>Thời gian:
+                                                    <strong id="lt-imu-duration">-- ngày</strong></span>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- ============================================ -->
+                    <!-- BOTTOM SECTION: GRAPHICS (3D & 2D) -->
+                    <!-- ============================================ -->
+                    <hr class="my-5">
+                    <h5 class="mb-4 text-center text-uppercase fw-bold"><i class="bi bi-display me-2"></i>Mô phỏng &
+                        Biểu đồ</h5>
+
+                    <!-- Time Range Selector -->
+                    <div class="d-flex justify-content-center mb-4">
+                        <div class="btn-group btn-group-sm shadow-sm" id="longterm-range-selector">
+                            <button class="btn btn-outline-primary fw-medium px-4" data-days="7">1 tuần</button>
+                            <button class="btn btn-outline-primary fw-medium px-4 active" data-days="30">1
+                                tháng</button>
+                            <button class="btn btn-outline-primary fw-medium px-4" data-days="365">1 năm</button>
+                        </div>
+                    </div>
+
+                    <!-- 3D Simulations Row -->
+                    <div class="row g-4 mb-4">
+                        <div class="col-lg-6">
+                            <div class="chart-box border-0 shadow-sm h-100 text-center">
+                                <div class="chart-title text-primary"><i class="bi bi-box me-2"></i>Mô phỏng Chuyển dịch
+                                    GNSS (3D)</div>
+                                <div id="container-3d-gnss"
+                                    style="width: 100%; height: 350px; background: #0a0e17; border-radius: 8px; overflow: hidden; position: relative;">
+                                    <!-- Three.js Canvas will be inserted here -->
+                                    <div id="gnss-3d-loading"
+                                        class="position-absolute top-50 start-50 translate-middle text-white z-2"
+                                        style="display: none;">
+                                        <div class="spinner-border mb-2" role="status"></div><br><small>Đang tạo
+                                            3D...</small>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-muted small d-flex justify-content-center gap-3">
+                                    <span><span style="color:#ff0000;">■</span> X (East)</span>
+                                    <span><span style="color:#00ff00;">■</span> Z (North)</span>
+                                    <span><span style="color:#0000ff;">■</span> Y (Up)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-6">
+                            <div class="chart-box border-0 shadow-sm h-100 text-center">
+                                <div class="chart-title text-warning"><i class="bi bi-box me-2"></i>Mô phỏng Độ nghiêng
+                                    IMU (3D)</div>
+                                <div id="container-3d-imu"
+                                    style="width: 100%; height: 350px; background: #0a0e17; border-radius: 8px; overflow: hidden; position: relative;">
+                                    <!-- Three.js Canvas will be inserted here -->
+                                    <div id="imu-3d-loading"
+                                        class="position-absolute top-50 start-50 translate-middle text-white z-2"
+                                        style="display: none;">
+                                        <div class="spinner-border mb-2" role="status"></div><br><small>Đang tạo
+                                            3D...</small>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-muted small">Sử dụng chuột trái để xoay, lăn chuột để zoom</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- COMBINED 2D CHART -->
+                    <div class="chart-box border-0 shadow-sm">
+                        <div class="chart-title"><i class="bi bi-graph-up me-2"></i>Biểu đồ tổng hợp chuỗi thời gian
+                            GNSS & IMU</div>
+                        <div style="height: 400px; padding: 10px;">
+                            <canvas id="chart-longterm-combined"></canvas>
                         </div>
                     </div>
 
