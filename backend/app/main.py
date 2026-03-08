@@ -1075,7 +1075,7 @@ async def get_long_term_analysis(
     db_data: AsyncSession = Depends(get_data_db)
 ):
     """
-    Phân tích dài hạn cho GNSS displacement
+    Phân tích dài hạn cho GNSS displacement + IMU tilt
     """
     try:
         # 1. Lấy config trạm
@@ -1087,9 +1087,9 @@ async def get_long_term_analysis(
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        # 2. Lấy dữ liệu GNSS trong khoảng thời gian
         cutoff_time = int(time.time()) - (days * 86400)
         
+        # 2. Lấy dữ liệu GNSS
         gnss_result = await db_data.execute(
             select(model_data.SensorData)
             .where(
@@ -1103,30 +1103,83 @@ async def get_long_term_analysis(
         )
         gnss_data = gnss_result.scalars().all()
         
-        if len(gnss_data) < 2:
-            return {
+        # 3. Lấy dữ liệu IMU
+        imu_result = await db_data.execute(
+            select(model_data.SensorData)
+            .where(
+                and_(
+                    model_data.SensorData.station_id == station_id,
+                    model_data.SensorData.sensor_type == "imu",
+                    model_data.SensorData.timestamp >= cutoff_time
+                )
+            )
+            .order_by(model_data.SensorData.timestamp.asc())
+        )
+        imu_data = imu_result.scalars().all()
+        
+        result = {"station_id": station_id, "days": days}
+        
+        # 4. Phân tích GNSS
+        if len(gnss_data) >= 2:
+            historical_gnss = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
+            gnss_analysis = analyzer.analyze_long_term_velocity(
+                station_id=station_id,
+                historical_data=historical_gnss,
+                config=station.config or {},
+                window_days=days
+            )
+            
+            # Tạo time-series GNSS (trung bình theo ngày) cho chart
+            if gnss_analysis.get("status") == "success":
+                from collections import OrderedDict
+                from datetime import datetime as dt
+                daily_gnss = OrderedDict()
+                for point in historical_gnss:
+                    day_key = dt.fromtimestamp(point['timestamp']).strftime('%d/%m')
+                    disp = point['data'].get('total_displacement_mm',
+                           point['data'].get('displacement_mm', 0))
+                    if day_key not in daily_gnss:
+                        daily_gnss[day_key] = []
+                    daily_gnss[day_key].append(float(disp))
+                
+                gnss_analysis["time_series"] = {
+                    "labels": list(daily_gnss.keys()),
+                    "displacement": [round(sum(v) / len(v), 2) for v in daily_gnss.values()]
+                }
+            
+            result["gnss"] = gnss_analysis
+        else:
+            result["gnss"] = {
                 "status": "insufficient_data",
                 "message": f"Cần ít nhất 2 điểm dữ liệu GNSS. Hiện có: {len(gnss_data)}"
             }
         
-        # 3. Chuyển đổi sang format cho analyzer
-        historical_data = [
-            {
-                "timestamp": d.timestamp,
-                "data": d.data
+        # 5. Phân tích IMU
+        if len(imu_data) >= 2:
+            historical_imu = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
+            imu_analysis = analyzer.analyze_long_term_tilt(
+                station_id=station_id,
+                historical_data=historical_imu,
+                window_days=days
+            )
+            result["imu"] = imu_analysis
+        else:
+            result["imu"] = {
+                "status": "insufficient_data",
+                "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(imu_data)}"
             }
-            for d in gnss_data
-        ]
         
-        # 4. Gọi analyzer
-        analysis_result = analyzer.analyze_long_term_velocity(
-            station_id=station_id,
-            historical_data=historical_data,
-            config=station.config or {},
-            window_days=days
-        )
+        # 6. Overall status
+        gnss_ok = result["gnss"].get("status") == "success"
+        imu_ok = result["imu"].get("status") == "success"
         
-        return analysis_result
+        if gnss_ok or imu_ok:
+            result["status"] = "success"
+        else:
+            result["status"] = "insufficient_data"
+            result["message"] = "Không đủ dữ liệu GNSS và IMU để phân tích."
+        
+        return result
         
     except HTTPException:
         raise
