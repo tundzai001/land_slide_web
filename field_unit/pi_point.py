@@ -481,14 +481,14 @@ def main():
 
     def _heartbeat_loop():
         while True:
-            time.sleep(15)
+            time.sleep(120)  # Heartbeat every 2 minutes instead of 15s to reduce log spam
             try:
                 import requests as _req
                 serial = DEVICE_CODE or ""
                 if not serial:
                     continue
                 _req.post(
-                    f"{BACKEND_URL}/api/field/register",
+                    f"{BACKEND_URL}/api/field/heartbeat",
                     json={"serial": serial, "name": f"Point-{serial[-8:]}", "device_type": "pi_point"},
                     timeout=10
                 )
@@ -497,7 +497,7 @@ def main():
 
     hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
     hb_thread.start()
-    logger.info("✅ Heartbeat thread started (60s interval)")
+    logger.info("✅ Heartbeat thread started (120s interval)")
 
     try:
         while True: time.sleep(1)
