@@ -25,6 +25,12 @@ if (document.readyState === 'loading') {
 function initialize() {
     console.log('✅ [MAP] DOM ready, initializing...');
 
+    // Set global Chart.js animation defaults for smooth realtime updates
+    if (window.Chart) {
+        Chart.defaults.animation.duration = 300;
+        Chart.defaults.animation.easing = 'easeOutQuart';
+    }
+
     initMap();
     setupEventListeners();
     loadStations();
@@ -189,7 +195,7 @@ function updateRealtimeSensorValues(message) {
             (data.speed ? data.speed * 1000 : null) || 0;
 
         console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
-        setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
+        animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
 
         const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
 
@@ -203,13 +209,13 @@ function updateRealtimeSensorValues(message) {
                 chart.data.datasets[0].data.shift();
             }
 
-            chart.update('none');
+            chart.update();
         }
     }
 
     if (sensor_type === 'rain' && data) {
         const intensity = data.intensity_mm_h || data.intensity || 0;
-        setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
+        animateValue('val-rain', intensity, 1, 'mm/h');
 
         if (charts['chart-rain']) {
             const chart = charts['chart-rain'];
@@ -221,13 +227,13 @@ function updateRealtimeSensorValues(message) {
                 chart.data.datasets[0].data.shift();
             }
 
-            chart.update('none');
+            chart.update();
         }
     }
 
     if (sensor_type === 'water' && data) {
         const level = data.water_level || data.level || data.processed_value_meters || 0;
-        setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
+        animateValue('val-water', level, 2, 'm');
 
         if (charts['chart-water']) {
             const chart = charts['chart-water'];
@@ -239,26 +245,26 @@ function updateRealtimeSensorValues(message) {
                 chart.data.datasets[0].data.shift();
             }
 
-            chart.update('none');
+            chart.update();
         }
     }
 
     if (sensor_type === 'imu' && data) {
-        setText('val-imu-roll', `${safeNumber(data.raw_roll, 1)}°`);
-        setText('val-imu-pitch', `${safeNumber(data.raw_pitch, 1)}°`);
-        setText('val-imu-yaw', `${safeNumber(data.raw_yaw, 1)}°`);
+        animateValue('val-imu-roll', data.raw_roll, 1, '°', true);
+        animateValue('val-imu-pitch', data.raw_pitch, 1, '°', true);
+        animateValue('val-imu-yaw', data.raw_yaw, 1, '°', true);
 
         // Delta values (secondary display)
-        setText('val-imu-delta-roll', `${safeNumber(data.roll, 1)}°`);
-        setText('val-imu-delta-pitch', `${safeNumber(data.pitch, 1)}°`);
-        setText('val-imu-delta-yaw', `${safeNumber(data.yaw, 1)}°`);
+        animateValue('val-imu-delta-roll', data.roll, 1, '°', true);
+        animateValue('val-imu-delta-pitch', data.pitch, 1, '°', true);
+        animateValue('val-imu-delta-yaw', data.yaw, 1, '°', true);
 
         // Update battery in real-time
         const batteryContainer = document.getElementById('battery-container');
         const batteryVal = data.battery;
         if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
             if (batteryContainer) batteryContainer.style.display = '';
-            setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
+            animateValue('val-battery', batteryVal, 2, 'V');
         }
 
         // Update IMU chart in real-time
@@ -275,7 +281,7 @@ function updateRealtimeSensorValues(message) {
                 chart.data.datasets.forEach(ds => ds.data.shift());
             }
 
-            chart.update('none');
+            chart.update();
         }
     }
 }
@@ -749,6 +755,15 @@ function updateMarker(station) {
 // SIREN POPUP HELPER — Dùng bởi selectStation và Track button
 // =====================================================
 function _showSirenIfAlerting(stationId, data) {
+    // Only show siren controls for admin and operator roles
+    const user = window.authManager?.getUserInfo();
+    const userRole = user?.role;
+    if (userRole !== 'admin' && userRole !== 'operator') {
+        const popup = document.getElementById('siren-bottom-popup');
+        if (popup) popup.style.bottom = '-120px';
+        return;
+    }
+
     const risk = data.risk_assessment?.overall_risk || data.risk_level;
     const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
 
@@ -1305,6 +1320,106 @@ function setText(id, val) {
 function setHTML(id, html) {
     const el = document.getElementById(id);
     if (el) el.innerHTML = html;
+}
+
+// =========================================================================
+// SMOOTH ANIMATED VALUE SYSTEM
+// =========================================================================
+
+// Store previous numeric values for lerp interpolation
+const _prevValues = {};
+// Store ongoing animation frame IDs to cancel previous animations
+const _animFrames = {};
+
+/**
+ * Smoothly animate a sensor value from its current displayed number to a new value.
+ * Uses requestAnimationFrame for 60fps lerp interpolation.
+ *
+ * @param {string} id - DOM element ID
+ * @param {number|string|null} newValue - New numeric value
+ * @param {number} decimals - Decimal places to display
+ * @param {string} unit - Unit string (e.g. 'mm/s', '°')
+ * @param {boolean} textOnly - If true, set innerText instead of innerHTML (for elements without unit spans)
+ */
+function animateValue(id, newValue, decimals = 2, unit = '', textOnly = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const numVal = parseFloat(newValue);
+    if (isNaN(numVal) || newValue === null || newValue === undefined) {
+        // Non-numeric → direct set
+        if (textOnly) {
+            el.innerText = `--${unit}`;
+        } else {
+            el.innerHTML = `--<span class="sensor-unit">${unit}</span>`;
+        }
+        return;
+    }
+
+    const prevVal = _prevValues[id];
+
+    // If no previous value or same value, just set directly (no animation needed)
+    if (prevVal === undefined || prevVal === numVal) {
+        _prevValues[id] = numVal;
+        if (textOnly) {
+            el.innerText = `${numVal.toFixed(decimals)}${unit}`;
+        } else {
+            el.innerHTML = `${numVal.toFixed(decimals)}<span class="sensor-unit">${unit}</span>`;
+        }
+        return;
+    }
+
+    // Cancel any ongoing animation for this element
+    if (_animFrames[id]) {
+        cancelAnimationFrame(_animFrames[id]);
+    }
+
+    // Trigger CSS glow effect on the parent sensor-item
+    flashUpdate(el);
+
+    const startVal = prevVal;
+    const diff = numVal - startVal;
+    const duration = 400; // ms
+    const startTime = performance.now();
+
+    function step(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Ease-out cubic for smooth deceleration
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const currentVal = startVal + diff * eased;
+
+        if (textOnly) {
+            el.innerText = `${currentVal.toFixed(decimals)}${unit}`;
+        } else {
+            el.innerHTML = `${currentVal.toFixed(decimals)}<span class="sensor-unit">${unit}</span>`;
+        }
+
+        if (progress < 1) {
+            _animFrames[id] = requestAnimationFrame(step);
+        } else {
+            _prevValues[id] = numVal;
+            delete _animFrames[id];
+        }
+    }
+
+    _prevValues[id] = numVal;
+    _animFrames[id] = requestAnimationFrame(step);
+}
+
+/**
+ * Trigger CSS glow flash on a value element's parent sensor-item.
+ */
+function flashUpdate(el) {
+    // Find closest sensor-item parent for the glow effect
+    const sensorItem = el.closest('.sensor-item') || el.closest('.axis-value');
+    if (sensorItem) {
+        sensorItem.classList.remove('value-updated');
+        // Force reflow to restart animation
+        void sensorItem.offsetWidth;
+        sensorItem.classList.add('value-updated');
+    }
 }
 
 function filterStations(searchTerm) {

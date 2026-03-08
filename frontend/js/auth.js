@@ -7,6 +7,7 @@ class AuthManager {
         this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
         this.user = null;
         this.tokenCheckInterval = null;
+        this._isVerifyingToken = false;
     }
 
     // ✅ CRITICAL: Verify token on init
@@ -53,6 +54,7 @@ class AuthManager {
     async verifyToken() {
         if (!this.token) return false;
 
+        this._isVerifyingToken = true;
         try {
             const res = await fetch('/api/auth/me', {
                 headers: {
@@ -69,6 +71,8 @@ class AuthManager {
         } catch (e) {
             console.error('❌ [AUTH] Verify failed:', e);
             return false;
+        } finally {
+            this._isVerifyingToken = false;
         }
     }
 
@@ -283,7 +287,7 @@ class AuthManager {
 const originalFetch = window.fetch;
 window.fetch = async function (...args) {
     const response = await originalFetch(...args);
-    if (response.status === 401 && window.authManager && window.authManager.isAuthenticated()) {
+    if (response.status === 401 && window.authManager && window.authManager.isAuthenticated() && !window.authManager._isVerifyingToken) {
         console.warn('⚠️ [AUTH] 401 Unauthorized response detected. Forcing logout...');
 
         // Anti-spam cho alert

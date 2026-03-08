@@ -408,6 +408,59 @@ body:has(.charts-panel.active) .toggle-list-btn {
     font-weight: 600;
     color: var(--accent-warning);
     margin-top: 4px;
+    transition: color 0.3s ease, opacity 0.2s ease;
+}
+
+/* ============================================
+   SMOOTH VALUE CHANGE ANIMATIONS
+============================================ */
+
+/* Subtle glow pulse when a sensor value changes */
+@keyframes valueFlash {
+    0% {
+        background: transparent;
+        box-shadow: none;
+    }
+
+    20% {
+        background: rgba(14, 165, 233, 0.08);
+        box-shadow: inset 0 0 12px rgba(14, 165, 233, 0.15);
+    }
+
+    100% {
+        background: transparent;
+        box-shadow: none;
+    }
+}
+
+/* Class applied briefly when value updates */
+.value-updated {
+    animation: valueFlash 0.8s ease-out;
+}
+
+/* Smooth transitions on sensor value elements */
+.sensor-value-large {
+    transition: color 0.3s ease, transform 0.15s ease;
+}
+
+/* Number text uses tabular-nums for stable width during counting */
+.sensor-value-large,
+.axis-num {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Status badge smooth color transition */
+.status-badge {
+    transition: color 0.4s ease, background 0.4s ease;
+}
+
+.status-dot {
+    transition: background 0.4s ease;
+}
+
+/* Sensor item subtle border glow on value change */
+.sensor-item.value-updated {
+    animation: valueFlash 0.8s ease-out;
 }
 
 /*  ACTION BUTTONS  */
@@ -551,9 +604,12 @@ body:has(.charts-panel.active) .toggle-list-btn {
 }
 
 @keyframes sirenBtnPulse {
-    0%, 100% {
+
+    0%,
+    100% {
         box-shadow: 0 2px 12px rgba(220, 38, 38, 0.4);
     }
+
     50% {
         box-shadow: 0 4px 24px rgba(220, 38, 38, 0.7), 0 0 40px rgba(220, 38, 38, 0.3);
     }
@@ -878,6 +934,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .status-badge.LOW {
     color: var(--accent-success);
 }
+
 .status-badge.LOW .status-dot {
     background: var(--accent-success);
 }
@@ -885,6 +942,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .status-badge.MEDIUM {
     color: var(--accent-warning);
 }
+
 .status-badge.MEDIUM .status-dot {
     background: var(--accent-warning);
 }
@@ -894,6 +952,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .status-badge.CRITICAL {
     color: var(--accent-danger);
 }
+
 .status-badge.HIGH .status-dot,
 .status-badge.EXTREME .status-dot,
 .status-badge.CRITICAL .status-dot {
@@ -903,6 +962,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .status-badge.OFFLINE {
     color: #6c757d;
 }
+
 .status-badge.OFFLINE .status-dot {
     background: #6c757d;
 }
@@ -910,6 +970,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .status-badge.UNKNOWN {
     color: var(--text-secondary);
 }
+
 .status-badge.UNKNOWN .status-dot {
     background: var(--text-secondary);
 }
