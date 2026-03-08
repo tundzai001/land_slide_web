@@ -434,7 +434,10 @@ function setupEventListeners() {
             chartsPanel.classList.add('active');
 
             // Đóng sidebar trái khi mở biểu đồ
-            stationSidebar.classList.add('force-hidden');
+            if (stationSidebar) {
+                stationSidebar.classList.add('hidden');
+                stationSidebar.classList.add('force-hidden');
+            }
 
             console.log('📊 [CHARTS] Charts panel opened');
 
@@ -448,9 +451,10 @@ function setupEventListeners() {
         closeChartsBtn.addEventListener('click', () => {
             chartsPanel.classList.remove('active');
 
-            // Mở lại sidebar trái
-            stationSidebar.classList.remove('force-hidden');
-            stationSidebar.classList.remove('hidden');
+            // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
+            if (stationSidebar) {
+                stationSidebar.classList.remove('force-hidden');
+            }
 
             console.log('📊 [CHARTS] Charts panel closed');
         });
@@ -466,7 +470,10 @@ function setupEventListeners() {
             longtermOverlay.classList.add('active');
 
             // Đóng sidebar trái
-            stationSidebar.classList.add('force-hidden');
+            if (stationSidebar) {
+                stationSidebar.classList.add('hidden');
+                stationSidebar.classList.add('force-hidden');
+            }
 
             // Cập nhật tên trạm 
             const longtermStationName = document.getElementById('longterm-station-name');
@@ -484,9 +491,10 @@ function setupEventListeners() {
         closeLongtermBtn.addEventListener('click', () => {
             longtermOverlay.classList.remove('active');
 
-            // Mở lại sidebar trái
-            stationSidebar.classList.remove('force-hidden');
-            stationSidebar.classList.remove('hidden');
+            // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
+            if (stationSidebar) {
+                stationSidebar.classList.remove('force-hidden');
+            }
 
             console.log('📊 [LONGTERM] Analysis overlay closed');
         });
@@ -1185,49 +1193,234 @@ async function loadLongTermAnalysis() {
     }
 }
 
+// Store last analysis data for re-rendering on time range change
+let _lastLongTermData = null;
+
 function renderLongTermAnalysis(data) {
     document.getElementById('longterm-loading').style.display = 'none';
     document.getElementById('longterm-content').style.display = 'block';
     document.getElementById('longterm-error').style.display = 'none';
 
-    const analysis = data.analysis;
+    _lastLongTermData = data;
 
-    const warningEl = document.getElementById('longterm-warning');
-    const warningTextEl = document.getElementById('warning-text');
+    // === GNSS Section ===
+    const gnss = data.gnss;
+    if (gnss && gnss.status === 'success') {
+        const analysis = gnss.analysis;
 
-    if (data.risk_level === 'EXTREME' || data.risk_level === 'HIGH') {
+        const warningEl = document.getElementById('longterm-warning');
+        const warningTextEl = document.getElementById('warning-text');
+
+        if (gnss.risk_level === 'EXTREME' || gnss.risk_level === 'HIGH') {
+            warningEl.style.display = 'block';
+            warningEl.className = `alert ${gnss.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'}`;
+            warningTextEl.textContent = gnss.warning_message;
+        } else {
+            warningEl.style.display = 'none';
+        }
+
+        setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
+        setText('lt-classification', analysis.classification || 'N/A');
+        setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
+        setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
+
+        const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+        const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
+
+        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+        document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
+
+        renderClassificationScale(analysis.classification, analysis.velocity_mm_year);
+    } else {
+        const warningEl = document.getElementById('longterm-warning');
+        if (warningEl) warningEl.style.display = 'none';
+        setText('lt-velocity', 'N/A');
+        setText('lt-classification', 'N/A');
+        setText('lt-total-disp', 'N/A');
+        setText('lt-duration', 'N/A');
+    }
+
+    // === IMU Section ===
+    renderImuLongTermSection(data.imu);
+
+    // === Combined Chart ===
+    renderCombinedLongTermChart(data);
+}
+
+function renderImuLongTermSection(imuData) {
+    const nodataEl = document.getElementById('imu-longterm-nodata');
+    const contentEl = document.getElementById('imu-longterm-content');
+
+    if (!imuData || imuData.status !== 'success') {
+        if (nodataEl) {
+            nodataEl.style.display = 'block';
+            const msgEl = document.getElementById('imu-nodata-msg');
+            if (msgEl) msgEl.textContent = imuData?.message || 'Không đủ dữ liệu IMU để phân tích.';
+        }
+        if (contentEl) contentEl.style.display = 'none';
+        return;
+    }
+
+    if (nodataEl) nodataEl.style.display = 'none';
+    if (contentEl) contentEl.style.display = 'block';
+
+    const analysis = imuData.analysis;
+
+    // Warning banner
+    const warningEl = document.getElementById('imu-longterm-warning');
+    const warningTextEl = document.getElementById('imu-warning-text');
+    if (imuData.risk_level === 'EXTREME' || imuData.risk_level === 'HIGH' || imuData.risk_level === 'MEDIUM') {
         warningEl.style.display = 'block';
-        warningEl.className = `alert ${data.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'}`;
-        warningTextEl.textContent = data.warning_message;
+        warningEl.className = `alert ${imuData.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'} mb-3`;
+        warningTextEl.textContent = imuData.warning_message;
     } else {
         warningEl.style.display = 'none';
     }
 
-    setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
-    setText('lt-classification', analysis.classification || 'N/A');
-    setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
-    setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
+    // Metrics
+    setText('lt-imu-tilt-change', `${safeNumber(analysis.total_tilt_change_deg, 2)}°`);
+    setText('lt-imu-rate', `${safeNumber(analysis.avg_rate_deg_per_day, 4)}°/ngày`);
+    setText('lt-imu-max-roll', `${safeNumber(analysis.max_roll_deg, 2)}°`);
+    setText('lt-imu-max-pitch', `${safeNumber(analysis.max_pitch_deg, 2)}°`);
+    setText('lt-imu-points', analysis.data_points || '--');
+    setText('lt-imu-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
 
-    const trendIconEl = document.getElementById('trend-icon');
-    const trendValueEl = document.getElementById('trend-value');
+    // Trend
+    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
+    document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+    document.getElementById('imu-trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
+}
 
-    const trendIcons = {
-        'accelerating': '📈',
-        'stable': '➡️',
-        'decelerating': '📉'
+// =========================================================================
+// COMBINED LONG-TERM CHART (GNSS + IMU on dual Y-axes)
+// =========================================================================
+function renderCombinedLongTermChart(data) {
+    const ctx = document.getElementById('chart-longterm-combined');
+    if (!ctx) return;
+
+    if (charts['chart-longterm-combined']) {
+        charts['chart-longterm-combined'].destroy();
+    }
+
+    const datasets = [];
+    let allLabels = [];
+    let hasGnss = false;
+    let hasImu = false;
+
+    // GNSS displacement → left Y-axis
+    const gnss = data.gnss;
+    if (gnss && gnss.status === 'success' && gnss.time_series && gnss.time_series.labels.length > 0) {
+        allLabels = gnss.time_series.labels;
+        hasGnss = true;
+        datasets.push({
+            label: 'GNSS Displacement (mm)',
+            data: gnss.time_series.displacement,
+            borderColor: '#0ea5e9',
+            backgroundColor: 'rgba(14, 165, 233, 0.08)',
+            tension: 0.4,
+            borderWidth: 2.5,
+            fill: true,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            yAxisID: 'y-gnss'
+        });
+    }
+
+    // IMU roll/pitch → right Y-axis
+    const imu = data.imu;
+    if (imu && imu.status === 'success' && imu.time_series) {
+        hasImu = true;
+        // Use IMU labels if no GNSS labels, or merge
+        if (allLabels.length === 0) {
+            allLabels = imu.time_series.labels;
+        }
+
+        datasets.push({
+            label: 'Roll (°)',
+            data: imu.time_series.roll,
+            borderColor: '#f59e0b',
+            backgroundColor: 'transparent',
+            tension: 0.4,
+            borderWidth: 2,
+            borderDash: [5, 3],
+            fill: false,
+            pointRadius: 2,
+            pointHoverRadius: 4,
+            yAxisID: 'y-imu'
+        });
+
+        datasets.push({
+            label: 'Pitch (°)',
+            data: imu.time_series.pitch,
+            borderColor: '#8b5cf6',
+            backgroundColor: 'transparent',
+            tension: 0.4,
+            borderWidth: 2,
+            borderDash: [5, 3],
+            fill: false,
+            pointRadius: 2,
+            pointHoverRadius: 4,
+            yAxisID: 'y-imu'
+        });
+    }
+
+    if (datasets.length === 0) return;
+
+    // Build scales
+    const scales = {
+        x: {
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+        }
     };
 
-    const trendTexts = {
-        'accelerating': 'Đang tăng tốc',
-        'stable': 'Ổn định',
-        'decelerating': 'Đang giảm tốc'
-    };
+    if (hasGnss) {
+        scales['y-gnss'] = {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: 'Displacement (mm)', color: '#0ea5e9' },
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#0ea5e9', callback: v => v + ' mm' }
+        };
+    }
 
-    trendIconEl.textContent = trendIcons[analysis.trend] || '❓';
-    trendValueEl.textContent = trendTexts[analysis.trend] || 'Không xác định';
+    if (hasImu) {
+        scales['y-imu'] = {
+            type: 'linear',
+            position: hasGnss ? 'right' : 'left',
+            title: { display: true, text: 'Góc nghiêng (°)', color: '#f59e0b' },
+            grid: { drawOnChartArea: !hasGnss, color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#f59e0b', callback: v => v + '°' }
+        };
+    }
 
-    renderClassificationScale(analysis.classification, analysis.velocity_mm_year);
-    renderLongTermChart(data);
+    // If only IMU (no GNSS), reassign yAxisID to y-imu for consistency
+    if (!hasGnss && hasImu) {
+        datasets.forEach(ds => { ds.yAxisID = 'y-imu'; });
+    }
+
+    charts['chart-longterm-combined'] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: allLabels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 16 }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                    padding: 12,
+                    titleFont: { weight: 'bold' }
+                }
+            },
+            scales
+        }
+    });
 }
 
 function renderClassificationScale(currentClass, velocity) {
@@ -1250,55 +1443,6 @@ function renderClassificationScale(currentClass, velocity) {
                     <div class="classification-range">${cls.range}</div>
                 </div>
             `).join('');
-}
-
-function renderLongTermChart(data) {
-    const ctx = document.getElementById('chart-longterm');
-    if (!ctx) return;
-
-    if (charts['chart-longterm']) {
-        charts['chart-longterm'].destroy();
-    }
-
-    const labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-    const values = [10, 25, 35, data.analysis.total_displacement_mm];
-
-    charts['chart-longterm'] = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Cumulative Displacement (mm)',
-                data: values,
-                borderColor: '#0ea5e9',
-                backgroundColor: 'rgba(14, 165, 233, 0.1)',
-                tension: 0.4,
-                borderWidth: 3,
-                fill: true
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    padding: 12
-                }
-            },
-            scales: {
-                x: {
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    ticks: { color: 'var(--text-secondary)' }
-                },
-                y: {
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    ticks: { color: 'var(--text-secondary)' }
-                }
-            }
-        }
-    });
 }
 
 function showLongTermError(message) {
