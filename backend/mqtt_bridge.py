@@ -22,7 +22,7 @@ from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
 from processors.imu_processor import IMUEngine
 
-from aes128decrypt import aes128_decrypt_base64
+from .aes128decrypt import aes128_decrypt_base64
 
 # Cấu hình Logging
 logging.basicConfig(
