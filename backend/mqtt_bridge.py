@@ -54,7 +54,6 @@ class MQTTBridge:
         self.topic_map: Dict[str, Dict[str, Any]] = {}
         self.processors_cache: Dict[str, Any] = {}
         
-        # ✅ THÊM: Save interval tracking (per station per sensor)
         self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
         
         self.loop = None
@@ -94,9 +93,8 @@ class MQTTBridge:
             topic = msg.topic
             try:
                 payload_str = msg.payload.decode('utf-8')
-                # sẽ thêm hàm giải mã AES ở đoạn này
-                # decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
-                decrypted_payload = str(bytearray(payload_str, 'utf-8'))
+                # Bỏ qua giải mã AES theo yêu cầu người dùng
+                decrypted_payload = payload_str
                 
             except UnicodeDecodeError:
                 return # Bỏ qua dữ liệu nhị phân (RTCM)
