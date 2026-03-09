@@ -91,28 +91,34 @@ class LandslideAnalyzer:
             if duration_days < 0.1:
                 return {"status": "insufficient_data", "message": "Thời gian đo quá ngắn."}
 
-            # --- Bước 3: Tính cumulative displacement (tổng quỹ đạo) ---
-            cumulative_displacement_m = 0.0
-            for i in range(1, len(sorted_data)):
-                prev_data = sorted_data[i - 1]['data']
-                curr_data = sorted_data[i]['data']
-                de = curr_data.get('pos_e', 0) - prev_data.get('pos_e', 0)
-                dn = curr_data.get('pos_n', 0) - prev_data.get('pos_n', 0)
-                du = curr_data.get('pos_u', 0) - prev_data.get('pos_u', 0)
-                cumulative_displacement_m += math.sqrt(de**2 + dn**2 + du**2)
+            # --- Bước 3: Tính toán vận tốc bằng OLS Regression (Ordinary Least Squares) ---
+            # Trích xuất time và tọa độ
+            t_days = np.array([(p['timestamp'] - first_point['timestamp']) / 86400.0 for p in sorted_data])
+            pos_e = np.array([p['data'].get('pos_e', 0) for p in sorted_data])
+            pos_n = np.array([p['data'].get('pos_n', 0) for p in sorted_data])
+            pos_u = np.array([p['data'].get('pos_u', 0) for p in sorted_data])
+            
+            # Tính slope (vận tốc: m/day) cho từng trục
+            # polyfit(x, y, 1) trả về [slope, intercept]
+            vel_e_m_day = np.polyfit(t_days, pos_e, 1)[0] if len(t_days) > 1 else 0
+            vel_n_m_day = np.polyfit(t_days, pos_n, 1)[0] if len(t_days) > 1 else 0
+            vel_u_m_day = np.polyfit(t_days, pos_u, 1)[0] if len(t_days) > 1 else 0
+            
+            # Vector vận tốc tổng hợp (m/day)
+            velocity_m_per_day = math.sqrt(vel_e_m_day**2 + vel_n_m_day**2 + vel_u_m_day**2)
+            
+            # Tính displacement ước lượng từ OLS (để hiển thị) thay vì cộng dồn noise
+            total_displacement_mm = (velocity_m_per_day * duration_days) * 1000
 
-            # Net displacement (first → last) cho so sánh
+            # Net displacement (first → last) chỉ dùng để tham khảo
             first_data = first_point['data']
             last_data = last_point['data']
             delta_e = last_data.get('pos_e', 0) - first_data.get('pos_e', 0)
             delta_n = last_data.get('pos_n', 0) - first_data.get('pos_n', 0)
             delta_u = last_data.get('pos_u', 0) - first_data.get('pos_u', 0)
-            net_displacement_m = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2)
+            net_displacement_mm = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2) * 1000
 
-            total_displacement_mm = cumulative_displacement_m * 1000
-            net_displacement_mm = net_displacement_m * 1000
-
-            velocity_mm_per_day = total_displacement_mm / duration_days
+            velocity_mm_per_day = velocity_m_per_day * 1000
             velocity_mm_per_year = velocity_mm_per_day * 365
             velocity_mm_per_second = velocity_mm_per_day / 86400
 
@@ -177,17 +183,16 @@ class LandslideAnalyzer:
         velocity_mm_year: float,
         config: Dict
     ) -> str:
-        classification_table = config.get('velocity_classification') or config.get('GNSS_Classification', [])
-        
+        classification_table = config.get("velocity_classification")
         if not classification_table:
             classification_table = [
-                {"name": "Extremely Rapid", "threshold": 5000, "unit": "mm/s"},
-                {"name": "Very Rapid", "threshold": 50, "unit": "mm/s"},
-                {"name": "Rapid", "threshold": 0.5, "unit": "mm/s"},
-                {"name": "Moderate", "threshold": 0.05, "unit": "mm/s"},
-                {"name": "Slow", "threshold": 0.00005, "unit": "mm/s"},
-                {"name": "Very Slow", "threshold": 0.0000005, "unit": "mm/s"},
-                {"name": "Extremely Slow", "threshold": 0, "unit": "mm/s"}
+                {"name": "Extremely Rapid", "threshold": 5, "unit": "m/s"},      # > 5 m/sec
+                {"name": "Very Rapid", "threshold": 3, "unit": "m/min"},      # > 3 m/min (0.05 m/s)
+                {"name": "Rapid", "threshold": 1.8, "unit": "m/hr"},       # > 1.8 m/hr (0.5 mm/s)
+                {"name": "Moderate", "threshold": 13, "unit": "m/month"},  # > 13 m/month (5x10^-3 mm/s)
+                {"name": "Slow", "threshold": 1.6, "unit": "m/year"},      # > 1.6 m/year (5x10^-5 mm/s)
+                {"name": "Very Slow", "threshold": 16, "unit": "mm/year"},    # > 16 mm/year (5x10^-7 mm/s)
+                {"name": "Extremely Slow", "threshold": 0, "unit": "mm/year"}     # < 16 mm/year
             ]
         
         normalized_table = []
@@ -195,9 +200,14 @@ class LandslideAnalyzer:
             thresh = float(cls.get('threshold', 0))
             unit = cls.get('unit', 'mm/s')
             
+            # Chuyển đổi mọi thứ về cùng 1 chuẩn để so sánh (mm/s)
             thresh_mm_s = thresh
             if unit == 'mm/year': thresh_mm_s = thresh / 31536000
             elif unit == 'mm/day': thresh_mm_s = thresh / 86400
+            elif unit == 'm/year': thresh_mm_s = (thresh * 1000) / 31536000
+            elif unit == 'm/month': thresh_mm_s = (thresh * 1000) / (30 * 86400)
+            elif unit == 'm/hr': thresh_mm_s = (thresh * 1000) / 3600
+            elif unit == 'm/min': thresh_mm_s = (thresh * 1000) / 60
             elif unit == 'm/s': thresh_mm_s = thresh * 1000
             
             normalized_table.append({
@@ -573,22 +583,22 @@ class LandslideAnalyzer:
     def _assess_long_term_risk(self, classification: str, trend: str, vel_year: float) -> tuple:
         cls_upper = classification.upper()
         
-        if "EXTREMELY RAPID" in cls_upper or "VERY RAPID" in cls_upper:
-            return "EXTREME", f"🚨 NGUY HIỂM: Vận tốc rất cao ({classification})"
+        # Nguy hiểm (Critical)
+        if any(c in cls_upper for c in ["EXTREMELY RAPID", "VERY RAPID", "RAPID"]):
+            return "CRITICAL", f"🚨 NGUY HIỂM: Vận tốc trượt cực kỳ nhanh ({classification})"
         
-        elif "RAPID" in cls_upper:
-            return "HIGH", f"⚠️ Cao: Vận tốc nhanh ({classification})"
-        
+        # Theo dõi (Warning)
         elif "MODERATE" in cls_upper:
-            return "MEDIUM", f"⚠️ Trung bình: Đất đang trượt ({classification})"
+            return "WARNING", f"⚠️ THEO DÕI: Đất đang dịch chuyển ({classification})"
         
-        elif "SLOW" in cls_upper or "STABLE" in cls_upper:
+        # An toàn (Info/Safe)
+        elif any(c in cls_upper for c in ["SLOW", "VERY SLOW", "EXTREMELY SLOW", "STABLE"]):
             if trend == "accelerating":
-                return "MEDIUM", f"⚠️ Chú ý: Đang tăng tốc ({classification})"
-            return "LOW", f"✅ Ổn định ({classification})"
+                return "INFO", f"✅ AN TOÀN (nhưng có dấu hiệu tăng tốc: {classification})"
+            return "INFO", f"✅ AN TOÀN ({classification})"
             
         else:
-            return "LOW", f"Trạng thái: {classification}"
+            return "INFO", f"Trạng thái: {classification}"
 
     # =========================================================================
     # PHÂN TÍCH DÀI HẠN GÓC NGHIÊNG IMU
@@ -744,14 +754,12 @@ class LandslideAnalyzer:
             
             # ✅ XÁC ĐỊNH MỨC ĐỘ NGUY HIỂM (chưa gửi alert)
             current_level = "INFO"
-            if "EXTREMELY RAPID" in cls_upper:
+            if "EXTREMELY RAPID" in cls_upper or "VERY RAPID" in cls_upper or "RAPID" in cls_upper:
                 current_level = "CRITICAL"
-            elif "VERY RAPID" in cls_upper:
-                current_level = "CRITICAL"
-            elif "RAPID" in cls_upper:
-                current_level = "WARNING"
             elif "MODERATE" in cls_upper:
                 current_level = "WARNING"
+            else:
+                current_level = "INFO"
             
             # ✅ LẤY BỘ ĐẾM CỦA TRẠM NÀY
             counter_info = self.alert_counters[station_id]['gnss']

@@ -1227,9 +1227,13 @@ function renderLongTermAnalysis(data) {
         const warningEl = document.getElementById('longterm-warning');
         const warningTextEl = document.getElementById('warning-text');
 
-        if (gnss.risk_level === 'EXTREME' || gnss.risk_level === 'HIGH') {
+        if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
             warningEl.style.display = 'block';
-            warningEl.className = `alert ${gnss.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'}`;
+            warningEl.className = `alert ${gnss.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'} mb-3`;
+            warningTextEl.textContent = gnss.warning_message;
+        } else if (gnss.risk_level === 'INFO') {
+            warningEl.style.display = 'block';
+            warningEl.className = `alert alert-success mb-3`;
             warningTextEl.textContent = gnss.warning_message;
         } else {
             warningEl.style.display = 'none';
@@ -1245,8 +1249,6 @@ function renderLongTermAnalysis(data) {
 
         document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
         document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
-
-        renderClassificationScale(analysis.classification, analysis.velocity_mm_year);
     } else {
         const warningEl = document.getElementById('longterm-warning');
         if (warningEl) warningEl.style.display = 'none';
@@ -1707,27 +1709,7 @@ function renderCombinedLongTermChart(data) {
     });
 }
 
-function renderClassificationScale(currentClass, velocity) {
-    const scaleContainer = document.getElementById('classification-scale');
 
-    const classifications = [
-        { name: 'Extremely rapid', color: '#dc2626', range: '> 5 m/s' },
-        { name: 'Very rapid', color: '#ea580c', range: '3 m/min - 5 m/s' },
-        { name: 'Rapid', color: '#f59e0b', range: '1.8 m/h - 3 m/min' },
-        { name: 'Moderate', color: '#eab308', range: '13 mm/month - 1.8 m/h' },
-        { name: 'Slow', color: '#84cc16', range: '1.6 m/year - 13 mm/month' },
-        { name: 'Very slow', color: '#10b981', range: '16 mm/year - 1.6 m/year' },
-        { name: 'Extremely slow', color: '#3b82f6', range: '< 16 mm/year' }
-    ];
-
-    scaleContainer.innerHTML = classifications.map(cls => `
-                <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
-                    <div class="classification-color" style="background: ${cls.color};"></div>
-                    <div class="classification-name">${cls.name}</div>
-                    <div class="classification-range">${cls.range}</div>
-                </div>
-            `).join('');
-}
 
 function showLongTermError(message) {
     document.getElementById('longterm-loading').style.display = 'none';

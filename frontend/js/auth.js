@@ -214,6 +214,13 @@ class AuthManager {
                 }
             }
 
+            // Show data analysis buttons for authenticated users (viewer, admin, operator)
+            const btnLongTerm = document.getElementById('btn-long-term');
+            if (btnLongTerm) {
+                btnLongTerm.classList.remove('d-none');
+                console.log('✅ [AUTH] Map: Data analysis buttons shown');
+            }
+
         } else {
             console.log('ℹ️ [AUTH] Not authenticated');
 
@@ -238,6 +245,13 @@ class AuthManager {
             const adminNavBtn = document.getElementById('admin-nav-btn');
             if (adminNavBtn) {
                 adminNavBtn.style.display = 'none';
+            }
+
+            // Hide data analysis buttons for unauthenticated users (guests)
+            const btnLongTerm = document.getElementById('btn-long-term');
+            if (btnLongTerm) {
+                btnLongTerm.classList.add('d-none');
+                console.log('🔒 [AUTH] Map: Data analysis buttons hidden (guest)');
             }
         }
     }
