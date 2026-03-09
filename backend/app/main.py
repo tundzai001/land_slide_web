@@ -1148,7 +1148,10 @@ async def get_long_term_analysis(
         # Chuyển sang list dict chung
         historical_gnss_full = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
         historical_gnss_requested = [p for p in historical_gnss_full if p['timestamp'] >= cutoff_requested]
-        
+        # ✅ FALLBACK: Nếu khoảng thời gian ngắn mà không có đủ dữ liệu, lấy dữ liệu gần nhất
+        if len(historical_gnss_requested) < 2 and len(historical_gnss_full) >= 2 and days <= 1:
+            historical_gnss_requested = historical_gnss_full[-20:]
+
         # 5. Phân tích GNSS (trên window requested)
         if len(historical_gnss_requested) >= 2:
             gnss_analysis = analyzer.analyze_long_term_velocity(
@@ -1158,16 +1161,21 @@ async def get_long_term_analysis(
                 window_days=days
             )
             
-            # Tạo time-series GNSS (trung bình theo ngày) cho chart & 3D
+            # Tạo time-series GNSS (trung bình theo ngày/giờ) cho chart & 3D
             if gnss_analysis.get("status") == "success":
                 from collections import OrderedDict
                 from datetime import datetime as dt
                 daily_gnss = OrderedDict()
                 
+                if days < 1/24:    fmt = '%H:%M:%S'
+                elif days <= 1:    fmt = '%H:%M'
+                elif days <= 7:    fmt = '%d/%m %H:00'
+                else:              fmt = '%d/%m'
+                
                 first_e, first_n, first_u = None, None, None
 
                 for point in historical_gnss_requested:
-                    day_key = dt.fromtimestamp(point['timestamp']).strftime('%d/%m')
+                    day_key = dt.fromtimestamp(point['timestamp']).strftime(fmt)
                     data = point['data']
                     
                     disp = data.get('total_displacement_mm', data.get('displacement_mm', 0))
@@ -1206,18 +1214,42 @@ async def get_long_term_analysis(
             }
         
         # 6. Phân tích IMU
-        if len(imu_data) >= 2:
-            historical_imu = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
+        historical_imu_full = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
+        historical_imu_requested = [p for p in historical_imu_full if p['timestamp'] >= cutoff_requested]
+        # ✅ FALLBACK: Nếu khoảng thời gian ngắn mà không có đủ dữ liệu, lấy dữ liệu gần nhất
+        if len(historical_imu_requested) < 2 and len(historical_imu_full) >= 2 and days <= 1:
+            historical_imu_requested = historical_imu_full[-60:]
+            
+        if len(historical_imu_requested) >= 2:
             imu_analysis = analyzer.analyze_long_term_tilt(
                 station_id=station_id,
-                historical_data=historical_imu,
+                historical_data=historical_imu_requested,
                 window_days=days
             )
+            
+            # Format X-axis for IMU exactly like GNSS
+            if imu_analysis.get("status") == "success" and "time_series" in imu_analysis:
+                from collections import OrderedDict
+                from datetime import datetime as dt
+                fmt = '%H:%M:%S' if days < 1/24 else '%H:%M' if days <= 1 else '%d/%m %H:00' if days <= 7 else '%d/%m'
+                
+                daily_imu = OrderedDict()
+                for ts, r, p in zip(imu_analysis["time_series"]["raw_timestamps"], imu_analysis["time_series"]["rolls"], imu_analysis["time_series"]["pitches"]):
+                    day_key = dt.fromtimestamp(ts).strftime(fmt)
+                    if day_key not in daily_imu:
+                        daily_imu[day_key] = {'rolls': [], 'pitches': []}
+                    daily_imu[day_key]['rolls'].append(r)
+                    daily_imu[day_key]['pitches'].append(p)
+                    
+                imu_analysis["time_series"]["labels"] = list(daily_imu.keys())
+                imu_analysis["time_series"]["rolls"] = [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_imu.values()]
+                imu_analysis["time_series"]["pitches"] = [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_imu.values()]
+                
             result["imu"] = imu_analysis
         else:
             result["imu"] = {
                 "status": "insufficient_data",
-                "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(imu_data)}"
+                "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(historical_imu_requested)}"
             }
         
         # 7. Phân tích tương quan Mưa - Dịch chuyển

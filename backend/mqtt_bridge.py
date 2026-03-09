@@ -242,7 +242,7 @@ class MQTTBridge:
                     if sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
                     elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
                     elif sensor_type == 'imu': 
-                        processed_data = processor.process(payload_json)
+                        processed_data = processor.process(payload_json, station_config)
                         # ✅ Auto-save baseline to DB khi vừa khóa lần đầu
                         if processed_data and processor.origin_locked and not hasattr(processor, '_baseline_saved'):
                             processor._baseline_saved = True
@@ -297,8 +297,13 @@ class MQTTBridge:
         # ---------------------------------------------------------
         is_dangerous = False
         is_just_resolved = False
+        is_pending = False
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
             is_dangerous = True
+        elif alert and alert.get('level') == 'PENDING':
+            is_pending = True
+            
+        if is_dangerous:
             try:
                 # 1. Update UI Status
                 await manager.broadcast({
@@ -333,7 +338,7 @@ class MQTTBridge:
                 logger.warning(f"🚨 [{station_name}] Alert broadcast: {alert['message']}")
             except Exception as e:
                 logger.error(f"❌ WS Alert Broadcast Error: {e}")
-        else:
+        elif not is_pending:
             # Nếu AN TOÀN -> Gửi LOW để UI chuyển về màu xanh ngay lập tức
             try:
                 await manager.broadcast({
@@ -478,14 +483,30 @@ class MQTTBridge:
 
                     # Chỉ lưu cảnh báo nếu nguy hiểm
                     if is_dangerous:
-                        db_data.add(model_data.Alert(
-                            station_id=station_id,
-                            timestamp=current_timestamp,
-                            level=alert['level'],
-                            category=alert['category'],
-                            message=alert['message'],
-                            is_resolved=False
-                        ))
+                        # Find existing unresolved alert for this category
+                        res = await db_data.execute(
+                            select(model_data.Alert).where(
+                                and_(
+                                    model_data.Alert.station_id == station_id,
+                                    model_data.Alert.category == alert['category'],
+                                    model_data.Alert.is_resolved == False
+                                )
+                            )
+                        )
+                        existing_alert = res.scalar_one_or_none()
+                        if existing_alert:
+                            existing_alert.timestamp = current_timestamp
+                            existing_alert.level = alert['level']
+                            existing_alert.message = alert['message']
+                        else:
+                            db_data.add(model_data.Alert(
+                                station_id=station_id,
+                                timestamp=current_timestamp,
+                                level=alert['level'],
+                                category=alert['category'],
+                                message=alert['message'],
+                                is_resolved=False
+                            ))
                     await db_data.commit()
 
         except Exception as e:

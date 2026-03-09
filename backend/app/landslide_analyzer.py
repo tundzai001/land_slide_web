@@ -837,20 +837,27 @@ class LandslideAnalyzer:
                 risk_level = "MEDIUM"
                 warning = f"⚠️ Chú ý: Tốc độ nghiêng đang tăng ({total_tilt_change:.2f}°)"
             
-            # --- Tạo time-series (trung bình theo ngày) cho chart ---
+            # --- Tạo time-series (trung bình theo khoảng thời gian) cho chart ---
             from collections import OrderedDict
             daily_data = OrderedDict()
+            
+            if window_days < 1/24: fmt = '%H:%M:%S'
+            elif window_days <= 1: fmt = '%H:%M'
+            elif window_days <= 7: fmt = '%d/%m %H:00'
+            else:                  fmt = '%d/%m'
+            
             for ts, r, p in zip(timestamps, rolls, pitches):
-                day_key = datetime.fromtimestamp(ts).strftime('%d/%m')
+                day_key = datetime.fromtimestamp(ts).strftime(fmt)
                 if day_key not in daily_data:
                     daily_data[day_key] = {'rolls': [], 'pitches': []}
                 daily_data[day_key]['rolls'].append(r)
                 daily_data[day_key]['pitches'].append(p)
             
             time_series = {
+                'raw_timestamps': timestamps,
                 'labels': list(daily_data.keys()),
-                'roll': [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_data.values()],
-                'pitch': [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_data.values()]
+                'rolls': [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_data.values()],
+                'pitches': [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_data.values()]
             }
             
             return {
@@ -1112,16 +1119,20 @@ class LandslideAnalyzer:
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
-                    if confirm_steps == 1:
+                    if counter_info['count'] >= confirm_steps:
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category})")
                         return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
-                    return None
+                    else:
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} (1/{confirm_steps})")
+                        return {"level": "PENDING", "category": alert_category}
                 else:
                     counter_info['count'] += 1
                     if counter_info['count'] >= confirm_steps:
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category}) after {confirm_steps} times")
                         return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
-                    return None
+                    else:
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} ({counter_info['count']}/{confirm_steps})")
+                        return {"level": "PENDING", "category": alert_category}
             else:
                 counter_info['count'] = max(0, counter_info['count'] - 1)
                 if counter_info['count'] == 0:

@@ -45,7 +45,42 @@ class IMUEngine:
             "yaw": round(delta_yaw, 2),
         }
 
-    def process(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _calculate_drift(self, delta_roll: float, delta_pitch: float, pole_height: float = 90.0) -> tuple:
+        """Tính độ lệch tâm (văng) giả định cột cao theo thực tế (mặc định 90mm) bằng phép chiếu không gian."""
+        r_rad = math.radians(delta_roll)
+        p_rad = math.radians(delta_pitch)
+        
+        # Để chính xác hơn trong không gian 3D, sự dịch chuyển của ngọn cột độ dài L=1000:
+        # Trong hệ tọa độ cầu/Euler, độ lệch tổng được tính dựa trên sin của góc nghiêng
+        # Tính góc nghiêng tổng (total tilt angle):
+        total_tilt_rad = math.sqrt(r_rad**2 + p_rad**2)
+        
+        # Khoảng cách lệch (kiểu cung lớn/dây cung) xấp xỉ L * sin(góc) 
+        # (vòng về chiếu ngang thay vì chiếu hình học phẳng với tan)
+        drift = pole_height * math.sin(total_tilt_rad)
+        
+        # Phân tích ra dx và dy để xác định hướng (dựa trên tỷ lệ góc)
+        dx = pole_height * math.sin(r_rad)
+        dy = pole_height * math.sin(p_rad)
+        
+        dir_text = "--"
+        if drift > 0.1:
+            angle_deg = math.degrees(math.atan2(dy, dx))
+            if angle_deg < 0: angle_deg += 360
+            dirs = ["Đ", "ĐB", "B", "TB", "T", "TN", "N", "ĐN"]
+            idx = int(round(angle_deg / 45)) % 8
+            dir_text = dirs[idx]
+        
+        return round(drift, 2), dir_text
+
+    def process(self, payload: Dict[str, Any], station_config: Dict = None) -> Optional[Dict[str, Any]]:
+        # Lấy chiều cao cột từ config trạm (ví dụ cho trạm này là 90mm)
+        pole_height = 90.0
+        if station_config:
+            # Ưu tiên lấy từ imu_alerting.pole_height_mm
+            imu_cfg = station_config.get('imu_alerting', {})
+            pole_height = float(imu_cfg.get('pole_height_mm', 90.0))
+            
         try:
             # =================================================================
             # CASE 1: FORMAT MỚI (Inclinometer / Tilt Sensor)
@@ -74,6 +109,9 @@ class IMUEngine:
 
                     # ✅ Tính delta so với baseline
                     delta = self._apply_baseline(angle_x, angle_y, angle_z)
+                    
+                    # ✅ Tính độ văng
+                    drift_len, drift_dir = self._calculate_drift(delta["roll"], delta["pitch"], pole_height)
 
                     # Tạo kết quả chuẩn hóa
                     result = {
@@ -81,6 +119,9 @@ class IMUEngine:
                         "roll": delta["roll"],
                         "pitch": delta["pitch"],
                         "yaw": delta["yaw"],
+                        
+                        "drift_len_mm": drift_len,
+                        "drift_dir": drift_dir,
                         
                         # Raw angles (góc tuyệt đối, để hiển thị tham khảo)
                         "raw_roll": round(angle_x, 2),
@@ -150,6 +191,9 @@ class IMUEngine:
 
             # ✅ Tính delta so với baseline
             delta = self._apply_baseline(raw_roll, raw_pitch, raw_yaw)
+            
+            # ✅ Tính độ văng dựa trên độ cao cấu hình
+            drift_len, drift_dir = self._calculate_drift(delta["roll"], delta["pitch"], pole_height)
 
             result = {
                 "ax": round(ax, 3), "ay": round(ay, 3), "az": round(az, 3),
@@ -158,6 +202,8 @@ class IMUEngine:
                 "roll": delta["roll"],
                 "pitch": delta["pitch"],
                 "yaw": delta["yaw"],
+                "drift_len_mm": drift_len,
+                "drift_dir": drift_dir,
                 # Raw angles
                 "raw_roll": round(raw_roll, 2),
                 "raw_pitch": round(raw_pitch, 2),

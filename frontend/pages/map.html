@@ -177,6 +177,19 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Thêm khoảng cách dịch nghiêng -->
+                        <div class="mt-1 pt-1 border-top" style="opacity: 0.8;">
+                            <div class="d-flex justify-content-between small px-1">
+                                <span style="font-size: 0.7rem;"><i class="bi bi-arrows-move me-1"></i>Độ lệch tâm
+                                    (tùy chỉnh):</span>
+                                <div class="d-flex gap-2"
+                                    style="font-size: 0.75rem; font-weight: bold; color: var(--accent-warning, #f59e0b);">
+                                    <span id="val-imu-drift-len">-- mm</span>
+                                    <span id="val-imu-drift-dir">(--)</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="sensor-item sensor-full-width" id="battery-container" style="display: none;">
                         <div class="sensor-label"><i class="bi bi-battery-charging me-1"></i>Battery Voltage</div>
@@ -262,9 +275,19 @@
 
             <!-- IMU Chart (3-axis) -->
             <div class="chart-box" id="chart-box-imu">
-                <div class="chart-title">🧭 IMU Roll / Pitch / Yaw (24h)</div>
-                <div style="height: 250px;">
+                <div class="chart-title d-flex justify-content-between align-items-center">
+                    <span>🧭 IMU Roll / Pitch / Yaw (24h)</span>
+                    <button class="btn btn-sm btn-outline-primary" id="btn-toggle-imu-3d"
+                        style="font-size: 0.7rem; padding: 2px 6px;">
+                        <i class="bi bi-box me-1"></i>3D View
+                    </button>
+                </div>
+                <div id="chart-imu-wrapper" style="height: 250px;">
                     <canvas id="chart-imu"></canvas>
+                </div>
+                <div id="realtime-imu-3d-wrapper"
+                    style="height: 250px; display: none; position: relative; border-radius: 8px; overflow: hidden;">
+                    <div id="realtime-imu-3d-scene" style="width: 100%; height: 100%;"></div>
                 </div>
             </div>
 
@@ -290,6 +313,17 @@
             </div>
 
             <div class="longterm-content-wrapper">
+                <!-- Time Range Selector (Always visible) -->
+                <div class="d-flex justify-content-center mb-4">
+                    <div class="btn-group btn-group-sm shadow-sm" id="longterm-range-selector">
+                        <button class="btn btn-outline-primary fw-medium px-4" data-days="0.000694">1 phút</button>
+                        <button class="btn btn-outline-primary fw-medium px-4" data-days="0.0416">1 giờ</button>
+                        <button class="btn btn-outline-primary fw-medium px-4" data-days="1">1 ngày</button>
+                        <button class="btn btn-outline-primary fw-medium px-4" data-days="7">1 tuần</button>
+                        <button class="btn btn-outline-primary fw-medium px-4 active" data-days="30">1 tháng</button>
+                    </div>
+                </div>
+
                 <!-- Loading State -->
                 <div id="longterm-loading" style="display: none;">
                     <div class="text-center my-5">
@@ -460,17 +494,6 @@
                         Biểu đồ</h5>
 
                     <!-- Time Range Selector -->
-                    <div class="d-flex justify-content-center mb-4">
-                        <div class="btn-group btn-group-sm shadow-sm" id="longterm-range-selector">
-                            <button class="btn btn-outline-primary fw-medium px-4" data-days="0.000694">1 phút</button>
-                            <button class="btn btn-outline-primary fw-medium px-4" data-days="0.0416">1 giờ</button>
-                            <button class="btn btn-outline-primary fw-medium px-4" data-days="1">1 ngày</button>
-                            <button class="btn btn-outline-primary fw-medium px-4" data-days="7">1 tuần</button>
-                            <button class="btn btn-outline-primary fw-medium px-4 active" data-days="30">1
-                                tháng</button>
-                        </div>
-                    </div>
-
                     <!-- 3D Simulations Row -->
                     <div class="row g-4 mb-4">
                         <div class="col-lg-6">

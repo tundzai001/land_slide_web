@@ -12,6 +12,12 @@ let allStations = [];
 let currentView = 'realtime';
 let wsConnection = null;
 
+// Realtime 3D state
+let realtimeImuScene, realtimeImuCamera, realtimeImuRenderer, realtimeImuControls, realtimeImuAnimationId;
+let realtimeImuSensorBlock = null;
+let realtimeImuTargetQuaternion = null;
+let realtimeImuActive = false;
+
 // =====================================================
 // MAIN INITIALIZATION
 // =====================================================
@@ -259,6 +265,14 @@ function updateRealtimeSensorValues(message) {
         animateValue('val-imu-delta-pitch', data.pitch, 1, '°', true);
         animateValue('val-imu-delta-yaw', data.yaw, 1, '°', true);
 
+        // Use backend drift calculation if available, fallback to JS
+        if (data.drift_len_mm !== undefined && data.drift_dir !== undefined) {
+            animateValue('val-imu-drift-len', data.drift_len_mm, 1, ' mm', true);
+            setText('val-imu-drift-dir', `(${data.drift_dir})`);
+        } else {
+            updateImuDrift(data.roll, data.pitch);
+        }
+
         // Update battery in real-time
         const batteryContainer = document.getElementById('battery-container');
         const batteryVal = data.battery;
@@ -457,6 +471,32 @@ function setupEventListeners() {
             }
 
             console.log('📊 [CHARTS] Charts panel closed');
+        });
+    }
+
+    const btnToggleImu3d = document.getElementById('btn-toggle-imu-3d');
+    const chartImuWrapper = document.getElementById('chart-imu-wrapper');
+    const realtimeImu3dWrapper = document.getElementById('realtime-imu-3d-wrapper');
+
+    if (btnToggleImu3d && chartImuWrapper && realtimeImu3dWrapper) {
+        btnToggleImu3d.addEventListener('click', () => {
+            realtimeImuActive = !realtimeImuActive;
+            if (realtimeImuActive) {
+                chartImuWrapper.style.display = 'none';
+                realtimeImu3dWrapper.style.display = 'block';
+                btnToggleImu3d.innerHTML = '<i class="bi bi-graph-up me-1"></i>2D Chart';
+                // Initialize 3D scene if not yet initialized
+                if (!realtimeImuScene && currentStationData && currentStationData.sensor_data && currentStationData.sensor_data.imu) {
+                    const latest = currentStationData.sensor_data.imu.latest;
+                    if (latest) {
+                        initRealtimeIMU3D(latest.roll || 0, latest.pitch || 0);
+                    }
+                }
+            } else {
+                realtimeImu3dWrapper.style.display = 'none';
+                chartImuWrapper.style.display = 'block';
+                btnToggleImu3d.innerHTML = '<i class="bi bi-box me-1"></i>3D View';
+            }
         });
     }
 
@@ -933,6 +973,7 @@ function updateSidebarUI(data) {
         setText('val-imu-delta-roll', '--°');
         setText('val-imu-delta-pitch', '--°');
         setText('val-imu-delta-yaw', '--°');
+        updateImuDrift(null, null);
 
         // ✅ Khi offline, nút tắt còi chuyển xám (idle)
         setSirenButtonState('idle');
@@ -958,6 +999,24 @@ function updateSidebarUI(data) {
         setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
         setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
         setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+
+        // Use backend drift calculation if available
+        if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
+            setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+            setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
+
+            // Update realtime 3D if active
+            if (realtimeImuActive && realtimeImuSensorBlock) {
+                const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
+                const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
+                const targetQuaternion = new THREE.Quaternion();
+                const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                targetQuaternion.setFromEuler(euler);
+                realtimeImuTargetQuaternion = targetQuaternion;
+            }
+        } else {
+            updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
+        }
 
         // ✅ Battery Voltage: hiển thị nếu có giá trị > 0
         const batteryContainer = document.getElementById('battery-container');
@@ -1519,98 +1578,65 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     imuScene.add(grid);
 
     // ==========================================
-    // HIGH-TECH SENSOR BLOCK DESIGN
+    // REALISTIC IMU BLACK BOX MOUNT DESIGN
     // ==========================================
     const sensorBlock = new THREE.Group();
 
-    // 1. Base / Main Body (Dark brushed aluminum)
-    const baseWidth = 2.4;
-    const baseHeight = 0.6;
-    const baseDepth = 3.4;
-    const bodyGeo = new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth);
-    const bodyMat = new THREE.MeshStandardMaterial({
-        color: 0x151821,
-        metalness: 0.7,
-        roughness: 0.4
+    // 1. Silver Base Plate (Circular)
+    const plateRadius = 2.0;
+    const plateThickness = 0.1;
+    const plateGeo = new THREE.CylinderGeometry(plateRadius, plateRadius, plateThickness, 32);
+    const plateMat = new THREE.MeshStandardMaterial({
+        color: 0xcccccc, // Silver
+        metalness: 0.8,
+        roughness: 0.3
     });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.castShadow = true;
-    body.receiveShadow = true;
-    sensorBlock.add(body);
+    const plate = new THREE.Mesh(plateGeo, plateMat);
+    plate.position.y = plateThickness / 2;
+    plate.castShadow = true;
+    plate.receiveShadow = true;
+    sensorBlock.add(plate);
 
-    // 2. Top Plate (Glass/Polished alloy finish)
-    const topWidth = 2.0;
-    const topHeight = 0.2;
-    const topDepth = 3.0;
-    const topGeo = new THREE.BoxGeometry(topWidth, topHeight, topDepth);
-    const topMat = new THREE.MeshPhysicalMaterial({
-        color: 0x222835,
-        metalness: 0.9,
-        roughness: 0.1,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1
+    // 2. The Black IMU Box (Main Sensor)
+    const boxWidth = 2.2;
+    const boxHeight = 1.0;
+    const boxDepth = 1.4;
+    const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+    const boxMat = new THREE.MeshStandardMaterial({
+        color: 0x111111, // Flat black
+        metalness: 0.2,
+        roughness: 0.8,
+        bumpScale: 0.02
     });
-    const topPlate = new THREE.Mesh(topGeo, topMat);
-    topPlate.position.y = baseHeight / 2 + topHeight / 2;
-    topPlate.castShadow = true;
-    sensorBlock.add(topPlate);
+    const imuBox = new THREE.Mesh(boxGeo, boxMat);
+    imuBox.position.y = plateThickness + boxHeight / 2;
+    imuBox.castShadow = true;
+    imuBox.receiveShadow = true;
+    sensorBlock.add(imuBox);
 
-    // 3. Glowing IMU Core
-    const coreGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 32);
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.y = topPlate.position.y + topHeight / 2 + 0.025;
-    sensorBlock.add(core);
-
-    // Glowing core ring
-    const ringGeo = new THREE.RingGeometry(0.4, 0.45, 32);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.6 });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = core.position.y;
-    sensorBlock.add(ring);
-
-    // 4. Direction Arrow (Sleek sci-fi style)
-    const arrowShape = new THREE.Shape();
-    arrowShape.moveTo(0, 0.4);
-    arrowShape.lineTo(0.25, -0.3);
-    arrowShape.lineTo(0, -0.15);
-    arrowShape.lineTo(-0.25, -0.3);
-    arrowShape.lineTo(0, 0.4);
-
-    // Smooth settings for extrude
-    const extrudeSettings = { depth: 0.05, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.02, bevelThickness: 0.02 };
-    const arrowGeo = new THREE.ExtrudeGeometry(arrowShape, extrudeSettings);
-    const arrowMat = new THREE.MeshStandardMaterial({
-        color: 0xff2a5f,
-        metalness: 0.6,
-        roughness: 0.2,
-        emissive: 0xff2a5f,
-        emissiveIntensity: 0.4
-    });
+    // 3. Direction Indicator (Simple white arrow on top of black box)
+    const arrowGeo = new THREE.ConeGeometry(0.15, 0.4, 16);
+    const arrowMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
     const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+    // Point it forward (along Z axis)
     arrow.rotation.x = Math.PI / 2;
-    arrow.position.set(0, topPlate.position.y + topHeight / 2 + 0.05, 1.0);
+    arrow.position.set(0, plateThickness + boxHeight + 0.05, boxDepth / 2 - 0.3);
     sensorBlock.add(arrow);
 
-    // 5. Screws/Mounting holes
-    const screwGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.2, 16);
-    const screwMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
-    const zOffset = (baseDepth / topDepth) * (topWidth / 2 - 0.2);
-    const screwPositions = [
-        [-baseWidth / 2 + 0.2, zOffset],
-        [baseWidth / 2 - 0.2, zOffset],
-        [-baseWidth / 2 + 0.2, -zOffset],
-        [baseWidth / 2 - 0.2, -zOffset]
-    ];
-    screwPositions.forEach(pos => {
-        const screw = new THREE.Mesh(screwGeo, screwMat);
-        screw.position.set(pos[0], baseHeight / 2 + 0.05, pos[1]);
-        sensorBlock.add(screw);
-    });
+    // 4. Mounting Screws on the plate
+    const screwGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
+    const screwMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.2 });
 
-    // 6. Add visual XYZ axis indicators
-    const origin = new THREE.Vector3(0, core.position.y + 0.1, 0);
+    for (let i = 0; i < 4; i++) {
+        const angle = (i * Math.PI) / 2 + Math.PI / 4;
+        const screw = new THREE.Mesh(screwGeo, screwMat);
+        const radius = plateRadius - 0.3;
+        screw.position.set(Math.cos(angle) * radius, plateThickness, Math.sin(angle) * radius);
+        sensorBlock.add(screw);
+    }
+
+    // 5. Add visual XYZ axis indicators
+    const origin = new THREE.Vector3(0, plateThickness + boxHeight + 0.2, 0);
     const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, 1.2, 0xff2a5f, 0.2, 0.15); // Red X
     const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), origin, 1.2, 0x00e5ff, 0.2, 0.15); // Cyan Y (Up)
     const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, 1.2, 0x00ff88, 0.2, 0.15); // Green Z
@@ -1635,10 +1661,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
         const delta = clock.getDelta();
         const elapsedTime = clock.getElapsedTime();
 
-        // 1. Hover effect & Glowing pulse
-        sensorBlock.position.y = Math.sin(elapsedTime * 2) * 0.05;
-        coreMat.color.setHSL(0.5 + Math.sin(elapsedTime * 3) * 0.05, 1.0, 0.5 + Math.sin(elapsedTime * 5) * 0.1);
-        ringMat.opacity = 0.4 + Math.sin(elapsedTime * 4) * 0.2;
+        // Removed vertical hover and glowing effect to keep the sensor realistic and grounded
 
         // 2. Playback IMU Tilt
         if (rollData.length > 1) {
@@ -1689,6 +1712,158 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
         imuCamera.updateProjectionMatrix();
         imuRenderer.setSize(container.clientWidth, container.clientHeight);
     });
+}
+
+async function initRealtimeIMU3D(initialRoll, initialPitch) {
+    const container = document.getElementById('realtime-imu-3d-scene');
+    if (!container) return;
+
+    if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
+    container.innerHTML = '';
+
+    try {
+        const THREE = await import('three');
+        const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+
+        realtimeImuScene = new THREE.Scene();
+        realtimeImuScene.background = new THREE.Color(0x0b0e14);
+        realtimeImuScene.fog = new THREE.FogExp2(0x0b0e14, 0.03);
+
+        const aspect = container.clientWidth / container.clientHeight;
+        realtimeImuCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+        realtimeImuCamera.position.set(5, 6, 8);
+
+        realtimeImuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        realtimeImuRenderer.setPixelRatio(window.devicePixelRatio);
+        realtimeImuRenderer.setSize(container.clientWidth, container.clientHeight);
+        realtimeImuRenderer.shadowMap.enabled = true;
+        realtimeImuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(realtimeImuRenderer.domElement);
+
+        realtimeImuControls = new OrbitControls(realtimeImuCamera, realtimeImuRenderer.domElement);
+        realtimeImuControls.enableDamping = true;
+        realtimeImuControls.dampingFactor = 0.05;
+        realtimeImuControls.maxPolarAngle = Math.PI / 2 + 0.1;
+        realtimeImuControls.minDistance = 3;
+        realtimeImuControls.maxDistance = 15;
+
+        // Advanced Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        realtimeImuScene.add(ambientLight);
+
+        const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x0f0e1d, 0.5);
+        realtimeImuScene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true;
+        realtimeImuScene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x00e5ff, 2, 8);
+        pointLight.position.set(0, 1.5, 0);
+        realtimeImuScene.add(pointLight);
+
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(30, 30);
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x0b0e14, roughness: 0.8, metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -1.5;
+        floor.receiveShadow = true;
+        realtimeImuScene.add(floor);
+
+        const grid = new THREE.GridHelper(30, 30, 0x00e5ff, 0x222233);
+        grid.position.y = -1.49;
+        grid.material.opacity = 0.15;
+        grid.material.transparent = true;
+        realtimeImuScene.add(grid);
+
+        // Realistic IMU mounting
+        realtimeImuSensorBlock = new THREE.Group();
+
+        // Base Plate
+        const plateRadius = 2.0;
+        const plateThickness = 0.1;
+        const plateGeo = new THREE.CylinderGeometry(plateRadius, plateRadius, plateThickness, 32);
+        const plateMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 });
+        const plate = new THREE.Mesh(plateGeo, plateMat);
+        plate.position.y = plateThickness / 2;
+        plate.castShadow = true;
+        plate.receiveShadow = true;
+        realtimeImuSensorBlock.add(plate);
+
+        // IMU Box
+        const boxWidth = 2.2;
+        const boxHeight = 1.0;
+        const boxDepth = 1.4;
+        const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2, roughness: 0.8 });
+        const imuBox = new THREE.Mesh(boxGeo, boxMat);
+        imuBox.position.y = plateThickness + boxHeight / 2;
+        imuBox.castShadow = true;
+        imuBox.receiveShadow = true;
+        realtimeImuSensorBlock.add(imuBox);
+
+        // Arrow
+        const arrowGeo = new THREE.ConeGeometry(0.15, 0.4, 16);
+        const arrowMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+        arrow.rotation.x = Math.PI / 2;
+        arrow.position.set(0, plateThickness + boxHeight + 0.05, boxDepth / 2 - 0.3);
+        realtimeImuSensorBlock.add(arrow);
+
+        // Screws
+        const screwGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
+        const screwMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.2 });
+        for (let i = 0; i < 4; i++) {
+            const angle = (i * Math.PI) / 2 + Math.PI / 4;
+            const screw = new THREE.Mesh(screwGeo, screwMat);
+            const radius = plateRadius - 0.3;
+            screw.position.set(Math.cos(angle) * radius, plateThickness, Math.sin(angle) * radius);
+            realtimeImuSensorBlock.add(screw);
+        }
+
+        // Axes Support
+        const origin = new THREE.Vector3(0, plateThickness + boxHeight + 0.2, 0);
+        const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, 1.2, 0xff2a5f, 0.2, 0.15);
+        const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), origin, 1.2, 0x00e5ff, 0.2, 0.15);
+        const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, 1.2, 0x00ff88, 0.2, 0.15);
+        realtimeImuSensorBlock.add(xArrow, yArrow, zArrow);
+
+        realtimeImuScene.add(realtimeImuSensorBlock);
+
+        // Initial orientation
+        const currPitch = initialPitch * Math.PI / 180;
+        const currRoll = initialRoll * Math.PI / 180;
+        realtimeImuTargetQuaternion = new THREE.Quaternion();
+        const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+        realtimeImuTargetQuaternion.setFromEuler(euler);
+
+        function animate() {
+            realtimeImuAnimationId = requestAnimationFrame(animate);
+
+            if (realtimeImuTargetQuaternion) {
+                realtimeImuSensorBlock.quaternion.slerp(realtimeImuTargetQuaternion, 0.1);
+            }
+
+            realtimeImuControls.update();
+            realtimeImuRenderer.render(realtimeImuScene, realtimeImuCamera);
+        }
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            if (!container) return;
+            realtimeImuCamera.aspect = container.clientWidth / container.clientHeight;
+            realtimeImuCamera.updateProjectionMatrix();
+            realtimeImuRenderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+    } catch (e) {
+        console.error("ThreeJS not loaded for realtime IMU", e);
+    }
 }
 
 function renderImuLongTermSection(imuData) {
@@ -2157,6 +2332,41 @@ function setText(id, val) {
 function setHTML(id, html) {
     const el = document.getElementById(id);
     if (el) el.innerHTML = html;
+}
+
+// =========================================================================
+// IMU DRIFT CALCULATION
+// =========================================================================
+function updateImuDrift(rollVal, pitchVal) {
+    if (rollVal === null || rollVal === undefined || pitchVal === null || pitchVal === undefined || isNaN(parseFloat(rollVal)) || isNaN(parseFloat(pitchVal))) {
+        setText('val-imu-drift-len', '-- mm');
+        setText('val-imu-drift-dir', '(--)');
+        return;
+    }
+    const r = parseFloat(rollVal) || 0;
+    const p = parseFloat(pitchVal) || 0;
+    const r_rad = r * Math.PI / 180;
+    const p_rad = p * Math.PI / 180;
+
+    // Using 1.0 meter (1000mm) as virtual pole length
+    // Use sin for spatial spherical coordinates instead of tan to prevent overestimation
+    const total_tilt_rad = Math.sqrt(r_rad * r_rad + p_rad * p_rad);
+    const drift = 1000 * Math.sin(total_tilt_rad);
+
+    const dx = 1000 * Math.sin(r_rad);
+    const dy = 1000 * Math.sin(p_rad);
+
+    let dir_text = "--";
+    if (drift > 0.1) {
+        let angle_deg = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (angle_deg < 0) angle_deg += 360;
+        const dirs = ["Đ", "ĐB", "B", "TB", "T", "TN", "N", "ĐN"];
+        const idx = Math.round(angle_deg / 45) % 8;
+        dir_text = dirs[idx];
+    }
+
+    animateValue('val-imu-drift-len', drift, 1, ' mm', true);
+    setText('val-imu-drift-dir', `(${dir_text})`);
 }
 
 // =========================================================================
