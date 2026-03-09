@@ -66,7 +66,7 @@ class LandslideAnalyzer:
         station_id: int,
         historical_data: List[Dict[str, Any]],
         config: Dict,
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
         try:
             if not historical_data or len(historical_data) < 2:
@@ -88,8 +88,8 @@ class LandslideAnalyzer:
             last_point = sorted_data[-1]
 
             duration_days = (last_point['timestamp'] - first_point['timestamp']) / 86400.0
-            if duration_days < 0.1:
-                return {"status": "insufficient_data", "message": "Thời gian đo quá ngắn."}
+            if duration_days <= 0:
+                duration_days = 0.00001  # Prevent division by zero
 
             # --- Bước 3: Tính toán vận tốc bằng OLS Regression (Ordinary Least Squares) ---
             # Trích xuất time và tọa độ
@@ -555,7 +555,7 @@ class LandslideAnalyzer:
         self,
         gnss_data: List[Dict[str, Any]],
         rain_data: List[Dict[str, Any]],
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
         """
         Phân tích tương quan giữa lượng mưa tích lũy và dịch chuyển.
@@ -763,7 +763,7 @@ class LandslideAnalyzer:
         self,
         station_id: int,
         historical_data: List[Dict[str, Any]],
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
         """
         Phân tích xu hướng nghiêng dài hạn từ dữ liệu IMU.
@@ -793,8 +793,8 @@ class LandslideAnalyzer:
                 return {"status": "insufficient_data", "message": "Không đủ dữ liệu IMU hợp lệ."}
             
             duration_days = (timestamps[-1] - timestamps[0]) / 86400.0
-            if duration_days < 0.01:
-                return {"status": "insufficient_data", "message": "Thời gian đo quá ngắn."}
+            if duration_days <= 0:
+                duration_days = 0.00001  # Prevent div by zero
             
             # --- Tính toán cơ bản ---
             roll_change = rolls[-1] - rolls[0]
