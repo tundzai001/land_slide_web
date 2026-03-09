@@ -22,7 +22,7 @@ from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
 from processors.imu_processor import IMUEngine
 
-from .aes128decrypt import aes128_decrypt_base64
+# from .aes128decrypt import aes128_decrypt_base64
 
 # Cấu hình Logging
 logging.basicConfig(
@@ -95,7 +95,8 @@ class MQTTBridge:
             try:
                 payload_str = msg.payload.decode('utf-8')
                 # sẽ thêm hàm giải mã AES ở đoạn này
-                decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
+                # decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
+                decrypted_payload = str(bytearray(payload_str, 'utf-8'))
                 
             except UnicodeDecodeError:
                 return # Bỏ qua dữ liệu nhị phân (RTCM)
