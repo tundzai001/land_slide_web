@@ -10,14 +10,13 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func, delete
+from sqlalchemy import select, and_, desc, func, delete, text
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mqtt_bridge import MQTTBridge
@@ -29,11 +28,20 @@ from .database import (
     get_auth_db, get_config_db, get_data_db,
     AuthSessionLocal, ConfigSessionLocal
 )
+from .routers import admin as admin_router
+from .routers import field as field_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
+from .models.pi_device import PiDevice  # noqa: F401 – ensures table is registered
 from .websocket import manager as ws_manager
 from .landslide_analyzer import LandslideAnalyzer
+
+# Import security core
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from security_core import AdvancedSecurityMiddleware, start_ipc_server
 
 # Cấu hình Logging
 logging.basicConfig(
@@ -59,16 +67,19 @@ mqtt_service = MQTTBridge()
 async def lifespan(app: FastAPI):
     logger.info("🚀 Landslide Monitoring System starting...")
     
+    # Start the Security IPC Server as a background task
+    asyncio.create_task(start_ipc_server())
+    
     try:
         # 1. Khởi tạo AUTH DB
         async with auth_engine.begin() as conn:
             await conn.run_sync(model_auth.BaseAuth.metadata.create_all)
         logger.info("✓ Auth database initialized")
 
-        # 2. Khởi tạo CONFIG DB
+        # 2. Khởi tạo CONFIG DB (stations, devices, pi_devices, ...)
         async with config_engine.begin() as conn:
             await conn.run_sync(model_config.BaseConfig.metadata.create_all)
-        logger.info("✓ Config database initialized")
+        logger.info("✓ Config database initialized (incl. pi_devices)")
 
         # 3. Khởi tạo DATA DB
         async with data_engine.begin() as conn:
@@ -143,13 +154,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Shutdown complete")
 
 # ============================================================================
-# APP SETUP
+# FASTAPI APPLICATION SETUP
 # ============================================================================
-app = FastAPI(
-    title="Landslide Monitoring API",
-    lifespan=lifespan,
-    version="3.0.0"
-)
+app = FastAPI(title="Landslide System API", lifespan=lifespan)
+
+# Add Security Middleware FIRST (Before CORS or Routing)
+app.add_middleware(AdvancedSecurityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,6 +168,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(admin_router.router)
+app.include_router(field_router.router)
+
+# Mount static files directory (for sounds, etc.)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
@@ -184,11 +199,21 @@ async def login(
             detail="Account is disabled"
         )
     
+    # Check remember_me from form scopes (OAuth2 extra fields)
+    remember_me = 'remember_me' in (form_data.scopes or [])
+    
+    # If remember_me, issue a 30-day token; otherwise use default
+    if remember_me:
+        expires = timedelta(days=30)
+    else:
+        expires = None  # Uses default from settings
+    
     access_token = auth.create_access_token(
-        data={"sub": user.username, "role": user.role}
+        data={"sub": user.username, "role": user.role},
+        expires_delta=expires
     )
     
-    logger.info(f"✅ Login successful: {user.username}")
+    logger.info(f"✅ Login successful: {user.username} (remember_me={remember_me})")
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/api/auth/me", response_model=schemas.UserResponse)
@@ -198,6 +223,7 @@ async def get_current_user_info(
     permissions = auth.get_user_permissions(current_user)
     user_response = schemas.UserResponse.from_orm(current_user)
     user_response.permissions = permissions
+    user_response.assigned_projects = getattr(current_user, 'assigned_projects', []) or []
     return user_response
 
 # ============================================================================
@@ -268,6 +294,11 @@ async def get_projects(
         )
         
         projects_with_counts = result.all()
+        
+        # Filter projects for operator role
+        assigned = getattr(current_user, 'assigned_projects', None) or []
+        if current_user.role == 'operator' and assigned:
+            projects_with_counts = [(p, c) for p, c in projects_with_counts if p.id in assigned]
         
         return [
             {
@@ -352,13 +383,6 @@ async def delete_project(
 # ============================================================================
 
 def calculate_station_location(sensors: dict, manual_location: dict = None):
-    """
-    Logic tính tọa độ trạm:
-    - Nếu có dữ liệu tọa độ từ các cảm biến (thường gửi kèm trong Sensors Dict):
-        - 1 cảm biến: Lấy tọa độ cảm biến đó.
-        - >1 cảm biến: Tính trung bình cộng lat, lon, h.
-    - Nếu không có dữ liệu từ cảm biến: Dùng manual_location từ Step 1.
-    """
     coords = []
     if sensors:
         for s_type, info in sensors.items():
@@ -394,16 +418,96 @@ def calculate_station_location(sensors: dict, manual_location: dict = None):
             "source": f"Average of {len(coords)} sensors"
         }
 
+# ============================================================================
+# RBAC HELPER: Check operator project access
+# ============================================================================
+def check_operator_project_access(user, project_id: int):
+    """Raise 403 if operator tries to access a project not in their assigned_projects."""
+    if user.role == 'operator':
+        assigned = getattr(user, 'assigned_projects', None) or []
+        if project_id not in assigned:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập dự án này")
+    elif user.role == 'viewer':
+        pass  # Viewers can view all projects (read-only)
+
+async def check_operator_station_access(user, station_id: int, db: AsyncSession):
+    """Raise 403 if operator tries to access a station not in their assigned projects."""
+    if user.role == 'operator':
+        assigned = getattr(user, 'assigned_projects', None) or []
+        res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
+        station = res.scalar_one_or_none()
+        if not station or station.project_id not in assigned:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập trạm này")
+    elif user.role == 'viewer':
+        pass  # Viewers can view all stations (read-only via VIEW_STATIONS)
+
 @app.get("/api/admin/projects/{project_id}/stations")
 async def get_stations_by_project(
     project_id: int,
-    db: AsyncSession = Depends(get_config_db),
+    db_config: AsyncSession = Depends(get_config_db),
+    db_data: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
-    result = await db.execute(
+    # Enforce operator project access
+    check_operator_project_access(current_user, project_id)
+    result = await db_config.execute(
         select(model_config.Station).where(model_config.Station.project_id == project_id)
     )
-    return result.scalars().all()
+    stations = result.scalars().all()
+    
+    # Tính status động cho từng trạm
+    current_time = int(time.time())
+    
+    stations_with_status = []
+    for station in stations:
+        # Lấy danh sách devices của trạm
+        devices_result = await db_config.execute(
+            select(model_config.Device).where(
+                and_(
+                    model_config.Device.station_id == station.id,
+                    model_config.Device.is_active == True
+                )
+            )
+        )
+        devices = devices_result.scalars().all()
+        
+        # Kiểm tra status cho từng sensor type
+        station_online = False
+        
+        for device in devices:
+            sensor_type = device.device_type
+            threshold = get_offline_threshold(station.config, sensor_type)
+            
+            latest_data_result = await db_data.execute(
+                select(model_data.SensorData)
+                .where(
+                    and_(
+                        model_data.SensorData.station_id == station.id,
+                        model_data.SensorData.sensor_type == sensor_type
+                    )
+                )
+                .order_by(desc(model_data.SensorData.timestamp))
+                .limit(1)
+            )
+            latest_data = latest_data_result.scalar_one_or_none()
+            
+            # Nếu có ít nhất 1 sensor online -> station online
+            if latest_data and (current_time - latest_data.timestamp) < threshold:
+                station_online = True
+                break
+        
+        computed_status = "online" if station_online else "offline"
+        
+        stations_with_status.append({
+            "id": station.id,
+            "station_code": station.station_code,
+            "name": station.name,
+            "location": station.location,
+            "status": computed_status, 
+            "config": station.config
+        })
+    
+    return stations_with_status
 
 @app.get("/api/admin/stations/{station_id}/config")
 async def get_station_config(
@@ -418,6 +522,9 @@ async def get_station_config(
     station = result.scalar_one_or_none()
     if not station:
         raise HTTPException(status_code=404, detail="Không tìm thấy trạm")
+    
+    # Enforce operator project access
+    check_operator_project_access(current_user, station.project_id)
     
     # Trả về cả ID, thông tin cơ bản và config
     return {
@@ -435,6 +542,8 @@ async def create_station_in_project(
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
+    # Enforce operator project access
+    check_operator_project_access(current_user, project_id)
     try:
         # 1. Kiểm tra mã trạm
         exist = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_data.station_code))
@@ -494,32 +603,59 @@ async def update_station_full_config(
         station = res.scalar_one_or_none()
         if not station: raise HTTPException(status_code=404)
 
+        # Enforce operator project access
+        check_operator_project_access(current_user, station.project_id)
+
         # TÍNH LẠI TOẠ ĐỘ TỰ ĐỘNG
         station.location = calculate_station_location(update_data.sensors, update_data.location)
         station.name = update_data.name
         station.config = update_data.config
         station.updated_at = int(time.time())
 
+
         # Sync Devices
+        # 1. Get all existing devices
+        existing_devices_res = await db.execute(select(model_config.Device).where(model_config.Device.station_id == station_id))
+        existing_devices = {d.device_type: d for d in existing_devices_res.scalars().all()}
+        
+        logger.info(f"📋 [UPDATE] Station {station_id}: existing_devices={list(existing_devices.keys())}")
+        logger.info(f"📋 [UPDATE] Incoming sensors: {update_data.sensors}")
+        
+        # 2. Update or create provided sensors based on payload
+        active_types = set()
         if update_data.sensors:
             for s_type, info in update_data.sensors.items():
                 topic = info.get('topic', '').strip()
                 if not topic: continue
                 
-                dev_res = await db.execute(select(model_config.Device).where(and_(model_config.Device.station_id == station_id, model_config.Device.device_type == s_type)))
-                device = dev_res.scalar_one_or_none()
-                if device:
-                    device.mqtt_topic = topic
+                active_types.add(s_type)
+                
+                if s_type in existing_devices:
+                    # Update existing
+                    existing_devices[s_type].mqtt_topic = topic
+                    existing_devices[s_type].is_active = True
+                    logger.info(f"  ✅ Updated device {s_type}: topic={topic}, is_active=True")
                 else:
+                    # Create new
                     db.add(model_config.Device(
                         device_code=f"{station.station_code}_{s_type.upper()}",
                         name=f"{station.name} - {s_type.upper()}",
                         station_id=station_id,
                         device_type=s_type,
                         mqtt_topic=topic,
+                        is_active=True,
                         created_at=int(time.time()),
                         updated_at=int(time.time())
                     ))
+                    logger.info(f"  🆕 Created device {s_type}: topic={topic}")
+
+        # 3. Deactivate missing sensors
+        for d_type, dev in existing_devices.items():
+            if d_type not in active_types:
+                dev.is_active = False
+                logger.info(f"  ❌ Deactivated device {d_type}")
+
+        logger.info(f"📋 [UPDATE] Active types after update: {active_types}")
         await db.commit()
         return {"status": "success"}
     except Exception as e:
@@ -534,11 +670,15 @@ async def delete_station(
 ):
     res = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
     station = res.scalar_one_or_none()
-    if station:
-        await db.delete(station)
-        await db.commit()
-        return {"status": "success"}
-    raise HTTPException(status_code=404)
+    if not station:
+        raise HTTPException(status_code=404)
+    
+    # Enforce operator project access
+    check_operator_project_access(current_user, station.project_id)
+    
+    await db.delete(station)
+    await db.commit()
+    return {"status": "success"}
 
 @app.post("/api/admin/gnss/fetch-live-origin")
 async def fetch_live_gnss_origin(
@@ -681,43 +821,85 @@ async def delete_device(
 # STATION DATA ENDPOINTS 
 # ============================================================================
 @app.get("/api/stations")
-async def get_all_stations(
+async def get_stations(
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db)
 ):
+    """
+    ✅ Trả về danh sách tất cả các trạm với offline threshold tùy chỉnh
+    """
     try:
         result = await db_config.execute(select(model_config.Station))
         stations = result.scalars().all()
         
-        stations_with_risk = []
+        current_time = int(time.time())
+        
+        stations_with_status = []
         for station in stations:
-            station_dict = {
+            # ✅ Chỉ lấy devices ACTIVE
+            devices_result = await db_config.execute(
+                select(model_config.Device).where(
+                    and_(
+                        model_config.Device.station_id == station.id,
+                        model_config.Device.is_active == True
+                    )
+                )
+            )
+            devices = devices_result.scalars().all()
+            
+            # Kiểm tra status cho từng sensor type
+            station_online = False
+            
+            for device in devices:
+                sensor_type = device.device_type
+                threshold = get_offline_threshold(station.config, sensor_type)
+                
+                # Lấy dữ liệu mới nhất của sensor này
+                latest_data_result = await db_data.execute(
+                    select(model_data.SensorData)
+                    .where(
+                        and_(
+                            model_data.SensorData.station_id == station.id,
+                            model_data.SensorData.sensor_type == sensor_type
+                        )
+                    )
+                    .order_by(desc(model_data.SensorData.timestamp))
+                    .limit(1)
+                )
+                latest_data = latest_data_result.scalar_one_or_none()
+                
+                # Nếu có ít nhất 1 sensor online -> station online
+                if latest_data and (current_time - latest_data.timestamp) < threshold:
+                    station_online = True
+                    break
+            
+            # ✅ Tính risk_level thực tế từ alerts (không hardcode LOW nữa)
+            risk_assessment = await _calculate_station_risk_assessment(db_data, station.id)
+            computed_risk = risk_assessment.get("overall_risk", "LOW")
+            
+            stations_with_status.append({
                 "id": station.id,
                 "station_code": station.station_code,
                 "name": station.name,
                 "location": station.location,
-                "status": station.status,
-                "last_update": station.last_update
-            }
-            
-            station_dict['risk_level'] = await _calculate_station_risk_simple(db_data, station.id)
-            stations_with_risk.append(station_dict)
+                "status": "online" if station_online else "offline",
+                "last_update": station.last_update, 
+                "risk_level": computed_risk
+            })
         
-        return stations_with_risk
+        return stations_with_status
         
     except Exception as e:
-        logger.error(f"Error fetching stations: {e}")
+        logger.error(f"Error loading stations: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 @app.get("/api/stations/{station_id}/detail")
 async def get_station_detail(
     station_id: int,
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db)
 ):
-    """
-    ✅ Trả về thông tin chi tiết trạm + dữ liệu cảm biến mới nhất
-    """
     try:
         # 1. Lấy thông tin trạm từ Config DB
         result = await db_config.execute(
@@ -730,7 +912,12 @@ async def get_station_detail(
         
         # 2. Lấy devices của trạm
         devices_result = await db_config.execute(
-            select(model_config.Device).where(model_config.Device.station_id == station_id)
+            select(model_config.Device).where(
+                and_(
+                    model_config.Device.station_id == station_id,
+                    model_config.Device.is_active == True
+                )
+            )
         )
         devices = devices_result.scalars().all()
         
@@ -738,6 +925,9 @@ async def get_station_detail(
         cutoff_time = int(time.time()) - 86400  # 24h ago
         
         sensor_data = {}
+        has_recent_data = False
+        latest_data_timestamp = 0
+        station_online = False  # Flag để kiểm tra trạm có online không
         
         for device in devices:
             sensor_type = device.device_type
@@ -756,6 +946,17 @@ async def get_station_detail(
             )
             latest = latest_result.scalar_one_or_none()
             
+            # ✅ Lấy offline threshold riêng cho sensor này
+            threshold = get_offline_threshold(station.config, sensor_type)
+            current_time = int(time.time())
+            
+            # Check xem sensor này có online không
+            if latest and (current_time - latest.timestamp) < threshold:
+                station_online = True  # Chỉ cần 1 sensor online là trạm online
+                has_recent_data = True
+                if latest.timestamp > latest_data_timestamp:
+                    latest_data_timestamp = latest.timestamp
+            
             # Lấy lịch sử 24h
             history_result = await db_data.execute(
                 select(model_data.SensorData)
@@ -767,7 +968,7 @@ async def get_station_detail(
                     )
                 )
                 .order_by(desc(model_data.SensorData.timestamp))
-                .limit(100)
+                .limit(500)
             )
             history = history_result.scalars().all()
             
@@ -778,24 +979,50 @@ async def get_station_detail(
                         "timestamp": h.timestamp,
                         "data": h.data
                     }
-                    for h in reversed(history)  # Đảo ngược để cũ → mới
+                    for h in reversed(history)
                 ]
             }
         
+        # ✅ Tính status dựa trên offline threshold tùy chỉnh
+        computed_status = "online" if station_online else "offline"
+        
         # 4. Tính risk assessment
         risk_assessment = await _calculate_station_risk_assessment(db_data, station_id)
-        
+
+        # 4.5 Lấy Pi devices gắn với trạm (pi_point, pi_center)
+        pi_devices_status = []
+        try:
+            pi_result = await db_config.execute(
+                select(PiDevice).where(PiDevice.station_id == station_id)
+            )
+            pi_devs = pi_result.scalars().all()
+            PI_ONLINE_THRESHOLD = 300  # 5 phút
+            for pd in pi_devs:
+                is_online = (current_time - (pd.last_seen or 0)) < PI_ONLINE_THRESHOLD
+                pi_devices_status.append({
+                    "id": pd.id,
+                    "serial": pd.serial,
+                    "name": pd.name,
+                    "device_type": pd.device_type,
+                    "is_online": is_online,
+                    "last_seen": pd.last_seen,
+                    "is_locked": pd.is_locked
+                })
+        except Exception as e:
+            logger.error(f"Error fetching Pi devices for station {station_id}: {e}")
+
         # 5. Trả về response
         return {
             "id": station.id,
             "station_code": station.station_code,
             "name": station.name,
             "location": station.location,
-            "status": station.status,
-            "last_update": station.last_update,
+            "status": computed_status,
+            "last_update": latest_data_timestamp if has_recent_data else station.last_update,
             "config": station.config,
             "sensors": sensor_data,
-            "risk_assessment": risk_assessment
+            "risk_assessment": risk_assessment,
+            "pi_devices": pi_devices_status
         }
         
     except HTTPException:
@@ -856,7 +1083,8 @@ async def get_long_term_analysis(
     db_data: AsyncSession = Depends(get_data_db)
 ):
     """
-    Phân tích dài hạn cho GNSS displacement
+    Phân tích dài hạn cho GNSS displacement + IMU tilt + Rainfall correlation
+    + Multi-window analysis + Inverse Velocity (Fukuzono)
     """
     try:
         # 1. Lấy config trạm
@@ -868,9 +1096,12 @@ async def get_long_term_analysis(
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        # 2. Lấy dữ liệu GNSS trong khoảng thời gian
-        cutoff_time = int(time.time()) - (days * 86400)
+        # Lấy window lớn nhất cho multi-window (tối thiểu = days, mở rộng 90 ngày)
+        max_window = max(days, 90)
+        cutoff_time = int(time.time()) - (max_window * 86400)
+        cutoff_requested = int(time.time()) - (days * 86400)
         
+        # 2. Lấy dữ liệu GNSS (mở rộng window cho multi-window)
         gnss_result = await db_data.execute(
             select(model_data.SensorData)
             .where(
@@ -884,30 +1115,149 @@ async def get_long_term_analysis(
         )
         gnss_data = gnss_result.scalars().all()
         
-        if len(gnss_data) < 2:
-            return {
-                "status": "insufficient_data",
-                "message": f"Cần ít nhất 2 điểm dữ liệu GNSS. Hiện có: {len(gnss_data)}"
-            }
-        
-        # 3. Chuyển đổi sang format cho analyzer
-        historical_data = [
-            {
-                "timestamp": d.timestamp,
-                "data": d.data
-            }
-            for d in gnss_data
-        ]
-        
-        # 4. Gọi analyzer
-        analysis_result = analyzer.analyze_long_term_velocity(
-            station_id=station_id,
-            historical_data=historical_data,
-            config=station.config or {},
-            window_days=days
+        # 3. Lấy dữ liệu IMU
+        imu_result = await db_data.execute(
+            select(model_data.SensorData)
+            .where(
+                and_(
+                    model_data.SensorData.station_id == station_id,
+                    model_data.SensorData.sensor_type == "imu",
+                    model_data.SensorData.timestamp >= cutoff_requested
+                )
+            )
+            .order_by(model_data.SensorData.timestamp.asc())
         )
+        imu_data = imu_result.scalars().all()
         
-        return analysis_result
+        # 4. Lấy dữ liệu mưa (cho rainfall-displacement correlation)
+        rain_result = await db_data.execute(
+            select(model_data.SensorData)
+            .where(
+                and_(
+                    model_data.SensorData.station_id == station_id,
+                    model_data.SensorData.sensor_type == "rain",
+                    model_data.SensorData.timestamp >= cutoff_requested
+                )
+            )
+            .order_by(model_data.SensorData.timestamp.asc())
+        )
+        rain_data = rain_result.scalars().all()
+        
+        result = {"station_id": station_id, "days": days}
+        
+        # Chuyển sang list dict chung
+        historical_gnss_full = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
+        historical_gnss_requested = [p for p in historical_gnss_full if p['timestamp'] >= cutoff_requested]
+        
+        # 5. Phân tích GNSS (trên window requested)
+        if len(historical_gnss_requested) >= 2:
+            gnss_analysis = analyzer.analyze_long_term_velocity(
+                station_id=station_id,
+                historical_data=historical_gnss_requested,
+                config=station.config or {},
+                window_days=days
+            )
+            
+            # Tạo time-series GNSS (trung bình theo ngày) cho chart & 3D
+            if gnss_analysis.get("status") == "success":
+                from collections import OrderedDict
+                from datetime import datetime as dt
+                daily_gnss = OrderedDict()
+                
+                first_e, first_n, first_u = None, None, None
+
+                for point in historical_gnss_requested:
+                    day_key = dt.fromtimestamp(point['timestamp']).strftime('%d/%m')
+                    data = point['data']
+                    
+                    disp = data.get('total_displacement_mm', data.get('displacement_mm', 0))
+                    e = data.get('pos_e', 0)
+                    n = data.get('pos_n', 0)
+                    u = data.get('pos_u', 0)
+                    
+                    if first_e is None:
+                        first_e, first_n, first_u = e, n, u
+
+                    if day_key not in daily_gnss:
+                        daily_gnss[day_key] = {'disp': [], 'e': [], 'n': [], 'u': []}
+                    
+                    daily_gnss[day_key]['disp'].append(float(disp))
+                    delta_e_mm = (e - first_e) * 1000
+                    delta_n_mm = (n - first_n) * 1000
+                    delta_u_mm = (u - first_u) * 1000
+                    
+                    daily_gnss[day_key]['e'].append(delta_e_mm)
+                    daily_gnss[day_key]['n'].append(delta_n_mm)
+                    daily_gnss[day_key]['u'].append(delta_u_mm)
+                
+                gnss_analysis["time_series"] = {
+                    "labels": list(daily_gnss.keys()),
+                    "displacement": [round(sum(v['disp']) / len(v['disp']), 2) for v in daily_gnss.values()],
+                    "e": [round(sum(v['e']) / len(v['e']), 2) for v in daily_gnss.values()],
+                    "n": [round(sum(v['n']) / len(v['n']), 2) for v in daily_gnss.values()],
+                    "u": [round(sum(v['u']) / len(v['u']), 2) for v in daily_gnss.values()]
+                }
+            
+            result["gnss"] = gnss_analysis
+        else:
+            result["gnss"] = {
+                "status": "insufficient_data",
+                "message": f"Cần ít nhất 2 điểm dữ liệu GNSS. Hiện có: {len(historical_gnss_requested)}"
+            }
+        
+        # 6. Phân tích IMU
+        if len(imu_data) >= 2:
+            historical_imu = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
+            imu_analysis = analyzer.analyze_long_term_tilt(
+                station_id=station_id,
+                historical_data=historical_imu,
+                window_days=days
+            )
+            result["imu"] = imu_analysis
+        else:
+            result["imu"] = {
+                "status": "insufficient_data",
+                "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(imu_data)}"
+            }
+        
+        # 7. Phân tích tương quan Mưa - Dịch chuyển
+        if len(historical_gnss_requested) >= 2 and len(rain_data) >= 2:
+            historical_rain = [{"timestamp": d.timestamp, "data": d.data} for d in rain_data]
+            rain_correlation = analyzer.analyze_rainfall_displacement_correlation(
+                gnss_data=historical_gnss_requested,
+                rain_data=historical_rain,
+                window_days=days
+            )
+            result["rainfall_correlation"] = rain_correlation
+        else:
+            result["rainfall_correlation"] = {
+                "available": False,
+                "message": "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+            }
+        
+        # 8. Phân tích đa cửa sổ (Multi-Window) - dùng full GNSS data
+        if len(historical_gnss_full) >= 2:
+            multi_window = analyzer.analyze_multi_window(
+                station_id=station_id,
+                historical_data=historical_gnss_full,
+                config=station.config or {},
+                windows=[7, 30, 90]
+            )
+            result["multi_window"] = multi_window
+        else:
+            result["multi_window"] = {"available": False, "message": "Không đủ dữ liệu."}
+        
+        # 9. Overall status
+        gnss_ok = result["gnss"].get("status") == "success"
+        imu_ok = result["imu"].get("status") == "success"
+        
+        if gnss_ok or imu_ok:
+            result["status"] = "success"
+        else:
+            result["status"] = "insufficient_data"
+            result["message"] = "Không đủ dữ liệu GNSS và IMU để phân tích."
+        
+        return result
         
     except HTTPException:
         raise
@@ -919,6 +1269,44 @@ async def get_long_term_analysis(
 # ============================================================================
 # DATABASE MANAGEMENT ENDPOINTS (cho Admin Panel)
 # ============================================================================
+
+# ============================================================================
+# STATS API (Đếm tổng số lượng bản ghi thực tế)
+# ============================================================================
+@app.get("/api/admin/db/stats")  #
+async def get_database_stats(
+    config_db: AsyncSession = Depends(get_config_db),
+    data_db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    try:
+        # Đếm Stations
+        count_stations = await config_db.execute(select(func.count()).select_from(model_config.Station))
+        num_stations = count_stations.scalar()
+
+        # Đếm Devices
+        count_devices = await config_db.execute(select(func.count()).select_from(model_config.Device))
+        num_devices = count_devices.scalar()
+
+        # Đếm Sensor Data (Total)
+        count_data = await data_db.execute(select(func.count()).select_from(model_data.SensorData))
+        num_data = count_data.scalar()
+
+        # Đếm Active Alerts (Chưa xử lý)
+        count_alerts = await data_db.execute(
+            select(func.count()).select_from(model_data.Alert).where(model_data.Alert.is_resolved == False)
+        )
+        num_alerts = count_alerts.scalar()
+
+        return {
+            "stations": num_stations,
+            "devices": num_devices,
+            "sensor_data": num_data,
+            "alerts": num_alerts
+        }
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return {"stations": 0, "devices": 0, "sensor_data": 0, "alerts": 0}
 
 @app.get("/api/admin/db/stations")
 async def admin_get_all_stations(
@@ -1006,7 +1394,9 @@ async def admin_get_sensor_data(
                 "data": d.data,
                 "value_1": d.value_1,
                 "value_2": d.value_2,
-                "value_3": d.value_3
+                "value_3": d.value_3,
+                "value_4": d.value_4,
+                "value_5": d.value_5
             }
             for d in data
         ]
@@ -1220,11 +1610,171 @@ async def read_root():
         return FileResponse(file_path)
     return {"error": "Frontend not found"}
 
-app.mount("/", StaticFiles(directory="../frontend", html=True), name="static")
 
+# =====================
+# Field Unit Provisioning API
+# =====================
+@app.post("/api/field/register")
+async def field_register(payload: Dict[str, Any], db: AsyncSession = Depends(get_config_db)):
+    """Register device (bootstrap). Payload: {"device_code": "hw123", "device_type":"pi"}
+    Returns enrollment token and device info.
+    """
+    device_code = payload.get('device_code')
+    device_type = payload.get('device_type', 'pi')
+    if not device_code:
+        raise HTTPException(status_code=400, detail="device_code required")
+
+    # check existing
+    result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
+    device = result.scalar_one_or_none()
+
+    import uuid, time
+    enroll_token = uuid.uuid4().hex
+    token_expiry = int(time.time()) + 3600*24  # 24h
+
+    now_ts = int(time.time())
+    if not device:
+        new_dev = model_config.Device(
+            device_code=device_code,
+            name=payload.get('name', device_code),
+            station_id=0,
+            device_type=device_type,
+            mqtt_topic=None,
+            position={},
+            is_active=True,
+            last_data_time=0,
+            config={"enroll_token": enroll_token, "token_expiry": token_expiry},
+            created_at=now_ts,
+            updated_at=now_ts
+        )
+        db.add(new_dev)
+        await db.commit()
+        await db.refresh(new_dev)
+        device = new_dev
+    else:
+        cfg = device.config or {}
+        cfg.update({"enroll_token": enroll_token, "token_expiry": token_expiry})
+        device.config = cfg
+        device.updated_at = now_ts
+        db.add(device)
+        await db.commit()
+        await db.refresh(device)
+
+    provision_url = f"/api/field/provision"
+    return {"device_code": device.device_code, "device_id": device.id, "enroll_token": enroll_token, "provision_url": provision_url, "token_expiry": token_expiry}
+
+
+@app.post("/api/field/provision")
+async def field_provision(payload: Dict[str, Any], db: AsyncSession = Depends(get_config_db)):
+    """Provision device with station assignment and configs.
+    Payload: {"device_code":"hw123","enroll_token":"...","station_id":1,"mqtt":{...},"audio_files":[...],"license":"..."}
+    """
+    device_code = payload.get('device_code')
+    token = payload.get('enroll_token')
+    if not device_code or not token:
+        raise HTTPException(status_code=400, detail="device_code and enroll_token required")
+
+    result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="device not found")
+
+    cfg = device.config or {}
+    if cfg.get('enroll_token') != token:
+        raise HTTPException(status_code=403, detail="invalid enroll token")
+
+    # apply provisioning
+    station_id = int(payload.get('station_id', 0))
+    mqtt_conf = payload.get('mqtt') or {}
+    audio_files = payload.get('audio_files') or []
+    license_blob = payload.get('license')
+
+    # set mqtt topic for alerts/commands
+    mqtt_topic = f"landslide/{station_id}"
+
+    cfg.update({
+        "provisioned": True,
+        "provisioned_at": int(time.time()),
+        "mqtt": mqtt_conf,
+        "audio_files": audio_files,
+        "license": license_blob
+    })
+
+    device.station_id = station_id
+    device.mqtt_topic = mqtt_topic
+    device.config = cfg
+    device.updated_at = int(time.time())
+
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+
+    return {"status": "ok", "device_id": device.id, "station_id": station_id, "mqtt_topic": mqtt_topic}
+
+
+@app.get("/api/field/{device_code}/config")
+async def field_get_config(device_code: str, token: Optional[str] = None, db: AsyncSession = Depends(get_config_db)):
+    """Device fetches its config. Provide enroll_token or provision token as query param 'token'"""
+    result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="device not found")
+
+    cfg = device.config or {}
+    # Accept either enroll_token or provisioned state
+    if (cfg.get('enroll_token') and token == cfg.get('enroll_token')) or cfg.get('provisioned'):
+        return {"device_code": device.device_code, "device_id": device.id, "station_id": device.station_id, "mqtt_topic": device.mqtt_topic, "config": cfg}
+    raise HTTPException(status_code=403, detail="unauthorized")
+
+
+@app.post("/api/field/{device_code}/status")
+async def field_status(device_code: str, payload: Dict[str, Any], db: AsyncSession = Depends(get_config_db)):
+    """Device posts health/status. payload example: {"status":"ok","uptime":1234, "audio_files": [...] }"""
+    result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="device not found")
+
+    # update last_data_time and config audio list if provided
+    now_ts = int(time.time())
+    device.last_data_time = now_ts
+    cfg = device.config or {}
+    if 'audio_files' in payload:
+        cfg['audio_files_local'] = payload.get('audio_files')
+    if 'status' in payload:
+        cfg['last_status'] = payload.get('status')
+
+    device.config = cfg
+    device.updated_at = now_ts
+    db.add(device)
+    await db.commit()
+    return {"status": "ok", "updated_at": now_ts}
+
+app.mount("/", StaticFiles(directory="../frontend", html=True), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+def get_offline_threshold(station_config: dict, sensor_type: str) -> int:
+    """
+    Lấy offline threshold từ config của station cho từng loại sensor
+    Args:
+        station_config: Dictionary config của station
+        sensor_type: Loại sensor ('gnss', 'rain', 'water', 'imu')
+    Returns:
+        Thời gian offline threshold (giây)
+    Mặc định:
+        - gnss: 300s (5 phút)
+        - rain: 300s (5 phút)  
+        - water: 300s (5 phút)
+        - imu: 300s (5 phút)
+    """
+    if not station_config:
+        return 60
+    
+    offline_config = station_config.get('offline_thresholds', {})
+    return offline_config.get(sensor_type, 60)
+
 async def _calculate_station_risk_simple(db_data: AsyncSession, station_id: int) -> str:
     try:
         result = await db_data.execute(
@@ -1239,8 +1789,7 @@ async def _calculate_station_risk_simple(db_data: AsyncSession, station_id: int)
         critical = sum(1 for a in alerts if a.level == "CRITICAL")
         warning = sum(1 for a in alerts if a.level == "WARNING")
         
-        if critical >= 2: return "EXTREME"
-        elif critical == 1 or warning >= 3: return "HIGH"
+        if critical >= 1: return "EXTREME"
         elif warning >= 1: return "MEDIUM"
         return "LOW"
     except:

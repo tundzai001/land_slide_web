@@ -15,9 +15,11 @@ body {
 body::before {
     content: '';
     position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: 
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
         radial-gradient(circle at 20% 80%, rgba(14, 165, 233, 0.08) 0%, transparent 50%),
         radial-gradient(circle at 80% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 50%);
     pointer-events: none;
@@ -26,14 +28,19 @@ body::before {
 }
 
 [data-theme="dark"] body::before {
-    background: 
+    background:
         radial-gradient(circle at 20% 80%, rgba(14, 165, 233, 0.15) 0%, transparent 50%),
         radial-gradient(circle at 80% 20%, rgba(59, 130, 246, 0.15) 0%, transparent 50%);
 }
 
 @keyframes bgShift {
-    0% { transform: translate(0, 0) scale(1); }
-    100% { transform: translate(5%, 5%) scale(1.1); }
+    0% {
+        transform: translate(0, 0) scale(1);
+    }
+
+    100% {
+        transform: translate(5%, 5%) scale(1.1);
+    }
 }
 
 /* === NAVBAR === */
@@ -63,6 +70,11 @@ body::before {
     text-align: center;
     position: relative;
     z-index: 1;
+    /* Prevent shift */
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .hero-title {
@@ -100,14 +112,22 @@ body::before {
     box-shadow: var(--shadow-sm);
 }
 
+.feature-card {
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
+}
+
 .feature-card::before {
     content: '';
     position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
-                                rgba(14, 165, 233, 0.1) 0%, 
-                                transparent 50%);
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+            rgba(14, 165, 233, 0.1) 0%,
+            transparent 50%);
     opacity: 0;
     transition: opacity var(--transition-base);
 }
@@ -126,9 +146,9 @@ body::before {
     width: 80px;
     height: 80px;
     border-radius: 20px;
-    background: linear-gradient(135deg, 
-                rgba(14, 165, 233, 0.1) 0%, 
-                rgba(59, 130, 246, 0.1) 100%);
+    background: linear-gradient(135deg,
+            rgba(14, 165, 233, 0.1) 0%,
+            rgba(59, 130, 246, 0.1) 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -138,6 +158,8 @@ body::before {
     position: relative;
     z-index: 1;
     color: var(--accent-primary);
+    flex-shrink: 0;
+    /* Prevent shrinking */
 }
 
 .feature-card:hover .icon-wrapper {
@@ -207,11 +229,11 @@ body::before {
     .hero-section {
         padding: 60px 0 40px;
     }
-    
+
     .feature-card {
         padding: 30px 24px;
     }
-    
+
     .icon-wrapper {
         width: 64px;
         height: 64px;
@@ -225,13 +247,110 @@ body::before {
 }
 
 [data-theme="dark"] .icon-wrapper {
-    background: linear-gradient(135deg, 
-                rgba(14, 165, 233, 0.15) 0%, 
-                rgba(59, 130, 246, 0.15) 100%);
+    background: linear-gradient(135deg,
+            rgba(14, 165, 233, 0.15) 0%,
+            rgba(59, 130, 246, 0.15) 100%);
 }
 
 [data-theme="dark"] .feature-card::before {
-    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
-                                rgba(14, 165, 233, 0.2) 0%, 
-                                transparent 50%);
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+            rgba(14, 165, 233, 0.2) 0%,
+            transparent 50%);
+}
+
+/* ========================================
+   DARK MODE TEXT FIX
+======================================== */
+[data-theme="dark"] .hero-title {
+    background: var(--gradient-hero);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+[data-theme="dark"] .hero-subtitle,
+[data-theme="dark"] .feature-card p {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .feature-card h3 {
+    color: var(--text-primary) !important;
+}
+
+/* ========================================
+   COMPREHENSIVE LIGHT/DARK TEXT FIXES
+======================================== */
+
+/* === Navbar === */
+.navbar .btn-link {
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.navbar .btn-link:hover {
+    color: var(--accent-primary);
+}
+
+/* === Info section card text === */
+.card h5 {
+    color: var(--text-primary) !important;
+}
+
+.card p.text-muted,
+.card .text-muted {
+    color: var(--text-muted) !important;
+}
+
+/* === Light mode specific === */
+[data-theme="light"] .navbar {
+    background: rgba(255, 255, 255, 0.95) !important;
+}
+
+[data-theme="light"] .navbar-brand {
+    color: #212529 !important;
+}
+
+[data-theme="light"] .feature-card h3 {
+    color: #212529 !important;
+}
+
+[data-theme="light"] .card h5 {
+    color: #212529 !important;
+}
+
+[data-theme="light"] .footer {
+    color: #6c757d;
+}
+
+/* === Dark mode specific === */
+[data-theme="dark"] .navbar {
+    background: rgba(15, 23, 42, 0.95) !important;
+}
+
+[data-theme="dark"] .navbar-brand {
+    color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .card h5 {
+    color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .footer {
+    color: var(--text-muted);
+}
+
+/* === Bootstrap text helper overrides === */
+[data-theme="dark"] .text-primary {
+    color: var(--accent-primary) !important;
+}
+
+[data-theme="dark"] .text-success {
+    color: var(--accent-success) !important;
+}
+
+[data-theme="dark"] .text-danger {
+    color: var(--accent-danger) !important;
+}
+
+[data-theme="dark"] .text-info {
+    color: var(--accent-info) !important;
 }

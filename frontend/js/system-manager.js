@@ -4,52 +4,48 @@
 
 class SystemManager {
     constructor() {
-        this.token = localStorage.getItem('token');
+        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
         this.isVerified = false;
-        
+
         // Khởi tạo chặn tab ngay lập tức
         this.setupTabInterceptor();
     }
 
     setupTabInterceptor() {
-        // Tìm nút bấm mở tab System
-        const systemTabBtn = document.querySelector('button[data-bs-target="#tab-system"]');
-        
-        if (!systemTabBtn) return;
+        // Tìm nút bấm mở tab System trong sidebar
+        const systemTabLink = document.querySelector('[data-tab="tab-system"]');
 
-        // ✅ QUAN TRỌNG: Dùng sự kiện 'show.bs.tab' thay vì 'click'
-        // Sự kiện này kích hoạt TRƯỚC khi tab chuyển đổi
-        systemTabBtn.addEventListener('show.bs.tab', (event) => {
+        if (!systemTabLink) return;
+
+        // Intercept click — prevent switching if not verified
+        systemTabLink.addEventListener('click', (event) => {
             if (!this.isVerified) {
-                // ⛔ CHẶN ĐỨNG việc chuyển tab ngay lập tức
-                event.preventDefault(); 
-                
-                // Hiện bảng nhập mật khẩu
+                event.preventDefault();
+                event.stopPropagation();
                 this.showPasswordShield();
             }
-            // Nếu đã verified (isVerified = true) thì cho phép chuyển tab bình thường
-        });
+        }, true); // capture phase to run before switchTab
     }
 
     showPasswordShield() {
         const shield = document.getElementById('password-shield');
         const input = document.getElementById('system-password-input');
         const error = document.getElementById('password-error');
-        
+
         if (shield) {
             shield.style.display = 'flex';
-            
+
             if (input) {
                 input.value = '';
                 input.focus();
-                
+
                 // Xử lý sự kiện Enter
                 input.onkeyup = (e) => {
                     if (e.key === 'Enter') this.verifyPassword();
                     if (error) error.style.display = 'none';
                 };
             }
-            
+
             if (error) error.style.display = 'none';
         }
     }
@@ -77,15 +73,16 @@ class SystemManager {
                 // ✅ ĐÚNG MẬT KHẨU
                 this.isVerified = true;
                 window.toast?.success('✅ Xác thực thành công!');
-                
+
                 // 1. Ẩn khiên
                 const shield = document.getElementById('password-shield');
                 if (shield) shield.style.display = 'none';
 
-                // 2. Tự động chuyển sang tab System (vì lúc nãy mình đã chặn nó)
-                const systemTabBtn = document.querySelector('button[data-bs-target="#tab-system"]');
-                const tabInstance = new bootstrap.Tab(systemTabBtn);
-                tabInstance.show();
+                // 2. Tự động chuyển sang tab System
+                const systemLink = document.querySelector('[data-tab="tab-system"]');
+                if (window.adminManager) {
+                    window.adminManager.switchTab('tab-system', systemLink);
+                }
 
                 // 3. Load dữ liệu
                 this.loadSystemConfig();
@@ -196,15 +193,16 @@ class SystemManager {
             if (!res.ok) throw new Error('Failed to save');
 
             window.toast?.success('✅ Đã lưu cấu hình hệ thống!');
-            
+
         } catch (e) {
             window.toast?.error('❌ Lỗi: ' + e.message);
         }
     }
 
     applyPreset(presetName) {
-        // Logic apply preset (nếu cần)
-        window.toast?.info('Chức năng Preset đang cập nhật...');
+        // ✅ Presets have been moved to per-station configuration
+        window.toast?.info('💡 Quick Presets áp dụng ở cấp trạm!', 2000);
+        window.toast?.info('Vào Quản lý Hệ thống → Chọn dự án → Chọn trạm → Cấu hình → Step 3', 4000);
     }
 }
 

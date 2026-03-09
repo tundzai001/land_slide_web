@@ -1,256 +1,399 @@
-<!--index.html (landing page)-->
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en" class="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Landslide Monitoring System</title>
-    
-    <!-- CSS Dependencies -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        slate: {
+                            950: '#020617',
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    
-    <!-- Custom CSS -->
-    <link rel="stylesheet" href="/css/theme-variables.css">
-    <link rel="stylesheet" href="/css/components.css">
-    <link rel="stylesheet" href="/css/landing.css">
-    <link rel="stylesheet" href="/css/animations.css">
-</head>
-<body>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #020617;
+        }
 
-    <!-- Welcome Banner (hiện khi vừa login) -->
-    <div class="welcome-banner" id="welcome-banner">
-        <div class="welcome-content">
-            <div class="welcome-icon">
-                <i class="bi bi-check-circle-fill"></i>
-            </div>
-            <h2 class="welcome-title">Chào mừng quay trở lại!</h2>
-            <p class="welcome-subtitle" id="welcome-username">Administrator</p>
-        </div>
+        .text-glow {
+            text-shadow: 0 0 20px rgba(45, 212, 191, 0.5);
+        }
+
+        /* Animating the background gradient */
+        .animate-gradient {
+            background-size: 200%;
+            animation: gradient-flow 3s linear infinite;
+        }
+
+        @keyframes gradient-flow {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-teal-500 selection:text-white">
+
+    <!-- Background -->
+    <div class="fixed inset-0 z-0 pointer-events-none">
+        <img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=3540&auto=format&fit=crop"
+            alt="Mountains" class="w-full h-full object-cover opacity-60">
+        <div class="absolute inset-0 bg-slate-950/60"></div>
+        <div class="absolute inset-0 bg-gradient-to-b from-slate-950/40 via-transparent to-slate-950"></div>
     </div>
 
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg sticky-top">
-        <div class="container">
-            <a class="navbar-brand d-flex align-items-center gap-2" href="/">
-                <i class="bi bi-activity" style="font-size: 1.8rem; color: var(--accent-primary);"></i>
-                <span>Landslide Monitor</span>
-            </a>
-            
-            <div class="ms-auto d-flex align-items-center gap-3">
-                <span id="user-display" class="text-muted small fw-semibold d-none"></span>
-                
-                <button id="auth-btn" class="btn btn-sm btn-primary">
-                    <i class="bi bi-box-arrow-in-right me-1"></i> Đăng nhập
+    <!-- Header -->
+    <header class="fixed top-0 left-0 right-0 z-50 py-4 transition-all duration-300" id="main-header">
+        <div class="container mx-auto px-4 md:px-8 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-10 h-10 bg-gradient-to-br from-teal-400 to-cyan-600 rounded-lg flex items-center justify-center shadow-lg shadow-teal-500/20">
+                    <i class="bi bi-activity text-white text-xl"></i>
+                </div>
+                <!-- Link to home -->
+                <a href="/"
+                    class="font-bold text-xl text-white tracking-tight hidden sm:block hover:text-teal-400 transition-colors">Landslide
+                    Monitor</a>
+            </div>
+
+            <nav class="hidden md:flex items-center gap-8">
+                <!-- Keep map button accessible -->
+                <a href="/pages/map.html"
+                    class="text-sm font-medium text-slate-300 hover:text-teal-400 transition-colors">Live Map</a>
+                <a href="#features"
+                    class="text-sm font-medium text-slate-300 hover:text-teal-400 transition-colors">Features</a>
+                <a href="https://aitogy.com/" target="_blank"
+                    class="text-sm font-medium text-slate-300 hover:text-teal-400 transition-colors">About</a>
+            </nav>
+
+            <div class="flex items-center gap-3">
+                <!-- Explicit Map Button -->
+                <a href="/pages/map.html"
+                    class="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-500/10 border border-teal-500/50 text-teal-400 hover:bg-teal-500 hover:text-white transition-all duration-300 text-sm font-bold shadow-[0_0_15px_rgba(20,184,166,0.2)] hover:shadow-[0_0_25px_rgba(20,184,166,0.4)]">
+                    <i class="bi bi-map-fill"></i> Public Map
+                </a>
+
+                <!-- Admin / Login Button -->
+                <a href="/pages/login.html" id="auth-header-btn"
+                    class="px-5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-colors border border-slate-700 flex items-center gap-2">
+                    Đăng nhập
+                </a>
+
+                <!-- Mobile Menu Button -->
+                <button class="md:hidden text-white p-2 hover:text-teal-400 transition-colors" id="mobile-menu-btn">
+                    <i class="bi bi-list text-2xl"></i>
                 </button>
             </div>
         </div>
-    </nav>
+    </header>
 
-    <!-- Hero Section -->
-    <div class="container">
-        <section class="hero-section">
-            <h1 class="hero-title fade-in-up">
-                Hệ thống Cảnh báo Sạt lở
+    <!-- Mobile Menu -->
+    <div class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-xl pt-24 px-6 md:hidden transition-transform duration-300 translate-x-full"
+        id="mobile-menu">
+        <nav class="flex flex-col gap-6 text-center">
+            <a href="/pages/map.html" class="text-xl font-medium text-teal-400 border-b border-white/10 pb-4">Live
+                Map</a>
+            <a href="#features" class="text-xl font-medium text-white hover:text-teal-400"
+                onclick="toggleMenu()">Features</a>
+            <a href="https://aitogy.com/" target="_blank" class="text-xl font-medium text-white hover:text-teal-400"
+                onclick="toggleMenu()">About</a>
+            <a href="/pages/login.html"
+                class="w-full py-3 rounded-lg bg-teal-600 text-white font-bold mt-4 shadow-lg shadow-teal-500/30">
+                Đăng nhập
+            </a>
+        </nav>
+        <button class="absolute top-6 right-6 text-white p-2 hover:text-teal-400 transition-colors" id="close-menu-btn">
+            <i class="bi bi-x-lg text-2xl"></i>
+        </button>
+    </div>
+
+    <!-- Main Content -->
+    <main class="relative z-10 container mx-auto px-4 pt-32 pb-16 min-h-screen flex flex-col justify-center">
+
+        <!-- Hero Section -->
+        <div class="text-center max-w-5xl mx-auto mb-20 mt-8 md:mt-0">
+            <h1 class="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 tracking-tight">
+                <span
+                    class="bg-clip-text text-transparent bg-gradient-to-r from-teal-400 via-cyan-400 to-green-400 text-glow animate-gradient">
+                    Hệ thống Cảnh báo Sạt lở
+                </span>
             </h1>
-            <p class="hero-subtitle fade-in-up stagger-1">
+            <p class="text-lg md:text-xl text-slate-300 font-light leading-relaxed max-w-3xl mx-auto mb-10">
                 Giám sát thời gian thực chuyển vị GNSS, lượng mưa, mực nước ngầm và độ nghiêng.
                 Phân tích nguy cơ và cảnh báo sớm để giảm thiểu thiệt hại.
             </p>
-        </section>
 
-        <!-- Feature Cards -->
-        <div class="row g-4 justify-content-center mb-5">
-            <!-- Map Card -->
-            <div class="col-md-6 col-lg-4">
-                <a href="/pages/map.html" class="feature-card fade-in-up stagger-2">
-                    <span class="status-badge">
-                        <i class="bi bi-broadcast me-1"></i>Live
-                    </span>
-                    <div class="icon-wrapper">
-                        <i class="bi bi-map-fill"></i>
-                    </div>
-                    <h3>Bản đồ Giám sát</h3>
-                    <p>
-                        Theo dõi vị trí các trạm quan trắc, xem dữ liệu cảm biến trực quan 
-                        và trạng thái cảnh báo trên bản đồ vệ tinh.
-                    </p>
+            <!-- Hero Buttons -->
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
+                <a href="/pages/map.html"
+                    class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-bold text-lg shadow-lg shadow-teal-500/30 hover:shadow-teal-500/50 hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2">
+                    <i class="bi bi-broadcast"></i> Xem Bản Đồ Live
                 </a>
-            </div>
-
-            <!-- Admin Card (Only visible for admin) -->
-            <div class="col-md-6 col-lg-4 d-none" id="admin-card">
-                <a href="/pages/admin.html" class="feature-card fade-in-up stagger-3">
-                    <div class="icon-wrapper text-danger">
-                        <i class="bi bi-gear-fill"></i>
-                    </div>
-                    <h3>Quản lý Hệ thống</h3>
-                    <p>
-                        Quản lý người dùng, cấu hình trạm giám sát, thiết lập cảm biến 
-                        và MQTT topics.
-                    </p>
-                </a>
-            </div>
-
-            <!-- About Card -->
-            <div class="col-md-6 col-lg-4">
-                <a href="#about" class="feature-card fade-in-up stagger-4">
-                    <div class="icon-wrapper text-info">
-                        <i class="bi bi-info-circle-fill"></i>
-                    </div>
-                    <h3>Giới thiệu</h3>
-                    <p>
-                        Tìm hiểu thêm về dự án, công nghệ được sử dụng và cách thức 
-                        hoạt động của hệ thống cảnh báo.
-                    </p>
+                <a href="https://aitogy.com/" target="_blank"
+                    class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-slate-800/80 text-white font-semibold text-lg border border-slate-700 hover:bg-slate-700 hover:border-teal-500/50 transition-all duration-300">
+                    Tìm hiểu thêm
                 </a>
             </div>
         </div>
 
-        <!-- Info Section -->
-        <div class="row mb-5">
-            <div class="col-lg-8 mx-auto">
-                <div class="card p-4 text-center fade-in-up stagger-5">
-                    <h5 class="mb-3">
-                        <i class="bi bi-shield-check text-success me-2"></i>
-                        Công nghệ Giám sát Hiện đại
-                    </h5>
-                    <p class="text-muted mb-0">
-                        Tích hợp MQTT real-time, WebSocket streaming, AI risk assessment 
-                        và cảnh báo đa kênh (Email, SMS, Push notification).
-                    </p>
+        <!-- Features Process Flow -->
+        <div id="features" class="w-full max-w-6xl mx-auto mb-24 scroll-mt-24">
+            <h2 class="text-center text-2xl font-semibold text-white mb-16 opacity-90">Nguyên lý Hoạt động</h2>
+
+            <div class="relative flex flex-col md:flex-row justify-between items-start gap-12 md:gap-8">
+                <!-- Connecting Line (Desktop) -->
+                <div
+                    class="hidden md:block absolute top-[40px] left-[140px] right-[140px] h-1 bg-gradient-to-r from-teal-500/20 via-teal-500 to-teal-500/20 z-0">
+                </div>
+
+                <!-- Step 1 -->
+                <div class="flex flex-col items-center relative z-10 group w-full md:w-1/3 text-center">
+                    <div class="relative mb-6">
+                        <div
+                            class="w-20 h-20 rounded-2xl bg-slate-900/50 backdrop-blur-sm border border-teal-500/30 flex items-center justify-center shadow-[0_0_15px_rgba(20,184,166,0.2)] group-hover:shadow-[0_0_25px_rgba(20,184,166,0.4)] transition-all duration-300 group-hover:-translate-y-2">
+                            <i class="bi bi-broadcast-pin text-3xl text-teal-400"></i>
+                        </div>
+                        <div
+                            class="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-slate-800 border border-teal-500/50 flex items-center justify-center text-teal-400 font-bold text-sm">
+                            1</div>
+                    </div>
+                    <h3 class="text-white font-semibold text-lg mb-2 group-hover:text-teal-300 transition-colors">Cảm
+                        biến IoT</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed max-w-[280px]">Thu thập dữ liệu liên tục từ các
+                        trạm quan trắc (GNSS, Mưa, Tilt, Water).</p>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="flex flex-col items-center relative z-10 group w-full md:w-1/3 text-center">
+                    <div class="relative mb-6">
+                        <div
+                            class="w-20 h-20 rounded-2xl bg-slate-900/50 backdrop-blur-sm border border-teal-500/30 flex items-center justify-center shadow-[0_0_15px_rgba(20,184,166,0.2)] group-hover:shadow-[0_0_25px_rgba(20,184,166,0.4)] transition-all duration-300 group-hover:-translate-y-2">
+                            <i class="bi bi-cpu text-3xl text-teal-400"></i>
+                        </div>
+                        <div
+                            class="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-slate-800 border border-teal-500/50 flex items-center justify-center text-teal-400 font-bold text-sm">
+                            2</div>
+                    </div>
+                    <h3 class="text-white font-semibold text-lg mb-2 group-hover:text-teal-300 transition-colors">Phân
+                        tích AI</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed max-w-[280px]">Hệ thống AI phân tích dữ liệu
+                        realtime và đánh giá nguy cơ sạt lở.</p>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="flex flex-col items-center relative z-10 group w-full md:w-1/3 text-center">
+                    <div class="relative mb-6">
+                        <div
+                            class="w-20 h-20 rounded-2xl bg-slate-900/50 backdrop-blur-sm border border-teal-500/30 flex items-center justify-center shadow-[0_0_15px_rgba(20,184,166,0.2)] group-hover:shadow-[0_0_25px_rgba(20,184,166,0.4)] transition-all duration-300 group-hover:-translate-y-2">
+                            <i class="bi bi-phone text-3xl text-teal-400"></i>
+                        </div>
+                        <div
+                            class="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-slate-800 border border-teal-500/50 flex items-center justify-center text-teal-400 font-bold text-sm">
+                            3</div>
+                    </div>
+                    <h3 class="text-white font-semibold text-lg mb-2 group-hover:text-teal-300 transition-colors">Cảnh
+                        báo Tức thì</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed max-w-[280px]">Gửi cảnh báo đến người dân và chính
+                        quyền qua App, SMS và Loa.</p>
                 </div>
             </div>
         </div>
-    </div>
+
+        <!-- Statistics -->
+        <div class="w-full max-w-5xl mx-auto mb-16">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-6 mb-8">
+                <h2 class="text-2xl font-semibold text-white self-start md:self-auto">Thống kê dữ liệu</h2>
+                <a href="/pages/map.html"
+                    class="flex items-center gap-1 text-teal-400 text-sm hover:text-teal-300 transition-colors self-end md:self-auto group">
+                    Xem báo cáo đầy đủ <i
+                        class="bi bi-chevron-right group-hover:translate-x-1 transition-transform"></i>
+                </a>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Left: Station count card -->
+                <div
+                    class="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:bg-slate-800/60 transition-colors duration-300">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0">
+                            <i class="bi bi-broadcast-pin text-lg text-teal-400"></i>
+                        </div>
+                        <div>
+                            <div class="text-sm text-slate-400">Trạm đang hoạt động</div>
+                            <div class="text-3xl font-bold text-white tracking-tight" id="active-station-count">--</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 pt-3 border-t border-slate-700/40">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span class="text-emerald-400 text-xs font-medium" id="online-count">0 Online</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                            <span class="text-slate-500 text-xs font-medium" id="offline-count">0 Offline</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 ml-auto">
+                            <i class="bi bi-shield-check text-teal-400 text-xs"></i>
+                            <span class="text-slate-400 text-xs">24/7 Monitoring</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Mini activity chart -->
+                <div
+                    class="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:bg-slate-800/60 transition-colors duration-300">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-2">
+                            <i class="bi bi-graph-up text-teal-400"></i>
+                            <span class="text-sm text-slate-400">Hoạt động hệ thống</span>
+                        </div>
+                        <span class="text-xs text-slate-500">7 ngày qua</span>
+                    </div>
+                    <!-- Mini bar chart -->
+                    <div class="flex items-end gap-1.5 h-20" id="mini-chart">
+                        <div class="flex-1 bg-teal-500/20 rounded-t-sm min-h-[8px]" style="height:45%"></div>
+                        <div class="flex-1 bg-teal-500/30 rounded-t-sm min-h-[8px]" style="height:65%"></div>
+                        <div class="flex-1 bg-teal-500/25 rounded-t-sm min-h-[8px]" style="height:50%"></div>
+                        <div class="flex-1 bg-teal-500/40 rounded-t-sm min-h-[8px]" style="height:80%"></div>
+                        <div class="flex-1 bg-teal-500/35 rounded-t-sm min-h-[8px]" style="height:70%"></div>
+                        <div class="flex-1 bg-teal-500/45 rounded-t-sm min-h-[8px]" style="height:90%"></div>
+                        <div class="flex-1 bg-teal-400/60 rounded-t-sm min-h-[8px]" style="height:100%"></div>
+                    </div>
+                    <div class="flex justify-between mt-2 text-[10px] text-slate-600">
+                        <span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span>CN</span>
+                    </div>
+                    <div class="flex items-center gap-4 mt-3 pt-3 border-t border-slate-700/40">
+                        <div>
+                            <div class="text-xs text-slate-500">Độ trễ TB</div>
+                            <div class="text-sm font-semibold text-white">0.5s</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-slate-500">Uptime</div>
+                            <div class="text-sm font-semibold text-emerald-400">99.9%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
 
     <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <p class="mb-0">
-                © 2025 Landslide Monitoring System. 
-                <span style="color: var(--accent-primary);">Developed for safety.</span>
-            </p>
+    <footer class="relative z-10 border-t border-white/5 bg-slate-950/50 backdrop-blur-sm mt-auto" id="about">
+        <div class="container mx-auto px-4 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="text-slate-400 text-sm text-center md:text-left">
+                <p class="font-medium text-slate-300 mb-1">Protecting Communities through Innovation</p>
+                <p class="opacity-70">© 2025 Landslide Monitoring System. Developed for safety.</p>
+            </div>
+            <div class="flex gap-6 text-slate-500 text-sm">
+                <a href="#" class="hover:text-teal-400 transition-colors">Privacy Policy</a>
+                <a href="#" class="hover:text-teal-400 transition-colors">Terms of Service</a>
+                <a href="#" class="hover:text-teal-400 transition-colors">Contact</a>
+            </div>
         </div>
     </footer>
 
     <!-- Scripts -->
-    <script src="/js/theme-manager.js"></script>
-    <script src="/js/auth.js"></script>
-    
     <script>
-        // Mouse move effect for cards
-        document.querySelectorAll('.feature-card').forEach(card => {
-            card.addEventListener('mousemove', (e) => {
-                const rect = card.getBoundingClientRect();
-                const x = ((e.clientX - rect.left) / rect.width) * 100;
-                const y = ((e.clientY - rect.top) / rect.height) * 100;
-                
-                card.style.setProperty('--mouse-x', `${x}%`);
-                card.style.setProperty('--mouse-y', `${y}%`);
-            });
-        });
+        const mobileBtn = document.getElementById('mobile-menu-btn');
+        const closeBtn = document.getElementById('close-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        const header = document.getElementById('main-header');
 
-        // Check if just logged in
-        const justLoggedIn = sessionStorage.getItem('justLoggedIn');
-        if (justLoggedIn) {
-            const user = window.authManager.getUserInfo();
-            if (user) {
-                document.getElementById('welcome-username').textContent = user.sub;
-                const banner = document.getElementById('welcome-banner');
-                banner.classList.add('show');
-                
-                // Auto hide after 3s
-                setTimeout(() => {
-                    banner.classList.remove('show');
-                    setTimeout(() => {
-                        banner.style.display = 'none';
-                    }, 500);
-                }, 3000);
-                
-                // Clear flag
-                sessionStorage.removeItem('justLoggedIn');
+        function toggleMenu() {
+            if (mobileMenu.classList.contains('translate-x-full')) {
+                mobileMenu.classList.remove('translate-x-full');
+            } else {
+                mobileMenu.classList.add('translate-x-full');
             }
         }
 
-        // Update auth UI and show admin cards if admin
-        document.addEventListener('DOMContentLoaded', () => {
-            window.authManager.updateAuthUI();
-            
-            // Show admin features for admin users
-            const user = window.authManager.getUserInfo();
-            if (user && user.role === 'admin') {
-                document.getElementById('admin-card').classList.remove('d-none');
+        if (mobileBtn) mobileBtn.addEventListener('click', toggleMenu);
+        if (closeBtn) closeBtn.addEventListener('click', toggleMenu);
+
+        // Fetch active station count
+        async function fetchStationStats() {
+            try {
+                const res = await fetch('/api/stations');
+                if (res.ok) {
+                    const stations = await res.json();
+                    const total = stations.length;
+                    const online = stations.filter(s => s.status === 'online' || s.is_online === true).length;
+                    const offline = total - online;
+
+                    const countEl = document.getElementById('active-station-count');
+                    const onlineEl = document.getElementById('online-count');
+                    const offlineEl = document.getElementById('offline-count');
+
+                    if (countEl) countEl.textContent = total;
+                    if (onlineEl) onlineEl.textContent = `${online} Online`;
+                    if (offlineEl) offlineEl.textContent = `${offline} Offline`;
+                }
+            } catch (e) {
+                console.log('Station stats not available');
+            }
+        }
+        fetchStationStats();
+
+        // Scroll effect
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 20) {
+                header.classList.add('bg-slate-950/80', 'backdrop-blur-md', 'border-b', 'border-white/5', 'py-3');
+                header.classList.remove('py-4');
+            } else {
+                header.classList.remove('bg-slate-950/80', 'backdrop-blur-md', 'border-b', 'border-white/5', 'py-3');
+                header.classList.add('py-4');
             }
         });
+        // Update auth header button based on token
+        (async function () {
+            const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+            const btn = document.getElementById('auth-header-btn');
+            if (token && btn) {
+                try {
+                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    const now = Math.floor(Date.now() / 1000);
+                    if (payload.exp && payload.exp > now) {
+                        const res = await fetch('/api/auth/me', {
+                            headers: { 'Authorization': 'Bearer ' + token }
+                        });
+                        if (res.ok) {
+                            const user = await res.json();
+                            btn.href = '/pages/admin.html';
+                            btn.innerHTML = '<i class="bi bi-person-check"></i> ' + user.username;
+                        }
+                    }
+                } catch (e) { }
+            }
+        })();
     </script>
-
-    <style>
-        /* Welcome Banner */
-        .welcome-banner {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) scale(0.8);
-            z-index: 99999;
-            background: var(--bg-overlay);
-            backdrop-filter: blur(20px);
-            border: 2px solid var(--accent-primary);
-            border-radius: 24px;
-            padding: 48px 64px;
-            box-shadow: 0 25px 80px rgba(14, 165, 233, 0.4);
-            opacity: 0;
-            pointer-events: none;
-            transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-        }
-        
-        .welcome-banner.show {
-            opacity: 1;
-            transform: translate(-50%, -50%) scale(1);
-            pointer-events: auto;
-        }
-        
-        .welcome-content {
-            text-align: center;
-        }
-        
-        .welcome-icon {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 24px;
-            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 3rem;
-            color: white;
-            animation: pulseScale 1.5s ease-in-out infinite;
-        }
-        
-        @keyframes pulseScale {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-        
-        .welcome-title {
-            font-size: 2rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-        }
-        
-        .welcome-subtitle {
-            font-size: 1.2rem;
-            color: var(--accent-primary);
-            font-weight: 600;
-            margin: 0;
-        }
-
-        /* Dark mode adjustments */
-        [data-theme="dark"] .welcome-banner {
-            box-shadow: 0 25px 80px rgba(14, 165, 233, 0.6);
-        }
-    </style>
 </body>
+
 </html>

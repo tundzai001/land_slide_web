@@ -1,15 +1,16 @@
 # ==============================================================================
-# == backend/mqtt_bridge.py - MQTT to Database Bridge (FINAL FIXED)           ==
+# == backend/mqtt_bridge.py - MQTT to Database Bridge (FIXED WITH SAVE INTERVALS) ==
 # ==============================================================================
 
 import asyncio
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from collections import defaultdict
 
 import paho.mqtt.client as mqtt
-from sqlalchemy import select
+from sqlalchemy import select, update, and_, desc
 from app.websocket import manager
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import config as model_config
@@ -52,7 +53,9 @@ class MQTTBridge:
         # Topic management
         self.topic_map: Dict[str, Dict[str, Any]] = {}
         self.processors_cache: Dict[str, Any] = {}
-        self.last_save_time: Dict[str, float] = {}
+        
+        # ✅ THÊM: Save interval tracking (per station per sensor)
+        self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
         
         self.loop = None
 
@@ -157,7 +160,17 @@ class MQTTBridge:
                         elif sensor_type == 'water':
                             self.processors_cache[proc_key] = WaterEngine()
                         elif sensor_type == 'imu':
-                            self.processors_cache[proc_key] = IMUEngine()
+                            imu_engine = IMUEngine()
+                            # ✅ Load baseline từ station config nếu có
+                            imu_baseline = (station.config or {}).get('ImuBaseline', {})
+                            if imu_baseline.get('baseline_roll') is not None:
+                                imu_engine.set_baseline(
+                                    float(imu_baseline.get('baseline_roll', 0)),
+                                    float(imu_baseline.get('baseline_pitch', 0)),
+                                    float(imu_baseline.get('baseline_yaw', 0))
+                                )
+                                logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
+                            self.processors_cache[proc_key] = imu_engine
                     
                     new_map[topic] = {
                         "device_id": device.id,
@@ -179,6 +192,27 @@ class MQTTBridge:
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
             await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
+
+    async def _save_imu_baseline(self, station_id: int, baseline_data: dict):
+        """Lưu IMU baseline vào station config trong DB."""
+        try:
+            from app.models.config import Station
+            async with ConfigSessionLocal() as db:
+                result = await db.execute(
+                    select(Station).where(Station.id == station_id)
+                )
+                station = result.scalar_one_or_none()
+                if station:
+                    config = station.config or {}
+                    config['ImuBaseline'] = baseline_data
+                    station.config = config
+                    # Force SQLAlchemy to detect the change on mutable JSON
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(station, 'config')
+                    await db.commit()
+                    logger.info(f"💾 [IMU] Baseline saved to DB for station {station_id}: {baseline_data}")
+        except Exception as e:
+            logger.error(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
 
     async def process_pipeline(self, topic: str, raw_payload: str):
         info = self.topic_map.get(topic)
@@ -208,7 +242,17 @@ class MQTTBridge:
                     payload_json = json.loads(raw_payload)
                     if sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
                     elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
-                    elif sensor_type == 'imu': processed_data = processor.process(payload_json)
+                    elif sensor_type == 'imu': 
+                        processed_data = processor.process(payload_json)
+                        # ✅ Auto-save baseline to DB khi vừa khóa lần đầu
+                        if processed_data and processor.origin_locked and not hasattr(processor, '_baseline_saved'):
+                            processor._baseline_saved = True
+                            baseline_data = {
+                                "baseline_roll": processor.baseline["roll"],
+                                "baseline_pitch": processor.baseline["pitch"],
+                                "baseline_yaw": processor.baseline["yaw"]
+                            }
+                            asyncio.ensure_future(self._save_imu_baseline(station_id, baseline_data))
                 except json.JSONDecodeError:
                     return
         except Exception as e:
@@ -253,17 +297,43 @@ class MQTTBridge:
         # Gửi ngay lập tức sau khi phân tích xong
         # ---------------------------------------------------------
         is_dangerous = False
+        is_just_resolved = False
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
             is_dangerous = True
             try:
+                # 1. Update UI Status
                 await manager.broadcast({
                     "type": "station_status",
                     "station_id": station_id,
                     "risk_level": alert['level']
                 })
-                logger.warning(f"🚨 [{station_name}] Alert sent: {alert['message']}")
+
+                # 2. Send Alert to Pi Audio Player (and UI) via WebSocket
+                await manager.broadcast({
+                    "type": "alert",
+                    "station_id": station_id,
+                    "level": alert['level'],
+                    "message": alert['message'],
+                    "audio_code": alert.get('audio_code', ''),
+                    "details": alert.get('details', {})
+                })
+                
+                # 3. ✅ CRITICAL: Gửi MQTT command đến Pi để phát audio
+                audio_code = alert.get('audio_code', '')
+                if audio_code:
+                    cmd_topic = f"landslide/{station_id}/command"
+                    cmd_payload = json.dumps({
+                        "audio_code": audio_code,
+                        "level": alert['level'],
+                        "message": alert['message'],
+                        "ts": int(time.time())
+                    })
+                    self.client.publish(cmd_topic, cmd_payload, qos=1)
+                    logger.warning(f"🔊 [{station_name}] MQTT audio command → {cmd_topic}: {audio_code}")
+
+                logger.warning(f"🚨 [{station_name}] Alert broadcast: {alert['message']}")
             except Exception as e:
-                logger.error(f"❌ WS Alert Error: {e}")
+                logger.error(f"❌ WS Alert Broadcast Error: {e}")
         else:
             # Nếu AN TOÀN -> Gửi LOW để UI chuyển về màu xanh ngay lập tức
             try:
@@ -274,16 +344,54 @@ class MQTTBridge:
                 })
             except Exception as e:
                 logger.error(f"❌ WS Low Status Error: {e}")
+                
+            # ✅ Tự động đánh dấu Resolved cho Alert của sensor này và tắt còi
+            try:
+                categories_to_resolve = []
+                if sensor_type == 'gnss': categories_to_resolve = ['gnss_velocity']
+                elif sensor_type == 'rain': categories_to_resolve = ['rainfall']
+                elif sensor_type == 'water': categories_to_resolve = ['water_level']
+                elif sensor_type == 'imu': categories_to_resolve = ['tilt_critical', 'tilt_warning', 'shock', 'tilt']
+                
+                if categories_to_resolve:
+                    async with DataSessionLocal() as db_data:
+                        res = await db_data.execute(
+                            model_data.Alert.__table__.update()
+                            .where(and_(
+                                model_data.Alert.station_id == station_id,
+                                model_data.Alert.is_resolved == False,
+                                model_data.Alert.category.in_(categories_to_resolve)
+                            ))
+                            .values(is_resolved=True)
+                        )
+                        if res.rowcount > 0:
+                            await db_data.commit()
+                            is_just_resolved = True
+                            logger.info(f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}). Sending stop_siren command...")
+                            
+                            # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
+                            cmd_topic = f"landslide/{station_id}/command"
+                            cmd_payload = json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())})
+                            self.client.publish(cmd_topic, cmd_payload, qos=1)
+            except Exception as e:
+                logger.error(f"❌ Error auto-resolving alerts: {e}")
 
         # 3. SAVE TO DB (THROTTLED)
-        # Chỉ lưu khi nguy hiểm HOẶC đến chu kỳ lưu
+        # ✅ CHỈ LƯU KHI: Alert xảy ra HOẶC vừa resolve alert HOẶC đã đủ chu kỳ lưu
         save_data_now = False
 
         if is_dangerous:
+            # ✅ ALERT → Lưu ngay lập tức / không quan tâm chu kỳ
             save_data_now = True
+            logger.warning(f"⚠️ [FORCED SAVE] Alert detected - saving immediately")
+        elif is_just_resolved:
+            # ✅ VỪA RESOLVE ALERT → Lưu ngay để DB có dữ liệu an toàn mới nhất
+            save_data_now = True
+            logger.info(f"💾 [RESOLVE SAVE] Alert just resolved - saving safe data for station {station_id}")
         else:
-            throttle_key = f"{device_id}_{sensor_type}"
-            last_saved = self.last_save_time.get(throttle_key, 0)
+            # ✅ KIỂM TRA CHU KỲ LƯU
+            throttle_key_station = f"{station_id}_{sensor_type}"
+            last_saved = self.last_save_time[station_id].get(sensor_type, 0)
             
             interval = settings.SAVE_INTERVAL_DEFAULT
             if sensor_type == 'gnss': interval = settings.SAVE_INTERVAL_GNSS
@@ -291,8 +399,32 @@ class MQTTBridge:
             elif sensor_type == 'rain': interval = settings.SAVE_INTERVAL_RAIN
             elif sensor_type == 'water': interval = settings.SAVE_INTERVAL_WATER
             
-            if current_timestamp - last_saved >= interval:
+            time_since_last_save = current_timestamp - last_saved
+            
+            if last_saved == 0:
+                # Lần đầu tiên → Lưu luôn
                 save_data_now = True
+                logger.info(f"💾 [FIRST SAVE] {station_name} - {sensor_type.upper()}")
+            elif sensor_type == 'gnss':
+                # GNSS: Logic lưu điểm đầu tiên của ngày (bao hàm cả điểm đầu tuần, tháng, năm)
+                from datetime import datetime
+                last_dt = datetime.fromtimestamp(last_saved)
+                curr_dt = datetime.fromtimestamp(current_timestamp)
+                
+                if curr_dt.date() > last_dt.date():
+                    save_data_now = True
+                    logger.info(f"💾 [CALENDAR START DAY SAVE - GNSS] {station_name} ({curr_dt.date()})")
+                elif interval < 86400 and time_since_last_save >= interval:
+                    # Nếu Admin cố tình set sys-save-gnss nhỏ hơn 1 ngày (vd: 1 tiếng) thì vẫn tuân thủ
+                    save_data_now = True
+                    logger.info(f"💾 [PERIODIC SAVE - GNSS] {station_name} (Interval: {interval}s)")
+            elif time_since_last_save >= interval:
+                # Đã đủ chu kỳ → Lưu (Dành cho IMU, Rain, Water)
+                save_data_now = True
+                logger.info(f"💾 [PERIODIC SAVE] {station_name} - {sensor_type.upper()} (Interval: {interval}s)")
+            else:
+                # Chưa đủ chu kỳ → Skip
+                logger.debug(f"⏭️ [SKIP SAVE] {station_name} - {sensor_type.upper()} ({time_since_last_save}/{interval}s)")
 
         try:
             if save_data_now:
@@ -308,16 +440,42 @@ class MQTTBridge:
 
             if save_data_now:
                 async with DataSessionLocal() as db_data:
-                    # Lưu dữ liệu cảm biến
+                    # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
+                    val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
+                    
+                    if sensor_type == 'gnss':
+                        val_1 = processed_data.get('speed_2d_mm_s', 0.0)
+                        val_2 = processed_data.get('total_displacement_mm', 0.0)
+                    
+                    elif sensor_type == 'rain':
+                        val_1 = processed_data.get('intensity_mm_h', 0.0)
+                        val_2 = processed_data.get('accumulated_mm', 0.0)
+                    
+                    elif sensor_type == 'water':
+                        val_1 = processed_data.get('water_level', 0.0)
+                        val_2 = processed_data.get('intensity_mm_h', 0.0)
+                    
+                    elif sensor_type == 'imu':
+                        val_1 = processed_data.get('roll', 0.0)
+                        val_2 = processed_data.get('pitch', 0.0)
+                        val_3 = processed_data.get('yaw', 0.0)
+                        val_4 = processed_data.get('total_accel', 0.0)
+                        val_5 = processed_data.get('battery', 0.0)
+                    
+                    # === LƯU VÀO DB ===
                     db_data.add(model_data.SensorData(
                         station_id=station_id,  
                         timestamp=current_timestamp,
                         sensor_type=sensor_type,
                         data=processed_data,
-                        value_1=processed_data.get('speed_2d_mm_s') if sensor_type == 'gnss' else processed_data.get('water_level'),
-                        value_2=processed_data.get('total_displacement_mm') if sensor_type == 'gnss' else processed_data.get('intensity_mm_h'),
+                        value_1=val_1,
+                        value_2=val_2,
+                        value_3=val_3,
+                        value_4=val_4,
+                        value_5=val_5
                     ))
-                    self.last_save_time[f"{device_id}_{sensor_type}"] = current_timestamp
+                    # ✅ CẬP NHẬT LAST SAVE TIME (theo station + sensor_type)
+                    self.last_save_time[station_id][sensor_type] = current_timestamp
 
                     # Chỉ lưu cảnh báo nếu nguy hiểm
                     if is_dangerous:
