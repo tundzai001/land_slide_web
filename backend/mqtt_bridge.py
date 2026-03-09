@@ -94,13 +94,8 @@ class MQTTBridge:
             topic = msg.topic
             try:
                 payload_str = msg.payload.decode('utf-8')
-                # Giải mã AES-128 (yêu cầu base64 padding đúng)
-                try:
-                    decrypted_bytes = aes128_decrypt_base64(payload_str)
-                    decrypted_payload = decrypted_bytes.decode('utf-8').strip('\x00\r\n\t')
-                except Exception as ex:
-                    # Nếu lỗi giải mã (vd: padding sai, hoặc dữ liệu không mã hóa AES), dùng luôn chuỗi gốc
-                    decrypted_payload = payload_str
+                # sẽ thêm hàm giải mã AES ở đoạn này
+                decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
                 
             except UnicodeDecodeError:
                 return # Bỏ qua dữ liệu nhị phân (RTCM)
