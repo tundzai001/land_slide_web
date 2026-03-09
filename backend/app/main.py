@@ -1078,7 +1078,7 @@ async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: 
 @app.get("/api/stations/{station_id}/long-term-analysis")
 async def get_long_term_analysis(
     station_id: int,
-    days: int = 30,
+    days: float = 30.0,
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db)
 ):
@@ -1098,8 +1098,8 @@ async def get_long_term_analysis(
         
         # Lấy window lớn nhất cho multi-window (tối thiểu = days, mở rộng 90 ngày)
         max_window = max(days, 90)
-        cutoff_time = int(time.time()) - (max_window * 86400)
-        cutoff_requested = int(time.time()) - (days * 86400)
+        cutoff_time = int(time.time() - (max_window * 86400))
+        cutoff_requested = int(time.time() - (days * 86400))
         
         # 2. Lấy dữ liệu GNSS (mở rộng window cho multi-window)
         gnss_result = await db_data.execute(

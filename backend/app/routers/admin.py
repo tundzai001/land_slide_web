@@ -1110,25 +1110,32 @@ class GNSSLiveFetcher:
         except (ValueError, IndexError):
             return None
     
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.is_connected = True
+            logger.info(f"[GNSSLiveFetcher] Connected to broker, subscribing to {userdata['topic']}")
             client.subscribe(userdata['topic'])
+        else:
+            logger.error(f"[GNSSLiveFetcher] Connect failed with code {rc}")
     
     def _on_message(self, client, userdata, msg):
         try:
             payload = msg.payload.decode('utf-8')
+            logger.info(f"[GNSSLiveFetcher] Received message on {msg.topic}: {payload}")
             parsed = self._parse_gngga(payload)
             if parsed and parsed['fix_quality'] >= 1:
+                logger.info(f"[GNSSLiveFetcher] Valid GNSS parsed: {parsed}")
                 self.received_data = parsed
                 client.disconnect()
-        except Exception:
-            pass
+            else:
+                logger.warning(f"[GNSSLiveFetcher] Parse failed or invalid fix_quality: {parsed}")
+        except Exception as e:
+            logger.error(f"[GNSSLiveFetcher] Exception processing message: {e}")
     
     async def fetch_origin(self, topic: str, timeout: int = 30) -> Optional[dict]:
         try:
             self.received_data = None
-            client = mqtt.Client(userdata={'topic': topic})
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata={'topic': topic})
             client.on_connect = self._on_connect
             client.on_message = self._on_message
             if self.username: client.username_pw_set(self.username, self.password)
@@ -1139,6 +1146,7 @@ class GNSSLiveFetcher:
             start_time = asyncio.get_event_loop().time()
             while self.received_data is None:
                 if asyncio.get_event_loop().time() - start_time > timeout:
+                    logger.warning("[GNSSLiveFetcher] Timeout reached waiting for GNSS data.")
                     client.loop_stop()
                     client.disconnect()
                     return None
