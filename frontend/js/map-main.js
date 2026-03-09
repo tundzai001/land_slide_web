@@ -1240,6 +1240,8 @@ function renderLongTermAnalysis(data) {
         }
 
         setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
+        const ciVal = safeNumber(analysis.velocity_ci_95, 2);
+        setText('lt-velocity-ci', `(Khoảng tin cậy: ±${ciVal})`);
         setText('lt-classification', analysis.classification || 'N/A');
         setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
         setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
@@ -1249,13 +1251,27 @@ function renderLongTermAnalysis(data) {
 
         document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
         document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
+
+        const cusumBadge = document.getElementById('cusum-badge');
+        const cusumMessage = document.getElementById('cusum-message');
+        if (analysis.cusum_change) {
+            cusumBadge.style.display = 'inline-block';
+            cusumMessage.textContent = analysis.cusum_message || 'Có thay đổi xu hướng';
+            cusumMessage.style.display = 'inline-block';
+        } else {
+            cusumBadge.style.display = 'none';
+            cusumMessage.style.display = 'none';
+        }
     } else {
         const warningEl = document.getElementById('longterm-warning');
         if (warningEl) warningEl.style.display = 'none';
         setText('lt-velocity', 'N/A');
+        setText('lt-velocity-ci', '(Chưa có thông tin)');
         setText('lt-classification', 'N/A');
         setText('lt-total-disp', 'N/A');
         setText('lt-duration', 'N/A');
+        document.getElementById('cusum-badge').style.display = 'none';
+        document.getElementById('cusum-message').style.display = 'none';
     }
 
     // === IMU Section ===

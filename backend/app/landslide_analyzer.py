@@ -132,11 +132,41 @@ class LandslideAnalyzer:
             # --- Bước 4: Trend detection bằng sliding window velocity ---
             trend = self._detect_displacement_trend(sorted_data)
 
-            risk_level, warning_message = self._assess_long_term_risk(
-                classification,
-                trend,
-                velocity_mm_per_year
-            )
+            cls_upper = classification.upper()
+            
+            if any(c in cls_upper for c in ("EXTREMELY RAPID", "VERY RAPID", "RAPID")):
+                risk_level = "CRITICAL"
+                warning_message = f"🚨 NGUY HIỂM: Vận tốc {classification}"
+            elif "MODERATE" in cls_upper:
+                risk_level = "HIGH"
+                warning_message = f"⚠️ CẢNH BÁO: Tăng tốc độ ({classification})"
+            elif "SLOW" in cls_upper:
+                risk_level = "MEDIUM"
+                warning_message = f"CẦN THEO DÕI: Vận tốc {classification}"
+            else:
+                risk_level = "LOW"
+                warning_message = f"An toàn: Vận tốc {classification}"
+
+            if trend == "accelerating" and risk_level in ("LOW", "MEDIUM"):
+                risk_level = "HIGH"
+                warning_message = f"⚠️ Chú ý: Xu hướng đang tăng tốc mạnh"
+
+            # --- Bước 4b: Tính toán Khoảng tin cậy OLS (OLS Confidence Interval) ---
+            velocity_ci_95 = self._calculate_ols_velocity_ci(sorted_data)
+
+            # --- Bước 4c: Phát hiện CUSUM Change Point ---
+            cusum_result = self._detect_cusum_change_points(sorted_data)
+            
+            if cusum_result['has_change']:
+                # Nâng risk level nếu CUSUM phát hiện thay đổi
+                if risk_level in ("LOW", "MEDIUM"):
+                    risk_level = "HIGH"
+                
+                cusum_msg = f"⚠️ CUSUM: {cusum_result['message']}"
+                if warning_message:
+                    warning_message = f"{warning_message} | {cusum_msg}"
+                else:
+                    warning_message = cusum_msg
 
             # --- Bước 5: Inverse Velocity Method (Fukuzono) ---
             inverse_velocity = self._inverse_velocity_analysis(sorted_data)
@@ -150,7 +180,8 @@ class LandslideAnalyzer:
                 elif days_to_failure <= 30:
                     if risk_level in ("LOW", "MEDIUM"):
                         risk_level = "HIGH"
-                        warning_message = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+                    # Luôn cập nhật message bất kể level
+                    warning_message = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
 
             return {
                 "status": "success",
@@ -158,10 +189,13 @@ class LandslideAnalyzer:
                     "total_displacement_mm": round(total_displacement_mm, 2),
                     "net_displacement_mm": round(net_displacement_mm, 2),
                     "velocity_mm_year": round(velocity_mm_per_year, 2),
+                    "velocity_ci_95": round(velocity_ci_95, 2),
                     "velocity_mm_day": round(velocity_mm_per_day, 4),
                     "velocity_mm_second": round(velocity_mm_per_second, 6),
                     "classification": classification,
                     "trend": trend,
+                    "cusum_change": cusum_result['has_change'],
+                    "cusum_message": cusum_result.get('message', ''),
                     "duration_days": round(duration_days, 1),
                     "data_points_used": len(sorted_data),
                     "start_date": datetime.fromtimestamp(first_point['timestamp']).isoformat(),
@@ -267,6 +301,146 @@ class LandslideAnalyzer:
                 return "stable"
         except Exception:
             return "stable"
+
+    def _calculate_ols_velocity_ci(self, sorted_data: List[Dict]) -> float:
+        """
+        Tính khoảng tin cậy 95% cho vận tốc bằng OLS (Ordinary Least Squares).
+        Sử dụng Error Propagation (weighted combination) để tính chuẩn sai số của Magnitude.
+        """
+        if len(sorted_data) < 5:
+            return 0.0
+
+        try:
+            x = []
+            y_e, y_n, y_u = [], [], []
+            
+            start_ts = sorted_data[0]['timestamp']
+            
+            for p in sorted_data:
+                dt_days = (p['timestamp'] - start_ts) / 86400.0
+                x.append(dt_days)
+                y_e.append(p['data'].get('pos_e', 0) * 1000) # mm
+                y_n.append(p['data'].get('pos_n', 0) * 1000)
+                y_u.append(p['data'].get('pos_u', 0) * 1000)
+                
+            x = np.array(x)
+            n = len(x)
+            x_mean = np.mean(x)
+            denominator = np.sum((x - x_mean)**2)
+            
+            if denominator == 0: return 0.0
+
+            # Tính toán Slope, SE^2 riêng của từng trục E, N, U
+            slopes = {}
+            se_squared_dict = {}
+
+            for axis_name, y_arr in zip(['e', 'n', 'u'], [np.array(y_e), np.array(y_n), np.array(y_u)]):
+                y_mean = np.mean(y_arr)
+                numerator = np.sum((x - x_mean) * (y_arr - y_mean))
+                slope = numerator / denominator
+                
+                y_pred = slope * (x - x_mean) + y_mean
+                ssr = np.sum((y_arr - y_pred)**2)
+                
+                s2 = ssr / (n - 2) if n > 2 else 0
+                se_squared = s2 / denominator
+                
+                slopes[axis_name] = slope
+                se_squared_dict[axis_name] = se_squared
+
+            # Tính Velocity Magnitude (v_mag)
+            v_mag = math.sqrt(slopes['e']**2 + slopes['n']**2 + slopes['u']**2)
+
+            if v_mag == 0:
+                return 0.0
+
+            # Lan truyền sai số (Error Propagation):
+            # Variance(v_mag) = Σ ( (∂v_mag / ∂v_i)^2 * Variance(v_i) )
+            # ∂v_mag / ∂v_i = v_i / v_mag
+            
+            se_magnitude_squared = (
+                (slopes['e'] / v_mag)**2 * se_squared_dict['e'] +
+                (slopes['n'] / v_mag)**2 * se_squared_dict['n'] +
+                (slopes['u'] / v_mag)**2 * se_squared_dict['u']
+            )
+            
+            se_magnitude_day = math.sqrt(se_magnitude_squared)
+            
+            # 95% CI (z ≈ 1.96)
+            ci_95_day = 1.96 * se_magnitude_day
+            ci_95_year = ci_95_day * 365.25 # mm/year
+            
+            return round(ci_95_year, 2)
+            
+        except Exception as e:
+            logger.error(f"Error calculating OLS CI: {e}")
+            return 0.0
+
+    def _detect_cusum_change_points(self, sorted_data: List[Dict]) -> Dict:
+        """
+        Thuật toán CUSUM để tìm điểm thay đổi (Change Point) đột ngột.
+        """
+        if len(sorted_data) < 14:  # Cần ít nhất 2 tuần dữ liệu
+            return {"has_change": False, "message": ""}
+            
+        try:
+            displacements = []
+            for i in range(1, len(sorted_data)):
+                p1 = sorted_data[i]
+                p0 = sorted_data[i-1]
+                dt_days = (p1['timestamp'] - p0['timestamp']) / 86400.0
+                
+                if dt_days > 0.001:
+                    de = p1['data'].get('pos_e', 0) - p0['data'].get('pos_e', 0)
+                    dn = p1['data'].get('pos_n', 0) - p0['data'].get('pos_n', 0)
+                    du = p1['data'].get('pos_u', 0) - p0['data'].get('pos_u', 0)
+                    disp_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
+                    
+                    vel_day = disp_mm / dt_days
+                    displacements.append(vel_day)
+                    
+            if len(displacements) < 10:
+                return {"has_change": False, "message": ""}
+            
+            values = np.array(displacements)
+            
+            # Baseline tự động: 25% dữ liệu đầu tối thiểu 10 điểm
+            baseline_len = max(10, int(len(values) * 0.25))
+            if baseline_len > len(values): baseline_len = len(values)
+            
+            baseline_mean = np.mean(values[:baseline_len])
+            baseline_std = np.std(values[:baseline_len])
+            if baseline_std < 0.001: 
+                baseline_std = 0.001 # Tránh chia 0
+            
+            z_scores = (values - baseline_mean) / baseline_std
+            cusum_positive = np.zeros(len(values) + 1)
+            
+            k = 0.5 # Allowable slack
+            h = 5.0 # Threshold
+            
+            change_detected_idx = -1
+            
+            for i in range(len(values)):
+                cusum_positive[i+1] = max(0, cusum_positive[i] + z_scores[i] - k)
+                if cusum_positive[i+1] > h and change_detected_idx == -1:
+                    change_detected_idx = i
+                    break
+                    
+            if change_detected_idx != -1:
+                # Lấy ngày xảy ra change point
+                change_point = sorted_data[change_detected_idx + 1]
+                change_date = datetime.fromtimestamp(change_point['timestamp']).strftime('%d/%m/%Y')
+                return {
+                    "has_change": True, 
+                    "message": f"Phát hiện điểm thay đổi xu hướng độ dốc vào {change_date}"
+                }
+                
+            return {"has_change": False, "message": ""}
+            
+        except Exception as e:
+            logger.error(f"Error in CUSUM: {e}")
+            return {"has_change": False, "message": ""}
 
     def _inverse_velocity_analysis(self, sorted_data: List[Dict], window_days: float = 3.0) -> Dict[str, Any]:
         """
@@ -580,25 +754,7 @@ class LandslideAnalyzer:
             logger.error(f"Error in multi-window analysis: {e}", exc_info=True)
             return {"available": False, "message": f"Lỗi: {str(e)}"}
 
-    def _assess_long_term_risk(self, classification: str, trend: str, vel_year: float) -> tuple:
-        cls_upper = classification.upper()
-        
-        # Nguy hiểm (Critical)
-        if any(c in cls_upper for c in ["EXTREMELY RAPID", "VERY RAPID", "RAPID"]):
-            return "CRITICAL", f"🚨 NGUY HIỂM: Vận tốc trượt cực kỳ nhanh ({classification})"
-        
-        # Theo dõi (Warning)
-        elif "MODERATE" in cls_upper:
-            return "WARNING", f"⚠️ THEO DÕI: Đất đang dịch chuyển ({classification})"
-        
-        # An toàn (Info/Safe)
-        elif any(c in cls_upper for c in ["SLOW", "VERY SLOW", "EXTREMELY SLOW", "STABLE"]):
-            if trend == "accelerating":
-                return "INFO", f"✅ AN TOÀN (nhưng có dấu hiệu tăng tốc: {classification})"
-            return "INFO", f"✅ AN TOÀN ({classification})"
-            
-        else:
-            return "INFO", f"Trạng thái: {classification}"
+
 
     # =========================================================================
     # PHÂN TÍCH DÀI HẠN GÓC NGHIÊNG IMU
@@ -741,7 +897,6 @@ class LandslideAnalyzer:
             # Lấy cấu hình xác nhận
             gnss_config = config.get('GnssAlerting', {})
             confirm_steps = int(gnss_config.get('gnss_confirm_steps', 3))  # Mặc định 3 lần
-            safe_streak = int(gnss_config.get('gnss_safe_streak', 5))      # Mặc định 5 lần an toàn
             
             velocity_class = self._classify_velocity_extended(
                 velocity_mms,
