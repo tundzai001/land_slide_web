@@ -1,14 +1,14 @@
 // =====================================================
-// DATABASE MANAGER - Xem/Sửa/Xóa trực tiếp Database
+// DATABASE MANAGER - CSV/ZIP EXPORT & CLEANUP
 // =====================================================
 
 class DatabaseManager {
     constructor() {
-        this.token = localStorage.getItem('token');
+        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
         this.allData = [];
         this.filteredData = [];
         this.currentEditModal = null;
-        
+
         if (!this.token) {
             window.location.href = '/pages/login.html';
             return;
@@ -19,30 +19,32 @@ class DatabaseManager {
 
     init() {
         console.log('🗄️ [DB MANAGER] Initializing...');
-        
-        // Initialize modal
+
         const editModalEl = document.getElementById('editRecordModal');
         if (editModalEl) {
             this.currentEditModal = new bootstrap.Modal(editModalEl);
         }
-        
-        // Auto-load on tab activation
+
+        // Support both Bootstrap tabs (old) and sidebar links (new)
         const dbTabBtn = document.querySelector('button[data-bs-target="#tab-database"]');
         if (dbTabBtn) {
             dbTabBtn.addEventListener('shown.bs.tab', () => {
                 this.loadAllData();
             });
         }
-        
+        const dbSidebarLink = document.querySelector('[data-tab="tab-database"]');
+        if (dbSidebarLink) {
+            dbSidebarLink.addEventListener('click', () => {
+                this.loadAllData();
+            });
+        }
+
         console.log('✅ [DB MANAGER] Initialized');
     }
 
-    // =========================================================================
-    // LOAD DATA FROM ALL TABLES
-    // =========================================================================
     async loadAllData() {
         console.log('📡 [DB MANAGER] Loading all database records...');
-        
+
         const tbody = document.getElementById('db-table-body');
         if (tbody) {
             tbody.innerHTML = `
@@ -56,7 +58,7 @@ class DatabaseManager {
         }
 
         try {
-            // Parallel load from all endpoints
+            // Tải dữ liệu song song
             const [stations, devices, sensorData, alerts] = await Promise.all([
                 this.fetchTable('stations'),
                 this.fetchTable('devices'),
@@ -64,7 +66,7 @@ class DatabaseManager {
                 this.fetchTable('alerts')
             ]);
 
-            // Combine all data
+            // Gộp dữ liệu và đánh dấu bảng nguồn (_table)
             this.allData = [
                 ...stations.map(s => ({ ...s, _table: 'stations' })),
                 ...devices.map(d => ({ ...d, _table: 'devices' })),
@@ -72,15 +74,9 @@ class DatabaseManager {
                 ...alerts.map(a => ({ ...a, _table: 'alerts' }))
             ];
 
-            // Update stats
-            this.updateStats({
-                stations: stations.length,
-                devices: devices.length,
-                sensor_data: sensorData.length,
-                alerts: alerts.filter(a => !a.is_resolved).length
-            });
+            // Cập nhật số liệu thống kê từ server (nhanh, chính xác)
+            this.fetchStats();
 
-            // Apply initial filter
             this.applyFilter();
 
             console.log(`✅ [DB MANAGER] Loaded ${this.allData.length} records`);
@@ -106,12 +102,12 @@ class DatabaseManager {
             const res = await fetch(`/api/admin/db/${endpoint}`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            
+
             if (!res.ok) {
                 console.warn(`⚠️ Failed to load ${endpoint}: ${res.status}`);
                 return [];
             }
-            
+
             return await res.json();
         } catch (e) {
             console.error(`❌ Error fetching ${endpoint}:`, e);
@@ -119,20 +115,15 @@ class DatabaseManager {
         }
     }
 
-    // =========================================================================
-    // FILTER & RENDER
-    // =========================================================================
     applyFilter() {
         const tableFilter = document.getElementById('db-filter-table')?.value || 'all';
         const searchTerm = document.getElementById('db-search')?.value.toLowerCase() || '';
         const limit = parseInt(document.getElementById('db-limit')?.value || '100');
 
-        // Filter by table
-        let filtered = tableFilter === 'all' 
-            ? this.allData 
+        let filtered = tableFilter === 'all'
+            ? this.allData
             : this.allData.filter(item => item._table === tableFilter);
 
-        // Filter by search term
         if (searchTerm) {
             filtered = filtered.filter(item => {
                 const searchable = JSON.stringify(item).toLowerCase();
@@ -140,9 +131,7 @@ class DatabaseManager {
             });
         }
 
-        // Limit results
         this.filteredData = filtered.slice(0, limit);
-
         this.renderTable();
     }
 
@@ -155,7 +144,7 @@ class DatabaseManager {
                 <tr>
                     <td colspan="4" class="text-center py-4">
                         <i class="bi bi-inbox fs-1 text-muted"></i>
-                        <p class="text-muted mt-2">Không có dữ liệu</p>
+                        <p class="text-muted mt-2 font-monospace">NO_DATA_FOUND</p>
                     </td>
                 </tr>
             `;
@@ -165,25 +154,25 @@ class DatabaseManager {
         tbody.innerHTML = this.filteredData.map(item => {
             const badgeColor = this.getTableBadgeColor(item._table);
             const previewData = this.getPreviewData(item);
-            
+
             return `
-                <tr>
-                    <td><code>${item.id}</code></td>
-                    <td><span class="badge ${badgeColor}">${item._table}</span></td>
+                <tr class="db-row font-monospace" style="font-size: 0.9rem;">
+                    <td class="text-muted">#${item.id}</td>
+                    <td><span class="badge ${badgeColor} bg-opacity-10 border border-${badgeColor.replace('bg-', '')} text-${badgeColor.replace('bg-', '')}">${item._table.toUpperCase()}</span></td>
                     <td>
-                        <div style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            <small class="text-muted">${previewData}</small>
+                        <div class="terminal-text" style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary);">
+                            <span class="text-muted me-2">>></span>${previewData}
                         </div>
                     </td>
                     <td>
-                        <div class="btn-group btn-group-sm">
-                            <button class="btn btn-outline-primary" onclick="window.dbManager.viewRecord('${item._table}', ${item.id})" title="Xem chi tiết">
+                        <div class="btn-group btn-group-sm opacity-50 hover-opacity-100">
+                            <button class="btn btn-outline-secondary border-0" onclick="window.dbManager.viewRecord('${item._table}', ${item.id})" title="VIEW">
                                 <i class="bi bi-eye"></i>
                             </button>
-                            <button class="btn btn-outline-warning" onclick="window.dbManager.editRecord('${item._table}', ${item.id})" title="Chỉnh sửa">
+                            <button class="btn btn-outline-secondary border-0" onclick="window.dbManager.editRecord('${item._table}', ${item.id})" title="EDIT">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${item._table}', ${item.id})" title="Xóa">
+                            <button class="btn btn-outline-danger border-0" onclick="window.dbManager.deleteRecord('${item._table}', ${item.id})" title="DELETE">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -204,7 +193,6 @@ class DatabaseManager {
     }
 
     getPreviewData(item) {
-        // Create meaningful preview based on table type
         if (item._table === 'stations') {
             return `${item.station_code} - ${item.name} (${item.status})`;
         }
@@ -228,15 +216,29 @@ class DatabaseManager {
         document.getElementById('stat-alerts').textContent = stats.alerts;
     }
 
-    // =========================================================================
-    // CRUD OPERATIONS
-    // =========================================================================
+    async fetchStats() {
+        try {
+            const res = await fetch('/api/admin/db/stats', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) {
+                console.warn('⚠️ Failed to fetch DB stats:', res.status);
+                return;
+            }
+
+            const stats = await res.json();
+            this.updateStats(stats);
+        } catch (e) {
+            console.warn('❌ Error fetching DB stats:', e);
+        }
+    }
+
     viewRecord(table, id) {
         const record = this.allData.find(r => r._table === table && r.id === id);
         if (!record) return;
 
         const formatted = JSON.stringify(record, null, 2);
-        
         alert(`Record từ bảng "${table}" (ID: ${id})\n\n${formatted}`);
     }
 
@@ -247,7 +249,6 @@ class DatabaseManager {
             return;
         }
 
-        // Fill modal
         document.getElementById('edit-table').value = table;
         document.getElementById('edit-id').value = id;
         document.getElementById('edit-json').value = JSON.stringify(record, null, 2);
@@ -261,7 +262,6 @@ class DatabaseManager {
             const id = document.getElementById('edit-id').value;
             const jsonText = document.getElementById('edit-json').value;
 
-            // Validate JSON
             let updatedData;
             try {
                 updatedData = JSON.parse(jsonText);
@@ -270,7 +270,6 @@ class DatabaseManager {
                 return;
             }
 
-            // Send update request
             const res = await fetch(`/api/admin/db/${table}/${id}`, {
                 method: 'PUT',
                 headers: {
@@ -280,13 +279,11 @@ class DatabaseManager {
                 body: JSON.stringify(updatedData)
             });
 
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
             window.toast?.success('✅ Cập nhật thành công!');
             this.currentEditModal.hide();
-            this.loadAllData(); // Reload
+            this.loadAllData();
 
         } catch (e) {
             console.error('❌ Error saving record:', e);
@@ -305,12 +302,10 @@ class DatabaseManager {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
 
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
             window.toast?.success('✅ Đã xóa!');
-            this.loadAllData(); // Reload
+            this.loadAllData();
 
         } catch (e) {
             console.error('❌ Error deleting record:', e);
@@ -319,31 +314,192 @@ class DatabaseManager {
     }
 
     // =========================================================================
-    // EXPORT
+    // EXPORT EXCEL/CSV & ZIP LOGIC (UPDATED)
     // =========================================================================
-    exportToJSON() {
-        const dataStr = JSON.stringify(this.allData, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `landslide_db_${Date.now()}.json`;
-        link.click();
-        
-        URL.revokeObjectURL(url);
-        window.toast?.success('✅ Exported to JSON');
+
+    // Hiện Modal Chọn Bảng
+    exportToExcel() {
+        const modal = new bootstrap.Modal(document.getElementById('exportExcelModal'));
+        modal.show();
     }
 
-    // Alias for backward compatibility
+    // Quick Select Functions
+    selectAllExport() {
+        ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
+            const checkbox = document.getElementById(`export-${table}`);
+            if (checkbox) checkbox.checked = true;
+        });
+    }
+
+    deselectAllExport() {
+        ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
+            const checkbox = document.getElementById(`export-${table}`);
+            if (checkbox) checkbox.checked = false;
+        });
+    }
+
+    selectOnlyData() {
+        this.deselectAllExport();
+        // Chỉ chọn Sensor Data và Alerts
+        document.getElementById('export-sensor-data').checked = true;
+        document.getElementById('export-alerts').checked = true;
+    }
+
+    // ✅ HÀM NÀY ĐÃ ĐƯỢC SỬA ĐỂ GỌI API /export-csv VÀ TẢI FILE ZIP
+    async confirmExportExcel() {
+        try {
+            // Lấy các bảng được chọn
+            const tables = [];
+            if (document.getElementById('export-projects')?.checked) tables.push('projects');
+            if (document.getElementById('export-stations')?.checked) tables.push('stations');
+            if (document.getElementById('export-devices')?.checked) tables.push('devices');
+            if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
+            if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
+
+            // Kiểm tra
+            if (tables.length === 0) {
+                window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng!');
+                return;
+            }
+
+            // Đóng modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('exportExcelModal'));
+            if (modal) modal.hide();
+
+            window.toast?.info('⏳ Đang tạo file CSV & nén ZIP... Vui lòng chờ!', 0);
+
+            // ✅ GỌI API MỚI: export-csv
+            const res = await fetch('/api/admin/db/export-csv', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ tables: tables })
+            });
+
+            if (!res.ok) throw new Error('Export failed');
+
+            // ✅ XỬ LÝ DOWNLOAD FILE ZIP
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+
+            // Đặt tên file là .zip
+            link.download = `landslide_backup_${Date.now()}.zip`;
+
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            window.toast?.success(`✅ Đã tải xuống file ZIP chứa ${tables.length} bảng CSV!`, 5000);
+
+        } catch (e) {
+            console.error('❌ Export error:', e);
+            window.toast?.error('❌ Lỗi export: ' + e.message);
+        }
+    }
+
+    // =========================================================================
+    // CLEAR DATABASE LOGIC
+    // =========================================================================
+
+    clearDatabase() {
+        // Reset input and error UI if modal exists
+        const input = document.getElementById('clear-db-confirm-input');
+        const error = document.getElementById('clear-db-error');
+
+        if (input) input.value = '';
+        if (error) error.style.display = 'none';
+
+        const modalEl = document.getElementById('clearDatabaseModal');
+        if (modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+
+            // focus input for convenience
+            setTimeout(() => { if (input) input.focus(); }, 300);
+            return;
+        }
+
+        // Fallback: simple confirm if no modal present
+        if (confirm('⚠️ CẢNH BÁO: Bạn có chắc muốn xóa dữ liệu?')) {
+            this.performClear();
+        }
+    }
+
+    async confirmClearDatabase() {
+        const input = document.getElementById('clear-db-confirm-input');
+        const confirmText = input?.value.trim();
+
+        let apiEndpoint = '';
+
+        // 1. Xóa dữ liệu (Giữ trạm)
+        if (confirmText === 'XOA DATA') {
+            apiEndpoint = '/api/admin/db/clear-all';
+        }
+        // 2. Xóa TẤT CẢ (Về ID 1)
+        else if (confirmText === 'FACTORY RESET') {
+            apiEndpoint = '/api/admin/db/factory-reset';
+        }
+        else {
+            window.toast?.warning('⚠️ Cú pháp sai! Nhập "XOA DATA" hoặc "FACTORY RESET"');
+            return;
+        }
+
+        try {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('clearDatabaseModal'));
+            if (modal) modal.hide();
+
+            window.toast?.warning('⏳ Đang xử lý...', 0);
+
+            const res = await fetch(apiEndpoint, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) throw new Error('Failed');
+
+            const result = await res.json();
+            window.toast?.success(`✅ ${result.message}`, 5000);
+
+            this.loadAllData(); // Reload lại bảng
+
+        } catch (e) {
+            console.error(e);
+            window.toast?.error('Lỗi: ' + e.message);
+        }
+    }
+
+    async performClear() {
+        try {
+            window.toast?.warning('⏳ Đang xóa database...', 0);
+
+            const res = await fetch('/api/admin/db/clear-all', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) throw new Error('Clear failed');
+
+            const result = await res.json();
+            window.toast?.success(`✅ ${result.message || 'Đã xóa dữ liệu'}`);
+            this.loadAllData();
+
+        } catch (e) {
+            window.toast?.error('Lỗi: ' + e.message);
+        }
+    }
+
+    // Alias
     loadStations() {
         this.loadAllData();
     }
 }
 
-// =========================================================================
-// INITIALIZATION
-// =========================================================================
+// Initialization
 document.addEventListener('DOMContentLoaded', () => {
     console.log('✅ [DB MANAGER] DOM loaded, initializing...');
     window.dbManager = new DatabaseManager();

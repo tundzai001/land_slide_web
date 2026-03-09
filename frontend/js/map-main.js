@@ -1,8 +1,8 @@
 // =====================================================
-// MAP MAIN LOGIC - COMPLETE FIXED VERSION
+// MAP MAIN - FIXED VERSION
 // =====================================================
 
-console.log('🚀 [MAP] Script loaded, waiting for DOM...');
+console.log('[MAP] Script loaded, waiting for DOM...');
 
 let map;
 let markers = {};
@@ -10,7 +10,7 @@ let charts = {};
 let currentStationData = null;
 let allStations = [];
 let currentView = 'realtime';
-let wsConnection = null; 
+let wsConnection = null;
 
 // =====================================================
 // MAIN INITIALIZATION
@@ -24,43 +24,49 @@ if (document.readyState === 'loading') {
 
 function initialize() {
     console.log('✅ [MAP] DOM ready, initializing...');
-    
+
+    // Set global Chart.js animation defaults for smooth realtime updates
+    if (window.Chart) {
+        Chart.defaults.animation.duration = 300;
+        Chart.defaults.animation.easing = 'easeOutQuart';
+    }
+
     initMap();
     setupEventListeners();
     loadStations();
-    setupWebSocket(); 
-    
+    setupWebSocket();
+
     const stationSidebar = document.getElementById('station-list-sidebar');
     if (stationSidebar) {
         stationSidebar.classList.add('hidden');
     }
-    
+
     const toggleBtn = document.getElementById('toggle-list-btn');
     if (toggleBtn) {
         toggleBtn.innerHTML = '<i class="bi bi-list"></i>';
     }
-    
+
     setInterval(loadStations, 30000);
-    
+
     console.log('✅ [MAP] Initialization complete!');
 }
 
 // =====================================================
-// ✅ FIXED: WEBSOCKET REALTIME CONNECTION
+// WEBSOCKET REALTIME CONNECTION
 // =====================================================
 
 function setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/updates`;
-    
+
     console.log('🔌 [WS] Connecting to:', wsUrl);
-    
+
     wsConnection = new WebSocket(wsUrl);
-    
+
     wsConnection.onopen = () => {
         console.log('✅ [WS] Connected');
     };
-    
+
     wsConnection.onmessage = (event) => {
         try {
             const message = JSON.parse(event.data);
@@ -69,16 +75,16 @@ function setupWebSocket() {
             console.error('❌ [WS] Parse error:', e);
         }
     };
-    
+
     wsConnection.onerror = (error) => {
         console.error('❌ [WS] Error:', error);
     };
-    
+
     wsConnection.onclose = () => {
         console.warn('⚠️ [WS] Disconnected, reconnecting in 5s...');
         setTimeout(setupWebSocket, 5000);
     };
-    
+
     // Keepalive ping
     setInterval(() => {
         if (wsConnection.readyState === WebSocket.OPEN) {
@@ -89,270 +95,483 @@ function setupWebSocket() {
 
 function handleRealtimeUpdate(message) {
     console.log('📡 [WS] Received:', message);
-    
+
     if (message.type === 'sensor_data') {
         if (currentStationData && message.station_id === currentStationData.id) {
             updateRealtimeSensorValues(message);
         }
     }
-    
-    // Khi nhận được trạng thái mới (VD: LOW)
-    if (message.type === 'station_status') {
-        // 1. Cập nhật chấm trên bản đồ
-        updateStationMarker(message.station_id, message.risk_level);
 
-        // 2. Cập nhật Sidebar chi tiết (nếu đang mở)
-        if (currentStationData && message.station_id === currentStationData.id) {
-            const riskEl = document.getElementById('st-risk');
-            if (riskEl) {
-                riskEl.className = `risk-badge ${message.risk_level}`;
-                riskEl.innerText = `Cảnh báo: ${message.risk_level}`;
+    if (message.type === 'station_status') {
+        const riskLevel = message.risk_level;
+        const stationId = message.station_id;
+
+        // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan
+        if (riskLevel === 'LOW') {
+            // 1. Clear marker flashing (phải gọi TRƯỚC updateStationMarker)
+            if (markerAlertState[stationId]) {
+                clearMarkerAlert(stationId);
+            }
+
+            // 2. Dismiss alert banner nếu đang hiện cho trạm này
+            if (currentAlertStationId === stationId) {
+                const banner = document.getElementById('alert-banner');
+                if (banner) banner.classList.remove('show');
+                currentAlertStationId = null;
+                lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
+            }
+
+            // 3. Reset siren popup về idle nếu đang xem trạm này
+            if (currentStationData && stationId === currentStationData.id) {
+                setSirenButtonState('idle');
             }
         }
 
-        // 3. ✅ CẬP NHẬT DANH SÁCH BÊN TRÁI NGAY LẬP TỨC
-        const listBadge = document.getElementById(`list-badge-${message.station_id}`);
+        // Update marker color on map
+        updateStationMarker(stationId, riskLevel);
+
+        // Update status badge in sidebar
+        if (currentStationData && stationId === currentStationData.id) {
+            const riskEl = document.getElementById('st-risk');
+            if (riskEl) {
+                let displayRisk = riskLevel;
+                let riskClass = riskLevel;
+
+                if (riskLevel === 'LOW') {
+                    displayRisk = 'SAFE';
+                    riskClass = 'LOW';
+                } else if (riskLevel === 'MEDIUM' || riskLevel === 'HIGH') {
+                    displayRisk = 'WARNING';
+                    riskClass = 'MEDIUM';
+                } else if (riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') {
+                    displayRisk = 'CRITICAL';
+                    riskClass = 'CRITICAL';
+                }
+
+                riskEl.className = `status-badge ${riskClass}`;
+                riskEl.innerHTML = `<span class="status-dot"></span> ${displayRisk}`;
+            }
+        }
+
+        // Update station list badge
+        const listBadge = document.getElementById(`list-badge-${stationId}`);
         if (listBadge) {
-            listBadge.className = `badge ${getRiskBadgeClass(message.risk_level)}`;
-            listBadge.innerText = message.risk_level;
-            
-            // Hiệu ứng nháy nhẹ để biết vừa cập nhật
+            const displayText = riskLevel === 'LOW' ? 'SAFE' : riskLevel;
+            listBadge.className = `badge ${getRiskBadgeClass(riskLevel)}`;
+            listBadge.innerText = displayText;
+
             listBadge.style.transition = '0.3s';
             listBadge.style.transform = 'scale(1.2)';
             setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
         }
     }
-}
 
-function updateSidebarRiskBadge(level) {
-    const riskEl = document.getElementById('st-risk');
-    if (!riskEl) return;
-
-    riskEl.className = `risk-badge ${level}`; 
-    riskEl.innerText = `Cảnh báo: ${level}`;
-    
-    riskEl.style.opacity = '0.5';
-    setTimeout(() => riskEl.style.opacity = '1', 300);
+    // ✅ XỬ LÝ CẢNH BÁO MỚI — Chỉ hiện 1 lần per alert (dedup)
+    if (message.type === 'alert') {
+        // Drop message.message from the key so dynamic numbers don't bypass dedup
+        const alertKey = `${message.station_id}_${message.level}`;
+        if (alertKey !== lastAlertKey) {
+            lastAlertKey = alertKey;
+            showAlertBanner(message);
+        }
+        // ✅ Marker chuyển đỏ + nhấp nháy khi có cảnh báo
+        setMarkerAlert(message.station_id, true);
+        // Always attempt to play siren (it will handle its own dedup/overlap)
+        playSiren();
+    }
 }
 
 function updateRealtimeSensorValues(message) {
     const { sensor_type, data, timestamp } = message;
-    
+
     console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
-    
+
     if (sensor_type === 'gnss' && data) {
-        // GNSS Velocity
-        const velocityMmS = data.speed_2d_mm_s || (data.speed_2d * 1000) || 0;
-        setHTML('val-gnss-vel', `${safeNumber(velocityMmS, 4)}<span class="sensor-unit">mm/s</span>`);
-        
-        // Displacement
-        const displacement = data.total_displacement_mm || 0;
-        
-        // ✅ Cập nhật chart nếu đang mở
+        const velocityMmS = data.velocity_mm_s ||
+            data.speed_2d_mm_s ||
+            data.speed_mm_s ||
+            (data.speed_2d ? data.speed_2d * 1000 : null) ||
+            (data.velocity ? data.velocity * 1000 : null) ||
+            (data.speed ? data.speed * 1000 : null) || 0;
+
+        console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
+        animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
+
+        const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
+
         if (charts['chart-gnss']) {
             const chart = charts['chart-gnss'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(displacement);
-            
-            // Giữ tối đa 50 điểm
+
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
-            chart.update('none'); // Update without animation
+
+            chart.update();
         }
     }
-    
+
     if (sensor_type === 'rain' && data) {
-        const intensity = data.intensity_mm_h || 0;
-        setHTML('val-rain', `${safeNumber(intensity, 1)}<span class="sensor-unit">mm/h</span>`);
-        
-        // Update chart
+        const intensity = data.intensity_mm_h || data.intensity || 0;
+        animateValue('val-rain', intensity, 1, 'mm/h');
+
         if (charts['chart-rain']) {
             const chart = charts['chart-rain'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(intensity);
-            
+
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
-            chart.update('none');
+
+            chart.update();
         }
     }
-    
+
     if (sensor_type === 'water' && data) {
-        const level = data.water_level || data.processed_value_meters || 0;
-        setHTML('val-water', `${safeNumber(level, 2)}<span class="sensor-unit">m</span>`);
-        
-        // Update chart
+        const level = data.water_level || data.level || data.processed_value_meters || 0;
+        animateValue('val-water', level, 2, 'm');
+
         if (charts['chart-water']) {
             const chart = charts['chart-water'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(level);
-            
+
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();
             }
-            
-            chart.update('none');
+
+            chart.update();
         }
     }
-    
+
     if (sensor_type === 'imu' && data) {
-        setText('val-imu-roll', `${safeNumber(data.roll, 1)}°`);
-        setText('val-imu-pitch', `${safeNumber(data.pitch, 1)}°`);
-        setText('val-imu-yaw', `${safeNumber(data.yaw, 1)}°`);
+        animateValue('val-imu-roll', data.raw_roll, 1, '°', true);
+        animateValue('val-imu-pitch', data.raw_pitch, 1, '°', true);
+        animateValue('val-imu-yaw', data.raw_yaw, 1, '°', true);
+
+        // Delta values (secondary display)
+        animateValue('val-imu-delta-roll', data.roll, 1, '°', true);
+        animateValue('val-imu-delta-pitch', data.pitch, 1, '°', true);
+        animateValue('val-imu-delta-yaw', data.yaw, 1, '°', true);
+
+        // Update battery in real-time
+        const batteryContainer = document.getElementById('battery-container');
+        const batteryVal = data.battery;
+        if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+            if (batteryContainer) batteryContainer.style.display = '';
+            animateValue('val-battery', batteryVal, 2, 'V');
+        }
+
+        // Update IMU chart in real-time
+        if (charts['chart-imu']) {
+            const chart = charts['chart-imu'];
+            const timeLabel = new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            chart.data.labels.push(timeLabel);
+            chart.data.datasets[0].data.push(parseFloat(data.roll) || 0);
+            chart.data.datasets[1].data.push(parseFloat(data.pitch) || 0);
+            chart.data.datasets[2].data.push(parseFloat(data.yaw) || 0);
+
+            if (chart.data.labels.length > 50) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(ds => ds.data.shift());
+            }
+
+            chart.update();
+        }
     }
 }
 
 function updateStationMarker(stationId, riskLevel) {
     const marker = markers[stationId];
     if (!marker) return;
-    
+
+    // ✅ Nếu marker đang trong trạng thái alert (đỏ nhấp nháy), không cập nhật
+    if (markerAlertState[stationId]) return;
+
     const colors = {
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
         'LOW': '#51cf66'
     };
-    
-    const color = colors[riskLevel] || '#adb5bd';
-    const el = marker.getElement();
-    if (el) {
-        const circle = el.querySelector('div');
-        if (circle) circle.style.background = color;
-    }
+
+    // ✅ Online mà không có risk_level → mặc định xanh (LOW)
+    const effectiveLevel = (riskLevel && colors[riskLevel]) ? riskLevel : 'LOW';
+    const color = colors[effectiveLevel];
+    const shouldPulse = effectiveLevel === 'EXTREME' || effectiveLevel === 'HIGH';
+    const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
+
+    // ✅ Dùng setIcon với HTML string để Leaflet giữ pulse class khi re-render
+    const iconHtml = `<div class="marker-circle${pulseClass}" style="
+                width: 18px; height: 18px; background: ${color};
+                border-radius: 50%; border: 2px solid white;
+                box-shadow: 0 0 8px rgba(0,0,0,0.5);
+                transition: background 0.3s ease;
+            "></div>`;
+
+    const newIcon = L.divIcon({
+        className: 'custom-map-marker',
+        html: iconHtml,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+    });
+    marker.setIcon(newIcon);
 }
 
 // =====================================================
-// EVENT LISTENERS SETUP
+// MARKER ALERT STATE — Đỏ + nhấp nháy khi có cảnh báo
 // =====================================================
+let markerAlertState = {};
+
+function setMarkerAlert(stationId, active) {
+    const marker = markers[stationId];
+    if (!marker) return;
+
+    if (active) {
+        markerAlertState[stationId] = true;
+
+        const iconHtml = `<div class="marker-circle marker-device-alert" style="
+                    width: 22px; height: 22px; background: #fa5252;
+                    border-radius: 50%; border: 3px solid white;
+                    box-shadow: 0 0 12px rgba(250, 82, 82, 0.8);
+                "></div>`;
+
+        const alertIcon = L.divIcon({
+            className: 'custom-map-marker',
+            html: iconHtml,
+            iconSize: [22, 22],
+            iconAnchor: [11, 11]
+        });
+        marker.setIcon(alertIcon);
+
+        console.log(`🔴 [MARKER] Station ${stationId} → ĐỎ + nhấp nháy`);
+    } else {
+        clearMarkerAlert(stationId);
+    }
+}
+
+function clearMarkerAlert(stationId) {
+    delete markerAlertState[stationId];
+
+    // Tìm station data để khôi phục màu gốc theo risk_level
+    const station = allStations.find(s => s.id === stationId);
+    if (station) {
+        // Xóa cache để bắt buộc vẽ lại marker
+        delete stationStateCache[stationId];
+        updateMarker(station);
+    }
+
+    console.log(`🟢 [MARKER] Station ${stationId} → Khôi phục màu gốc`);
+}
+
+// (updateSidebarUI đã được chuyển xuống dưới — duy nhất 1 bản)
 
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
-    
+
     const toggleListBtn = document.getElementById('toggle-list-btn');
     const sidebarCloseTab = document.getElementById('sidebar-close-tab');
     const stationSidebar = document.getElementById('station-list-sidebar');
-    
+
+    // Toggle sidebar trái
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
             stationSidebar.classList.remove('hidden');
+            stationSidebar.classList.remove('force-hidden');
         });
     }
-    
+
     if (sidebarCloseTab && stationSidebar) {
         sidebarCloseTab.addEventListener('click', () => {
             stationSidebar.classList.add('hidden');
         });
     }
-    
+
+    // Đóng detailed sidebar
     const closeDetailBtn = document.getElementById('close-btn');
     const detailSidebar = document.getElementById('detail-sidebar');
-    
+
     if (closeDetailBtn && detailSidebar) {
         closeDetailBtn.addEventListener('click', () => {
             detailSidebar.classList.remove('active');
-            detailSidebar.classList.remove('expanded');
-            detailSidebar.classList.remove('fullwidth');
-            
-            document.getElementById('realtime-view').style.display = 'block';
-            document.getElementById('longterm-view').style.display = 'none';
-            document.getElementById('charts-container').classList.remove('active');
-            
+
+            // Đóng tất cả panels
+            const chartsPanel = document.getElementById('charts-panel');
+            const longtermOverlay = document.getElementById('longterm-overlay');
+            if (chartsPanel) chartsPanel.classList.remove('active');
+            if (longtermOverlay) longtermOverlay.classList.remove('active');
+
+            // Mở lại sidebar trái
             if (stationSidebar) {
                 stationSidebar.classList.remove('hidden');
+                stationSidebar.classList.remove('force-hidden');
             }
         });
     }
-    
-    const themeToggleBtn = document.getElementById('theme-toggle-btn');
-    if (themeToggleBtn) {
-        themeToggleBtn.addEventListener('click', () => {
-            if (window.themeManager) {
-                window.themeManager.toggle();
-            }
-        });
-    }
-    
+
+    // Theme toggle - handled by theme-manager.js (do NOT add duplicate listener)
+
+    // Search
     const searchInput = document.getElementById('search-station');
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
             filterStations(e.target.value);
         });
     }
-    
+
+    // ✅ NEW: Xem biểu đồ - Mở panel giữa màn hình
     const btnShowCharts = document.getElementById('btn-show-charts');
-    if (btnShowCharts) {
+    const chartsPanel = document.getElementById('charts-panel');
+    const closeChartsBtn = document.getElementById('close-charts-btn');
+
+    if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', () => {
-            const chartsContainer = document.getElementById('charts-container');
-            const isActive = chartsContainer.classList.contains('active');
-            
-            if (isActive) {
-                detailSidebar.classList.remove('expanded');
-                chartsContainer.classList.remove('active');
-                stationSidebar.classList.remove('collapsed');
-                btnShowCharts.innerHTML = '<i class="bi bi-graph-up me-2"></i>Xem biểu đồ';
-            } else {
-                detailSidebar.classList.add('expanded');
-                chartsContainer.classList.add('active');
-                stationSidebar.classList.add('collapsed');
-                btnShowCharts.innerHTML = '<i class="bi bi-x me-2"></i>Đóng biểu đồ';
-                
-                if (currentStationData) {
-                    renderCharts(currentStationData);
-                }
-            }
-        });
-    }
-    
-    const btnLongTerm = document.getElementById('btn-long-term');
-    if (btnLongTerm) {
-        btnLongTerm.addEventListener('click', () => {
-            const longtermView = document.getElementById('longterm-view');
-            const isActive = longtermView.style.display === 'block';
-            
-            if (isActive) {
-                switchView('realtime');
-                detailSidebar.classList.remove('fullwidth');
-                stationSidebar.classList.remove('hidden');
-                btnLongTerm.innerHTML = '<i class="bi bi-calendar-range me-2"></i>Phân tích dài hạn';
-            } else {
-                switchView('longterm');
-                detailSidebar.classList.add('fullwidth');
+            chartsPanel.classList.add('active');
+
+            // Đóng sidebar trái khi mở biểu đồ
+            if (stationSidebar) {
                 stationSidebar.classList.add('hidden');
-                btnLongTerm.innerHTML = '<i class="bi bi-x me-2"></i>Đóng phân tích';
-                
-                loadLongTermAnalysis();
+                stationSidebar.classList.add('force-hidden');
+            }
+
+            console.log('📊 [CHARTS] Charts panel opened');
+
+            if (currentStationData) {
+                renderCharts(currentStationData);
             }
         });
     }
-    
+
+    if (closeChartsBtn && chartsPanel) {
+        closeChartsBtn.addEventListener('click', () => {
+            chartsPanel.classList.remove('active');
+
+            // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
+            if (stationSidebar) {
+                stationSidebar.classList.remove('force-hidden');
+            }
+
+            console.log('📊 [CHARTS] Charts panel closed');
+        });
+    }
+
+    // Phân tích dài hạn -> Mở fullscreen
+    const btnLongTerm = document.getElementById('btn-long-term');
+    const longtermOverlay = document.getElementById('longterm-overlay');
+    const closeLongtermBtn = document.getElementById('close-longterm-btn');
+
+    if (btnLongTerm && longtermOverlay) {
+        btnLongTerm.addEventListener('click', () => {
+            longtermOverlay.classList.add('active');
+
+            // Đóng sidebar trái
+            if (stationSidebar) {
+                stationSidebar.classList.add('hidden');
+                stationSidebar.classList.add('force-hidden');
+            }
+
+            // Cập nhật tên trạm 
+            const longtermStationName = document.getElementById('longterm-station-name');
+            if (longtermStationName && currentStationData) {
+                longtermStationName.textContent = `${currentStationData.name} (${currentStationData.station_code})`;
+            }
+
+            console.log('📊 [LONGTERM] Analysis overlay opened');
+
+            loadLongTermAnalysis();
+        });
+    }
+
+    if (closeLongtermBtn && longtermOverlay) {
+        closeLongtermBtn.addEventListener('click', () => {
+            longtermOverlay.classList.remove('active');
+
+            // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
+            if (stationSidebar) {
+                stationSidebar.classList.remove('force-hidden');
+            }
+
+            console.log('📊 [LONGTERM] Analysis overlay closed');
+        });
+    }
+
+    // Time range selector buttons for long-term analysis
+    const rangeSelector = document.getElementById('longterm-range-selector');
+    if (rangeSelector) {
+        rangeSelector.querySelectorAll('.btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                rangeSelector.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                loadLongTermAnalysis();
+            });
+        });
+    }
+
+    // Nút tắt/bật còi trong sidebar
+    const sirenToggleBtns = document.querySelectorAll('.btn-siren-toggle');
+    sirenToggleBtns.forEach(sirenToggleBtn => {
+        sirenToggleBtn.addEventListener('click', async () => {
+            if (!currentAlertStationId) return;
+            const state = sirenToggleBtn.getAttribute('data-siren-state');
+            const target = sirenToggleBtn.getAttribute('data-target') || 'all';
+            if (state === 'idle') return; // disabled, không làm gì
+
+            try {
+                const iconBase = target === 'pi_center' ? 'Center' : 'Point';
+                sirenToggleBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>`;
+
+                if (state === 'alerting') {
+                    // Đang kêu → Tắt còi
+                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren?target=${target}`, {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        window.toast?.success(`Mute command sent (${iconBase})`);
+                        setSirenButtonState('muted', target);
+                        // Tắt siren trên web (chỉ tắt khi mute center/point tùy logic, tạm thời cứ tắt JS audio)
+                        if (currentSirenAudio) {
+                            currentSirenAudio.pause();
+                            currentSirenAudio.currentTime = 0;
+                            currentSirenAudio = null;
+                        }
+                    } else {
+                        window.toast?.error(`Failed to mute (${iconBase})`);
+                        setSirenButtonState('alerting', target);
+                    }
+                } else if (state === 'muted') {
+                    // Đã tắt → Bật lại còi
+                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/enable-siren?target=${target}`, {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        window.toast?.success(`Alarm re-enabled (${iconBase})`);
+                        setSirenButtonState('alerting', target);
+                    } else {
+                        window.toast?.error(`Failed to enable (${iconBase})`);
+                        setSirenButtonState('muted', target);
+                    }
+                }
+            } catch (error) {
+                console.error('Error toggling siren:', error);
+                window.toast?.error('Cannot connect to server');
+                // Khôi phục trạng thái cũ
+                const target = sirenToggleBtn.getAttribute('data-target') || 'all';
+                setSirenButtonState(state, target);
+            }
+        });
+    });
+
     console.log('✅ [MAP] All event listeners setup complete');
 }
 
 // =====================================================
-// OTHER FUNCTIONS (Keep existing implementations)
+// OTHER FUNCTIONS
 // =====================================================
-
-function switchView(view) {
-    currentView = view;
-    
-    const realtimeView = document.getElementById('realtime-view');
-    const longtermView = document.getElementById('longterm-view');
-    
-    if (view === 'realtime') {
-        realtimeView.style.display = 'block';
-        longtermView.style.display = 'none';
-    } else if (view === 'longterm') {
-        realtimeView.style.display = 'none';
-        longtermView.style.display = 'block';
-    }
-}
 
 function initMap() {
     try {
@@ -363,7 +582,7 @@ function initMap() {
             maxZoom: 20,
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
         }).addTo(map);
-        
+
         console.log('✅ [MAP] Leaflet map initialized');
     } catch (error) {
         console.error('❌ [MAP] Failed to initialize map:', error);
@@ -374,13 +593,26 @@ async function loadStations() {
     try {
         const res = await fetch('/api/stations');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        
+
         const stations = await res.json();
         allStations = stations;
 
         stations.forEach(station => {
             if (station.location && station.location.lat && station.location.lon) {
                 updateMarker(station);
+            }
+
+            // ✅ THÊM: Nếu trạm đang xem bị đổi status (ví dụ offline/online, hoặc đổi risk_level)
+            if (currentStationData && currentStationData.id === station.id) {
+                if (currentStationData.status !== station.status || currentStationData.risk_level !== station.risk_level) {
+                    console.log(`🔄 [STATE] Station ${station.id} changed state: ${currentStationData.status}->${station.status}, updating UI...`);
+                    currentStationData.status = station.status;
+                    currentStationData.risk_level = station.risk_level;
+                    if (currentStationData.risk_assessment) {
+                        currentStationData.risk_assessment.overall_risk = station.risk_level;
+                    }
+                    updateSidebarUI(currentStationData);
+                }
             }
         });
 
@@ -397,122 +629,242 @@ function renderStationList(stations) {
 
     if (stations.length === 0) {
         container.innerHTML = `
-            <div class="text-center text-muted mt-4">
-                <i class="bi bi-inbox fs-1"></i>
-                <p class="mt-2">Chưa có trạm nào</p>
-            </div>
-        `;
+                    <div class="text-center text-muted mt-4">
+                        <i class="bi bi-inbox fs-1"></i>
+                        <p class="mt-2">Chưa có trạm nào</p>
+                    </div>
+                `;
         return;
     }
 
     container.innerHTML = '';
-    
+
     stations.forEach(st => {
+        let rawLevel = st.risk_level || 'LOW';
+        if (st.status === 'offline') {
+            rawLevel = 'OFFLINE';
+        }
+
+        let displayString = rawLevel;
+        let classLevel = rawLevel;
+
+        if (rawLevel === 'LOW') {
+            displayString = 'SAFE';
+            classLevel = 'LOW';
+        } else if (rawLevel === 'MEDIUM' || rawLevel === 'HIGH') {
+            displayString = 'WARNING';
+            classLevel = 'MEDIUM'; // maps to warning classes
+        } else if (rawLevel === 'EXTREME' || rawLevel === 'CRITICAL') {
+            displayString = 'CRITICAL';
+            classLevel = 'CRITICAL';
+        } else if (rawLevel === 'OFFLINE') {
+            displayString = 'OFFLINE';
+            classLevel = 'OFFLINE';
+        } else {
+            displayString = 'SAFE';
+        }
+
         const div = document.createElement('div');
         div.className = 'station-item';
         div.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="fw-bold text-white">${st.name}</div>
-                    <small class="text-muted">${st.station_code}</small>
-                </div>
-                <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(st.risk_level)}">
-                    ${st.risk_level || 'N/A'}
-                </span>
-            </div>
-        `;
-        
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
+                            <small style="color: var(--text-secondary)">${st.station_code}</small>
+                        </div>
+                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(classLevel)}">
+                            ${displayString}
+                        </span>
+                    </div>
+                `;
+
         div.addEventListener('click', () => {
             selectStation(st.id);
-            
             if (window.innerWidth < 768) {
                 const sidebar = document.getElementById('station-list-sidebar');
                 if (sidebar) sidebar.classList.add('hidden');
             }
         });
-        
+
         container.appendChild(div);
     });
 }
 
 function getRiskBadgeClass(level) {
     const classes = {
-        'EXTREME': 'bg-danger',
-        'HIGH': 'bg-warning text-dark',
+        'CRITICAL': 'bg-danger',
+        'EXTREME': 'bg-danger', // fallback
         'MEDIUM': 'bg-warning text-dark',
-        'LOW': 'bg-success'
+        'HIGH': 'bg-warning text-dark', // fallback
+        'LOW': 'bg-success',
+        'OFFLINE': 'bg-secondary'
     };
     return classes[level] || 'bg-success';
 }
 
+// ✅ BOOST 3: Cache trạng thái marker để tránh vẽ lại không cần thiết
+let stationStateCache = {};
+
 function updateMarker(station) {
     const colors = {
+        'CRITICAL': '#fa5252',
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
-        'LOW': '#51cf66'
+        'LOW': '#51cf66',
+        'OFFLINE': '#6c757d'
     };
-    const color = colors[station.risk_level] || '#adb5bd';
-    
+
+    let currentLevel = station.risk_level;
+    if (station.status === 'offline') {
+        currentLevel = 'OFFLINE';
+    } else if (!currentLevel || !colors[currentLevel]) {
+        // ✅ Online mà không có risk_level → mặc định xanh (LOW)
+        currentLevel = 'LOW';
+    }
+    const color = colors[currentLevel] || '#adb5bd';
+    const shouldPulse = currentLevel === 'CRITICAL' || currentLevel === 'EXTREME' || currentLevel === 'HIGH' || currentLevel === 'MEDIUM';
+
+    // ✅ KIỂM TRA CACHE: Nếu trạng thái không đổi thì KHÔNG LÀM GÌ CẢ
+    const cacheKey = `${station.id}_${currentLevel}_${station.location.lat}_${station.location.lon}`;
+    if (stationStateCache[station.id] === cacheKey) {
+        return; // Dữ liệu y hệt cũ -> Bỏ qua, không vẽ lại (Giảm tải CPU)
+    }
+
+    // Cập nhật Cache mới
+    stationStateCache[station.id] = cacheKey;
+
+    // ✅ Tạo HTML string cho divIcon (giúp Leaflet giữ nguyên class khi re-render)
+    const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
+    const iconHtml = `<div class="marker-circle${pulseClass}" style="
+                width: 18px; height: 18px; background: ${color};
+                border-radius: 50%; border: 2px solid white;
+                box-shadow: 0 0 8px rgba(0,0,0,0.5);
+                transition: background 0.3s ease;
+            "></div>`;
+
     if (markers[station.id]) {
         markers[station.id].setLatLng([station.location.lat, station.location.lon]);
-        const el = markers[station.id].getElement();
-        if (el) {
-            const circle = el.querySelector('div');
-            if (circle) circle.style.background = color;
-        }
-    } else {
-        const div = document.createElement('div');
-        div.style.cssText = `
-            width: 18px; height: 18px; background: ${color};
-            border-radius: 50%; border: 2px solid white;
-            box-shadow: 0 0 8px rgba(0,0,0,0.5);
-        `;
-        
-        const icon = L.divIcon({ 
-            className: '', 
-            html: div, 
-            iconSize: [18, 18], 
-            iconAnchor: [9, 9] 
+
+        // ✅ Cập nhật icon mới với HTML string (giữ pulse class)
+        const newIcon = L.divIcon({
+            className: 'custom-map-marker',
+            html: iconHtml,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         });
-        
+        markers[station.id].setIcon(newIcon);
+    } else {
+        const icon = L.divIcon({
+            className: 'custom-map-marker',
+            html: iconHtml,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+        });
+
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
             .addTo(map)
             .bindTooltip(station.name, { direction: 'top', offset: [0, -10] });
-        
+
         marker.on('click', () => selectStation(station.id));
         markers[station.id] = marker;
     }
 }
 
-async function selectStation(stationId) {
-    console.log(`🎯 [MAP] Selecting station: ${stationId}`);
-    
-    switchView('realtime');
-    
+// =====================================================
+// SIREN POPUP HELPER — Dùng bởi selectStation và Track button
+// =====================================================
+function _showSirenIfAlerting(stationId, data) {
+    // Only show siren controls for admin and operator roles
+    const user = window.authManager?.getUserInfo();
+    const userRole = user?.role;
+    if (userRole !== 'admin' && userRole !== 'operator') {
+        const popup = document.getElementById('siren-bottom-popup');
+        if (popup) popup.style.bottom = '-120px';
+        return;
+    }
+
+    const risk = data.risk_assessment?.overall_risk || data.risk_level;
+    const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
+
+    const popupStationName = document.getElementById('siren-popup-station');
+    if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
+
+    // Default statuses based on pi_devices array from station detail API
+    let pointDeviceStatus = 'idle';
+    let centerDeviceStatus = 'idle';
+
+    if (data.pi_devices && Array.isArray(data.pi_devices)) {
+        const pPoint = data.pi_devices.find(d => d.device_type === 'pi_point');
+        const pCenter = data.pi_devices.find(d => d.device_type === 'pi_center');
+
+        if (pPoint && !pPoint.is_online) pointDeviceStatus = 'offline';
+        if (pCenter && !pCenter.is_online) centerDeviceStatus = 'offline';
+        // If there is no pi_point or pi_center registered for this station, maybe set to offline?
+        // But let's only override if explicitly offline to be safe.
+    }
+
+    if (isAlerting) {
+        currentAlertStationId = stationId;
+        const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
+        if (sirenBtns.length > 0) {
+            sirenBtns.forEach(b => {
+                const target = b.getAttribute('data-target');
+                let currentState = b.getAttribute('data-siren-state');
+
+                // Determine target default status (might be offline)
+                const isOffline = target === 'pi_center' ? centerDeviceStatus === 'offline' : pointDeviceStatus === 'offline';
+
+                if (isOffline) {
+                    setSirenButtonState('offline', target);
+                } else {
+                    // If online, transition idle to alerting, keep muted as is
+                    if (currentState === 'idle' || currentState === 'offline') currentState = 'alerting';
+                    setSirenButtonState(currentState, target);
+                }
+            });
+        }
+    } else {
+        if (currentAlertStationId === stationId) {
+            currentAlertStationId = null;
+        }
+
+        // Apply idle or offline if not alerting
+        setSirenButtonState(centerDeviceStatus === 'offline' ? 'offline' : 'idle', 'pi_center');
+        setSirenButtonState(pointDeviceStatus === 'offline' ? 'offline' : 'idle', 'pi_point');
+    }
+}
+
+async function selectStation(stationId, options = {}) {
+    const { skipZoom = false, skipSiren = false } = options;
+    console.log(`🎯 [MAP] Selecting station: ${stationId}`, options);
+
     const sidebar = document.getElementById('detail-sidebar');
     if (sidebar) {
         sidebar.classList.add('active');
-        sidebar.classList.remove('expanded');
-        sidebar.classList.remove('fullwidth');
     }
 
     try {
         const res = await fetch(`/api/stations/${stationId}/detail`);
         if (!res.ok) throw new Error('Failed to load station detail');
-        
+
         const data = await res.json();
         currentStationData = data;
 
-        if (markers[stationId]) {
+        if (!skipZoom && markers[stationId]) {
             map.flyTo(markers[stationId].getLatLng(), 16, { duration: 1 });
         }
-        
+
         updateSidebarUI(data);
-        
+
+        // ✅ Siren popup logic — có thể bị skip bởi caller (ví dụ: Track button tự quản lý)
+        if (!skipSiren) {
+            _showSirenIfAlerting(stationId, data);
+        }
+
     } catch (e) {
         console.error('❌ [MAP] Error loading station detail:', e);
-        window.toast?.error('Không thể tải thông tin trạm');
+        window.toast?.error('Failed to load station info');
     }
 }
 
@@ -520,24 +872,49 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     if (value === null || value === undefined || value === '') {
         return defaultValue;
     }
-    
+
     const num = parseFloat(value);
     if (isNaN(num)) {
         return defaultValue;
     }
-    
+
     return num.toFixed(decimals);
 }
 
 function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
-    
+
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
-        const risk = data.risk_assessment?.overall_risk || 'UNKNOWN';
-        riskEl.className = `risk-badge ${risk}`;
-        riskEl.innerText = `Cảnh báo: ${risk}`;
+        let rawRisk = data.risk_assessment?.overall_risk || data.risk_level || 'UNKNOWN';
+
+        if (data.status === 'offline') {
+            rawRisk = 'OFFLINE';
+        }
+
+        let displayRisk = rawRisk;
+        let riskClass = rawRisk;
+
+        if (rawRisk === 'LOW') {
+            displayRisk = 'SAFE';
+            riskClass = 'LOW';
+        } else if (rawRisk === 'MEDIUM' || rawRisk === 'HIGH') {
+            displayRisk = 'WARNING';
+            riskClass = 'MEDIUM'; // Will use yellow/orange warning CSS
+        } else if (rawRisk === 'EXTREME' || rawRisk === 'CRITICAL') {
+            displayRisk = 'CRITICAL';
+            riskClass = 'CRITICAL';
+        } else if (rawRisk === 'OFFLINE') {
+            displayRisk = 'OFFLINE';
+            riskClass = 'OFFLINE';
+        } else {
+            displayRisk = 'SAFE'; // Default fallback
+            riskClass = 'LOW';
+        }
+
+        riskEl.className = `status-badge ${riskClass}`;
+        riskEl.innerHTML = `<span class="status-dot"></span> ${displayRisk}`;
     }
 
     const gnssLatest = data.sensors?.gnss?.latest;
@@ -545,39 +922,117 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
 
-    const gnssSpeed = gnssLatest?.speed_2d_mm_s || gnssLatest?.speed_2d * 1000 || null;
-    setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
+    // ✅ Khi thiết bị offline → hiển thị '--' cho TẤT CẢ sensor
+    if (data.status === 'offline') {
+        setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+        setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
+        setHTML('val-water', `--<span class="sensor-unit">m</span>`);
+        setText('val-imu-roll', '--°');
+        setText('val-imu-pitch', '--°');
+        setText('val-imu-yaw', '--°');
+        setText('val-imu-delta-roll', '--°');
+        setText('val-imu-delta-pitch', '--°');
+        setText('val-imu-delta-yaw', '--°');
 
-    const rainIntensity = rainLatest?.intensity_mm_h ?? null;
-    setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
+        // ✅ Khi offline, nút tắt còi chuyển xám (idle)
+        setSirenButtonState('idle');
 
-    const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
-    setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+        // Ẩn battery khi offline
+        const batteryContainer = document.getElementById('battery-container');
+        if (batteryContainer) batteryContainer.style.display = 'none';
+    } else {
+        const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
+        setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
 
-    setText('val-imu-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-    setText('val-imu-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-    setText('val-imu-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+        const rainIntensity = rainLatest?.intensity_mm_h ?? null;
+        setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
 
-    renderCharts(data);
+        const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
+        setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+
+        setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
+        setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
+        setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
+
+        // ✅ Delta values (secondary display)
+        setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
+        setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
+        setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+
+        // ✅ Battery Voltage: hiển thị nếu có giá trị > 0
+        const batteryContainer = document.getElementById('battery-container');
+        const batteryVal = imuLatest?.battery;
+        if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+            if (batteryContainer) batteryContainer.style.display = '';
+            setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
+        } else {
+            if (batteryContainer) batteryContainer.style.display = 'none';
+        }
+    }
 }
 
 function renderCharts(data) {
     if (!data.sensors) return;
-    
-    renderChart('chart-gnss', data.sensors.gnss?.history, 'total_displacement_mm', '#fa5252', 'Displacement');
-    renderChart('chart-rain', data.sensors.rain?.history, 'intensity_mm_h', '#06b6d4', 'Intensity');
-    renderChart('chart-water', data.sensors.water?.history, 'water_level', '#10b981', 'Level');
+
+    console.log('📊 [CHARTS] Rendering charts for station devices...');
+
+    // Show charts based on DEVICE presence, not data existence
+    const allChartIds = ['chart-box-gnss', 'chart-box-rain', 'chart-box-water', 'chart-box-imu'];
+    const activeChartBoxIds = [];
+
+    // GNSS
+    if (data.sensors.gnss) {
+        activeChartBoxIds.push('chart-box-gnss');
+        const history = data.sensors.gnss.history || [];
+        renderChart('chart-gnss', history, 'total_displacement_mm', '#fa5252', 'Displacement (mm)');
+    }
+
+    // Rain
+    if (data.sensors.rain) {
+        activeChartBoxIds.push('chart-box-rain');
+        const history = data.sensors.rain.history || [];
+        renderChart('chart-rain', history, 'intensity_mm_h', '#06b6d4', 'Intensity (mm/h)');
+    }
+
+    // Water
+    if (data.sensors.water) {
+        activeChartBoxIds.push('chart-box-water');
+        const history = data.sensors.water.history || [];
+        renderChart('chart-water', history, 'water_level', '#10b981', 'Level (m)');
+    }
+
+    // IMU (3-axis)
+    if (data.sensors.imu) {
+        activeChartBoxIds.push('chart-box-imu');
+        renderImuChart(data.sensors.imu.history || []);
+    }
+
+    // Show/hide chart boxes
+    allChartIds.forEach(chartBoxId => {
+        const chartBox = document.getElementById(chartBoxId);
+        if (chartBox) {
+            chartBox.style.display = activeChartBoxIds.includes(chartBoxId) ? 'block' : 'none';
+        }
+    });
+
+    // Show empty state if no sensors at all
+    const emptyState = document.getElementById('charts-empty-state');
+    if (emptyState) {
+        emptyState.style.display = activeChartBoxIds.length === 0 ? 'block' : 'none';
+    }
+
+    console.log(`✅ [CHARTS] Rendered ${activeChartBoxIds.length} charts`);
 }
 
 function renderChart(id, history, key, color, label) {
     const ctx = document.getElementById(id);
     if (!ctx) return;
-    
+
     const labels = (history || []).map(h => {
         const date = new Date(h.timestamp * 1000);
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     });
-    
+
     const values = (history || []).map(h => {
         const val = h.data?.[key];
         return val !== null && val !== undefined ? parseFloat(val) : 0;
@@ -586,7 +1041,12 @@ function renderChart(id, history, key, color, label) {
     if (charts[id]) {
         charts[id].destroy();
     }
-    
+
+    // Theme-aware colors
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    const tickColor = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)';
+
     charts[id] = new Chart(ctx, {
         type: 'line',
         data: {
@@ -606,9 +1066,102 @@ function renderChart(id, history, key, color, label) {
             plugins: { legend: { display: false } },
             scales: {
                 x: { display: false },
-                y: { 
-                    grid: { color: '#333' },
-                    ticks: { color: 'var(--text-secondary)' }
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: tickColor }
+                }
+            }
+        }
+    });
+}
+
+function renderImuChart(history) {
+    const ctx = document.getElementById('chart-imu');
+    if (!ctx) return;
+
+    const labels = (history || []).map(h => {
+        const date = new Date(h.timestamp * 1000);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+
+    const rollData = (history || []).map(h => parseFloat(h.data?.roll) || 0);
+    const pitchData = (history || []).map(h => parseFloat(h.data?.pitch) || 0);
+    const yawData = (history || []).map(h => parseFloat(h.data?.yaw) || 0);
+
+    if (charts['chart-imu']) {
+        charts['chart-imu'].destroy();
+    }
+
+    // Theme-aware colors
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    const tickColor = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)';
+    const legendColor = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)';
+
+    charts['chart-imu'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Roll (°)',
+                    data: rollData,
+                    borderColor: '#ff6384',
+                    backgroundColor: 'rgba(255, 99, 132, 0.08)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true
+                },
+                {
+                    label: 'Pitch (°)',
+                    data: pitchData,
+                    borderColor: '#4bc0c0',
+                    backgroundColor: 'rgba(75, 192, 192, 0.08)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true
+                },
+                {
+                    label: 'Yaw (°)',
+                    data: yawData,
+                    borderColor: '#36a2eb',
+                    backgroundColor: 'rgba(54, 162, 235, 0.08)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 },
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: {
+                        color: legendColor,
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                        font: { size: 11 }
+                    }
+                }
+            },
+            scales: {
+                x: { display: false },
+                y: {
+                    grid: { color: gridColor },
+                    ticks: {
+                        color: tickColor,
+                        callback: (v) => v + '°'
+                    }
                 }
             }
         }
@@ -617,166 +1170,825 @@ function renderChart(id, history, key, color, label) {
 
 async function loadLongTermAnalysis() {
     console.log('📊 [MAP] Loading long-term analysis...');
-    
+
     if (!currentStationData) {
         console.error('❌ [MAP] No station selected');
         return;
     }
-    
+
     const stationId = currentStationData.id;
-    
+
+    // Get selected days from range selector
+    const activeBtn = document.querySelector('#longterm-range-selector .btn.active');
+    const days = activeBtn ? parseInt(activeBtn.dataset.days) || 30 : 30;
+
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'none';
-    
+
     try {
-        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?days=30`);
-        
+        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?days=${days}`);
+
         if (!res.ok) {
             const error = await res.json();
             throw new Error(error.detail || 'Failed to load analysis');
         }
-        
+
         const data = await res.json();
-        
+
         if (data.status === 'insufficient_data') {
             showLongTermError(data.message);
             return;
         }
-        
+
         renderLongTermAnalysis(data);
-        
+
     } catch (e) {
         console.error('❌ [MAP] Error loading long-term analysis:', e);
         showLongTermError(e.message);
     }
 }
 
+// Store last analysis data for re-rendering on time range change
+let _lastLongTermData = null;
+
 function renderLongTermAnalysis(data) {
     document.getElementById('longterm-loading').style.display = 'none';
     document.getElementById('longterm-content').style.display = 'block';
     document.getElementById('longterm-error').style.display = 'none';
-    
-    const analysis = data.analysis;
-    
-    const warningEl = document.getElementById('longterm-warning');
-    const warningTextEl = document.getElementById('warning-text');
-    
-    if (data.risk_level === 'EXTREME' || data.risk_level === 'HIGH') {
+
+    _lastLongTermData = data;
+
+    // === GNSS Section ===
+    const gnss = data.gnss;
+    if (gnss && gnss.status === 'success') {
+        const analysis = gnss.analysis;
+
+        const warningEl = document.getElementById('longterm-warning');
+        const warningTextEl = document.getElementById('warning-text');
+
+        if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
+            warningEl.style.display = 'block';
+            warningEl.className = `alert ${gnss.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'} mb-3`;
+            warningTextEl.textContent = gnss.warning_message;
+        } else if (gnss.risk_level === 'INFO') {
+            warningEl.style.display = 'block';
+            warningEl.className = `alert alert-success mb-3`;
+            warningTextEl.textContent = gnss.warning_message;
+        } else {
+            warningEl.style.display = 'none';
+        }
+
+        setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
+        setText('lt-classification', analysis.classification || 'N/A');
+        setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
+        setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
+
+        const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+        const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
+
+        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+        document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
+    } else {
+        const warningEl = document.getElementById('longterm-warning');
+        if (warningEl) warningEl.style.display = 'none';
+        setText('lt-velocity', 'N/A');
+        setText('lt-classification', 'N/A');
+        setText('lt-total-disp', 'N/A');
+        setText('lt-duration', 'N/A');
+    }
+
+    // === IMU Section ===
+    renderImuLongTermSection(data.imu);
+
+    // === Combined Chart ===
+    renderCombinedLongTermChart(data);
+
+    // === 3D Simulations ===
+    init3DVisualizations(data);
+
+    // === NEW: Inverse Velocity (Fukuzono) ===
+    renderInverseVelocitySection(data);
+
+    // === NEW: Rainfall-Displacement Correlation ===
+    renderRainfallCorrelationSection(data);
+
+    // === NEW: Multi-Window Analysis ===
+    renderMultiWindowSection(data);
+}
+
+// Global references for 3D logic
+let gnssScene, gnssCamera, gnssRenderer, gnssControls, gnssAnimationId;
+let imuScene, imuCamera, imuRenderer, imuControls, imuAnimationId;
+
+async function init3DVisualizations(data) {
+    try {
+        const THREE = await import('three');
+        const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+
+        // GNSS
+        if (data.gnss && data.gnss.status === 'success' && data.gnss.time_series) {
+            document.getElementById('gnss-3d-loading').style.display = 'block';
+            setTimeout(() => {
+                initGNSS3D(data.gnss.time_series, THREE, OrbitControls);
+                document.getElementById('gnss-3d-loading').style.display = 'none';
+            }, 50);
+        } else {
+            const cGnss = document.getElementById('container-3d-gnss');
+            if (cGnss) cGnss.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu GNSS 3D</div>';
+        }
+
+        // IMU
+        if (data.imu && data.imu.status === 'success' && data.imu.time_series) {
+            document.getElementById('imu-3d-loading').style.display = 'block';
+            setTimeout(() => {
+                initIMU3D(data.imu.time_series, THREE, OrbitControls);
+                document.getElementById('imu-3d-loading').style.display = 'none';
+            }, 50);
+        } else {
+            const cImu = document.getElementById('container-3d-imu');
+            if (cImu) cImu.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu IMU 3D</div>';
+        }
+
+    } catch (error) {
+        console.error("Failed to load Three.js:", error);
+    }
+}
+
+function initGNSS3D(timeSeries, THREE, OrbitControls) {
+    const container = document.getElementById('container-3d-gnss');
+    if (!container) return;
+
+    // Cleanup previous
+    if (gnssAnimationId) cancelAnimationFrame(gnssAnimationId);
+    container.innerHTML = '';
+
+    gnssScene = new THREE.Scene();
+    gnssScene.background = new THREE.Color(0x0a0e17);
+
+    const aspect = container.clientWidth / container.clientHeight;
+    gnssCamera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+    gnssCamera.position.set(10, 10, 10);
+
+    gnssRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    gnssRenderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(gnssRenderer.domElement);
+
+    gnssControls = new OrbitControls(gnssCamera, gnssRenderer.domElement);
+    gnssControls.enableDamping = true;
+    gnssControls.dampingFactor = 0.05;
+
+    // Grid and Axes
+    const gridHelper = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+    gnssScene.add(gridHelper);
+
+    const axesHelper = new THREE.AxesHelper(5);
+    // Red=X(East), Green=Y(Up), Blue=Z(North)
+    gnssScene.add(axesHelper);
+
+    // Data points
+    const e = timeSeries.e || [];
+    const n = timeSeries.n || [];
+    const u = timeSeries.u || [];
+
+    // Default fallback if e,n,u missing
+    if (!e.length && timeSeries.displacement) {
+        // Just make a dummy random path if backend didn't update yet
+        for (let i = 0; i < timeSeries.displacement.length; i++) {
+            e.push(i * 2); n.push(Math.sin(i) * 2); u.push(Math.cos(i) * 2);
+        }
+    }
+
+    if (e.length === 0) return;
+
+    // Normalize scale to fit nicely in view
+    let maxVal = 0.01;
+    for (let i = 0; i < e.length; i++) {
+        maxVal = Math.max(maxVal, Math.abs(e[i]), Math.abs(n[i]), Math.abs(u[i]));
+    }
+    const scaleFactor = 5 / maxVal;
+
+    // Create Path Line
+    const points = [];
+    for (let i = 0; i < e.length; i++) {
+        // Note: in ThreeJS, Y is up. Data usually has E=X, N=Y, U=Z or similar.
+        // We'll map E -> X, U -> Y, N -> Z (standard right handed, Y up)
+        points.push(new THREE.Vector3(e[i] * scaleFactor, u[i] * scaleFactor, -n[i] * scaleFactor));
+    }
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color: 0x0ea5e9, linewidth: 2 });
+    const line = new THREE.Line(geometry, material);
+    gnssScene.add(line);
+
+    // Current point sphere
+    const sphereGeo = new THREE.SphereGeometry(0.3, 16, 16);
+    const sphereMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+    gnssScene.add(sphere);
+
+    let progress = 0;
+    const speed = 0.005;
+
+    function animate() {
+        gnssAnimationId = requestAnimationFrame(animate);
+
+        // Animate sphere along the path
+        if (points.length > 1) {
+            progress += speed;
+            if (progress >= 1) progress = 0; // loop
+
+            const totalSegments = points.length - 1;
+            const floatIndex = progress * totalSegments;
+            const index = Math.floor(floatIndex);
+            const remainder = floatIndex - index;
+
+            if (index < totalSegments) {
+                const p1 = points[index];
+                const p2 = points[index + 1];
+                sphere.position.lerpVectors(p1, p2, remainder);
+            }
+        } else if (points.length === 1) {
+            sphere.position.copy(points[0]);
+        }
+
+        gnssControls.update();
+        gnssRenderer.render(gnssScene, gnssCamera);
+    }
+    animate();
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        if (!container) return;
+        gnssCamera.aspect = container.clientWidth / container.clientHeight;
+        gnssCamera.updateProjectionMatrix();
+        gnssRenderer.setSize(container.clientWidth, container.clientHeight);
+    });
+}
+
+function initIMU3D(timeSeries, THREE, OrbitControls) {
+    const container = document.getElementById('container-3d-imu');
+    if (!container) return;
+
+    if (imuAnimationId) cancelAnimationFrame(imuAnimationId);
+    container.innerHTML = '';
+
+    imuScene = new THREE.Scene();
+    imuScene.background = new THREE.Color(0x0a0e17);
+
+    const aspect = container.clientWidth / container.clientHeight;
+    imuCamera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
+    imuCamera.position.set(5, 5, 8);
+
+    imuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(imuRenderer.domElement);
+
+    imuControls = new OrbitControls(imuCamera, imuRenderer.domElement);
+    imuControls.enableDamping = true;
+    imuControls.dampingFactor = 0.05;
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    imuScene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, 10, 5);
+    imuScene.add(dirLight);
+
+    // Grid Reference
+    const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    imuScene.add(grid);
+
+    // Sensor Block
+    const blockGeo = new THREE.BoxGeometry(2, 0.5, 3);
+    const materials = [
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // right
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // left
+        new THREE.MeshLambertMaterial({ color: 0xf59e0b }), // top
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // bottom
+        new THREE.MeshLambertMaterial({ color: 0x8b5cf6 }), // front
+        new THREE.MeshLambertMaterial({ color: 0x333333 }), // back
+    ];
+    const sensorBlock = new THREE.Mesh(blockGeo, materials);
+
+    // Add an arrow or label marker on top to indicate direction
+    const dirGeo = new THREE.ConeGeometry(0.2, 0.5, 16);
+    const dirMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const dirIndicator = new THREE.Mesh(dirGeo, dirMat);
+    dirIndicator.position.set(0, 0.3, 1);
+    dirIndicator.rotation.x = Math.PI / 2;
+    sensorBlock.add(dirIndicator);
+
+    imuScene.add(sensorBlock);
+
+    const rollData = timeSeries.roll || [];
+    const pitchData = timeSeries.pitch || [];
+    if (rollData.length === 0) return;
+
+    let progress = 0;
+    const speed = 0.005;
+
+    function animate() {
+        imuAnimationId = requestAnimationFrame(animate);
+
+        if (rollData.length > 1) {
+            progress += speed;
+            if (progress >= 1) progress = 0;
+
+            const total = rollData.length - 1;
+            const floatIndex = progress * total;
+            const index = Math.floor(floatIndex);
+            const remainder = floatIndex - index;
+
+            if (index < total) {
+                // Degrees to Radians
+                const r1 = rollData[index] * Math.PI / 180;
+                const r2 = rollData[index + 1] * Math.PI / 180;
+                const p1 = pitchData[index] * Math.PI / 180;
+                const p2 = pitchData[index + 1] * Math.PI / 180;
+
+                const currRoll = r1 + (r2 - r1) * remainder;
+                const currPitch = p1 + (p2 - p1) * remainder;
+
+                // Typical aviation/IMU mapping: X=Pitch, Z=Roll
+                sensorBlock.rotation.x = currPitch;
+                sensorBlock.rotation.z = currRoll;
+            }
+        } else if (rollData.length === 1) {
+            sensorBlock.rotation.x = pitchData[0] * Math.PI / 180;
+            sensorBlock.rotation.z = rollData[0] * Math.PI / 180;
+        }
+
+        imuControls.update();
+        imuRenderer.render(imuScene, imuCamera);
+    }
+    animate();
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        if (!container) return;
+        imuCamera.aspect = container.clientWidth / container.clientHeight;
+        imuCamera.updateProjectionMatrix();
+        imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    });
+}
+
+function renderImuLongTermSection(imuData) {
+    const nodataEl = document.getElementById('imu-longterm-nodata');
+    const contentEl = document.getElementById('imu-longterm-content');
+
+    if (!imuData || imuData.status !== 'success') {
+        if (nodataEl) {
+            nodataEl.style.display = 'block';
+            const msgEl = document.getElementById('imu-nodata-msg');
+            if (msgEl) msgEl.textContent = imuData?.message || 'Không đủ dữ liệu IMU để phân tích.';
+        }
+        if (contentEl) contentEl.style.display = 'none';
+        return;
+    }
+
+    if (nodataEl) nodataEl.style.display = 'none';
+    if (contentEl) contentEl.style.display = 'block';
+
+    const analysis = imuData.analysis;
+
+    // Warning banner
+    const warningEl = document.getElementById('imu-longterm-warning');
+    const warningTextEl = document.getElementById('imu-warning-text');
+    if (imuData.risk_level === 'EXTREME' || imuData.risk_level === 'HIGH' || imuData.risk_level === 'MEDIUM') {
         warningEl.style.display = 'block';
-        warningEl.className = `alert ${data.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'}`;
-        warningTextEl.textContent = data.warning_message;
+        warningEl.className = `alert ${imuData.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'} mb-3`;
+        warningTextEl.textContent = imuData.warning_message;
     } else {
         warningEl.style.display = 'none';
     }
-    
-    setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
-    setText('lt-classification', analysis.classification || 'N/A');
-    setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
-    setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
-    
-    const trendIconEl = document.getElementById('trend-icon');
-    const trendValueEl = document.getElementById('trend-value');
-    
-    const trendIcons = {
-        'accelerating': '📈',
-        'stable': '➡️',
-        'decelerating': '📉'
-    };
-    
-    const trendTexts = {
-        'accelerating': 'Đang tăng tốc',
-        'stable': 'Ổn định',
-        'decelerating': 'Đang giảm tốc'
-    };
-    
-    trendIconEl.textContent = trendIcons[analysis.trend] || '❓';
-    trendValueEl.textContent = trendTexts[analysis.trend] || 'Không xác định';
-    
-    renderClassificationScale(analysis.classification, analysis.velocity_mm_year);
-    renderLongTermChart(data);
+
+    // Metrics
+    setText('lt-imu-tilt-change', `${safeNumber(analysis.total_tilt_change_deg, 2)}°`);
+    setText('lt-imu-rate', `${safeNumber(analysis.avg_rate_deg_per_day, 4)}°/ngày`);
+    setText('lt-imu-max-roll', `${safeNumber(analysis.max_roll_deg, 2)}°`);
+    setText('lt-imu-max-pitch', `${safeNumber(analysis.max_pitch_deg, 2)}°`);
+    setText('lt-imu-points', analysis.data_points || '--');
+    setText('lt-imu-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
+
+    // Trend
+    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
+    document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+    document.getElementById('imu-trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
 }
 
-function renderClassificationScale(currentClass, velocity) {
-    const scaleContainer = document.getElementById('classification-scale');
-    
-    const classifications = [
-        { name: 'Extremely rapid', color: '#dc2626', range: '> 5 m/s' },
-        { name: 'Very rapid', color: '#ea580c', range: '3 m/min - 5 m/s' },
-        { name: 'Rapid', color: '#f59e0b', range: '1.8 m/h - 3 m/min' },
-        { name: 'Moderate', color: '#eab308', range: '13 mm/month - 1.8 m/h' },
-        { name: 'Slow', color: '#84cc16', range: '1.6 m/year - 13 mm/month' },
-        { name: 'Very slow', color: '#10b981', range: '16 mm/year - 1.6 m/year' },
-        { name: 'Extremely slow', color: '#3b82f6', range: '< 16 mm/year' }
-    ];
-    
-    scaleContainer.innerHTML = classifications.map(cls => `
-        <div class="classification-item ${cls.name === currentClass ? 'active' : ''}">
-            <div class="classification-color" style="background: ${cls.color};"></div>
-            <div class="classification-name">${cls.name}</div>
-            <div class="classification-range">${cls.range}</div>
-        </div>
-    `).join('');
-}
-
-function renderLongTermChart(data) {
-    const ctx = document.getElementById('chart-longterm');
+// =========================================================================
+// COMBINED LONG-TERM CHART (GNSS + IMU on dual Y-axes)
+// =========================================================================
+function renderCombinedLongTermChart(data) {
+    const ctx = document.getElementById('chart-longterm-combined');
     if (!ctx) return;
-    
-    if (charts['chart-longterm']) {
-        charts['chart-longterm'].destroy();
+
+    if (charts['chart-longterm-combined']) {
+        charts['chart-longterm-combined'].destroy();
     }
-    
-    const labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-    const values = [10, 25, 35, data.analysis.total_displacement_mm];
-    
-    charts['chart-longterm'] = new Chart(ctx, {
+
+    const datasets = [];
+    let allLabels = [];
+    let hasGnss = false;
+    let hasImu = false;
+
+    // GNSS displacement → left Y-axis
+    const gnss = data.gnss;
+    if (gnss && gnss.status === 'success' && gnss.time_series && gnss.time_series.labels.length > 0) {
+        allLabels = gnss.time_series.labels;
+        hasGnss = true;
+        datasets.push({
+            label: 'GNSS Displacement (mm)',
+            data: gnss.time_series.displacement,
+            borderColor: '#0ea5e9',
+            backgroundColor: 'rgba(14, 165, 233, 0.08)',
+            tension: 0.4,
+            borderWidth: 2.5,
+            fill: true,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            yAxisID: 'y-gnss'
+        });
+    }
+
+    // IMU roll/pitch → right Y-axis
+    const imu = data.imu;
+    if (imu && imu.status === 'success' && imu.time_series) {
+        hasImu = true;
+        // Use IMU labels if no GNSS labels, or merge
+        if (allLabels.length === 0) {
+            allLabels = imu.time_series.labels;
+        }
+
+        datasets.push({
+            label: 'Roll (°)',
+            data: imu.time_series.roll,
+            borderColor: '#f59e0b',
+            backgroundColor: 'transparent',
+            tension: 0.4,
+            borderWidth: 2,
+            borderDash: [5, 3],
+            fill: false,
+            pointRadius: 2,
+            pointHoverRadius: 4,
+            yAxisID: 'y-imu'
+        });
+
+        datasets.push({
+            label: 'Pitch (°)',
+            data: imu.time_series.pitch,
+            borderColor: '#8b5cf6',
+            backgroundColor: 'transparent',
+            tension: 0.4,
+            borderWidth: 2,
+            borderDash: [5, 3],
+            fill: false,
+            pointRadius: 2,
+            pointHoverRadius: 4,
+            yAxisID: 'y-imu'
+        });
+    }
+
+    if (datasets.length === 0) return;
+
+    // Build scales
+    const scales = {
+        x: {
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+        }
+    };
+
+    if (hasGnss) {
+        scales['y-gnss'] = {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: 'Displacement (mm)', color: '#0ea5e9' },
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#0ea5e9', callback: v => v + ' mm' }
+        };
+    }
+
+    if (hasImu) {
+        scales['y-imu'] = {
+            type: 'linear',
+            position: hasGnss ? 'right' : 'left',
+            title: { display: true, text: 'Góc nghiêng (°)', color: '#f59e0b' },
+            grid: { drawOnChartArea: !hasGnss, color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#f59e0b', callback: v => v + '°' }
+        };
+    }
+
+    // If only IMU (no GNSS), reassign yAxisID to y-imu for consistency
+    if (!hasGnss && hasImu) {
+        datasets.forEach(ds => { ds.yAxisID = 'y-imu'; });
+    }
+
+    charts['chart-longterm-combined'] = new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Cumulative Displacement (mm)',
-                data: values,
-                borderColor: '#0ea5e9',
-                backgroundColor: 'rgba(14, 165, 233, 0.1)',
-                tension: 0.4,
-                borderWidth: 3,
-                fill: true
-            }]
-        },
+        data: { labels: allLabels, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { display: false },
+                legend: {
+                    display: true,
+                    labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 16 }
+                },
                 tooltip: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    padding: 12
+                    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                    padding: 12,
+                    titleFont: { weight: 'bold' }
                 }
             },
-            scales: {
-                x: {
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    ticks: { color: 'var(--text-secondary)' }
-                },
-                y: {
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    ticks: { color: 'var(--text-secondary)' }
-                }
-            }
+            scales
         }
     });
 }
+
+
 
 function showLongTermError(message) {
     document.getElementById('longterm-loading').style.display = 'none';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'block';
-    
+
     const errorMessageEl = document.getElementById('error-message');
     if (errorMessageEl) {
         errorMessageEl.textContent = message;
     }
+}
+
+// =========================================================================
+// INVERSE VELOCITY (FUKUZONO) SECTION
+// =========================================================================
+function renderInverseVelocitySection(data) {
+    const section = document.getElementById('inverse-velocity-section');
+    if (!section) return;
+
+    const invVel = data.gnss?.inverse_velocity;
+    if (!invVel || !invVel.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Warning
+    const warningEl = document.getElementById('inv-vel-warning');
+    const warningTextEl = document.getElementById('inv-vel-warning-text');
+    if (invVel.predicted_failure) {
+        warningEl.style.display = 'block';
+        warningTextEl.textContent = invVel.message;
+    } else {
+        warningEl.style.display = 'none';
+    }
+
+    // Metrics
+    setText('inv-vel-prediction', invVel.predicted_failure
+        ? `⚠️ Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
+        : '✅ Không');
+    setText('inv-vel-days', invVel.predicted_failure
+        ? `~${invVel.days_to_failure} ngày`
+        : 'N/A');
+    setText('inv-vel-r2', invVel.r_squared !== undefined ? invVel.r_squared.toFixed(4) : '--');
+    setText('inv-vel-confidence', invVel.confidence
+        ? (invVel.confidence === 'high' ? '🔴 Cao' : '🟡 Trung bình')
+        : invVel.message || '--');
+
+    // Chart
+    if (invVel.time_series) {
+        const ctx = document.getElementById('chart-inverse-velocity');
+        if (!ctx) return;
+        if (charts['chart-inverse-velocity']) {
+            charts['chart-inverse-velocity'].destroy();
+        }
+
+        charts['chart-inverse-velocity'] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: invVel.time_series.labels,
+                datasets: [
+                    {
+                        label: '1/Velocity (thực tế)',
+                        data: invVel.time_series.inverse_velocity,
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.3,
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        fill: true
+                    },
+                    {
+                        label: 'Đường xu hướng (Linear)',
+                        data: invVel.time_series.trend_line,
+                        borderColor: '#fbbf24',
+                        borderWidth: 2,
+                        borderDash: [8, 4],
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: 'var(--text-primary)', usePointStyle: true }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        padding: 12
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: 'var(--text-secondary)' }
+                    },
+                    y: {
+                        title: { display: true, text: '1/Velocity (day/mm)', color: '#ef4444' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#ef4444' }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// =========================================================================
+// RAINFALL-DISPLACEMENT CORRELATION SECTION
+// =========================================================================
+function renderRainfallCorrelationSection(data) {
+    const section = document.getElementById('rainfall-correlation-section');
+    if (!section) return;
+
+    const rainCorr = data.rainfall_correlation;
+    if (!rainCorr || !rainCorr.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Metrics
+    const corrVal = rainCorr.correlation;
+    const corrColor = Math.abs(corrVal) >= 0.6 ? 'text-danger' : Math.abs(corrVal) >= 0.4 ? 'text-warning' : 'text-info';
+    const corrEl = document.getElementById('rain-correlation');
+    if (corrEl) {
+        corrEl.textContent = corrVal.toFixed(4);
+        corrEl.className = `fs-4 fw-bold mt-1 ${corrColor}`;
+    }
+    setText('rain-strength', rainCorr.strength || '--');
+    setText('rain-assessment', rainCorr.assessment || '--');
+
+    // Chart: Dual-axis — cumulative displacement + cumulative/daily rainfall
+    if (rainCorr.time_series) {
+        const ctx = document.getElementById('chart-rainfall-correlation');
+        if (!ctx) return;
+        if (charts['chart-rainfall-correlation']) {
+            charts['chart-rainfall-correlation'].destroy();
+        }
+
+        charts['chart-rainfall-correlation'] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: rainCorr.time_series.labels,
+                datasets: [
+                    {
+                        label: 'Dịch chuyển tích lũy (mm)',
+                        data: rainCorr.time_series.cumulative_displacement_mm,
+                        borderColor: '#0ea5e9',
+                        backgroundColor: 'rgba(14, 165, 233, 0.08)',
+                        tension: 0.4,
+                        borderWidth: 2.5,
+                        fill: true,
+                        pointRadius: 2,
+                        yAxisID: 'y-disp'
+                    },
+                    {
+                        label: 'Mưa tích lũy (mm)',
+                        data: rainCorr.time_series.cumulative_rainfall_mm,
+                        borderColor: '#10b981',
+                        backgroundColor: 'transparent',
+                        tension: 0.4,
+                        borderWidth: 2,
+                        borderDash: [5, 3],
+                        fill: false,
+                        pointRadius: 2,
+                        yAxisID: 'y-rain'
+                    },
+                    {
+                        label: 'Mưa ngày (mm)',
+                        type: 'bar',
+                        data: rainCorr.time_series.daily_rainfall_mm,
+                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                        borderColor: '#3b82f6',
+                        borderWidth: 1,
+                        yAxisID: 'y-rain'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 16 }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        padding: 12
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+                    },
+                    'y-disp': {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: 'Dịch chuyển (mm)', color: '#0ea5e9' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#0ea5e9' }
+                    },
+                    'y-rain': {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: 'Lượng mưa (mm)', color: '#10b981' },
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#10b981' }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// =========================================================================
+// MULTI-WINDOW ANALYSIS SECTION
+// =========================================================================
+function renderMultiWindowSection(data) {
+    const section = document.getElementById('multi-window-section');
+    if (!section) return;
+
+    const mw = data.multi_window;
+    if (!mw || !mw.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Acceleration alert
+    const alertEl = document.getElementById('multi-window-alert');
+    const alertTextEl = document.getElementById('multi-window-alert-text');
+    if (mw.acceleration_alert) {
+        alertEl.style.display = 'block';
+        alertEl.className = `alert ${mw.acceleration_alert.type === 'rapid_acceleration' ? 'alert-danger' : 'alert-warning'} mb-3`;
+        alertTextEl.textContent = mw.acceleration_alert.message;
+    } else {
+        alertEl.style.display = 'none';
+    }
+
+    // Window cards
+    const cardsContainer = document.getElementById('multi-window-cards');
+    if (!cardsContainer) return;
+
+    const windowLabels = { 7: '7 ngày', 30: '30 ngày', 90: '90 ngày' };
+    const windowIcons = { 7: 'bi-calendar-day', 30: 'bi-calendar-month', 90: 'bi-calendar3' };
+    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendTexts = { 'accelerating': 'Tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Giảm tốc' };
+
+    cardsContainer.innerHTML = (mw.windows || []).map(w => {
+        if (w.status !== 'success') {
+            return `
+                <div class="col-md-4">
+                    <div class="longterm-metric-card text-center opacity-50">
+                        <div class="text-muted small"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
+                        <div class="fs-6 mt-1">Không đủ dữ liệu</div>
+                    </div>
+                </div>`;
+        }
+
+        return `
+            <div class="col-md-4">
+                <div class="longterm-metric-card">
+                    <div class="text-muted small mb-2"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
+                    <div class="fs-4 fw-bold text-primary">${w.velocity_mm_year.toFixed(1)} <small class="fs-6 text-muted">mm/năm</small></div>
+                    <div class="small mt-1">Dịch chuyển: <strong>${w.displacement_mm.toFixed(1)} mm</strong></div>
+                    <div class="small">Xu hướng: ${trendIcons[w.trend] || '❓'} ${trendTexts[w.trend] || '--'}</div>
+                    <div class="small text-muted">${w.data_points} điểm dữ liệu</div>
+                </div>
+            </div>`;
+    }).join('');
 }
 
 function setText(id, val) {
@@ -789,26 +2001,321 @@ function setHTML(id, html) {
     if (el) el.innerHTML = html;
 }
 
+// =========================================================================
+// SMOOTH ANIMATED VALUE SYSTEM
+// =========================================================================
+
+// Store previous numeric values for lerp interpolation
+const _prevValues = {};
+// Store ongoing animation frame IDs to cancel previous animations
+const _animFrames = {};
+
+/**
+ * Smoothly animate a sensor value from its current displayed number to a new value.
+ * Uses requestAnimationFrame for 60fps lerp interpolation.
+ *
+ * @param {string} id - DOM element ID
+ * @param {number|string|null} newValue - New numeric value
+ * @param {number} decimals - Decimal places to display
+ * @param {string} unit - Unit string (e.g. 'mm/s', '°')
+ * @param {boolean} textOnly - If true, set innerText instead of innerHTML (for elements without unit spans)
+ */
+function animateValue(id, newValue, decimals = 2, unit = '', textOnly = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const numVal = parseFloat(newValue);
+    if (isNaN(numVal) || newValue === null || newValue === undefined) {
+        // Non-numeric → direct set
+        if (textOnly) {
+            el.innerText = `--${unit}`;
+        } else {
+            el.innerHTML = `--<span class="sensor-unit">${unit}</span>`;
+        }
+        return;
+    }
+
+    const prevVal = _prevValues[id];
+
+    // If no previous value or same value, just set directly (no animation needed)
+    if (prevVal === undefined || prevVal === numVal) {
+        _prevValues[id] = numVal;
+        if (textOnly) {
+            el.innerText = `${numVal.toFixed(decimals)}${unit}`;
+        } else {
+            el.innerHTML = `${numVal.toFixed(decimals)}<span class="sensor-unit">${unit}</span>`;
+        }
+        return;
+    }
+
+    // Cancel any ongoing animation for this element
+    if (_animFrames[id]) {
+        cancelAnimationFrame(_animFrames[id]);
+    }
+
+    // Trigger CSS glow effect on the parent sensor-item
+    flashUpdate(el);
+
+    const startVal = prevVal;
+    const diff = numVal - startVal;
+    const duration = 400; // ms
+    const startTime = performance.now();
+
+    function step(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Ease-out cubic for smooth deceleration
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const currentVal = startVal + diff * eased;
+
+        if (textOnly) {
+            el.innerText = `${currentVal.toFixed(decimals)}${unit}`;
+        } else {
+            el.innerHTML = `${currentVal.toFixed(decimals)}<span class="sensor-unit">${unit}</span>`;
+        }
+
+        if (progress < 1) {
+            _animFrames[id] = requestAnimationFrame(step);
+        } else {
+            _prevValues[id] = numVal;
+            delete _animFrames[id];
+        }
+    }
+
+    _prevValues[id] = numVal;
+    _animFrames[id] = requestAnimationFrame(step);
+}
+
+/**
+ * Trigger CSS glow flash on a value element's parent sensor-item.
+ */
+function flashUpdate(el) {
+    // Find closest sensor-item parent for the glow effect
+    const sensorItem = el.closest('.sensor-item') || el.closest('.axis-value');
+    if (sensorItem) {
+        sensorItem.classList.remove('value-updated');
+        // Force reflow to restart animation
+        void sensorItem.offsetWidth;
+        sensorItem.classList.add('value-updated');
+    }
+}
+
 function filterStations(searchTerm) {
     const items = document.querySelectorAll('.station-item');
     const term = searchTerm.toLowerCase();
-    
+
     items.forEach(item => {
         const text = item.textContent.toLowerCase();
         item.style.display = text.includes(term) ? 'block' : 'none';
     });
 }
 
-// =====================================================
-// EXPORTS & FINAL SETUP
-// =====================================================
+// =========================================================================
+// SIREN TOGGLE BUTTON STATE MANAGEMENT
+// =========================================================================
+
+/**
+ * Cập nhật trạng thái nút còi
+ * @param {'idle'|'alerting'|'muted'|'offline'} state
+ *   - idle: xám, disabled (mặc định, chưa có cảnh báo)
+ *   - alerting: đỏ, nhấp nháy (đang cảnh báo, bấm để tắt còi)
+ *   - muted: xanh (đã tắt còi, bấm để bật lại)
+ *   - offline: xám đen, disabled (thiết bị Pi mất kết nối)
+ */
+function setSirenButtonState(state, target = null) {
+    const popup = document.getElementById('siren-bottom-popup');
+    if (!popup) return;
+
+    const btns = target
+        ? document.querySelectorAll(`.btn-siren-toggle[data-target="${target}"]`)
+        : document.querySelectorAll('.btn-siren-toggle');
+
+    btns.forEach(btn => {
+        btn.setAttribute('data-siren-state', state);
+        const iconBase = btn.getAttribute('data-target') === 'pi_center' ? 'Center' : 'Point';
+
+        switch (state) {
+            case 'idle':
+                btn.disabled = true;
+                btn.classList.add('disabled', 'btn-danger');
+                btn.classList.remove('btn-success', 'btn-secondary');
+                btn.style.opacity = '1';
+                btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${iconBase}`;
+                break;
+            case 'alerting':
+                btn.disabled = false;
+                btn.classList.remove('disabled', 'btn-success', 'btn-secondary');
+                btn.classList.add('btn-danger');
+                btn.style.opacity = '1';
+                btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>Mute ${iconBase}`;
+                break;
+            case 'muted':
+                btn.disabled = false;
+                btn.classList.remove('disabled', 'btn-danger', 'btn-secondary');
+                btn.classList.add('btn-success');
+                btn.style.opacity = '1';
+                btn.innerHTML = `<i class="bi bi-volume-up-fill me-1"></i>On ${iconBase}`;
+                break;
+            case 'offline':
+                btn.disabled = true;
+                btn.classList.remove('btn-danger', 'btn-success');
+                btn.classList.add('btn-secondary', 'disabled');
+                btn.style.opacity = '0.6';
+                btn.innerHTML = `<i class="bi bi-plug-fill me-1"></i>Offline`;
+                break;
+        }
+    });
+
+    // Check if any button is NOT idle and NOT offline, if so, show popup
+    const allBtns = document.querySelectorAll('.btn-siren-toggle');
+    const anyActive = Array.from(allBtns).some(b => {
+        const s = b.getAttribute('data-siren-state');
+        return s !== 'idle' && s !== 'offline';
+    });
+
+    if (!anyActive) {
+        popup.style.bottom = '-120px';
+    } else {
+        popup.style.bottom = '8px';
+    }
+}
+
+// =========================================================================
+// ALERT BANNER SYSTEM
+// =========================================================================
+
+let currentAlertStationId = null;
+let lastAlertKey = null;
+
+function showAlertBanner(alertData) {
+    const banner = document.getElementById('alert-banner');
+    if (!banner) return;
+
+    // ✅ Lookup station info từ allStations (đã load sẵn)
+    const station = allStations.find(s => s.id === alertData.station_id);
+    const stationName = station?.name || `Station #${alertData.station_id}`;
+    const stationCode = station?.station_code || '';
+
+    // Cập nhật nội dung
+    document.getElementById('alert-title').textContent =
+        `${alertData.level.toUpperCase()} ALERT!`;
+
+    document.getElementById('alert-station').textContent =
+        `Station: ${stationName} (${stationCode})`;
+
+    document.getElementById('alert-message').textContent =
+        ` • ${alertData.message || 'Anomaly detected!'}`;
+
+    // Lưu station ID
+    currentAlertStationId = alertData.station_id;
+
+    // ✅ Kích hoạt nút "Tắt âm báo" khi có cảnh báo
+    setSirenButtonState('alerting');
+
+    // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
+    banner.classList.add('show');
+}
+
+let currentSirenAudio = null;
+
+function playSiren() {
+    try {
+        if (!currentSirenAudio) {
+            currentSirenAudio = new Audio('/static/sounds/siren.mp3');
+            currentSirenAudio.loop = false; // Phát 1 lần cho mỗi sự kiện alert
+
+            // Xóa biến khi phát xong để cho phép phát lại
+            currentSirenAudio.addEventListener('ended', () => {
+                currentSirenAudio = null;
+            });
+
+            currentSirenAudio.play().catch(e => {
+                console.error('[ERROR] Siren auto-play blocked:', e);
+                currentSirenAudio = null;
+            });
+        }
+    } catch (e) {
+        console.error('[ERROR] playSiren error:', e);
+        currentSirenAudio = null;
+    }
+}
+
+function playAlertSound() {
+    try {
+        // Tạo beep sound đơn giản
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+        console.warn('⚠️ [ALERT] Sound not available:', e);
+    }
+}
+
+// Setup event listeners cho Alert Banner
+document.addEventListener('DOMContentLoaded', () => {
+    // Nút "Theo dõi" → Zoom vào trạm + ẩn banner + hiện siren popup sau khi zoom xong
+    const btnFollow = document.getElementById('btn-alert-follow');
+    if (btnFollow) {
+        btnFollow.addEventListener('click', async () => {
+            if (!currentAlertStationId) return;
+
+            const alertStationId = currentAlertStationId;
+
+            // 1. Ẩn banner ngay
+            const banner = document.getElementById('alert-banner');
+            if (banner) banner.classList.remove('show');
+
+            // 2. Load dữ liệu trạm (skip zoom và siren — tự quản lý bên dưới)
+            await selectStation(alertStationId, { skipZoom: true, skipSiren: true });
+
+            // 3. Zoom vào trạm
+            if (markers[alertStationId]) {
+                map.flyTo(markers[alertStationId].getLatLng(), 16, { duration: 1.5 });
+
+                // 4. Hiện siren popup SAU KHI zoom xong
+                map.once('moveend', () => {
+                    if (currentStationData && currentStationData.id === alertStationId) {
+                        _showSirenIfAlerting(alertStationId, currentStationData);
+                    }
+                });
+            }
+        });
+    }
+
+    // Nút "Đóng" → Chỉ ẩn banner, không zoom, không ảnh hưởng gì khác
+    const btnDismiss = document.getElementById('btn-alert-dismiss');
+    if (btnDismiss) {
+        btnDismiss.addEventListener('click', () => {
+            const banner = document.getElementById('alert-banner');
+            if (banner) banner.classList.remove('show');
+        });
+    }
+});
 
 window.mapManager = {
     loadLongTermAnalysis,
     safeNumber,
-    // Export thêm để tiện debug nếu cần
     updateRealtimeSensorValues,
+    updateSidebarUI,
+    showAlertBanner,
+    playAlertSound,
+    playSiren,
+    setMarkerAlert,
+    clearMarkerAlert,
     charts
 };
 
-console.log('✅ [MAP] Script fully loaded');
+console.log('[MAP] Script fully loaded');

@@ -3,18 +3,30 @@
    File: css/map.css
 ===================================================== */
 
-/* === ROOT VARIABLES & RESET === */
+/* ROOT VARIABLES & RESET  */
 :root {
     --sidebar-width: 340px;
     --sidebar-expanded-width: 720px;
     --sidebar-collapsed-width: 60px;
     --transition-speed: 0.3s;
+
+    /* Typography & Spacing Variables */
+    --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Courier New', monospace;
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
 }
 
-* { 
-    margin: 0; 
-    padding: 0; 
-    box-sizing: border-box; 
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 body {
@@ -24,7 +36,7 @@ body {
     color: var(--text-primary);
 }
 
-/* === TOP NAVBAR === */
+/*  TOP NAVBAR  */
 .top-navbar {
     position: fixed;
     top: 0;
@@ -57,7 +69,7 @@ body {
     color: var(--accent-primary);
 }
 
-/* === MAP CONTAINER === */
+/*  MAP CONTAINER  */
 #map {
     position: absolute;
     top: 64px;
@@ -67,21 +79,21 @@ body {
     z-index: 1;
 }
 
-/* === TOGGLE BUTTON - ✅ FIXED: Hiện đúng vị trí === */
+/*  TOGGLE BUTTON  */
 .toggle-list-btn {
     position: fixed;
     top: 80px;
     left: 16px;
     z-index: 2000;
-    background: var(--accent-primary);
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
     border: none;
     border-radius: 50%;
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     color: white;
-    font-size: 1.2rem;
+    font-size: 1.25rem;
     cursor: pointer;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
@@ -89,29 +101,28 @@ body {
 }
 
 .toggle-list-btn:hover {
-    transform: scale(1.1);
-    background: var(--accent-secondary);
-    box-shadow: 0 8px 24px rgba(14, 165, 233, 0.5);
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 6px 24px rgba(6, 182, 212, 0.6);
 }
 
 .toggle-list-btn:active {
     transform: scale(0.95);
 }
 
-.toggle-list-btn i {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/*  Ẩn toggle button khi sidebar đang mở */
+body:has(.station-list-sidebar:not(.hidden):not(.force-hidden)) .toggle-list-btn {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
 }
 
-@media (max-width: 768px) {
-    .toggle-list-btn {
-        top: 76px;
-        width: 40px;
-        height: 40px;
-        font-size: 1.1rem;
-    }
+body:has(.charts-panel.active) .toggle-list-btn {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
 }
 
-/* === STATION LIST SIDEBAR (Left) === */
+/*  STATION LIST SIDEBAR (Left)  */
 .station-list-sidebar {
     position: fixed;
     top: 64px;
@@ -131,8 +142,11 @@ body {
     transform: translateX(-100%);
 }
 
-.station-list-sidebar.collapsed {
-    transform: translateX(calc(-1 * var(--sidebar-width) + var(--sidebar-collapsed-width)));
+.station-list-sidebar.force-hidden {
+    transform: translateX(-100%) !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 .sidebar-header {
@@ -167,13 +181,18 @@ body {
 }
 
 .station-item {
-    padding: 12px 16px;
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
     background: var(--bg-tertiary);
-    margin-bottom: 8px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     border: 2px solid transparent;
     transition: all 0.2s;
+    line-height: 1.5;
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .station-item:hover {
@@ -182,11 +201,20 @@ body {
     transform: translateX(4px);
 }
 
-/* === NÚT ĐÓNG SIDEBAR - Tab ở mép phải === */
+.sensor-value-large {
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1.2;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+/*  NÚT ĐÓNG SIDEBAR - Tab ở mép phải  */
 .sidebar-close-tab {
     position: absolute;
     top: 50%;
-    right: -20px; /* Nhô ra ngoài mép phải sidebar */
+    right: -20px;
     transform: translateY(-50%);
     width: 20px;
     height: 60px;
@@ -214,12 +242,11 @@ body {
     transform: translateY(-50%) scale(0.95);
 }
 
-/* ✅ Khi sidebar đóng → Ẩn nút */
-.station-list-sidebar.hidden .sidebar-close-tab {
+.station-list-sidebar.hidden .sidebar-close-tab,
+.station-list-sidebar.force-hidden .sidebar-close-tab {
     display: none;
 }
 
-/* ✅ Icon xoay khi hover */
 .sidebar-close-tab i {
     transition: transform 0.3s ease;
 }
@@ -228,50 +255,11 @@ body {
     transform: translateX(-2px);
 }
 
-/* === TOGGLE BUTTON - Hiện khi sidebar đóng === */
-.toggle-list-btn {
-    position: fixed;
-    top: 80px;
-    left: 16px;
-    z-index: 2000;
-    background: var(--accent-primary);
-    border: none;
-    border-radius: 50%;
-    width: 44px;
-    height: 44px;
-    color: white;
-    font-size: 1.2rem;
-    cursor: pointer;
-    box-shadow: var(--shadow-lg);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 1;
-}
-
-/* ✅ Khi sidebar MỞ → Ẩn nút toggle */
-.station-list-sidebar:not(.hidden) ~ #map .toggle-list-btn,
-body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
-    opacity: 0;
-    pointer-events: none;
-}
-
-.toggle-list-btn:hover {
-    transform: scale(1.1);
-    background: var(--accent-secondary);
-}
-
-/* === ✅ XÓA NÚT THEME TOGGLE GÓC DƯỚI PHẢI === */
-.theme-toggle {
-    display: none !important;
-}
-
 /* Admin Button in Navbar */
 #admin-nav-btn {
-    background: transparent;
-    border: 1px solid var(--accent-primary);
-    color: var(--accent-primary);
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
+    border: none;
+    color: white;
     font-weight: 600;
     padding: 6px 16px;
     border-radius: 8px;
@@ -283,29 +271,14 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
 }
 
 #admin-nav-btn:hover {
-    background: var(--accent-primary);
+    background: linear-gradient(135deg, #0891b2, #0e7490);
     color: white;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
     text-decoration: none;
 }
 
-#admin-nav-btn i {
-    font-size: 0.9rem;
-}
-
-/* Dark mode adjustments */
-[data-theme="dark"] #admin-nav-btn {
-    border-color: var(--accent-primary);
-    color: var(--accent-primary);
-}
-
-[data-theme="dark"] #admin-nav-btn:hover {
-    background: var(--accent-primary);
-    color: white;
-}
-
-/* === DETAIL SIDEBAR (Right) === */
+/*  DETAIL SIDEBAR (Right)  */
 .detail-sidebar {
     position: fixed;
     top: 64px;
@@ -321,28 +294,41 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     transform: translateX(100%);
 }
 
-/* ✅ FIXED: Hiện sidebar */
+/* Close button - top right corner */
+.sidebar-close-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.85rem;
+}
+
+.sidebar-close-btn:hover {
+    background: var(--accent-danger);
+    color: white;
+    border-color: var(--accent-danger);
+}
+
 .detail-sidebar.active {
     transform: translateX(0);
-}
-
-/* ✅ FIXED: Mở rộng sidebar (khi xem biểu đồ) */
-.detail-sidebar.expanded {
-    width: var(--sidebar-expanded-width);
-}
-
-/* ✅ FIXED: Full width (khi phân tích dài hạn) */
-.detail-sidebar.fullwidth {
-    width: 100vw;
-    left: 0;
-    right: auto;
 }
 
 .sidebar-content {
     padding: 20px;
 }
 
-/* === SENSOR COMPACT VIEW === */
+/*  SENSOR COMPACT VIEW  */
 .sensor-compact {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -392,6 +378,16 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     gap: 8px;
 }
 
+/* Sensor items that span full width in the 2-column grid */
+.sensor-full-width {
+    grid-column: 1 / -1;
+}
+
+/* Water Level larger display */
+.sensor-full-width .sensor-value-large {
+    font-size: 2rem;
+}
+
 .axis-value {
     flex: 1;
     text-align: center;
@@ -412,79 +408,440 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     font-weight: 600;
     color: var(--accent-warning);
     margin-top: 4px;
+    transition: color 0.3s ease, opacity 0.2s ease;
 }
 
-/* === ACTION BUTTONS === */
+/* ============================================
+   SMOOTH VALUE CHANGE ANIMATIONS
+============================================ */
+
+/* Subtle glow pulse when a sensor value changes */
+@keyframes valueFlash {
+    0% {
+        background: transparent;
+        box-shadow: none;
+    }
+
+    20% {
+        background: rgba(14, 165, 233, 0.08);
+        box-shadow: inset 0 0 12px rgba(14, 165, 233, 0.15);
+    }
+
+    100% {
+        background: transparent;
+        box-shadow: none;
+    }
+}
+
+/* Class applied briefly when value updates */
+.value-updated {
+    animation: valueFlash 0.8s ease-out;
+}
+
+/* Smooth transitions on sensor value elements */
+.sensor-value-large {
+    transition: color 0.3s ease, transform 0.15s ease;
+}
+
+/* Number text uses tabular-nums for stable width during counting */
+.sensor-value-large,
+.axis-num {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Status badge smooth color transition */
+.status-badge {
+    transition: color 0.4s ease, background 0.4s ease;
+}
+
+.status-dot {
+    transition: background 0.4s ease;
+}
+
+/* Sensor item subtle border glow on value change */
+.sensor-item.value-updated {
+    animation: valueFlash 0.8s ease-out;
+}
+
+/*  ACTION BUTTONS  */
 .action-buttons {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
 }
 
 .btn-action {
-    flex: 1;
-    padding: 10px;
-    background: var(--gradient-button);
+    padding: 0.875rem 1rem;
     border: none;
-    border-radius: 8px;
-    color: white;
+    border-radius: 10px;
     font-weight: 600;
+    font-size: 0.9rem;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 0.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    position: relative;
+    overflow: hidden;
 }
 
-.btn-action:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
+.btn-action::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+
+.btn-action:hover::before {
+    width: 300px;
+    height: 300px;
 }
 
 .btn-action:active {
-    transform: translateY(0);
+    transform: scale(0.97);
+}
+
+.btn-action:not(.secondary) {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+    color: white;
+}
+
+.btn-action:not(.secondary):hover {
+    background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+    box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
+    transform: translateY(-2px);
 }
 
 .btn-action.secondary {
-    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    color: white;
 }
 
-/* === CHARTS CONTAINER === */
-.charts-container {
-    display: none;
-    margin-top: 16px;
+.btn-action.secondary:hover {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+    transform: translateY(-2px);
 }
 
-.charts-container.active {
-    display: block;
-    animation: fadeInUp 0.4s ease;
+.btn-action i,
+.btn-action span {
+    z-index: 1;
 }
 
+/* NÚT TẮT/BẬT ÂM BÁO trong sidebar — 3 trạng thái */
+.btn-siren-toggle {
+    width: 100%;
+    padding: 0.875rem 1rem;
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    color: white;
+}
+
+/* Trạng thái 1: idle (xám, disabled) — mặc định, chưa có cảnh báo */
+.btn-siren-toggle[data-siren-state="idle"],
+.btn-siren-toggle.disabled {
+    background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+    cursor: not-allowed;
+    opacity: 0.65;
+    box-shadow: none;
+    animation: none;
+}
+
+/* Trạng thái 2: alerting (đỏ, nhấp nháy) — có cảnh báo, bấm để tắt còi */
+.btn-siren-toggle[data-siren-state="alerting"] {
+    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    cursor: pointer;
+    opacity: 1;
+    box-shadow: 0 2px 12px rgba(220, 38, 38, 0.4);
+    animation: sirenBtnPulse 1.5s ease-in-out infinite;
+}
+
+.btn-siren-toggle[data-siren-state="alerting"]:hover {
+    background: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
+    box-shadow: 0 4px 20px rgba(220, 38, 38, 0.6);
+    transform: translateY(-2px);
+}
+
+.btn-siren-toggle[data-siren-state="alerting"]:active {
+    transform: scale(0.97);
+}
+
+/* Trạng thái 3: muted (xanh) — còi đã tắt, bấm để bật lại */
+.btn-siren-toggle[data-siren-state="muted"] {
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    cursor: pointer;
+    opacity: 1;
+    box-shadow: 0 2px 12px rgba(22, 163, 74, 0.4);
+    animation: none;
+}
+
+.btn-siren-toggle[data-siren-state="muted"]:hover {
+    background: linear-gradient(135deg, #15803d 0%, #166534 100%);
+    box-shadow: 0 4px 20px rgba(22, 163, 74, 0.6);
+    transform: translateY(-2px);
+}
+
+.btn-siren-toggle[data-siren-state="muted"]:active {
+    transform: scale(0.97);
+}
+
+@keyframes sirenBtnPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 2px 12px rgba(220, 38, 38, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 4px 24px rgba(220, 38, 38, 0.7), 0 0 40px rgba(220, 38, 38, 0.3);
+    }
+}
+
+/* CENTER CHARTS PANEL  */
+.charts-panel {
+    position: fixed;
+    top: 64px;
+    left: 0;
+    width: calc(100vw - 420px);
+    height: calc(100vh - 64px);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    box-shadow: var(--shadow-xl);
+    z-index: 1500;
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.charts-panel.active {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: all;
+}
+
+/* Overlay backdrop khi charts mở */
+.charts-panel::before {
+    content: '';
+    position: fixed;
+    top: 64px;
+    left: 0;
+    width: 100vw;
+    height: calc(100vh - 64px);
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: -1;
+}
+
+.charts-panel.active::before {
+    opacity: 1;
+}
+
+.charts-panel-header {
+    padding: 1.25rem 1.5rem;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.charts-panel-header h5 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+}
+
+.charts-panel-header h5 i {
+    color: var(--accent-primary);
+}
+
+/* Nút đóng dạng chevron */
+.charts-panel-header .btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 1.2rem;
+    transition: all 0.3s;
+}
+
+.charts-panel-header .btn:hover {
+    background: var(--accent-primary);
+    color: white;
+    transform: translateX(3px);
+}
+
+.charts-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+    background: var(--bg-primary);
+}
+
+/* Cải thiện chart boxes */
+.charts-panel .chart-box {
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.charts-panel .chart-box:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.15);
+    transform: translateY(-2px);
+}
+
+.charts-panel .chart-box:last-child {
+    margin-bottom: 0;
+}
+
+[data-theme="dark"] .charts-panel .chart-box {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .charts-panel-content {
+    background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .charts-panel {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+}
+
+/* LONG-TERM FULLSCREEN OVERLAY  */
+.longterm-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    z-index: 2000;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.longterm-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.longterm-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    width: 95%;
+    max-width: 1400px;
+    height: 90%;
+    background: var(--bg-secondary);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.longterm-overlay.active .longterm-container {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.longterm-header {
+    padding: 1.5rem 2rem;
+    background: var(--bg-tertiary);
+    border-bottom: 2px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.longterm-header h4 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+}
+
+.longterm-header h4 i {
+    color: var(--accent-primary);
+}
+
+.longterm-content-wrapper {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+}
+
+/*  CHART BOX (Dùng chung)  */
 .chart-box {
     background: var(--bg-tertiary);
     border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
     border: 1px solid var(--border-color);
-    transition: all 0.2s;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .chart-box:hover {
     border-color: var(--accent-primary);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+    transform: translateY(-2px);
 }
 
 .chart-title {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 12px;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--border-color);
 }
 
-/* === LONG TERM ANALYSIS === */
-#longterm-view {
-    animation: fadeInUp 0.4s ease;
-}
-
+/*  LONG TERM METRICS  */
 .longterm-metric-card {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
@@ -499,36 +856,126 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     box-shadow: var(--shadow-sm);
 }
 
-/* === RISK BADGE === */
-.risk-badge {
+/*  CLASSIFICATION SCALE  */
+#classification-scale {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.classification-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     padding: 10px;
+    background: var(--bg-secondary);
     border-radius: 8px;
-    text-align: center;
+    transition: all 0.2s;
+}
+
+.classification-item.active {
+    background: rgba(14, 165, 233, 0.1);
+    border: 2px solid var(--accent-primary);
+    transform: scale(1.02);
+}
+
+.classification-color {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+}
+
+.classification-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.classification-range {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/*  RISK BADGE → STATUS BAR  */
+.status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
     margin-bottom: 16px;
+}
+
+.status-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-weight: 700;
     font-size: 0.9rem;
-    animation: fadeIn 0.3s ease;
+    padding: 4px 12px;
+    border-radius: 20px;
 }
 
-.risk-badge.LOW {
-    background: rgba(16, 185, 129, 0.15);
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-badge.LOW {
     color: var(--accent-success);
-    border: 2px solid var(--accent-success);
 }
 
-.risk-badge.MEDIUM {
-    background: rgba(245, 158, 11, 0.15);
+.status-badge.LOW .status-dot {
+    background: var(--accent-success);
+}
+
+.status-badge.MEDIUM {
     color: var(--accent-warning);
-    border: 2px solid var(--accent-warning);
 }
 
-.risk-badge.HIGH, .risk-badge.EXTREME {
-    background: rgba(239, 68, 68, 0.15);
+.status-badge.MEDIUM .status-dot {
+    background: var(--accent-warning);
+}
+
+.status-badge.HIGH,
+.status-badge.EXTREME,
+.status-badge.CRITICAL {
     color: var(--accent-danger);
-    border: 2px solid var(--accent-danger);
 }
 
-/* === SEARCH INPUT === */
+.status-badge.HIGH .status-dot,
+.status-badge.EXTREME .status-dot,
+.status-badge.CRITICAL .status-dot {
+    background: var(--accent-danger);
+}
+
+.status-badge.OFFLINE {
+    color: #6c757d;
+}
+
+.status-badge.OFFLINE .status-dot {
+    background: #6c757d;
+}
+
+.status-badge.UNKNOWN {
+    color: var(--text-secondary);
+}
+
+.status-badge.UNKNOWN .status-dot {
+    background: var(--text-secondary);
+}
+
+/*  SEARCH INPUT  */
 #search-station {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -545,98 +992,88 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
 }
 
-#search-station::placeholder {
-    color: var(--text-muted);
+/*  SCROLLBAR  */
+::-webkit-scrollbar {
+    width: 6px;
 }
 
-/* === SCROLLBAR === */
-::-webkit-scrollbar { 
-    width: 6px; 
+::-webkit-scrollbar-track {
+    background: transparent;
 }
 
-::-webkit-scrollbar-track { 
-    background: transparent; 
-}
-
-::-webkit-scrollbar-thumb { 
-    background: var(--accent-primary); 
-    border-radius: 3px; 
+::-webkit-scrollbar-thumb {
+    background: var(--accent-primary);
+    border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--accent-secondary);
 }
 
-/* === ANIMATIONS === */
+/*  ANIMATIONS  */
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes fadeInUp {
-    from { 
-        opacity: 0; 
-        transform: translateY(10px); 
-    }
-    to { 
-        opacity: 1; 
-        transform: translateY(0); 
-    }
-}
-
-@keyframes slideIn {
     from {
         opacity: 0;
-        transform: translateX(-20px);
     }
+
     to {
         opacity: 1;
-        transform: translateX(0);
     }
 }
 
-/* === EMPTY STATE === */
-.station-list-content .text-center {
-    padding: 40px 20px;
-}
+/* ✅ MARKER FLASHING ANIMATION for HIGH/EXTREME alerts */
+@keyframes markerPulse {
 
-.station-list-content .text-center i {
-    color: var(--text-muted);
-    opacity: 0.5;
-}
+    0%,
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+    }
 
-/* === RESPONSIVE === */
-@media (max-width: 768px) {
-    .station-list-sidebar { 
-        width: 100%; 
-        max-width: 300px; 
-    }
-    
-    .detail-sidebar { 
-        width: 100% !important; 
-    }
-    
-    .detail-sidebar.expanded,
-    .detail-sidebar.fullwidth { 
-        width: 100% !important; 
-    }
-    
-    .sensor-compact { 
-        grid-template-columns: 1fr; 
-    }
-    
-    .action-buttons {
-        flex-direction: column;
+    50% {
+        transform: scale(1.6);
+        box-shadow: 0 0 20px rgba(250, 82, 82, 0.9), 0 0 40px rgba(250, 82, 82, 0.5);
     }
 }
 
-/* === LOADING STATES === */
+.marker-alert-pulse {
+    animation: markerPulse 1s ease-in-out infinite !important;
+}
+
+/* ✅ DEVICE MARKER ALERT — Đỏ + nhấp nháy khi có cảnh báo */
+@keyframes markerDeviceBlink {
+
+    0%,
+    100% {
+        background: #fa5252 !important;
+        box-shadow: 0 0 8px rgba(250, 82, 82, 0.6),
+            0 0 20px rgba(250, 82, 82, 0.3);
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        background: #c92a2a !important;
+        box-shadow: 0 0 20px rgba(250, 82, 82, 1),
+            0 0 50px rgba(250, 82, 82, 0.6),
+            0 0 80px rgba(250, 82, 82, 0.3);
+        transform: scale(1.5);
+        opacity: 0.8;
+    }
+}
+
+.marker-device-alert {
+    animation: markerDeviceBlink 0.8s ease-in-out infinite !important;
+    border: 3px solid #fff !important;
+}
+
+/*  LOADING STATES  */
 .spinner-border {
     border-color: var(--border-color);
     border-right-color: var(--accent-primary);
 }
 
-/* === TOOLTIPS & POPOVERS === */
+/*  TOOLTIPS  */
 .leaflet-tooltip {
     background: var(--bg-overlay) !important;
     border: 1px solid var(--border-color) !important;
@@ -647,32 +1084,320 @@ body:has(.station-list-sidebar:not(.hidden)) .toggle-list-btn {
     font-size: 0.85rem !important;
 }
 
-.leaflet-tooltip::before {
-    border-top-color: var(--border-color) !important;
+/*  DARK MODE EXPLICIT OVERRIDES  */
+[data-theme="dark"] .station-list-sidebar {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
 }
 
-/* === DARK MODE SPECIFIC === */
-[data-theme="dark"] .station-list-sidebar {
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+[data-theme="dark"] .top-navbar {
+    background: var(--bg-overlay);
+    border-bottom: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .station-item,
+[data-theme="dark"] .sensor-item,
+[data-theme="dark"] .chart-box {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .station-item:hover,
+[data-theme="dark"] .sensor-item:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
 }
 
 [data-theme="dark"] .detail-sidebar {
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
 }
 
-[data-theme="dark"] .toggle-list-btn {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+[data-theme="dark"] .sidebar-header,
+[data-theme="dark"] .charts-panel-header,
+[data-theme="dark"] .longterm-header {
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
 }
 
-/* === LIGHT MODE SPECIFIC === */
-[data-theme="light"] .station-item {
-    background: white;
-}
-
-[data-theme="light"] .sensor-item {
-    background: white;
-}
-
+/*  LIGHT MODE EXPLICIT OVERRIDES  */
+[data-theme="light"] .station-item,
+[data-theme="light"] .sensor-item,
 [data-theme="light"] .chart-box {
     background: white;
+    border-color: var(--border-color);
+}
+
+/*  DIM MAP TILES IN DARK MODE  */
+[data-theme="dark"] .leaflet-tile-pane {
+    filter: brightness(0.65) contrast(1.1);
+    transition: filter 0.5s ease;
+}
+
+/* ========================================
+   ALERT BANNER - Cảnh báo giữa màn hình
+======================================== */
+.alert-banner {
+    display: none;
+    position: fixed;
+    top: 80px;
+    /* Nằm giữa khoảng trống: left sidebar 340px, right sidebar 420px */
+    left: calc(var(--sidebar-width) + (100vw - var(--sidebar-width) - 420px) / 2);
+    transform: translateX(-50%) translateY(-120%);
+    z-index: 9998;
+    width: calc(100vw - var(--sidebar-width) - 420px - 40px);
+    max-width: 700px;
+    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    border: 3px solid #fca5a5;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(220, 38, 38, 0.6),
+        0 0 100px rgba(220, 38, 38, 0.4);
+    transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    animation: alertPulse 2s ease-in-out infinite;
+}
+
+.alert-banner.show {
+    display: flex;
+    /* Hiện lại khi có class .show */
+    transform: translateX(-50%) translateY(0);
+}
+
+@keyframes alertPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 20px 60px rgba(220, 38, 38, 0.6),
+            0 0 100px rgba(220, 38, 38, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 25px 70px rgba(220, 38, 38, 0.8),
+            0 0 120px rgba(220, 38, 38, 0.6);
+    }
+}
+
+.alert-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+    color: white;
+}
+
+.alert-icon {
+    font-size: 2.5rem;
+    color: #fef3c7;
+    animation: shake 0.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-8px) rotate(-5deg);
+    }
+
+    75% {
+        transform: translateX(8px) rotate(5deg);
+    }
+}
+
+.alert-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.alert-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    margin: 0 0 4px 0;
+    color: #fef3c7;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.alert-info-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.alert-station {
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.95);
+    display: inline;
+}
+
+.alert-message {
+    font-size: 1rem;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.9);
+    display: inline;
+}
+
+.alert-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.btn-alert-follow {
+    background: white;
+    color: #dc2626;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.btn-alert-follow:hover {
+    background: #f3f4f6;
+    transform: scale(1.05);
+}
+
+.btn-alert-dismiss {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-alert-dismiss:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/*  RESPONSIVE  */
+@media (max-width: 768px) {
+    .alert-banner {
+        width: 95%;
+        top: 70px;
+        left: 50%;
+    }
+
+    .alert-banner-content {
+        flex-direction: column;
+        text-align: center;
+        padding: 20px;
+    }
+
+    .alert-icon {
+        font-size: 2.5rem;
+    }
+
+    .alert-title {
+        font-size: 1.2rem;
+    }
+
+    .alert-actions {
+        flex-direction: row;
+        width: 100%;
+    }
+
+    .btn-alert-follow {
+        flex: 1;
+    }
+
+    .station-list-sidebar {
+        width: 100%;
+        max-width: 300px;
+    }
+
+    .detail-sidebar {
+        width: 100% !important;
+    }
+
+    .sensor-compact {
+        grid-template-columns: 1fr;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    .charts-panel {
+        width: 100vw;
+        left: 0;
+    }
+
+    .longterm-container {
+        width: 98%;
+        height: 95%;
+    }
+}
+
+/* ========================================
+   DARK MODE TEXT FIX
+======================================== */
+[data-theme="dark"] .station-item,
+[data-theme="dark"] .sensor-item,
+[data-theme="dark"] .chart-box {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .sensor-label,
+[data-theme="dark"] .chart-title {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .sensor-value-large {
+    color: var(--accent-primary) !important;
+}
+
+/* === Map Navbar buttons — visible in both themes === */
+.top-navbar .btn-outline-primary {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.top-navbar .btn-outline-primary:hover {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.top-navbar .btn-link {
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.top-navbar .btn-link:hover {
+    color: var(--accent-primary);
+}
+
+/* === Light mode: navbar text visible === */
+[data-theme="light"] .top-navbar {
+    background: rgba(255, 255, 255, 0.95);
+}
+
+[data-theme="light"] .brand-text {
+    color: #212529;
+}
+
+/* === Dark mode: navbar text visible === */
+[data-theme="dark"] .top-navbar {
+    background: rgba(15, 23, 42, 0.95);
+}
+
+[data-theme="dark"] .brand-text {
+    color: #f1f5f9;
 }

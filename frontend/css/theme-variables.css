@@ -8,70 +8,135 @@
     --bg-secondary: #f8f9fa;
     --bg-tertiary: #f1f3f5;
     --bg-overlay: rgba(255, 255, 255, 0.98);
-    
+
     --text-primary: #212529;
     --text-secondary: #495057;
     --text-muted: #868e96;
-    
+
     --border-color: rgba(0, 0, 0, 0.08);
     --border-light: rgba(0, 0, 0, 0.04);
-    
+
     /* Accent Colors - Blue Ocean Vibe */
-    --accent-primary: #0ea5e9;    /* Sky blue */
-    --accent-secondary: #3b82f6;  /* Blue */
-    --accent-success: #10b981;    /* Emerald */
-    --accent-warning: #f59e0b;    /* Amber */
-    --accent-danger: #ef4444;     /* Red */
-    --accent-info: #06b6d4;       /* Cyan */
-    
+    --accent-primary: #0ea5e9;
+    /* Sky blue */
+    --accent-secondary: #3b82f6;
+    /* Blue */
+    --accent-success: #10b981;
+    /* Emerald */
+    --accent-warning: #f59e0b;
+    /* Amber */
+    --accent-danger: #ef4444;
+    /* Red */
+    --accent-info: #06b6d4;
+    /* Cyan */
+
     /* Gradients */
     --gradient-hero: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
     --gradient-card: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
     --gradient-button: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);
-    
+
     /* Shadows - Light Mode */
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
     --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.15);
-    
+
     /* Transitions */
     --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-base: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* === TYPOGRAPHY & SPACING (CONSISTENT ACROSS THEMES) === */
+    /* Typography */
+    --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Courier New', monospace;
+
+    /* Spacing - Consistent across themes */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+
+    /* Border radius - Consistent */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+
+    /* Z-index layers */
+    --z-map: 1;
+    --z-sidebar: 1000;
+    --z-navbar: 9999;
+    --z-modal: 2000;
 }
 
 /* === DARK MODE OVERRIDE === */
 [data-theme="dark"] {
-    --bg-primary: #0f172a;        /* Slate-900 */
-    --bg-secondary: #1e293b;      /* Slate-800 */
-    --bg-tertiary: #334155;       /* Slate-700 */
-    --bg-overlay: rgba(15, 23, 42, 0.95);
-    
-    --text-primary: #f1f5f9;      /* Slate-100 */
-    --text-secondary: #cbd5e1;    /* Slate-300 */
-    --text-muted: #94a3b8;        /* Slate-400 */
-    
-    --border-color: rgba(255, 255, 255, 0.1);
-    --border-light: rgba(255, 255, 255, 0.05);
-    
-    /* Keep same accent colors for consistency */
-    
-    /* Dark mode shadows */
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-    --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.6);
-    
-    --gradient-card: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    /* === TECHNO / FUTURISTIC DARK MODE === */
+    --bg-primary: #050A0F;
+    /* Deep Space Black */
+    --bg-secondary: #0B1219;
+    /* Cyber Panel Background */
+    --bg-tertiary: rgba(0, 242, 255, 0.03);
+    /* Subtle Cyan Tint */
+    --bg-overlay: rgba(5, 10, 15, 0.85);
+    /* Glass Overlay */
+
+    --text-primary: #e0f2fe;
+    /* Ice White */
+    --text-secondary: #94a3b8;
+    /* Muted Blue-Grey */
+    --text-muted: #64748b;
+    /* dim */
+
+    --border-color: rgba(0, 242, 255, 0.15);
+    /* Faint Neon Border */
+    --border-light: rgba(0, 242, 255, 0.05);
+
+    /* Techno Accents */
+    --accent-primary: #00F2FF;
+    /* Neon Cyan */
+    --accent-secondary: #39FF14;
+    /* Safety Green */
+    --accent-info: #00F2FF;
+    /* Cyan alias */
+    --accent-success: #39FF14;
+    /* Green alias */
+    --accent-warning: #FFD700;
+    /* Gold */
+    --accent-danger: #FF003C;
+    /* Cyber Red */
+
+    /* Glow Shadows */
+    --shadow-sm: 0 0 10px rgba(0, 242, 255, 0.1);
+    --shadow-md: 0 0 20px rgba(0, 242, 255, 0.15);
+    --shadow-lg: 0 0 30px rgba(0, 242, 255, 0.2);
+    --shadow-xl: 0 0 50px rgba(0, 242, 255, 0.3);
+
+    --gradient-card: linear-gradient(145deg, rgba(11, 18, 25, 0.9) 0%, rgba(5, 10, 15, 0.95) 100%);
+    --gradient-button: linear-gradient(90deg, #00C6FF 0%, #0072FF 100%);
+    /* Electric Blue Gradient */
+}
+
+/* Smooth font rendering for light mode */
+:root {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth font rendering for dark mode */
+[data-theme="dark"] {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* === SMOOTH THEME TRANSITION === */
 * {
     transition: background-color var(--transition-base),
-                color var(--transition-base),
-                border-color var(--transition-base),
-                box-shadow var(--transition-base);
+        color var(--transition-base),
+        border-color var(--transition-base),
+        box-shadow var(--transition-base);
 }
 
 /* Disable transitions during theme switch */
