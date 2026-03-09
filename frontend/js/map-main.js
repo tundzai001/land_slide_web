@@ -1240,6 +1240,8 @@ function renderLongTermAnalysis(data) {
         }
 
         setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
+        const ciVal = safeNumber(analysis.velocity_ci_95, 2);
+        setText('lt-velocity-ci', `(Khoảng tin cậy: ±${ciVal})`);
         setText('lt-classification', analysis.classification || 'N/A');
         setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
         setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
@@ -1249,13 +1251,27 @@ function renderLongTermAnalysis(data) {
 
         document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
         document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
+
+        const cusumBadge = document.getElementById('cusum-badge');
+        const cusumMessage = document.getElementById('cusum-message');
+        if (analysis.cusum_change) {
+            cusumBadge.style.display = 'inline-block';
+            cusumMessage.textContent = analysis.cusum_message || 'Có thay đổi xu hướng';
+            cusumMessage.style.display = 'inline-block';
+        } else {
+            cusumBadge.style.display = 'none';
+            cusumMessage.style.display = 'none';
+        }
     } else {
         const warningEl = document.getElementById('longterm-warning');
         if (warningEl) warningEl.style.display = 'none';
         setText('lt-velocity', 'N/A');
+        setText('lt-velocity-ci', '(Chưa có thông tin)');
         setText('lt-classification', 'N/A');
         setText('lt-total-disp', 'N/A');
         setText('lt-duration', 'N/A');
+        document.getElementById('cusum-badge').style.display = 'none';
+        document.getElementById('cusum-message').style.display = 'none';
     }
 
     // === IMU Section ===
@@ -1288,10 +1304,11 @@ async function init3DVisualizations(data) {
 
         // GNSS
         if (data.gnss && data.gnss.status === 'success' && data.gnss.time_series) {
-            document.getElementById('gnss-3d-loading').style.display = 'block';
+            const gnssLoading = document.getElementById('gnss-3d-loading');
+            if (gnssLoading) gnssLoading.style.display = 'block';
             setTimeout(() => {
                 initGNSS3D(data.gnss.time_series, THREE, OrbitControls);
-                document.getElementById('gnss-3d-loading').style.display = 'none';
+                if (gnssLoading) gnssLoading.style.display = 'none';
             }, 50);
         } else {
             const cGnss = document.getElementById('container-3d-gnss');
@@ -1300,10 +1317,11 @@ async function init3DVisualizations(data) {
 
         // IMU
         if (data.imu && data.imu.status === 'success' && data.imu.time_series) {
-            document.getElementById('imu-3d-loading').style.display = 'block';
+            const imuLoading = document.getElementById('imu-3d-loading');
+            if (imuLoading) imuLoading.style.display = 'block';
             setTimeout(() => {
                 initIMU3D(data.imu.time_series, THREE, OrbitControls);
-                document.getElementById('imu-3d-loading').style.display = 'none';
+                if (imuLoading) imuLoading.style.display = 'none';
             }, 50);
         } else {
             const cImu = document.getElementById('container-3d-imu');
@@ -1434,63 +1452,195 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     container.innerHTML = '';
 
     imuScene = new THREE.Scene();
-    imuScene.background = new THREE.Color(0x0a0e17);
+    // Premium dark gradient background - we'll just use a color but add fog
+    imuScene.background = new THREE.Color(0x0b0e14);
+    imuScene.fog = new THREE.FogExp2(0x0b0e14, 0.03);
 
     const aspect = container.clientWidth / container.clientHeight;
-    imuCamera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
-    imuCamera.position.set(5, 5, 8);
+    imuCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+    imuCamera.position.set(5, 6, 8);
 
     imuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    imuRenderer.setPixelRatio(window.devicePixelRatio);
     imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    imuRenderer.shadowMap.enabled = true;
+    imuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(imuRenderer.domElement);
 
     imuControls = new OrbitControls(imuCamera, imuRenderer.domElement);
     imuControls.enableDamping = true;
     imuControls.dampingFactor = 0.05;
+    imuControls.maxPolarAngle = Math.PI / 2 + 0.1; // Limit below ground
+    imuControls.minDistance = 3;
+    imuControls.maxDistance = 15;
 
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // Advanced Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     imuScene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(5, 10, 5);
+
+    const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x0f0e1d, 0.5);
+    imuScene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(5, 10, 7);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 25;
+    dirLight.shadow.camera.left = -5;
+    dirLight.shadow.camera.right = 5;
+    dirLight.shadow.camera.top = 5;
+    dirLight.shadow.camera.bottom = -5;
+    dirLight.shadow.bias = -0.001;
     imuScene.add(dirLight);
 
-    // Grid Reference
-    const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    const pointLight = new THREE.PointLight(0x00e5ff, 2, 8);
+    pointLight.position.set(0, 1.5, 0);
+    imuScene.add(pointLight);
+
+    // Floor with grid
+    const floorGeo = new THREE.PlaneGeometry(30, 30);
+    const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x0b0e14,
+        roughness: 0.8,
+        metalness: 0.2
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -1.5;
+    floor.receiveShadow = true;
+    imuScene.add(floor);
+
+    const grid = new THREE.GridHelper(30, 30, 0x00e5ff, 0x222233);
+    grid.position.y = -1.49;
+    grid.material.opacity = 0.15;
+    grid.material.transparent = true;
     imuScene.add(grid);
 
-    // Sensor Block
-    const blockGeo = new THREE.BoxGeometry(2, 0.5, 3);
-    const materials = [
-        new THREE.MeshLambertMaterial({ color: 0x333333 }), // right
-        new THREE.MeshLambertMaterial({ color: 0x333333 }), // left
-        new THREE.MeshLambertMaterial({ color: 0xf59e0b }), // top
-        new THREE.MeshLambertMaterial({ color: 0x333333 }), // bottom
-        new THREE.MeshLambertMaterial({ color: 0x8b5cf6 }), // front
-        new THREE.MeshLambertMaterial({ color: 0x333333 }), // back
-    ];
-    const sensorBlock = new THREE.Mesh(blockGeo, materials);
+    // ==========================================
+    // HIGH-TECH SENSOR BLOCK DESIGN
+    // ==========================================
+    const sensorBlock = new THREE.Group();
 
-    // Add an arrow or label marker on top to indicate direction
-    const dirGeo = new THREE.ConeGeometry(0.2, 0.5, 16);
-    const dirMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const dirIndicator = new THREE.Mesh(dirGeo, dirMat);
-    dirIndicator.position.set(0, 0.3, 1);
-    dirIndicator.rotation.x = Math.PI / 2;
-    sensorBlock.add(dirIndicator);
+    // 1. Base / Main Body (Dark brushed aluminum)
+    const baseWidth = 2.4;
+    const baseHeight = 0.6;
+    const baseDepth = 3.4;
+    const bodyGeo = new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth);
+    const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x151821,
+        metalness: 0.7,
+        roughness: 0.4
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    sensorBlock.add(body);
+
+    // 2. Top Plate (Glass/Polished alloy finish)
+    const topWidth = 2.0;
+    const topHeight = 0.2;
+    const topDepth = 3.0;
+    const topGeo = new THREE.BoxGeometry(topWidth, topHeight, topDepth);
+    const topMat = new THREE.MeshPhysicalMaterial({
+        color: 0x222835,
+        metalness: 0.9,
+        roughness: 0.1,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1
+    });
+    const topPlate = new THREE.Mesh(topGeo, topMat);
+    topPlate.position.y = baseHeight / 2 + topHeight / 2;
+    topPlate.castShadow = true;
+    sensorBlock.add(topPlate);
+
+    // 3. Glowing IMU Core
+    const coreGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 32);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.y = topPlate.position.y + topHeight / 2 + 0.025;
+    sensorBlock.add(core);
+
+    // Glowing core ring
+    const ringGeo = new THREE.RingGeometry(0.4, 0.45, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.6 });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = core.position.y;
+    sensorBlock.add(ring);
+
+    // 4. Direction Arrow (Sleek sci-fi style)
+    const arrowShape = new THREE.Shape();
+    arrowShape.moveTo(0, 0.4);
+    arrowShape.lineTo(0.25, -0.3);
+    arrowShape.lineTo(0, -0.15);
+    arrowShape.lineTo(-0.25, -0.3);
+    arrowShape.lineTo(0, 0.4);
+
+    // Smooth settings for extrude
+    const extrudeSettings = { depth: 0.05, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.02, bevelThickness: 0.02 };
+    const arrowGeo = new THREE.ExtrudeGeometry(arrowShape, extrudeSettings);
+    const arrowMat = new THREE.MeshStandardMaterial({
+        color: 0xff2a5f,
+        metalness: 0.6,
+        roughness: 0.2,
+        emissive: 0xff2a5f,
+        emissiveIntensity: 0.4
+    });
+    const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+    arrow.rotation.x = Math.PI / 2;
+    arrow.position.set(0, topPlate.position.y + topHeight / 2 + 0.05, 1.0);
+    sensorBlock.add(arrow);
+
+    // 5. Screws/Mounting holes
+    const screwGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.2, 16);
+    const screwMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
+    const zOffset = (baseDepth / topDepth) * (topWidth / 2 - 0.2);
+    const screwPositions = [
+        [-baseWidth / 2 + 0.2, zOffset],
+        [baseWidth / 2 - 0.2, zOffset],
+        [-baseWidth / 2 + 0.2, -zOffset],
+        [baseWidth / 2 - 0.2, -zOffset]
+    ];
+    screwPositions.forEach(pos => {
+        const screw = new THREE.Mesh(screwGeo, screwMat);
+        screw.position.set(pos[0], baseHeight / 2 + 0.05, pos[1]);
+        sensorBlock.add(screw);
+    });
+
+    // 6. Add visual XYZ axis indicators
+    const origin = new THREE.Vector3(0, core.position.y + 0.1, 0);
+    const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, 1.2, 0xff2a5f, 0.2, 0.15); // Red X
+    const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), origin, 1.2, 0x00e5ff, 0.2, 0.15); // Cyan Y (Up)
+    const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, 1.2, 0x00ff88, 0.2, 0.15); // Green Z
+    sensorBlock.add(xArrow, yArrow, zArrow);
 
     imuScene.add(sensorBlock);
 
+    // Data parsing
     const rollData = timeSeries.roll || [];
     const pitchData = timeSeries.pitch || [];
     if (rollData.length === 0) return;
 
     let progress = 0;
-    const speed = 0.005;
+    const speed = 0.003; // Smooth flow
+
+    // Hover animation variables
+    let clock = new THREE.Clock();
 
     function animate() {
         imuAnimationId = requestAnimationFrame(animate);
 
+        const delta = clock.getDelta();
+        const elapsedTime = clock.getElapsedTime();
+
+        // 1. Hover effect & Glowing pulse
+        sensorBlock.position.y = Math.sin(elapsedTime * 2) * 0.05;
+        coreMat.color.setHSL(0.5 + Math.sin(elapsedTime * 3) * 0.05, 1.0, 0.5 + Math.sin(elapsedTime * 5) * 0.1);
+        ringMat.opacity = 0.4 + Math.sin(elapsedTime * 4) * 0.2;
+
+        // 2. Playback IMU Tilt
         if (rollData.length > 1) {
             progress += speed;
             if (progress >= 1) progress = 0;
@@ -1511,12 +1661,20 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
                 const currPitch = p1 + (p2 - p1) * remainder;
 
                 // Typical aviation/IMU mapping: X=Pitch, Z=Roll
-                sensorBlock.rotation.x = currPitch;
-                sensorBlock.rotation.z = currRoll;
+                const targetQuaternion = new THREE.Quaternion();
+                const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                targetQuaternion.setFromEuler(euler);
+
+                // Smooth interpolation to avoid jitter
+                sensorBlock.quaternion.slerp(targetQuaternion, 0.1);
             }
         } else if (rollData.length === 1) {
-            sensorBlock.rotation.x = pitchData[0] * Math.PI / 180;
-            sensorBlock.rotation.z = rollData[0] * Math.PI / 180;
+            const currPitch = pitchData[0] * Math.PI / 180;
+            const currRoll = rollData[0] * Math.PI / 180;
+            const targetQuaternion = new THREE.Quaternion();
+            const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+            targetQuaternion.setFromEuler(euler);
+            sensorBlock.quaternion.slerp(targetQuaternion, 0.1);
         }
 
         imuControls.update();
