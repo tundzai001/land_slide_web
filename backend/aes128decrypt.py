@@ -170,8 +170,19 @@ def aes128_decrypt(data: bytearray, initial_key: bytearray = initialKey) -> byte
 	# remove padding as the Go code does
 	return remove_pad_from_data(data)
 
-def aes128_decrypt_base64(data: bytearray, initial_key: bytearray = initialKey) -> bytearray:
-    data_array = bytearray(base64.b64decode(str(data)))
+def aes128_decrypt_base64(data, initial_key: bytearray = initialKey) -> bytearray:
+    # Handle string to bytes conversion
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    elif isinstance(data, bytearray):
+        data = bytes(data)
+        
+    # Fix missing base64 padding
+    padding_needed = len(data) % 4
+    if padding_needed:
+        data += b'=' * (4 - padding_needed)
+        
+    data_array = bytearray(base64.b64decode(data))
     return aes128_decrypt(data_array, initial_key)
 
 if __name__ == "__main__":
