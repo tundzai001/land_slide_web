@@ -38,6 +38,10 @@ class SecurityState:
         self.sqli_blocks = 0
         self.xss_blocks = 0
         self.lfi_blocks = 0
+        
+        # Threat Map State
+        self.geoip_cache = {}
+        self.map_events = deque(maxlen=200)
 
     def add_event(self, event_type: str, ip: str, detail: str):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")

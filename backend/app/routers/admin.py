@@ -507,25 +507,40 @@ async def export_database_csv(
                     data = res.scalars().all()
                     
                     if data:
-                        # Chuyển đổi dữ liệu (tối ưu tốc độ)
-                        export_list = []
+                        # Chia dữ liệu theo Trạm (station_id) và Loại cảm biến (sensor_type)
+                        grouped_data = {}
+                        
                         for d in data:
-                            export_list.append({
+                            group_key = f"station_{d.station_id}_{d.sensor_type}"
+                            if group_key not in grouped_data:
+                                grouped_data[group_key] = []
+                            
+                            # Flatten raw_json (data) fields
+                            row_dict = {
                                 'id': d.id,
                                 'time_str': datetime.fromtimestamp(d.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
                                 'timestamp': d.timestamp,
                                 'station_id': d.station_id,
                                 'type': d.sensor_type,
-                                'val1': d.value_1,
-                                'val2': d.value_2,
-                                'val3': d.value_3,
-                                'raw_json': str(d.data)
-                            })
-                        
-                        df = pd.DataFrame(export_list)
-                        zf.writestr("sensor_data.csv", df.to_csv(index=False))
-                        has_data = True
-                        logger.info(f"✅ CSV: Exported {len(data)} sensor records")
+                            }
+                            
+                            # Flatten các giá trị quan trọng từ raw JSON
+                            if isinstance(d.data, dict):
+                                for k, v in d.data.items():
+                                    row_dict[k] = v
+                            else:
+                                row_dict['raw_json'] = str(d.data)
+                                
+                            grouped_data[group_key].append(row_dict)
+                            
+                        # Ghi từng group ra từng file CSV trong file ZIP
+                        for group_name, items in grouped_data.items():
+                            df = pd.DataFrame(items)
+                            file_name = f"sensor_data/{group_name}.csv"
+                            zf.writestr(file_name, df.to_csv(index=False))
+                            has_data = True
+                            
+                        logger.info(f"✅ CSV: Exported {len(data)} sensor records into {len(grouped_data)} files")
                     else:
                         logger.info("⚠️ CSV: No sensor data found")
                         

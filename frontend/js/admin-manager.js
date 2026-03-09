@@ -25,13 +25,13 @@ class AdminManager {
 
         // Velocity classification (Cruden & Varnes)
         this.velocityConfig = [
-            { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
-            { name: 'Very slow', threshold: 0.0005, unit: 'mm/s', description: '16 mm/year to 1.6 m/year', editable: true },
-            { name: 'Slow', threshold: 0.05, unit: 'mm/s', description: '1.6 m/year to 13 mm/month', editable: true },
-            { name: 'Moderate', threshold: 0.5, unit: 'mm/s', description: '13 mm/month to 1.8 m/hour', editable: true },
-            { name: 'Rapid', threshold: 50, unit: 'mm/s', description: '1.8 m/hour to 3 m/min', editable: true },
-            { name: 'Very rapid', threshold: 833, unit: 'mm/s', description: '3 m/min to 5 m/s', editable: true },
-            { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
+            { name: 'Extremely slow', threshold: 0, unit: 'mm/year', description: '< 16 mm/year', editable: true },
+            { name: 'Very slow', threshold: 16, unit: 'mm/year', description: '16 mm/year to 1.6 m/year', editable: true },
+            { name: 'Slow', threshold: 1.6, unit: 'm/year', description: '1.6 m/year to 13 mm/month', editable: true },
+            { name: 'Moderate', threshold: 13, unit: 'm/month', description: '13 mm/month to 1.8 m/hour', editable: true },
+            { name: 'Rapid', threshold: 1.8, unit: 'm/hr', description: '1.8 m/hour to 3 m/min', editable: true },
+            { name: 'Very rapid', threshold: 3, unit: 'm/min', description: '3 m/min to 5 m/s', editable: true },
+            { name: 'Extremely rapid', threshold: 5, unit: 'm/s', description: '> 5 m/s', editable: true }
         ];
 
         // ✅ Default offline thresholds (seconds)
@@ -710,13 +710,13 @@ class AdminManager {
                 this.velocityConfig = cfg.velocity_classification;
             } else {
                 this.velocityConfig = [
-                    { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
-                    { name: 'Very slow', threshold: 0.0005, unit: 'mm/s', description: '16 mm/year to 1.6 m/year', editable: true },
-                    { name: 'Slow', threshold: 0.05, unit: 'mm/s', description: '1.6 m/year to 13 mm/month', editable: true },
-                    { name: 'Moderate', threshold: 0.5, unit: 'mm/s', description: '13 mm/month to 1.8 m/hour', editable: true },
-                    { name: 'Rapid', threshold: 50, unit: 'mm/s', description: '1.8 m/hour to 3 m/min', editable: true },
-                    { name: 'Very rapid', threshold: 833, unit: 'mm/s', description: '3 m/min to 5 m/s', editable: true },
-                    { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
+                    { name: 'Extremely slow', threshold: 0, unit: 'mm/year', description: '< 16 mm/year', editable: true },
+                    { name: 'Very slow', threshold: 16, unit: 'mm/year', description: '16 mm/year to 1.6 m/year', editable: true },
+                    { name: 'Slow', threshold: 1.6, unit: 'm/year', description: '1.6 m/year to 13 mm/month', editable: true },
+                    { name: 'Moderate', threshold: 13, unit: 'm/month', description: '13 mm/month to 1.8 m/hour', editable: true },
+                    { name: 'Rapid', threshold: 1.8, unit: 'm/hr', description: '1.8 m/hour to 3 m/min', editable: true },
+                    { name: 'Very rapid', threshold: 3, unit: 'm/min', description: '3 m/min to 5 m/s', editable: true },
+                    { name: 'Extremely rapid', threshold: 5, unit: 'm/s', description: '> 5 m/s', editable: true }
                 ];
             }
 
@@ -1213,13 +1213,13 @@ class AdminManager {
     resetVelocityConfig() {
         // Khôi phục về mặc định Cruden & Varnes nếu cần
         this.velocityConfig = [
-            { name: 'Extremely slow', threshold: 0.00001, unit: 'mm/s', description: '< 16 mm/year', editable: true },
-            { name: 'Very slow', threshold: 0.0005, unit: 'mm/s', description: '16 mm/year to 1.6 m/year', editable: true },
-            { name: 'Slow', threshold: 0.05, unit: 'mm/s', description: '1.6 m/year to 13 mm/month', editable: true },
-            { name: 'Moderate', threshold: 0.5, unit: 'mm/s', description: '13 mm/month to 1.8 m/hour', editable: true },
-            { name: 'Rapid', threshold: 50, unit: 'mm/s', description: '1.8 m/hour to 3 m/min', editable: true },
-            { name: 'Very rapid', threshold: 833, unit: 'mm/s', description: '3 m/min to 5 m/s', editable: true },
-            { name: 'Extremely rapid', threshold: 5000, unit: 'mm/s', description: '> 5 m/s', editable: true }
+            { name: 'Extremely slow', threshold: 0, unit: 'mm/year', description: '< 16 mm/year', editable: true },
+            { name: 'Very slow', threshold: 16, unit: 'mm/year', description: '16 mm/year to 1.6 m/year', editable: true },
+            { name: 'Slow', threshold: 1.6, unit: 'm/year', description: '1.6 m/year to 13 mm/month', editable: true },
+            { name: 'Moderate', threshold: 13, unit: 'm/month', description: '13 mm/month to 1.8 m/hour', editable: true },
+            { name: 'Rapid', threshold: 1.8, unit: 'm/hr', description: '1.8 m/hour to 3 m/min', editable: true },
+            { name: 'Very rapid', threshold: 3, unit: 'm/min', description: '3 m/min to 5 m/s', editable: true },
+            { name: 'Extremely rapid', threshold: 5, unit: 'm/s', description: '> 5 m/s', editable: true }
         ];
         this.renderVelocityTable();
         window.toast?.info('Đã khôi phục cấu hình vận tốc mặc định');

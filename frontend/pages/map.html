@@ -189,7 +189,7 @@
                     <button class="btn-action" id="btn-show-charts">
                         <i class="bi bi-graph-up me-2"></i>View Chart
                     </button>
-                    <button class="btn-action secondary" id="btn-long-term">
+                    <button class="btn-action secondary d-none" id="btn-long-term">
                         <i class="bi bi-calendar-range me-2"></i>Analysis
                     </button>
                 </div>
@@ -351,7 +351,7 @@
 
                     <div class="row g-3 mb-4">
                         <!-- Trend Indicator -->
-                        <div class="col-md-6">
+                        <div class="col-md-12">
                             <div class="card h-100 border-0 shadow-sm">
                                 <div class="card-body">
                                     <h6 class="card-title text-muted">Xu hướng GNSS</h6>
@@ -360,15 +360,6 @@
                                         <span id="trend-value" class="fs-5 fw-bold">Không xác định</span>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <!-- Classification Scale -->
-                        <div class="col-md-6">
-                            <div class="chart-box h-100 border-0 shadow-sm p-3">
-                                <div class="chart-title text-muted mb-2"><i class="bi bi-bar-chart-steps me-2"></i>Bảng
-                                    phân loại Cruden & Varnes</div>
-                                <div id="classification-scale"></div>
                             </div>
                         </div>
                     </div>
@@ -559,7 +550,8 @@
                             </div>
                         </div>
                         <div class="chart-box border-0 shadow-sm">
-                            <div class="chart-title"><i class="bi bi-graph-down me-2"></i>Biểu đồ 1/Velocity theo thời gian</div>
+                            <div class="chart-title"><i class="bi bi-graph-down me-2"></i>Biểu đồ 1/Velocity theo thời
+                                gian</div>
                             <div style="height: 300px; padding: 10px;">
                                 <canvas id="chart-inverse-velocity"></canvas>
                             </div>
@@ -594,7 +586,8 @@
                             </div>
                         </div>
                         <div class="chart-box border-0 shadow-sm">
-                            <div class="chart-title"><i class="bi bi-moisture me-2"></i>Biểu đồ Mưa tích lũy vs Dịch chuyển tích lũy</div>
+                            <div class="chart-title"><i class="bi bi-moisture me-2"></i>Biểu đồ Mưa tích lũy vs Dịch
+                                chuyển tích lũy</div>
                             <div style="height: 350px; padding: 10px;">
                                 <canvas id="chart-rainfall-correlation"></canvas>
                             </div>

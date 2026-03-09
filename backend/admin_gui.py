@@ -1,9 +1,24 @@
 import asyncio
 import json
 import threading
+import sys
+import subprocess
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from tkinter import messagebox, scrolledtext
+
+try:
+    import tkintermapview
+    HAS_MAPVIEW = True
+except ImportError:
+    try:
+        print("Auto-installing tkintermapview for Threat Map...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "tkintermapview", "pillow"])
+        import tkintermapview
+        HAS_MAPVIEW = True
+    except Exception as e:
+        print(f"Failed to install tkintermapview: {e}")
+        HAS_MAPVIEW = False
 
 IPC_HOST = '127.0.0.1'
 IPC_PORT = 9999
@@ -24,7 +39,6 @@ class SIEMAdminGUI(ttk.Window):
 
         self._build_ui()
         self._start_auto_refresh()
-        self.after(50, self._animate_radar)
 
     def start_asyncio_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -96,9 +110,20 @@ class SIEMAdminGUI(ttk.Window):
         map_frame = ttk.LabelFrame(mid_frame, text="Live Threat Map (Geo-Radar)", padding=5)
         mid_frame.add(map_frame, weight=3) # Give map generous space
         
-        self.map_canvas = ttk.Canvas(map_frame, bg="#0e0e0e", highlightthickness=0)
-        self.map_canvas.pack(fill=BOTH, expand=YES)
-        threading.Thread(target=self._load_map_bg_thread, daemon=True).start()
+        if HAS_MAPVIEW:
+            self.map_widget = tkintermapview.TkinterMapView(map_frame, corner_radius=0)
+            self.map_widget.pack(fill=BOTH, expand=YES)
+            try:
+                self.map_widget.set_tile_server("https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", max_zoom=19)
+            except:
+                pass
+            self.map_widget.set_position(21.0285, 105.8542) # Hanoi center
+            self.map_widget.set_zoom(2)
+            self.map_markers = []
+        else:
+            self.map_canvas = ttk.Canvas(map_frame, bg="#0e0e0e", highlightthickness=0)
+            self.map_canvas.pack(fill=BOTH, expand=YES)
+            self.map_canvas.create_text(400, 200, text="[SYS WARNING] tkintermapview not available.", fill="red")
         
         # 2. Threat Feed & Controls
         right_panel = ttk.PanedWindow(mid_frame, orient=VERTICAL)
@@ -139,43 +164,7 @@ class SIEMAdminGUI(ttk.Window):
         self.status_var = ttk.StringVar(value="System Initializing...")
         ttk.Label(self, textvariable=self.status_var, padding=5, font=("Consolas", 9)).pack(side=BOTTOM, fill=X)
 
-    def _load_map_bg_thread(self):
-        import os, urllib.request
-        try:
-            if not os.path.exists("world_map_dark.png"):
-                req = urllib.request.Request('https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/World_map_blank_black.png/1024px-World_map_blank_black.png', headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=5) as resp, open('world_map_dark.png', 'wb') as f:
-                    f.write(resp.read())
-            self.after(0, self._render_map_bg)
-        except Exception as e:
-            print("Threat Map image fetch failed:", e)
-
-    def _render_map_bg(self):
-        # We place the top-left at X=50, Y=20 to center the 1024x516 map nicely
-        self.map_offset_x = 50
-        self.map_offset_y = 20
-        self.img_map = ttk.PhotoImage(file="world_map_dark.png")
-        self.map_canvas.create_image(self.map_offset_x, self.map_offset_y, image=self.img_map, anchor=NW, tags="bg")
-
-    def _animate_radar(self):
-        to_del = []
-        for pid, data in list(self.active_radars.items()):
-            data["radius"] += 1.5
-            cv_id = data["cv_id"]
-            x, y, r = data["x"], data["y"], data["radius"]
-            
-            # Simple scaling out
-            self.map_canvas.coords(cv_id, x-r, y-r, x+r, y+r)
-            
-            if r > 40:
-                self.map_canvas.delete(cv_id)
-                to_del.append(pid)
-                
-        for pid in to_del:
-            del self.active_radars[pid]
-            
-        self.after(40, self._animate_radar)
-
+    def _create_stat_card(self, parent, title, value, row, col, bootstyle=PRIMARY):
         frame = ttk.Frame(parent, bootstyle=bootstyle)
         frame.grid(row=row, column=col, padx=4, pady=5, sticky=NSEW)
         parent.columnconfigure(col, weight=1)
@@ -248,19 +237,12 @@ class SIEMAdminGUI(ttk.Window):
                     # Ocean / Unresolved
                     if lat == 0.0 and lon == 0.0: continue
                     
-                    if hasattr(self, 'map_offset_x'):
-                        # Equirectangular projection mapping to 1024x516 World Map
-                        x = self.map_offset_x + (lon + 180) * (1024 / 360)
-                        y = self.map_offset_y + (90 - lat) * (516 / 180)
-                        
-                        color = "#00ff00" if threat_type == "NORMAL" else "#ff0000"
-                        if threat_type == "DDOS": color = "#ffaa00"
-                        
-                        cv_id = self.map_canvas.create_oval(x-2, y-2, x+2, y+2, outline=color, width=2)
-                        # Add a persistent tiny dot
-                        self.map_canvas.create_oval(x-1, y-1, x+1, y+1, fill=color, outline=color)
-                        
-                        self.active_radars[event_id] = {"x": x, "y": y, "radius": 2, "color": color, "cv_id": cv_id}
+                    if HAS_MAPVIEW and hasattr(self, 'map_widget'):
+                        mrk = self.map_widget.set_marker(lat, lon, text=f"{event['ip']}\n({threat_type})")
+                        self.map_markers.append(mrk)
+                        if len(self.map_markers) > 30:
+                            old = self.map_markers.pop(0)
+                            old.delete()
                         
             # Prevent memory leak
             if len(self.processed_events) > 1000:

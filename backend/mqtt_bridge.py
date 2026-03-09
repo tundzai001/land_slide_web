@@ -400,8 +400,21 @@ class MQTTBridge:
                 # Lần đầu tiên → Lưu luôn
                 save_data_now = True
                 logger.info(f"💾 [FIRST SAVE] {station_name} - {sensor_type.upper()}")
+            elif sensor_type == 'gnss':
+                # GNSS: Logic lưu điểm đầu tiên của ngày (bao hàm cả điểm đầu tuần, tháng, năm)
+                from datetime import datetime
+                last_dt = datetime.fromtimestamp(last_saved)
+                curr_dt = datetime.fromtimestamp(current_timestamp)
+                
+                if curr_dt.date() > last_dt.date():
+                    save_data_now = True
+                    logger.info(f"💾 [CALENDAR START DAY SAVE - GNSS] {station_name} ({curr_dt.date()})")
+                elif interval < 86400 and time_since_last_save >= interval:
+                    # Nếu Admin cố tình set sys-save-gnss nhỏ hơn 1 ngày (vd: 1 tiếng) thì vẫn tuân thủ
+                    save_data_now = True
+                    logger.info(f"💾 [PERIODIC SAVE - GNSS] {station_name} (Interval: {interval}s)")
             elif time_since_last_save >= interval:
-                # Đã đủ chu kỳ → Lưu
+                # Đã đủ chu kỳ → Lưu (Dành cho IMU, Rain, Water)
                 save_data_now = True
                 logger.info(f"💾 [PERIODIC SAVE] {station_name} - {sensor_type.upper()} (Interval: {interval}s)")
             else:
