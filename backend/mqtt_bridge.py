@@ -43,8 +43,30 @@ class MQTTBridge:
         
         # MQTT Client setup
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        if settings.MQTT_USER:
-            self.client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
+        self.runtime_mqtt = {
+            "broker": settings.MQTT_BROKER,
+            "port": settings.MQTT_PORT,
+            "user": settings.MQTT_USER,
+            "password": settings.MQTT_PASSWORD,
+            "topic_reload_interval": settings.TOPIC_RELOAD_INTERVAL,
+        }
+        self.runtime_confirmation = {
+            "gnss": 3,
+            "rain": 2,
+            "water": 3,
+            "imu": 1,
+        }
+        self.runtime_save_intervals = {
+            "gnss": settings.SAVE_INTERVAL_GNSS,
+            "rain": settings.SAVE_INTERVAL_RAIN,
+            "water": settings.SAVE_INTERVAL_WATER,
+            "imu": settings.SAVE_INTERVAL_IMU,
+            "default": settings.SAVE_INTERVAL_DEFAULT,
+        }
+        self.topic_reload_interval = settings.TOPIC_RELOAD_INTERVAL
+
+        if self.runtime_mqtt["user"]:
+            self.client.username_pw_set(self.runtime_mqtt["user"], self.runtime_mqtt["password"])
             
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
@@ -67,6 +89,127 @@ class MQTTBridge:
         self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
 
         self.loop = None
+
+    async def load_runtime_config_from_db(self):
+        """Load global system config (main_config) and apply as runtime defaults."""
+        try:
+            async with ConfigSessionLocal() as db:
+                res = await db.execute(
+                    select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
+                )
+                cfg_row = res.scalar_one_or_none()
+                if not cfg_row or not isinstance(cfg_row.value, dict):
+                    return
+
+                cfg = cfg_row.value
+                mqtt_cfg = cfg.get("mqtt", {}) or {}
+                confirm_cfg = cfg.get("confirmation", {}) or {}
+                intervals_cfg = cfg.get("save_intervals", {}) or {}
+
+                self.runtime_mqtt["broker"] = mqtt_cfg.get("broker", self.runtime_mqtt["broker"])
+                self.runtime_mqtt["port"] = int(mqtt_cfg.get("port", self.runtime_mqtt["port"]))
+                self.runtime_mqtt["user"] = mqtt_cfg.get("user", self.runtime_mqtt["user"])
+                if mqtt_cfg.get("password"):
+                    self.runtime_mqtt["password"] = mqtt_cfg.get("password")
+                self.runtime_mqtt["topic_reload_interval"] = int(
+                    mqtt_cfg.get("topic_reload_interval", self.runtime_mqtt["topic_reload_interval"])
+                )
+                self.topic_reload_interval = self.runtime_mqtt["topic_reload_interval"]
+
+                self.runtime_confirmation["gnss"] = int(confirm_cfg.get("gnss", self.runtime_confirmation["gnss"]))
+                self.runtime_confirmation["rain"] = int(confirm_cfg.get("rain", self.runtime_confirmation["rain"]))
+                self.runtime_confirmation["water"] = int(confirm_cfg.get("water", self.runtime_confirmation["water"]))
+                self.runtime_confirmation["imu"] = int(confirm_cfg.get("imu", self.runtime_confirmation["imu"]))
+
+                self.runtime_save_intervals["gnss"] = int(intervals_cfg.get("gnss", self.runtime_save_intervals["gnss"]))
+                self.runtime_save_intervals["rain"] = int(intervals_cfg.get("rain", self.runtime_save_intervals["rain"]))
+                self.runtime_save_intervals["water"] = int(intervals_cfg.get("water", self.runtime_save_intervals["water"]))
+                self.runtime_save_intervals["imu"] = int(intervals_cfg.get("imu", self.runtime_save_intervals["imu"]))
+        except Exception as e:
+            logger.error(f"Error loading runtime system config: {e}")
+
+    def _apply_runtime_defaults_to_station_config(self, station_config: dict) -> dict:
+        """Station config has priority; global system config is fallback."""
+        cfg = dict(station_config or {})
+
+        gnss_cfg = dict(cfg.get("GnssAlerting", {}) or {})
+        rain_cfg = dict(cfg.get("RainAlerting", {}) or {})
+        water_cfg = dict(cfg.get("Water", {}) or {})
+        imu_cfg = dict(cfg.get("ImuAlerting", {}) or {})
+
+        gnss_cfg.setdefault("gnss_confirm_steps", self.runtime_confirmation["gnss"])
+        rain_cfg.setdefault("rain_confirm_steps", self.runtime_confirmation["rain"])
+        water_cfg.setdefault("water_confirm_steps", self.runtime_confirmation["water"])
+        imu_cfg.setdefault("imu_confirm_steps", self.runtime_confirmation["imu"])
+
+        cfg["GnssAlerting"] = gnss_cfg
+        cfg["RainAlerting"] = rain_cfg
+        cfg["Water"] = water_cfg
+        cfg["ImuAlerting"] = imu_cfg
+        return cfg
+
+    def reload_config(self, config_dict: dict):
+        """Apply system config at runtime and reconnect MQTT with new credentials."""
+        try:
+            mqtt_cfg = (config_dict or {}).get("mqtt", {}) or {}
+            confirm_cfg = (config_dict or {}).get("confirmation", {}) or {}
+            intervals_cfg = (config_dict or {}).get("save_intervals", {}) or {}
+
+            old_signature = (
+                self.runtime_mqtt["broker"],
+                self.runtime_mqtt["port"],
+                self.runtime_mqtt["user"],
+                self.runtime_mqtt["password"],
+            )
+
+            self.runtime_mqtt["broker"] = mqtt_cfg.get("broker", self.runtime_mqtt["broker"])
+            self.runtime_mqtt["port"] = int(mqtt_cfg.get("port", self.runtime_mqtt["port"]))
+            self.runtime_mqtt["user"] = mqtt_cfg.get("user", self.runtime_mqtt["user"])
+            if mqtt_cfg.get("password"):
+                self.runtime_mqtt["password"] = mqtt_cfg.get("password")
+            self.runtime_mqtt["topic_reload_interval"] = int(
+                mqtt_cfg.get("topic_reload_interval", self.runtime_mqtt["topic_reload_interval"])
+            )
+            self.topic_reload_interval = self.runtime_mqtt["topic_reload_interval"]
+
+            self.runtime_confirmation["gnss"] = int(confirm_cfg.get("gnss", self.runtime_confirmation["gnss"]))
+            self.runtime_confirmation["rain"] = int(confirm_cfg.get("rain", self.runtime_confirmation["rain"]))
+            self.runtime_confirmation["water"] = int(confirm_cfg.get("water", self.runtime_confirmation["water"]))
+            self.runtime_confirmation["imu"] = int(confirm_cfg.get("imu", self.runtime_confirmation["imu"]))
+
+            self.runtime_save_intervals["gnss"] = int(intervals_cfg.get("gnss", self.runtime_save_intervals["gnss"]))
+            self.runtime_save_intervals["rain"] = int(intervals_cfg.get("rain", self.runtime_save_intervals["rain"]))
+            self.runtime_save_intervals["water"] = int(intervals_cfg.get("water", self.runtime_save_intervals["water"]))
+            self.runtime_save_intervals["imu"] = int(intervals_cfg.get("imu", self.runtime_save_intervals["imu"]))
+
+            new_signature = (
+                self.runtime_mqtt["broker"],
+                self.runtime_mqtt["port"],
+                self.runtime_mqtt["user"],
+                self.runtime_mqtt["password"],
+            )
+
+            if old_signature != new_signature:
+                logger.info("🔄 MQTT runtime config changed. Reconnecting with new credentials...")
+                try:
+                    self.client.loop_stop()
+                    self.client.disconnect()
+                except Exception:
+                    pass
+
+                self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                if self.runtime_mqtt["user"]:
+                    self.client.username_pw_set(self.runtime_mqtt["user"], self.runtime_mqtt["password"])
+                self.client.on_connect = self.on_connect
+                self.client.on_message = self.on_message
+                self.client.on_disconnect = self.on_disconnect
+
+                self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
+                self.client.loop_start()
+
+            logger.info("✅ Runtime system config applied")
+        except Exception as e:
+            logger.error(f"❌ Failed to reload runtime config: {e}")
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
@@ -126,7 +269,10 @@ class MQTTBridge:
             return
 
         try:
-            self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 60)
+            if self.loop and self.loop.is_running():
+                self.loop.create_task(self.load_runtime_config_from_db())
+
+            self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
             self.client.loop_start()
             self.loop.create_task(self.reload_topics_from_db())
             self.loop.create_task(self._flush_loop())  # ✅ Khởi động flush buffer
@@ -143,6 +289,7 @@ class MQTTBridge:
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
+                await self.load_runtime_config_from_db()
                 from app.models.config import Device, Station
                 from sqlalchemy import select
                 
@@ -189,7 +336,7 @@ class MQTTBridge:
                         "station_name": station.name,
                         "type": device.device_type,
                         "processor": self.processors_cache[proc_key],
-                        "config": station.config or {}
+                        "config": self._apply_runtime_defaults_to_station_config(station.config or {})
                     }
 
                 # Diff subscribe/unsubscribe
@@ -201,7 +348,7 @@ class MQTTBridge:
 
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
-            await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
+            await asyncio.sleep(self.topic_reload_interval)
 
     async def _flush_loop(self):
         """Background task: gom write buffer và flush xuống DB mỗi N giây."""
@@ -501,11 +648,11 @@ class MQTTBridge:
             throttle_key_station = f"{station_id}_{sensor_type}"
             last_saved = self.last_save_time[station_id].get(sensor_type, 0)
             
-            interval = settings.SAVE_INTERVAL_DEFAULT
-            if sensor_type == 'gnss': interval = settings.SAVE_INTERVAL_GNSS
-            elif sensor_type == 'imu': interval = settings.SAVE_INTERVAL_IMU
-            elif sensor_type == 'rain': interval = settings.SAVE_INTERVAL_RAIN
-            elif sensor_type == 'water': interval = settings.SAVE_INTERVAL_WATER
+            interval = self.runtime_save_intervals.get('default', settings.SAVE_INTERVAL_DEFAULT)
+            if sensor_type == 'gnss': interval = self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)
+            elif sensor_type == 'imu': interval = self.runtime_save_intervals.get('imu', settings.SAVE_INTERVAL_IMU)
+            elif sensor_type == 'rain': interval = self.runtime_save_intervals.get('rain', settings.SAVE_INTERVAL_RAIN)
+            elif sensor_type == 'water': interval = self.runtime_save_intervals.get('water', settings.SAVE_INTERVAL_WATER)
             
             time_since_last_save = current_timestamp - last_saved
             

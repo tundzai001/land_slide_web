@@ -887,7 +887,11 @@ async def get_stations(
                     break
             
             # ✅ Tính risk_level thực tế từ alerts (không hardcode LOW nữa)
-            risk_assessment = await _calculate_station_risk_assessment(db_data, station.id)
+            risk_assessment = await _calculate_station_risk_assessment(
+                db_data,
+                station.id,
+                station.config
+            )
             computed_risk = risk_assessment.get("overall_risk", "LOW")
             
             stations_with_status.append({
@@ -1000,7 +1004,11 @@ async def get_station_detail(
         computed_status = "online" if station_online else "offline"
         
         # 4. Tính risk assessment
-        risk_assessment = await _calculate_station_risk_assessment(db_data, station_id)
+        risk_assessment = await _calculate_station_risk_assessment(
+            db_data,
+            station_id,
+            station.config
+        )
 
         # 4.5 Lấy Pi devices gắn với trạm (pi_point, pi_center)
         pi_devices_status = []
@@ -1044,9 +1052,27 @@ async def get_station_detail(
         logger.error(f"Error loading station detail: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     
-async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: int) -> Dict:
-    """Helper: Tính toán risk assessment từ alerts"""
+async def _calculate_station_risk_assessment(
+    db_data: AsyncSession,
+    station_id: int,
+    station_config: Optional[Dict[str, Any]] = None
+) -> Dict:
+    """Helper: Tính toán risk assessment từ unresolved alerts còn hiệu lực thời gian."""
     try:
+        now_ts = int(time.time())
+        # Chỉ tính alert còn "tươi" để tránh kẹt WARNING/CRITICAL khi sensor đã ngừng gửi.
+        base_ttl = 180  # mặc định 3 phút nếu không có config
+        ttl_cfg = (station_config or {}).get('alert_ttl_seconds', {}) if station_config else {}
+        alert_ttl = {
+            'gnss_velocity': int(ttl_cfg.get('gnss_velocity', base_ttl)),
+            'rainfall': int(ttl_cfg.get('rainfall', base_ttl)),
+            'water_level': int(ttl_cfg.get('water_level', base_ttl)),
+            'tilt': int(ttl_cfg.get('tilt', base_ttl)),
+            'tilt_warning': int(ttl_cfg.get('tilt_warning', base_ttl)),
+            'tilt_critical': int(ttl_cfg.get('tilt_critical', base_ttl)),
+            'shock': int(ttl_cfg.get('shock', base_ttl)),
+        }
+
         result = await db_data.execute(
             select(model_data.Alert).where(
                 and_(
@@ -1056,9 +1082,16 @@ async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: 
             )
         )
         alerts = result.scalars().all()
+
+        # Lọc alert hết hạn theo category-specific TTL.
+        fresh_alerts = []
+        for a in alerts:
+            ttl = alert_ttl.get(a.category, base_ttl)
+            if (now_ts - int(a.timestamp or 0)) <= ttl:
+                fresh_alerts.append(a)
         
-        critical_count = sum(1 for a in alerts if a.level == "CRITICAL")
-        warning_count = sum(1 for a in alerts if a.level == "WARNING")
+        critical_count = sum(1 for a in fresh_alerts if a.level == "CRITICAL")
+        warning_count = sum(1 for a in fresh_alerts if a.level == "WARNING")
         
         if critical_count >= 2:
             overall_risk = "EXTREME"
@@ -1078,7 +1111,7 @@ async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: 
                     "message": a.message,
                     "timestamp": a.timestamp
                 }
-                for a in alerts
+                for a in fresh_alerts
             ]
         }
     except Exception as e:
