@@ -55,7 +55,17 @@ class MQTTBridge:
         self.processors_cache: Dict[str, Any] = {}
         
         self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
-        
+
+        # ============================================================
+        # Write buffer – gom nhiều bản ghi lại rồi flush 1 lần/chu kỳ
+        # Tránh mở đóng session liên tục khi có nhiều trạm
+        # ============================================================
+        self._sensor_buffer: list = []
+        self._station_update_buffer: dict = {}  # {station_id: {status, last_update}}
+        self._device_update_buffer: dict = {}   # {device_id: last_data_time}
+        self._buffer_lock = asyncio.Lock()
+        self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
+
         self.loop = None
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
@@ -119,6 +129,7 @@ class MQTTBridge:
             self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 60)
             self.client.loop_start()
             self.loop.create_task(self.reload_topics_from_db())
+            self.loop.create_task(self._flush_loop())  # ✅ Khởi động flush buffer
             logger.info("✅ MQTT Bridge started successfully.")
         except Exception as e:
             logger.error(f"❌ Failed to start MQTT Bridge: {e}")
@@ -191,6 +202,99 @@ class MQTTBridge:
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
             await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
+
+    async def _flush_loop(self):
+        """Background task: gom write buffer và flush xuống DB mỗi N giây."""
+        logger.info("🔄 Started DB Write Buffer Flush Task")
+        while True:
+            await asyncio.sleep(self._flush_interval)
+            await self._flush_write_buffer()
+
+    async def _flush_write_buffer(self):
+        """Flush toàn bộ buffer ra DB bằng bulk insert / batch update."""
+        async with self._buffer_lock:
+            if not self._sensor_buffer and not self._station_update_buffer:
+                return
+            sensor_batch = list(self._sensor_buffer)
+            station_batch = dict(self._station_update_buffer)
+            device_batch = dict(self._device_update_buffer)
+            self._sensor_buffer.clear()
+            self._station_update_buffer.clear()
+            self._device_update_buffer.clear()
+
+        # 1. Bulk insert sensor data (1 INSERT nhiều rows thay vì nhiều INSERT)
+        if sensor_batch:
+            try:
+                async with DataSessionLocal() as db:
+                    await db.execute(model_data.SensorData.__table__.insert(), sensor_batch)
+                    await db.commit()
+                logger.debug(f"💾 [BULK FLUSH] {len(sensor_batch)} sensor records saved")
+            except Exception as e:
+                logger.error(f"❌ Bulk sensor flush error: {e}")
+
+        # 2. Batch update Device.last_data_time + Station.last_update / status
+        if station_batch or device_batch:
+            try:
+                from app.models.config import Station, Device
+                async with ConfigSessionLocal() as db:
+                    for sid, vals in station_batch.items():
+                        await db.execute(
+                            Station.__table__.update().where(Station.id == sid).values(**vals)
+                        )
+                    for did, ts in device_batch.items():
+                        await db.execute(
+                            Device.__table__.update().where(Device.id == did).values(last_data_time=ts)
+                        )
+                    await db.commit()
+                logger.debug(f"💾 [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
+            except Exception as e:
+                logger.error(f"❌ Batch config update error: {e}")
+
+    async def _save_alert_immediate(self, device_id: int, station_id: int, sensor_record: dict, alert: dict, current_timestamp: int):
+        """Ghi trực tiếp xuống DB ngay lập tức khi có alert (không qua buffer)."""
+        try:
+            from app.models.config import Device, Station
+            async with ConfigSessionLocal() as db_config:
+                await db_config.execute(
+                    Device.__table__.update().where(Device.id == device_id).values(last_data_time=current_timestamp)
+                )
+                await db_config.execute(
+                    Station.__table__.update().where(Station.id == station_id).values(last_update=current_timestamp, status="online")
+                )
+                await db_config.commit()
+        except Exception as e:
+            logger.error(f"❌ Alert config update error: {e}")
+
+        try:
+            async with DataSessionLocal() as db_data:
+                db_data.add(model_data.SensorData(**sensor_record))
+                # Tìm alert chưa resolve cùng category, cập nhật hoặc tạo mới
+                res = await db_data.execute(
+                    select(model_data.Alert).where(
+                        and_(
+                            model_data.Alert.station_id == station_id,
+                            model_data.Alert.category == alert['category'],
+                            model_data.Alert.is_resolved == False
+                        )
+                    )
+                )
+                existing_alert = res.scalar_one_or_none()
+                if existing_alert:
+                    existing_alert.timestamp = current_timestamp
+                    existing_alert.level = alert['level']
+                    existing_alert.message = alert['message']
+                else:
+                    db_data.add(model_data.Alert(
+                        station_id=station_id,
+                        timestamp=current_timestamp,
+                        level=alert['level'],
+                        category=alert['category'],
+                        message=alert['message'],
+                        is_resolved=False
+                    ))
+                await db_data.commit()
+        except Exception as e:
+            logger.error(f"❌ Alert data save error: {e}")
 
     async def _save_imu_baseline(self, station_id: int, baseline_data: dict):
         """Lưu IMU baseline vào station config trong DB."""
@@ -432,82 +536,50 @@ class MQTTBridge:
 
         try:
             if save_data_now:
-                 async with ConfigSessionLocal() as db_config:
-                    from app.models.config import Device, Station
-                    await db_config.execute(
-                        Device.__table__.update().where(Device.id == device_id).values(last_data_time=current_timestamp)
-                    )
-                    await db_config.execute(
-                        Station.__table__.update().where(Station.id == station_id).values(last_update=current_timestamp, status="online")
-                    )
-                    await db_config.commit()
+                # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
+                val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
 
-            if save_data_now:
-                async with DataSessionLocal() as db_data:
-                    # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
-                    val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
-                    
-                    if sensor_type == 'gnss':
-                        val_1 = processed_data.get('speed_2d_mm_s', 0.0)
-                        val_2 = processed_data.get('total_displacement_mm', 0.0)
-                    
-                    elif sensor_type == 'rain':
-                        val_1 = processed_data.get('intensity_mm_h', 0.0)
-                        val_2 = processed_data.get('accumulated_mm', 0.0)
-                    
-                    elif sensor_type == 'water':
-                        val_1 = processed_data.get('water_level', 0.0)
-                        val_2 = processed_data.get('intensity_mm_h', 0.0)
-                    
-                    elif sensor_type == 'imu':
-                        val_1 = processed_data.get('roll', 0.0)
-                        val_2 = processed_data.get('pitch', 0.0)
-                        val_3 = processed_data.get('yaw', 0.0)
-                        val_4 = processed_data.get('total_accel', 0.0)
-                        val_5 = processed_data.get('battery', 0.0)
-                    
-                    # === LƯU VÀO DB ===
-                    db_data.add(model_data.SensorData(
-                        station_id=station_id,  
-                        timestamp=current_timestamp,
-                        sensor_type=sensor_type,
-                        data=processed_data,
-                        value_1=val_1,
-                        value_2=val_2,
-                        value_3=val_3,
-                        value_4=val_4,
-                        value_5=val_5
-                    ))
-                    # ✅ CẬP NHẬT LAST SAVE TIME (theo station + sensor_type)
-                    self.last_save_time[station_id][sensor_type] = current_timestamp
+                if sensor_type == 'gnss':
+                    val_1 = processed_data.get('speed_2d_mm_s', 0.0)
+                    val_2 = processed_data.get('total_displacement_mm', 0.0)
+                elif sensor_type == 'rain':
+                    val_1 = processed_data.get('intensity_mm_h', 0.0)
+                    val_2 = processed_data.get('accumulated_mm', 0.0)
+                elif sensor_type == 'water':
+                    val_1 = processed_data.get('water_level', 0.0)
+                    val_2 = processed_data.get('intensity_mm_h', 0.0)
+                elif sensor_type == 'imu':
+                    val_1 = processed_data.get('roll', 0.0)
+                    val_2 = processed_data.get('pitch', 0.0)
+                    val_3 = processed_data.get('yaw', 0.0)
+                    val_4 = processed_data.get('total_accel', 0.0)
+                    val_5 = processed_data.get('battery', 0.0)
 
-                    # Chỉ lưu cảnh báo nếu nguy hiểm
-                    if is_dangerous:
-                        # Find existing unresolved alert for this category
-                        res = await db_data.execute(
-                            select(model_data.Alert).where(
-                                and_(
-                                    model_data.Alert.station_id == station_id,
-                                    model_data.Alert.category == alert['category'],
-                                    model_data.Alert.is_resolved == False
-                                )
-                            )
-                        )
-                        existing_alert = res.scalar_one_or_none()
-                        if existing_alert:
-                            existing_alert.timestamp = current_timestamp
-                            existing_alert.level = alert['level']
-                            existing_alert.message = alert['message']
-                        else:
-                            db_data.add(model_data.Alert(
-                                station_id=station_id,
-                                timestamp=current_timestamp,
-                                level=alert['level'],
-                                category=alert['category'],
-                                message=alert['message'],
-                                is_resolved=False
-                            ))
-                    await db_data.commit()
+                sensor_record = {
+                    "station_id": station_id,
+                    "timestamp": current_timestamp,
+                    "sensor_type": sensor_type,
+                    "data": processed_data,
+                    "value_1": val_1,
+                    "value_2": val_2,
+                    "value_3": val_3,
+                    "value_4": val_4,
+                    "value_5": val_5,
+                }
+                self.last_save_time[station_id][sensor_type] = current_timestamp
+
+                if is_dangerous:
+                    # ✅ ALERT → Ghi thẳng xuống DB, không qua buffer
+                    await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
+                else:
+                    # ✅ BÌNH THƯỜNG → Đưa vào buffer, flush theo chu kỳ
+                    async with self._buffer_lock:
+                        self._sensor_buffer.append(sensor_record)
+                        self._station_update_buffer[station_id] = {
+                            "status": "online",
+                            "last_update": current_timestamp
+                        }
+                        self._device_update_buffer[device_id] = current_timestamp
 
         except Exception as e:
             logger.error(f"❌ DB Error: {e}")
