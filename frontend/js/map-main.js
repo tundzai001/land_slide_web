@@ -17,6 +17,7 @@ let realtimeImuScene, realtimeImuCamera, realtimeImuRenderer, realtimeImuControl
 let realtimeImuSensorBlock = null;
 let realtimeImuTargetQuaternion = null;
 let realtimeImuActive = false;
+let _THREE = null; // Cached Three.js module for use outside async import scope
 
 // =====================================================
 // MAIN INITIALIZATION
@@ -518,17 +519,24 @@ function setupEventListeners() {
                 chartImuWrapper.style.display = 'none';
                 realtimeImu3dWrapper.style.display = 'block';
                 btnToggleImu3d.innerHTML = '<i class="bi bi-graph-up me-1"></i>2D Chart';
-                // Initialize 3D scene if not yet initialized
-                if (!realtimeImuScene && currentStationData && currentStationData.sensor_data && currentStationData.sensor_data.imu) {
+                // Always re-init 3D scene when toggling on to ensure proper sizing
+                if (currentStationData && currentStationData.sensor_data && currentStationData.sensor_data.imu) {
                     const latest = currentStationData.sensor_data.imu.latest;
                     if (latest) {
-                        initRealtimeIMU3D(latest.roll || 0, latest.pitch || 0);
+                        // Small delay to let display:block take effect
+                        setTimeout(() => {
+                            initRealtimeIMU3D(latest.roll || 0, latest.pitch || 0);
+                        }, 50);
                     }
                 }
             } else {
                 realtimeImu3dWrapper.style.display = 'none';
                 chartImuWrapper.style.display = 'block';
                 btnToggleImu3d.innerHTML = '<i class="bi bi-box me-1"></i>3D View';
+                // Cleanup realtime scene on hide
+                if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
+                realtimeImuScene = null;
+                realtimeImuRenderer = null;
             }
         });
     }
@@ -1040,11 +1048,11 @@ function updateSidebarUI(data) {
             setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
 
             // Update realtime 3D if active
-            if (realtimeImuActive && realtimeImuSensorBlock) {
+            if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
                 const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
                 const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
-                const targetQuaternion = new THREE.Quaternion();
-                const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                const targetQuaternion = new _THREE.Quaternion();
+                const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
                 targetQuaternion.setFromEuler(euler);
                 realtimeImuTargetQuaternion = targetQuaternion;
             }
@@ -1390,19 +1398,58 @@ function renderLongTermAnalysis(data) {
 let gnssScene, gnssCamera, gnssRenderer, gnssControls, gnssAnimationId;
 let imuScene, imuCamera, imuRenderer, imuControls, imuAnimationId;
 
+// Helper: wait until a container has non-zero dimensions (handles CSS transitions/display:none)
+function waitForContainerSize(container, timeoutMs = 3000) {
+    return new Promise((resolve) => {
+        if (container.clientWidth > 0 && container.clientHeight > 0) {
+            resolve(true);
+            return;
+        }
+        const start = Date.now();
+        const check = () => {
+            if (container.clientWidth > 0 && container.clientHeight > 0) {
+                resolve(true);
+            } else if (Date.now() - start > timeoutMs) {
+                console.warn('[3D] Container still has 0 size after timeout, using fallback');
+                resolve(false);
+            } else {
+                requestAnimationFrame(check);
+            }
+        };
+        requestAnimationFrame(check);
+    });
+}
+
+// Helper: get container dimensions with fallback
+function getContainerDims(container) {
+    let w = container.clientWidth;
+    let h = container.clientHeight;
+    if (w <= 0 || h <= 0) {
+        // Fallback: use style dimensions or parent
+        const rect = container.getBoundingClientRect();
+        w = rect.width > 0 ? rect.width : 600;
+        h = rect.height > 0 ? rect.height : 350;
+    }
+    return { w, h };
+}
+
 async function init3DVisualizations(data) {
     try {
         const THREE = await import('three');
+        _THREE = THREE; // Cache for realtime updates
         const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
 
         // GNSS
         if (data.gnss && data.gnss.status === 'success' && data.gnss.time_series) {
             const gnssLoading = document.getElementById('gnss-3d-loading');
             if (gnssLoading) gnssLoading.style.display = 'block';
+            const gnssContainer = document.getElementById('container-3d-gnss');
+            // Wait for container to become visible (overlay transition)
+            await waitForContainerSize(gnssContainer, 2000);
             setTimeout(() => {
                 initGNSS3D(data.gnss.time_series, THREE, OrbitControls);
                 if (gnssLoading) gnssLoading.style.display = 'none';
-            }, 50);
+            }, 100);
         } else {
             const cGnss = document.getElementById('container-3d-gnss');
             if (cGnss) cGnss.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu GNSS 3D</div>';
@@ -1412,10 +1459,13 @@ async function init3DVisualizations(data) {
         if (data.imu && data.imu.status === 'success' && data.imu.time_series) {
             const imuLoading = document.getElementById('imu-3d-loading');
             if (imuLoading) imuLoading.style.display = 'block';
+            const imuContainer = document.getElementById('container-3d-imu');
+            // Wait for container to become visible (overlay transition)
+            await waitForContainerSize(imuContainer, 2000);
             setTimeout(() => {
                 initIMU3D(data.imu.time_series, THREE, OrbitControls);
                 if (imuLoading) imuLoading.style.display = 'none';
-            }, 50);
+            }, 100);
         } else {
             const cImu = document.getElementById('container-3d-imu');
             if (cImu) cImu.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu IMU 3D</div>';
@@ -1437,12 +1487,13 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
     gnssScene = new THREE.Scene();
     gnssScene.background = new THREE.Color(0x0a0e17);
 
-    const aspect = container.clientWidth / container.clientHeight;
+    const dims = getContainerDims(container);
+    const aspect = dims.w / dims.h;
     gnssCamera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
     gnssCamera.position.set(10, 10, 10);
 
     gnssRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    gnssRenderer.setSize(container.clientWidth, container.clientHeight);
+    gnssRenderer.setSize(dims.w, dims.h);
     container.appendChild(gnssRenderer.domElement);
 
     gnssControls = new OrbitControls(gnssCamera, gnssRenderer.domElement);
@@ -1528,13 +1579,19 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
     }
     animate();
 
-    // Resize handler
-    window.addEventListener('resize', () => {
-        if (!container) return;
-        gnssCamera.aspect = container.clientWidth / container.clientHeight;
+    // Resize handler + ResizeObserver for proper sizing after CSS transitions
+    function handleGnssResize() {
+        if (!container || !gnssRenderer || !gnssCamera) return;
+        const d = getContainerDims(container);
+        gnssCamera.aspect = d.w / d.h;
         gnssCamera.updateProjectionMatrix();
-        gnssRenderer.setSize(container.clientWidth, container.clientHeight);
-    });
+        gnssRenderer.setSize(d.w, d.h);
+    }
+    window.addEventListener('resize', handleGnssResize);
+    if (typeof ResizeObserver !== 'undefined') {
+        const gnssRo = new ResizeObserver(() => handleGnssResize());
+        gnssRo.observe(container);
+    }
 }
 
 function initIMU3D(timeSeries, THREE, OrbitControls) {
@@ -1549,13 +1606,14 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     imuScene.background = new THREE.Color(0x0b0e14);
     imuScene.fog = new THREE.FogExp2(0x0b0e14, 0.03);
 
-    const aspect = container.clientWidth / container.clientHeight;
+    const dims = getContainerDims(container);
+    const aspect = dims.w / dims.h;
     imuCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
     imuCamera.position.set(5, 6, 8);
 
     imuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     imuRenderer.setPixelRatio(window.devicePixelRatio);
-    imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    imuRenderer.setSize(dims.w, dims.h);
     imuRenderer.shadowMap.enabled = true;
     imuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(imuRenderer.domElement);
@@ -1678,10 +1736,9 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
 
     imuScene.add(sensorBlock);
 
-    // Data parsing
-    const rollData = timeSeries.roll || [];
-    const pitchData = timeSeries.pitch || [];
-    if (rollData.length === 0) return;
+    // Data parsing (backend sends 'rolls'/'pitches' plural)
+    const rollData = timeSeries.rolls || timeSeries.roll || [];
+    const pitchData = timeSeries.pitches || timeSeries.pitch || [];
 
     let progress = 0;
     const speed = 0.003; // Smooth flow
@@ -1739,13 +1796,19 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     }
     animate();
 
-    // Resize handler
-    window.addEventListener('resize', () => {
-        if (!container) return;
-        imuCamera.aspect = container.clientWidth / container.clientHeight;
+    // Resize handler + ResizeObserver for proper sizing after CSS transitions
+    function handleImuResize() {
+        if (!container || !imuRenderer || !imuCamera) return;
+        const d = getContainerDims(container);
+        imuCamera.aspect = d.w / d.h;
         imuCamera.updateProjectionMatrix();
-        imuRenderer.setSize(container.clientWidth, container.clientHeight);
-    });
+        imuRenderer.setSize(d.w, d.h);
+    }
+    window.addEventListener('resize', handleImuResize);
+    if (typeof ResizeObserver !== 'undefined') {
+        const imuRo = new ResizeObserver(() => handleImuResize());
+        imuRo.observe(container);
+    }
 }
 
 async function initRealtimeIMU3D(initialRoll, initialPitch) {
@@ -1757,19 +1820,23 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
 
     try {
         const THREE = await import('three');
+        _THREE = THREE; // Cache for realtime updates
         const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
 
         realtimeImuScene = new THREE.Scene();
         realtimeImuScene.background = new THREE.Color(0x0b0e14);
         realtimeImuScene.fog = new THREE.FogExp2(0x0b0e14, 0.03);
 
-        const aspect = container.clientWidth / container.clientHeight;
+        // Wait for wrapper to be visible before measuring
+        await waitForContainerSize(container, 2000);
+        const dims = getContainerDims(container);
+        const aspect = dims.w / dims.h;
         realtimeImuCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
         realtimeImuCamera.position.set(5, 6, 8);
 
         realtimeImuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         realtimeImuRenderer.setPixelRatio(window.devicePixelRatio);
-        realtimeImuRenderer.setSize(container.clientWidth, container.clientHeight);
+        realtimeImuRenderer.setSize(dims.w, dims.h);
         realtimeImuRenderer.shadowMap.enabled = true;
         realtimeImuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
         container.appendChild(realtimeImuRenderer.domElement);
@@ -1887,13 +1954,19 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         }
         animate();
 
-        // Resize handler
-        window.addEventListener('resize', () => {
-            if (!container) return;
-            realtimeImuCamera.aspect = container.clientWidth / container.clientHeight;
+        // Resize handler + ResizeObserver for proper sizing
+        function handleRealtimeImuResize() {
+            if (!container || !realtimeImuRenderer || !realtimeImuCamera) return;
+            const d = getContainerDims(container);
+            realtimeImuCamera.aspect = d.w / d.h;
             realtimeImuCamera.updateProjectionMatrix();
-            realtimeImuRenderer.setSize(container.clientWidth, container.clientHeight);
-        });
+            realtimeImuRenderer.setSize(d.w, d.h);
+        }
+        window.addEventListener('resize', handleRealtimeImuResize);
+        if (typeof ResizeObserver !== 'undefined') {
+            const rtImuRo = new ResizeObserver(() => handleRealtimeImuResize());
+            rtImuRo.observe(container);
+        }
 
     } catch (e) {
         console.error("ThreeJS not loaded for realtime IMU", e);

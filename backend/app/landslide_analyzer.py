@@ -171,17 +171,17 @@ class LandslideAnalyzer:
             # --- Bước 5: Inverse Velocity Method (Fukuzono) ---
             inverse_velocity = self._inverse_velocity_analysis(sorted_data)
 
-            # Nâng risk nếu Fukuzono dự báo sụp đổ gần
+            # Nâng risk nếu Fukuzono dự báo sụp lún gần
             if inverse_velocity.get('predicted_failure'):
                 days_to_failure = inverse_velocity.get('days_to_failure', 999)
                 if days_to_failure <= 7:
                     risk_level = "EXTREME"
-                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
                 elif days_to_failure <= 30:
                     if risk_level in ("LOW", "MEDIUM"):
                         risk_level = "HIGH"
                     # Luôn cập nhật message bất kể level
-                    warning_message = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+                    warning_message = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
 
             return {
                 "status": "success",
@@ -444,8 +444,8 @@ class LandslideAnalyzer:
 
     def _inverse_velocity_analysis(self, sorted_data: List[Dict], window_days: float = 3.0) -> Dict[str, Any]:
         """
-        Phương pháp Inverse Velocity (Fukuzono/Saito) để dự báo thời điểm sụp đổ.
-        Nếu 1/v giảm tuyến tính về 0, đó là dấu hiệu sắp sụp đổ.
+        Phương pháp Inverse Velocity (Fukuzono/Saito) để dự báo thời điểm sụp lún.
+        Nếu 1/v giảm tuyến tính về 0, đó là dấu hiệu sắp sụp lún.
         """
         result = {
             "available": False,
@@ -532,14 +532,14 @@ class LandslideAnalyzer:
                     result["days_to_failure"] = round(days_to_failure, 1)
                     failure_timestamp = timestamps[-1] + days_to_failure * 86400
                     result["predicted_failure_date"] = datetime.fromtimestamp(failure_timestamp).isoformat()
-                    result["message"] = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (R²={r_squared:.2f})"
+                    result["message"] = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày (R²={r_squared:.2f})"
                     result["confidence"] = "high" if r_squared > 0.85 else "medium"
                 else:
-                    result["message"] = "1/v đang giảm nhưng chưa hội tụ trong 1 năm tới."
+                    result["message"] = "hệ số đang giảm nhưng chưa có dấu hiệu sụt lún trong thời gian sắp tới."
             elif slope_inv_v < 0:
-                result["message"] = "1/v đang giảm nhưng R² thấp — cần theo dõi thêm."
+                result["message"] = "hệ số đang giảm nhưng độ tin cậy thấp — cần theo dõi thêm."
             else:
-                result["message"] = "Không có dấu hiệu hội tụ (1/v ổn định hoặc tăng)."
+                result["message"] = "Chưa có dấu hiệu sụt lún."
 
             return result
 
