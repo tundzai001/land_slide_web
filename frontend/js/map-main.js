@@ -520,8 +520,8 @@ function setupEventListeners() {
                 realtimeImu3dWrapper.style.display = 'block';
                 btnToggleImu3d.innerHTML = '<i class="bi bi-graph-up me-1"></i>2D Chart';
                 // Always re-init 3D scene when toggling on to ensure proper sizing
-                if (currentStationData && currentStationData.sensor_data && currentStationData.sensor_data.imu) {
-                    const latest = currentStationData.sensor_data.imu.latest;
+                if (currentStationData && currentStationData.sensors && currentStationData.sensors.imu) {
+                    const latest = currentStationData.sensors.imu.latest;
                     if (latest) {
                         // Small delay to let display:block take effect
                         setTimeout(() => {
