@@ -127,9 +127,26 @@ function handleRealtimeUpdate(message) {
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
 
-            // 3. Reset siren popup về idle nếu đang xem trạm này
+            // 3. Reset siren buttons to idle if viewing this station
             if (currentStationData && stationId === currentStationData.id) {
                 setSirenButtonState('idle');
+            }
+        }
+
+        // ✅ Nếu trạm chuyển sang EXTREME/CRITICAL → Cập nhật siren buttons
+        if ((riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') && currentStationData && stationId === currentStationData.id) {
+            const user = window.authManager?.getUserInfo();
+            const userRole = user?.role;
+            if (userRole === 'admin' || userRole === 'operator') {
+                currentAlertStationId = stationId;
+                // Transition idle/offline buttons to alerting
+                document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+                    const target = b.getAttribute('data-target');
+                    const currentState = b.getAttribute('data-siren-state');
+                    if (currentState === 'idle' || currentState === 'offline') {
+                        setSirenButtonState('alerting', target);
+                    }
+                });
             }
         }
 
@@ -184,6 +201,22 @@ function handleRealtimeUpdate(message) {
         setMarkerAlert(message.station_id, true);
         // Always attempt to play siren (it will handle its own dedup/overlap)
         playSiren();
+
+        // ✅ Cập nhật siren buttons nếu đang xem trạm này
+        if (currentStationData && message.station_id === currentStationData.id) {
+            const user = window.authManager?.getUserInfo();
+            const userRole = user?.role;
+            if (userRole === 'admin' || userRole === 'operator') {
+                currentAlertStationId = message.station_id;
+                document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+                    const target = b.getAttribute('data-target');
+                    const currentState = b.getAttribute('data-siren-state');
+                    if (currentState === 'idle') {
+                        setSirenButtonState('alerting', target);
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -815,20 +848,21 @@ function updateMarker(station) {
 // SIREN POPUP HELPER — Dùng bởi selectStation và Track button
 // =====================================================
 function _showSirenIfAlerting(stationId, data) {
+    const sirenSection = document.getElementById('siren-sidebar-section');
+
     // Only show siren controls for admin and operator roles
     const user = window.authManager?.getUserInfo();
     const userRole = user?.role;
     if (userRole !== 'admin' && userRole !== 'operator') {
-        const popup = document.getElementById('siren-bottom-popup');
-        if (popup) popup.style.bottom = '-120px';
+        if (sirenSection) sirenSection.style.display = 'none';
         return;
     }
 
+    // Always visible for admin/operator (grey when idle, red when alerting)
+    if (sirenSection) sirenSection.style.display = '';
+
     const risk = data.risk_assessment?.overall_risk || data.risk_level;
     const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
-
-    const popupStationName = document.getElementById('siren-popup-station');
-    if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
 
     // Default statuses based on pi_devices array from station detail API
     let pointDeviceStatus = 'idle';
@@ -1289,11 +1323,11 @@ function renderLongTermAnalysis(data) {
         if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
             warningEl.style.display = 'block';
             warningEl.className = `alert ${gnss.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'} mb-3`;
-            warningTextEl.textContent = gnss.warning_message;
+            warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
         } else if (gnss.risk_level === 'INFO') {
             warningEl.style.display = 'block';
             warningEl.className = `alert alert-success mb-3`;
-            warningTextEl.textContent = gnss.warning_message;
+            warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
         } else {
             warningEl.style.display = 'none';
         }
@@ -1305,10 +1339,10 @@ function renderLongTermAnalysis(data) {
         setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
         setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
 
-        const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+        const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
         const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
 
-        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '';
         document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
 
         const cusumBadge = document.getElementById('cusum-badge');
@@ -1891,7 +1925,7 @@ function renderImuLongTermSection(imuData) {
     if (imuData.risk_level === 'EXTREME' || imuData.risk_level === 'HIGH' || imuData.risk_level === 'MEDIUM') {
         warningEl.style.display = 'block';
         warningEl.className = `alert ${imuData.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'} mb-3`;
-        warningTextEl.textContent = imuData.warning_message;
+        warningTextEl.textContent = sanitizeLongTermText(imuData.warning_message);
     } else {
         warningEl.style.display = 'none';
     }
@@ -1905,9 +1939,9 @@ function renderImuLongTermSection(imuData) {
     setText('lt-imu-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
 
     // Trend
-    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
     const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
-    document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+    document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '';
     document.getElementById('imu-trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
 }
 
@@ -2075,22 +2109,22 @@ function renderInverseVelocitySection(data) {
     const warningTextEl = document.getElementById('inv-vel-warning-text');
     if (invVel.predicted_failure) {
         warningEl.style.display = 'block';
-        warningTextEl.textContent = invVel.message;
+        warningTextEl.textContent = sanitizeLongTermText(invVel.message);
     } else {
         warningEl.style.display = 'none';
     }
 
     // Metrics
     setText('inv-vel-prediction', invVel.predicted_failure
-        ? `⚠️ Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
-        : '✅ Không');
+        ? `Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
+        : 'Không');
     setText('inv-vel-days', invVel.predicted_failure
         ? `~${invVel.days_to_failure} ngày`
         : 'N/A');
     setText('inv-vel-r2', invVel.r_squared !== undefined ? invVel.r_squared.toFixed(4) : '--');
     setText('inv-vel-confidence', invVel.confidence
-        ? (invVel.confidence === 'high' ? '🔴 Cao' : '🟡 Trung bình')
-        : invVel.message || '--');
+        ? (invVel.confidence === 'high' ? 'Cao' : 'Trung bình')
+        : sanitizeLongTermText(invVel.message) || '--');
 
     // Chart
     if (invVel.time_series) {
@@ -2106,7 +2140,7 @@ function renderInverseVelocitySection(data) {
                 labels: invVel.time_series.labels,
                 datasets: [
                     {
-                        label: '1/Velocity (thực tế)',
+                        label: 'hệ số (thời gian thực)',
                         data: invVel.time_series.inverse_velocity,
                         borderColor: '#ef4444',
                         backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -2116,7 +2150,7 @@ function renderInverseVelocitySection(data) {
                         fill: true
                     },
                     {
-                        label: 'Đường xu hướng (Linear)',
+                        label: 'Đường xu hướng',
                         data: invVel.time_series.trend_line,
                         borderColor: '#fbbf24',
                         borderWidth: 2,
@@ -2297,7 +2331,7 @@ function renderMultiWindowSection(data) {
 
     const windowLabels = { 7: '7 ngày', 30: '30 ngày', 90: '90 ngày' };
     const windowIcons = { 7: 'bi-calendar-day', 30: 'bi-calendar-month', 90: 'bi-calendar3' };
-    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
     const trendTexts = { 'accelerating': 'Tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Giảm tốc' };
 
     cardsContainer.innerHTML = (mw.windows || []).map(w => {
@@ -2317,11 +2351,18 @@ function renderMultiWindowSection(data) {
                     <div class="text-muted small mb-2"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
                     <div class="fs-4 fw-bold text-primary">${w.velocity_mm_year.toFixed(1)} <small class="fs-6 text-muted">mm/năm</small></div>
                     <div class="small mt-1">Dịch chuyển: <strong>${w.displacement_mm.toFixed(1)} mm</strong></div>
-                    <div class="small">Xu hướng: ${trendIcons[w.trend] || '❓'} ${trendTexts[w.trend] || '--'}</div>
+                    <div class="small">Xu hướng: ${trendIcons[w.trend] || ''} ${trendTexts[w.trend] || '--'}</div>
                     <div class="small text-muted">${w.data_points} điểm dữ liệu</div>
                 </div>
             </div>`;
     }).join('');
+}
+
+function sanitizeLongTermText(text) {
+    return String(text || '')
+        .replace(/[📈✅📉🚨]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 }
 
 function setText(id, val) {
@@ -2492,8 +2533,7 @@ function filterStations(searchTerm) {
  *   - offline: xám đen, disabled (thiết bị Pi mất kết nối)
  */
 function setSirenButtonState(state, target = null) {
-    const popup = document.getElementById('siren-bottom-popup');
-    if (!popup) return;
+    const sirenSection = document.getElementById('siren-sidebar-section');
 
     const btns = target
         ? document.querySelectorAll(`.btn-siren-toggle[data-target="${target}"]`)
@@ -2506,9 +2546,9 @@ function setSirenButtonState(state, target = null) {
         switch (state) {
             case 'idle':
                 btn.disabled = true;
-                btn.classList.add('disabled', 'btn-danger');
-                btn.classList.remove('btn-success', 'btn-secondary');
-                btn.style.opacity = '1';
+                btn.classList.remove('btn-danger', 'btn-success');
+                btn.classList.add('disabled', 'btn-secondary');
+                btn.style.opacity = '0.5';
                 btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${iconBase}`;
                 break;
             case 'alerting':
@@ -2529,24 +2569,11 @@ function setSirenButtonState(state, target = null) {
                 btn.disabled = true;
                 btn.classList.remove('btn-danger', 'btn-success');
                 btn.classList.add('btn-secondary', 'disabled');
-                btn.style.opacity = '0.6';
+                btn.style.opacity = '0.5';
                 btn.innerHTML = `<i class="bi bi-plug-fill me-1"></i>Offline`;
                 break;
         }
     });
-
-    // Check if any button is NOT idle and NOT offline, if so, show popup
-    const allBtns = document.querySelectorAll('.btn-siren-toggle');
-    const anyActive = Array.from(allBtns).some(b => {
-        const s = b.getAttribute('data-siren-state');
-        return s !== 'idle' && s !== 'offline';
-    });
-
-    if (!anyActive) {
-        popup.style.bottom = '-120px';
-    } else {
-        popup.style.bottom = '8px';
-    }
 }
 
 // =========================================================================
