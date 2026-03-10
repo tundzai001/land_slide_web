@@ -85,6 +85,19 @@ async def lifespan(app: FastAPI):
         async with data_engine.begin() as conn:
             await conn.run_sync(model_data.BaseData.metadata.create_all)
         logger.info("✓ Data database initialized")
+
+        # 3b. Đảm bảo composite index tồn tại (idempotent, không ảnh hưởng nếu đã có)
+        async with data_engine.connect() as conn:
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_sensor_data_station_type_ts "
+                "ON sensor_data (station_id, sensor_type, timestamp)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_sensor_data_station_ts "
+                "ON sensor_data (station_id, timestamp)"
+            ))
+            await conn.commit()
+        logger.info("✓ sensor_data composite indexes ensured")
         
         # 4. Tạo Admin mặc định
         async with asyncio.timeout(10):
