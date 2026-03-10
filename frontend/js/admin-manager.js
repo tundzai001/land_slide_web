@@ -18,6 +18,8 @@ class AdminManager {
         this.velocityModal = null;
         this.isEditMode = false;
         this.currentStationId = null;
+        this.currentStationConfig = {};
+        this.stationPresetConfirm = null;
 
         // Data cache
         this.projectsData = null;
@@ -567,6 +569,8 @@ class AdminManager {
     openAddStationModal() {
         this.isEditMode = false;
         this.currentStationId = null;
+        this.currentStationConfig = {};
+        this.stationPresetConfirm = null;
         this.currentStep = 1;
 
         document.getElementById('stationConfigForm').reset();
@@ -606,6 +610,12 @@ class AdminManager {
         document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.rain);
         document.getElementById('offline-water-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.water);
         document.getElementById('offline-imu-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.imu);
+
+        // Reset confirm steps source indicators cho trạm mới
+        const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
+        const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
+        if (rainConfirmSrc) { rainConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; rainConfirmSrc.className = 'text-warning small'; }
+        if (waterConfirmSrc) { waterConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; waterConfirmSrc.className = 'text-warning small'; }
 
         document.getElementById('mqtt-empty-state').style.display = 'block';
         document.getElementById('btn-delete-station').style.display = 'none';
@@ -684,6 +694,7 @@ class AdminManager {
 
             // STEP 3: Thresholds
             const cfg = stationData.config || {};
+            this.currentStationConfig = cfg;
 
             // ✅ ĐỌC OFFLINE THRESHOLDS
             const offlineThresholds = cfg.offline_thresholds || {};
@@ -724,14 +735,35 @@ class AdminManager {
             document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
             document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
 
-            const rainCfg = cfg.RainAlerting || {};
-            document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
-            document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
-            document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
+        // Water confirm steps - hiển thị nguồn giá trị
+        const waterConfirmEl = document.getElementById('cfg-water-confirm');
+        const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
+        if (waterConfirmEl) {
+            const wcs = waterCfg.water_confirm_steps;
+            waterConfirmEl.value = wcs ?? 3;
+            if (waterConfirmSrc) {
+                waterConfirmSrc.textContent = wcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
+            }
+        }
 
+        const rainCfg = cfg.RainAlerting || {};
+        document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
+        document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
+        document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
+
+        // Rain confirm steps - hiển thị nguồn giá trị
+        const rainConfirmEl = document.getElementById('cfg-rain-confirm');
+        const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
+        if (rainConfirmEl) {
+            const rcs = rainCfg.rain_confirm_steps;
+            rainConfirmEl.value = rcs ?? 2;
+            if (rainConfirmSrc) {
+                rainConfirmSrc.textContent = rcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
+            }
+        }
             const gnssCfg = cfg.GnssAlerting || {};
-            document.getElementById('cfg-gnss-hdop').value = gnssCfg.gnss_max_hdop ?? 4.0;
-            document.getElementById('cfg-gnss-steps').value = gnssCfg.gnss_confirm_steps ?? 3;
             document.getElementById('cfg-gnss-streak').value = gnssCfg.gnss_safe_streak ?? 10;
             document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
 
@@ -839,6 +871,10 @@ class AdminManager {
     highlightPreset(presetName) {
         this.activePreset = presetName || null;
 
+        if (!this.activePreset || this.activePreset === 'custom') {
+            this.stationPresetConfirm = null;
+        }
+
         // Reset all buttons visual styling to transparent/outlined
         const buttons = document.querySelectorAll('.preset-btn');
         buttons.forEach(btn => {
@@ -921,6 +957,18 @@ class AdminManager {
         if (!preset) return;
 
         // ✅ ĐIỀN TỰ ĐỘNG CÁC GIÁ TRỊ VÀO FORM
+
+        // Rain/Water confirm steps - giờ có input field riêng
+        const rainConfirmEl = document.getElementById('cfg-rain-confirm');
+        const waterConfirmEl = document.getElementById('cfg-water-confirm');
+        if (rainConfirmEl) rainConfirmEl.value = preset.rain_confirm;
+        if (waterConfirmEl) waterConfirmEl.value = preset.water_confirm;
+
+        // Cập nhật source indicator
+        const rainSrc = document.getElementById('cfg-rain-confirm-source');
+        const waterSrc = document.getElementById('cfg-water-confirm-source');
+        if (rainSrc) { rainSrc.textContent = '🔧 Từ preset: ' + presetName; rainSrc.className = 'text-info small'; }
+        if (waterSrc) { waterSrc.textContent = '🔧 Từ preset: ' + presetName; waterSrc.className = 'text-info small'; }
 
         // GNSS Quality
         const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
@@ -1035,6 +1083,10 @@ class AdminManager {
 
         if (hasError) return;
 
+        // Rain/Water confirm steps: đọc trực tiếp từ input (user đã thấy và có thể sửa)
+        const finalRainConfirm = parseInt(document.getElementById('cfg-rain-confirm')?.value) || 2;
+        const finalWaterConfirm = parseInt(document.getElementById('cfg-water-confirm')?.value) || 3;
+
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
         const config = {
             active_preset: this.activePreset || '',
@@ -1047,13 +1099,13 @@ class AdminManager {
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
-                water_confirm_steps: 3  // ✅ THÊM: Default confirmation steps
+                water_confirm_steps: finalWaterConfirm
             },
             RainAlerting: {
                 rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch').value),
                 rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning').value),
                 rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value),
-                rain_confirm_steps: 2  // ✅ THÊM: Default confirmation steps
+                rain_confirm_steps: finalRainConfirm
             },
             GnssAlerting: {
                 gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
