@@ -130,7 +130,10 @@
                 <div class="sensor-compact">
                     <!-- GNSS -->
                     <div class="sensor-item">
-                        <div class="sensor-label"><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity</div>
+                        <div class="sensor-label d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity</span>
+                            <span id="gnss-fix-badge" class="gnss-fix-badge GNSS_UNKNOWN">NO DATA</span>
+                        </div>
                         <div class="sensor-value-large" id="val-gnss-vel">--<span class="sensor-unit">mm/s</span></div>
                     </div>
 

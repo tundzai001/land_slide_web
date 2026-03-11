@@ -989,7 +989,11 @@ async def get_station_detail(
             )
             history = history_result.scalars().all()
             
+            # ✅ Per-sensor online check (kiểm tra riêng từng sensor)
+            sensor_is_online = bool(latest and (current_time - latest.timestamp) < threshold)
+
             sensor_data[sensor_type] = {
+                "is_online": sensor_is_online,
                 "latest": latest.data if latest else None,
                 "history": [
                     {

@@ -484,8 +484,44 @@ class MQTTBridge:
                 res = processor.process_gngga(raw_payload)
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
+                elif res and res.get('type') == 'gnss_status':
+                    # Broadcast GNSS fix status even when velocity is skipped (fix != 4)
+                    try:
+                        await manager.broadcast({
+                            "type": "sensor_status",
+                            "station_id": station_id,
+                            "sensor_type": "gnss",
+                            "timestamp": current_timestamp,
+                            "data": {
+                                "status": res.get('status'),
+                                "fix_quality": res.get('fix_quality'),
+                                "fix_mode": res.get('fix_mode'),
+                                "message": res.get('message')
+                            }
+                        })
+                    except Exception as ws_e:
+                        logger.error(f"❌ WS GNSS status error: {ws_e}")
+                    return
                 elif res and res.get('type') == 'origin_locked':
                     logger.info(f"🎯 [{station_name}] GNSS Origin locked")
+                    return
+                elif res and res.get('type') == 'origin_status':
+                    # During origin collection, notify UI about current fix mode
+                    try:
+                        await manager.broadcast({
+                            "type": "sensor_status",
+                            "station_id": station_id,
+                            "sensor_type": "gnss",
+                            "timestamp": current_timestamp,
+                            "data": {
+                                "status": res.get('status'),
+                                "fix_quality": res.get('fix_quality'),
+                                "fix_mode": res.get('fix_mode'),
+                                "message": res.get('message')
+                            }
+                        })
+                    except Exception as ws_e:
+                        logger.error(f"❌ WS GNSS origin status error: {ws_e}")
                     return
             else:
                 try:

@@ -55,6 +55,10 @@ function initialize() {
 
     setInterval(loadStations, 30000);
 
+    // ✅ Refresh sensor online status of currently-viewed station every 30s
+    // (handles case where a device goes offline while the sidebar is already open)
+    setInterval(refreshCurrentStationDetail, 30000);
+
     console.log('✅ [MAP] Initialization complete!');
 }
 
@@ -106,6 +110,14 @@ function handleRealtimeUpdate(message) {
     if (message.type === 'sensor_data') {
         if (currentStationData && message.station_id === currentStationData.id) {
             updateRealtimeSensorValues(message);
+        }
+    }
+
+    if (message.type === 'sensor_status') {
+        if (currentStationData && message.station_id === currentStationData.id && message.sensor_type === 'gnss') {
+            updateGnssFixBadge(message.data?.fix_mode, message.data?.fix_quality);
+            // Low-trust GNSS fixes should not keep stale velocity visible
+            setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
         }
     }
 
@@ -227,6 +239,8 @@ function updateRealtimeSensorValues(message) {
     console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
 
     if (sensor_type === 'gnss' && data) {
+        updateGnssFixBadge(data.fix_mode, data.fix_quality);
+
         const velocityMmS = data.velocity_mm_s ||
             data.speed_2d_mm_s ||
             data.speed_mm_s ||
@@ -704,6 +718,24 @@ async function loadStations() {
     }
 }
 
+// ✅ Silently re-fetch current station detail to refresh per-sensor is_online status
+async function refreshCurrentStationDetail() {
+    if (!currentStationData) return;
+    const sidebar = document.getElementById('detail-sidebar');
+    if (!sidebar || !sidebar.classList.contains('active')) return;
+
+    try {
+        const res = await fetch(`/api/stations/${currentStationData.id}/detail`);
+        if (!res.ok) return;
+        const data = await res.json();
+        currentStationData = data;
+        updateSidebarUI(currentStationData);
+        console.log(`🔄 [MAP] Refreshed detail for station ${currentStationData.id}`);
+    } catch (e) {
+        console.warn('⚠️ [MAP] Silent detail refresh failed:', e);
+    }
+}
+
 function renderStationList(stations) {
     const container = document.getElementById('station-list-container');
     if (!container) return;
@@ -963,6 +995,55 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     return num.toFixed(decimals);
 }
 
+function updateGnssFixBadge(fixMode, fixQuality) {
+    const badge = document.getElementById('gnss-fix-badge');
+    if (!badge) return;
+
+    let cls = 'GNSS_UNKNOWN';
+    let text = 'NO DATA';
+
+    switch (fixMode) {
+        case 'RTK_FIXED':
+            cls = 'GNSS_RTK_FIXED';
+            text = 'RTK FIXED';
+            break;
+        case 'RTK_FLOAT':
+            cls = 'GNSS_RTK_FLOAT';
+            text = 'RTK FLOAT';
+            break;
+        case 'DGPS_FLOAT':
+            cls = 'GNSS_DGPS_FLOAT';
+            text = 'DGPS FLOAT';
+            break;
+        case 'GPS_SINGLE_NO_RTK':
+            cls = 'GNSS_SINGLE';
+            text = 'NO RTK';
+            break;
+        case 'INVALID':
+            cls = 'GNSS_INVALID';
+            text = 'INVALID';
+            break;
+        default:
+            if (fixQuality === 4) {
+                cls = 'GNSS_RTK_FIXED';
+                text = 'RTK FIXED';
+            } else if (fixQuality === 5) {
+                cls = 'GNSS_RTK_FLOAT';
+                text = 'RTK FLOAT';
+            } else if (fixQuality === 2) {
+                cls = 'GNSS_DGPS_FLOAT';
+                text = 'DGPS FLOAT';
+            } else if (fixQuality === 1) {
+                cls = 'GNSS_SINGLE';
+                text = 'NO RTK';
+            }
+            break;
+    }
+
+    badge.className = `gnss-fix-badge ${cls}`;
+    badge.textContent = text;
+}
+
 function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
@@ -1004,7 +1085,19 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
 
-    // ✅ Khi thiết bị offline → hiển thị '--' cho TẤT CẢ sensor
+    // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
+    const gnssOnline  = data.status !== 'offline' && (data.sensors?.gnss?.is_online  ?? false);
+    const rainOnline  = data.status !== 'offline' && (data.sensors?.rain?.is_online  ?? false);
+    const waterOnline = data.status !== 'offline' && (data.sensors?.water?.is_online ?? false);
+    const imuOnline   = data.status !== 'offline' && (data.sensors?.imu?.is_online   ?? false);
+
+    if (gnssOnline) {
+        updateGnssFixBadge(gnssLatest?.fix_mode, gnssLatest?.fix_quality);
+    } else {
+        updateGnssFixBadge('UNKNOWN', 0);
+    }
+
+    // ✅ Khi toàn trạm offline → hiển thị '--' cho TẤT CẢ sensor
     if (data.status === 'offline') {
         setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
         setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
@@ -1024,46 +1117,70 @@ function updateSidebarUI(data) {
         const batteryContainer = document.getElementById('battery-container');
         if (batteryContainer) batteryContainer.style.display = 'none';
     } else {
-        const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
-        setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
-
-        const rainIntensity = rainLatest?.intensity_mm_h ?? null;
-        setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
-
-        const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
-        setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
-
-        setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
-        setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
-        setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
-
-        // ✅ Delta values (secondary display)
-        setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-        setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-        setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
-
-        // Use backend drift calculation if available
-        if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-            setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
-            setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
-
-            // Update realtime 3D if active
-            if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
-                const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
-                const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
-                const targetQuaternion = new _THREE.Quaternion();
-                const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
-                targetQuaternion.setFromEuler(euler);
-                realtimeImuTargetQuaternion = targetQuaternion;
-            }
+        // GNSS: chỉ hiện giá trị khi sensor đang online
+        if (gnssOnline) {
+            const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
+            setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
         } else {
-            updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
+            setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
         }
 
-        // ✅ Battery Voltage: hiển thị nếu có giá trị > 0
+        // Rain
+        if (rainOnline) {
+            const rainIntensity = rainLatest?.intensity_mm_h ?? null;
+            setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
+        } else {
+            setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
+        }
+
+        // Water
+        if (waterOnline) {
+            const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
+            setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+        } else {
+            setHTML('val-water', `--<span class="sensor-unit">m</span>`);
+        }
+
+        // IMU
+        if (imuOnline) {
+            setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
+            setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
+            setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
+            setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
+            setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
+            setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+
+            // Use backend drift calculation if available
+            if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
+                setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+                setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
+
+                // Update realtime 3D if active
+                if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
+                    const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
+                    const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
+                    const targetQuaternion = new _THREE.Quaternion();
+                    const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                    targetQuaternion.setFromEuler(euler);
+                    realtimeImuTargetQuaternion = targetQuaternion;
+                }
+            } else {
+                updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
+            }
+        } else {
+            setText('val-imu-roll', '--°');
+            setText('val-imu-pitch', '--°');
+            setText('val-imu-yaw', '--°');
+            setText('val-imu-delta-roll', '--°');
+            setText('val-imu-delta-pitch', '--°');
+            setText('val-imu-delta-yaw', '--°');
+            updateImuDrift(null, null);
+        }
+
+        // ✅ Battery Voltage: chỉ hiển thị khi IMU online và có giá trị > 0
         const batteryContainer = document.getElementById('battery-container');
         const batteryVal = imuLatest?.battery;
-        if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+        if (imuOnline && batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
             if (batteryContainer) batteryContainer.style.display = '';
             setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
         } else {

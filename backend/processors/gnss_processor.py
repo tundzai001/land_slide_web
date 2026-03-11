@@ -58,7 +58,20 @@ class GNSSVelocityProcessor:
         
         self._schedule_load_origin()
         
-        logger.info(f"GNSS Processor init for device {device_id}: State={self.state}")
+        logger.info(
+            f"GNSS Processor init for device {device_id}: State={self.state}, velocity_mode=fix4_only"
+        )
+
+    def _fix_mode(self, fix_quality: int) -> str:
+        # NMEA GGA fix quality mapping for UI/log readability
+        mapping = {
+            0: "INVALID",
+            1: "GPS_SINGLE_NO_RTK",
+            2: "DGPS_FLOAT",
+            4: "RTK_FIXED",
+            5: "RTK_FLOAT"
+        }
+        return mapping.get(fix_quality, "UNKNOWN")
 
     def _schedule_load_origin(self):
         try:
@@ -163,12 +176,15 @@ class GNSSVelocityProcessor:
             return None
 
     def _handle_origin_collection(self, gngga_string, fix_quality):
-        if fix_quality < self.min_fix_quality:
+        # Chỉ lock origin khi RTK FIXED (fix=4)
+        if fix_quality != 4:
             self.stats['low_quality_rejected'] += 1
             return {
                 "type": "origin_status",
                 "status": "WAITING_FOR_QUALITY",
-                "message": f"Low quality fix ({fix_quality} < {self.min_fix_quality})"
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "message": f"Waiting RTK FIXED (fix=4), current={fix_quality} ({self._fix_mode(fix_quality)})"
             }
 
         point = self._parse_gngga(gngga_string)
@@ -232,9 +248,16 @@ class GNSSVelocityProcessor:
         }
 
     def _handle_processing(self, gngga_string, fix_quality):
-        if fix_quality < self.min_fix_quality:
+        # Chỉ tính vận tốc/displacement khi RTK FIXED (fix=4)
+        if fix_quality != 4:
             self.stats['low_quality_rejected'] += 1
-            return None
+            return {
+                "type": "gnss_status",
+                "status": "UNTRUSTED_FIX",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "message": "Velocity skipped: only fix=4 (RTK FIXED) is accepted"
+            }
 
         point = self._parse_gngga(gngga_string)
         if not point: return None
@@ -299,6 +322,7 @@ class GNSSVelocityProcessor:
                 'speed_2d': float(np.sqrt(v_enu_filtered[0]**2 + v_enu_filtered[1]**2)),
                 'speed_2d_mm_s': float(np.sqrt(v_enu_filtered[0]**2 + v_enu_filtered[1]**2) * 1000),
                 'fix_quality': point['fix_quality'], 
+                'fix_mode': self._fix_mode(point['fix_quality']),
                 'num_sats': point['num_sats'], 
                 'hdop': point['hdop']
             }
