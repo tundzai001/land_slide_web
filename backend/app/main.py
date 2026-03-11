@@ -1038,12 +1038,19 @@ async def get_station_detail(
             logger.error(f"Error fetching Pi devices for station {station_id}: {e}")
 
         # 5. Trả về response
+        mqtt_connected = False
+        try:
+            mqtt_connected = bool(mqtt_service.client.is_connected())
+        except Exception:
+            mqtt_connected = False
+
         return {
             "id": station.id,
             "station_code": station.station_code,
             "name": station.name,
             "location": station.location,
             "status": computed_status,
+            "mqtt_connected": mqtt_connected,
             "last_update": latest_data_timestamp if has_recent_data else station.last_update,
             "config": station.config,
             "sensors": sensor_data,

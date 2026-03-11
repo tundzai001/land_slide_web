@@ -891,6 +891,11 @@ class MQTTBridge:
                     self.last_save_time[station_id][sensor_type] = current_timestamp
                     # ✅ ALERT → Ghi thẳng xuống DB, không qua buffer
                     await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
+                elif is_just_resolved:
+                    # ✅ RESOLVE → Buffer rồi flush ngay, tránh mất dữ liệu khi server restart
+                    await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data)
+                    await self._flush_write_buffer()
+                    logger.info(f"💾 [RESOLVE FLUSH] {station_name} - {sensor_type.upper()} ts={current_timestamp} written immediately")
                 else:
                     # ✅ BÌNH THƯỜNG → Đưa vào buffer, flush theo chu kỳ
                     await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data)

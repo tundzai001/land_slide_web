@@ -1063,6 +1063,25 @@ body:has(.charts-panel.active) .toggle-list-btn {
     background: var(--text-secondary);
 }
 
+.stale-info {
+    margin-top: -8px;
+    margin-bottom: 14px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px dashed rgba(245, 158, 11, 0.45);
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.stale-info .badge-label {
+    color: #b45309;
+    font-weight: 700;
+    margin-right: 6px;
+}
+
 /*  SEARCH INPUT  */
 #search-station {
     background: var(--bg-primary);

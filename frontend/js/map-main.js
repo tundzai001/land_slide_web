@@ -106,7 +106,7 @@ function setupWebSocket() {
 }
 
 function handleRealtimeUpdate(message) {
-    console.log('📡 [WS] Received:', message);
+    //console.log('📡 [WS] Received:', message);
 
     if (message.type === 'sensor_data') {
         if (currentStationData && message.station_id === currentStationData.id) {
@@ -223,14 +223,23 @@ function handleRealtimeUpdate(message) {
         playSiren();
 
         // ✅ Cập nhật siren buttons nếu đang xem trạm này
+        // Phân biệt pi_point / pi_center — chỉ set 'alerting' nếu thiết bị online
         if (currentStationData && message.station_id === currentStationData.id) {
             const user = window.authManager?.getUserInfo();
             const userRole = user?.role;
             if (userRole === 'admin' || userRole === 'operator') {
                 currentAlertStationId = message.station_id;
+                const piDevices = currentStationData.pi_devices || [];
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
                     const target = b.getAttribute('data-target');
                     const currentState = b.getAttribute('data-siren-state');
+                    if (currentState === 'offline') return; // thiết bị offline, bỏ qua
+                    // Kiểm tra pi device tương ứng có online không
+                    const piDev = piDevices.find(d => d.device_type === target);
+                    if (piDev && !piDev.is_online) {
+                        setSirenButtonState('offline', target);
+                        return;
+                    }
                     if (currentState === 'idle') {
                         setSirenButtonState('alerting', target);
                     }
@@ -248,7 +257,7 @@ function updateRealtimeSensorValues(message) {
         latestRealtimeSensorTs[`${stationId}_${sensor_type}`] = Number(timestamp);
     }
 
-    console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
+    //console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
 
     if (sensor_type === 'gnss' && data) {
         updateGnssFixBadge(data.fix_mode, data.fix_quality);
@@ -260,7 +269,7 @@ function updateRealtimeSensorValues(message) {
             (data.velocity ? data.velocity * 1000 : null) ||
             (data.speed ? data.speed * 1000 : null) || 0;
 
-        console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
+        //console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
 
         const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
@@ -723,6 +732,15 @@ async function loadStations() {
                 updateMarker(station);
             }
 
+            // ✅ Sync marker blinking state từ risk_level API (restore sau reload)
+            const _isAlertingRisk = (station.risk_level === 'EXTREME' || station.risk_level === 'HIGH')
+                && station.status !== 'offline';
+            if (_isAlertingRisk && !markerAlertState[station.id]) {
+                setMarkerAlert(station.id, true);
+            } else if (!_isAlertingRisk && markerAlertState[station.id]) {
+                clearMarkerAlert(station.id);
+            }
+
             // ✅ THÊM: Nếu trạm đang xem bị đổi status (ví dụ offline/online, hoặc đổi risk_level)
             if (currentStationData && currentStationData.id === station.id) {
                 if (currentStationData.status !== station.status || currentStationData.risk_level !== station.risk_level) {
@@ -1006,6 +1024,26 @@ async function selectStation(stationId, options = {}) {
             _showSirenIfAlerting(stationId, data);
         }
 
+        // ✅ Restore alert banner + siren buttons im lặng nếu trạm đang có alert từ DB (sau reload)
+        const _banner = document.getElementById('alert-banner');
+        const _riskLevel = data.risk_assessment?.overall_risk || 'LOW';
+        const _activeAlerts = data.risk_assessment?.active_alerts || [];
+        if (!_banner?.classList.contains('show') &&
+            (_riskLevel === 'HIGH' || _riskLevel === 'EXTREME') &&
+            _activeAlerts.length > 0 &&
+            data.status !== 'offline') {
+            const _topAlert = _activeAlerts.find(a => a.level === 'CRITICAL') || _activeAlerts[0];
+            // Show banner (silent — không kêu còi browser)
+            showAlertBanner({
+                station_id: data.id,
+                level: _topAlert.level,
+                message: _topAlert.message,
+                sensor_type: _topAlert.category
+            }, { silent: true });
+            // Sync siren buttons đúng per-device (đã handle offline/online trong _showSirenIfAlerting)
+            _showSirenIfAlerting(data.id, data);
+        }
+
     } catch (e) {
         console.error('❌ [MAP] Error loading station detail:', e);
         window.toast?.error('Failed to load station info');
@@ -1122,12 +1160,15 @@ function updateSidebarUI(data) {
     const stationId = data.id;
     const imuApiTs = Number(data.sensors?.imu?.latest_timestamp || 0);
     const imuRealtimeTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
+    const latestSensorTs = getLatestSensorTimestamp(data);
 
     // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
-    const gnssOnline  = data.status !== 'offline' && (data.sensors?.gnss?.is_online  ?? false);
-    const rainOnline  = data.status !== 'offline' && (data.sensors?.rain?.is_online  ?? false);
-    const waterOnline = data.status !== 'offline' && (data.sensors?.water?.is_online ?? false);
-    const imuOnline   = data.status !== 'offline' && (data.sensors?.imu?.is_online   ?? false);
+    const mqttConnected = data.mqtt_connected !== false;
+    renderStaleInfo(data, mqttConnected, latestSensorTs);
+    const gnssOnline  = mqttConnected && data.status !== 'offline' && (data.sensors?.gnss?.is_online  ?? false);
+    const rainOnline  = mqttConnected && data.status !== 'offline' && (data.sensors?.rain?.is_online  ?? false);
+    const waterOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.water?.is_online ?? false);
+    const imuOnline   = mqttConnected && data.status !== 'offline' && (data.sensors?.imu?.is_online   ?? false);
 
     if (gnssOnline) {
         updateGnssFixBadge(gnssLatest?.fix_mode, gnssLatest?.fix_quality);
@@ -2607,6 +2648,57 @@ function setHTML(id, html) {
     if (el) el.innerHTML = html;
 }
 
+function getLatestSensorTimestamp(data) {
+    const sensors = data?.sensors || {};
+    let latestTs = Number(data?.last_update || 0);
+
+    for (const sensor of Object.values(sensors)) {
+        const ts = Number(sensor?.latest_timestamp || 0);
+        if (ts > latestTs) latestTs = ts;
+    }
+    return latestTs;
+}
+
+function formatAgeFromTimestamp(ts) {
+    if (!ts) return '--';
+    const now = Math.floor(Date.now() / 1000);
+    const diff = Math.max(0, now - Number(ts));
+
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function renderStaleInfo(data, mqttConnected, latestSensorTs) {
+    const staleEl = document.getElementById('st-stale-info');
+    if (!staleEl) return;
+
+    if (!latestSensorTs) {
+        staleEl.style.display = 'none';
+        staleEl.innerHTML = '';
+        return;
+    }
+
+    const ageText = formatAgeFromTimestamp(latestSensorTs);
+    const localTime = new Date(latestSensorTs * 1000).toLocaleString();
+
+    if (!mqttConnected) {
+        staleEl.innerHTML = `<span class="badge-label">STALE</span> Last data ${ageText} (${localTime})`;
+        staleEl.style.display = 'block';
+        return;
+    }
+
+    if (data.status === 'offline') {
+        staleEl.innerHTML = `<span class="badge-label">OFFLINE</span> Last data ${ageText} (${localTime})`;
+        staleEl.style.display = 'block';
+        return;
+    }
+
+    staleEl.style.display = 'none';
+    staleEl.innerHTML = '';
+}
+
 // =========================================================================
 // IMU DRIFT CALCULATION
 // =========================================================================
@@ -2843,7 +2935,7 @@ function clearAllSensorCardAlerts() {
     });
 }
 
-function showAlertBanner(alertData) {
+function showAlertBanner(alertData, options = {}) {
     const banner = document.getElementById('alert-banner');
     if (!banner) return;
 
@@ -2854,7 +2946,7 @@ function showAlertBanner(alertData) {
 
     // Cập nhật nội dung
     document.getElementById('alert-title').textContent =
-        `${alertData.level.toUpperCase()} ALERT!`;
+        options.silent ? `⚠️ ALERT (persistent)` : `${alertData.level.toUpperCase()} ALERT!`;
 
     document.getElementById('alert-station').textContent =
         `Station: ${stationName} (${stationCode})`;
@@ -2865,10 +2957,9 @@ function showAlertBanner(alertData) {
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
 
-    // ✅ Kích hoạt nút "Tắt âm báo" khi có cảnh báo
-    setSirenButtonState('alerting');
-
     // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
+    // Lưu ý: siren button state được quản lý bởi _showSirenIfAlerting / WS handler,
+    // không set ở đây để tránh override trạng thái offline của từng pi device.
     banner.classList.add('show');
 }
 
