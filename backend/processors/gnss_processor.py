@@ -1,4 +1,5 @@
 # backend/processors/gnss_processor.py
+import re
 import numpy as np
 import math
 import logging
@@ -169,23 +170,59 @@ class GNSSVelocityProcessor:
             logger.error(f"❌ Error saving origin to DB: {e}")
 
     def process_gngga(self, raw_payload: str) -> Optional[Dict[str, Any]]:
+        status_type = 'origin_status' if self.state == "AWAITING_CANDIDATES" else 'gnss_status'
         try:
-            parts = raw_payload.split(',')
-            if len(parts) < 10 or not parts[2] or not parts[4]:
-                return None
+            # Extract câu GGA từ bất kỳ vị trí nào trong string.
+            # Chịu được wrapper text (bytearray repr, prefix bytes, v.v.)
+            gga_match = re.search(r'\$G[NP]GGA,[^\r\n*]*(?:\*[0-9A-Fa-f]{2})?', raw_payload or '')
+            if not gga_match:
+                return {
+                    "type": status_type,
+                    "status": "NO_DATA",
+                    "fix_quality": None,
+                    "fix_mode": "UNKNOWN",
+                    "message": "No GGA sentence found in payload"
+                }
+
+            payload = gga_match.group(0).strip()
+            parts = payload.split(',')
+            if len(parts) < 10:
+                return {
+                    "type": status_type,
+                    "status": "NO_DATA",
+                    "fix_quality": None,
+                    "fix_mode": "UNKNOWN",
+                    "message": "Incomplete GGA sentence"
+                }
+
+            # lat/lon trống thường là mất tín hiệu/antenna issue -> NO_DATA, không phải INVALID.
+            if not parts[2] or not parts[4]:
+                return {
+                    "type": status_type,
+                    "status": "NO_DATA",
+                    "fix_quality": int(parts[6]) if parts[6] else None,
+                    "fix_mode": "UNKNOWN",
+                    "message": "GGA has empty coordinate fields"
+                }
 
             fix_quality = int(parts[6]) if parts[6] else 0
             
             if self.state == "AWAITING_CANDIDATES":
-                return self._handle_origin_collection(raw_payload, fix_quality)
+                return self._handle_origin_collection(payload, fix_quality)
             elif self.state == "ORIGIN_LOCKED":
-                return self._handle_processing(raw_payload, fix_quality)
+                return self._handle_processing(payload, fix_quality)
             
             return None
 
         except Exception as e:
-            logger.error(f"Error processing GNGGA: {e}")
-            return None
+            logger.debug(f"GNSS payload parse skipped: {e}")
+            return {
+                "type": status_type,
+                "status": "NO_DATA",
+                "fix_quality": None,
+                "fix_mode": "UNKNOWN",
+                "message": "Failed to parse GGA payload"
+            }
 
     def _handle_origin_collection(self, gngga_string, fix_quality):
         # Chỉ lock origin khi RTK FIXED (fix=4)

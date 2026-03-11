@@ -249,10 +249,13 @@ class MQTTBridge:
                 # sẽ thêm hàm giải mã AES ở đoạn này
                 # decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
                 # Tôi phải bỏ hàm giải mã AES vì hiện tại client không mã hóa dữ liệu, đồng chí nào tự ý sửa logic này mà không hiểu rõ sẽ ăn 500 cú Kamejoko vỡ bô đi ị.
-                decrypted_payload = str(bytearray(payload_str, 'utf-8'))
+                decrypted_payload = payload_str.strip()
                 
             except UnicodeDecodeError:
                 return # Bỏ qua dữ liệu nhị phân (RTCM)
+
+            if not decrypted_payload:
+                return
             
             if self.loop and self.loop.is_running():
                 asyncio.run_coroutine_threadsafe(
@@ -466,6 +469,62 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
 
+    def _get_sensor_offline_threshold(self, station_config: dict, sensor_type: str) -> int:
+        offline_config = (station_config or {}).get('offline_thresholds', {}) or {}
+        try:
+            return max(int(offline_config.get(sensor_type, 60)), 15)
+        except (TypeError, ValueError):
+            return 60
+
+    def _should_save_gnss_status(self, station_id: int, current_timestamp: int, station_config: dict) -> bool:
+        last_saved = self.last_save_time[station_id].get('gnss', 0)
+        if last_saved == 0:
+            return True
+
+        offline_threshold = self._get_sensor_offline_threshold(station_config, 'gnss')
+        heartbeat_interval = max(5, offline_threshold // 2)
+        return (current_timestamp - last_saved) >= heartbeat_interval
+
+    async def _buffer_sensor_record(self, device_id: int, station_id: int, sensor_type: str, current_timestamp: int, processed_data: dict):
+        val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
+
+        if sensor_type == 'gnss':
+            val_1 = processed_data.get('speed_2d_mm_s', 0.0) or 0.0
+            val_2 = processed_data.get('total_displacement_mm', 0.0) or 0.0
+        elif sensor_type == 'rain':
+            val_1 = processed_data.get('intensity_mm_h', 0.0) or 0.0
+            val_2 = processed_data.get('accumulated_mm', 0.0) or 0.0
+        elif sensor_type == 'water':
+            val_1 = processed_data.get('water_level', 0.0) or 0.0
+            val_2 = processed_data.get('intensity_mm_h', 0.0) or 0.0
+        elif sensor_type == 'imu':
+            val_1 = processed_data.get('roll', 0.0) or 0.0
+            val_2 = processed_data.get('pitch', 0.0) or 0.0
+            val_3 = processed_data.get('yaw', 0.0) or 0.0
+            val_4 = processed_data.get('total_accel', 0.0) or 0.0
+            val_5 = processed_data.get('battery', 0.0) or 0.0
+
+        sensor_record = {
+            "station_id": station_id,
+            "timestamp": current_timestamp,
+            "sensor_type": sensor_type,
+            "data": processed_data,
+            "value_1": val_1,
+            "value_2": val_2,
+            "value_3": val_3,
+            "value_4": val_4,
+            "value_5": val_5,
+        }
+        self.last_save_time[station_id][sensor_type] = current_timestamp
+
+        async with self._buffer_lock:
+            self._sensor_buffer.append(sensor_record)
+            self._station_update_buffer[station_id] = {
+                "status": "online",
+                "last_update": current_timestamp
+            }
+            self._device_update_buffer[device_id] = current_timestamp
+
     async def process_pipeline(self, topic: str, raw_payload: str):
         info = self.topic_map.get(topic)
         if not info: return
@@ -487,6 +546,14 @@ class MQTTBridge:
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
                 elif res and res.get('type') == 'gnss_status':
+                    status_payload = {
+                        "status": res.get('status'),
+                        "fix_quality": res.get('fix_quality'),
+                        "fix_mode": res.get('fix_mode'),
+                        "message": res.get('message')
+                    }
+                    if self._should_save_gnss_status(station_id, current_timestamp, station_config):
+                        await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
                     # Broadcast GNSS fix status even when velocity is skipped (fix != 4)
                     try:
                         await manager.broadcast({
@@ -494,12 +561,7 @@ class MQTTBridge:
                             "station_id": station_id,
                             "sensor_type": "gnss",
                             "timestamp": current_timestamp,
-                            "data": {
-                                "status": res.get('status'),
-                                "fix_quality": res.get('fix_quality'),
-                                "fix_mode": res.get('fix_mode'),
-                                "message": res.get('message')
-                            }
+                            "data": status_payload
                         })
                     except Exception as ws_e:
                         logger.error(f"❌ WS GNSS status error: {ws_e}")
@@ -508,6 +570,14 @@ class MQTTBridge:
                     logger.info(f"🎯 [{station_name}] GNSS Origin locked")
                     return
                 elif res and res.get('type') == 'origin_status':
+                    status_payload = {
+                        "status": res.get('status'),
+                        "fix_quality": res.get('fix_quality'),
+                        "fix_mode": res.get('fix_mode'),
+                        "message": res.get('message')
+                    }
+                    if self._should_save_gnss_status(station_id, current_timestamp, station_config):
+                        await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
                     # During origin collection, notify UI about current fix mode
                     try:
                         await manager.broadcast({
@@ -515,12 +585,7 @@ class MQTTBridge:
                             "station_id": station_id,
                             "sensor_type": "gnss",
                             "timestamp": current_timestamp,
-                            "data": {
-                                "status": res.get('status'),
-                                "fix_quality": res.get('fix_quality'),
-                                "fix_mode": res.get('fix_mode'),
-                                "message": res.get('message')
-                            }
+                            "data": status_payload
                         })
                     except Exception as ws_e:
                         logger.error(f"❌ WS GNSS origin status error: {ws_e}")
@@ -722,50 +787,24 @@ class MQTTBridge:
 
         try:
             if save_data_now:
-                # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
-                val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
-
-                if sensor_type == 'gnss':
-                    val_1 = processed_data.get('speed_2d_mm_s', 0.0)
-                    val_2 = processed_data.get('total_displacement_mm', 0.0)
-                elif sensor_type == 'rain':
-                    val_1 = processed_data.get('intensity_mm_h', 0.0)
-                    val_2 = processed_data.get('accumulated_mm', 0.0)
-                elif sensor_type == 'water':
-                    val_1 = processed_data.get('water_level', 0.0)
-                    val_2 = processed_data.get('intensity_mm_h', 0.0)
-                elif sensor_type == 'imu':
-                    val_1 = processed_data.get('roll', 0.0)
-                    val_2 = processed_data.get('pitch', 0.0)
-                    val_3 = processed_data.get('yaw', 0.0)
-                    val_4 = processed_data.get('total_accel', 0.0)
-                    val_5 = processed_data.get('battery', 0.0)
-
-                sensor_record = {
-                    "station_id": station_id,
-                    "timestamp": current_timestamp,
-                    "sensor_type": sensor_type,
-                    "data": processed_data,
-                    "value_1": val_1,
-                    "value_2": val_2,
-                    "value_3": val_3,
-                    "value_4": val_4,
-                    "value_5": val_5,
-                }
-                self.last_save_time[station_id][sensor_type] = current_timestamp
-
                 if is_dangerous:
+                    sensor_record = {
+                        "station_id": station_id,
+                        "timestamp": current_timestamp,
+                        "sensor_type": sensor_type,
+                        "data": processed_data,
+                        "value_1": processed_data.get('speed_2d_mm_s', 0.0) if sensor_type == 'gnss' else processed_data.get('intensity_mm_h', 0.0) if sensor_type == 'rain' else processed_data.get('water_level', 0.0) if sensor_type == 'water' else processed_data.get('roll', 0.0),
+                        "value_2": processed_data.get('total_displacement_mm', 0.0) if sensor_type == 'gnss' else processed_data.get('accumulated_mm', 0.0) if sensor_type == 'rain' else processed_data.get('intensity_mm_h', 0.0) if sensor_type == 'water' else processed_data.get('pitch', 0.0),
+                        "value_3": 0.0 if sensor_type != 'imu' else processed_data.get('yaw', 0.0),
+                        "value_4": 0.0 if sensor_type != 'imu' else processed_data.get('total_accel', 0.0),
+                        "value_5": 0.0 if sensor_type != 'imu' else processed_data.get('battery', 0.0),
+                    }
+                    self.last_save_time[station_id][sensor_type] = current_timestamp
                     # ✅ ALERT → Ghi thẳng xuống DB, không qua buffer
                     await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
                 else:
                     # ✅ BÌNH THƯỜNG → Đưa vào buffer, flush theo chu kỳ
-                    async with self._buffer_lock:
-                        self._sensor_buffer.append(sensor_record)
-                        self._station_update_buffer[station_id] = {
-                            "status": "online",
-                            "last_update": current_timestamp
-                        }
-                        self._device_update_buffer[device_id] = current_timestamp
+                    await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data)
 
         except Exception as e:
             logger.error(f"❌ DB Error: {e}")

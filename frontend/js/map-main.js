@@ -1047,9 +1047,6 @@ function updateGnssFixBadge(fixMode, fixQuality) {
             } else if (quality === 1) {
                 cls = 'GNSS_SINGLE';
                 text = 'NO RTK';
-            } else if (quality === 0) {
-                cls = 'GNSS_INVALID';
-                text = 'INVALID';
             }
             break;
     }
@@ -1427,11 +1424,6 @@ async function loadLongTermAnalysis() {
         }
 
         const data = await res.json();
-
-        if (data.status === 'insufficient_data') {
-            showLongTermError(data.message);
-            return;
-        }
 
         renderLongTermAnalysis(data);
 

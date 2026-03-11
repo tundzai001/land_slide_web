@@ -1137,6 +1137,11 @@ async def get_long_term_analysis(
     + Multi-window analysis + Inverse Velocity (Fukuzono)
     """
     try:
+        def is_gnss_analysis_point(data: dict) -> bool:
+            if not isinstance(data, dict):
+                return False
+            return all(key in data for key in ("pos_e", "pos_n", "pos_u"))
+
         # 1. Lấy config trạm
         station_result = await db_config.execute(
             select(model_config.Station).where(model_config.Station.id == station_id)
@@ -1196,7 +1201,11 @@ async def get_long_term_analysis(
         result = {"station_id": station_id, "days": days}
         
         # Chuyển sang list dict chung
-        historical_gnss_full = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
+        historical_gnss_full = [
+            {"timestamp": d.timestamp, "data": d.data}
+            for d in gnss_data
+            if is_gnss_analysis_point(d.data)
+        ]
         historical_gnss_requested = [p for p in historical_gnss_full if p['timestamp'] >= cutoff_requested]
         # ✅ FALLBACK: Nếu khoảng thời gian ngắn mà không có đủ dữ liệu, lấy dữ liệu gần nhất
         if len(historical_gnss_requested) < 2 and len(historical_gnss_full) >= 2 and days <= 1:
@@ -1332,8 +1341,10 @@ async def get_long_term_analysis(
         # 9. Overall status
         gnss_ok = result["gnss"].get("status") == "success"
         imu_ok = result["imu"].get("status") == "success"
+        multi_window_ok = result.get("multi_window", {}).get("available") is True
+        rainfall_ok = result.get("rainfall_correlation", {}).get("available") is True
         
-        if gnss_ok or imu_ok:
+        if gnss_ok or imu_ok or multi_window_ok or rainfall_ok:
             result["status"] = "success"
         else:
             result["status"] = "insufficient_data"
