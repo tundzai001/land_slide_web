@@ -23,43 +23,55 @@ def haversine_3d(lat1, lon1, h1, lat2, lon2, h2):
     return math.sqrt(distance_2d**2 + (h2 - h1)**2)
 
 class GNSSVelocityProcessor:
+    """
+    Processor đơn giản: nhận GNGGA → tính ENU position → tính velocity 2-point
+    → làm mượt nhẹ bằng median window.
+
+    Không có ngưỡng cứng về tốc độ/gia tốc/HDOP ở đây.
+    Toàn bộ logic cảnh báo (ngưỡng, confirm_steps, min_confirm_seconds)
+    thuộc về LandslideAnalyzer, không thuộc processor.
+    """
     def __init__(
-        self, 
+        self,
         device_id: int,
-        db_session_factory, 
-        required_points=5, 
-        max_spread_m=5.0, 
-        filter_window_size=5, 
-        min_fix_quality=4
+        db_session_factory,
+        required_points=5,
+        max_spread_m=5.0,
+        filter_window_size=5,
+        min_fix_quality=4,
+        # Sanity gate: reject fix nếu thiết bị claim nhảy > X mét trong 1 sample.
+        # Không phải ngưỡng nhạy cảm — landslide thật không bao giờ nhảy cỡ này.
+        # Tăng lên nếu deploy ở nơi GPS baseline rất xa hoặc sample rate rất thấp.
+        max_step_distance_m=3.0,
     ):
         self.device_id = device_id
         self.db_session_factory = db_session_factory
-        
-        # Cấu hình
         self.required_points = required_points
         self.max_spread_m = max_spread_m
         self.min_fix_quality = min_fix_quality
         self.filter_window_size = filter_window_size
-        
+        self.max_step_distance_m = float(max_step_distance_m)
+
         # State
-        self.state = "AWAITING_CANDIDATES" 
+        self.state = "AWAITING_CANDIDATES"
         self.origin = None
         self.origin_candidates = []
-        
-        # Bộ nhớ đệm
+
+        # history giữ filter_window_size + 1 mẫu để tính median window
         self.history = deque(maxlen=filter_window_size + 1)
-        
-        # Thống kê
+
         self.stats = {
             'total_processed': 0,
             'low_quality_rejected': 0,
-            'origin_resets': 0
+            'origin_resets': 0,
+            'spike_rejected': 0,
         }
-        
+
         self._schedule_load_origin()
-        
         logger.info(
-            f"GNSS Processor init for device {device_id}: State={self.state}, velocity_mode=fix4_only"
+            f"GNSS Processor init for device {device_id}: "
+            f"fix_required={min_fix_quality}, window={filter_window_size}, "
+            f"max_step={self.max_step_distance_m}m"
         )
 
     def _fix_mode(self, fix_quality: int) -> str:
@@ -249,82 +261,107 @@ class GNSSVelocityProcessor:
 
     def _handle_processing(self, gngga_string, fix_quality):
         # Chỉ tính vận tốc/displacement khi RTK FIXED (fix=4)
-        if fix_quality != 4:
+        if fix_quality != self.min_fix_quality:
             self.stats['low_quality_rejected'] += 1
             return {
                 "type": "gnss_status",
                 "status": "UNTRUSTED_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
-                "message": "Velocity skipped: only fix=4 (RTK FIXED) is accepted"
+                "message": f"Velocity skipped: need fix={self.min_fix_quality} (RTK FIXED), current={fix_quality}"
             }
 
         point = self._parse_gngga(gngga_string)
-        if not point: return None
+        if not point:
+            return None
 
         ts = time.time()
         ecef_coords = self._gngga_to_ecef(
-            point['wgs']['lat'], 
-            point['wgs']['lon'], 
+            point['wgs']['lat'],
+            point['wgs']['lon'],
             point['wgs']['h']
         )
-        
+        pos_enu = self.origin['R'] @ (ecef_coords - self.origin['ecef'])
+        if not np.all(np.isfinite(pos_enu)):
+            logger.warning(f"Non-finite ENU position rejected (device {self.device_id})")
+            return None
+
         self.history.append({
-            'ts': ts, 
-            'ecef': ecef_coords, 
-            'wgs': point['wgs']
+            'ts': ts,
+            'pos_enu': pos_enu,
         })
 
-        if len(self.history) < 2: return None
+        if len(self.history) < 2:
+            return None
 
         p_new = self.history[-1]
         p_old = self.history[-2]
         dt = p_new['ts'] - p_old['ts']
-        
-        if dt < 0.01: return None
-            
-        v_ecef_raw = (p_new['ecef'] - p_old['ecef']) / dt
-        v_enu_raw = self.origin['R'] @ v_ecef_raw
 
+        if dt < 0.01:
+            return None
+
+        v_enu_raw = (p_new['pos_enu'] - p_old['pos_enu']) / dt
+        if not np.all(np.isfinite(v_enu_raw)):
+            logger.warning(f"Non-finite raw velocity rejected (device {self.device_id})")
+            self.history.pop()
+            return None
+
+        # Sanity gate: reject fix vật lý không thể xảy ra (bad RTK fix, multipath)
+        # Dùng displacement (mét) chứ không phải tốc độ để độc lập với sample rate.
+        step_2d_m = float(np.hypot(v_enu_raw[0], v_enu_raw[1]) * dt)
+        if step_2d_m > self.max_step_distance_m:
+            self.stats['spike_rejected'] += 1
+            self.history.pop()  # pop bad fix ra khỏi window trước khi nó nhiễm median
+            logger.warning(
+                f"[GNSS-{self.device_id}] Bad fix rejected: step={step_2d_m:.3f}m "
+                f"(max={self.max_step_distance_m}m), dt={dt:.3f}s"
+            )
+            return None
+
+        # Median window smoothing over adjacent 2-point velocities
         if len(self.history) >= self.filter_window_size:
             velocities_enu = []
             for i in range(1, len(self.history)):
                 p1 = self.history[i]
-                p0 = self.history[i-1]
+                p0 = self.history[i - 1]
                 idt = p1['ts'] - p0['ts']
                 if idt >= 0.01:
-                    iv_ecef = (p1['ecef'] - p0['ecef']) / idt
-                    velocities_enu.append(self.origin['R'] @ iv_ecef)
-            
-            v_enu_filtered = np.mean(velocities_enu, axis=0) if velocities_enu else v_enu_raw
+                    velocities_enu.append((p1['pos_enu'] - p0['pos_enu']) / idt)
+            v_enu_filtered = np.median(velocities_enu, axis=0) if velocities_enu else v_enu_raw
         else:
             v_enu_filtered = v_enu_raw
 
-        pos_enu = self.origin['R'] @ (ecef_coords - self.origin['ecef'])
+        if not np.all(np.isfinite(v_enu_filtered)):
+            logger.warning(f"Non-finite filtered velocity rejected (device {self.device_id})")
+            self.history.pop()
+            return None
+
+        speed_2d = float(np.hypot(v_enu_filtered[0], v_enu_filtered[1]))
         total_displacement_m = float(np.sqrt(pos_enu[0]**2 + pos_enu[1]**2 + pos_enu[2]**2))
-        
+
         self.stats['total_processed'] += 1
-        
+
         return {
             'type': 'gnss_processed',
             'timestamp': int(ts),
             'data': {
-                'lat': point['wgs']['lat'], 
-                'lon': point['wgs']['lon'], 
+                'lat': point['wgs']['lat'],
+                'lon': point['wgs']['lon'],
                 'h': point['wgs']['h'],
-                'pos_e': float(pos_enu[0]), 
-                'pos_n': float(pos_enu[1]), 
+                'pos_e': float(pos_enu[0]),
+                'pos_n': float(pos_enu[1]),
                 'pos_u': float(pos_enu[2]),
                 'total_displacement_mm': total_displacement_m * 1000,
-                'vel_e': float(v_enu_filtered[0]), 
-                'vel_n': float(v_enu_filtered[1]), 
+                'vel_e': float(v_enu_filtered[0]),
+                'vel_n': float(v_enu_filtered[1]),
                 'vel_u': float(v_enu_filtered[2]),
-                'speed_2d': float(np.sqrt(v_enu_filtered[0]**2 + v_enu_filtered[1]**2)),
-                'speed_2d_mm_s': float(np.sqrt(v_enu_filtered[0]**2 + v_enu_filtered[1]**2) * 1000),
-                'fix_quality': point['fix_quality'], 
+                'speed_2d': speed_2d,
+                'speed_2d_mm_s': float(speed_2d * 1000),
+                'fix_quality': point['fix_quality'],
                 'fix_mode': self._fix_mode(point['fix_quality']),
-                'num_sats': point['num_sats'], 
-                'hdop': point['hdop']
+                'num_sats': point['num_sats'],
+                'hdop': point['hdop'],
             }
         }
 

@@ -139,6 +139,8 @@ function handleRealtimeUpdate(message) {
                 currentAlertStationId = null;
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
+            // Clear tất cả sensor card highlight khi trạm về safe
+            clearAllSensorCardAlerts();
 
             // 3. Reset siren buttons to idle if viewing this station
             if (currentStationData && stationId === currentStationData.id) {
@@ -209,6 +211,10 @@ function handleRealtimeUpdate(message) {
         if (alertKey !== lastAlertKey) {
             lastAlertKey = alertKey;
             showAlertBanner(message);
+        }
+        // Highlight sensor card nếu đang xem trạm đang báo
+        if (currentStationData && message.station_id === currentStationData.id && message.sensor_type) {
+            setSensorCardAlert(message.sensor_type, message.level);
         }
         // ✅ Marker chuyển đỏ + nhấp nháy khi có cảnh báo
         setMarkerAlert(message.station_id, true);
@@ -999,10 +1005,13 @@ function updateGnssFixBadge(fixMode, fixQuality) {
     const badge = document.getElementById('gnss-fix-badge');
     if (!badge) return;
 
+    const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
+    const quality = Number(fixQuality);
+
     let cls = 'GNSS_UNKNOWN';
     let text = 'NO DATA';
 
-    switch (fixMode) {
+    switch (normalizedMode) {
         case 'RTK_FIXED':
             cls = 'GNSS_RTK_FIXED';
             text = 'RTK FIXED';
@@ -1016,6 +1025,8 @@ function updateGnssFixBadge(fixMode, fixQuality) {
             text = 'DGPS FLOAT';
             break;
         case 'GPS_SINGLE_NO_RTK':
+        case 'SINGLE':
+        case 'NO_RTK':
             cls = 'GNSS_SINGLE';
             text = 'NO RTK';
             break;
@@ -1024,18 +1035,21 @@ function updateGnssFixBadge(fixMode, fixQuality) {
             text = 'INVALID';
             break;
         default:
-            if (fixQuality === 4) {
+            if (quality === 4) {
                 cls = 'GNSS_RTK_FIXED';
                 text = 'RTK FIXED';
-            } else if (fixQuality === 5) {
+            } else if (quality === 5) {
                 cls = 'GNSS_RTK_FLOAT';
                 text = 'RTK FLOAT';
-            } else if (fixQuality === 2) {
+            } else if (quality === 2) {
                 cls = 'GNSS_DGPS_FLOAT';
                 text = 'DGPS FLOAT';
-            } else if (fixQuality === 1) {
+            } else if (quality === 1) {
                 cls = 'GNSS_SINGLE';
                 text = 'NO RTK';
+            } else if (quality === 0) {
+                cls = 'GNSS_INVALID';
+                text = 'INVALID';
             }
             break;
     }
@@ -2772,6 +2786,34 @@ function setSirenButtonState(state, target = null) {
 
 let currentAlertStationId = null;
 let lastAlertKey = null;
+
+// Map sensor_type từ backend → id của sensor card trong HTML
+const SENSOR_CARD_IDS = {
+    gnss: 'sensor-card-gnss',
+    rain: 'sensor-card-rain',
+    water: 'sensor-card-water',
+    imu: 'sensor-card-imu',
+};
+
+function setSensorCardAlert(sensorType, level) {
+    const cardId = SENSOR_CARD_IDS[sensorType];
+    if (!cardId) return;
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
+    if (level === 'WARNING') {
+        card.classList.add('sensor-alert-warning');
+    } else if (level === 'CRITICAL' || level === 'EXTREME') {
+        card.classList.add('sensor-alert-critical');
+    }
+}
+
+function clearAllSensorCardAlerts() {
+    Object.values(SENSOR_CARD_IDS).forEach(id => {
+        const card = document.getElementById(id);
+        if (card) card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
+    });
+}
 
 function showAlertBanner(alertData) {
     const banner = document.getElementById('alert-banner');

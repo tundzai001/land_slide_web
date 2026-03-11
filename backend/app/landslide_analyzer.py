@@ -4,7 +4,7 @@ import math
 import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, deque
 
 logger = logging.getLogger(__name__)
 
@@ -12,11 +12,13 @@ class LandslideAnalyzer:
     def __init__(self):
         # ✅ Bộ đếm xác nhận cho từng station
         self.alert_counters = defaultdict(lambda: {
-            'gnss': {'count': 0, 'last_level': None},
-            'rain': {'count': 0, 'last_level': None},
-            'water': {'count': 0, 'last_level': None},
-            'imu': {'count': 0, 'last_level': None}
+            'gnss': {'count': 0, 'last_level': None, 'first_detected': 0.0, 'latched_level': None},
+            'rain': {'count': 0, 'last_level': None, 'first_detected': 0.0, 'latched_level': None},
+            'water': {'count': 0, 'last_level': None, 'first_detected': 0.0, 'latched_level': None},
+            'imu': {'count': 0, 'last_level': None, 'first_detected': 0.0, 'latched_level': None}
         })
+        # Lịch sử ngắn hạn để phân biệt trượt thật với jitter GNSS dù fix=4.
+        self.gnss_recent_history = defaultdict(lambda: deque(maxlen=120))
         
     def _get_cfg(self, config: Dict, section: str, key: str, default: float) -> float:
         try:
@@ -903,7 +905,10 @@ class LandslideAnalyzer:
             
             # Lấy cấu hình xác nhận
             gnss_config = config.get('GnssAlerting', {})
-            confirm_steps = int(gnss_config.get('gnss_confirm_steps', 3))  # Mặc định 3 lần
+            confirm_steps = int(gnss_config.get('gnss_confirm_steps', 3))
+            # Dù đủ confirm_steps, phải span ít nhất X giây liên tục.
+            # Ngăn data burst 30Hz confirm trong <200ms.
+            min_confirm_seconds = float(gnss_config.get('gnss_confirm_min_seconds', 3.0))
             
             velocity_class = self._classify_velocity_extended(
                 velocity_mms,
@@ -925,23 +930,99 @@ class LandslideAnalyzer:
             
             # ✅ LẤY BỘ ĐẾM CỦA TRẠM NÀY
             counter_info = self.alert_counters[station_id]['gnss']
+            # Backward-compatible for running workers created before latched_level was added.
+            if 'latched_level' not in counter_info:
+                counter_info['latched_level'] = None
+
+            # Anti-jitter gate tự thích nghi theo noise nền của chính trạm.
+            # Không cần set tham số theo từng nơi: nếu chỉ rung quanh 1 điểm,
+            # net displacement sẽ nhỏ so với noise envelope và bị hạ về INFO.
+            history = self.gnss_recent_history[station_id]
+            sample_ts = float(recent_data[-1].get('timestamp', 0.0) or 0.0)
+            pos_e = latest.get('pos_e')
+            pos_n = latest.get('pos_n')
+            if pos_e is not None and pos_n is not None and sample_ts > 0:
+                history.append({'ts': sample_ts, 'e': float(pos_e), 'n': float(pos_n)})
+
+            if current_level in ["WARNING", "CRITICAL"] and len(history) >= 4:
+                motion_points = list(history)
+                if counter_info.get('first_detected', 0.0) > 0:
+                    recent_motion = [p for p in history if p['ts'] >= counter_info['first_detected']]
+                    if len(recent_motion) >= 4:
+                        motion_points = recent_motion
+
+                if len(motion_points) >= 4:
+                    step_lengths = []
+                    for i in range(1, len(motion_points)):
+                        dx = motion_points[i]['e'] - motion_points[i - 1]['e']
+                        dy = motion_points[i]['n'] - motion_points[i - 1]['n']
+                        step_lengths.append(math.hypot(dx, dy))
+
+                    if len(step_lengths) >= 3:
+                        first = motion_points[0]
+                        last = motion_points[-1]
+                        net_m = math.hypot(last['e'] - first['e'], last['n'] - first['n'])
+                        path_m = float(sum(step_lengths))
+
+                        step_array = np.array(step_lengths, dtype=float)
+                        median_step = float(np.median(step_array))
+                        mad_step = float(np.median(np.abs(step_array - median_step)))
+                        noise_envelope_m = max(median_step + 1.4826 * mad_step, 1e-6)
+                        motion_significance = net_m / noise_envelope_m
+                        directionality = net_m / max(path_m, 1e-9)
+
+                        # Chỉ suppress khi vừa net displacement nhỏ so với noise floor,
+                        # vừa quỹ đạo không có hướng rõ ràng.
+                        if motion_significance < max(3.0, math.sqrt(len(step_lengths))) and directionality < 0.5:
+                            current_level = "INFO"
+                            logger.debug(
+                                f"[GNSS-{station_id}] Jitter-suppressed: net={net_m*1000.0:.2f}mm, "
+                                f"path={path_m*1000.0:.2f}mm, noise={noise_envelope_m*1000.0:.2f}mm, "
+                                f"significance={motion_significance:.2f}, directionality={directionality:.2f}"
+                            )
             
             # ✅ LOGIC ĐẾM XÁC NHẬN
             if current_level in ["WARNING", "CRITICAL"]:
+                # Đã confirm level này và chưa về safe hoàn toàn -> không bắn lại.
+                if counter_info['latched_level'] == current_level:
+                    return None
+
                 # Nếu level thay đổi → Reset bộ đếm
+                import time as _time
+                now = _time.time()
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
-                    logger.info(f"🔄 [GNSS-{station_id}] Level changed to {current_level}, reset counter to 1")
-                    return None  # Chưa đủ → Không gửi
+                    counter_info['first_detected'] = now
+                    logger.debug(f"[GNSS-{station_id}] Potential {current_level} detected, counting (1/{confirm_steps})")
+                    return None
                 else:
-                    # Level giữ nguyên → Tăng đếm
                     counter_info['count'] += 1
-                    logger.info(f"⏳ [GNSS-{station_id}] {current_level} count: {counter_info['count']}/{confirm_steps}")
-                    
-                    # ✅ CHỈ GỬI ALERT KHI ĐỦ SỐ LẦN XÁC NHẬN
-                    if counter_info['count'] >= confirm_steps:
-                        logger.warning(f"🚨 [GNSS-{station_id}] ✅ CONFIRMED {current_level} after {confirm_steps} times!")
+
+                    # Cap tại confirm_steps để không re-fire
+                    if counter_info['count'] > confirm_steps:
+                        counter_info['count'] = confirm_steps
+                        return None
+
+                    elapsed = now - counter_info['first_detected']
+                    logger.debug(
+                        f"[GNSS-{station_id}] {current_level} count: {counter_info['count']}/{confirm_steps}, "
+                        f"elapsed: {elapsed:.1f}/{min_confirm_seconds}s"
+                    )
+
+                    # Phải đủ CẢ HAI: số lần VÀ thời gian tối thiểu
+                    if counter_info['count'] == confirm_steps:
+                        if elapsed < min_confirm_seconds:
+                            logger.debug(
+                                f"[GNSS-{station_id}] Count reached but too fast "
+                                f"({elapsed:.2f}s < {min_confirm_seconds}s) — waiting"
+                            )
+                            # Không cap count — cho phép tiếp tục tăng để
+                            # khi đủ thời gian sẽ re-check ở lần kế
+                            counter_info['count'] = confirm_steps - 1
+                            return None
+                        counter_info['latched_level'] = current_level
+                        logger.warning(f"🚨 [GNSS-{station_id}] ✅ CONFIRMED {current_level} after {confirm_steps} readings over {elapsed:.1f}s!")
                         
                         message = f"🚨 CỰC KỲ NGUY HIỂM: {velocity_mms:.2f} mm/s ({velocity_class})" if current_level == "CRITICAL" else f"⚠️ Tốc độ nhanh: {velocity_mms:.4f} mm/s ({velocity_class})"
                         
@@ -967,11 +1048,14 @@ class LandslideAnalyzer:
                 # ✅ AN TOÀN → Đếm ngược để reset
                 if counter_info['count'] > 0:
                     counter_info['count'] = max(0, counter_info['count'] - 1)
-                    logger.info(f"✅ [GNSS-{station_id}] Safe reading, decrement to {counter_info['count']}")
+                    logger.debug(f"[GNSS-{station_id}] Safe reading, counter → {counter_info['count']}/{confirm_steps}")
                 
                 # Reset sau khi liên tục an toàn
                 if counter_info['count'] == 0:
+                    if counter_info['last_level'] is not None:
+                        logger.info(f"✅ [GNSS-{station_id}] Returned to safe after potential {counter_info['last_level']}")
                     counter_info['last_level'] = None
+                    counter_info['latched_level'] = None
             
             return None
 

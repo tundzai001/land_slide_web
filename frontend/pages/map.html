@@ -129,7 +129,7 @@
                 <!-- COMPACT SENSOR DATA -->
                 <div class="sensor-compact">
                     <!-- GNSS -->
-                    <div class="sensor-item">
+                    <div class="sensor-item" id="sensor-card-gnss">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity</span>
                             <span id="gnss-fix-badge" class="gnss-fix-badge GNSS_UNKNOWN">NO DATA</span>
@@ -138,19 +138,19 @@
                     </div>
 
                     <!-- Rain Intensity -->
-                    <div class="sensor-item">
+                    <div class="sensor-item" id="sensor-card-rain">
                         <div class="sensor-label"><i class="bi bi-cloud-rain-fill me-1"></i>Rain Intensity</div>
                         <div class="sensor-value-large" id="val-rain">--<span class="sensor-unit">mm/h</span></div>
                     </div>
 
                     <!-- Water Level -->
-                    <div class="sensor-item sensor-full-width">
+                    <div class="sensor-item sensor-full-width" id="sensor-card-water">
                         <div class="sensor-label"><i class="bi bi-water me-1"></i>Water Level</div>
                         <div class="sensor-value-large" id="val-water">--<span class="sensor-unit">m</span></div>
                     </div>
 
                     <!-- IMU (3 axes) -->
-                    <div class="sensor-item sensor-full-width">
+                    <div class="sensor-item sensor-full-width" id="sensor-card-imu">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-compass-fill me-1"></i>IMU (ROLL/PITCH/YAW)</span>
                         </div>

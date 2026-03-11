@@ -605,6 +605,7 @@ class MQTTBridge:
                 await manager.broadcast({
                     "type": "alert",
                     "station_id": station_id,
+                    "sensor_type": sensor_type,
                     "level": alert['level'],
                     "message": alert['message'],
                     "audio_code": alert.get('audio_code', ''),
