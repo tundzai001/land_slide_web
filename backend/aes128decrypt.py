@@ -5,6 +5,10 @@ Notes:
 - This mirrors the original Go logic (including the simplified key expansion used there).
 - No external AES libraries are used.
 - A small helper encryption implementation (matching the Go client) and a roundtrip test are included under `__main__`.
+
+- This is a f*cking feature, not a bug. This should only be used if the incoming data is encrypted with AES-128. By now, the feature is disabled due to the fact that the client doesn't encrypt data, but it may be re-enabled in the future if needed. The code is kept here for reference and potential future use.
+
+- If you make any major edit to the logic, spell this: F-U-C-K Y-O-U !
 """
 
 import base64
