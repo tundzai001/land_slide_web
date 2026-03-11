@@ -290,12 +290,14 @@ def get_default_station_config():
         "RainAlerting": {
             "rain_intensity_watch_threshold": 10.0,
             "rain_intensity_warning_threshold": 25.0,
-            "rain_intensity_critical_threshold": 50.0
+            "rain_intensity_critical_threshold": 50.0,
+            "rain_confirm_steps": 2
         },
         # Nhóm cảnh báo Mực nước & Chuyển dịch
         "Water": {
             "warning_threshold": 0.15,
-            "critical_threshold": 0.30
+            "critical_threshold": 0.30,
+            "water_confirm_steps": 3
         },
         # Bảng Cruden & Varnes
         "GNSS_Classification": [
@@ -714,6 +716,36 @@ async def get_system_config(
         }
     }
 
+
+@router.get("/mqtt-status")
+async def get_mqtt_status(
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Trả về trạng thái MQTT runtime thực tế (không phải text cứng ở UI)."""
+    try:
+        from app.main import mqtt_service
+
+        res = await db.execute(
+            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
+        )
+        db_cfg = res.scalar_one_or_none()
+        config_source = "database" if db_cfg else "env"
+
+        return {
+            "connected": bool(mqtt_service.client.is_connected()),
+            "broker": mqtt_service.runtime_mqtt.get("broker", config.settings.MQTT_BROKER),
+            "port": int(mqtt_service.runtime_mqtt.get("port", config.settings.MQTT_PORT)),
+            "user": mqtt_service.runtime_mqtt.get("user", config.settings.MQTT_USER),
+            "topic_reload_interval": int(
+                mqtt_service.runtime_mqtt.get("topic_reload_interval", config.settings.TOPIC_RELOAD_INTERVAL)
+            ),
+            "config_source": config_source,
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting MQTT status: {e}")
+        raise HTTPException(status_code=500, detail="Cannot get MQTT runtime status")
+
 @router.put("/system-config")
 async def update_system_config(
     config_in: schemas.SystemConfigPayload,
@@ -751,8 +783,12 @@ async def update_system_config(
             
         await db.commit()
         
-        # (Tùy chọn) Trigger reload MQTT Service nếu cần thiết
-        # mqtt_service.reload_config(config_dict) 
+        # Áp dụng ngay cho service đang chạy để tránh lệch giữa UI và runtime.
+        try:
+            from app.main import mqtt_service
+            mqtt_service.reload_config(config_dict)
+        except Exception as reload_err:
+            logger.warning(f"⚠️ Saved config but runtime reload failed: {reload_err}")
         
         logger.info(f"✅ System config updated by {current_user.username}")
         return {"status": "success", "message": "Configuration saved successfully"}
@@ -896,11 +932,21 @@ async def get_station_config(
     if not station:
         raise HTTPException(status_code=404, detail="Station not found")
     
+    # Deep-merge: defaults ← station config (station wins)
+    import copy
+    merged = copy.deepcopy(get_default_station_config())
+    raw = station.config or {}
+    for key, value in raw.items():
+        if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+            merged[key].update(value)
+        else:
+            merged[key] = value
+    
     return {
         "station_id": station.id,
         "station_code": station.station_code,
         "name": station.name,
-        "config": station.config or get_default_station_config()
+        "config": merged
     }
 
 @router.put("/stations/{station_id}/config")
@@ -1110,25 +1156,32 @@ class GNSSLiveFetcher:
         except (ValueError, IndexError):
             return None
     
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.is_connected = True
+            logger.info(f"[GNSSLiveFetcher] Connected to broker, subscribing to {userdata['topic']}")
             client.subscribe(userdata['topic'])
+        else:
+            logger.error(f"[GNSSLiveFetcher] Connect failed with code {rc}")
     
     def _on_message(self, client, userdata, msg):
         try:
             payload = msg.payload.decode('utf-8')
+            logger.info(f"[GNSSLiveFetcher] Received message on {msg.topic}: {payload}")
             parsed = self._parse_gngga(payload)
             if parsed and parsed['fix_quality'] >= 1:
+                logger.info(f"[GNSSLiveFetcher] Valid GNSS parsed: {parsed}")
                 self.received_data = parsed
                 client.disconnect()
-        except Exception:
-            pass
+            else:
+                logger.warning(f"[GNSSLiveFetcher] Parse failed or invalid fix_quality: {parsed}")
+        except Exception as e:
+            logger.error(f"[GNSSLiveFetcher] Exception processing message: {e}")
     
     async def fetch_origin(self, topic: str, timeout: int = 30) -> Optional[dict]:
         try:
             self.received_data = None
-            client = mqtt.Client(userdata={'topic': topic})
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata={'topic': topic})
             client.on_connect = self._on_connect
             client.on_message = self._on_message
             if self.username: client.username_pw_set(self.username, self.password)
@@ -1139,6 +1192,7 @@ class GNSSLiveFetcher:
             start_time = asyncio.get_event_loop().time()
             while self.received_data is None:
                 if asyncio.get_event_loop().time() - start_time > timeout:
+                    logger.warning("[GNSSLiveFetcher] Timeout reached waiting for GNSS data.")
                     client.loop_stop()
                     client.disconnect()
                     return None

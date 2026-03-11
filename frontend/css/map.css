@@ -463,6 +463,15 @@ body:has(.charts-panel.active) .toggle-list-btn {
     animation: valueFlash 0.8s ease-out;
 }
 
+/*  SIREN SIDEBAR CONTROL  */
+.siren-sidebar-control {
+    padding: 10px 14px;
+    margin-top: 12px;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+}
+
 /*  ACTION BUTTONS  */
 .action-buttons {
     display: grid;
