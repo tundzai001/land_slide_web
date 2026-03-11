@@ -501,14 +501,22 @@
                     </div>
                 </div>
 
-                <form id="systemConfigForm">
+                <form id="systemConfigForm" autocomplete="off">
+
+                    <!-- Dummy fields to absorb aggressive browser/password-manager autofill -->
+                    <input type="text" name="fake-username" autocomplete="username"
+                        style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;"
+                        tabindex="-1" aria-hidden="true">
+                    <input type="password" name="fake-password" autocomplete="current-password"
+                        style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;"
+                        tabindex="-1" aria-hidden="true">
 
                     <!-- 1. MQTT Configuration -->
                     <div class="config-section">
                         <div class="section-header">
                             <i class="bi bi-hdd-network-fill"></i>
                             <h5>MQTT Broker Configuration</h5>
-                            <span class="badge bg-success ms-auto">CONNECTED</span>
+                            <span id="sys-mqtt-status-badge" class="badge bg-secondary ms-auto">UNKNOWN</span>
                         </div>
 
                         <div class="row g-3">
@@ -543,7 +551,10 @@
                                 <label class="form-label">
                                     <i class="bi bi-person-badge me-1"></i> Username
                                 </label>
-                                <input type="text" class="form-control" id="sys-mqtt-user" placeholder="mqttUser">
+                                <input type="text" class="form-control" id="sys-mqtt-user" placeholder="mqttUser"
+                                    name="sys_mqtt_user_runtime" autocomplete="new-password" readonly
+                                    onfocus="unlockProtectedInput(this)" spellcheck="false" autocapitalize="off"
+                                    autocorrect="off" data-lpignore="true" onblur="lockProtectedInput(this)">
                                 <small class="text-muted">Tài khoản MQTT</small>
                             </div>
 
@@ -553,7 +564,9 @@
                                 </label>
                                 <div class="input-group">
                                     <input type="password" class="form-control" id="sys-mqtt-password"
-                                        placeholder="••••••••">
+                                        name="sys_mqtt_password_runtime" autocomplete="new-password" readonly
+                                        onfocus="unlockProtectedInput(this)" placeholder="••••••••"
+                                        data-lpignore="true" onblur="lockProtectedInput(this)">
                                     <button class="btn btn-outline-secondary" type="button"
                                         onclick="togglePasswordVisibility('sys-mqtt-password')">
                                         <i class="bi bi-eye"></i>
@@ -1176,6 +1189,11 @@
                                         <strong>Sensitive:</strong> Tất cả 1 lần (Cảnh báo nhanh)
                                     </small>
                                 </div>
+                                <div class="alert alert-warning py-2 small mt-2 mb-0">
+                                    <i class="bi bi-diagram-3 me-1"></i>
+                                    <strong>Ưu tiên Confirm Steps:</strong> Giá trị nhập tại đây (trạm) &gt; Giá trị trong tab Hệ thống (toàn cục).
+                                    Nếu trạm đã lưu riêng, thay đổi ở Hệ thống sẽ <strong>không</strong> ảnh hưởng trạm này.
+                                </div>
                             </div>
 
                             <!--1. OFFLINE TIMEOUTS -->
@@ -1283,15 +1301,21 @@
                                     <h5>Water Level Thresholds</h5>
                                 </div>
                                 <div class="row g-3">
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <label class="form-label">Warning (m)</label>
                                         <input type="number" step="0.01" class="form-control" id="cfg-water-warning"
                                             value="0.15">
                                     </div>
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <label class="form-label">Critical (m)</label>
                                         <input type="number" step="0.01" class="form-control" id="cfg-water-critical"
                                             value="0.30">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-water-confirm" value="3"
+                                            min="1" max="10">
+                                        <small id="cfg-water-confirm-source" class="text-muted">Mặc định</small>
                                     </div>
                                 </div>
                             </div>
@@ -1303,17 +1327,23 @@
                                     <h5>Rain Intensity (mm/h)</h5>
                                 </div>
                                 <div class="row g-3">
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label">Watch</label>
                                         <input type="number" class="form-control" id="cfg-rain-watch" value="10.0">
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label">Warning</label>
                                         <input type="number" class="form-control" id="cfg-rain-warning" value="25.0">
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label">Critical</label>
                                         <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-rain-confirm" value="2"
+                                            min="1" max="10">
+                                        <small id="cfg-rain-confirm-source" class="text-muted">Mặc định</small>
                                     </div>
                                 </div>
                             </div>
@@ -1911,6 +1941,16 @@
     </div>
 
     <script>
+        function unlockProtectedInput(inputEl) {
+            if (!inputEl) return;
+            inputEl.removeAttribute('readonly');
+        }
+
+        function lockProtectedInput(inputEl) {
+            if (!inputEl) return;
+            inputEl.setAttribute('readonly', 'readonly');
+        }
+
         // Hàm toggle hiển thị mật khẩu
         function togglePasswordVisibility(inputId) {
             const input = document.getElementById(inputId);

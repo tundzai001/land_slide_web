@@ -8,7 +8,12 @@ def create_pg_engine(url):
     return create_async_engine(
         url,
         echo=False,
-        pool_pre_ping=True, # Tự động kết nối lại nếu bị ngắt
+        pool_pre_ping=True,
+        pool_size=10,        # Tăng lên 10 để phục vụ nhiều trạm đồng thời
+        max_overflow=20,     # Cho phép tối đa 30 kết nối khi tải cao
+        pool_recycle=1800,
+        pool_timeout=30,
+        pool_use_lifo=True,  # Tái sử dụng kết nối gần nhất (tốt cho cache)
     )
 
 # 1. AUTH DB

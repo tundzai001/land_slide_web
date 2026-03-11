@@ -85,6 +85,19 @@ async def lifespan(app: FastAPI):
         async with data_engine.begin() as conn:
             await conn.run_sync(model_data.BaseData.metadata.create_all)
         logger.info("✓ Data database initialized")
+
+        # 3b. Đảm bảo composite index tồn tại (idempotent, không ảnh hưởng nếu đã có)
+        async with data_engine.connect() as conn:
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_sensor_data_station_type_ts "
+                "ON sensor_data (station_id, sensor_type, timestamp)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_sensor_data_station_ts "
+                "ON sensor_data (station_id, timestamp)"
+            ))
+            await conn.commit()
+        logger.info("✓ sensor_data composite indexes ensured")
         
         # 4. Tạo Admin mặc định
         async with asyncio.timeout(10):
@@ -874,7 +887,11 @@ async def get_stations(
                     break
             
             # ✅ Tính risk_level thực tế từ alerts (không hardcode LOW nữa)
-            risk_assessment = await _calculate_station_risk_assessment(db_data, station.id)
+            risk_assessment = await _calculate_station_risk_assessment(
+                db_data,
+                station.id,
+                station.config
+            )
             computed_risk = risk_assessment.get("overall_risk", "LOW")
             
             stations_with_status.append({
@@ -987,7 +1004,11 @@ async def get_station_detail(
         computed_status = "online" if station_online else "offline"
         
         # 4. Tính risk assessment
-        risk_assessment = await _calculate_station_risk_assessment(db_data, station_id)
+        risk_assessment = await _calculate_station_risk_assessment(
+            db_data,
+            station_id,
+            station.config
+        )
 
         # 4.5 Lấy Pi devices gắn với trạm (pi_point, pi_center)
         pi_devices_status = []
@@ -1031,9 +1052,27 @@ async def get_station_detail(
         logger.error(f"Error loading station detail: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     
-async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: int) -> Dict:
-    """Helper: Tính toán risk assessment từ alerts"""
+async def _calculate_station_risk_assessment(
+    db_data: AsyncSession,
+    station_id: int,
+    station_config: Optional[Dict[str, Any]] = None
+) -> Dict:
+    """Helper: Tính toán risk assessment từ unresolved alerts còn hiệu lực thời gian."""
     try:
+        now_ts = int(time.time())
+        # Chỉ tính alert còn "tươi" để tránh kẹt WARNING/CRITICAL khi sensor đã ngừng gửi.
+        base_ttl = 180  # mặc định 3 phút nếu không có config
+        ttl_cfg = (station_config or {}).get('alert_ttl_seconds', {}) if station_config else {}
+        alert_ttl = {
+            'gnss_velocity': int(ttl_cfg.get('gnss_velocity', base_ttl)),
+            'rainfall': int(ttl_cfg.get('rainfall', base_ttl)),
+            'water_level': int(ttl_cfg.get('water_level', base_ttl)),
+            'tilt': int(ttl_cfg.get('tilt', base_ttl)),
+            'tilt_warning': int(ttl_cfg.get('tilt_warning', base_ttl)),
+            'tilt_critical': int(ttl_cfg.get('tilt_critical', base_ttl)),
+            'shock': int(ttl_cfg.get('shock', base_ttl)),
+        }
+
         result = await db_data.execute(
             select(model_data.Alert).where(
                 and_(
@@ -1043,9 +1082,16 @@ async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: 
             )
         )
         alerts = result.scalars().all()
+
+        # Lọc alert hết hạn theo category-specific TTL.
+        fresh_alerts = []
+        for a in alerts:
+            ttl = alert_ttl.get(a.category, base_ttl)
+            if (now_ts - int(a.timestamp or 0)) <= ttl:
+                fresh_alerts.append(a)
         
-        critical_count = sum(1 for a in alerts if a.level == "CRITICAL")
-        warning_count = sum(1 for a in alerts if a.level == "WARNING")
+        critical_count = sum(1 for a in fresh_alerts if a.level == "CRITICAL")
+        warning_count = sum(1 for a in fresh_alerts if a.level == "WARNING")
         
         if critical_count >= 2:
             overall_risk = "EXTREME"
@@ -1065,7 +1111,7 @@ async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: 
                     "message": a.message,
                     "timestamp": a.timestamp
                 }
-                for a in alerts
+                for a in fresh_alerts
             ]
         }
     except Exception as e:
@@ -1078,7 +1124,7 @@ async def _calculate_station_risk_assessment(db_data: AsyncSession, station_id: 
 @app.get("/api/stations/{station_id}/long-term-analysis")
 async def get_long_term_analysis(
     station_id: int,
-    days: int = 30,
+    days: float = 30.0,
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db)
 ):
@@ -1098,8 +1144,8 @@ async def get_long_term_analysis(
         
         # Lấy window lớn nhất cho multi-window (tối thiểu = days, mở rộng 90 ngày)
         max_window = max(days, 90)
-        cutoff_time = int(time.time()) - (max_window * 86400)
-        cutoff_requested = int(time.time()) - (days * 86400)
+        cutoff_time = int(time.time() - (max_window * 86400))
+        cutoff_requested = int(time.time() - (days * 86400))
         
         # 2. Lấy dữ liệu GNSS (mở rộng window cho multi-window)
         gnss_result = await db_data.execute(
@@ -1148,7 +1194,10 @@ async def get_long_term_analysis(
         # Chuyển sang list dict chung
         historical_gnss_full = [{"timestamp": d.timestamp, "data": d.data} for d in gnss_data]
         historical_gnss_requested = [p for p in historical_gnss_full if p['timestamp'] >= cutoff_requested]
-        
+        # ✅ FALLBACK: Nếu khoảng thời gian ngắn mà không có đủ dữ liệu, lấy dữ liệu gần nhất
+        if len(historical_gnss_requested) < 2 and len(historical_gnss_full) >= 2 and days <= 1:
+            historical_gnss_requested = historical_gnss_full[-20:]
+
         # 5. Phân tích GNSS (trên window requested)
         if len(historical_gnss_requested) >= 2:
             gnss_analysis = analyzer.analyze_long_term_velocity(
@@ -1158,16 +1207,21 @@ async def get_long_term_analysis(
                 window_days=days
             )
             
-            # Tạo time-series GNSS (trung bình theo ngày) cho chart & 3D
+            # Tạo time-series GNSS (trung bình theo ngày/giờ) cho chart & 3D
             if gnss_analysis.get("status") == "success":
                 from collections import OrderedDict
                 from datetime import datetime as dt
                 daily_gnss = OrderedDict()
                 
+                if days < 1/24:    fmt = '%H:%M:%S'
+                elif days <= 1:    fmt = '%H:%M'
+                elif days <= 7:    fmt = '%d/%m %H:00'
+                else:              fmt = '%d/%m'
+                
                 first_e, first_n, first_u = None, None, None
 
                 for point in historical_gnss_requested:
-                    day_key = dt.fromtimestamp(point['timestamp']).strftime('%d/%m')
+                    day_key = dt.fromtimestamp(point['timestamp']).strftime(fmt)
                     data = point['data']
                     
                     disp = data.get('total_displacement_mm', data.get('displacement_mm', 0))
@@ -1206,18 +1260,42 @@ async def get_long_term_analysis(
             }
         
         # 6. Phân tích IMU
-        if len(imu_data) >= 2:
-            historical_imu = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
+        historical_imu_full = [{"timestamp": d.timestamp, "data": d.data} for d in imu_data]
+        historical_imu_requested = [p for p in historical_imu_full if p['timestamp'] >= cutoff_requested]
+        # ✅ FALLBACK: Nếu khoảng thời gian ngắn mà không có đủ dữ liệu, lấy dữ liệu gần nhất
+        if len(historical_imu_requested) < 2 and len(historical_imu_full) >= 2 and days <= 1:
+            historical_imu_requested = historical_imu_full[-60:]
+            
+        if len(historical_imu_requested) >= 2:
             imu_analysis = analyzer.analyze_long_term_tilt(
                 station_id=station_id,
-                historical_data=historical_imu,
+                historical_data=historical_imu_requested,
                 window_days=days
             )
+            
+            # Format X-axis for IMU exactly like GNSS
+            if imu_analysis.get("status") == "success" and "time_series" in imu_analysis:
+                from collections import OrderedDict
+                from datetime import datetime as dt
+                fmt = '%H:%M:%S' if days < 1/24 else '%H:%M' if days <= 1 else '%d/%m %H:00' if days <= 7 else '%d/%m'
+                
+                daily_imu = OrderedDict()
+                for ts, r, p in zip(imu_analysis["time_series"]["raw_timestamps"], imu_analysis["time_series"]["rolls"], imu_analysis["time_series"]["pitches"]):
+                    day_key = dt.fromtimestamp(ts).strftime(fmt)
+                    if day_key not in daily_imu:
+                        daily_imu[day_key] = {'rolls': [], 'pitches': []}
+                    daily_imu[day_key]['rolls'].append(r)
+                    daily_imu[day_key]['pitches'].append(p)
+                    
+                imu_analysis["time_series"]["labels"] = list(daily_imu.keys())
+                imu_analysis["time_series"]["rolls"] = [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_imu.values()]
+                imu_analysis["time_series"]["pitches"] = [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_imu.values()]
+                
             result["imu"] = imu_analysis
         else:
             result["imu"] = {
                 "status": "insufficient_data",
-                "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(imu_data)}"
+                "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(historical_imu_requested)}"
             }
         
         # 7. Phân tích tương quan Mưa - Dịch chuyển

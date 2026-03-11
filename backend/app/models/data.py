@@ -1,12 +1,17 @@
 #backend/app/models/data.py
-from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float
+from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index
 from app.database import BaseData
 
 class SensorData(BaseData):
 
     __tablename__ = "sensor_data"
-    
-    id = Column(Integer, primary_key=True)
+    # Composite index tối ưu cho truy vấn lịch sử theo trạm + loại sensor + thời gian
+    __table_args__ = (
+        Index('ix_sensor_data_station_type_ts', 'station_id', 'sensor_type', 'timestamp'),
+        Index('ix_sensor_data_station_ts', 'station_id', 'timestamp'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)  # BigInteger cho dữ liệu lớn
     station_id = Column(Integer, index=True, nullable=False)
     timestamp = Column(BigInteger, index=True, nullable=False)
     sensor_type = Column(String, index=True, nullable=False)

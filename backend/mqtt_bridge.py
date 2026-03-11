@@ -43,8 +43,30 @@ class MQTTBridge:
         
         # MQTT Client setup
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        if settings.MQTT_USER:
-            self.client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
+        self.runtime_mqtt = {
+            "broker": settings.MQTT_BROKER,
+            "port": settings.MQTT_PORT,
+            "user": settings.MQTT_USER,
+            "password": settings.MQTT_PASSWORD,
+            "topic_reload_interval": settings.TOPIC_RELOAD_INTERVAL,
+        }
+        self.runtime_confirmation = {
+            "gnss": 3,
+            "rain": 2,
+            "water": 3,
+            "imu": 1,
+        }
+        self.runtime_save_intervals = {
+            "gnss": settings.SAVE_INTERVAL_GNSS,
+            "rain": settings.SAVE_INTERVAL_RAIN,
+            "water": settings.SAVE_INTERVAL_WATER,
+            "imu": settings.SAVE_INTERVAL_IMU,
+            "default": settings.SAVE_INTERVAL_DEFAULT,
+        }
+        self.topic_reload_interval = settings.TOPIC_RELOAD_INTERVAL
+
+        if self.runtime_mqtt["user"]:
+            self.client.username_pw_set(self.runtime_mqtt["user"], self.runtime_mqtt["password"])
             
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
@@ -54,10 +76,140 @@ class MQTTBridge:
         self.topic_map: Dict[str, Dict[str, Any]] = {}
         self.processors_cache: Dict[str, Any] = {}
         
-        # ✅ THÊM: Save interval tracking (per station per sensor)
         self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
-        
+
+        # ============================================================
+        # Write buffer – gom nhiều bản ghi lại rồi flush 1 lần/chu kỳ
+        # Tránh mở đóng session liên tục khi có nhiều trạm
+        # ============================================================
+        self._sensor_buffer: list = []
+        self._station_update_buffer: dict = {}  # {station_id: {status, last_update}}
+        self._device_update_buffer: dict = {}   # {device_id: last_data_time}
+        self._buffer_lock = asyncio.Lock()
+        self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
+
         self.loop = None
+
+    async def load_runtime_config_from_db(self):
+        """Load global system config (main_config) and apply as runtime defaults."""
+        try:
+            async with ConfigSessionLocal() as db:
+                res = await db.execute(
+                    select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
+                )
+                cfg_row = res.scalar_one_or_none()
+                if not cfg_row or not isinstance(cfg_row.value, dict):
+                    return
+
+                cfg = cfg_row.value
+                mqtt_cfg = cfg.get("mqtt", {}) or {}
+                confirm_cfg = cfg.get("confirmation", {}) or {}
+                intervals_cfg = cfg.get("save_intervals", {}) or {}
+
+                self.runtime_mqtt["broker"] = mqtt_cfg.get("broker", self.runtime_mqtt["broker"])
+                self.runtime_mqtt["port"] = int(mqtt_cfg.get("port", self.runtime_mqtt["port"]))
+                self.runtime_mqtt["user"] = mqtt_cfg.get("user", self.runtime_mqtt["user"])
+                if mqtt_cfg.get("password"):
+                    self.runtime_mqtt["password"] = mqtt_cfg.get("password")
+                self.runtime_mqtt["topic_reload_interval"] = int(
+                    mqtt_cfg.get("topic_reload_interval", self.runtime_mqtt["topic_reload_interval"])
+                )
+                self.topic_reload_interval = self.runtime_mqtt["topic_reload_interval"]
+
+                self.runtime_confirmation["gnss"] = int(confirm_cfg.get("gnss", self.runtime_confirmation["gnss"]))
+                self.runtime_confirmation["rain"] = int(confirm_cfg.get("rain", self.runtime_confirmation["rain"]))
+                self.runtime_confirmation["water"] = int(confirm_cfg.get("water", self.runtime_confirmation["water"]))
+                self.runtime_confirmation["imu"] = int(confirm_cfg.get("imu", self.runtime_confirmation["imu"]))
+
+                self.runtime_save_intervals["gnss"] = int(intervals_cfg.get("gnss", self.runtime_save_intervals["gnss"]))
+                self.runtime_save_intervals["rain"] = int(intervals_cfg.get("rain", self.runtime_save_intervals["rain"]))
+                self.runtime_save_intervals["water"] = int(intervals_cfg.get("water", self.runtime_save_intervals["water"]))
+                self.runtime_save_intervals["imu"] = int(intervals_cfg.get("imu", self.runtime_save_intervals["imu"]))
+        except Exception as e:
+            logger.error(f"Error loading runtime system config: {e}")
+
+    def _apply_runtime_defaults_to_station_config(self, station_config: dict) -> dict:
+        """Station config has priority; global system config is fallback."""
+        cfg = dict(station_config or {})
+
+        gnss_cfg = dict(cfg.get("GnssAlerting", {}) or {})
+        rain_cfg = dict(cfg.get("RainAlerting", {}) or {})
+        water_cfg = dict(cfg.get("Water", {}) or {})
+        imu_cfg = dict(cfg.get("ImuAlerting", {}) or {})
+
+        gnss_cfg.setdefault("gnss_confirm_steps", self.runtime_confirmation["gnss"])
+        rain_cfg.setdefault("rain_confirm_steps", self.runtime_confirmation["rain"])
+        water_cfg.setdefault("water_confirm_steps", self.runtime_confirmation["water"])
+        imu_cfg.setdefault("imu_confirm_steps", self.runtime_confirmation["imu"])
+
+        cfg["GnssAlerting"] = gnss_cfg
+        cfg["RainAlerting"] = rain_cfg
+        cfg["Water"] = water_cfg
+        cfg["ImuAlerting"] = imu_cfg
+        return cfg
+
+    def reload_config(self, config_dict: dict):
+        """Apply system config at runtime and reconnect MQTT with new credentials."""
+        try:
+            mqtt_cfg = (config_dict or {}).get("mqtt", {}) or {}
+            confirm_cfg = (config_dict or {}).get("confirmation", {}) or {}
+            intervals_cfg = (config_dict or {}).get("save_intervals", {}) or {}
+
+            old_signature = (
+                self.runtime_mqtt["broker"],
+                self.runtime_mqtt["port"],
+                self.runtime_mqtt["user"],
+                self.runtime_mqtt["password"],
+            )
+
+            self.runtime_mqtt["broker"] = mqtt_cfg.get("broker", self.runtime_mqtt["broker"])
+            self.runtime_mqtt["port"] = int(mqtt_cfg.get("port", self.runtime_mqtt["port"]))
+            self.runtime_mqtt["user"] = mqtt_cfg.get("user", self.runtime_mqtt["user"])
+            if mqtt_cfg.get("password"):
+                self.runtime_mqtt["password"] = mqtt_cfg.get("password")
+            self.runtime_mqtt["topic_reload_interval"] = int(
+                mqtt_cfg.get("topic_reload_interval", self.runtime_mqtt["topic_reload_interval"])
+            )
+            self.topic_reload_interval = self.runtime_mqtt["topic_reload_interval"]
+
+            self.runtime_confirmation["gnss"] = int(confirm_cfg.get("gnss", self.runtime_confirmation["gnss"]))
+            self.runtime_confirmation["rain"] = int(confirm_cfg.get("rain", self.runtime_confirmation["rain"]))
+            self.runtime_confirmation["water"] = int(confirm_cfg.get("water", self.runtime_confirmation["water"]))
+            self.runtime_confirmation["imu"] = int(confirm_cfg.get("imu", self.runtime_confirmation["imu"]))
+
+            self.runtime_save_intervals["gnss"] = int(intervals_cfg.get("gnss", self.runtime_save_intervals["gnss"]))
+            self.runtime_save_intervals["rain"] = int(intervals_cfg.get("rain", self.runtime_save_intervals["rain"]))
+            self.runtime_save_intervals["water"] = int(intervals_cfg.get("water", self.runtime_save_intervals["water"]))
+            self.runtime_save_intervals["imu"] = int(intervals_cfg.get("imu", self.runtime_save_intervals["imu"]))
+
+            new_signature = (
+                self.runtime_mqtt["broker"],
+                self.runtime_mqtt["port"],
+                self.runtime_mqtt["user"],
+                self.runtime_mqtt["password"],
+            )
+
+            if old_signature != new_signature:
+                logger.info("🔄 MQTT runtime config changed. Reconnecting with new credentials...")
+                try:
+                    self.client.loop_stop()
+                    self.client.disconnect()
+                except Exception:
+                    pass
+
+                self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                if self.runtime_mqtt["user"]:
+                    self.client.username_pw_set(self.runtime_mqtt["user"], self.runtime_mqtt["password"])
+                self.client.on_connect = self.on_connect
+                self.client.on_message = self.on_message
+                self.client.on_disconnect = self.on_disconnect
+
+                self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
+                self.client.loop_start()
+
+            logger.info("✅ Runtime system config applied")
+        except Exception as e:
+            logger.error(f"❌ Failed to reload runtime config: {e}")
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
@@ -119,9 +271,13 @@ class MQTTBridge:
             return
 
         try:
-            self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 60)
+            if self.loop and self.loop.is_running():
+                self.loop.create_task(self.load_runtime_config_from_db())
+
+            self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
             self.client.loop_start()
             self.loop.create_task(self.reload_topics_from_db())
+            self.loop.create_task(self._flush_loop())  # ✅ Khởi động flush buffer
             logger.info("✅ MQTT Bridge started successfully.")
         except Exception as e:
             logger.error(f"❌ Failed to start MQTT Bridge: {e}")
@@ -135,6 +291,7 @@ class MQTTBridge:
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
+                await self.load_runtime_config_from_db()
                 from app.models.config import Device, Station
                 from sqlalchemy import select
                 
@@ -181,7 +338,7 @@ class MQTTBridge:
                         "station_name": station.name,
                         "type": device.device_type,
                         "processor": self.processors_cache[proc_key],
-                        "config": station.config or {}
+                        "config": self._apply_runtime_defaults_to_station_config(station.config or {})
                     }
 
                 # Diff subscribe/unsubscribe
@@ -193,7 +350,100 @@ class MQTTBridge:
 
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
-            await asyncio.sleep(settings.TOPIC_RELOAD_INTERVAL)
+            await asyncio.sleep(self.topic_reload_interval)
+
+    async def _flush_loop(self):
+        """Background task: gom write buffer và flush xuống DB mỗi N giây."""
+        logger.info("🔄 Started DB Write Buffer Flush Task")
+        while True:
+            await asyncio.sleep(self._flush_interval)
+            await self._flush_write_buffer()
+
+    async def _flush_write_buffer(self):
+        """Flush toàn bộ buffer ra DB bằng bulk insert / batch update."""
+        async with self._buffer_lock:
+            if not self._sensor_buffer and not self._station_update_buffer:
+                return
+            sensor_batch = list(self._sensor_buffer)
+            station_batch = dict(self._station_update_buffer)
+            device_batch = dict(self._device_update_buffer)
+            self._sensor_buffer.clear()
+            self._station_update_buffer.clear()
+            self._device_update_buffer.clear()
+
+        # 1. Bulk insert sensor data (1 INSERT nhiều rows thay vì nhiều INSERT)
+        if sensor_batch:
+            try:
+                async with DataSessionLocal() as db:
+                    await db.execute(model_data.SensorData.__table__.insert(), sensor_batch)
+                    await db.commit()
+                logger.debug(f"💾 [BULK FLUSH] {len(sensor_batch)} sensor records saved")
+            except Exception as e:
+                logger.error(f"❌ Bulk sensor flush error: {e}")
+
+        # 2. Batch update Device.last_data_time + Station.last_update / status
+        if station_batch or device_batch:
+            try:
+                from app.models.config import Station, Device
+                async with ConfigSessionLocal() as db:
+                    for sid, vals in station_batch.items():
+                        await db.execute(
+                            Station.__table__.update().where(Station.id == sid).values(**vals)
+                        )
+                    for did, ts in device_batch.items():
+                        await db.execute(
+                            Device.__table__.update().where(Device.id == did).values(last_data_time=ts)
+                        )
+                    await db.commit()
+                logger.debug(f"💾 [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
+            except Exception as e:
+                logger.error(f"❌ Batch config update error: {e}")
+
+    async def _save_alert_immediate(self, device_id: int, station_id: int, sensor_record: dict, alert: dict, current_timestamp: int):
+        """Ghi trực tiếp xuống DB ngay lập tức khi có alert (không qua buffer)."""
+        try:
+            from app.models.config import Device, Station
+            async with ConfigSessionLocal() as db_config:
+                await db_config.execute(
+                    Device.__table__.update().where(Device.id == device_id).values(last_data_time=current_timestamp)
+                )
+                await db_config.execute(
+                    Station.__table__.update().where(Station.id == station_id).values(last_update=current_timestamp, status="online")
+                )
+                await db_config.commit()
+        except Exception as e:
+            logger.error(f"❌ Alert config update error: {e}")
+
+        try:
+            async with DataSessionLocal() as db_data:
+                db_data.add(model_data.SensorData(**sensor_record))
+                # Tìm alert chưa resolve cùng category, cập nhật hoặc tạo mới
+                res = await db_data.execute(
+                    select(model_data.Alert).where(
+                        and_(
+                            model_data.Alert.station_id == station_id,
+                            model_data.Alert.category == alert['category'],
+                            model_data.Alert.is_resolved == False
+                        )
+                    )
+                )
+                existing_alert = res.scalar_one_or_none()
+                if existing_alert:
+                    existing_alert.timestamp = current_timestamp
+                    existing_alert.level = alert['level']
+                    existing_alert.message = alert['message']
+                else:
+                    db_data.add(model_data.Alert(
+                        station_id=station_id,
+                        timestamp=current_timestamp,
+                        level=alert['level'],
+                        category=alert['category'],
+                        message=alert['message'],
+                        is_resolved=False
+                    ))
+                await db_data.commit()
+        except Exception as e:
+            logger.error(f"❌ Alert data save error: {e}")
 
     async def _save_imu_baseline(self, station_id: int, baseline_data: dict):
         """Lưu IMU baseline vào station config trong DB."""
@@ -245,7 +495,7 @@ class MQTTBridge:
                     if sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
                     elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
                     elif sensor_type == 'imu': 
-                        processed_data = processor.process(payload_json)
+                        processed_data = processor.process(payload_json, station_config)
                         # ✅ Auto-save baseline to DB khi vừa khóa lần đầu
                         if processed_data and processor.origin_locked and not hasattr(processor, '_baseline_saved'):
                             processor._baseline_saved = True
@@ -300,8 +550,13 @@ class MQTTBridge:
         # ---------------------------------------------------------
         is_dangerous = False
         is_just_resolved = False
+        is_pending = False
         if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
             is_dangerous = True
+        elif alert and alert.get('level') == 'PENDING':
+            is_pending = True
+            
+        if is_dangerous:
             try:
                 # 1. Update UI Status
                 await manager.broadcast({
@@ -336,7 +591,7 @@ class MQTTBridge:
                 logger.warning(f"🚨 [{station_name}] Alert broadcast: {alert['message']}")
             except Exception as e:
                 logger.error(f"❌ WS Alert Broadcast Error: {e}")
-        else:
+        elif not is_pending:
             # Nếu AN TOÀN -> Gửi LOW để UI chuyển về màu xanh ngay lập tức
             try:
                 await manager.broadcast({
@@ -395,11 +650,11 @@ class MQTTBridge:
             throttle_key_station = f"{station_id}_{sensor_type}"
             last_saved = self.last_save_time[station_id].get(sensor_type, 0)
             
-            interval = settings.SAVE_INTERVAL_DEFAULT
-            if sensor_type == 'gnss': interval = settings.SAVE_INTERVAL_GNSS
-            elif sensor_type == 'imu': interval = settings.SAVE_INTERVAL_IMU
-            elif sensor_type == 'rain': interval = settings.SAVE_INTERVAL_RAIN
-            elif sensor_type == 'water': interval = settings.SAVE_INTERVAL_WATER
+            interval = self.runtime_save_intervals.get('default', settings.SAVE_INTERVAL_DEFAULT)
+            if sensor_type == 'gnss': interval = self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)
+            elif sensor_type == 'imu': interval = self.runtime_save_intervals.get('imu', settings.SAVE_INTERVAL_IMU)
+            elif sensor_type == 'rain': interval = self.runtime_save_intervals.get('rain', settings.SAVE_INTERVAL_RAIN)
+            elif sensor_type == 'water': interval = self.runtime_save_intervals.get('water', settings.SAVE_INTERVAL_WATER)
             
             time_since_last_save = current_timestamp - last_saved
             
@@ -430,66 +685,50 @@ class MQTTBridge:
 
         try:
             if save_data_now:
-                 async with ConfigSessionLocal() as db_config:
-                    from app.models.config import Device, Station
-                    await db_config.execute(
-                        Device.__table__.update().where(Device.id == device_id).values(last_data_time=current_timestamp)
-                    )
-                    await db_config.execute(
-                        Station.__table__.update().where(Station.id == station_id).values(last_update=current_timestamp, status="online")
-                    )
-                    await db_config.commit()
+                # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
+                val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
 
-            if save_data_now:
-                async with DataSessionLocal() as db_data:
-                    # ===== EXTRACT VALUES BASED ON SENSOR TYPE =====
-                    val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
-                    
-                    if sensor_type == 'gnss':
-                        val_1 = processed_data.get('speed_2d_mm_s', 0.0)
-                        val_2 = processed_data.get('total_displacement_mm', 0.0)
-                    
-                    elif sensor_type == 'rain':
-                        val_1 = processed_data.get('intensity_mm_h', 0.0)
-                        val_2 = processed_data.get('accumulated_mm', 0.0)
-                    
-                    elif sensor_type == 'water':
-                        val_1 = processed_data.get('water_level', 0.0)
-                        val_2 = processed_data.get('intensity_mm_h', 0.0)
-                    
-                    elif sensor_type == 'imu':
-                        val_1 = processed_data.get('roll', 0.0)
-                        val_2 = processed_data.get('pitch', 0.0)
-                        val_3 = processed_data.get('yaw', 0.0)
-                        val_4 = processed_data.get('total_accel', 0.0)
-                        val_5 = processed_data.get('battery', 0.0)
-                    
-                    # === LƯU VÀO DB ===
-                    db_data.add(model_data.SensorData(
-                        station_id=station_id,  
-                        timestamp=current_timestamp,
-                        sensor_type=sensor_type,
-                        data=processed_data,
-                        value_1=val_1,
-                        value_2=val_2,
-                        value_3=val_3,
-                        value_4=val_4,
-                        value_5=val_5
-                    ))
-                    # ✅ CẬP NHẬT LAST SAVE TIME (theo station + sensor_type)
-                    self.last_save_time[station_id][sensor_type] = current_timestamp
+                if sensor_type == 'gnss':
+                    val_1 = processed_data.get('speed_2d_mm_s', 0.0)
+                    val_2 = processed_data.get('total_displacement_mm', 0.0)
+                elif sensor_type == 'rain':
+                    val_1 = processed_data.get('intensity_mm_h', 0.0)
+                    val_2 = processed_data.get('accumulated_mm', 0.0)
+                elif sensor_type == 'water':
+                    val_1 = processed_data.get('water_level', 0.0)
+                    val_2 = processed_data.get('intensity_mm_h', 0.0)
+                elif sensor_type == 'imu':
+                    val_1 = processed_data.get('roll', 0.0)
+                    val_2 = processed_data.get('pitch', 0.0)
+                    val_3 = processed_data.get('yaw', 0.0)
+                    val_4 = processed_data.get('total_accel', 0.0)
+                    val_5 = processed_data.get('battery', 0.0)
 
-                    # Chỉ lưu cảnh báo nếu nguy hiểm
-                    if is_dangerous:
-                        db_data.add(model_data.Alert(
-                            station_id=station_id,
-                            timestamp=current_timestamp,
-                            level=alert['level'],
-                            category=alert['category'],
-                            message=alert['message'],
-                            is_resolved=False
-                        ))
-                    await db_data.commit()
+                sensor_record = {
+                    "station_id": station_id,
+                    "timestamp": current_timestamp,
+                    "sensor_type": sensor_type,
+                    "data": processed_data,
+                    "value_1": val_1,
+                    "value_2": val_2,
+                    "value_3": val_3,
+                    "value_4": val_4,
+                    "value_5": val_5,
+                }
+                self.last_save_time[station_id][sensor_type] = current_timestamp
+
+                if is_dangerous:
+                    # ✅ ALERT → Ghi thẳng xuống DB, không qua buffer
+                    await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
+                else:
+                    # ✅ BÌNH THƯỜNG → Đưa vào buffer, flush theo chu kỳ
+                    async with self._buffer_lock:
+                        self._sensor_buffer.append(sensor_record)
+                        self._station_update_buffer[station_id] = {
+                            "status": "online",
+                            "last_update": current_timestamp
+                        }
+                        self._device_update_buffer[device_id] = current_timestamp
 
         except Exception as e:
             logger.error(f"❌ DB Error: {e}")

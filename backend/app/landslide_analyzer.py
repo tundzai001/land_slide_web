@@ -66,7 +66,7 @@ class LandslideAnalyzer:
         station_id: int,
         historical_data: List[Dict[str, Any]],
         config: Dict,
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
         try:
             if not historical_data or len(historical_data) < 2:
@@ -88,8 +88,8 @@ class LandslideAnalyzer:
             last_point = sorted_data[-1]
 
             duration_days = (last_point['timestamp'] - first_point['timestamp']) / 86400.0
-            if duration_days < 0.1:
-                return {"status": "insufficient_data", "message": "Thời gian đo quá ngắn."}
+            if duration_days <= 0:
+                duration_days = 0.00001  # Prevent division by zero
 
             # --- Bước 3: Tính toán vận tốc bằng OLS Regression (Ordinary Least Squares) ---
             # Trích xuất time và tọa độ
@@ -171,17 +171,17 @@ class LandslideAnalyzer:
             # --- Bước 5: Inverse Velocity Method (Fukuzono) ---
             inverse_velocity = self._inverse_velocity_analysis(sorted_data)
 
-            # Nâng risk nếu Fukuzono dự báo sụp đổ gần
+            # Nâng risk nếu Fukuzono dự báo sụp lún gần
             if inverse_velocity.get('predicted_failure'):
                 days_to_failure = inverse_velocity.get('days_to_failure', 999)
                 if days_to_failure <= 7:
                     risk_level = "EXTREME"
-                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
                 elif days_to_failure <= 30:
                     if risk_level in ("LOW", "MEDIUM"):
                         risk_level = "HIGH"
                     # Luôn cập nhật message bất kể level
-                    warning_message = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (Fukuzono)"
+                    warning_message = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
 
             return {
                 "status": "success",
@@ -444,8 +444,8 @@ class LandslideAnalyzer:
 
     def _inverse_velocity_analysis(self, sorted_data: List[Dict], window_days: float = 3.0) -> Dict[str, Any]:
         """
-        Phương pháp Inverse Velocity (Fukuzono/Saito) để dự báo thời điểm sụp đổ.
-        Nếu 1/v giảm tuyến tính về 0, đó là dấu hiệu sắp sụp đổ.
+        Phương pháp Inverse Velocity (Fukuzono/Saito) để dự báo thời điểm sụp lún.
+        Nếu 1/v giảm tuyến tính về 0, đó là dấu hiệu sắp sụp lún.
         """
         result = {
             "available": False,
@@ -532,14 +532,14 @@ class LandslideAnalyzer:
                     result["days_to_failure"] = round(days_to_failure, 1)
                     failure_timestamp = timestamps[-1] + days_to_failure * 86400
                     result["predicted_failure_date"] = datetime.fromtimestamp(failure_timestamp).isoformat()
-                    result["message"] = f"⚠️ Dự báo sụp đổ trong ~{days_to_failure:.0f} ngày (R²={r_squared:.2f})"
+                    result["message"] = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày (R²={r_squared:.2f})"
                     result["confidence"] = "high" if r_squared > 0.85 else "medium"
                 else:
-                    result["message"] = "1/v đang giảm nhưng chưa hội tụ trong 1 năm tới."
+                    result["message"] = "hệ số đang giảm nhưng chưa có dấu hiệu sụt lún trong thời gian sắp tới."
             elif slope_inv_v < 0:
-                result["message"] = "1/v đang giảm nhưng R² thấp — cần theo dõi thêm."
+                result["message"] = "hệ số đang giảm nhưng độ tin cậy thấp — cần theo dõi thêm."
             else:
-                result["message"] = "Không có dấu hiệu hội tụ (1/v ổn định hoặc tăng)."
+                result["message"] = "Chưa có dấu hiệu sụt lún."
 
             return result
 
@@ -555,7 +555,7 @@ class LandslideAnalyzer:
         self,
         gnss_data: List[Dict[str, Any]],
         rain_data: List[Dict[str, Any]],
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
         """
         Phân tích tương quan giữa lượng mưa tích lũy và dịch chuyển.
@@ -763,7 +763,7 @@ class LandslideAnalyzer:
         self,
         station_id: int,
         historical_data: List[Dict[str, Any]],
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
         """
         Phân tích xu hướng nghiêng dài hạn từ dữ liệu IMU.
@@ -793,8 +793,8 @@ class LandslideAnalyzer:
                 return {"status": "insufficient_data", "message": "Không đủ dữ liệu IMU hợp lệ."}
             
             duration_days = (timestamps[-1] - timestamps[0]) / 86400.0
-            if duration_days < 0.01:
-                return {"status": "insufficient_data", "message": "Thời gian đo quá ngắn."}
+            if duration_days <= 0:
+                duration_days = 0.00001  # Prevent div by zero
             
             # --- Tính toán cơ bản ---
             roll_change = rolls[-1] - rolls[0]
@@ -837,20 +837,27 @@ class LandslideAnalyzer:
                 risk_level = "MEDIUM"
                 warning = f"⚠️ Chú ý: Tốc độ nghiêng đang tăng ({total_tilt_change:.2f}°)"
             
-            # --- Tạo time-series (trung bình theo ngày) cho chart ---
+            # --- Tạo time-series (trung bình theo khoảng thời gian) cho chart ---
             from collections import OrderedDict
             daily_data = OrderedDict()
+            
+            if window_days < 1/24: fmt = '%H:%M:%S'
+            elif window_days <= 1: fmt = '%H:%M'
+            elif window_days <= 7: fmt = '%d/%m %H:00'
+            else:                  fmt = '%d/%m'
+            
             for ts, r, p in zip(timestamps, rolls, pitches):
-                day_key = datetime.fromtimestamp(ts).strftime('%d/%m')
+                day_key = datetime.fromtimestamp(ts).strftime(fmt)
                 if day_key not in daily_data:
                     daily_data[day_key] = {'rolls': [], 'pitches': []}
                 daily_data[day_key]['rolls'].append(r)
                 daily_data[day_key]['pitches'].append(p)
             
             time_series = {
+                'raw_timestamps': timestamps,
                 'labels': list(daily_data.keys()),
-                'roll': [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_data.values()],
-                'pitch': [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_data.values()]
+                'rolls': [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_data.values()],
+                'pitches': [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_data.values()]
             }
             
             return {
@@ -1112,16 +1119,20 @@ class LandslideAnalyzer:
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
-                    if confirm_steps == 1:
+                    if counter_info['count'] >= confirm_steps:
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category})")
                         return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
-                    return None
+                    else:
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} (1/{confirm_steps})")
+                        return {"level": "PENDING", "category": alert_category}
                 else:
                     counter_info['count'] += 1
                     if counter_info['count'] >= confirm_steps:
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category}) after {confirm_steps} times")
                         return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
-                    return None
+                    else:
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} ({counter_info['count']}/{confirm_steps})")
+                        return {"level": "PENDING", "category": alert_category}
             else:
                 counter_info['count'] = max(0, counter_info['count'] - 1)
                 if counter_info['count'] == 0:

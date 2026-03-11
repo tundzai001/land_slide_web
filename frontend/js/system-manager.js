@@ -131,6 +131,14 @@ class SystemManager {
                 document.getElementById('sys-reload-interval').value = config.mqtt.topic_reload_interval || 60;
                 document.getElementById('sys-mqtt-user').value = config.mqtt.user || '';
                 // Không hiển thị password vì bảo mật
+                const pwdEl = document.getElementById('sys-mqtt-password');
+                const clearPwd = () => {
+                    if (pwdEl) pwdEl.value = '';
+                };
+                clearPwd();
+                // Một số browser/password manager autofill trễ, clear thêm vài nhịp.
+                setTimeout(clearPwd, 80);
+                setTimeout(clearPwd, 350);
             }
 
             if (config.confirmation) {
@@ -147,9 +155,36 @@ class SystemManager {
                 document.getElementById('sys-save-imu').value = config.save_intervals.imu || 2592000;
             }
 
+            await this.loadMqttRuntimeStatus();
+
         } catch (e) {
             console.error(e);
             window.toast?.error('Không thể tải cấu hình hệ thống');
+        }
+    }
+
+    async loadMqttRuntimeStatus() {
+        const badge = document.getElementById('sys-mqtt-status-badge');
+        if (!badge) return;
+
+        try {
+            const res = await fetch('/api/admin/mqtt-status', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) throw new Error('Failed to load mqtt status');
+            const status = await res.json();
+
+            if (status.connected) {
+                badge.className = 'badge bg-success ms-auto';
+                badge.textContent = `CONNECTED (${status.config_source})`;
+            } else {
+                badge.className = 'badge bg-danger ms-auto';
+                badge.textContent = `DISCONNECTED (${status.config_source})`;
+            }
+        } catch (e) {
+            badge.className = 'badge bg-warning text-dark ms-auto';
+            badge.textContent = 'STATUS UNKNOWN';
         }
     }
 
@@ -193,6 +228,7 @@ class SystemManager {
             if (!res.ok) throw new Error('Failed to save');
 
             window.toast?.success('✅ Đã lưu cấu hình hệ thống!');
+            await this.loadMqttRuntimeStatus();
 
         } catch (e) {
             window.toast?.error('❌ Lỗi: ' + e.message);

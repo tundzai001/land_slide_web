@@ -12,6 +12,13 @@ let allStations = [];
 let currentView = 'realtime';
 let wsConnection = null;
 
+// Realtime 3D state
+let realtimeImuScene, realtimeImuCamera, realtimeImuRenderer, realtimeImuControls, realtimeImuAnimationId;
+let realtimeImuSensorBlock = null;
+let realtimeImuTargetQuaternion = null;
+let realtimeImuActive = false;
+let _THREE = null; // Cached Three.js module for use outside async import scope
+
 // =====================================================
 // MAIN INITIALIZATION
 // =====================================================
@@ -121,9 +128,26 @@ function handleRealtimeUpdate(message) {
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
 
-            // 3. Reset siren popup về idle nếu đang xem trạm này
+            // 3. Reset siren buttons to idle if viewing this station
             if (currentStationData && stationId === currentStationData.id) {
                 setSirenButtonState('idle');
+            }
+        }
+
+        // ✅ Nếu trạm chuyển sang EXTREME/CRITICAL → Cập nhật siren buttons
+        if ((riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') && currentStationData && stationId === currentStationData.id) {
+            const user = window.authManager?.getUserInfo();
+            const userRole = user?.role;
+            if (userRole === 'admin' || userRole === 'operator') {
+                currentAlertStationId = stationId;
+                // Transition idle/offline buttons to alerting
+                document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+                    const target = b.getAttribute('data-target');
+                    const currentState = b.getAttribute('data-siren-state');
+                    if (currentState === 'idle' || currentState === 'offline') {
+                        setSirenButtonState('alerting', target);
+                    }
+                });
             }
         }
 
@@ -178,6 +202,22 @@ function handleRealtimeUpdate(message) {
         setMarkerAlert(message.station_id, true);
         // Always attempt to play siren (it will handle its own dedup/overlap)
         playSiren();
+
+        // ✅ Cập nhật siren buttons nếu đang xem trạm này
+        if (currentStationData && message.station_id === currentStationData.id) {
+            const user = window.authManager?.getUserInfo();
+            const userRole = user?.role;
+            if (userRole === 'admin' || userRole === 'operator') {
+                currentAlertStationId = message.station_id;
+                document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+                    const target = b.getAttribute('data-target');
+                    const currentState = b.getAttribute('data-siren-state');
+                    if (currentState === 'idle') {
+                        setSirenButtonState('alerting', target);
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -258,6 +298,14 @@ function updateRealtimeSensorValues(message) {
         animateValue('val-imu-delta-roll', data.roll, 1, '°', true);
         animateValue('val-imu-delta-pitch', data.pitch, 1, '°', true);
         animateValue('val-imu-delta-yaw', data.yaw, 1, '°', true);
+
+        // Use backend drift calculation if available, fallback to JS
+        if (data.drift_len_mm !== undefined && data.drift_dir !== undefined) {
+            animateValue('val-imu-drift-len', data.drift_len_mm, 1, ' mm', true);
+            setText('val-imu-drift-dir', `(${data.drift_dir})`);
+        } else {
+            updateImuDrift(data.roll, data.pitch);
+        }
 
         // Update battery in real-time
         const batteryContainer = document.getElementById('battery-container');
@@ -457,6 +505,39 @@ function setupEventListeners() {
             }
 
             console.log('📊 [CHARTS] Charts panel closed');
+        });
+    }
+
+    const btnToggleImu3d = document.getElementById('btn-toggle-imu-3d');
+    const chartImuWrapper = document.getElementById('chart-imu-wrapper');
+    const realtimeImu3dWrapper = document.getElementById('realtime-imu-3d-wrapper');
+
+    if (btnToggleImu3d && chartImuWrapper && realtimeImu3dWrapper) {
+        btnToggleImu3d.addEventListener('click', () => {
+            realtimeImuActive = !realtimeImuActive;
+            if (realtimeImuActive) {
+                chartImuWrapper.style.display = 'none';
+                realtimeImu3dWrapper.style.display = 'block';
+                btnToggleImu3d.innerHTML = '<i class="bi bi-graph-up me-1"></i>2D Chart';
+                // Always re-init 3D scene when toggling on to ensure proper sizing
+                if (currentStationData && currentStationData.sensors && currentStationData.sensors.imu) {
+                    const latest = currentStationData.sensors.imu.latest;
+                    if (latest) {
+                        // Small delay to let display:block take effect
+                        setTimeout(() => {
+                            initRealtimeIMU3D(latest.roll || 0, latest.pitch || 0);
+                        }, 50);
+                    }
+                }
+            } else {
+                realtimeImu3dWrapper.style.display = 'none';
+                chartImuWrapper.style.display = 'block';
+                btnToggleImu3d.innerHTML = '<i class="bi bi-box me-1"></i>3D View';
+                // Cleanup realtime scene on hide
+                if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
+                realtimeImuScene = null;
+                realtimeImuRenderer = null;
+            }
         });
     }
 
@@ -775,20 +856,21 @@ function updateMarker(station) {
 // SIREN POPUP HELPER — Dùng bởi selectStation và Track button
 // =====================================================
 function _showSirenIfAlerting(stationId, data) {
+    const sirenSection = document.getElementById('siren-sidebar-section');
+
     // Only show siren controls for admin and operator roles
     const user = window.authManager?.getUserInfo();
     const userRole = user?.role;
     if (userRole !== 'admin' && userRole !== 'operator') {
-        const popup = document.getElementById('siren-bottom-popup');
-        if (popup) popup.style.bottom = '-120px';
+        if (sirenSection) sirenSection.style.display = 'none';
         return;
     }
 
+    // Always visible for admin/operator (grey when idle, red when alerting)
+    if (sirenSection) sirenSection.style.display = '';
+
     const risk = data.risk_assessment?.overall_risk || data.risk_level;
     const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
-
-    const popupStationName = document.getElementById('siren-popup-station');
-    if (popupStationName) popupStationName.textContent = `${data.name} (${data.station_code})`;
 
     // Default statuses based on pi_devices array from station detail API
     let pointDeviceStatus = 'idle';
@@ -933,6 +1015,7 @@ function updateSidebarUI(data) {
         setText('val-imu-delta-roll', '--°');
         setText('val-imu-delta-pitch', '--°');
         setText('val-imu-delta-yaw', '--°');
+        updateImuDrift(null, null);
 
         // ✅ Khi offline, nút tắt còi chuyển xám (idle)
         setSirenButtonState('idle');
@@ -958,6 +1041,24 @@ function updateSidebarUI(data) {
         setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
         setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
         setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+
+        // Use backend drift calculation if available
+        if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
+            setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+            setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
+
+            // Update realtime 3D if active
+            if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
+                const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
+                const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
+                const targetQuaternion = new _THREE.Quaternion();
+                const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                targetQuaternion.setFromEuler(euler);
+                realtimeImuTargetQuaternion = targetQuaternion;
+            }
+        } else {
+            updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
+        }
 
         // ✅ Battery Voltage: hiển thị nếu có giá trị > 0
         const batteryContainer = document.getElementById('battery-container');
@@ -1180,7 +1281,7 @@ async function loadLongTermAnalysis() {
 
     // Get selected days from range selector
     const activeBtn = document.querySelector('#longterm-range-selector .btn.active');
-    const days = activeBtn ? parseInt(activeBtn.dataset.days) || 30 : 30;
+    const days = activeBtn ? parseFloat(activeBtn.dataset.days) || 30 : 30;
 
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';
@@ -1230,11 +1331,11 @@ function renderLongTermAnalysis(data) {
         if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
             warningEl.style.display = 'block';
             warningEl.className = `alert ${gnss.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'} mb-3`;
-            warningTextEl.textContent = gnss.warning_message;
+            warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
         } else if (gnss.risk_level === 'INFO') {
             warningEl.style.display = 'block';
             warningEl.className = `alert alert-success mb-3`;
-            warningTextEl.textContent = gnss.warning_message;
+            warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
         } else {
             warningEl.style.display = 'none';
         }
@@ -1246,10 +1347,10 @@ function renderLongTermAnalysis(data) {
         setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
         setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
 
-        const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+        const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
         const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
 
-        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '';
         document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
 
         const cusumBadge = document.getElementById('cusum-badge');
@@ -1297,19 +1398,58 @@ function renderLongTermAnalysis(data) {
 let gnssScene, gnssCamera, gnssRenderer, gnssControls, gnssAnimationId;
 let imuScene, imuCamera, imuRenderer, imuControls, imuAnimationId;
 
+// Helper: wait until a container has non-zero dimensions (handles CSS transitions/display:none)
+function waitForContainerSize(container, timeoutMs = 3000) {
+    return new Promise((resolve) => {
+        if (container.clientWidth > 0 && container.clientHeight > 0) {
+            resolve(true);
+            return;
+        }
+        const start = Date.now();
+        const check = () => {
+            if (container.clientWidth > 0 && container.clientHeight > 0) {
+                resolve(true);
+            } else if (Date.now() - start > timeoutMs) {
+                console.warn('[3D] Container still has 0 size after timeout, using fallback');
+                resolve(false);
+            } else {
+                requestAnimationFrame(check);
+            }
+        };
+        requestAnimationFrame(check);
+    });
+}
+
+// Helper: get container dimensions with fallback
+function getContainerDims(container) {
+    let w = container.clientWidth;
+    let h = container.clientHeight;
+    if (w <= 0 || h <= 0) {
+        // Fallback: use style dimensions or parent
+        const rect = container.getBoundingClientRect();
+        w = rect.width > 0 ? rect.width : 600;
+        h = rect.height > 0 ? rect.height : 350;
+    }
+    return { w, h };
+}
+
 async function init3DVisualizations(data) {
     try {
         const THREE = await import('three');
+        _THREE = THREE; // Cache for realtime updates
         const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
 
         // GNSS
         if (data.gnss && data.gnss.status === 'success' && data.gnss.time_series) {
             const gnssLoading = document.getElementById('gnss-3d-loading');
             if (gnssLoading) gnssLoading.style.display = 'block';
+            const gnssContainer = document.getElementById('container-3d-gnss');
+            // Wait for container to become visible (overlay transition)
+            await waitForContainerSize(gnssContainer, 2000);
             setTimeout(() => {
                 initGNSS3D(data.gnss.time_series, THREE, OrbitControls);
                 if (gnssLoading) gnssLoading.style.display = 'none';
-            }, 50);
+            }, 100);
         } else {
             const cGnss = document.getElementById('container-3d-gnss');
             if (cGnss) cGnss.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu GNSS 3D</div>';
@@ -1319,10 +1459,13 @@ async function init3DVisualizations(data) {
         if (data.imu && data.imu.status === 'success' && data.imu.time_series) {
             const imuLoading = document.getElementById('imu-3d-loading');
             if (imuLoading) imuLoading.style.display = 'block';
+            const imuContainer = document.getElementById('container-3d-imu');
+            // Wait for container to become visible (overlay transition)
+            await waitForContainerSize(imuContainer, 2000);
             setTimeout(() => {
                 initIMU3D(data.imu.time_series, THREE, OrbitControls);
                 if (imuLoading) imuLoading.style.display = 'none';
-            }, 50);
+            }, 100);
         } else {
             const cImu = document.getElementById('container-3d-imu');
             if (cImu) cImu.innerHTML = '<div class="text-muted d-flex h-100 align-items-center justify-content-center">Không có dữ liệu IMU 3D</div>';
@@ -1344,12 +1487,13 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
     gnssScene = new THREE.Scene();
     gnssScene.background = new THREE.Color(0x0a0e17);
 
-    const aspect = container.clientWidth / container.clientHeight;
+    const dims = getContainerDims(container);
+    const aspect = dims.w / dims.h;
     gnssCamera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
     gnssCamera.position.set(10, 10, 10);
 
     gnssRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    gnssRenderer.setSize(container.clientWidth, container.clientHeight);
+    gnssRenderer.setSize(dims.w, dims.h);
     container.appendChild(gnssRenderer.domElement);
 
     gnssControls = new OrbitControls(gnssCamera, gnssRenderer.domElement);
@@ -1435,13 +1579,19 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
     }
     animate();
 
-    // Resize handler
-    window.addEventListener('resize', () => {
-        if (!container) return;
-        gnssCamera.aspect = container.clientWidth / container.clientHeight;
+    // Resize handler + ResizeObserver for proper sizing after CSS transitions
+    function handleGnssResize() {
+        if (!container || !gnssRenderer || !gnssCamera) return;
+        const d = getContainerDims(container);
+        gnssCamera.aspect = d.w / d.h;
         gnssCamera.updateProjectionMatrix();
-        gnssRenderer.setSize(container.clientWidth, container.clientHeight);
-    });
+        gnssRenderer.setSize(d.w, d.h);
+    }
+    window.addEventListener('resize', handleGnssResize);
+    if (typeof ResizeObserver !== 'undefined') {
+        const gnssRo = new ResizeObserver(() => handleGnssResize());
+        gnssRo.observe(container);
+    }
 }
 
 function initIMU3D(timeSeries, THREE, OrbitControls) {
@@ -1456,13 +1606,14 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     imuScene.background = new THREE.Color(0x0b0e14);
     imuScene.fog = new THREE.FogExp2(0x0b0e14, 0.03);
 
-    const aspect = container.clientWidth / container.clientHeight;
+    const dims = getContainerDims(container);
+    const aspect = dims.w / dims.h;
     imuCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
     imuCamera.position.set(5, 6, 8);
 
     imuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     imuRenderer.setPixelRatio(window.devicePixelRatio);
-    imuRenderer.setSize(container.clientWidth, container.clientHeight);
+    imuRenderer.setSize(dims.w, dims.h);
     imuRenderer.shadowMap.enabled = true;
     imuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(imuRenderer.domElement);
@@ -1519,98 +1670,65 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     imuScene.add(grid);
 
     // ==========================================
-    // HIGH-TECH SENSOR BLOCK DESIGN
+    // REALISTIC IMU BLACK BOX MOUNT DESIGN
     // ==========================================
     const sensorBlock = new THREE.Group();
 
-    // 1. Base / Main Body (Dark brushed aluminum)
-    const baseWidth = 2.4;
-    const baseHeight = 0.6;
-    const baseDepth = 3.4;
-    const bodyGeo = new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth);
-    const bodyMat = new THREE.MeshStandardMaterial({
-        color: 0x151821,
-        metalness: 0.7,
-        roughness: 0.4
+    // 1. Silver Base Plate (Circular)
+    const plateRadius = 2.0;
+    const plateThickness = 0.1;
+    const plateGeo = new THREE.CylinderGeometry(plateRadius, plateRadius, plateThickness, 32);
+    const plateMat = new THREE.MeshStandardMaterial({
+        color: 0xcccccc, // Silver
+        metalness: 0.8,
+        roughness: 0.3
     });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.castShadow = true;
-    body.receiveShadow = true;
-    sensorBlock.add(body);
+    const plate = new THREE.Mesh(plateGeo, plateMat);
+    plate.position.y = plateThickness / 2;
+    plate.castShadow = true;
+    plate.receiveShadow = true;
+    sensorBlock.add(plate);
 
-    // 2. Top Plate (Glass/Polished alloy finish)
-    const topWidth = 2.0;
-    const topHeight = 0.2;
-    const topDepth = 3.0;
-    const topGeo = new THREE.BoxGeometry(topWidth, topHeight, topDepth);
-    const topMat = new THREE.MeshPhysicalMaterial({
-        color: 0x222835,
-        metalness: 0.9,
-        roughness: 0.1,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1
+    // 2. The Black IMU Box (Main Sensor)
+    const boxWidth = 2.2;
+    const boxHeight = 1.0;
+    const boxDepth = 1.4;
+    const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+    const boxMat = new THREE.MeshStandardMaterial({
+        color: 0x111111, // Flat black
+        metalness: 0.2,
+        roughness: 0.8,
+        bumpScale: 0.02
     });
-    const topPlate = new THREE.Mesh(topGeo, topMat);
-    topPlate.position.y = baseHeight / 2 + topHeight / 2;
-    topPlate.castShadow = true;
-    sensorBlock.add(topPlate);
+    const imuBox = new THREE.Mesh(boxGeo, boxMat);
+    imuBox.position.y = plateThickness + boxHeight / 2;
+    imuBox.castShadow = true;
+    imuBox.receiveShadow = true;
+    sensorBlock.add(imuBox);
 
-    // 3. Glowing IMU Core
-    const coreGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 32);
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.y = topPlate.position.y + topHeight / 2 + 0.025;
-    sensorBlock.add(core);
-
-    // Glowing core ring
-    const ringGeo = new THREE.RingGeometry(0.4, 0.45, 32);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.6 });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = core.position.y;
-    sensorBlock.add(ring);
-
-    // 4. Direction Arrow (Sleek sci-fi style)
-    const arrowShape = new THREE.Shape();
-    arrowShape.moveTo(0, 0.4);
-    arrowShape.lineTo(0.25, -0.3);
-    arrowShape.lineTo(0, -0.15);
-    arrowShape.lineTo(-0.25, -0.3);
-    arrowShape.lineTo(0, 0.4);
-
-    // Smooth settings for extrude
-    const extrudeSettings = { depth: 0.05, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.02, bevelThickness: 0.02 };
-    const arrowGeo = new THREE.ExtrudeGeometry(arrowShape, extrudeSettings);
-    const arrowMat = new THREE.MeshStandardMaterial({
-        color: 0xff2a5f,
-        metalness: 0.6,
-        roughness: 0.2,
-        emissive: 0xff2a5f,
-        emissiveIntensity: 0.4
-    });
+    // 3. Direction Indicator (Simple white arrow on top of black box)
+    const arrowGeo = new THREE.ConeGeometry(0.15, 0.4, 16);
+    const arrowMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
     const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+    // Point it forward (along Z axis)
     arrow.rotation.x = Math.PI / 2;
-    arrow.position.set(0, topPlate.position.y + topHeight / 2 + 0.05, 1.0);
+    arrow.position.set(0, plateThickness + boxHeight + 0.05, boxDepth / 2 - 0.3);
     sensorBlock.add(arrow);
 
-    // 5. Screws/Mounting holes
-    const screwGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.2, 16);
-    const screwMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
-    const zOffset = (baseDepth / topDepth) * (topWidth / 2 - 0.2);
-    const screwPositions = [
-        [-baseWidth / 2 + 0.2, zOffset],
-        [baseWidth / 2 - 0.2, zOffset],
-        [-baseWidth / 2 + 0.2, -zOffset],
-        [baseWidth / 2 - 0.2, -zOffset]
-    ];
-    screwPositions.forEach(pos => {
-        const screw = new THREE.Mesh(screwGeo, screwMat);
-        screw.position.set(pos[0], baseHeight / 2 + 0.05, pos[1]);
-        sensorBlock.add(screw);
-    });
+    // 4. Mounting Screws on the plate
+    const screwGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
+    const screwMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.2 });
 
-    // 6. Add visual XYZ axis indicators
-    const origin = new THREE.Vector3(0, core.position.y + 0.1, 0);
+    for (let i = 0; i < 4; i++) {
+        const angle = (i * Math.PI) / 2 + Math.PI / 4;
+        const screw = new THREE.Mesh(screwGeo, screwMat);
+        const radius = plateRadius - 0.3;
+        screw.position.set(Math.cos(angle) * radius, plateThickness, Math.sin(angle) * radius);
+        sensorBlock.add(screw);
+    }
+
+    // 5. Add visual XYZ axis indicators
+    const origin = new THREE.Vector3(0, plateThickness + boxHeight + 0.2, 0);
     const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, 1.2, 0xff2a5f, 0.2, 0.15); // Red X
     const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), origin, 1.2, 0x00e5ff, 0.2, 0.15); // Cyan Y (Up)
     const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, 1.2, 0x00ff88, 0.2, 0.15); // Green Z
@@ -1618,10 +1736,9 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
 
     imuScene.add(sensorBlock);
 
-    // Data parsing
-    const rollData = timeSeries.roll || [];
-    const pitchData = timeSeries.pitch || [];
-    if (rollData.length === 0) return;
+    // Data parsing (backend sends 'rolls'/'pitches' plural)
+    const rollData = timeSeries.rolls || timeSeries.roll || [];
+    const pitchData = timeSeries.pitches || timeSeries.pitch || [];
 
     let progress = 0;
     const speed = 0.003; // Smooth flow
@@ -1635,10 +1752,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
         const delta = clock.getDelta();
         const elapsedTime = clock.getElapsedTime();
 
-        // 1. Hover effect & Glowing pulse
-        sensorBlock.position.y = Math.sin(elapsedTime * 2) * 0.05;
-        coreMat.color.setHSL(0.5 + Math.sin(elapsedTime * 3) * 0.05, 1.0, 0.5 + Math.sin(elapsedTime * 5) * 0.1);
-        ringMat.opacity = 0.4 + Math.sin(elapsedTime * 4) * 0.2;
+        // Removed vertical hover and glowing effect to keep the sensor realistic and grounded
 
         // 2. Playback IMU Tilt
         if (rollData.length > 1) {
@@ -1682,13 +1796,181 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     }
     animate();
 
-    // Resize handler
-    window.addEventListener('resize', () => {
-        if (!container) return;
-        imuCamera.aspect = container.clientWidth / container.clientHeight;
+    // Resize handler + ResizeObserver for proper sizing after CSS transitions
+    function handleImuResize() {
+        if (!container || !imuRenderer || !imuCamera) return;
+        const d = getContainerDims(container);
+        imuCamera.aspect = d.w / d.h;
         imuCamera.updateProjectionMatrix();
-        imuRenderer.setSize(container.clientWidth, container.clientHeight);
-    });
+        imuRenderer.setSize(d.w, d.h);
+    }
+    window.addEventListener('resize', handleImuResize);
+    if (typeof ResizeObserver !== 'undefined') {
+        const imuRo = new ResizeObserver(() => handleImuResize());
+        imuRo.observe(container);
+    }
+}
+
+async function initRealtimeIMU3D(initialRoll, initialPitch) {
+    const container = document.getElementById('realtime-imu-3d-scene');
+    if (!container) return;
+
+    if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
+    container.innerHTML = '';
+
+    try {
+        const THREE = await import('three');
+        _THREE = THREE; // Cache for realtime updates
+        const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+
+        realtimeImuScene = new THREE.Scene();
+        realtimeImuScene.background = new THREE.Color(0x0b0e14);
+        realtimeImuScene.fog = new THREE.FogExp2(0x0b0e14, 0.03);
+
+        // Wait for wrapper to be visible before measuring
+        await waitForContainerSize(container, 2000);
+        const dims = getContainerDims(container);
+        const aspect = dims.w / dims.h;
+        realtimeImuCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+        realtimeImuCamera.position.set(5, 6, 8);
+
+        realtimeImuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        realtimeImuRenderer.setPixelRatio(window.devicePixelRatio);
+        realtimeImuRenderer.setSize(dims.w, dims.h);
+        realtimeImuRenderer.shadowMap.enabled = true;
+        realtimeImuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(realtimeImuRenderer.domElement);
+
+        realtimeImuControls = new OrbitControls(realtimeImuCamera, realtimeImuRenderer.domElement);
+        realtimeImuControls.enableDamping = true;
+        realtimeImuControls.dampingFactor = 0.05;
+        realtimeImuControls.maxPolarAngle = Math.PI / 2 + 0.1;
+        realtimeImuControls.minDistance = 3;
+        realtimeImuControls.maxDistance = 15;
+
+        // Advanced Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        realtimeImuScene.add(ambientLight);
+
+        const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x0f0e1d, 0.5);
+        realtimeImuScene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true;
+        realtimeImuScene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x00e5ff, 2, 8);
+        pointLight.position.set(0, 1.5, 0);
+        realtimeImuScene.add(pointLight);
+
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(30, 30);
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x0b0e14, roughness: 0.8, metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -1.5;
+        floor.receiveShadow = true;
+        realtimeImuScene.add(floor);
+
+        const grid = new THREE.GridHelper(30, 30, 0x00e5ff, 0x222233);
+        grid.position.y = -1.49;
+        grid.material.opacity = 0.15;
+        grid.material.transparent = true;
+        realtimeImuScene.add(grid);
+
+        // Realistic IMU mounting
+        realtimeImuSensorBlock = new THREE.Group();
+
+        // Base Plate
+        const plateRadius = 2.0;
+        const plateThickness = 0.1;
+        const plateGeo = new THREE.CylinderGeometry(plateRadius, plateRadius, plateThickness, 32);
+        const plateMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 });
+        const plate = new THREE.Mesh(plateGeo, plateMat);
+        plate.position.y = plateThickness / 2;
+        plate.castShadow = true;
+        plate.receiveShadow = true;
+        realtimeImuSensorBlock.add(plate);
+
+        // IMU Box
+        const boxWidth = 2.2;
+        const boxHeight = 1.0;
+        const boxDepth = 1.4;
+        const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2, roughness: 0.8 });
+        const imuBox = new THREE.Mesh(boxGeo, boxMat);
+        imuBox.position.y = plateThickness + boxHeight / 2;
+        imuBox.castShadow = true;
+        imuBox.receiveShadow = true;
+        realtimeImuSensorBlock.add(imuBox);
+
+        // Arrow
+        const arrowGeo = new THREE.ConeGeometry(0.15, 0.4, 16);
+        const arrowMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+        arrow.rotation.x = Math.PI / 2;
+        arrow.position.set(0, plateThickness + boxHeight + 0.05, boxDepth / 2 - 0.3);
+        realtimeImuSensorBlock.add(arrow);
+
+        // Screws
+        const screwGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
+        const screwMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.2 });
+        for (let i = 0; i < 4; i++) {
+            const angle = (i * Math.PI) / 2 + Math.PI / 4;
+            const screw = new THREE.Mesh(screwGeo, screwMat);
+            const radius = plateRadius - 0.3;
+            screw.position.set(Math.cos(angle) * radius, plateThickness, Math.sin(angle) * radius);
+            realtimeImuSensorBlock.add(screw);
+        }
+
+        // Axes Support
+        const origin = new THREE.Vector3(0, plateThickness + boxHeight + 0.2, 0);
+        const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, 1.2, 0xff2a5f, 0.2, 0.15);
+        const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), origin, 1.2, 0x00e5ff, 0.2, 0.15);
+        const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, 1.2, 0x00ff88, 0.2, 0.15);
+        realtimeImuSensorBlock.add(xArrow, yArrow, zArrow);
+
+        realtimeImuScene.add(realtimeImuSensorBlock);
+
+        // Initial orientation
+        const currPitch = initialPitch * Math.PI / 180;
+        const currRoll = initialRoll * Math.PI / 180;
+        realtimeImuTargetQuaternion = new THREE.Quaternion();
+        const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+        realtimeImuTargetQuaternion.setFromEuler(euler);
+
+        function animate() {
+            realtimeImuAnimationId = requestAnimationFrame(animate);
+
+            if (realtimeImuTargetQuaternion) {
+                realtimeImuSensorBlock.quaternion.slerp(realtimeImuTargetQuaternion, 0.1);
+            }
+
+            realtimeImuControls.update();
+            realtimeImuRenderer.render(realtimeImuScene, realtimeImuCamera);
+        }
+        animate();
+
+        // Resize handler + ResizeObserver for proper sizing
+        function handleRealtimeImuResize() {
+            if (!container || !realtimeImuRenderer || !realtimeImuCamera) return;
+            const d = getContainerDims(container);
+            realtimeImuCamera.aspect = d.w / d.h;
+            realtimeImuCamera.updateProjectionMatrix();
+            realtimeImuRenderer.setSize(d.w, d.h);
+        }
+        window.addEventListener('resize', handleRealtimeImuResize);
+        if (typeof ResizeObserver !== 'undefined') {
+            const rtImuRo = new ResizeObserver(() => handleRealtimeImuResize());
+            rtImuRo.observe(container);
+        }
+
+    } catch (e) {
+        console.error("ThreeJS not loaded for realtime IMU", e);
+    }
 }
 
 function renderImuLongTermSection(imuData) {
@@ -1716,7 +1998,7 @@ function renderImuLongTermSection(imuData) {
     if (imuData.risk_level === 'EXTREME' || imuData.risk_level === 'HIGH' || imuData.risk_level === 'MEDIUM') {
         warningEl.style.display = 'block';
         warningEl.className = `alert ${imuData.risk_level === 'EXTREME' ? 'alert-danger' : 'alert-warning'} mb-3`;
-        warningTextEl.textContent = imuData.warning_message;
+        warningTextEl.textContent = sanitizeLongTermText(imuData.warning_message);
     } else {
         warningEl.style.display = 'none';
     }
@@ -1730,9 +2012,9 @@ function renderImuLongTermSection(imuData) {
     setText('lt-imu-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
 
     // Trend
-    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
     const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
-    document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '❓';
+    document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '';
     document.getElementById('imu-trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
 }
 
@@ -1900,22 +2182,22 @@ function renderInverseVelocitySection(data) {
     const warningTextEl = document.getElementById('inv-vel-warning-text');
     if (invVel.predicted_failure) {
         warningEl.style.display = 'block';
-        warningTextEl.textContent = invVel.message;
+        warningTextEl.textContent = sanitizeLongTermText(invVel.message);
     } else {
         warningEl.style.display = 'none';
     }
 
     // Metrics
     setText('inv-vel-prediction', invVel.predicted_failure
-        ? `⚠️ Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
-        : '✅ Không');
+        ? `Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
+        : 'Không');
     setText('inv-vel-days', invVel.predicted_failure
         ? `~${invVel.days_to_failure} ngày`
         : 'N/A');
     setText('inv-vel-r2', invVel.r_squared !== undefined ? invVel.r_squared.toFixed(4) : '--');
     setText('inv-vel-confidence', invVel.confidence
-        ? (invVel.confidence === 'high' ? '🔴 Cao' : '🟡 Trung bình')
-        : invVel.message || '--');
+        ? (invVel.confidence === 'high' ? 'Cao' : 'Trung bình')
+        : sanitizeLongTermText(invVel.message) || '--');
 
     // Chart
     if (invVel.time_series) {
@@ -1931,7 +2213,7 @@ function renderInverseVelocitySection(data) {
                 labels: invVel.time_series.labels,
                 datasets: [
                     {
-                        label: '1/Velocity (thực tế)',
+                        label: 'hệ số (thời gian thực)',
                         data: invVel.time_series.inverse_velocity,
                         borderColor: '#ef4444',
                         backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -1941,7 +2223,7 @@ function renderInverseVelocitySection(data) {
                         fill: true
                     },
                     {
-                        label: 'Đường xu hướng (Linear)',
+                        label: 'Đường xu hướng',
                         data: invVel.time_series.trend_line,
                         borderColor: '#fbbf24',
                         borderWidth: 2,
@@ -2122,7 +2404,7 @@ function renderMultiWindowSection(data) {
 
     const windowLabels = { 7: '7 ngày', 30: '30 ngày', 90: '90 ngày' };
     const windowIcons = { 7: 'bi-calendar-day', 30: 'bi-calendar-month', 90: 'bi-calendar3' };
-    const trendIcons = { 'accelerating': '📈', 'stable': '➡️', 'decelerating': '📉' };
+    const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
     const trendTexts = { 'accelerating': 'Tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Giảm tốc' };
 
     cardsContainer.innerHTML = (mw.windows || []).map(w => {
@@ -2142,11 +2424,18 @@ function renderMultiWindowSection(data) {
                     <div class="text-muted small mb-2"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
                     <div class="fs-4 fw-bold text-primary">${w.velocity_mm_year.toFixed(1)} <small class="fs-6 text-muted">mm/năm</small></div>
                     <div class="small mt-1">Dịch chuyển: <strong>${w.displacement_mm.toFixed(1)} mm</strong></div>
-                    <div class="small">Xu hướng: ${trendIcons[w.trend] || '❓'} ${trendTexts[w.trend] || '--'}</div>
+                    <div class="small">Xu hướng: ${trendIcons[w.trend] || ''} ${trendTexts[w.trend] || '--'}</div>
                     <div class="small text-muted">${w.data_points} điểm dữ liệu</div>
                 </div>
             </div>`;
     }).join('');
+}
+
+function sanitizeLongTermText(text) {
+    return String(text || '')
+        .replace(/[📈✅📉🚨]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 }
 
 function setText(id, val) {
@@ -2157,6 +2446,41 @@ function setText(id, val) {
 function setHTML(id, html) {
     const el = document.getElementById(id);
     if (el) el.innerHTML = html;
+}
+
+// =========================================================================
+// IMU DRIFT CALCULATION
+// =========================================================================
+function updateImuDrift(rollVal, pitchVal) {
+    if (rollVal === null || rollVal === undefined || pitchVal === null || pitchVal === undefined || isNaN(parseFloat(rollVal)) || isNaN(parseFloat(pitchVal))) {
+        setText('val-imu-drift-len', '-- mm');
+        setText('val-imu-drift-dir', '(--)');
+        return;
+    }
+    const r = parseFloat(rollVal) || 0;
+    const p = parseFloat(pitchVal) || 0;
+    const r_rad = r * Math.PI / 180;
+    const p_rad = p * Math.PI / 180;
+
+    // Using 1.0 meter (1000mm) as virtual pole length
+    // Use sin for spatial spherical coordinates instead of tan to prevent overestimation
+    const total_tilt_rad = Math.sqrt(r_rad * r_rad + p_rad * p_rad);
+    const drift = 1000 * Math.sin(total_tilt_rad);
+
+    const dx = 1000 * Math.sin(r_rad);
+    const dy = 1000 * Math.sin(p_rad);
+
+    let dir_text = "--";
+    if (drift > 0.1) {
+        let angle_deg = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (angle_deg < 0) angle_deg += 360;
+        const dirs = ["Đ", "ĐB", "B", "TB", "T", "TN", "N", "ĐN"];
+        const idx = Math.round(angle_deg / 45) % 8;
+        dir_text = dirs[idx];
+    }
+
+    animateValue('val-imu-drift-len', drift, 1, ' mm', true);
+    setText('val-imu-drift-dir', `(${dir_text})`);
 }
 
 // =========================================================================
@@ -2282,8 +2606,7 @@ function filterStations(searchTerm) {
  *   - offline: xám đen, disabled (thiết bị Pi mất kết nối)
  */
 function setSirenButtonState(state, target = null) {
-    const popup = document.getElementById('siren-bottom-popup');
-    if (!popup) return;
+    const sirenSection = document.getElementById('siren-sidebar-section');
 
     const btns = target
         ? document.querySelectorAll(`.btn-siren-toggle[data-target="${target}"]`)
@@ -2296,9 +2619,9 @@ function setSirenButtonState(state, target = null) {
         switch (state) {
             case 'idle':
                 btn.disabled = true;
-                btn.classList.add('disabled', 'btn-danger');
-                btn.classList.remove('btn-success', 'btn-secondary');
-                btn.style.opacity = '1';
+                btn.classList.remove('btn-danger', 'btn-success');
+                btn.classList.add('disabled', 'btn-secondary');
+                btn.style.opacity = '0.5';
                 btn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${iconBase}`;
                 break;
             case 'alerting':
@@ -2319,24 +2642,11 @@ function setSirenButtonState(state, target = null) {
                 btn.disabled = true;
                 btn.classList.remove('btn-danger', 'btn-success');
                 btn.classList.add('btn-secondary', 'disabled');
-                btn.style.opacity = '0.6';
+                btn.style.opacity = '0.5';
                 btn.innerHTML = `<i class="bi bi-plug-fill me-1"></i>Offline`;
                 break;
         }
     });
-
-    // Check if any button is NOT idle and NOT offline, if so, show popup
-    const allBtns = document.querySelectorAll('.btn-siren-toggle');
-    const anyActive = Array.from(allBtns).some(b => {
-        const s = b.getAttribute('data-siren-state');
-        return s !== 'idle' && s !== 'offline';
-    });
-
-    if (!anyActive) {
-        popup.style.bottom = '-120px';
-    } else {
-        popup.style.bottom = '8px';
-    }
 }
 
 // =========================================================================
