@@ -1,20 +1,23 @@
-# backend/app/landslide_analyzer.py
+# backend/app/landslide_analyzer.py - FIXED WITH CONFIRMATION COUNTER
 import logging
 import math
 import numpy as np
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime
+from collections import defaultdict, OrderedDict
 
 logger = logging.getLogger(__name__)
 
 class LandslideAnalyzer:
-    """
-    Bộ não phân tích rủi ro.
-    Nhận dữ liệu đã qua xử lý (Clean Data) và Cấu hình trạm (Station Config).
-    Trả về Cảnh báo (Alert) nếu vượt ngưỡng.
-    """
-
-    # --- HELPER: Lấy config an toàn ---
+    def __init__(self):
+        # ✅ Bộ đếm xác nhận cho từng station
+        self.alert_counters = defaultdict(lambda: {
+            'gnss': {'count': 0, 'last_level': None},
+            'rain': {'count': 0, 'last_level': None},
+            'water': {'count': 0, 'last_level': None},
+            'imu': {'count': 0, 'last_level': None}
+        })
+        
     def _get_cfg(self, config: Dict, section: str, key: str, default: float) -> float:
         try:
             return float(config.get(section, {}).get(key, default))
@@ -22,119 +25,190 @@ class LandslideAnalyzer:
             return float(default)
 
     # =========================================================================
-    # PHÂN TÍCH DÀI HẠN (Long-term Analysis)
+    # PHÂN TÍCH DÀI HẠN (Long-term Analysis) - IMPROVED
     # =========================================================================
+
+    def _filter_outliers_iqr(self, data_points: List[Dict], field: str = 'pos_e') -> List[Dict]:
+        """Loại bỏ outlier bằng IQR trên trường pos_e/pos_n/pos_u."""
+        if len(data_points) < 4:
+            return data_points
+
+        values = np.array([p['data'].get(field, 0) for p in data_points])
+        q1, q3 = np.percentile(values, [25, 75])
+        iqr = q3 - q1
+        lower = q1 - 3.0 * iqr
+        upper = q3 + 3.0 * iqr
+
+        filtered = []
+        for i, p in enumerate(data_points):
+            v = values[i]
+            if lower <= v <= upper:
+                filtered.append(p)
+
+        removed = len(data_points) - len(filtered)
+        if removed > 0:
+            logger.info(f"🧹 Outlier filter ({field}): removed {removed}/{len(data_points)} points")
+        return filtered
+
+    def _filter_gnss_quality(self, data_points: List[Dict], min_fix: int = 4) -> List[Dict]:
+        """Lọc dữ liệu GNSS theo chất lượng fix (RTK Fixed = 4+)."""
+        filtered = [
+            p for p in data_points
+            if p['data'].get('fix_quality', min_fix) >= min_fix
+        ]
+        removed = len(data_points) - len(filtered)
+        if removed > 0:
+            logger.info(f"🛰️ Quality filter: removed {removed}/{len(data_points)} low-quality fixes")
+        return filtered if len(filtered) >= 2 else data_points
+
     def analyze_long_term_velocity(
         self,
         station_id: int,
         historical_data: List[Dict[str, Any]],
         config: Dict,
-        window_days: int = 30
+        window_days: float = 30.0
     ) -> Dict[str, Any]:
-        """
-        Phân tích xu hướng chuyển dịch dài hạn (30 ngày, 90 ngày, 1 năm...)
-        
-        Returns:
-            {
-                "status": "success" | "insufficient_data",
-                "analysis": {
-                    "total_displacement_mm": float,
-                    "velocity_mm_year": float,
-                    "velocity_mm_day": float,
-                    "classification": str,
-                    "trend": "accelerating" | "stable" | "decelerating",
-                    "duration_days": float
-                },
-                "risk_level": "LOW" | "MEDIUM" | "HIGH" | "EXTREME",
-                "warning_message": str
-            }
-        """
         try:
-            # 1. Kiểm tra dữ liệu đầu vào
             if not historical_data or len(historical_data) < 2:
-                return {
-                    "status": "insufficient_data",
-                    "message": f"Cần ít nhất 2 điểm dữ liệu để phân tích. Hiện có: {len(historical_data)}"
-                }
+                return {"status": "insufficient_data", "message": "Cần ít nhất 2 điểm dữ liệu."}
 
-            # 2. Sắp xếp theo thời gian
             sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
-            
-            # 3. Lấy điểm đầu và cuối
+
+            # --- Bước 1: Lọc chất lượng GNSS fix ---
+            sorted_data = self._filter_gnss_quality(sorted_data)
+
+            # --- Bước 2: Loại bỏ outlier bằng IQR trên E, N, U ---
+            for field in ['pos_e', 'pos_n', 'pos_u']:
+                sorted_data = self._filter_outliers_iqr(sorted_data, field)
+
+            if len(sorted_data) < 2:
+                return {"status": "insufficient_data", "message": "Không đủ dữ liệu sau khi lọc outlier."}
+
             first_point = sorted_data[0]
             last_point = sorted_data[-1]
-            
-            # 4. Tính thời gian (duration)
-            time_diff_seconds = last_point['timestamp'] - first_point['timestamp']
-            duration_days = time_diff_seconds / 86400
-            
-            if duration_days < 0.1:  # Ít hơn 2.4 giờ
-                return {
-                    "status": "insufficient_data",
-                    "message": f"Khoảng thời gian quá ngắn: {duration_days:.2f} ngày"
-                }
 
-            # 5. Tính tổng chuyển dịch 3D
+            duration_days = (last_point['timestamp'] - first_point['timestamp']) / 86400.0
+            if duration_days <= 0:
+                duration_days = 0.00001  # Prevent division by zero
+
+            # --- Bước 3: Tính toán vận tốc bằng OLS Regression (Ordinary Least Squares) ---
+            # Trích xuất time và tọa độ
+            t_days = np.array([(p['timestamp'] - first_point['timestamp']) / 86400.0 for p in sorted_data])
+            pos_e = np.array([p['data'].get('pos_e', 0) for p in sorted_data])
+            pos_n = np.array([p['data'].get('pos_n', 0) for p in sorted_data])
+            pos_u = np.array([p['data'].get('pos_u', 0) for p in sorted_data])
+            
+            # Tính slope (vận tốc: m/day) cho từng trục
+            # polyfit(x, y, 1) trả về [slope, intercept]
+            vel_e_m_day = np.polyfit(t_days, pos_e, 1)[0] if len(t_days) > 1 else 0
+            vel_n_m_day = np.polyfit(t_days, pos_n, 1)[0] if len(t_days) > 1 else 0
+            vel_u_m_day = np.polyfit(t_days, pos_u, 1)[0] if len(t_days) > 1 else 0
+            
+            # Vector vận tốc tổng hợp (m/day)
+            velocity_m_per_day = math.sqrt(vel_e_m_day**2 + vel_n_m_day**2 + vel_u_m_day**2)
+            
+            # Tính displacement ước lượng từ OLS (để hiển thị) thay vì cộng dồn noise
+            total_displacement_mm = (velocity_m_per_day * duration_days) * 1000
+
+            # Net displacement (first → last) chỉ dùng để tham khảo
             first_data = first_point['data']
             last_data = last_point['data']
-            
-            # Vector chuyển dịch
             delta_e = last_data.get('pos_e', 0) - first_data.get('pos_e', 0)
             delta_n = last_data.get('pos_n', 0) - first_data.get('pos_n', 0)
             delta_u = last_data.get('pos_u', 0) - first_data.get('pos_u', 0)
-            
-            # Tổng chuyển dịch (m)
-            total_displacement_m = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2)
-            total_displacement_mm = total_displacement_m * 1000
+            net_displacement_mm = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2) * 1000
 
-            # 6. Tính vận tốc trung bình
-            velocity_m_per_day = total_displacement_m / duration_days
             velocity_mm_per_day = velocity_m_per_day * 1000
             velocity_mm_per_year = velocity_mm_per_day * 365
-            velocity_mm_per_second = velocity_m_per_day / 86400 * 1000
+            velocity_mm_per_second = velocity_mm_per_day / 86400
 
-            # 7. Phân loại theo Cruden & Varnes (Extended)
             classification = self._classify_velocity_extended(
-                velocity_mm_per_second, 
+                velocity_mm_per_second,
                 velocity_mm_per_day,
                 velocity_mm_per_year,
                 config
             )
 
-            # 8. Phân tích xu hướng (Trend Detection)
-            trend = self._detect_trend(sorted_data)
+            # --- Bước 4: Trend detection bằng sliding window velocity ---
+            trend = self._detect_displacement_trend(sorted_data)
 
-            # 9. Đánh giá rủi ro
-            risk_level, warning_message = self._assess_long_term_risk(
-                velocity_mm_per_year,
-                classification,
-                trend,
-                config
-            )
+            cls_upper = classification.upper()
+            
+            if any(c in cls_upper for c in ("EXTREMELY RAPID", "VERY RAPID", "RAPID")):
+                risk_level = "CRITICAL"
+                warning_message = f"🚨 NGUY HIỂM: Vận tốc {classification}"
+            elif "MODERATE" in cls_upper:
+                risk_level = "HIGH"
+                warning_message = f"⚠️ CẢNH BÁO: Tăng tốc độ ({classification})"
+            elif "SLOW" in cls_upper:
+                risk_level = "MEDIUM"
+                warning_message = f"CẦN THEO DÕI: Vận tốc {classification}"
+            else:
+                risk_level = "LOW"
+                warning_message = f"An toàn: Vận tốc {classification}"
+
+            if trend == "accelerating" and risk_level in ("LOW", "MEDIUM"):
+                risk_level = "HIGH"
+                warning_message = f"⚠️ Chú ý: Xu hướng đang tăng tốc mạnh"
+
+            # --- Bước 4b: Tính toán Khoảng tin cậy OLS (OLS Confidence Interval) ---
+            velocity_ci_95 = self._calculate_ols_velocity_ci(sorted_data)
+
+            # --- Bước 4c: Phát hiện CUSUM Change Point ---
+            cusum_result = self._detect_cusum_change_points(sorted_data)
+            
+            if cusum_result['has_change']:
+                # Nâng risk level nếu CUSUM phát hiện thay đổi
+                if risk_level in ("LOW", "MEDIUM"):
+                    risk_level = "HIGH"
+                
+                cusum_msg = f"⚠️ CUSUM: {cusum_result['message']}"
+                if warning_message:
+                    warning_message = f"{warning_message} | {cusum_msg}"
+                else:
+                    warning_message = cusum_msg
+
+            # --- Bước 5: Inverse Velocity Method (Fukuzono) ---
+            inverse_velocity = self._inverse_velocity_analysis(sorted_data)
+
+            # Nâng risk nếu Fukuzono dự báo sụp lún gần
+            if inverse_velocity.get('predicted_failure'):
+                days_to_failure = inverse_velocity.get('days_to_failure', 999)
+                if days_to_failure <= 7:
+                    risk_level = "EXTREME"
+                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
+                elif days_to_failure <= 30:
+                    if risk_level in ("LOW", "MEDIUM"):
+                        risk_level = "HIGH"
+                    # Luôn cập nhật message bất kể level
+                    warning_message = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
 
             return {
                 "status": "success",
                 "analysis": {
                     "total_displacement_mm": round(total_displacement_mm, 2),
+                    "net_displacement_mm": round(net_displacement_mm, 2),
                     "velocity_mm_year": round(velocity_mm_per_year, 2),
+                    "velocity_ci_95": round(velocity_ci_95, 2),
                     "velocity_mm_day": round(velocity_mm_per_day, 4),
                     "velocity_mm_second": round(velocity_mm_per_second, 6),
                     "classification": classification,
                     "trend": trend,
+                    "cusum_change": cusum_result['has_change'],
+                    "cusum_message": cusum_result.get('message', ''),
                     "duration_days": round(duration_days, 1),
+                    "data_points_used": len(sorted_data),
                     "start_date": datetime.fromtimestamp(first_point['timestamp']).isoformat(),
                     "end_date": datetime.fromtimestamp(last_point['timestamp']).isoformat()
                 },
                 "risk_level": risk_level,
-                "warning_message": warning_message
+                "warning_message": warning_message,
+                "inverse_velocity": inverse_velocity
             }
 
         except Exception as e:
             logger.error(f"Error in long-term analysis: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "message": f"Lỗi phân tích: {str(e)}"
-            }
+            return {"status": "error", "message": f"Lỗi: {str(e)}"}
 
     def _classify_velocity_extended(
         self,
@@ -143,114 +217,675 @@ class LandslideAnalyzer:
         velocity_mm_year: float,
         config: Dict
     ) -> str:
-        """
-        Phân loại vận tốc theo Cruden & Varnes với đơn vị mở rộng
-        Hỗ trợ: mm/s, mm/day, mm/year
-        """
-        # Lấy bảng phân loại từ config (nếu có)
-        classification_table = config.get('GNSS_Classification', [])
-        
+        classification_table = config.get("velocity_classification")
         if not classification_table:
-            # Bảng mặc định mở rộng
             classification_table = [
-                {"name": "Extremely Rapid", "mm_s": 5000, "mm_day": 432000000, "mm_year": 157680000000, "desc": "> 5 m/s"},
-                {"name": "Very Rapid", "mm_s": 50, "mm_day": 4320000, "mm_year": 1576800000, "desc": "3 m/min to 5 m/s"},
-                {"name": "Rapid", "mm_s": 0.5, "mm_day": 43200, "mm_year": 15768000, "desc": "1.8 m/h to 3 m/min"},
-                {"name": "Moderate", "mm_s": 0.0006, "mm_day": 51.84, "mm_year": 18921.6, "desc": "13 mm/mo to 1.8 m/h"},
-                {"name": "Slow", "mm_s": 0.00005, "mm_day": 4.32, "mm_year": 1576.8, "desc": "1.6 m/y to 13 mm/mo"},
-                {"name": "Very Slow", "mm_s": 0.000001, "mm_day": 0.0864, "mm_year": 31.536, "desc": "16 mm/y to 1.6 m/y"},
-                {"name": "Extremely Slow", "mm_s": 0, "mm_day": 0, "mm_year": 0, "desc": "< 16 mm/y"}
+                {"name": "Extremely Rapid", "threshold": 5, "unit": "m/s"},      # > 5 m/sec
+                {"name": "Very Rapid", "threshold": 3, "unit": "m/min"},      # > 3 m/min (0.05 m/s)
+                {"name": "Rapid", "threshold": 1.8, "unit": "m/hr"},       # > 1.8 m/hr (0.5 mm/s)
+                {"name": "Moderate", "threshold": 13, "unit": "m/month"},  # > 13 m/month (5x10^-3 mm/s)
+                {"name": "Slow", "threshold": 1.6, "unit": "m/year"},      # > 1.6 m/year (5x10^-5 mm/s)
+                {"name": "Very Slow", "threshold": 16, "unit": "mm/year"},    # > 16 mm/year (5x10^-7 mm/s)
+                {"name": "Extremely Slow", "threshold": 0, "unit": "mm/year"}     # < 16 mm/year
             ]
         
-        # Sort từ nhanh xuống chậm
-        sorted_classes = sorted(
-            classification_table,
-            key=lambda x: x.get('mm_year', x.get('mm_s', 0) * 31536000),
-            reverse=True
-        )
-        
-        # Tìm class phù hợp (ưu tiên mm/year cho phân tích dài hạn)
-        for cls in sorted_classes:
-            threshold_year = cls.get('mm_year', cls.get('mm_s', 0) * 31536000)
+        normalized_table = []
+        for cls in classification_table:
+            thresh = float(cls.get('threshold', 0))
+            unit = cls.get('unit', 'mm/s')
             
-            if velocity_mm_year >= threshold_year:
-                return cls.get('name', 'Unknown')
+            # Chuyển đổi mọi thứ về cùng 1 chuẩn để so sánh (mm/s)
+            thresh_mm_s = thresh
+            if unit == 'mm/year': thresh_mm_s = thresh / 31536000
+            elif unit == 'mm/day': thresh_mm_s = thresh / 86400
+            elif unit == 'm/year': thresh_mm_s = (thresh * 1000) / 31536000
+            elif unit == 'm/month': thresh_mm_s = (thresh * 1000) / (30 * 86400)
+            elif unit == 'm/hr': thresh_mm_s = (thresh * 1000) / 3600
+            elif unit == 'm/min': thresh_mm_s = (thresh * 1000) / 60
+            elif unit == 'm/s': thresh_mm_s = thresh * 1000
+            
+            normalized_table.append({
+                "name": cls.get('name', 'Unknown'),
+                "threshold_mm_s": thresh_mm_s
+            })
+
+        sorted_classes = sorted(normalized_table, key=lambda x: x['threshold_mm_s'], reverse=True)
+        
+        for cls in sorted_classes:
+            if velocity_mm_s >= cls['threshold_mm_s']:
+                return cls['name']
         
         return "Stable"
 
-    def _detect_trend(self, sorted_data: List[Dict]) -> str:
+    def _detect_displacement_trend(self, sorted_data: List[Dict], window_size: int = 5) -> str:
         """
-        Phát hiện xu hướng: tăng tốc, ổn định, giảm tốc
-        Sử dụng linear regression đơn giản trên vận tốc
+        Phát hiện xu hướng bằng sliding window velocity tính từ displacement thực,
+        thay vì dùng speed_2d tức thời nhiễu cao.
         """
-        if len(sorted_data) < 5:
+        if len(sorted_data) < window_size * 2:
             return "stable"
-        
         try:
-            # Lấy vận tốc 2D từ các điểm
-            velocities = [
-                point['data'].get('speed_2d', 0) 
-                for point in sorted_data 
-                if 'speed_2d' in point['data']
-            ]
-            
-            if len(velocities) < 5:
+            # Tính velocity trung bình mỗi window (mm/day)
+            window_velocities = []
+            for i in range(window_size, len(sorted_data)):
+                start = sorted_data[i - window_size]
+                end = sorted_data[i]
+                dt_days = (end['timestamp'] - start['timestamp']) / 86400.0
+                if dt_days < 0.001:
+                    continue
+                de = end['data'].get('pos_e', 0) - start['data'].get('pos_e', 0)
+                dn = end['data'].get('pos_n', 0) - start['data'].get('pos_n', 0)
+                du = end['data'].get('pos_u', 0) - start['data'].get('pos_u', 0)
+                disp_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
+                vel = disp_mm / dt_days
+                window_velocities.append(vel)
+
+            if len(window_velocities) < 5:
                 return "stable"
-            
-            # Linear regression
-            x = np.arange(len(velocities))
-            y = np.array(velocities)
-            
-            # Tính slope
+
+            x = np.arange(len(window_velocities))
+            y = np.array(window_velocities)
+            # Chuẩn hóa slope theo mean velocity để có ý nghĩa tương đối
             slope = np.polyfit(x, y, 1)[0]
-            
-            # Ngưỡng phân loại (có thể điều chỉnh)
-            if slope > 0.0001:  # Tăng > 0.1 mm/s mỗi điểm
+            mean_vel = np.mean(y)
+            if mean_vel > 0:
+                relative_slope = slope / mean_vel
+            else:
+                relative_slope = 0
+
+            if relative_slope > 0.01:
                 return "accelerating"
-            elif slope < -0.0001:  # Giảm
+            elif relative_slope < -0.01:
                 return "decelerating"
             else:
                 return "stable"
-                
-        except Exception as e:
-            logger.error(f"Error detecting trend: {e}")
+        except Exception:
             return "stable"
 
-    def _assess_long_term_risk(
-        self,
-        velocity_mm_year: float,
-        classification: str,
-        trend: str,
-        config: Dict
-    ) -> tuple:
+    def _calculate_ols_velocity_ci(self, sorted_data: List[Dict]) -> float:
         """
-        Đánh giá mức độ rủi ro dựa trên vận tốc và xu hướng
-        
-        Returns:
-            (risk_level, warning_message)
+        Tính khoảng tin cậy 95% cho vận tốc bằng OLS (Ordinary Least Squares).
+        Sử dụng Error Propagation (weighted combination) để tính chuẩn sai số của Magnitude.
         """
-        # Ngưỡng cảnh báo (mm/year)
-        threshold_high = 1000  # 1 m/year
-        threshold_medium = 100  # 10 cm/year
-        
-        # Điều chỉnh theo trend
-        if trend == "accelerating":
-            # Nếu đang tăng tốc, giảm ngưỡng cảnh báo
-            threshold_high *= 0.8
-            threshold_medium *= 0.8
-        
-        # Quyết định mức độ
-        if velocity_mm_year > threshold_high:
-            return "EXTREME", f"⚠️ NGUY HIỂM: Vận tốc {velocity_mm_year:.1f} mm/năm ({classification}), {trend}"
-        elif velocity_mm_year > threshold_medium:
-            return "HIGH", f"⚠️ Cao: Vận tốc {velocity_mm_year:.1f} mm/năm ({classification}), {trend}"
-        elif velocity_mm_year > 16:  # Ngưỡng "Very Slow"
-            return "MEDIUM", f"⚠️ Trung bình: Vận tốc {velocity_mm_year:.1f} mm/năm ({classification}), {trend}"
-        else:
-            return "LOW", f"✅ Thấp: Vận tốc {velocity_mm_year:.1f} mm/năm ({classification}), {trend}"
+        if len(sorted_data) < 5:
+            return 0.0
+
+        try:
+            x = []
+            y_e, y_n, y_u = [], [], []
+            
+            start_ts = sorted_data[0]['timestamp']
+            
+            for p in sorted_data:
+                dt_days = (p['timestamp'] - start_ts) / 86400.0
+                x.append(dt_days)
+                y_e.append(p['data'].get('pos_e', 0) * 1000) # mm
+                y_n.append(p['data'].get('pos_n', 0) * 1000)
+                y_u.append(p['data'].get('pos_u', 0) * 1000)
+                
+            x = np.array(x)
+            n = len(x)
+            x_mean = np.mean(x)
+            denominator = np.sum((x - x_mean)**2)
+            
+            if denominator == 0: return 0.0
+
+            # Tính toán Slope, SE^2 riêng của từng trục E, N, U
+            slopes = {}
+            se_squared_dict = {}
+
+            for axis_name, y_arr in zip(['e', 'n', 'u'], [np.array(y_e), np.array(y_n), np.array(y_u)]):
+                y_mean = np.mean(y_arr)
+                numerator = np.sum((x - x_mean) * (y_arr - y_mean))
+                slope = numerator / denominator
+                
+                y_pred = slope * (x - x_mean) + y_mean
+                ssr = np.sum((y_arr - y_pred)**2)
+                
+                s2 = ssr / (n - 2) if n > 2 else 0
+                se_squared = s2 / denominator
+                
+                slopes[axis_name] = slope
+                se_squared_dict[axis_name] = se_squared
+
+            # Tính Velocity Magnitude (v_mag)
+            v_mag = math.sqrt(slopes['e']**2 + slopes['n']**2 + slopes['u']**2)
+
+            if v_mag == 0:
+                return 0.0
+
+            # Lan truyền sai số (Error Propagation):
+            # Variance(v_mag) = Σ ( (∂v_mag / ∂v_i)^2 * Variance(v_i) )
+            # ∂v_mag / ∂v_i = v_i / v_mag
+            
+            se_magnitude_squared = (
+                (slopes['e'] / v_mag)**2 * se_squared_dict['e'] +
+                (slopes['n'] / v_mag)**2 * se_squared_dict['n'] +
+                (slopes['u'] / v_mag)**2 * se_squared_dict['u']
+            )
+            
+            se_magnitude_day = math.sqrt(se_magnitude_squared)
+            
+            # 95% CI (z ≈ 1.96)
+            ci_95_day = 1.96 * se_magnitude_day
+            ci_95_year = ci_95_day * 365.25 # mm/year
+            
+            return round(ci_95_year, 2)
+            
+        except Exception as e:
+            logger.error(f"Error calculating OLS CI: {e}")
+            return 0.0
+
+    def _detect_cusum_change_points(self, sorted_data: List[Dict]) -> Dict:
+        """
+        Thuật toán CUSUM để tìm điểm thay đổi (Change Point) đột ngột.
+        """
+        if len(sorted_data) < 14:  # Cần ít nhất 2 tuần dữ liệu
+            return {"has_change": False, "message": ""}
+            
+        try:
+            displacements = []
+            for i in range(1, len(sorted_data)):
+                p1 = sorted_data[i]
+                p0 = sorted_data[i-1]
+                dt_days = (p1['timestamp'] - p0['timestamp']) / 86400.0
+                
+                if dt_days > 0.001:
+                    de = p1['data'].get('pos_e', 0) - p0['data'].get('pos_e', 0)
+                    dn = p1['data'].get('pos_n', 0) - p0['data'].get('pos_n', 0)
+                    du = p1['data'].get('pos_u', 0) - p0['data'].get('pos_u', 0)
+                    disp_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
+                    
+                    vel_day = disp_mm / dt_days
+                    displacements.append(vel_day)
+                    
+            if len(displacements) < 10:
+                return {"has_change": False, "message": ""}
+            
+            values = np.array(displacements)
+            
+            # Baseline tự động: 25% dữ liệu đầu tối thiểu 10 điểm
+            baseline_len = max(10, int(len(values) * 0.25))
+            if baseline_len > len(values): baseline_len = len(values)
+            
+            baseline_mean = np.mean(values[:baseline_len])
+            baseline_std = np.std(values[:baseline_len])
+            if baseline_std < 0.001: 
+                baseline_std = 0.001 # Tránh chia 0
+            
+            z_scores = (values - baseline_mean) / baseline_std
+            cusum_positive = np.zeros(len(values) + 1)
+            
+            k = 0.5 # Allowable slack
+            h = 5.0 # Threshold
+            
+            change_detected_idx = -1
+            
+            for i in range(len(values)):
+                cusum_positive[i+1] = max(0, cusum_positive[i] + z_scores[i] - k)
+                if cusum_positive[i+1] > h and change_detected_idx == -1:
+                    change_detected_idx = i
+                    break
+                    
+            if change_detected_idx != -1:
+                # Lấy ngày xảy ra change point
+                change_point = sorted_data[change_detected_idx + 1]
+                change_date = datetime.fromtimestamp(change_point['timestamp']).strftime('%d/%m/%Y')
+                return {
+                    "has_change": True, 
+                    "message": f"Phát hiện điểm thay đổi xu hướng độ dốc vào {change_date}"
+                }
+                
+            return {"has_change": False, "message": ""}
+            
+        except Exception as e:
+            logger.error(f"Error in CUSUM: {e}")
+            return {"has_change": False, "message": ""}
+
+    def _inverse_velocity_analysis(self, sorted_data: List[Dict], window_days: float = 3.0) -> Dict[str, Any]:
+        """
+        Phương pháp Inverse Velocity (Fukuzono/Saito) để dự báo thời điểm sụp lún.
+        Nếu 1/v giảm tuyến tính về 0, đó là dấu hiệu sắp sụp lún.
+        """
+        result = {
+            "available": False,
+            "predicted_failure": False,
+            "message": ""
+        }
+
+        if len(sorted_data) < 10:
+            result["message"] = "Cần ít nhất 10 điểm dữ liệu cho phân tích Inverse Velocity."
+            return result
+
+        try:
+            # Tính daily velocity (mm/day) bằng sliding window
+            window_sec = window_days * 86400
+            daily_velocities = []  # (timestamp, velocity_mm_day)
+
+            for i in range(len(sorted_data)):
+                # Tìm các điểm trong window trước đó
+                t_end = sorted_data[i]['timestamp']
+                t_start = t_end - window_sec
+                window_points = [p for p in sorted_data if t_start <= p['timestamp'] <= t_end]
+                if len(window_points) < 2:
+                    continue
+
+                first_wp = window_points[0]
+                last_wp = window_points[-1]
+                dt_days = (last_wp['timestamp'] - first_wp['timestamp']) / 86400.0
+                if dt_days < 0.1:
+                    continue
+
+                de = last_wp['data'].get('pos_e', 0) - first_wp['data'].get('pos_e', 0)
+                dn = last_wp['data'].get('pos_n', 0) - first_wp['data'].get('pos_n', 0)
+                du = last_wp['data'].get('pos_u', 0) - first_wp['data'].get('pos_u', 0)
+                disp_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
+                vel = disp_mm / dt_days
+
+                if vel > 0.001:  # Bỏ qua velocity gần 0
+                    daily_velocities.append((t_end, vel))
+
+            if len(daily_velocities) < 5:
+                result["message"] = "Không đủ dữ liệu velocity > 0 cho Inverse Velocity."
+                return result
+
+            # Tính 1/v
+            timestamps = np.array([dv[0] for dv in daily_velocities], dtype=float)
+            velocities = np.array([dv[1] for dv in daily_velocities])
+            inv_velocities = 1.0 / velocities
+
+            # Chuẩn hóa timestamps (ngày từ điểm đầu)
+            t0 = timestamps[0]
+            t_days = (timestamps - t0) / 86400.0
+
+            # Linear regression trên 1/v
+            coeffs = np.polyfit(t_days, inv_velocities, 1)
+            slope_inv_v = coeffs[0]
+            intercept_inv_v = coeffs[1]
+
+            # Tính R² để đánh giá độ tin cậy
+            inv_v_predicted = np.polyval(coeffs, t_days)
+            ss_res = np.sum((inv_velocities - inv_v_predicted) ** 2)
+            ss_tot = np.sum((inv_velocities - np.mean(inv_velocities)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+            result["available"] = True
+            result["r_squared"] = round(r_squared, 4)
+            result["slope"] = round(slope_inv_v, 6)
+
+            # Time-series cho chart
+            result["time_series"] = {
+                "labels": [datetime.fromtimestamp(ts).strftime('%d/%m') for ts in timestamps],
+                "inverse_velocity": [round(float(iv), 4) for iv in inv_velocities],
+                "trend_line": [round(float(v), 4) for v in inv_v_predicted]
+            }
+
+            # Nếu slope < 0 (1/v đang giảm) VÀ R² đủ cao → dự báo failure
+            if slope_inv_v < -0.0001 and r_squared > 0.6:
+                # Thời điểm 1/v = 0: t_failure = -intercept / slope
+                t_failure_days = -intercept_inv_v / slope_inv_v
+                t_last_days = t_days[-1]
+                days_to_failure = t_failure_days - t_last_days
+
+                if 0 < days_to_failure < 365:
+                    result["predicted_failure"] = True
+                    result["days_to_failure"] = round(days_to_failure, 1)
+                    failure_timestamp = timestamps[-1] + days_to_failure * 86400
+                    result["predicted_failure_date"] = datetime.fromtimestamp(failure_timestamp).isoformat()
+                    result["message"] = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày (R²={r_squared:.2f})"
+                    result["confidence"] = "high" if r_squared > 0.85 else "medium"
+                else:
+                    result["message"] = "hệ số đang giảm nhưng chưa có dấu hiệu sụt lún trong thời gian sắp tới."
+            elif slope_inv_v < 0:
+                result["message"] = "hệ số đang giảm nhưng độ tin cậy thấp — cần theo dõi thêm."
+            else:
+                result["message"] = "Chưa có dấu hiệu sụt lún."
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in inverse velocity analysis: {e}", exc_info=True)
+            result["message"] = f"Lỗi phân tích: {str(e)}"
+            return result
 
     # =========================================================================
-    # 1. PHÂN TÍCH GNSS (Chuyển dịch & Vận tốc)
+    # PHÂN TÍCH TƯƠNG QUAN MƯA - DỊCH CHUYỂN
+    # =========================================================================
+    def analyze_rainfall_displacement_correlation(
+        self,
+        gnss_data: List[Dict[str, Any]],
+        rain_data: List[Dict[str, Any]],
+        window_days: float = 30.0
+    ) -> Dict[str, Any]:
+        """
+        Phân tích tương quan giữa lượng mưa tích lũy và dịch chuyển.
+        Phương pháp: So sánh daily rainfall vs daily displacement.
+        """
+        result = {
+            "available": False,
+            "message": ""
+        }
+
+        if not gnss_data or not rain_data or len(gnss_data) < 2 or len(rain_data) < 2:
+            result["message"] = "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+            return result
+
+        try:
+            # Aggregate daily displacement
+            sorted_gnss = sorted(gnss_data, key=lambda x: x['timestamp'])
+            sorted_rain = sorted(rain_data, key=lambda x: x['timestamp'])
+
+            daily_disp = OrderedDict()  # day_key -> cumulative_disp_mm
+            cumulative = 0.0
+            for i in range(1, len(sorted_gnss)):
+                prev = sorted_gnss[i - 1]['data']
+                curr = sorted_gnss[i]['data']
+                de = curr.get('pos_e', 0) - prev.get('pos_e', 0)
+                dn = curr.get('pos_n', 0) - prev.get('pos_n', 0)
+                du = curr.get('pos_u', 0) - prev.get('pos_u', 0)
+                cumulative += math.sqrt(de**2 + dn**2 + du**2) * 1000
+                day_key = datetime.fromtimestamp(sorted_gnss[i]['timestamp']).strftime('%Y-%m-%d')
+                daily_disp[day_key] = cumulative
+
+            # Aggregate daily rainfall (tổng mm/ngày)
+            daily_rain = OrderedDict()
+            for point in sorted_rain:
+                day_key = datetime.fromtimestamp(point['timestamp']).strftime('%Y-%m-%d')
+                rain_val = point['data'].get('rainfall_mm', point['data'].get('rain_mm', point['data'].get('rainfall', 0)))
+                if day_key not in daily_rain:
+                    daily_rain[day_key] = 0.0
+                daily_rain[day_key] += float(rain_val) if rain_val else 0
+
+            # Tính cumulative rainfall
+            cumulative_rain = OrderedDict()
+            cum_r = 0.0
+            for day, val in daily_rain.items():
+                cum_r += val
+                cumulative_rain[day] = cum_r
+
+            # Match days
+            common_days = sorted(set(daily_disp.keys()) & set(cumulative_rain.keys()))
+            if len(common_days) < 5:
+                result["message"] = f"Chỉ có {len(common_days)} ngày chung — cần ít nhất 5."
+                return result
+
+            disp_values = np.array([daily_disp[d] for d in common_days])
+            rain_values = np.array([cumulative_rain[d] for d in common_days])
+
+            # Pearson correlation
+            if np.std(disp_values) > 0 and np.std(rain_values) > 0:
+                correlation = float(np.corrcoef(disp_values, rain_values)[0, 1])
+            else:
+                correlation = 0.0
+
+            # Đánh giá mức tương quan
+            abs_corr = abs(correlation)
+            if abs_corr >= 0.8:
+                strength = "Rất mạnh"
+                assessment = "Mưa có ảnh hưởng rõ rệt đến dịch chuyển đất."
+            elif abs_corr >= 0.6:
+                strength = "Mạnh"
+                assessment = "Mưa có tương quan đáng kể với dịch chuyển."
+            elif abs_corr >= 0.4:
+                strength = "Trung bình"
+                assessment = "Mưa có ảnh hưởng nhất định đến dịch chuyển."
+            elif abs_corr >= 0.2:
+                strength = "Yếu"
+                assessment = "Tương quan mưa-dịch chuyển yếu."
+            else:
+                strength = "Không đáng kể"
+                assessment = "Mưa không ảnh hưởng rõ đến dịch chuyển trong giai đoạn này."
+
+            # Daily rainfall (non-cumulative) cho chart
+            daily_rain_values = [daily_rain.get(d, 0) for d in common_days]
+
+            result["available"] = True
+            result["correlation"] = round(correlation, 4)
+            result["strength"] = strength
+            result["assessment"] = assessment
+            result["common_days"] = len(common_days)
+            result["time_series"] = {
+                "labels": [datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m') for d in common_days],
+                "cumulative_displacement_mm": [round(daily_disp[d], 2) for d in common_days],
+                "cumulative_rainfall_mm": [round(cumulative_rain[d], 1) for d in common_days],
+                "daily_rainfall_mm": [round(v, 1) for v in daily_rain_values]
+            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in rainfall-displacement correlation: {e}", exc_info=True)
+            result["message"] = f"Lỗi: {str(e)}"
+            return result
+
+    # =========================================================================
+    # PHÂN TÍCH ĐA CỬA SỔ (Multi-Window Analysis)
+    # =========================================================================
+    def analyze_multi_window(
+        self,
+        station_id: int,
+        historical_data: List[Dict[str, Any]],
+        config: Dict,
+        windows: List[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Phân tích trên nhiều cửa sổ thời gian (7, 30, 90 ngày) để phát hiện
+        sự thay đổi đột ngột giữa xu hướng ngắn hạn và dài hạn.
+        """
+        if windows is None:
+            windows = [7, 30, 90]
+
+        if not historical_data or len(historical_data) < 2:
+            return {"available": False, "message": "Không đủ dữ liệu."}
+
+        try:
+            sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
+            latest_ts = sorted_data[-1]['timestamp']
+
+            window_results = []
+            for w_days in windows:
+                cutoff = latest_ts - (w_days * 86400)
+                window_data = [p for p in sorted_data if p['timestamp'] >= cutoff]
+
+                if len(window_data) < 2:
+                    window_results.append({
+                        "window_days": w_days,
+                        "status": "insufficient_data",
+                        "velocity_mm_day": None,
+                        "trend": None
+                    })
+                    continue
+
+                # Tính cumulative displacement trong window
+                cumulative = 0.0
+                for i in range(1, len(window_data)):
+                    prev = window_data[i - 1]['data']
+                    curr = window_data[i]['data']
+                    de = curr.get('pos_e', 0) - prev.get('pos_e', 0)
+                    dn = curr.get('pos_n', 0) - prev.get('pos_n', 0)
+                    du = curr.get('pos_u', 0) - prev.get('pos_u', 0)
+                    cumulative += math.sqrt(de**2 + dn**2 + du**2) * 1000
+
+                duration = (window_data[-1]['timestamp'] - window_data[0]['timestamp']) / 86400.0
+                vel_mm_day = cumulative / duration if duration > 0 else 0
+                trend = self._detect_displacement_trend(window_data)
+
+                window_results.append({
+                    "window_days": w_days,
+                    "status": "success",
+                    "velocity_mm_day": round(vel_mm_day, 4),
+                    "velocity_mm_year": round(vel_mm_day * 365, 2),
+                    "displacement_mm": round(cumulative, 2),
+                    "data_points": len(window_data),
+                    "trend": trend
+                })
+
+            # Phát hiện acceleration qua so sánh windows
+            acceleration_alert = None
+            valid_windows = [w for w in window_results if w['status'] == 'success' and w['velocity_mm_day'] is not None]
+
+            if len(valid_windows) >= 2:
+                # So sánh window ngắn nhất vs dài nhất
+                short_window = valid_windows[0]
+                long_window = valid_windows[-1]
+
+                if long_window['velocity_mm_day'] > 0:
+                    ratio = short_window['velocity_mm_day'] / long_window['velocity_mm_day']
+                    if ratio > 3.0:
+                        acceleration_alert = {
+                            "type": "rapid_acceleration",
+                            "message": f"⚠️ Vận tốc {short_window['window_days']} ngày gần đây gấp {ratio:.1f}x so với {long_window['window_days']} ngày",
+                            "ratio": round(ratio, 2)
+                        }
+                    elif ratio > 1.5:
+                        acceleration_alert = {
+                            "type": "moderate_acceleration",
+                            "message": f"Vận tốc {short_window['window_days']} ngày tăng {ratio:.1f}x so với {long_window['window_days']} ngày",
+                            "ratio": round(ratio, 2)
+                        }
+
+            return {
+                "available": True,
+                "windows": window_results,
+                "acceleration_alert": acceleration_alert
+            }
+
+        except Exception as e:
+            logger.error(f"Error in multi-window analysis: {e}", exc_info=True)
+            return {"available": False, "message": f"Lỗi: {str(e)}"}
+
+
+
+    # =========================================================================
+    # PHÂN TÍCH DÀI HẠN GÓC NGHIÊNG IMU
+    # =========================================================================
+    def analyze_long_term_tilt(
+        self,
+        station_id: int,
+        historical_data: List[Dict[str, Any]],
+        window_days: float = 30.0
+    ) -> Dict[str, Any]:
+        """
+        Phân tích xu hướng nghiêng dài hạn từ dữ liệu IMU.
+        Phát hiện đất dần dần nghiêng theo thời gian.
+        """
+        try:
+            if not historical_data or len(historical_data) < 2:
+                return {"status": "insufficient_data", "message": "Cần ít nhất 2 điểm dữ liệu IMU."}
+
+            sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
+            
+            # Extract roll/pitch values
+            rolls = []
+            pitches = []
+            timestamps = []
+            
+            for point in sorted_data:
+                data = point.get('data', {})
+                roll = data.get('roll', data.get('raw_roll', None))
+                pitch = data.get('pitch', data.get('raw_pitch', None))
+                if roll is not None and pitch is not None:
+                    rolls.append(float(roll))
+                    pitches.append(float(pitch))
+                    timestamps.append(point['timestamp'])
+            
+            if len(rolls) < 2:
+                return {"status": "insufficient_data", "message": "Không đủ dữ liệu IMU hợp lệ."}
+            
+            duration_days = (timestamps[-1] - timestamps[0]) / 86400.0
+            if duration_days <= 0:
+                duration_days = 0.00001  # Prevent div by zero
+            
+            # --- Tính toán cơ bản ---
+            roll_change = rolls[-1] - rolls[0]
+            pitch_change = pitches[-1] - pitches[0]
+            total_tilt_change = math.sqrt(roll_change**2 + pitch_change**2)
+            avg_rate_deg_per_day = total_tilt_change / duration_days if duration_days > 0 else 0
+            
+            max_roll = max(abs(r) for r in rolls)
+            max_pitch = max(abs(p) for p in pitches)
+            
+            # --- Xu hướng (linear regression trên tổng tilt) ---
+            tilts = [math.sqrt(r**2 + p**2) for r, p in zip(rolls, pitches)]
+            if len(tilts) >= 5:
+                x = np.arange(len(tilts))
+                slope = np.polyfit(x, np.array(tilts), 1)[0]
+                if slope > 0.001:
+                    trend = "accelerating"
+                elif slope < -0.001:
+                    trend = "decelerating"
+                else:
+                    trend = "stable"
+            else:
+                trend = "stable"
+            
+            # --- Đánh giá rủi ro ---
+            if total_tilt_change >= 10.0 or avg_rate_deg_per_day >= 1.0:
+                risk_level = "EXTREME"
+                warning = f"🚨 NGUY HIỂM: Góc nghiêng thay đổi {total_tilt_change:.1f}° trong {duration_days:.0f} ngày"
+            elif total_tilt_change >= 5.0 or avg_rate_deg_per_day >= 0.5:
+                risk_level = "HIGH"
+                warning = f"⚠️ Cao: Nghiêng {total_tilt_change:.1f}° ({avg_rate_deg_per_day:.2f}°/ngày)"
+            elif total_tilt_change >= 2.0 or avg_rate_deg_per_day >= 0.1:
+                risk_level = "MEDIUM"
+                warning = f"⚠️ Trung bình: Nghiêng dần {total_tilt_change:.1f}°"
+            else:
+                risk_level = "LOW"
+                warning = f"✅ Ổn định: Thay đổi {total_tilt_change:.2f}°"
+            
+            if trend == "accelerating" and risk_level == "LOW":
+                risk_level = "MEDIUM"
+                warning = f"⚠️ Chú ý: Tốc độ nghiêng đang tăng ({total_tilt_change:.2f}°)"
+            
+            # --- Tạo time-series (trung bình theo khoảng thời gian) cho chart ---
+            from collections import OrderedDict
+            daily_data = OrderedDict()
+            
+            if window_days < 1/24: fmt = '%H:%M:%S'
+            elif window_days <= 1: fmt = '%H:%M'
+            elif window_days <= 7: fmt = '%d/%m %H:00'
+            else:                  fmt = '%d/%m'
+            
+            for ts, r, p in zip(timestamps, rolls, pitches):
+                day_key = datetime.fromtimestamp(ts).strftime(fmt)
+                if day_key not in daily_data:
+                    daily_data[day_key] = {'rolls': [], 'pitches': []}
+                daily_data[day_key]['rolls'].append(r)
+                daily_data[day_key]['pitches'].append(p)
+            
+            time_series = {
+                'raw_timestamps': timestamps,
+                'labels': list(daily_data.keys()),
+                'rolls': [round(sum(v['rolls']) / len(v['rolls']), 2) for v in daily_data.values()],
+                'pitches': [round(sum(v['pitches']) / len(v['pitches']), 2) for v in daily_data.values()]
+            }
+            
+            return {
+                "status": "success",
+                "analysis": {
+                    "total_tilt_change_deg": round(total_tilt_change, 2),
+                    "avg_rate_deg_per_day": round(avg_rate_deg_per_day, 4),
+                    "max_roll_deg": round(max_roll, 2),
+                    "max_pitch_deg": round(max_pitch, 2),
+                    "roll_change_deg": round(roll_change, 2),
+                    "pitch_change_deg": round(pitch_change, 2),
+                    "trend": trend,
+                    "duration_days": round(duration_days, 1),
+                    "data_points": len(rolls),
+                    "start_date": datetime.fromtimestamp(timestamps[0]).isoformat(),
+                    "end_date": datetime.fromtimestamp(timestamps[-1]).isoformat()
+                },
+                "risk_level": risk_level,
+                "warning_message": warning,
+                "time_series": time_series
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in long-term tilt analysis: {e}", exc_info=True)
+            return {"status": "error", "message": f"Lỗi: {str(e)}"}
+
+    # =========================================================================
+    # 1. PHÂN TÍCH GNSS - ✅ CÓ ĐẾM XÁC NHẬN
     # =========================================================================
     def analyze_gnss_displacement(
         self, 
@@ -258,257 +893,251 @@ class LandslideAnalyzer:
         recent_data: List[Dict[str, Any]], 
         config: Dict
     ) -> Optional[Dict]:
-        """
-        Phân tích dữ liệu GNSS.
-        - Kiểm tra tổng chuyển dịch (Displacement) so với gốc.
-        - Phân loại vận tốc theo Cruden & Varnes.
-        """
-        if not recent_data:
-            return None
+        
+        if not recent_data: return None
         
         try:
-            # Lấy dữ liệu mới nhất
-            latest_point = recent_data[-1]['data']
+            latest = recent_data[-1]['data']
+            velocity_ms = latest.get('speed_2d', 0.0) 
+            velocity_mms = velocity_ms * 1000.0
             
-            # 1. Kiểm tra Tổng chuyển dịch (Displacement)
-            pos_e = latest_point.get('pos_e', 0.0)
-            pos_n = latest_point.get('pos_n', 0.0)
-            pos_u = latest_point.get('pos_u', 0.0)
+            # Lấy cấu hình xác nhận
+            gnss_config = config.get('GnssAlerting', {})
+            confirm_steps = int(gnss_config.get('gnss_confirm_steps', 3))  # Mặc định 3 lần
             
-            total_displacement_m = math.sqrt(pos_e**2 + pos_n**2 + pos_u**2)
+            velocity_class = self._classify_velocity_extended(
+                velocity_mms,
+                velocity_mms * 86400,
+                velocity_mms * 31536000,
+                config
+            )
             
-            # Lấy ngưỡng cảnh báo
-            thresh_warn = self._get_cfg(config, 'Water', 'warning_threshold', 0.15)
-            thresh_crit = self._get_cfg(config, 'Water', 'critical_threshold', 0.30)
-
-            # 2. Phân loại vận tốc
-            velocity_ms = latest_point.get('speed_2d', 0.0)
-            velocity_class = self._classify_cruden_varnes(velocity_ms, config)
-
-            # 3. Quyết định mức độ cảnh báo
-            level = "INFO"
-            message = f"ℹ️ Chuyển dịch: {total_displacement_m*100:.1f}cm | Tốc độ: {velocity_class}"
-            category = "displacement"
-
-            if total_displacement_m >= thresh_crit:
-                level = "CRITICAL"
-                message = f"🚨 NGUY HIỂM: Chuyển dịch {total_displacement_m*100:.1f}cm (> {thresh_crit*100}cm)! ({velocity_class})"
-            elif total_displacement_m >= thresh_warn:
-                level = "WARNING"
-                message = f"⚠️ CẢNH BÁO: Chuyển dịch {total_displacement_m*100:.1f}cm (> {thresh_warn*100}cm)"
+            cls_upper = velocity_class.upper()
             
-            if level in ["WARNING", "CRITICAL"]:
-                return {
-                    "level": level,
-                    "category": category,
-                    "message": message,
-                    "details": {
-                        "displacement_m": total_displacement_m,
-                        "velocity_ms": velocity_ms,
-                        "class": velocity_class
-                    }
-                }
+            # ✅ XÁC ĐỊNH MỨC ĐỘ NGUY HIỂM (chưa gửi alert)
+            current_level = "INFO"
+            if "EXTREMELY RAPID" in cls_upper or "VERY RAPID" in cls_upper or "RAPID" in cls_upper:
+                current_level = "CRITICAL"
+            elif "MODERATE" in cls_upper:
+                current_level = "WARNING"
+            else:
+                current_level = "INFO"
+            
+            # ✅ LẤY BỘ ĐẾM CỦA TRẠM NÀY
+            counter_info = self.alert_counters[station_id]['gnss']
+            
+            # ✅ LOGIC ĐẾM XÁC NHẬN
+            if current_level in ["WARNING", "CRITICAL"]:
+                # Nếu level thay đổi → Reset bộ đếm
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    logger.info(f"🔄 [GNSS-{station_id}] Level changed to {current_level}, reset counter to 1")
+                    return None  # Chưa đủ → Không gửi
+                else:
+                    # Level giữ nguyên → Tăng đếm
+                    counter_info['count'] += 1
+                    logger.info(f"⏳ [GNSS-{station_id}] {current_level} count: {counter_info['count']}/{confirm_steps}")
+                    
+                    # ✅ CHỈ GỬI ALERT KHI ĐỦ SỐ LẦN XÁC NHẬN
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"🚨 [GNSS-{station_id}] ✅ CONFIRMED {current_level} after {confirm_steps} times!")
+                        
+                        message = f"🚨 CỰC KỲ NGUY HIỂM: {velocity_mms:.2f} mm/s ({velocity_class})" if current_level == "CRITICAL" else f"⚠️ Tốc độ nhanh: {velocity_mms:.4f} mm/s ({velocity_class})"
+                        
+                        audio_code = "gnss_warning"
+                        if current_level == "CRITICAL":
+                            audio_code = "gnss_critical"
+                        
+                        return {
+                            "level": current_level,
+                            "category": "gnss_velocity",
+                            "message": message,
+                            "audio_code": audio_code,
+                            "details": {
+                                "velocity_mm_s": velocity_mms,
+                                "classification": velocity_class,
+                                "confirmed_after": confirm_steps
+                            }
+                        }
+                    else:
+                        return None  # Chưa đủ số lần
+            
+            else:
+                # ✅ AN TOÀN → Đếm ngược để reset
+                if counter_info['count'] > 0:
+                    counter_info['count'] = max(0, counter_info['count'] - 1)
+                    logger.info(f"✅ [GNSS-{station_id}] Safe reading, decrement to {counter_info['count']}")
+                
+                # Reset sau khi liên tục an toàn
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
             return None
 
         except Exception as e:
             logger.error(f"Error analyzing GNSS for station {station_id}: {e}")
             return None
 
-    def _classify_cruden_varnes(self, velocity_ms: float, config: Dict) -> str:
-        """Helper phân loại tốc độ trượt đất"""
-        default_classes = [
-            {"name": "Extremely Rapid", "min": 5.0},
-            {"name": "Very Rapid", "min": 0.05},
-            {"name": "Rapid", "min": 0.0005},
-            {"name": "Moderate", "min": 2.1e-7},
-            {"name": "Slow", "min": 1.6e-9},
-            {"name": "Very Slow", "min": 5e-10},
-            {"name": "Extremely Slow", "min": 0.0}
-        ]
-        
-        classes = config.get('GNSS_Classification', default_classes)
-        
-        try:
-            sorted_classes = sorted(
-                classes, 
-                key=lambda x: x.get('min', x.get('mm_giay', 0)/1000.0), 
-                reverse=True
-            )
-            
-            for cls in sorted_classes:
-                threshold = cls.get('min', 0)
-                if 'mm_giay' in cls:
-                    threshold = cls['mm_giay'] / 1000.0
-                
-                if velocity_ms >= threshold:
-                    return cls.get('name', 'Unknown')
-        except Exception:
-            return "Unknown"
-            
-        return "Stable"
-
     # =========================================================================
-    # 2. PHÂN TÍCH MƯA (Rainfall)
+    # 2. PHÂN TÍCH MƯA - ✅ CÓ ĐẾM XÁC NHẬN
     # =========================================================================
-    def analyze_rainfall(
-        self, 
-        station_id: int, 
-        recent_data: List[Dict[str, Any]], 
-        past_72h_data: List[Dict[str, Any]],
-        config: Dict
-    ) -> Optional[Dict]:
+    def analyze_rainfall(self, station_id: int, recent_data: List[Dict], past_72h: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
-
         try:
             watch = self._get_cfg(config, 'RainAlerting', 'rain_intensity_watch_threshold', 10.0)
             warning = self._get_cfg(config, 'RainAlerting', 'rain_intensity_warning_threshold', 25.0)
             critical = self._get_cfg(config, 'RainAlerting', 'rain_intensity_critical_threshold', 50.0)
+            confirm_steps = int(config.get('RainAlerting', {}).get('rain_confirm_steps', 2))  # ✅ Mặc định 2 lần
 
-            latest = recent_data[-1]['data']
-            intensity = latest.get('intensity_mm_h', 0.0)
-
-            level = "INFO"
-            message = ""
-
-            if intensity >= critical:
-                level = "CRITICAL"
-                message = f"🌧️ MƯA CỰC LỚN: {intensity:.1f} mm/h (> {critical})"
-            elif intensity >= warning:
-                level = "WARNING"
-                message = f"🌧️ Mưa lớn: {intensity:.1f} mm/h (> {warning})"
-            elif intensity >= watch:
-                level = "INFO"
-                message = f"💧 Mưa đáng chú ý: {intensity:.1f} mm/h"
+            intensity = recent_data[-1]['data'].get('intensity_mm_h', 0.0)
             
-            if level in ["WARNING", "CRITICAL"]:
-                return {
-                    "level": level,
-                    "category": "rainfall",
-                    "message": message,
-                    "details": {"intensity": intensity}
-                }
+            current_level = "INFO"
+            if intensity >= critical: current_level = "CRITICAL"
+            elif intensity >= warning: current_level = "WARNING"
+            elif intensity >= watch: current_level = "INFO"
+            
+            counter_info = self.alert_counters[station_id]['rain']
+            
+            if current_level in ["WARNING", "CRITICAL"]:
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    return None
+                else:
+                    counter_info['count'] += 1
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"🌧️ [RAIN-{station_id}] ✅ CONFIRMED {current_level}")
+                        audio_code = "rain_warning"
+                        if current_level == "CRITICAL":
+                            audio_code = "rain_critical"
+                        return {"level": current_level, "category": "rainfall", "message": f"Mưa lớn: {intensity:.1f}mm/h", "audio_code": audio_code, "details": {"val": intensity}}
+                    return None
+            else:
+                counter_info['count'] = max(0, counter_info['count'] - 1)
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
             return None
-
-        except Exception as e:
-            logger.error(f"Error analyzing rain: {e}")
+        except Exception:
             return None
 
     # =========================================================================
-    # 3. PHÂN TÍCH IMU
+    # 3. PHÂN TÍCH MỰC NƯỚC - ✅ CÓ ĐẾM XÁC NHẬN
     # =========================================================================
-    def analyze_tilt(
-        self, 
-        station_id: int, 
-        recent_data: List[Dict[str, Any]], 
-        config: Dict
-    ) -> Optional[Dict]:
+    def analyze_water_level(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
-
         try:
-            latest = recent_data[-1]['data']
+            val = recent_data[-1]['data'].get('water_level', 0.0)
+            warn = self._get_cfg(config, 'Water', 'warning_threshold', 999.0)
+            crit = self._get_cfg(config, 'Water', 'critical_threshold', 999.0)
+            confirm_steps = int(config.get('Water', {}).get('water_confirm_steps', 3))  # ✅ Mặc định 3 lần
             
-            total_accel = latest.get('total_accel', 0.0)
-            shock_thresh = self._get_cfg(config, 'ImuAlerting', 'shock_threshold_ms2', 20.0) 
+            current_level = "INFO"
+            if val >= crit: current_level = "CRITICAL"
+            elif val >= warn: current_level = "WARNING"
             
-            roll = abs(latest.get('roll', 0.0))
-            pitch = abs(latest.get('pitch', 0.0))
-            max_tilt = max(roll, pitch)
-            tilt_thresh = 30.0
-
-            level = "INFO"
-            message = ""
-
-            if total_accel > shock_thresh:
-                level = "CRITICAL"
-                message = f"💥 PHÁT HIỆN VA ĐẬP MẠNH: {total_accel:.1f} m/s²"
-            elif max_tilt > tilt_thresh:
-                level = "WARNING"
-                message = f"📐 NGHIÊNG BẤT THƯỜNG: {max_tilt:.1f}° (> {tilt_thresh}°)"
-
-            if level in ["WARNING", "CRITICAL"]:
-                return {
-                    "level": level,
-                    "category": "imu_tilt_shock",
-                    "message": message,
-                    "details": {"accel": total_accel, "tilt": max_tilt}
-                }
+            counter_info = self.alert_counters[station_id]['water']
+            
+            if current_level in ["WARNING", "CRITICAL"]:
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    return None
+                else:
+                    counter_info['count'] += 1
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"💧 [WATER-{station_id}] ✅ CONFIRMED {current_level}")
+                        audio_code = "water_warning"
+                        if current_level == "CRITICAL":
+                            audio_code = "water_critical"
+                        return {"level": current_level, "category": "water_level", "message": f"Nước cao: {val:.2f}m", "audio_code": audio_code, "details": {"val": val}}
+                    return None
+            else:
+                counter_info['count'] = max(0, counter_info['count'] - 1)
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
             return None
-
-        except Exception as e:
-            logger.error(f"Error analyzing IMU: {e}")
+        except Exception:
             return None
 
     # =========================================================================
-    # 4. PHÂN TÍCH MỰC NƯỚC
+    # 4. PHÂN TÍCH IMU - GÓC NGHIÊNG & VA ĐẬP - ✅ CÓ ĐẾM XÁC NHẬN
     # =========================================================================
-    def analyze_water_level(
-        self, 
-        station_id: int, 
-        recent_data: List[Dict[str, Any]], 
-        config: Dict
-    ) -> Optional[Dict]:
+    def analyze_tilt(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
         try:
             latest = recent_data[-1]['data']
-            water_level = latest.get('water_level', 0.0)
             
-            warn = self._get_cfg(config, 'water', 'warning_level', 999.0)
-            crit = self._get_cfg(config, 'water', 'critical_level', 999.0)
+            # Góc nghiêng
+            roll = latest.get('roll', 0.0)
+            pitch = latest.get('pitch', 0.0)
+            delta_tilt = math.sqrt(roll**2 + pitch**2)
             
-            level = "INFO"
-            message = ""
+            tilt_warn = self._get_cfg(config, 'ImuAlerting', 'tilt_warning_deg', 5.0)
+            tilt_crit = self._get_cfg(config, 'ImuAlerting', 'tilt_critical_deg', 15.0)
             
-            if water_level >= crit:
-                level = "CRITICAL"
-                message = f"🌊 LŨ LỚN: {water_level}m (> {crit}m)"
-            elif water_level >= warn:
-                level = "WARNING"
-                message = f"🌊 Nước dâng cao: {water_level}m (> {warn}m)"
+            # Va đập
+            accel = latest.get('total_accel', 0.0)
+            shock_thresh = self._get_cfg(config, 'ImuAlerting', 'shock_threshold_ms2', 20.0)
+            
+            confirm_steps = int(config.get('ImuAlerting', {}).get('imu_confirm_steps', 2))
+            
+            # Xác định mức nguy hiểm cao nhất hiện tại
+            current_level = "INFO"
+            alert_category = "tilt"
+            alert_msg = ""
+            audio_code = ""
+            details = {"delta_tilt_deg": delta_tilt}
+            
+            # 1. Ưu tiên kiểm tra va đập (Shock) -> thường là CRITICAL ngay
+            if accel >= shock_thresh:
+                current_level = "CRITICAL"
+                alert_category = "shock"
+                alert_msg = f"Va đập: {accel:.1f} m/s²"
+                audio_code = "imu_shock"
+                details["shock_ms2"] = accel
+                # Shock có thể cần báo ngay lập tức
+                confirm_steps = 1 
                 
-            if level in ["WARNING", "CRITICAL"]:
-                return {
-                    "level": level,
-                    "category": "water_level",
-                    "message": message,
-                    "details": {"water_level": water_level}
-                }
-            return None
+            # 2. Xử lý độ nghiêng (Tilt)
+            elif delta_tilt >= tilt_crit:
+                current_level = "CRITICAL"
+                alert_category = "tilt_critical"
+                alert_msg = f"Nghiêng nguy hiểm: {delta_tilt:.1f}°"
+                audio_code = "imu_critical"
+            elif delta_tilt >= tilt_warn:
+                current_level = "WARNING"
+                alert_category = "tilt_warning"
+                alert_msg = f"Nghiêng nhanh: {delta_tilt:.1f}°"
+                audio_code = "imu_warning"
             
-        except Exception as e:
-            logger.error(f"Error analyzing Water: {e}")
-            return None
-
-    # =========================================================================
-    # 5. TỔNG HỢP ĐÁNH GIÁ RỦI RO
-    # =========================================================================
-    def generate_combined_risk_assessment(
-        self, 
-        station_id: int, 
-        gnss_alert: Optional[Dict], 
-        rain_alert: Optional[Dict], 
-        water_alert: Optional[Dict], 
-        imu_alert: Optional[Dict]
-    ) -> Dict:
-        alerts = [a for a in [gnss_alert, rain_alert, water_alert, imu_alert] if a]
-        
-        crit_count = sum(1 for a in alerts if a['level'] == 'CRITICAL')
-        warn_count = sum(1 for a in alerts if a['level'] == 'WARNING')
-        
-        if crit_count >= 1:
-            risk = "EXTREME"
-            rec = "🚨 CẢNH BÁO ĐỎ: Nguy hiểm! Sơ tán/Kiểm tra ngay."
-        elif warn_count >= 2:
-            risk = "HIGH"
-            rec = "⚠️ Cảnh báo cao: Nhiều chỉ số vượt ngưỡng."
-        elif warn_count == 1:
-            risk = "MEDIUM"
-            rec = "⚠️ Cảnh báo: Có chỉ số bất thường."
-        else:
-            risk = "LOW"
-            rec = "✅ Trạng thái bình thường."
+            counter_info = self.alert_counters[station_id]['imu']
             
-        return {
-            "overall_risk": risk,
-            "active_alerts": alerts,
-            "recommendation": rec
-        }
+            if current_level in ["WARNING", "CRITICAL"]:
+                if counter_info['last_level'] != current_level:
+                    counter_info['count'] = 1
+                    counter_info['last_level'] = current_level
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category})")
+                        return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
+                    else:
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} (1/{confirm_steps})")
+                        return {"level": "PENDING", "category": alert_category}
+                else:
+                    counter_info['count'] += 1
+                    if counter_info['count'] >= confirm_steps:
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category}) after {confirm_steps} times")
+                        return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
+                    else:
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} ({counter_info['count']}/{confirm_steps})")
+                        return {"level": "PENDING", "category": alert_category}
+            else:
+                counter_info['count'] = max(0, counter_info['count'] - 1)
+                if counter_info['count'] == 0:
+                    counter_info['last_level'] = None
+            
+            return None
+        except Exception:
+            return None

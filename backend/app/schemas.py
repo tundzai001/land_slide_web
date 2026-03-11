@@ -2,7 +2,6 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 
-# ✅ Schema trạm giám sát
 class StationBase(BaseModel):
     station_code: str
     name: str
@@ -12,7 +11,8 @@ class StationBase(BaseModel):
     has_rain: bool = False
     has_imu: bool = False
     sensor_positions: Optional[Dict] = None
-    config: Optional[Dict[str, Any]] = None 
+    config: Optional[Dict[str, Any]] = None
+    sensors: Optional[Dict[str, Any]] = None 
 
 class StationCreate(StationBase):
     pass
@@ -22,7 +22,6 @@ class StationConfigUpdate(BaseModel):
     imu: Dict[str, float]
     gnss: Dict[str, float]
     rain: Dict[str, float]
-    # gnss_classification có thể phức tạp, tạm thời để list dict
     gnss_classification: List[Dict]
     
 class StationResponse(StationBase):
@@ -33,12 +32,16 @@ class StationResponse(StationBase):
     class Config:
         from_attributes = True
 
-# ✅ Schema dữ liệu cảm biến
 class SensorDataCreate(BaseModel):
     station_id: int
     timestamp: int
     sensor_type: str
     data: Dict
+    value_1: Optional[float] = None
+    value_2: Optional[float] = None
+    value_3: Optional[float] = None
+    value_4: Optional[float] = None
+    value_5: Optional[float] = None
 
 class SensorDataResponse(SensorDataCreate):
     id: int
@@ -46,7 +49,6 @@ class SensorDataResponse(SensorDataCreate):
     class Config:
         from_attributes = True
 
-# ✅ Schema cảnh báo
 class AlertCreate(BaseModel):
     station_id: int
     timestamp: int
@@ -61,7 +63,6 @@ class AlertResponse(AlertCreate):
     class Config:
         from_attributes = True
 
-# ✅ Schema tọa độ gốc GNSS
 class GNSSOriginResponse(BaseModel):
     station_id: int
     lat: float
@@ -80,11 +81,13 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    assigned_projects: List[int] = []
 
 class UserResponse(UserBase):
     id: int
     is_active: bool
     permissions: List[str] = []
+    assigned_projects: List[int] = []
     
     class Config:
         from_attributes = True
@@ -113,3 +116,30 @@ class GNSSOriginResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class MqttConfig(BaseModel):
+    broker: str
+    port: int
+    user: Optional[str] = None
+    password: Optional[str] = None
+    topic_reload_interval: int = 60
+
+class ConfirmationConfig(BaseModel):
+    gnss: int
+    rain: int
+    water: int
+    imu: int
+
+class SaveIntervalsConfig(BaseModel):
+    gnss: int
+    rain: int
+    water: int
+    imu: int
+
+class SystemPasswordCheck(BaseModel):
+    password: str
+
+class SystemConfigPayload(BaseModel):
+    mqtt: MqttConfig
+    confirmation: ConfirmationConfig
+    save_intervals: SaveIntervalsConfig

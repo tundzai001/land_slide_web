@@ -1,26 +1,28 @@
 #backend/app/models/data.py
-from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float
+from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index
 from app.database import BaseData
 
 class SensorData(BaseData):
-    """
-    ✅ FIXED: Thêm cột processed để lưu giá trị đã xử lý
-    """
+
     __tablename__ = "sensor_data"
-    
-    id = Column(Integer, primary_key=True)
+    # Composite index tối ưu cho truy vấn lịch sử theo trạm + loại sensor + thời gian
+    __table_args__ = (
+        Index('ix_sensor_data_station_type_ts', 'station_id', 'sensor_type', 'timestamp'),
+        Index('ix_sensor_data_station_ts', 'station_id', 'timestamp'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)  # BigInteger cho dữ liệu lớn
     station_id = Column(Integer, index=True, nullable=False)
     timestamp = Column(BigInteger, index=True, nullable=False)
     sensor_type = Column(String, index=True, nullable=False)
     
-    # ✅ Raw data từ MQTT
     data = Column(JSON, nullable=False)
     
-    # ✅ OPTIONAL: Cached values cho truy vấn nhanh
-    # Tách các giá trị quan trọng thành cột riêng (indexed)
-    value_1 = Column(Float, nullable=True)  # VD: water_level, rainfall_mm
-    value_2 = Column(Float, nullable=True)  # VD: intensity_mm_h, speed_2d
-    value_3 = Column(Float, nullable=True)  # VD: total_displacement_mm
+    value_1 = Column(Float, nullable=True) 
+    value_2 = Column(Float, nullable=True)  
+    value_3 = Column(Float, nullable=True)  
+    value_4 = Column(Float, nullable=True)  
+    value_5 = Column(Float, nullable=True)  
 
 class Alert(BaseData):
     __tablename__ = "alerts"

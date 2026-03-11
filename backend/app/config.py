@@ -1,31 +1,37 @@
 # backend/app/config.py
+import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # --- 1. DATABASE URLs (3 DB riêng biệt) ---
-    AUTH_DB_URL: str = "sqlite+aiosqlite:///./db_auth.sqlite"
-    CONFIG_DB_URL: str = "sqlite+aiosqlite:///./db_config.sqlite"
-    DATA_DB_URL: str = "sqlite+aiosqlite:///./db_sensor_data.sqlite"
+    # --- 1. DATABASE URLs ---
+    # Pydantic sẽ tự động đọc giá trị từ file .env khớp với tên biến
+    # Nếu không đọc được .env, nó sẽ dùng giá trị mặc định bên phải (dự phòng)
     
-    # --- 2. SECURITY (JWT) - QUAN TRỌNG ĐỂ FIX LỖI ---
+    AUTH_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_auth"
+    CONFIG_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_config"
+    DATA_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_data"
+
+    # --- 2. CÁC CẤU HÌNH KHÁC ---
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
-    ALGORITHM: str = "HS256"  # ✅ Đây là dòng bị thiếu gây ra lỗi
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 # Thời gian hết hạn token
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     
-    # --- 3. MQTT CONFIG ---
-    MQTT_BROKER: str = "localhost"
+    MQTT_BROKER: str = "aitogy.asia"
     MQTT_PORT: int = 1883
-    MQTT_USER: str = ""
+    MQTT_USER: str = "mqttUser"
     MQTT_PASSWORD: str = ""
     TOPIC_RELOAD_INTERVAL: int = 60
 
-    # --- 4. DATA SAVING INTERVALS (Giây) ---
-    SAVE_INTERVAL_GNSS: int = 86400    # 1 ngày
-    SAVE_INTERVAL_ENV: int = 3600      # 1 giờ (Mưa/Nước)
-    SAVE_INTERVAL_IMU: int = 2592000   # 1 tháng
+    SAVE_INTERVAL_DEFAULT: int = 60
+    SAVE_INTERVAL_GNSS: int = 86400
+    SAVE_INTERVAL_RAIN: int = 3600
+    SAVE_INTERVAL_WATER: int = 3600
+    SAVE_INTERVAL_IMU: int = 2592000
 
     class Config:
-        env_file = ".env"
-        extra = "ignore" # Bỏ qua các biến thừa trong .env
+        # Chỉ định đường dẫn tuyệt đối tới file .env để chạy ổn định trên IIS
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        env_file_encoding = 'utf-8'
+        extra = "ignore"
 
 settings = Settings()
