@@ -9,7 +9,19 @@ from tkinter import messagebox, scrolledtext
 import logging
 import os
 
-logging.basicConfig(level=logging.DEBUG)
+LOGLEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+
+# Optional: Add validation for the log level string
+valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+if LOGLEVEL not in valid_levels:
+    print(f"Warning: Invalid LOG_LEVEL specified ('{LOGLEVEL}'). Defaulting to WARNING.")
+    LOGLEVEL = 'WARNING'
+
+logging.basicConfig(
+    level=LOGLEVEL,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout # Direct output to standard output (console)
+)
 
 try:
     import tkintermapview
