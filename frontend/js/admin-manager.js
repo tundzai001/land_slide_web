@@ -38,10 +38,10 @@ class AdminManager {
 
         // ✅ Default offline thresholds (seconds)
         this.defaultOfflineThresholds = {
-            gnss: 60,
+            gnss: 30,
             rain: 60,
             water: 60,
-            imu: 60
+            imu: 2400
         };
 
         if (!this.token) {

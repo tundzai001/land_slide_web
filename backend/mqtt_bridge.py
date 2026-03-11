@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from collections import defaultdict
 
 import paho.mqtt.client as mqtt
-from sqlalchemy import select, update, and_, desc
+from sqlalchemy import select, update, and_, desc, func
 from app.websocket import manager
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import config as model_config
@@ -36,6 +36,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class MQTTBridge:
+    DANGEROUS_ALERT_LEVELS = {"WARNING", "CRITICAL", "HIGH", "EXTREME"}
+    DEFAULT_OFFLINE_THRESHOLDS = {
+        "gnss": 30,
+        "rain": 60,
+        "water": 60,
+        "imu": 2400,
+    }
+
     def __init__(self):
         logger.info("🛠️ Initializing MQTT Bridge Instance...")
         
@@ -448,6 +456,78 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"❌ Alert data save error: {e}")
 
+    async def _get_station_active_alert_summary(self, station_id: int, station_config: Optional[dict] = None) -> Dict[str, Any]:
+        """Return highest active risk level and unresolved alert count for a station."""
+        try:
+            now_ts = int(time.time())
+            gnss_offline = self._get_sensor_offline_threshold(station_config or {}, 'gnss')
+            rain_offline = self._get_sensor_offline_threshold(station_config or {}, 'rain')
+            water_offline = self._get_sensor_offline_threshold(station_config or {}, 'water')
+            imu_offline = self._get_sensor_offline_threshold(station_config or {}, 'imu')
+
+            default_ttl = {
+                'gnss_velocity': max(90, gnss_offline * 2),
+                'rainfall': max(120, rain_offline * 2),
+                'water_level': max(120, water_offline * 2),
+                'tilt': max(300, imu_offline),
+                'tilt_warning': max(300, imu_offline),
+                'tilt_critical': max(300, imu_offline),
+                'shock': max(300, imu_offline),
+            }
+
+            ttl_cfg = (station_config or {}).get('alert_ttl_seconds', {}) if station_config else {}
+            alert_ttl = {
+                'gnss_velocity': int(ttl_cfg.get('gnss_velocity', default_ttl['gnss_velocity'])),
+                'rainfall': int(ttl_cfg.get('rainfall', default_ttl['rainfall'])),
+                'water_level': int(ttl_cfg.get('water_level', default_ttl['water_level'])),
+                'tilt': int(ttl_cfg.get('tilt', default_ttl['tilt'])),
+                'tilt_warning': int(ttl_cfg.get('tilt_warning', default_ttl['tilt_warning'])),
+                'tilt_critical': int(ttl_cfg.get('tilt_critical', default_ttl['tilt_critical'])),
+                'shock': int(ttl_cfg.get('shock', default_ttl['shock'])),
+            }
+
+            async with DataSessionLocal() as db_data:
+                res = await db_data.execute(
+                    select(model_data.Alert.level, model_data.Alert.category, model_data.Alert.timestamp)
+                    .where(
+                        and_(
+                            model_data.Alert.station_id == station_id,
+                            model_data.Alert.is_resolved == False
+                        )
+                    )
+                )
+                rows = res.all()
+
+            fresh_levels = []
+            for level, category, ts in rows:
+                ttl = alert_ttl.get(category, 180)
+                if (now_ts - int(ts or 0)) <= ttl:
+                    fresh_levels.append(level)
+
+            priority = {
+                "EXTREME": 5,
+                "CRITICAL": 4,
+                "HIGH": 3,
+                "WARNING": 2,
+                "MEDIUM": 1,
+                "LOW": 0,
+            }
+            normalized_levels = [str(level).upper() for level in fresh_levels if level is not None]
+            highest_level = "LOW"
+            highest_score = -1
+            for level in normalized_levels:
+                score = priority.get(level, 0)
+                if score > highest_score:
+                    highest_level = level
+                    highest_score = score
+
+            if highest_level in priority and highest_level != "LOW":
+                return {"risk_level": highest_level, "unresolved_count": len(fresh_levels)}
+            return {"risk_level": "LOW", "unresolved_count": len(fresh_levels)}
+        except Exception as e:
+            logger.error(f"❌ Error reading active alert summary for station {station_id}: {e}")
+            return {"risk_level": "LOW", "unresolved_count": 0}
+
     async def _save_imu_baseline(self, station_id: int, baseline_data: dict):
         """Lưu IMU baseline vào station config trong DB."""
         try:
@@ -472,9 +552,10 @@ class MQTTBridge:
     def _get_sensor_offline_threshold(self, station_config: dict, sensor_type: str) -> int:
         offline_config = (station_config or {}).get('offline_thresholds', {}) or {}
         try:
-            return max(int(offline_config.get(sensor_type, 60)), 15)
+            default_threshold = self.DEFAULT_OFFLINE_THRESHOLDS.get(sensor_type, 60)
+            return max(int(offline_config.get(sensor_type, default_threshold)), 15)
         except (TypeError, ValueError):
-            return 60
+            return self.DEFAULT_OFFLINE_THRESHOLDS.get(sensor_type, 60)
 
     def _should_save_gnss_status(self, station_id: int, current_timestamp: int, station_config: dict) -> bool:
         last_saved = self.last_save_time[station_id].get('gnss', 0)
@@ -652,7 +733,7 @@ class MQTTBridge:
         is_dangerous = False
         is_just_resolved = False
         is_pending = False
-        if alert and alert.get('level') in ['WARNING', 'CRITICAL']:
+        if alert and str(alert.get('level', '')).upper() in self.DANGEROUS_ALERT_LEVELS:
             is_dangerous = True
         elif alert and alert.get('level') == 'PENDING':
             is_pending = True
@@ -694,16 +775,6 @@ class MQTTBridge:
             except Exception as e:
                 logger.error(f"❌ WS Alert Broadcast Error: {e}")
         elif not is_pending:
-            # Nếu AN TOÀN -> Gửi LOW để UI chuyển về màu xanh ngay lập tức
-            try:
-                await manager.broadcast({
-                    "type": "station_status",
-                    "station_id": station_id,
-                    "risk_level": "LOW"
-                })
-            except Exception as e:
-                logger.error(f"❌ WS Low Status Error: {e}")
-                
             # ✅ Tự động đánh dấu Resolved cho Alert của sensor này và tắt còi
             try:
                 categories_to_resolve = []
@@ -726,14 +797,32 @@ class MQTTBridge:
                         if res.rowcount > 0:
                             await db_data.commit()
                             is_just_resolved = True
-                            logger.info(f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}). Sending stop_siren command...")
-                            
-                            # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
-                            cmd_topic = f"landslide/{station_id}/command"
-                            cmd_payload = json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())})
-                            self.client.publish(cmd_topic, cmd_payload, qos=1)
+                            summary = await self._get_station_active_alert_summary(station_id, station_config)
+                            unresolved_count = summary.get('unresolved_count', 0)
+                            if unresolved_count == 0:
+                                logger.info(f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}). Sending stop_siren command...")
+                                # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
+                                cmd_topic = f"landslide/{station_id}/command"
+                                cmd_payload = json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())})
+                                self.client.publish(cmd_topic, cmd_payload, qos=1)
+                            else:
+                                logger.info(
+                                    f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}) "
+                                    f"but {unresolved_count} alerts still active; keep siren active state."
+                                )
             except Exception as e:
                 logger.error(f"❌ Error auto-resolving alerts: {e}")
+
+            # Chỉ gửi LOW khi trạm thực sự không còn alert unresolved.
+            try:
+                summary = await self._get_station_active_alert_summary(station_id, station_config)
+                await manager.broadcast({
+                    "type": "station_status",
+                    "station_id": station_id,
+                    "risk_level": summary['risk_level']
+                })
+            except Exception as e:
+                logger.error(f"❌ WS Station Status Error: {e}")
 
         # 3. SAVE TO DB (THROTTLED)
         # ✅ CHỈ LƯU KHI: Alert xảy ra HOẶC vừa resolve alert HOẶC đã đủ chu kỳ lưu

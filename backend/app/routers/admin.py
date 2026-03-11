@@ -299,6 +299,12 @@ def get_default_station_config():
             "critical_threshold": 0.30,
             "water_confirm_steps": 3
         },
+        "offline_thresholds": {
+            "gnss": 30,
+            "rain": 60,
+            "water": 60,
+            "imu": 2400
+        },
         # Bảng Cruden & Varnes
         "GNSS_Classification": [
             { "name": "Extremely rapid", "mm_giay": 5000, "m_giay": 0.05, "desc": "> 5 m/s" },

@@ -1215,17 +1215,17 @@
                                             GNSS Timeout
                                         </label>
                                         <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-gnss" value="300"
-                                                min="30" max="3600" step="30">
+                                            <input type="number" class="form-control" id="offline-gnss" value="30"
+                                                min="15" max="3600" step="15">
                                             <span class="input-group-text">giây</span>
                                             <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-gnss').value = 300; document.getElementById('offline-gnss').dispatchEvent(new Event('input'));"
-                                                title="Reset về 5 phút">
+                                                onclick="document.getElementById('offline-gnss').value = 30; document.getElementById('offline-gnss').dispatchEvent(new Event('input'));"
+                                                title="Reset về 30 giây">
                                                 <i class="bi bi-arrow-clockwise"></i>
                                             </button>
                                         </div>
                                         <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-gnss-display" class="fw-bold">5 phút</span>
+                                            Hiện tại: <span id="offline-gnss-display" class="fw-bold">30 giây</span>
                                         </small>
                                     </div>
 
@@ -1236,17 +1236,17 @@
                                             Rain Timeout
                                         </label>
                                         <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-rain" value="300"
+                                            <input type="number" class="form-control" id="offline-rain" value="60"
                                                 min="30" max="3600" step="30">
                                             <span class="input-group-text">giây</span>
                                             <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-rain').value = 300; document.getElementById('offline-rain').dispatchEvent(new Event('input'));"
-                                                title="Reset về 5 phút">
+                                                onclick="document.getElementById('offline-rain').value = 60; document.getElementById('offline-rain').dispatchEvent(new Event('input'));"
+                                                title="Reset về 1 phút">
                                                 <i class="bi bi-arrow-clockwise"></i>
                                             </button>
                                         </div>
                                         <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-rain-display" class="fw-bold">5 phút</span>
+                                            Hiện tại: <span id="offline-rain-display" class="fw-bold">1 phút</span>
                                         </small>
                                     </div>
 
@@ -1257,17 +1257,17 @@
                                             Water Timeout
                                         </label>
                                         <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-water" value="300"
+                                            <input type="number" class="form-control" id="offline-water" value="60"
                                                 min="30" max="3600" step="30">
                                             <span class="input-group-text">giây</span>
                                             <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-water').value = 300; document.getElementById('offline-water').dispatchEvent(new Event('input'));"
-                                                title="Reset về 5 phút">
+                                                onclick="document.getElementById('offline-water').value = 60; document.getElementById('offline-water').dispatchEvent(new Event('input'));"
+                                                title="Reset về 1 phút">
                                                 <i class="bi bi-arrow-clockwise"></i>
                                             </button>
                                         </div>
                                         <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-water-display" class="fw-bold">5 phút</span>
+                                            Hiện tại: <span id="offline-water-display" class="fw-bold">1 phút</span>
                                         </small>
                                     </div>
 
@@ -1278,17 +1278,17 @@
                                             IMU Timeout
                                         </label>
                                         <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-imu" value="300"
-                                                min="30" max="3600" step="30">
+                                            <input type="number" class="form-control" id="offline-imu" value="2400"
+                                                min="60" max="7200" step="60">
                                             <span class="input-group-text">giây</span>
                                             <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-imu').value = 300; document.getElementById('offline-imu').dispatchEvent(new Event('input'));"
-                                                title="Reset về 5 phút">
+                                                onclick="document.getElementById('offline-imu').value = 2400; document.getElementById('offline-imu').dispatchEvent(new Event('input'));"
+                                                title="Reset về 40 phút">
                                                 <i class="bi bi-arrow-clockwise"></i>
                                             </button>
                                         </div>
                                         <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-imu-display" class="fw-bold">5 phút</span>
+                                            Hiện tại: <span id="offline-imu-display" class="fw-bold">40 phút</span>
                                         </small>
                                     </div>
                                 </div>

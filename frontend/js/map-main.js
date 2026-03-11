@@ -11,6 +11,7 @@ let currentStationData = null;
 let allStations = [];
 let currentView = 'realtime';
 let wsConnection = null;
+let latestRealtimeSensorTs = {}; // key: `${stationId}_${sensorType}` -> unix timestamp
 
 // Realtime 3D state
 let realtimeImuScene, realtimeImuCamera, realtimeImuRenderer, realtimeImuControls, realtimeImuAnimationId;
@@ -122,7 +123,7 @@ function handleRealtimeUpdate(message) {
     }
 
     if (message.type === 'station_status') {
-        const riskLevel = message.risk_level;
+        const riskLevel = String(message.risk_level || 'LOW').toUpperCase();
         const stationId = message.station_id;
 
         // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan
@@ -178,7 +179,7 @@ function handleRealtimeUpdate(message) {
                 if (riskLevel === 'LOW') {
                     displayRisk = 'SAFE';
                     riskClass = 'LOW';
-                } else if (riskLevel === 'MEDIUM' || riskLevel === 'HIGH') {
+                } else if (riskLevel === 'WARNING' || riskLevel === 'MEDIUM' || riskLevel === 'HIGH') {
                     displayRisk = 'WARNING';
                     riskClass = 'MEDIUM';
                 } else if (riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') {
@@ -206,8 +207,8 @@ function handleRealtimeUpdate(message) {
 
     // ✅ XỬ LÝ CẢNH BÁO MỚI — Chỉ hiện 1 lần per alert (dedup)
     if (message.type === 'alert') {
-        // Drop message.message from the key so dynamic numbers don't bypass dedup
-        const alertKey = `${message.station_id}_${message.level}`;
+        // Dedup theo station + sensor + level để không nuốt cảnh báo mới cùng level từ sensor khác.
+        const alertKey = `${message.station_id}_${message.sensor_type || 'unknown'}_${message.level}`;
         if (alertKey !== lastAlertKey) {
             lastAlertKey = alertKey;
             showAlertBanner(message);
@@ -240,7 +241,12 @@ function handleRealtimeUpdate(message) {
 }
 
 function updateRealtimeSensorValues(message) {
-    const { sensor_type, data, timestamp } = message;
+    const { sensor_type, data, timestamp, station_id } = message;
+    const stationId = station_id || currentStationData?.id;
+
+    if (stationId && sensor_type && timestamp) {
+        latestRealtimeSensorTs[`${stationId}_${sensor_type}`] = Number(timestamp);
+    }
 
     console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
 
@@ -310,6 +316,9 @@ function updateRealtimeSensorValues(message) {
     }
 
     if (sensor_type === 'imu' && data) {
+        if (stationId && timestamp) {
+            console.debug(`🧭 [IMU][WS] station=${stationId} ts=${timestamp}`, data);
+        }
         animateValue('val-imu-roll', data.raw_roll, 1, '°', true);
         animateValue('val-imu-pitch', data.raw_pitch, 1, '°', true);
         animateValue('val-imu-yaw', data.raw_yaw, 1, '°', true);
@@ -361,6 +370,16 @@ function updateStationMarker(stationId, riskLevel) {
     // ✅ Nếu marker đang trong trạng thái alert (đỏ nhấp nháy), không cập nhật
     if (markerAlertState[stationId]) return;
 
+    const normalized = String(riskLevel || 'LOW').toUpperCase();
+    const riskToColorKey = {
+        'LOW': 'LOW',
+        'WARNING': 'MEDIUM',
+        'MEDIUM': 'MEDIUM',
+        'HIGH': 'HIGH',
+        'CRITICAL': 'EXTREME',
+        'EXTREME': 'EXTREME'
+    };
+
     const colors = {
         'EXTREME': '#fa5252',
         'HIGH': '#ff922b',
@@ -368,8 +387,9 @@ function updateStationMarker(stationId, riskLevel) {
         'LOW': '#51cf66'
     };
 
-    // ✅ Online mà không có risk_level → mặc định xanh (LOW)
-    const effectiveLevel = (riskLevel && colors[riskLevel]) ? riskLevel : 'LOW';
+    // ✅ Map WARNING/CRITICAL về palette nội bộ, tránh rơi về SAFE khi nhận nhãn khác.
+    const mappedLevel = riskToColorKey[normalized] || 'LOW';
+    const effectiveLevel = (mappedLevel && colors[mappedLevel]) ? mappedLevel : 'LOW';
     const color = colors[effectiveLevel];
     const shouldPulse = effectiveLevel === 'EXTREME' || effectiveLevel === 'HIGH';
     const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
@@ -734,6 +754,10 @@ async function refreshCurrentStationDetail() {
         const res = await fetch(`/api/stations/${currentStationData.id}/detail`);
         if (!res.ok) return;
         const data = await res.json();
+        const stationId = data.id;
+        const apiImuTs = Number(data.sensors?.imu?.latest_timestamp || 0);
+        const wsImuTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
+        console.debug(`🔍 [IMU][REFRESH] station=${stationId} api_ts=${apiImuTs || 'none'} ws_ts=${wsImuTs || 'none'}`);
         currentStationData = data;
         updateSidebarUI(currentStationData);
         console.log(`🔄 [MAP] Refreshed detail for station ${currentStationData.id}`);
@@ -1095,6 +1119,9 @@ function updateSidebarUI(data) {
     const rainLatest = data.sensors?.rain?.latest;
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
+    const stationId = data.id;
+    const imuApiTs = Number(data.sensors?.imu?.latest_timestamp || 0);
+    const imuRealtimeTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
 
     // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
     const gnssOnline  = data.status !== 'offline' && (data.sensors?.gnss?.is_online  ?? false);
@@ -1154,29 +1181,38 @@ function updateSidebarUI(data) {
 
         // IMU
         if (imuOnline) {
-            setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
-            setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
-            setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
-            setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-            setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-            setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+            const useApiImu = !imuRealtimeTs || !imuApiTs || imuApiTs >= imuRealtimeTs;
+            console.debug(`🧭 [IMU][MERGE] station=${stationId} api_ts=${imuApiTs || 'none'} ws_ts=${imuRealtimeTs || 'none'} source=${useApiImu ? 'api' : 'ws-cache'}`);
+
+            if (useApiImu) {
+                setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
+                setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
+                setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
+                setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
+                setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
+                setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+            } else {
+                console.warn(`⏭️ [IMU] Skip stale API overwrite station=${stationId} api_ts=${imuApiTs} < ws_ts=${imuRealtimeTs}`);
+            }
 
             // Use backend drift calculation if available
-            if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-                setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
-                setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
+            if (useApiImu) {
+                if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
+                    setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+                    setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
 
-                // Update realtime 3D if active
-                if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
-                    const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
-                    const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
-                    const targetQuaternion = new _THREE.Quaternion();
-                    const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
-                    targetQuaternion.setFromEuler(euler);
-                    realtimeImuTargetQuaternion = targetQuaternion;
+                    // Update realtime 3D if active
+                    if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
+                        const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
+                        const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
+                        const targetQuaternion = new _THREE.Quaternion();
+                        const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                        targetQuaternion.setFromEuler(euler);
+                        realtimeImuTargetQuaternion = targetQuaternion;
+                    }
+                } else {
+                    updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
                 }
-            } else {
-                updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
             }
         } else {
             setText('val-imu-roll', '--°');
@@ -2837,6 +2873,7 @@ function showAlertBanner(alertData) {
 }
 
 let currentSirenAudio = null;
+let pendingSirenReplay = false;
 
 function playSiren() {
     try {
@@ -2844,19 +2881,27 @@ function playSiren() {
             currentSirenAudio = new Audio('/static/sounds/siren.mp3');
             currentSirenAudio.loop = false; // Phát 1 lần cho mỗi sự kiện alert
 
-            // Xóa biến khi phát xong để cho phép phát lại
+            // Nếu có alert mới trong lúc đang phát, phát nối tiếp thêm 1 lần.
             currentSirenAudio.addEventListener('ended', () => {
                 currentSirenAudio = null;
+                if (pendingSirenReplay) {
+                    pendingSirenReplay = false;
+                    playSiren();
+                }
             });
 
             currentSirenAudio.play().catch(e => {
                 console.error('[ERROR] Siren auto-play blocked:', e);
                 currentSirenAudio = null;
+                pendingSirenReplay = false;
             });
+        } else {
+            pendingSirenReplay = true;
         }
     } catch (e) {
         console.error('[ERROR] playSiren error:', e);
         currentSirenAudio = null;
+        pendingSirenReplay = false;
     }
 }
 

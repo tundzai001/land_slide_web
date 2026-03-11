@@ -995,6 +995,7 @@ async def get_station_detail(
             sensor_data[sensor_type] = {
                 "is_online": sensor_is_online,
                 "latest": latest.data if latest else None,
+                "latest_timestamp": latest.timestamp if latest else None,
                 "history": [
                     {
                         "timestamp": h.timestamp,
@@ -1064,17 +1065,30 @@ async def _calculate_station_risk_assessment(
     """Helper: Tính toán risk assessment từ unresolved alerts còn hiệu lực thời gian."""
     try:
         now_ts = int(time.time())
+        gnss_offline = get_offline_threshold(station_config or {}, 'gnss')
+        rain_offline = get_offline_threshold(station_config or {}, 'rain')
+        water_offline = get_offline_threshold(station_config or {}, 'water')
+        imu_offline = get_offline_threshold(station_config or {}, 'imu')
+
         # Chỉ tính alert còn "tươi" để tránh kẹt WARNING/CRITICAL khi sensor đã ngừng gửi.
-        base_ttl = 180  # mặc định 3 phút nếu không có config
+        default_ttl = {
+            'gnss_velocity': max(90, gnss_offline * 2),
+            'rainfall': max(120, rain_offline * 2),
+            'water_level': max(120, water_offline * 2),
+            'tilt': max(300, imu_offline),
+            'tilt_warning': max(300, imu_offline),
+            'tilt_critical': max(300, imu_offline),
+            'shock': max(300, imu_offline),
+        }
         ttl_cfg = (station_config or {}).get('alert_ttl_seconds', {}) if station_config else {}
         alert_ttl = {
-            'gnss_velocity': int(ttl_cfg.get('gnss_velocity', base_ttl)),
-            'rainfall': int(ttl_cfg.get('rainfall', base_ttl)),
-            'water_level': int(ttl_cfg.get('water_level', base_ttl)),
-            'tilt': int(ttl_cfg.get('tilt', base_ttl)),
-            'tilt_warning': int(ttl_cfg.get('tilt_warning', base_ttl)),
-            'tilt_critical': int(ttl_cfg.get('tilt_critical', base_ttl)),
-            'shock': int(ttl_cfg.get('shock', base_ttl)),
+            'gnss_velocity': int(ttl_cfg.get('gnss_velocity', default_ttl['gnss_velocity'])),
+            'rainfall': int(ttl_cfg.get('rainfall', default_ttl['rainfall'])),
+            'water_level': int(ttl_cfg.get('water_level', default_ttl['water_level'])),
+            'tilt': int(ttl_cfg.get('tilt', default_ttl['tilt'])),
+            'tilt_warning': int(ttl_cfg.get('tilt_warning', default_ttl['tilt_warning'])),
+            'tilt_critical': int(ttl_cfg.get('tilt_critical', default_ttl['tilt_critical'])),
+            'shock': int(ttl_cfg.get('shock', default_ttl['shock'])),
         }
 
         result = await db_data.execute(
@@ -1090,7 +1104,7 @@ async def _calculate_station_risk_assessment(
         # Lọc alert hết hạn theo category-specific TTL.
         fresh_alerts = []
         for a in alerts:
-            ttl = alert_ttl.get(a.category, base_ttl)
+            ttl = alert_ttl.get(a.category, 180)
             if (now_ts - int(a.timestamp or 0)) <= ttl:
                 fresh_alerts.append(a)
         
@@ -1862,11 +1876,21 @@ def get_offline_threshold(station_config: dict, sensor_type: str) -> int:
         - water: 300s (5 phút)
         - imu: 300s (5 phút)
     """
+    default_map = {
+        'gnss': 30,
+        'rain': 60,
+        'water': 60,
+        'imu': 2400,
+    }
+    default_threshold = default_map.get(sensor_type, 300)
     if not station_config:
-        return 60
-    
-    offline_config = station_config.get('offline_thresholds', {})
-    return offline_config.get(sensor_type, 60)
+        return default_threshold
+
+    offline_config = station_config.get('offline_thresholds', {}) or {}
+    try:
+        return max(int(offline_config.get(sensor_type, default_threshold)), 15)
+    except (TypeError, ValueError):
+        return default_threshold
 
 async def _calculate_station_risk_simple(db_data: AsyncSession, station_id: int) -> str:
     try:

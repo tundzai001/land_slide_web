@@ -15,7 +15,9 @@ class WaterEngine:
 
     def process(self, payload: Dict[str, Any], timestamp: float) -> Optional[Dict[str, Any]]:
         try:
-            val = payload.get("value") or payload.get("water_level")
+            val = payload.get("value")
+            if val is None:
+                val = payload.get("water_level")
             
             if val is None:
                 logger.warning("Water value is None, using last valid value")
