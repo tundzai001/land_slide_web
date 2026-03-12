@@ -69,6 +69,30 @@
     --z-sidebar: 1000;
     --z-navbar: 9999;
     --z-modal: 2000;
+
+    /* === MOBILE-SPECIFIC VARIABLES === */
+    --touch-target-min: 44px;
+    --touch-target-lg: 48px;
+    --mobile-navbar-height: 60px;
+    --mobile-bottom-nav-height: 56px;
+    --mobile-padding: 12px;
+    --mobile-gap: 8px;
+    --mobile-sidebar-width: 100%;
+    --mobile-max-content-width: 100vw;
+
+    /* Mobile Typography */
+    --font-mobile-base: 16px;
+    --font-mobile-sm: 14px;
+    --font-mobile-xs: 12px;
+    --font-mobile-h1: 24px;
+    --font-mobile-h2: 20px;
+    --font-mobile-h3: 18px;
+
+    /* Mobile Breakpoints (for reference/comments) */
+    /* Extra small: 320px - 375px (iPhone SE, iPhone 12 mini) */
+    /* Small: 375px - 480px (iPhone 12, 13) */
+    /* Medium: 480px - 768px (Tablets in portrait) */
+    /* Large: 768px+ (Desktop, tablets in landscape) */
 }
 
 /* === DARK MODE OVERRIDE === */

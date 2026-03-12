@@ -173,22 +173,22 @@
 
                         <!-- Delta values — hiển thị hướng lệch rõ ràng -->
                         <div class="mt-2 pt-1 border-top">
-                            <div class="imu-delta-header">Δ Từ Baseline</div>
+                            <div class="imu-delta-header">Chuyển vị từ Baseline</div>
                             <div class="imu-delta-grid">
                                 <div class="imu-delta-item">
-                                    <span class="imu-delta-axis">Roll</span>
+                                    <span class="imu-delta-axis">Roll (X)</span>
                                     <span class="imu-delta-hint">← Trái / Phải →</span>
-                                    <span class="imu-delta-num" id="val-imu-delta-roll">--°</span>
+                                    <span class="imu-delta-num" id="val-imu-delta-roll">-- mm</span>
                                 </div>
                                 <div class="imu-delta-item">
-                                    <span class="imu-delta-axis">Pitch</span>
+                                    <span class="imu-delta-axis">Pitch (Y)</span>
                                     <span class="imu-delta-hint">↓ Trước / Sau ↑</span>
-                                    <span class="imu-delta-num" id="val-imu-delta-pitch">--°</span>
+                                    <span class="imu-delta-num" id="val-imu-delta-pitch">-- mm</span>
                                 </div>
                                 <div class="imu-delta-item">
-                                    <span class="imu-delta-axis">Yaw</span>
+                                    <span class="imu-delta-axis">Yaw (Z)</span>
                                     <span class="imu-delta-hint">↺ Trái / Phải ↻</span>
-                                    <span class="imu-delta-num" id="val-imu-delta-yaw">--°</span>
+                                    <span class="imu-delta-num" id="val-imu-delta-yaw">-- mm</span>
                                 </div>
                             </div>
                         </div>
@@ -200,7 +200,7 @@
                                     (tùy chỉnh):</span>
                                 <div class="d-flex gap-2"
                                     style="font-size: 0.75rem; font-weight: bold; color: var(--accent-warning, #f59e0b);">
-                                    <span id="val-imu-drift-len">-- mm</span>
+                                    <span id="val-imu-drift-len">-- cm</span>
                                     <span id="val-imu-drift-dir">(--)</span>
                                 </div>
                             </div>
@@ -655,6 +655,40 @@
             </div>
         </div>
     </div>
+
+    <!-- MOBILE BOTTOM NAVIGATION (Mobile only, <768px) -->
+    <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+        <div class="nav-item active" data-view="map">
+            <a href="#" class="nav-link">
+                <i class="bi bi-map"></i>
+                <span>Map</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="stations">
+            <a href="#" class="nav-link">
+                <i class="bi bi-hdd-network"></i>
+                <span>Stations</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="details">
+            <a href="#" class="nav-link">
+                <i class="bi bi-info-circle"></i>
+                <span>Details</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="charts">
+            <a href="#" class="nav-link">
+                <i class="bi bi-graph-up"></i>
+                <span>Charts</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="account">
+            <a href="#" class="nav-link">
+                <i class="bi bi-person-circle"></i>
+                <span>Account</span>
+            </a>
+        </div>
+    </nav>
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

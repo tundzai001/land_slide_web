@@ -79,6 +79,116 @@ class NavManager {
             });
             console.log('✅ [NAV] Search input connected');
         }
+
+        // ===== MOBILE BOTTOM NAVIGATION =====
+        this.setupMobileBottomNav();
+
+        // ===== RESPONSIVE SIDEBAR TOGGLE =====
+        this.setupResponsiveSidebarToggle();
+    }
+
+    setupMobileBottomNav() {
+        const mobileNav = document.getElementById('mobile-bottom-nav');
+        if (!mobileNav) {
+            console.log('ℹ️ [NAV] Mobile bottom nav not found (expected on mobile pages)');
+            return;
+        }
+
+        const navItems = mobileNav.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                const view = item.getAttribute('data-view');
+                this.handleMobileNavView(view);
+                
+                // Update active state
+                navItems.forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+            });
+        });
+
+        console.log('✅ [NAV] Mobile bottom navigation initialized');
+    }
+
+    handleMobileNavView(view) {
+        const stationSidebar = document.getElementById('station-list-sidebar');
+        const detailSidebar = document.getElementById('detail-sidebar');
+        const chartsPanel = document.getElementById('charts-panel');
+        const map = document.getElementById('map');
+        const authBtn = document.getElementById('auth-btn');
+
+        // Hide all panels first
+        if (stationSidebar) stationSidebar.classList.remove('active');
+        if (detailSidebar) detailSidebar.classList.remove('active');
+        if (chartsPanel) chartsPanel.classList.remove('active');
+
+        switch (view) {
+            case 'map':
+                // Show map
+                if (map) map.style.display = 'block';
+                break;
+            case 'stations':
+                // Show station list sidebar
+                if (stationSidebar) stationSidebar.classList.add('active');
+                if (map) map.style.display = 'block';
+                break;
+            case 'details':
+                // Show detail sidebar
+                if (detailSidebar) detailSidebar.classList.add('active');
+                if (map) map.style.display = 'block';
+                break;
+            case 'charts':
+                // Show charts panel
+                if (chartsPanel) chartsPanel.classList.add('active');
+                break;
+            case 'account':
+                // Trigger auth button
+                if (authBtn) authBtn.click();
+                break;
+            case 'dashboard':
+            case 'sensors':
+            case 'settings':
+                // For admin page - scroll to respective sections
+                const targetTab = document.querySelector(`[data-bs-target="#${view}-tab"]`);
+                if (targetTab) {
+                    const tab = new bootstrap.Tab(targetTab);
+                    tab.show();
+                }
+                break;
+        }
+
+        console.log(`📱 [NAV] Mobile view switched to: ${view}`);
+    }
+
+    setupResponsiveSidebarToggle() {
+        // Handle sidebar behavior on responsive breakpoints
+        const stationSidebar = document.getElementById('station-list-sidebar');
+        const detailSidebar = document.getElementById('detail-sidebar');
+
+        if (!stationSidebar) return;
+
+        window.addEventListener('resize', () => {
+            const isMobile = window.innerWidth <= 768;
+
+            if (isMobile) {
+                // On mobile: convert sidebar to modal-like behavior
+                // Keep CSS classes but ensure they work as modals
+                stationSidebar.classList.add('force-hidden');
+                if (detailSidebar) detailSidebar.classList.remove('active');
+            } else {
+                // On desktop: show sidebar normally
+                stationSidebar.classList.remove('force-hidden');
+                stationSidebar.classList.remove('hidden');
+            }
+        });
+
+        // Initial check
+        const isMobile = window.innerWidth <= 768;
+        if (isMobile && stationSidebar) {
+            stationSidebar.classList.add('force-hidden');
+        }
+
+        console.log('✅ [NAV] Responsive sidebar toggle initialized');
     }
 
     // ✅ NEW: Update admin button visibility

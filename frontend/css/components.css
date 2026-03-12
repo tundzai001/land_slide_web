@@ -245,3 +245,87 @@
 [data-theme="light"] .theme-toggle {
     background: var(--accent-secondary);
 }
+
+/* === MOBILE-FRIENDLY BUTTON & FORM ADJUSTMENTS === */
+
+/* Ensure all buttons have touch-friendly minimum heights */
+.btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
+}
+
+.btn-sm {
+    min-height: 40px;
+    padding: 8px 12px;
+}
+
+.btn-lg {
+    min-height: 48px;
+    padding: 12px 24px;
+}
+
+/* Icon buttons - ensure clickable area */
+.btn-link,
+.btn-icon,
+[class*="btn-"] .icon {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Form inputs - larger on mobile for easier interaction */
+.form-control,
+.form-select,
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+textarea,
+select {
+    min-height: 44px;
+    font-size: 16px; /* Prevents auto-zoom on iOS Safari */
+    padding: 10px 12px;
+    border-radius: 8px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+}
+
+/* Ensure form labels are clickable */
+label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+}
+
+/* Mobile-friendly list items and links */
+a,
+button,
+[role="button"] {
+    -webkit-tap-highlight-color: transparent;
+    padding: 12px;
+}
+
+/* Prevent zoom on input focus (iOS Safari) */
+@media (max-width: 768px) {
+    input,
+    textarea,
+    select {
+        font-size: 16px !important;
+    }
+}

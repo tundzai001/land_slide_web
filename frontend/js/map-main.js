@@ -340,7 +340,7 @@ function updateRealtimeSensorValues(message) {
 
         // Use backend drift calculation if available, fallback to JS
         if (data.drift_len_mm !== undefined && data.drift_dir !== undefined) {
-            animateValue('val-imu-drift-len', data.drift_len_mm, 1, ' mm', true);
+            animateValue('val-imu-drift-len', (parseFloat(data.drift_len_mm) || 0) / 10, 1, ' cm', true);
             setText('val-imu-drift-dir', `(${data.drift_dir})`);
         } else {
             updateImuDrift(data.roll, data.pitch);
@@ -355,9 +355,14 @@ function updateRealtimeSensorValues(message) {
         }
 
         // Update IMU chart in real-time
+        const imuCanvas = document.getElementById('chart-imu');
+        if (!charts['chart-imu'] && imuCanvas) {
+            renderImuChart(currentStationData?.sensors?.imu?.history || []);
+        }
         if (charts['chart-imu']) {
             const chart = charts['chart-imu'];
-            const timeLabel = new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const ts = Number(timestamp) || Math.floor(Date.now() / 1000);
+            const timeLabel = new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             chart.data.labels.push(timeLabel);
             chart.data.datasets[0].data.push(parseFloat(data.roll) || 0);
             chart.data.datasets[1].data.push(parseFloat(data.pitch) || 0);
@@ -1066,14 +1071,21 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
 
 function formatImuDelta(val, axis) {
     const num = parseFloat(val);
-    if (isNaN(num)) return '--°';
-    const sign = num > 0 ? '+' : '';
+    if (isNaN(num)) return '-- cm';
+    const dispMm = Math.sin(num * Math.PI / 180) * 0.09 * 1000; // mm
+    const sign = dispMm > 0 ? '+' : '';
+    // Ưu tiên cm; chỉ dùng mm khi |giá trị| < 1 cm
+    const absMm = Math.abs(dispMm);
+    const [displayVal, unit] = absMm >= 10
+        ? [(dispMm / 10).toFixed(2), 'cm']
+        : [dispMm.toFixed(1), 'mm'];
+    const threshold = unit === 'cm' ? 0.05 : 0.5;
     const arrows = {
-        roll:  num > 0.05 ? ' →' : num < -0.05 ? ' ←' : '',
-        pitch: num > 0.05 ? ' ↑' : num < -0.05 ? ' ↓' : '',
-        yaw:   num > 0.05 ? ' ↻' : num < -0.05 ? ' ↺' : '',
+        roll:  dispMm > threshold ? ' →' : dispMm < -threshold ? ' ←' : '',
+        pitch: dispMm > threshold ? ' ↑' : dispMm < -threshold ? ' ↓' : '',
+        yaw:   dispMm > threshold ? ' ↻' : dispMm < -threshold ? ' ↺' : '',
     };
-    return `${sign}${num.toFixed(1)}°${arrows[axis] || ''}`;
+    return `${sign}${displayVal} ${unit}${arrows[axis] || ''}`;
 }
 
 function updateGnssFixBadge(fixMode, fixQuality) {
@@ -1204,9 +1216,9 @@ function updateSidebarUI(data) {
         setText('val-imu-roll', '--°');
         setText('val-imu-pitch', '--°');
         setText('val-imu-yaw', '--°');
-        setText('val-imu-delta-roll', '--°');
-        setText('val-imu-delta-pitch', '--°');
-        setText('val-imu-delta-yaw', '--°');
+        setText('val-imu-delta-roll', '-- mm');
+        setText('val-imu-delta-pitch', '-- mm');
+        setText('val-imu-delta-yaw', '-- mm');
         updateImuDrift(null, null);
 
         // ✅ Khi offline, nút tắt còi chuyển xám (idle)
@@ -1267,7 +1279,7 @@ function updateSidebarUI(data) {
             // Use backend drift calculation if available
             if (useApiImu) {
                 if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-                    setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+                    setText('val-imu-drift-len', `${safeNumber((parseFloat(imuLatest.drift_len_mm) || 0) / 10, 1)} cm`);
                     setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
 
                     // Update realtime 3D if active
@@ -1292,7 +1304,7 @@ function updateSidebarUI(data) {
             setText('val-imu-delta-pitch', formatImuDelta(imuLatest?.pitch, 'pitch'));
             setText('val-imu-delta-yaw', formatImuDelta(imuLatest?.yaw, 'yaw'));
             if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-                setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+                setText('val-imu-drift-len', `${safeNumber((parseFloat(imuLatest.drift_len_mm) || 0) / 10, 1)} cm`);
                 setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
             } else {
                 updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
@@ -1301,9 +1313,9 @@ function updateSidebarUI(data) {
             setText('val-imu-roll', '--°');
             setText('val-imu-pitch', '--°');
             setText('val-imu-yaw', '--°');
-            setText('val-imu-delta-roll', '--°');
-            setText('val-imu-delta-pitch', '--°');
-            setText('val-imu-delta-yaw', '--°');
+            setText('val-imu-delta-roll', '-- mm');
+            setText('val-imu-delta-pitch', '-- mm');
+            setText('val-imu-delta-yaw', '-- mm');
             updateImuDrift(null, null);
         }
 
@@ -1934,7 +1946,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     // 2. The Black IMU Box (Main Sensor)
     const boxWidth = 2.2;
     const boxHeight = 1.0;
-    const boxDepth = 1.4;
+    const boxDepth = 2.2;
     const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
     const boxMat = new THREE.MeshStandardMaterial({
         color: 0x111111, // Flat black
@@ -1958,14 +1970,15 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     sensorBlock.add(arrow);
 
     // 4. Mounting Screws on the plate
+    // 4. Mounting Screws on the plate — cardinal positions (N/S/E/W)
     const screwGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
     const screwMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.2 });
+    const screwRadius = plateRadius - 0.3;
 
     for (let i = 0; i < 4; i++) {
-        const angle = (i * Math.PI) / 2 + Math.PI / 4;
+        const angle = (i * Math.PI) / 2; // 0°, 90°, 180°, 270° → mỗi mặt
         const screw = new THREE.Mesh(screwGeo, screwMat);
-        const radius = plateRadius - 0.3;
-        screw.position.set(Math.cos(angle) * radius, plateThickness, Math.sin(angle) * radius);
+        screw.position.set(Math.cos(angle) * screwRadius, plateThickness, Math.sin(angle) * screwRadius);
         sensorBlock.add(screw);
     }
 
@@ -1981,14 +1994,14 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     // ==========================================
     // GUY WIRES — 4 cáp neo thể hiện hướng lệch
     // ==========================================
-    const _gwAttachY = plateThickness + boxHeight * 0.75;
     const _gwDist    = 5.5;
     const _gwFloor   = -1.49;
+    const _gwScrewR = plateRadius - 0.3;
     const _gwSpecs   = [
-        { local: new THREE.Vector3( boxWidth  / 2, _gwAttachY, 0           ), anchor: [ _gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll+
-        { local: new THREE.Vector3(-boxWidth  / 2, _gwAttachY, 0           ), anchor: [-_gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll-
-        { local: new THREE.Vector3(0, _gwAttachY,  boxDepth  / 2           ), anchor: [0, _gwFloor,  _gwDist     ], color: 0x00d4ff }, // Pitch+
-        { local: new THREE.Vector3(0, _gwAttachY, -boxDepth  / 2           ), anchor: [0, _gwFloor, -_gwDist     ], color: 0x00d4ff }, // Pitch-
+        { local: new THREE.Vector3( _gwScrewR, plateThickness,  0         ), anchor: [ _gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll+
+        { local: new THREE.Vector3(-_gwScrewR, plateThickness,  0         ), anchor: [-_gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll-
+        { local: new THREE.Vector3( 0, plateThickness,  _gwScrewR         ), anchor: [0, _gwFloor,  _gwDist     ], color: 0x00d4ff }, // Pitch+
+        { local: new THREE.Vector3( 0, plateThickness, -_gwScrewR         ), anchor: [0, _gwFloor, -_gwDist     ], color: 0x00d4ff }, // Pitch-
     ];
     const imuWires = _gwSpecs.map(spec => {
         const geo = new THREE.BufferGeometry();
@@ -2177,7 +2190,7 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         // IMU Box
         const boxWidth = 2.2;
         const boxHeight = 1.0;
-        const boxDepth = 1.4;
+        const boxDepth = 2.2;
         const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
         const boxMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2, roughness: 0.8 });
         const imuBox = new THREE.Mesh(boxGeo, boxMat);
@@ -2195,13 +2208,14 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         realtimeImuSensorBlock.add(arrow);
 
         // Screws
+        // Screws — cardinal positions
         const screwGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
         const screwMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.2 });
+        const screwRadius = plateRadius - 0.3;
         for (let i = 0; i < 4; i++) {
-            const angle = (i * Math.PI) / 2 + Math.PI / 4;
+            const angle = (i * Math.PI) / 2;
             const screw = new THREE.Mesh(screwGeo, screwMat);
-            const radius = plateRadius - 0.3;
-            screw.position.set(Math.cos(angle) * radius, plateThickness, Math.sin(angle) * radius);
+            screw.position.set(Math.cos(angle) * screwRadius, plateThickness, Math.sin(angle) * screwRadius);
             realtimeImuSensorBlock.add(screw);
         }
 
@@ -2217,14 +2231,14 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         // ==========================================
         // GUY WIRES — 4 cáp neo realtime
         // ==========================================
-        const _rtGwAttachY = plateThickness + boxHeight * 0.75;
         const _rtGwDist    = 5.5;
         const _rtGwFloor   = -1.49;
+        const _rtGwScrewR = plateRadius - 0.3;
         const _rtGwSpecs   = [
-            { local: new THREE.Vector3( boxWidth  / 2, _rtGwAttachY,  0           ), anchor: [ _rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
-            { local: new THREE.Vector3(-boxWidth  / 2, _rtGwAttachY,  0           ), anchor: [-_rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
-            { local: new THREE.Vector3( 0, _rtGwAttachY,  boxDepth   / 2          ), anchor: [0,          _rtGwFloor,  _rtGwDist ], color: 0x00d4ff },
-            { local: new THREE.Vector3( 0, _rtGwAttachY, -boxDepth   / 2          ), anchor: [0,          _rtGwFloor, -_rtGwDist ], color: 0x00d4ff },
+            { local: new THREE.Vector3( _rtGwScrewR, plateThickness,  0           ), anchor: [ _rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
+            { local: new THREE.Vector3(-_rtGwScrewR, plateThickness,  0           ), anchor: [-_rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
+            { local: new THREE.Vector3( 0, plateThickness,  _rtGwScrewR           ), anchor: [0,          _rtGwFloor,  _rtGwDist ], color: 0x00d4ff },
+            { local: new THREE.Vector3( 0, plateThickness, -_rtGwScrewR           ), anchor: [0,          _rtGwFloor, -_rtGwDist ], color: 0x00d4ff },
         ];
         const rtImuWires = _rtGwSpecs.map(spec => {
             const geo = new THREE.BufferGeometry();
@@ -2819,7 +2833,7 @@ function renderStaleInfo(data, mqttConnected, latestSensorTs) {
 // =========================================================================
 function updateImuDrift(rollVal, pitchVal) {
     if (rollVal === null || rollVal === undefined || pitchVal === null || pitchVal === undefined || isNaN(parseFloat(rollVal)) || isNaN(parseFloat(pitchVal))) {
-        setText('val-imu-drift-len', '-- mm');
+        setText('val-imu-drift-len', '-- cm');
         setText('val-imu-drift-dir', '(--)');
         return;
     }
@@ -2845,7 +2859,7 @@ function updateImuDrift(rollVal, pitchVal) {
         dir_text = dirs[idx];
     }
 
-    animateValue('val-imu-drift-len', drift, 1, ' mm', true);
+    animateValue('val-imu-drift-len', drift / 10, 1, ' cm', true);
     setText('val-imu-drift-dir', `(${dir_text})`);
 }
 

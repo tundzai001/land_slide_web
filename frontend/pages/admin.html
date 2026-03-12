@@ -1312,10 +1312,18 @@
                                             value="0.30">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label">Confirm Steps</label>
+                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
                                         <input type="number" class="form-control" id="cfg-water-confirm" value="3"
                                             min="1" max="10">
                                         <small id="cfg-water-confirm-source" class="text-muted">Mặc định</small>
+                                    </div>
+                                </div>
+                                <div class="row g-3 mt-1">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
+                                        <input type="number" class="form-control" id="cfg-water-safe-confirm" value="3"
+                                            min="1" max="20">
+                                        <small id="cfg-water-safe-confirm-source" class="text-muted">Mặc định</small>
                                     </div>
                                 </div>
                             </div>
@@ -1340,10 +1348,16 @@
                                         <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label">Confirm Steps</label>
+                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
                                         <input type="number" class="form-control" id="cfg-rain-confirm" value="2"
                                             min="1" max="10">
                                         <small id="cfg-rain-confirm-source" class="text-muted">Mặc định</small>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
+                                        <input type="number" class="form-control" id="cfg-rain-safe-confirm" value="3"
+                                            min="1" max="20">
+                                        <small id="cfg-rain-safe-confirm-source" class="text-muted">Mặc định</small>
                                     </div>
                                 </div>
                             </div>
@@ -1365,8 +1379,12 @@
                                             value="4.0">
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="form-label">Confirm Steps</label>
+                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
                                         <input type="number" class="form-control" id="cfg-gnss-steps" value="3">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
+                                        <input type="number" class="form-control" id="cfg-gnss-safe-steps" value="5" min="1" max="20">
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Safe Streak</label>
@@ -1402,8 +1420,12 @@
                                             value="5.0">
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label">Confirm Steps</label>
+                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
                                         <input type="number" class="form-control" id="cfg-imu-confirm" value="2">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
+                                        <input type="number" class="form-control" id="cfg-imu-safe-confirm" value="3" min="1" max="20">
                                     </div>
                                 </div>
                             </div>
@@ -1939,6 +1961,40 @@
             </div>
         </div>
     </div>
+
+    <!-- MOBILE BOTTOM NAVIGATION (Mobile only, <768px) -->
+    <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+        <div class="nav-item active" data-view="dashboard">
+            <a href="#" class="nav-link">
+                <i class="bi bi-speedometer2"></i>
+                <span>Dashboard</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="stations">
+            <a href="#" class="nav-link">
+                <i class="bi bi-hdd-network"></i>
+                <span>Stations</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="sensors">
+            <a href="#" class="nav-link">
+                <i class="bi bi-sliders"></i>
+                <span>Sensors</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="settings">
+            <a href="#" class="nav-link">
+                <i class="bi bi-gear"></i>
+                <span>Settings</span>
+            </a>
+        </div>
+        <div class="nav-item" data-view="account">
+            <a href="#" class="nav-link">
+                <i class="bi bi-person-circle"></i>
+                <span>Account</span>
+            </a>
+        </div>
+    </nav>
 
     <script>
         function unlockProtectedInput(inputEl) {
