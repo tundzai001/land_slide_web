@@ -549,6 +549,25 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
 
+    async def _upsert_latest_sensor_cache(self, station_id: int, sensor_type: str, timestamp: int, data: dict):
+        """Luôn cập nhật giá trị mới nhất vào bảng cache riêng, bất kể chu kỳ lưu sensor_data."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        try:
+            async with DataSessionLocal() as db:
+                stmt = pg_insert(model_data.LatestSensorCache).values(
+                    station_id=station_id,
+                    sensor_type=sensor_type,
+                    timestamp=timestamp,
+                    data=data,
+                ).on_conflict_do_update(
+                    index_elements=['station_id', 'sensor_type'],
+                    set_=dict(timestamp=timestamp, data=data),
+                )
+                await db.execute(stmt)
+                await db.commit()
+        except Exception as e:
+            logger.error(f"❌ [CACHE] Upsert failed station={station_id} sensor={sensor_type}: {e}")
+
     def _get_sensor_offline_threshold(self, station_config: dict, sensor_type: str) -> int:
         offline_config = (station_config or {}).get('offline_thresholds', {}) or {}
         try:
@@ -709,6 +728,12 @@ class MQTTBridge:
             })
         except Exception as e:
             logger.error(f"❌ WS Sensor Error: {e}")
+
+        # ✅ Upsert latest_sensor_cache — luôn lưu giá trị mới nhất bất kể chu kỳ save
+        try:
+            await self._upsert_latest_sensor_cache(station_id, sensor_type, current_timestamp, processed_data)
+        except Exception as e:
+            logger.error(f"❌ LatestSensorCache upsert error: {e}")
 
         # 2. ANALYZE
         alert = None

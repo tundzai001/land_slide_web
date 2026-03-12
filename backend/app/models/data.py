@@ -24,6 +24,21 @@ class SensorData(BaseData):
     value_4 = Column(Float, nullable=True)  
     value_5 = Column(Float, nullable=True)  
 
+class LatestSensorCache(BaseData):
+    """Bảng cache giá trị sensor mới nhất — upsert mỗi lần MQTT nhận data,
+    không phụ thuộc chu kỳ lưu sensor_data. Dùng để frontend luôn hiện số mới nhất."""
+    __tablename__ = "latest_sensor_cache"
+    __table_args__ = (
+        Index('ix_latest_cache_station_sensor', 'station_id', 'sensor_type', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    station_id = Column(Integer, nullable=False)
+    sensor_type = Column(String, nullable=False)
+    timestamp = Column(BigInteger, nullable=False)
+    data = Column(JSON, nullable=False)
+
+
 class Alert(BaseData):
     __tablename__ = "alerts"
     

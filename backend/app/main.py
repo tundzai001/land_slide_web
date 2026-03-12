@@ -491,21 +491,37 @@ async def get_stations_by_project(
             sensor_type = device.device_type
             threshold = get_offline_threshold(station.config, sensor_type)
             
-            latest_data_result = await db_data.execute(
-                select(model_data.SensorData)
+            # ✅ Ưu tiên lấy từ latest_sensor_cache
+            cache_result = await db_data.execute(
+                select(model_data.LatestSensorCache)
                 .where(
                     and_(
-                        model_data.SensorData.station_id == station.id,
-                        model_data.SensorData.sensor_type == sensor_type
+                        model_data.LatestSensorCache.station_id == station.id,
+                        model_data.LatestSensorCache.sensor_type == sensor_type
                     )
                 )
-                .order_by(desc(model_data.SensorData.timestamp))
-                .limit(1)
             )
-            latest_data = latest_data_result.scalar_one_or_none()
+            cached = cache_result.scalar_one_or_none()
+            
+            if cached:
+                latest_ts = cached.timestamp
+            else:
+                latest_data_result = await db_data.execute(
+                    select(model_data.SensorData)
+                    .where(
+                        and_(
+                            model_data.SensorData.station_id == station.id,
+                            model_data.SensorData.sensor_type == sensor_type
+                        )
+                    )
+                    .order_by(desc(model_data.SensorData.timestamp))
+                    .limit(1)
+                )
+                latest_data = latest_data_result.scalar_one_or_none()
+                latest_ts = latest_data.timestamp if latest_data else None
             
             # Nếu có ít nhất 1 sensor online -> station online
-            if latest_data and (current_time - latest_data.timestamp) < threshold:
+            if latest_ts and (current_time - latest_ts) < threshold:
                 station_online = True
                 break
         
@@ -949,30 +965,48 @@ async def get_station_detail(
         for device in devices:
             sensor_type = device.device_type
             
-            # Lấy 1 điểm mới nhất
-            latest_result = await db_data.execute(
-                select(model_data.SensorData)
+            # ✅ Ưu tiên lấy từ latest_sensor_cache (luôn cập nhật mỗi lần MQTT nhận data)
+            cache_result = await db_data.execute(
+                select(model_data.LatestSensorCache)
                 .where(
                     and_(
-                        model_data.SensorData.station_id == station_id,
-                        model_data.SensorData.sensor_type == sensor_type
+                        model_data.LatestSensorCache.station_id == station_id,
+                        model_data.LatestSensorCache.sensor_type == sensor_type
                     )
                 )
-                .order_by(desc(model_data.SensorData.timestamp))
-                .limit(1)
             )
-            latest = latest_result.scalar_one_or_none()
+            cached = cache_result.scalar_one_or_none()
+            
+            # Fallback: nếu cache chưa có (server mới khởi động) thì lấy từ sensor_data
+            if not cached:
+                latest_result = await db_data.execute(
+                    select(model_data.SensorData)
+                    .where(
+                        and_(
+                            model_data.SensorData.station_id == station_id,
+                            model_data.SensorData.sensor_type == sensor_type
+                        )
+                    )
+                    .order_by(desc(model_data.SensorData.timestamp))
+                    .limit(1)
+                )
+                latest_row = latest_result.scalar_one_or_none()
+                latest_data = latest_row.data if latest_row else None
+                latest_ts = latest_row.timestamp if latest_row else None
+            else:
+                latest_data = cached.data
+                latest_ts = cached.timestamp
             
             # ✅ Lấy offline threshold riêng cho sensor này
             threshold = get_offline_threshold(station.config, sensor_type)
             current_time = int(time.time())
             
-            # Check xem sensor này có online không
-            if latest and (current_time - latest.timestamp) < threshold:
+            # Check xem sensor này có online không (dựa trên ts mới nhất thực sự)
+            if latest_ts and (current_time - latest_ts) < threshold:
                 station_online = True  # Chỉ cần 1 sensor online là trạm online
                 has_recent_data = True
-                if latest.timestamp > latest_data_timestamp:
-                    latest_data_timestamp = latest.timestamp
+                if latest_ts > latest_data_timestamp:
+                    latest_data_timestamp = latest_ts
             
             # Lấy lịch sử 24h
             history_result = await db_data.execute(
@@ -989,13 +1023,13 @@ async def get_station_detail(
             )
             history = history_result.scalars().all()
             
-            # ✅ Per-sensor online check (kiểm tra riêng từng sensor)
-            sensor_is_online = bool(latest and (current_time - latest.timestamp) < threshold)
+            # ✅ Per-sensor online check (dựa trên cache timestamp)
+            sensor_is_online = bool(latest_ts and (current_time - latest_ts) < threshold)
 
             sensor_data[sensor_type] = {
                 "is_online": sensor_is_online,
-                "latest": latest.data if latest else None,
-                "latest_timestamp": latest.timestamp if latest else None,
+                "latest": latest_data,
+                "latest_timestamp": latest_ts,
                 "history": [
                     {
                         "timestamp": h.timestamp,

@@ -328,14 +328,15 @@ function updateRealtimeSensorValues(message) {
         if (stationId && timestamp) {
             console.debug(`🧭 [IMU][WS] station=${stationId} ts=${timestamp}`, data);
         }
+        updateImuOfflineBadge(true);
         animateValue('val-imu-roll', data.raw_roll, 1, '°', true);
         animateValue('val-imu-pitch', data.raw_pitch, 1, '°', true);
         animateValue('val-imu-yaw', data.raw_yaw, 1, '°', true);
 
-        // Delta values (secondary display)
-        animateValue('val-imu-delta-roll', data.roll, 1, '°', true);
-        animateValue('val-imu-delta-pitch', data.pitch, 1, '°', true);
-        animateValue('val-imu-delta-yaw', data.yaw, 1, '°', true);
+        // Delta values (secondary display) — với mũi tên hướng lệch
+        setText('val-imu-delta-roll', formatImuDelta(data.roll, 'roll'));
+        setText('val-imu-delta-pitch', formatImuDelta(data.pitch, 'pitch'));
+        setText('val-imu-delta-yaw', formatImuDelta(data.yaw, 'yaw'));
 
         // Use backend drift calculation if available, fallback to JS
         if (data.drift_len_mm !== undefined && data.drift_dir !== undefined) {
@@ -1063,6 +1064,18 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     return num.toFixed(decimals);
 }
 
+function formatImuDelta(val, axis) {
+    const num = parseFloat(val);
+    if (isNaN(num)) return '--°';
+    const sign = num > 0 ? '+' : '';
+    const arrows = {
+        roll:  num > 0.05 ? ' →' : num < -0.05 ? ' ←' : '',
+        pitch: num > 0.05 ? ' ↑' : num < -0.05 ? ' ↓' : '',
+        yaw:   num > 0.05 ? ' ↻' : num < -0.05 ? ' ↺' : '',
+    };
+    return `${sign}${num.toFixed(1)}°${arrows[axis] || ''}`;
+}
+
 function updateGnssFixBadge(fixMode, fixQuality) {
     const badge = document.getElementById('gnss-fix-badge');
     if (!badge) return;
@@ -1115,6 +1128,12 @@ function updateGnssFixBadge(fixMode, fixQuality) {
 
     badge.className = `gnss-fix-badge ${cls}`;
     badge.textContent = text;
+}
+
+function updateImuOfflineBadge(isOnline) {
+    const badge = document.getElementById('imu-offline-badge');
+    if (!badge) return;
+    badge.style.display = isOnline ? 'none' : '';
 }
 
 function updateSidebarUI(data) {
@@ -1175,6 +1194,7 @@ function updateSidebarUI(data) {
     } else {
         updateGnssFixBadge('UNKNOWN', 0);
     }
+    updateImuOfflineBadge(imuOnline);
 
     // ✅ Khi toàn trạm offline → hiển thị '--' cho TẤT CẢ sensor
     if (data.status === 'offline') {
@@ -1208,12 +1228,20 @@ function updateSidebarUI(data) {
         if (rainOnline) {
             const rainIntensity = rainLatest?.intensity_mm_h ?? null;
             setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
+        } else if (rainLatest) {
+            // Sensor offline nhưng vẫn có dữ liệu DB gần nhất -> giữ số liệu để tránh nhảy '--'
+            const rainIntensity = rainLatest?.intensity_mm_h ?? null;
+            setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
         } else {
             setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
         }
 
         // Water
         if (waterOnline) {
+            const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
+            setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+        } else if (waterLatest) {
+            // Sensor offline nhưng vẫn có dữ liệu DB gần nhất -> giữ số liệu để tránh nhảy '--'
             const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
             setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
         } else {
@@ -1229,9 +1257,9 @@ function updateSidebarUI(data) {
                 setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
                 setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
                 setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
-                setText('val-imu-delta-roll', `${safeNumber(imuLatest?.roll, 1)}°`);
-                setText('val-imu-delta-pitch', `${safeNumber(imuLatest?.pitch, 1)}°`);
-                setText('val-imu-delta-yaw', `${safeNumber(imuLatest?.yaw, 1)}°`);
+                setText('val-imu-delta-roll', formatImuDelta(imuLatest?.roll, 'roll'));
+                setText('val-imu-delta-pitch', formatImuDelta(imuLatest?.pitch, 'pitch'));
+                setText('val-imu-delta-yaw', formatImuDelta(imuLatest?.yaw, 'yaw'));
             } else {
                 console.warn(`⏭️ [IMU] Skip stale API overwrite station=${stationId} api_ts=${imuApiTs} < ws_ts=${imuRealtimeTs}`);
             }
@@ -1254,6 +1282,20 @@ function updateSidebarUI(data) {
                 } else {
                     updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
                 }
+            }
+        } else if (imuLatest) {
+            // IMU offline nhưng có dữ liệu cũ trong DB → hiển thị giá trị mới nhất
+            setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
+            setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
+            setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
+            setText('val-imu-delta-roll', formatImuDelta(imuLatest?.roll, 'roll'));
+            setText('val-imu-delta-pitch', formatImuDelta(imuLatest?.pitch, 'pitch'));
+            setText('val-imu-delta-yaw', formatImuDelta(imuLatest?.yaw, 'yaw'));
+            if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
+                setText('val-imu-drift-len', `${safeNumber(imuLatest.drift_len_mm, 1)} mm`);
+                setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
+            } else {
+                updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
             }
         } else {
             setText('val-imu-roll', '--°');
@@ -1936,6 +1978,34 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
 
     imuScene.add(sensorBlock);
 
+    // ==========================================
+    // GUY WIRES — 4 cáp neo thể hiện hướng lệch
+    // ==========================================
+    const _gwAttachY = plateThickness + boxHeight * 0.75;
+    const _gwDist    = 5.5;
+    const _gwFloor   = -1.49;
+    const _gwSpecs   = [
+        { local: new THREE.Vector3( boxWidth  / 2, _gwAttachY, 0           ), anchor: [ _gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll+
+        { local: new THREE.Vector3(-boxWidth  / 2, _gwAttachY, 0           ), anchor: [-_gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll-
+        { local: new THREE.Vector3(0, _gwAttachY,  boxDepth  / 2           ), anchor: [0, _gwFloor,  _gwDist     ], color: 0x00d4ff }, // Pitch+
+        { local: new THREE.Vector3(0, _gwAttachY, -boxDepth  / 2           ), anchor: [0, _gwFloor, -_gwDist     ], color: 0x00d4ff }, // Pitch-
+    ];
+    const imuWires = _gwSpecs.map(spec => {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const mat = new THREE.LineBasicMaterial({ color: spec.color, linewidth: 2 });
+        const line = new THREE.Line(geo, mat);
+        imuScene.add(line);
+        // Anchor peg
+        const peg = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.08, 0.08, 0.25, 8),
+            new THREE.MeshStandardMaterial({ color: spec.color, metalness: 0.7, roughness: 0.3, emissive: spec.color, emissiveIntensity: 0.25 })
+        );
+        peg.position.set(spec.anchor[0], _gwFloor + 0.12, spec.anchor[2]);
+        imuScene.add(peg);
+        return { line, local: spec.local, anchor: new THREE.Vector3(...spec.anchor) };
+    });
+
     // Data parsing (backend sends 'rolls'/'pitches' plural)
     const rollData = timeSeries.rolls || timeSeries.roll || [];
     const pitchData = timeSeries.pitches || timeSeries.pitch || [];
@@ -1991,6 +2061,15 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
             sensorBlock.quaternion.slerp(targetQuaternion, 0.1);
         }
 
+        // Cập nhật guy wires
+        sensorBlock.updateMatrixWorld();
+        imuWires.forEach(w => {
+            const wp   = w.local.clone().applyMatrix4(sensorBlock.matrixWorld);
+            const attr = w.line.geometry.attributes.position;
+            attr.setXYZ(0, wp.x, wp.y, wp.z);
+            attr.setXYZ(1, w.anchor.x, w.anchor.y, w.anchor.z);
+            attr.needsUpdate = true;
+        });
         imuControls.update();
         imuRenderer.render(imuScene, imuCamera);
     }
@@ -2135,6 +2214,33 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
 
         realtimeImuScene.add(realtimeImuSensorBlock);
 
+        // ==========================================
+        // GUY WIRES — 4 cáp neo realtime
+        // ==========================================
+        const _rtGwAttachY = plateThickness + boxHeight * 0.75;
+        const _rtGwDist    = 5.5;
+        const _rtGwFloor   = -1.49;
+        const _rtGwSpecs   = [
+            { local: new THREE.Vector3( boxWidth  / 2, _rtGwAttachY,  0           ), anchor: [ _rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
+            { local: new THREE.Vector3(-boxWidth  / 2, _rtGwAttachY,  0           ), anchor: [-_rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
+            { local: new THREE.Vector3( 0, _rtGwAttachY,  boxDepth   / 2          ), anchor: [0,          _rtGwFloor,  _rtGwDist ], color: 0x00d4ff },
+            { local: new THREE.Vector3( 0, _rtGwAttachY, -boxDepth   / 2          ), anchor: [0,          _rtGwFloor, -_rtGwDist ], color: 0x00d4ff },
+        ];
+        const rtImuWires = _rtGwSpecs.map(spec => {
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+            const mat = new THREE.LineBasicMaterial({ color: spec.color, linewidth: 2 });
+            const line = new THREE.Line(geo, mat);
+            realtimeImuScene.add(line);
+            const peg = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.08, 0.08, 0.25, 8),
+                new THREE.MeshStandardMaterial({ color: spec.color, metalness: 0.7, roughness: 0.3, emissive: spec.color, emissiveIntensity: 0.25 })
+            );
+            peg.position.set(spec.anchor[0], _rtGwFloor + 0.12, spec.anchor[2]);
+            realtimeImuScene.add(peg);
+            return { line, local: spec.local, anchor: new THREE.Vector3(...spec.anchor) };
+        });
+
         // Initial orientation
         const currPitch = initialPitch * Math.PI / 180;
         const currRoll = initialRoll * Math.PI / 180;
@@ -2149,6 +2255,15 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
                 realtimeImuSensorBlock.quaternion.slerp(realtimeImuTargetQuaternion, 0.1);
             }
 
+            // Cập nhật guy wires realtime
+            realtimeImuSensorBlock.updateMatrixWorld();
+            rtImuWires.forEach(w => {
+                const wp   = w.local.clone().applyMatrix4(realtimeImuSensorBlock.matrixWorld);
+                const attr = w.line.geometry.attributes.position;
+                attr.setXYZ(0, wp.x, wp.y, wp.z);
+                attr.setXYZ(1, w.anchor.x, w.anchor.y, w.anchor.z);
+                attr.needsUpdate = true;
+            });
             realtimeImuControls.update();
             realtimeImuRenderer.render(realtimeImuScene, realtimeImuCamera);
         }

@@ -1543,6 +1543,76 @@ body:has(.charts-panel.active) .toggle-list-btn {
     border-color: rgba(248, 113, 113, 0.5);
 }
 
+.imu-offline-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 6px;
+    border-radius: 999px;
+    border: 1px solid #fca5a5;
+    line-height: 1;
+    white-space: nowrap;
+    color: #7f1d1d;
+    background: #fee2e2;
+}
+
+[data-theme="dark"] .imu-offline-badge {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(248, 113, 113, 0.5);
+}
+
+.imu-delta-header {
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.45;
+    padding: 0 4px;
+    margin-bottom: 5px;
+}
+.imu-delta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 0 2px;
+}
+.imu-delta-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.12);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 7px;
+    padding: 5px 3px 4px;
+    gap: 1px;
+}
+[data-theme="dark"] .imu-delta-item {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.08);
+}
+.imu-delta-axis {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    opacity: 0.55;
+    line-height: 1;
+}
+.imu-delta-hint {
+    font-size: 0.48rem;
+    opacity: 0.35;
+    line-height: 1.3;
+    text-align: center;
+    white-space: nowrap;
+}
+.imu-delta-num {
+    font-family: monospace;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--accent-primary);
+    margin-top: 2px;
+    letter-spacing: -0.01em;
+}
+
 /* === Map Navbar buttons — visible in both themes === */
 .top-navbar .btn-outline-primary {
     color: var(--accent-primary);
