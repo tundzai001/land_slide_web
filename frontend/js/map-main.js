@@ -1579,8 +1579,11 @@ function renderLongTermAnalysis(data) {
         const ciVal = safeNumber(analysis.velocity_ci_95, 2);
         setText('lt-velocity-ci', `(Khoảng tin cậy: ±${ciVal})`);
         setText('lt-classification', analysis.classification || 'N/A');
-        setText('lt-total-disp', `${safeNumber(analysis.total_displacement_mm, 1)} mm`);
-        setText('lt-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
+        
+        // Use auto cm/mm formatting
+        setText('lt-total-disp', formatDisplacementString(analysis.total_displacement_mm, 1));
+        
+        setText('lt-duration', formatDurationString(analysis.duration_days));
 
         const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
         const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
@@ -2319,7 +2322,7 @@ function renderImuLongTermSection(imuData) {
     setText('lt-imu-max-roll', `${safeNumber(analysis.max_roll_deg, 2)}°`);
     setText('lt-imu-max-pitch', `${safeNumber(analysis.max_pitch_deg, 2)}°`);
     setText('lt-imu-points', analysis.data_points || '--');
-    setText('lt-imu-duration', `${safeNumber(analysis.duration_days, 1)} ngày`);
+    setText('lt-imu-duration', formatDurationString(analysis.duration_days));
 
     // Trend
     const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
@@ -2683,8 +2686,43 @@ function renderRainfallCorrelationSection(data) {
 }
 
 // =========================================================================
-// MULTI-WINDOW ANALYSIS SECTION
+// MULTI-WINDOW ANALYSIS SECTION (CALENDAR INTERVALS)
 // =========================================================================
+function formatDisplacementString(valMm, decimals=1) {
+    const val = parseFloat(valMm) || 0;
+    if (Math.abs(val) >= 10) {
+        return `${(val / 10).toFixed(decimals)} cm`;
+    }
+    return `${val.toFixed(decimals)} mm`;
+}
+
+function formatDurationString(durationDays) {
+    if (!durationDays || durationDays <= 0) return '0 phút';
+    
+    if (durationDays < 1 / 24) { // less than 1 hour
+        const minutes = Math.round(durationDays * 24 * 60);
+        return `${minutes} phút`;
+    } else if (durationDays < 1) { // less than 1 day
+        const hours = Math.floor(durationDays * 24);
+        const minutes = Math.round((durationDays * 24 - hours) * 60);
+        return minutes > 0 ? `${hours} giờ ${minutes} phút` : `${hours} giờ`;
+    } else { // 1 day or more
+        const days = Math.floor(durationDays);
+        if (days >= 365) {
+            const years = Math.floor(days / 365);
+            const remainingDays = days % 365;
+            return remainingDays > 0 ? `${years} năm ${remainingDays} ngày` : `${years} năm`;
+        } else if (days >= 30) {
+            const months = Math.floor(days / 30);
+            const remainingDays = days % 30;
+            return remainingDays > 0 ? `${months} tháng ${remainingDays} ngày` : `${months} tháng`;
+        } else {
+            const hours = Math.round((durationDays - days) * 24);
+            return hours > 0 && days < 7 ? `${days} ngày ${hours} giờ` : `${days} ngày`;
+        }
+    }
+}
+
 function renderMultiWindowSection(data) {
     const section = document.getElementById('multi-window-section');
     if (!section) return;
@@ -2700,40 +2738,57 @@ function renderMultiWindowSection(data) {
     // Acceleration alert
     const alertEl = document.getElementById('multi-window-alert');
     const alertTextEl = document.getElementById('multi-window-alert-text');
+    const warningTextEl = document.getElementById('warning-text');
+    const warningEl = document.getElementById('longterm-warning');
+
     if (mw.acceleration_alert) {
         alertEl.style.display = 'block';
         alertEl.className = `alert ${mw.acceleration_alert.type === 'rapid_acceleration' ? 'alert-danger' : 'alert-warning'} mb-3`;
         alertTextEl.textContent = mw.acceleration_alert.message;
     } else {
         alertEl.style.display = 'none';
+        alertTextEl.textContent = '';
+    }
+
+    // Unify CUSUM and Fukuzono models into overall alert if any
+    let unifiedMsg = [];
+    if (data.gnss?.analysis?.cusum_change) unifiedMsg.push(data.gnss.analysis.cusum_message);
+    if (data.inverse_velocity && data.inverse_velocity.predicted_failure) {
+        unifiedMsg.push(`Fukuzono (Ngịch đảo Vận tốc) dự báo sụp lún trong ~${data.inverse_velocity.days_to_failure} ngày.`);
+    }
+    if (unifiedMsg.length > 0 && warningEl) {
+        warningEl.style.display = 'block';
+        warningEl.className = 'alert alert-danger mb-3';
+        warningTextEl.innerHTML = `<strong>KẾT HỢP PHÂN TÍCH:</strong><br>${unifiedMsg.join('<br>')}`;
     }
 
     // Window cards
     const cardsContainer = document.getElementById('multi-window-cards');
     if (!cardsContainer) return;
 
-    const windowLabels = { 7: '7 ngày', 30: '30 ngày', 90: '90 ngày' };
-    const windowIcons = { 7: 'bi-calendar-day', 30: 'bi-calendar-month', 90: 'bi-calendar3' };
-    const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
+    const typeIcons = { 'day': 'bi-clock-history', 'week': 'bi-calendar-week', 'month': 'bi-calendar-month', 'year': 'bi-calendar3' };
+    const trendIcons = { 'accelerating': '↗️', 'stable': '➡️', 'decelerating': '↘️' };
     const trendTexts = { 'accelerating': 'Tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Giảm tốc' };
 
     cardsContainer.innerHTML = (mw.windows || []).map(w => {
+        const icon = typeIcons[w.window_days] || 'bi-calendar';
+        const label = w.label || (w.window_days + ' ngày');
         if (w.status !== 'success') {
             return `
-                <div class="col-md-4">
-                    <div class="longterm-metric-card text-center opacity-50">
-                        <div class="text-muted small"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
-                        <div class="fs-6 mt-1">Không đủ dữ liệu</div>
+                <div class="col-md-4 mb-2">
+                    <div class="longterm-metric-card text-center opacity-50 h-100">
+                        <div class="text-muted small"><i class="bi ${icon} me-1"></i>${label}</div>
+                        <div class="fs-6 mt-1">Chưa đủ dữ liệu hoặc chưa qua mốc thời gian</div>
                     </div>
                 </div>`;
         }
 
         return `
-            <div class="col-md-4">
-                <div class="longterm-metric-card">
-                    <div class="text-muted small mb-2"><i class="bi ${windowIcons[w.window_days] || 'bi-calendar'} me-1"></i>${windowLabels[w.window_days] || w.window_days + ' ngày'}</div>
+            <div class="col-md-4 mb-2">
+                <div class="longterm-metric-card h-100">
+                    <div class="text-muted small mb-2"><i class="bi ${icon} me-1"></i>${label}</div>
                     <div class="fs-4 fw-bold text-primary">${w.velocity_mm_year.toFixed(1)} <small class="fs-6 text-muted">mm/năm</small></div>
-                    <div class="small mt-1">Dịch chuyển: <strong>${w.displacement_mm.toFixed(1)} mm</strong></div>
+                    <div class="small mt-1">Dịch chuyển: <strong class="text-info">${formatDisplacementString(w.displacement_mm, 1)}</strong></div>
                     <div class="small">Xu hướng: ${trendIcons[w.trend] || ''} ${trendTexts[w.trend] || '--'}</div>
                     <div class="small text-muted">${w.data_points} điểm dữ liệu</div>
                 </div>

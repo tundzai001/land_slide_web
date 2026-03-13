@@ -176,14 +176,17 @@ class LandslideAnalyzer:
             # Nâng risk nếu Fukuzono dự báo sụp lún gần
             if inverse_velocity.get('predicted_failure'):
                 days_to_failure = inverse_velocity.get('days_to_failure', 999)
+                fukuzono_msg = ""
                 if days_to_failure <= 7:
                     risk_level = "EXTREME"
-                    warning_message = f"🚨 CẢNH BÁO: Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
+                    fukuzono_msg = f"🚨 FUKUZONO: Dự báo sụp lún trong ~{days_to_failure:.0f} ngày."
                 elif days_to_failure <= 30:
                     if risk_level in ("LOW", "MEDIUM"):
                         risk_level = "HIGH"
-                    # Luôn cập nhật message bất kể level
-                    warning_message = f"⚠️ Dự báo sụp lún trong ~{days_to_failure:.0f} ngày"
+                    fukuzono_msg = f"⚠️ FUKUZONO: Dự báo sụp lún trong ~{days_to_failure:.0f} ngày."
+                
+                if fukuzono_msg:
+                    warning_message = f"{warning_message} | {fukuzono_msg}" if warning_message else fukuzono_msg
 
             return {
                 "status": "success",
@@ -661,7 +664,7 @@ class LandslideAnalyzer:
             return result
 
     # =========================================================================
-    # PHÂN TÍCH ĐA CỬA SỔ (Multi-Window Analysis)
+    # PHÂN TÍCH THEO CHU KỲ LỊCH (Day/Week/Month Analysis)
     # =========================================================================
     def analyze_multi_window(
         self,
@@ -671,34 +674,53 @@ class LandslideAnalyzer:
         windows: List[int] = None
     ) -> Dict[str, Any]:
         """
-        Phân tích trên nhiều cửa sổ thời gian (7, 30, 90 ngày) để phát hiện
-        sự thay đổi đột ngột giữa xu hướng ngắn hạn và dài hạn.
+        Phân tích trên các chu kỳ lịch sử dụng: Ngày hôm trước, Tuần này (bao nhiêu ngày tính bấy nhiêu),
+        Tháng này thay thế cho 'Multi Window' động đơn thuần.
         """
-        if windows is None:
-            windows = [7, 30, 90]
-
         if not historical_data or len(historical_data) < 2:
             return {"available": False, "message": "Không đủ dữ liệu."}
 
         try:
+            from datetime import timedelta
             sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
             latest_ts = sorted_data[-1]['timestamp']
+            latest_dt = datetime.fromtimestamp(latest_ts)
+
+            # Determine anchors
+            # Day: data from 24h ago
+            yesterday_start = latest_ts - 86400
+            
+            # Week: start of current week (Monday) at 00:00:00
+            days_since_monday = latest_dt.weekday()
+            week_start_dt = latest_dt.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_since_monday)
+            week_start_ts = week_start_dt.timestamp()
+
+            # Month: start of current month
+            month_start_dt = latest_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_start_ts = month_start_dt.timestamp()
+
+            intervals = [
+                {"label": "24h qua", "cutoff": yesterday_start, "type": "day"},
+                {"label": f"Tuần này ({days_since_monday + 1}/7 ngày)", "cutoff": week_start_ts, "type": "week"},
+                {"label": f"Tháng {latest_dt.month} ({latest_dt.day} ngày)", "cutoff": month_start_ts, "type": "month"}
+            ]
 
             window_results = []
-            for w_days in windows:
-                cutoff = latest_ts - (w_days * 86400)
+            for interval in intervals:
+                cutoff = interval["cutoff"]
                 window_data = [p for p in sorted_data if p['timestamp'] >= cutoff]
 
                 if len(window_data) < 2:
                     window_results.append({
-                        "window_days": w_days,
+                        "window_days": interval["type"],
+                        "label": interval["label"],
                         "status": "insufficient_data",
                         "velocity_mm_day": None,
                         "trend": None
                     })
                     continue
 
-                # Tính cumulative displacement trong window
+                # Tính cumulative displacement
                 cumulative = 0.0
                 for i in range(1, len(window_data)):
                     prev = window_data[i - 1]['data']
@@ -713,7 +735,8 @@ class LandslideAnalyzer:
                 trend = self._detect_displacement_trend(window_data)
 
                 window_results.append({
-                    "window_days": w_days,
+                    "window_days": interval["type"], 
+                    "label": interval["label"],
                     "status": "success",
                     "velocity_mm_day": round(vel_mm_day, 4),
                     "velocity_mm_year": round(vel_mm_day * 365, 2),
@@ -722,27 +745,25 @@ class LandslideAnalyzer:
                     "trend": trend
                 })
 
-            # Phát hiện acceleration qua so sánh windows
             acceleration_alert = None
             valid_windows = [w for w in window_results if w['status'] == 'success' and w['velocity_mm_day'] is not None]
 
             if len(valid_windows) >= 2:
-                # So sánh window ngắn nhất vs dài nhất
-                short_window = valid_windows[0]
+                short_window = next((w for w in valid_windows if w['window_days'] == 'day'), valid_windows[0])
                 long_window = valid_windows[-1]
 
-                if long_window['velocity_mm_day'] > 0:
+                if short_window != long_window and long_window['velocity_mm_day'] > 0:
                     ratio = short_window['velocity_mm_day'] / long_window['velocity_mm_day']
                     if ratio > 3.0:
                         acceleration_alert = {
                             "type": "rapid_acceleration",
-                            "message": f"⚠️ Vận tốc {short_window['window_days']} ngày gần đây gấp {ratio:.1f}x so với {long_window['window_days']} ngày",
+                            "message": f"⚠️ CẢNH BÁO: Tốc độ hiện tại ({short_window['label']}) gấp {ratio:.1f}x so với xu hướng dài hạn ({long_window['label']})",
                             "ratio": round(ratio, 2)
                         }
                     elif ratio > 1.5:
                         acceleration_alert = {
                             "type": "moderate_acceleration",
-                            "message": f"Vận tốc {short_window['window_days']} ngày tăng {ratio:.1f}x so với {long_window['window_days']} ngày",
+                            "message": f"Chú ý: Tốc độ hiện hành đang tăng ({ratio:.1f}x so với {long_window['label']})",
                             "ratio": round(ratio, 2)
                         }
 
@@ -753,7 +774,7 @@ class LandslideAnalyzer:
             }
 
         except Exception as e:
-            logger.error(f"Error in multi-window analysis: {e}", exc_info=True)
+            logger.error(f"Error in calendar interval analysis: {e}", exc_info=True)
             return {"available": False, "message": f"Lỗi: {str(e)}"}
 
 

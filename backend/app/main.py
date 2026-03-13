@@ -54,6 +54,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Tắt log spam cho /api/field/heartbeat của Uvicorn
+class HeartbeatFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/field/heartbeat" not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(HeartbeatFilter())
+
 # ============================================================================
 # GLOBAL INSTANCES
 # ============================================================================
