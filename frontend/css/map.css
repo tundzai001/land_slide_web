@@ -1299,6 +1299,12 @@ body:has(.charts-panel.active) .toggle-list-btn {
    ALERT BANNER - Cảnh báo giữa màn hình
 ======================================== */
 .alert-banner {
+    --alert-banner-bg: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    --alert-banner-border: #fca5a5;
+    --alert-banner-title: #fef3c7;
+    --alert-banner-icon: #fef3c7;
+    --alert-banner-shadow: 0 20px 60px rgba(220, 38, 38, 0.6), 0 0 100px rgba(220, 38, 38, 0.4);
+    --alert-banner-shadow-pulse: 0 25px 70px rgba(220, 38, 38, 0.8), 0 0 120px rgba(220, 38, 38, 0.6);
     display: none;
     position: fixed;
     top: 80px;
@@ -1308,13 +1314,30 @@ body:has(.charts-panel.active) .toggle-list-btn {
     z-index: 9998;
     width: calc(100vw - var(--sidebar-width) - 420px - 40px);
     max-width: 700px;
-    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-    border: 3px solid #fca5a5;
+    background: var(--alert-banner-bg);
+    border: 3px solid var(--alert-banner-border);
     border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(220, 38, 38, 0.6),
-        0 0 100px rgba(220, 38, 38, 0.4);
+    box-shadow: var(--alert-banner-shadow);
     transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
     animation: alertPulse 2s ease-in-out infinite;
+}
+
+.alert-banner.level-critical {
+    --alert-banner-bg: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    --alert-banner-border: #fca5a5;
+    --alert-banner-title: #fef3c7;
+    --alert-banner-icon: #fef3c7;
+    --alert-banner-shadow: 0 20px 60px rgba(220, 38, 38, 0.6), 0 0 100px rgba(220, 38, 38, 0.4);
+    --alert-banner-shadow-pulse: 0 25px 70px rgba(220, 38, 38, 0.8), 0 0 120px rgba(220, 38, 38, 0.6);
+}
+
+.alert-banner.level-warning {
+    --alert-banner-bg: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+    --alert-banner-border: #fde68a;
+    --alert-banner-title: #fff7cc;
+    --alert-banner-icon: #fff7cc;
+    --alert-banner-shadow: 0 20px 60px rgba(245, 158, 11, 0.55), 0 0 100px rgba(245, 158, 11, 0.35);
+    --alert-banner-shadow-pulse: 0 25px 70px rgba(245, 158, 11, 0.75), 0 0 120px rgba(245, 158, 11, 0.5);
 }
 
 .alert-banner.show {
@@ -1327,13 +1350,11 @@ body:has(.charts-panel.active) .toggle-list-btn {
 
     0%,
     100% {
-        box-shadow: 0 20px 60px rgba(220, 38, 38, 0.6),
-            0 0 100px rgba(220, 38, 38, 0.4);
+        box-shadow: var(--alert-banner-shadow);
     }
 
     50% {
-        box-shadow: 0 25px 70px rgba(220, 38, 38, 0.8),
-            0 0 120px rgba(220, 38, 38, 0.6);
+        box-shadow: var(--alert-banner-shadow-pulse);
     }
 }
 
@@ -1347,7 +1368,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 
 .alert-icon {
     font-size: 2.5rem;
-    color: #fef3c7;
+    color: var(--alert-banner-icon);
     animation: shake 0.5s ease-in-out infinite;
     flex-shrink: 0;
 }
@@ -1377,7 +1398,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
     font-size: 1.4rem;
     font-weight: 800;
     margin: 0 0 4px 0;
-    color: #fef3c7;
+    color: var(--alert-banner-title);
     text-transform: uppercase;
     letter-spacing: 1px;
 }

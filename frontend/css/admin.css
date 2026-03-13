@@ -20,6 +20,34 @@ body,
     padding: var(--spacing-md);
 }
 
+/* Keep station sensor selectors as compact toggle switches (not oversized circular checkboxes) */
+#edit-gnss,
+#edit-rain,
+#edit-water,
+#edit-imu {
+    min-width: 2.4em !important;
+    min-height: 1.25em !important;
+    width: 2.4em;
+    height: 1.25em;
+    margin-top: 0.2em;
+    cursor: pointer;
+}
+
+#edit-gnss.form-check-input,
+#edit-rain.form-check-input,
+#edit-water.form-check-input,
+#edit-imu.form-check-input {
+    border-radius: 2em;
+}
+
+#edit-gnss.form-check-input:checked,
+#edit-rain.form-check-input:checked,
+#edit-water.form-check-input:checked,
+#edit-imu.form-check-input:checked {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
 /* Fix button alignment */
 .btn {
     line-height: 1.5;

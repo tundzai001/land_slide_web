@@ -20,6 +20,48 @@ let realtimeImuTargetQuaternion = null;
 let realtimeImuActive = false;
 let _THREE = null; // Cached Three.js module for use outside async import scope
 
+function normalizeRiskLevel(rawRisk, stationStatus = null) {
+    if (stationStatus === 'offline') return 'OFFLINE';
+
+    const level = String(rawRisk || 'LOW').toUpperCase();
+    if (level === 'OFFLINE') return 'OFFLINE';
+    if (level === 'LOW' || level === 'SAFE') return 'LOW';
+    if (level === 'WARNING' || level === 'MEDIUM' || level === 'HIGH') return 'MEDIUM';
+    if (level === 'CRITICAL' || level === 'EXTREME') return 'CRITICAL';
+    return 'LOW';
+}
+
+function getRiskPresentation(rawRisk, stationStatus = null) {
+    const normalized = normalizeRiskLevel(rawRisk, stationStatus);
+    if (normalized === 'OFFLINE') {
+        return { normalized, display: 'OFFLINE', className: 'OFFLINE' };
+    }
+    if (normalized === 'MEDIUM') {
+        return { normalized, display: 'WARNING', className: 'MEDIUM' };
+    }
+    if (normalized === 'CRITICAL') {
+        return { normalized, display: 'CRITICAL', className: 'CRITICAL' };
+    }
+    return { normalized, display: 'SAFE', className: 'LOW' };
+}
+
+function normalizeAlertLevel(rawLevel) {
+    const level = String(rawLevel || '').toUpperCase();
+    if (level === 'CRITICAL' || level === 'EXTREME') return 'CRITICAL';
+    if (level === 'WARNING' || level === 'MEDIUM' || level === 'HIGH') return 'WARNING';
+    return 'WARNING';
+}
+
+function updateAlertBannerTheme(rawLevel) {
+    const banner = document.getElementById('alert-banner');
+    if (!banner) return;
+
+    const normalized = normalizeAlertLevel(rawLevel);
+    banner.classList.remove('level-warning', 'level-critical');
+    banner.classList.add(normalized === 'CRITICAL' ? 'level-critical' : 'level-warning');
+    banner.dataset.alertLevel = normalized;
+}
+
 // =====================================================
 // MAIN INITIALIZATION
 // =====================================================
@@ -124,10 +166,11 @@ function handleRealtimeUpdate(message) {
 
     if (message.type === 'station_status') {
         const riskLevel = String(message.risk_level || 'LOW').toUpperCase();
+        const riskUi = getRiskPresentation(riskLevel);
         const stationId = message.station_id;
 
         // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan
-        if (riskLevel === 'LOW') {
+        if (riskUi.normalized === 'LOW' || riskUi.normalized === 'OFFLINE') {
             // 1. Clear marker flashing (phải gọi TRƯỚC updateStationMarker)
             if (markerAlertState[stationId]) {
                 clearMarkerAlert(stationId);
@@ -136,7 +179,10 @@ function handleRealtimeUpdate(message) {
             // 2. Dismiss alert banner nếu đang hiện cho trạm này
             if (currentAlertStationId === stationId) {
                 const banner = document.getElementById('alert-banner');
-                if (banner) banner.classList.remove('show');
+                if (banner) {
+                    banner.classList.remove('show');
+                    banner.classList.remove('level-warning', 'level-critical');
+                }
                 currentAlertStationId = null;
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
@@ -149,8 +195,19 @@ function handleRealtimeUpdate(message) {
             }
         }
 
+        if (currentAlertStationId === stationId && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
+            const banner = document.getElementById('alert-banner');
+            if (banner?.classList.contains('show')) {
+                updateAlertBannerTheme(riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                const alertTitle = document.getElementById('alert-title');
+                if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
+                    alertTitle.textContent = `${riskUi.display} ALERT!`;
+                }
+            }
+        }
+
         // ✅ Nếu trạm chuyển sang EXTREME/CRITICAL → Cập nhật siren buttons
-        if ((riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') && currentStationData && stationId === currentStationData.id) {
+        if (riskUi.normalized === 'CRITICAL' && currentStationData && stationId === currentStationData.id) {
             const user = window.authManager?.getUserInfo();
             const userRole = user?.role;
             if (userRole === 'admin' || userRole === 'operator') {
@@ -167,37 +224,22 @@ function handleRealtimeUpdate(message) {
         }
 
         // Update marker color on map
-        updateStationMarker(stationId, riskLevel);
+        updateStationMarker(stationId, riskUi.normalized);
 
         // Update status badge in sidebar
         if (currentStationData && stationId === currentStationData.id) {
             const riskEl = document.getElementById('st-risk');
             if (riskEl) {
-                let displayRisk = riskLevel;
-                let riskClass = riskLevel;
-
-                if (riskLevel === 'LOW') {
-                    displayRisk = 'SAFE';
-                    riskClass = 'LOW';
-                } else if (riskLevel === 'WARNING' || riskLevel === 'MEDIUM' || riskLevel === 'HIGH') {
-                    displayRisk = 'WARNING';
-                    riskClass = 'MEDIUM';
-                } else if (riskLevel === 'EXTREME' || riskLevel === 'CRITICAL') {
-                    displayRisk = 'CRITICAL';
-                    riskClass = 'CRITICAL';
-                }
-
-                riskEl.className = `status-badge ${riskClass}`;
-                riskEl.innerHTML = `<span class="status-dot"></span> ${displayRisk}`;
+                riskEl.className = `status-badge ${riskUi.className}`;
+                riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
             }
         }
 
         // Update station list badge
         const listBadge = document.getElementById(`list-badge-${stationId}`);
         if (listBadge) {
-            const displayText = riskLevel === 'LOW' ? 'SAFE' : riskLevel;
-            listBadge.className = `badge ${getRiskBadgeClass(riskLevel)}`;
-            listBadge.innerText = displayText;
+            listBadge.className = `badge ${getRiskBadgeClass(riskUi.className)}`;
+            listBadge.innerText = riskUi.display;
 
             listBadge.style.transition = '0.3s';
             listBadge.style.transform = 'scale(1.2)';
@@ -385,28 +427,18 @@ function updateStationMarker(stationId, riskLevel) {
     // ✅ Nếu marker đang trong trạng thái alert (đỏ nhấp nháy), không cập nhật
     if (markerAlertState[stationId]) return;
 
-    const normalized = String(riskLevel || 'LOW').toUpperCase();
-    const riskToColorKey = {
-        'LOW': 'LOW',
-        'WARNING': 'MEDIUM',
-        'MEDIUM': 'MEDIUM',
-        'HIGH': 'HIGH',
-        'CRITICAL': 'EXTREME',
-        'EXTREME': 'EXTREME'
-    };
+    const normalized = normalizeRiskLevel(riskLevel);
 
     const colors = {
-        'EXTREME': '#fa5252',
-        'HIGH': '#ff922b',
+        'CRITICAL': '#fa5252',
         'MEDIUM': '#ffd43b',
-        'LOW': '#51cf66'
+        'LOW': '#51cf66',
+        'OFFLINE': '#6c757d'
     };
 
-    // ✅ Map WARNING/CRITICAL về palette nội bộ, tránh rơi về SAFE khi nhận nhãn khác.
-    const mappedLevel = riskToColorKey[normalized] || 'LOW';
-    const effectiveLevel = (mappedLevel && colors[mappedLevel]) ? mappedLevel : 'LOW';
+    const effectiveLevel = (normalized && colors[normalized]) ? normalized : 'LOW';
     const color = colors[effectiveLevel];
-    const shouldPulse = effectiveLevel === 'EXTREME' || effectiveLevel === 'HIGH';
+    const shouldPulse = effectiveLevel === 'CRITICAL';
     const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
 
     // ✅ Dùng setIcon với HTML string để Leaflet giữ pulse class khi re-render
@@ -739,7 +771,7 @@ async function loadStations() {
             }
 
             // ✅ Sync marker blinking state từ risk_level API (restore sau reload)
-            const _isAlertingRisk = (station.risk_level === 'EXTREME' || station.risk_level === 'HIGH')
+            const _isAlertingRisk = normalizeRiskLevel(station.risk_level, station.status) === 'CRITICAL'
                 && station.status !== 'offline';
             if (_isAlertingRisk && !markerAlertState[station.id]) {
                 setMarkerAlert(station.id, true);
@@ -807,29 +839,7 @@ function renderStationList(stations) {
     container.innerHTML = '';
 
     stations.forEach(st => {
-        let rawLevel = st.risk_level || 'LOW';
-        if (st.status === 'offline') {
-            rawLevel = 'OFFLINE';
-        }
-
-        let displayString = rawLevel;
-        let classLevel = rawLevel;
-
-        if (rawLevel === 'LOW') {
-            displayString = 'SAFE';
-            classLevel = 'LOW';
-        } else if (rawLevel === 'MEDIUM' || rawLevel === 'HIGH') {
-            displayString = 'WARNING';
-            classLevel = 'MEDIUM'; // maps to warning classes
-        } else if (rawLevel === 'EXTREME' || rawLevel === 'CRITICAL') {
-            displayString = 'CRITICAL';
-            classLevel = 'CRITICAL';
-        } else if (rawLevel === 'OFFLINE') {
-            displayString = 'OFFLINE';
-            classLevel = 'OFFLINE';
-        } else {
-            displayString = 'SAFE';
-        }
+        const riskUi = getRiskPresentation(st.risk_level, st.status);
 
         const div = document.createElement('div');
         div.className = 'station-item';
@@ -839,8 +849,8 @@ function renderStationList(stations) {
                             <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
                             <small style="color: var(--text-secondary)">${st.station_code}</small>
                         </div>
-                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(classLevel)}">
-                            ${displayString}
+                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(riskUi.className)}">
+                            ${riskUi.display}
                         </span>
                     </div>
                 `;
@@ -860,9 +870,10 @@ function renderStationList(stations) {
 function getRiskBadgeClass(level) {
     const classes = {
         'CRITICAL': 'bg-danger',
-        'EXTREME': 'bg-danger', // fallback
+        'EXTREME': 'bg-danger',
         'MEDIUM': 'bg-warning text-dark',
-        'HIGH': 'bg-warning text-dark', // fallback
+        'HIGH': 'bg-warning text-dark',
+        'WARNING': 'bg-warning text-dark',
         'LOW': 'bg-success',
         'OFFLINE': 'bg-secondary'
     };
@@ -875,22 +886,16 @@ let stationStateCache = {};
 function updateMarker(station) {
     const colors = {
         'CRITICAL': '#fa5252',
-        'EXTREME': '#fa5252',
-        'HIGH': '#ff922b',
         'MEDIUM': '#ffd43b',
         'LOW': '#51cf66',
         'OFFLINE': '#6c757d'
     };
 
-    let currentLevel = station.risk_level;
-    if (station.status === 'offline') {
-        currentLevel = 'OFFLINE';
-    } else if (!currentLevel || !colors[currentLevel]) {
-        // ✅ Online mà không có risk_level → mặc định xanh (LOW)
-        currentLevel = 'LOW';
-    }
+    let currentLevel = normalizeRiskLevel(station.risk_level, station.status);
+    if (!colors[currentLevel]) currentLevel = 'LOW';
+
     const color = colors[currentLevel] || '#adb5bd';
-    const shouldPulse = currentLevel === 'CRITICAL' || currentLevel === 'EXTREME' || currentLevel === 'HIGH' || currentLevel === 'MEDIUM';
+    const shouldPulse = currentLevel === 'CRITICAL';
 
     // ✅ KIỂM TRA CACHE: Nếu trạng thái không đổi thì KHÔNG LÀM GÌ CẢ
     const cacheKey = `${station.id}_${currentLevel}_${station.location.lat}_${station.location.lon}`;
@@ -1032,10 +1037,11 @@ async function selectStation(stationId, options = {}) {
 
         // ✅ Restore alert banner + siren buttons im lặng nếu trạm đang có alert từ DB (sau reload)
         const _banner = document.getElementById('alert-banner');
-        const _riskLevel = data.risk_assessment?.overall_risk || 'LOW';
+        const _riskLevel = data.risk_assessment?.overall_risk || data.risk_level || 'LOW';
+        const _riskBand = normalizeRiskLevel(_riskLevel, data.status);
         const _activeAlerts = data.risk_assessment?.active_alerts || [];
         if (!_banner?.classList.contains('show') &&
-            (_riskLevel === 'HIGH' || _riskLevel === 'EXTREME') &&
+            (_riskBand === 'MEDIUM' || _riskBand === 'CRITICAL') &&
             _activeAlerts.length > 0 &&
             data.status !== 'offline') {
             const _topAlert = _activeAlerts.find(a => a.level === 'CRITICAL') || _activeAlerts[0];
@@ -1154,34 +1160,9 @@ function updateSidebarUI(data) {
 
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
-        let rawRisk = data.risk_assessment?.overall_risk || data.risk_level || 'UNKNOWN';
-
-        if (data.status === 'offline') {
-            rawRisk = 'OFFLINE';
-        }
-
-        let displayRisk = rawRisk;
-        let riskClass = rawRisk;
-
-        if (rawRisk === 'LOW') {
-            displayRisk = 'SAFE';
-            riskClass = 'LOW';
-        } else if (rawRisk === 'MEDIUM' || rawRisk === 'HIGH') {
-            displayRisk = 'WARNING';
-            riskClass = 'MEDIUM'; // Will use yellow/orange warning CSS
-        } else if (rawRisk === 'EXTREME' || rawRisk === 'CRITICAL') {
-            displayRisk = 'CRITICAL';
-            riskClass = 'CRITICAL';
-        } else if (rawRisk === 'OFFLINE') {
-            displayRisk = 'OFFLINE';
-            riskClass = 'OFFLINE';
-        } else {
-            displayRisk = 'SAFE'; // Default fallback
-            riskClass = 'LOW';
-        }
-
-        riskEl.className = `status-badge ${riskClass}`;
-        riskEl.innerHTML = `<span class="status-dot"></span> ${displayRisk}`;
+        const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, data.status);
+        riskEl.className = `status-badge ${riskUi.className}`;
+        riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
     }
 
     const gnssLatest = data.sensors?.gnss?.latest;
@@ -3050,9 +3031,10 @@ function setSensorCardAlert(sensorType, level) {
     const card = document.getElementById(cardId);
     if (!card) return;
     card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
-    if (level === 'WARNING') {
+    const normalized = normalizeAlertLevel(level);
+    if (normalized === 'WARNING') {
         card.classList.add('sensor-alert-warning');
-    } else if (level === 'CRITICAL' || level === 'EXTREME') {
+    } else if (normalized === 'CRITICAL') {
         card.classList.add('sensor-alert-critical');
     }
 }
@@ -3073,9 +3055,13 @@ function showAlertBanner(alertData, options = {}) {
     const stationName = station?.name || `Station #${alertData.station_id}`;
     const stationCode = station?.station_code || '';
 
+    const normalizedLevel = normalizeAlertLevel(alertData.level || alertData.risk_level);
+
     // Cập nhật nội dung
+    updateAlertBannerTheme(normalizedLevel);
+
     document.getElementById('alert-title').textContent =
-        options.silent ? `⚠️ ALERT (persistent)` : `${alertData.level.toUpperCase()} ALERT!`;
+        options.silent ? `⚠️ ALERT (persistent)` : `${normalizedLevel} ALERT!`;
 
     document.getElementById('alert-station').textContent =
         `Station: ${stationName} (${stationCode})`;
@@ -3184,7 +3170,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnDismiss) {
         btnDismiss.addEventListener('click', () => {
             const banner = document.getElementById('alert-banner');
-            if (banner) banner.classList.remove('show');
+            if (banner) {
+                banner.classList.remove('show');
+                banner.classList.remove('level-warning', 'level-critical');
+            }
         });
     }
 });

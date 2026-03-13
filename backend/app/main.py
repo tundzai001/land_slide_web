@@ -882,23 +882,39 @@ async def get_stations(
             for device in devices:
                 sensor_type = device.device_type
                 threshold = get_offline_threshold(station.config, sensor_type)
-                
-                # Lấy dữ liệu mới nhất của sensor này
-                latest_data_result = await db_data.execute(
-                    select(model_data.SensorData)
+
+                # ✅ Ưu tiên lấy từ latest_sensor_cache (luôn cập nhật mỗi lần MQTT nhận data)
+                cache_result = await db_data.execute(
+                    select(model_data.LatestSensorCache)
                     .where(
                         and_(
-                            model_data.SensorData.station_id == station.id,
-                            model_data.SensorData.sensor_type == sensor_type
+                            model_data.LatestSensorCache.station_id == station.id,
+                            model_data.LatestSensorCache.sensor_type == sensor_type
                         )
                     )
-                    .order_by(desc(model_data.SensorData.timestamp))
-                    .limit(1)
                 )
-                latest_data = latest_data_result.scalar_one_or_none()
-                
+                cached = cache_result.scalar_one_or_none()
+
+                if cached:
+                    latest_ts = cached.timestamp
+                else:
+                    # Fallback: query SensorData nếu cache chưa có
+                    latest_data_result = await db_data.execute(
+                        select(model_data.SensorData)
+                        .where(
+                            and_(
+                                model_data.SensorData.station_id == station.id,
+                                model_data.SensorData.sensor_type == sensor_type
+                            )
+                        )
+                        .order_by(desc(model_data.SensorData.timestamp))
+                        .limit(1)
+                    )
+                    latest_row = latest_data_result.scalar_one_or_none()
+                    latest_ts = latest_row.timestamp if latest_row else None
+
                 # Nếu có ít nhất 1 sensor online -> station online
-                if latest_data and (current_time - latest_data.timestamp) < threshold:
+                if latest_ts and (current_time - latest_ts) < threshold:
                     station_online = True
                     break
             
