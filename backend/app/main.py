@@ -5,9 +5,10 @@
 import logging
 import asyncio
 import time
+import math
 import sys
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
@@ -26,7 +27,7 @@ from . import schemas, auth, config
 from .database import (
     auth_engine, config_engine, data_engine,
     get_auth_db, get_config_db, get_data_db,
-    AuthSessionLocal, ConfigSessionLocal
+    AuthSessionLocal, ConfigSessionLocal, DataSessionLocal
 )
 from .routers import admin as admin_router
 from .routers import field as field_router
@@ -66,6 +67,258 @@ logging.getLogger("uvicorn.access").addFilter(HeartbeatFilter())
 # ============================================================================
 analyzer = LandslideAnalyzer()
 mqtt_service = MQTTBridge()
+gnss_rollup_task: Optional[asyncio.Task] = None
+
+
+def _utc_day_start(ts: int) -> int:
+    return (int(ts) // 86400) * 86400
+
+
+def _map_gnss_daily_risk(classification: str) -> str:
+    cls_upper = str(classification or "").upper()
+    if any(c in cls_upper for c in ("EXTREMELY RAPID", "VERY RAPID", "RAPID")):
+        return "CRITICAL"
+    if "MODERATE" in cls_upper:
+        return "HIGH"
+    if "SLOW" in cls_upper:
+        return "MEDIUM"
+    return "LOW"
+
+
+async def _upsert_gnss_weekly_summary(station_id: int, ending_day_start_ts: int):
+    """Tạo summary tuần từ 7 ngày daily gần nhất (liên tiếp) cho station."""
+    week_end_ts = ending_day_start_ts + 86400
+    async with DataSessionLocal() as db_data:
+        res = await db_data.execute(
+            select(model_data.GnssDailySummary)
+            .where(
+                and_(
+                    model_data.GnssDailySummary.station_id == station_id,
+                    model_data.GnssDailySummary.day_end_ts <= week_end_ts,
+                    model_data.GnssDailySummary.status == "success"
+                )
+            )
+            .order_by(model_data.GnssDailySummary.day_start_ts.desc())
+            .limit(7)
+        )
+        days = list(reversed(res.scalars().all()))
+
+        if len(days) < 7:
+            return
+
+        # Bắt buộc 7 ngày liên tiếp
+        for i in range(1, len(days)):
+            if days[i].day_start_ts - days[i - 1].day_start_ts != 86400:
+                return
+
+        week_start_ts = days[0].day_start_ts
+        now_ts = int(time.time())
+        total_disp_mm = float(sum(float(d.net_displacement_mm or 0.0) for d in days))
+        avg_vel_mm_day = float(sum(float(d.velocity_mm_day or 0.0) for d in days)) / 7.0
+        max_vel_mm_day = float(max(float(d.velocity_mm_day or 0.0) for d in days))
+        min_vel_mm_day = float(min(float(d.velocity_mm_day or 0.0) for d in days))
+        vel_mm_second = avg_vel_mm_day / 86400.0
+        vel_mm_year = avg_vel_mm_day * 365.0
+        classification = analyzer._classify_velocity_extended(
+            vel_mm_second,
+            avg_vel_mm_day,
+            vel_mm_year,
+            {}
+        )
+        risk_level = _map_gnss_daily_risk(classification)
+        is_safe = risk_level in ("LOW", "MEDIUM")
+
+        existing_res = await db_data.execute(
+            select(model_data.GnssWeeklySummary).where(
+                and_(
+                    model_data.GnssWeeklySummary.station_id == station_id,
+                    model_data.GnssWeeklySummary.week_start_ts == week_start_ts,
+                    model_data.GnssWeeklySummary.week_end_ts == week_end_ts,
+                )
+            )
+        )
+        existing = existing_res.scalar_one_or_none()
+
+        if existing:
+            existing.day_count = 7
+            existing.total_displacement_mm = round(total_disp_mm, 3)
+            existing.avg_velocity_mm_day = round(avg_vel_mm_day, 6)
+            existing.max_velocity_mm_day = round(max_vel_mm_day, 6)
+            existing.min_velocity_mm_day = round(min_vel_mm_day, 6)
+            existing.classification = str(classification)
+            existing.risk_level = risk_level
+            existing.is_safe = is_safe
+            existing.status = "success"
+            existing.message = "Weekly summary computed from 7 consecutive daily summaries."
+            existing.updated_at = now_ts
+        else:
+            db_data.add(model_data.GnssWeeklySummary(
+                station_id=station_id,
+                week_start_ts=week_start_ts,
+                week_end_ts=week_end_ts,
+                day_count=7,
+                total_displacement_mm=round(total_disp_mm, 3),
+                avg_velocity_mm_day=round(avg_vel_mm_day, 6),
+                max_velocity_mm_day=round(max_vel_mm_day, 6),
+                min_velocity_mm_day=round(min_vel_mm_day, 6),
+                classification=str(classification),
+                risk_level=risk_level,
+                is_safe=is_safe,
+                status="success",
+                message="Weekly summary computed from 7 consecutive daily summaries.",
+                created_at=now_ts,
+                updated_at=now_ts,
+            ))
+
+        await db_data.commit()
+
+
+async def _finalize_gnss_station_day(station_id: int, day_start_ts: int, purge_raw: bool):
+    day_end_ts = day_start_ts + 86400
+    now_ts = int(time.time())
+
+    async with DataSessionLocal() as db_data:
+        existing_res = await db_data.execute(
+            select(model_data.GnssDailySummary).where(
+                and_(
+                    model_data.GnssDailySummary.station_id == station_id,
+                    model_data.GnssDailySummary.day_start_ts == day_start_ts,
+                )
+            )
+        )
+        existing_summary = existing_res.scalar_one_or_none()
+
+        # Nếu chưa có summary thì tính từ raw trong ngày
+        if not existing_summary:
+            rows_res = await db_data.execute(
+                select(model_data.SensorData)
+                .where(
+                    and_(
+                        model_data.SensorData.station_id == station_id,
+                        model_data.SensorData.sensor_type == "gnss",
+                        model_data.SensorData.timestamp >= day_start_ts,
+                        model_data.SensorData.timestamp < day_end_ts,
+                    )
+                )
+                .order_by(model_data.SensorData.timestamp.asc())
+            )
+            rows = rows_res.scalars().all()
+            valid_points = [
+                r for r in rows
+                if isinstance(r.data, dict)
+                and all(k in r.data for k in ("pos_e", "pos_n", "pos_u"))
+            ]
+
+            sample_count = len(valid_points)
+            first_ts = int(valid_points[0].timestamp) if sample_count > 0 else None
+            last_ts = int(valid_points[-1].timestamp) if sample_count > 0 else None
+            duration_seconds = max((last_ts - first_ts), 0) if first_ts and last_ts else 0
+
+            if sample_count >= 2 and duration_seconds > 0:
+                first_data = valid_points[0].data
+                last_data = valid_points[-1].data
+                delta_e = float(last_data.get("pos_e", 0.0)) - float(first_data.get("pos_e", 0.0))
+                delta_n = float(last_data.get("pos_n", 0.0)) - float(first_data.get("pos_n", 0.0))
+                delta_u = float(last_data.get("pos_u", 0.0)) - float(first_data.get("pos_u", 0.0))
+                net_disp_mm = math.sqrt(delta_e ** 2 + delta_n ** 2 + delta_u ** 2) * 1000.0
+                duration_days = max(duration_seconds / 86400.0, 1e-6)
+                velocity_mm_day = net_disp_mm / duration_days
+                velocity_mm_second = velocity_mm_day / 86400.0
+                velocity_mm_year = velocity_mm_day * 365.0
+
+                classification = analyzer._classify_velocity_extended(
+                    velocity_mm_second,
+                    velocity_mm_day,
+                    velocity_mm_year,
+                    {}
+                )
+                risk_level = _map_gnss_daily_risk(classification)
+                is_safe = risk_level in ("LOW", "MEDIUM")
+                status = "success"
+                message = "Daily summary computed from raw GNSS records."
+            else:
+                net_disp_mm = 0.0
+                velocity_mm_day = 0.0
+                velocity_mm_second = 0.0
+                classification = "insufficient_data"
+                risk_level = "INFO"
+                is_safe = True
+                status = "insufficient_data"
+                message = "Not enough GNSS points for daily summary."
+
+            db_data.add(model_data.GnssDailySummary(
+                station_id=station_id,
+                day_start_ts=day_start_ts,
+                day_end_ts=day_end_ts,
+                sample_count=sample_count,
+                first_ts=first_ts,
+                last_ts=last_ts,
+                duration_seconds=duration_seconds,
+                net_displacement_mm=round(float(net_disp_mm), 3),
+                velocity_mm_day=round(float(velocity_mm_day), 6),
+                velocity_mm_second=round(float(velocity_mm_second), 8),
+                classification=str(classification),
+                risk_level=risk_level,
+                is_safe=is_safe,
+                status=status,
+                message=message,
+                created_at=now_ts,
+                updated_at=now_ts,
+            ))
+            await db_data.commit()
+
+        # Xóa raw GNSS của ngày đã chốt nếu bật purge
+        if purge_raw:
+            await db_data.execute(
+                delete(model_data.SensorData).where(
+                    and_(
+                        model_data.SensorData.station_id == station_id,
+                        model_data.SensorData.sensor_type == "gnss",
+                        model_data.SensorData.timestamp >= day_start_ts,
+                        model_data.SensorData.timestamp < day_end_ts,
+                    )
+                )
+            )
+            await db_data.commit()
+
+    await _upsert_gnss_weekly_summary(station_id, day_start_ts)
+
+
+async def run_gnss_daily_rollup_daemon():
+    """Daemon: chốt GNSS theo ngày rồi rollup tuần từ 7 ngày liên tiếp."""
+    interval = max(int(config.settings.GNSS_ROLLUP_INTERVAL_SECONDS), 60)
+    purge_raw = bool(config.settings.GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP)
+    logger.info(
+        f"🔄 GNSS rollup daemon started (interval={interval}s, purge_raw={purge_raw})"
+    )
+
+    while True:
+        try:
+            now_ts = int(time.time())
+            today_start = _utc_day_start(now_ts)
+
+            async with DataSessionLocal() as db_data:
+                pairs_res = await db_data.execute(text(
+                    """
+                    SELECT station_id, ((timestamp / 86400) * 86400) AS day_start
+                    FROM sensor_data
+                    WHERE sensor_type = 'gnss' AND timestamp < :cutoff
+                    GROUP BY station_id, ((timestamp / 86400) * 86400)
+                    ORDER BY day_start, station_id
+                    """
+                ), {"cutoff": today_start})
+                pairs = [(int(r[0]), int(r[1])) for r in pairs_res.fetchall()]
+
+            for station_id, day_start_ts in pairs:
+                await _finalize_gnss_station_day(station_id, day_start_ts, purge_raw)
+
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            logger.info("🛑 GNSS rollup daemon cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"❌ GNSS rollup daemon error: {e}", exc_info=True)
+            await asyncio.sleep(30)
 
 # ============================================================================
 # LIFESPAN MANAGEMENT
@@ -76,6 +329,7 @@ async def lifespan(app: FastAPI):
     
     # Start the Security IPC Server as a background task
     asyncio.create_task(start_ipc_server())
+    global gnss_rollup_task
     
     try:
         # 1. Khởi tạo AUTH DB
@@ -159,6 +413,9 @@ async def lifespan(app: FastAPI):
         mqtt_service.start()
         logger.info("✓ Background MQTT Service started")
 
+        gnss_rollup_task = asyncio.create_task(run_gnss_daily_rollup_daemon())
+        logger.info("✓ GNSS rollup daemon started")
+
         logger.info("=" * 60)
         logger.info("🎉 System ready to serve!")
         logger.info("=" * 60)
@@ -167,6 +424,10 @@ async def lifespan(app: FastAPI):
         
     finally:
         logger.info("🛑 Shutting down...")
+        if gnss_rollup_task and not gnss_rollup_task.done():
+            gnss_rollup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await gnss_rollup_task
         await auth_engine.dispose()
         await config_engine.dispose()
         await data_engine.dispose()
@@ -1207,11 +1468,15 @@ async def _calculate_station_risk_assessment(
 async def get_long_term_analysis(
     station_id: int,
     days: float = 30.0,
+    include_correlation: bool = False,
+    correlation_model: str = "ls_rapid",
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db)
 ):
     """
-    Phân tích dài hạn cho GNSS displacement + IMU tilt + Rainfall correlation
+    Phân tích dài hạn cho GNSS displacement + IMU tilt.
+    Rainfall correlation chỉ chạy khi include_correlation=True.
+    correlation_model hiện hỗ trợ: ls_rapid.
     + Multi-window analysis + Inverse Velocity (Fukuzono)
     """
     try:
@@ -1219,6 +1484,150 @@ async def get_long_term_analysis(
             if not isinstance(data, dict):
                 return False
             return all(key in data for key in ("pos_e", "pos_n", "pos_u"))
+
+        def _trend_from_velocity_series(values: List[float]) -> str:
+            clean = [float(v or 0.0) for v in values]
+            if len(clean) < 2:
+                return "stable"
+            first_v = clean[0]
+            last_v = clean[-1]
+            if abs(first_v) < 1e-6 and abs(last_v) < 1e-6:
+                return "stable"
+            if abs(first_v) < 1e-6:
+                return "accelerating" if last_v > 0 else "stable"
+            ratio = (last_v - first_v) / (abs(first_v) + 1e-6)
+            if ratio > 0.1:
+                return "accelerating"
+            if ratio < -0.1:
+                return "decelerating"
+            return "stable"
+
+        def _severity(level: str) -> int:
+            order = {
+                "INFO": 0,
+                "LOW": 1,
+                "MEDIUM": 2,
+                "HIGH": 3,
+                "CRITICAL": 4,
+                "EXTREME": 5,
+            }
+            return order.get(str(level or "").upper(), 0)
+
+        def _build_gnss_analysis_from_daily_summaries(
+            daily_rows: List[model_data.GnssDailySummary],
+            station_cfg: Dict[str, Any]
+        ) -> Dict[str, Any]:
+            if not daily_rows:
+                return {
+                    "status": "insufficient_data",
+                    "message": "Không có GNSS daily summary trong khoảng thời gian yêu cầu."
+                }
+
+            rows = sorted(daily_rows, key=lambda r: int(r.day_start_ts or 0))
+            total_displacement_mm = float(sum(float(r.net_displacement_mm or 0.0) for r in rows))
+            duration_seconds = int(sum(int(r.duration_seconds or 0) for r in rows))
+            duration_days = duration_seconds / 86400.0 if duration_seconds > 0 else float(len(rows))
+            if duration_days <= 0:
+                duration_days = float(len(rows))
+
+            velocity_mm_per_day = total_displacement_mm / duration_days if duration_days > 0 else 0.0
+            velocity_mm_per_second = velocity_mm_per_day / 86400.0
+            velocity_mm_per_year = velocity_mm_per_day * 365.0
+
+            classification = analyzer._classify_velocity_extended(
+                velocity_mm_per_second,
+                velocity_mm_per_day,
+                velocity_mm_per_year,
+                station_cfg or {}
+            )
+
+            min_reliable_duration_days = analyzer._get_gnss_min_reliable_window_days(station_cfg or {})
+            data_points_used = int(sum(int(r.sample_count or 0) for r in rows))
+            reliability_points = data_points_used if data_points_used > 0 else len(rows)
+            velocity_reliable = analyzer._is_reliable_observation_window(
+                duration_days,
+                reliability_points,
+                min_reliable_duration_days
+            )
+            reliability_message = analyzer._build_gnss_preliminary_message(
+                duration_days,
+                reliability_points,
+                min_reliable_duration_days
+            )
+
+            trend = _trend_from_velocity_series([float(r.velocity_mm_day or 0.0) for r in rows])
+            derived_risk = _map_gnss_daily_risk(classification)
+            max_row_risk = "LOW"
+            for r in rows:
+                row_risk = str(r.risk_level or "LOW").upper()
+                if _severity(row_risk) > _severity(max_row_risk):
+                    max_row_risk = row_risk
+            risk_level = max_row_risk if _severity(max_row_risk) >= _severity(derived_risk) else derived_risk
+
+            if risk_level in ("CRITICAL", "EXTREME"):
+                warning_message = f"🚨 Cảnh báo cao từ GNSS daily summary ({classification})."
+            elif risk_level == "HIGH":
+                warning_message = f"⚠️ Cảnh báo: vận tốc có xu hướng tăng ({classification})."
+            elif risk_level == "MEDIUM":
+                warning_message = f"Cần theo dõi: GNSS có chuyển dịch mức trung bình ({classification})."
+            else:
+                warning_message = f"An toàn tương đối theo GNSS daily summary ({classification})."
+
+            if not velocity_reliable:
+                warning_message = reliability_message
+                risk_level = "INFO"
+
+            labels = []
+            displacement_series = []
+            cumulative_disp = 0.0
+            for row in rows:
+                labels.append(datetime.fromtimestamp(int(row.day_start_ts)).strftime('%d/%m'))
+                cumulative_disp += float(row.net_displacement_mm or 0.0)
+                displacement_series.append(round(cumulative_disp, 2))
+
+            return {
+                "status": "success",
+                "source": "daily_summary_rollup",
+                "analysis": {
+                    "total_displacement_mm": round(total_displacement_mm, 2),
+                    "net_displacement_mm": round(total_displacement_mm, 2),
+                    "regression_displacement_mm": round(total_displacement_mm, 2),
+                    "velocity_mm_year": round(velocity_mm_per_year, 2),
+                    "velocity_ci_95": 0.0,
+                    "velocity_mm_day": round(velocity_mm_per_day, 4),
+                    "velocity_mm_second": round(velocity_mm_per_second, 6),
+                    "regression_velocity_mm_year": round(velocity_mm_per_year, 2),
+                    "regression_velocity_mm_day": round(velocity_mm_per_day, 4),
+                    "regression_velocity_mm_second": round(velocity_mm_per_second, 6),
+                    "classification": classification,
+                    "trend": trend,
+                    "cusum_change": False,
+                    "cusum_message": "Daily summary mode: không chạy CUSUM trên raw sample.",
+                    "displacement_basis": "daily_rollup_sum",
+                    "velocity_reliable": velocity_reliable,
+                    "reliability_message": reliability_message,
+                    "min_reliable_duration_days": round(min_reliable_duration_days, 4),
+                    "min_reliable_points": 3,
+                    "duration_days": round(duration_days, 4),
+                    "data_points_used": data_points_used,
+                    "summary_days_used": len(rows),
+                    "start_date": datetime.fromtimestamp(int(rows[0].day_start_ts)).isoformat(),
+                    "end_date": datetime.fromtimestamp(int(rows[-1].day_end_ts)).isoformat()
+                },
+                "risk_level": risk_level,
+                "warning_message": warning_message,
+                "inverse_velocity": {
+                    "available": False,
+                    "message": "Daily summary mode: inverse velocity cần raw GNSS chi tiết."
+                },
+                "time_series": {
+                    "labels": labels,
+                    "displacement": displacement_series,
+                    "e": [],
+                    "n": [],
+                    "u": []
+                }
+            }
 
         # 1. Lấy config trạm
         station_result = await db_config.execute(
@@ -1247,6 +1656,24 @@ async def get_long_term_analysis(
             .order_by(model_data.SensorData.timestamp.asc())
         )
         gnss_data = gnss_result.scalars().all()
+
+        # 2b. Lấy GNSS daily summary để fallback khi raw đã purge
+        daily_summary_result = await db_data.execute(
+            select(model_data.GnssDailySummary)
+            .where(
+                and_(
+                    model_data.GnssDailySummary.station_id == station_id,
+                    model_data.GnssDailySummary.day_start_ts >= _utc_day_start(cutoff_time),
+                    model_data.GnssDailySummary.status == "success"
+                )
+            )
+            .order_by(model_data.GnssDailySummary.day_start_ts.asc())
+        )
+        daily_gnss_full = daily_summary_result.scalars().all()
+        daily_gnss_requested = [
+            d for d in daily_gnss_full
+            if int(d.day_start_ts or 0) >= _utc_day_start(cutoff_requested)
+        ]
         
         # 3. Lấy dữ liệu IMU
         imu_result = await db_data.execute(
@@ -1276,7 +1703,12 @@ async def get_long_term_analysis(
         )
         rain_data = rain_result.scalars().all()
         
-        result = {"station_id": station_id, "days": days}
+        model_key = str(correlation_model or "ls_rapid").strip().lower()
+        result = {
+            "station_id": station_id,
+            "days": days,
+            "correlation_model": model_key
+        }
         
         # Chuyển sang list dict chung
         historical_gnss_full = [
@@ -1344,10 +1776,15 @@ async def get_long_term_analysis(
                 }
             
             result["gnss"] = gnss_analysis
+        elif len(daily_gnss_requested) >= 1:
+            result["gnss"] = _build_gnss_analysis_from_daily_summaries(
+                daily_rows=daily_gnss_requested,
+                station_cfg=station.config or {}
+            )
         else:
             result["gnss"] = {
                 "status": "insufficient_data",
-                "message": f"Cần ít nhất 2 điểm dữ liệu GNSS. Hiện có: {len(historical_gnss_requested)}"
+                "message": f"Không đủ dữ liệu GNSS raw ({len(historical_gnss_requested)} điểm) và chưa có daily summary trong cửa sổ {days} ngày."
             }
         
         # 6. Phân tích IMU
@@ -1389,19 +1826,31 @@ async def get_long_term_analysis(
                 "message": f"Cần ít nhất 2 điểm dữ liệu IMU. Hiện có: {len(historical_imu_requested)}"
             }
         
-        # 7. Phân tích tương quan Mưa - Dịch chuyển
-        if len(historical_gnss_requested) >= 2 and len(rain_data) >= 2:
-            historical_rain = [{"timestamp": d.timestamp, "data": d.data} for d in rain_data]
-            rain_correlation = analyzer.analyze_rainfall_displacement_correlation(
-                gnss_data=historical_gnss_requested,
-                rain_data=historical_rain,
-                window_days=days
-            )
-            result["rainfall_correlation"] = rain_correlation
+        # 7. Phân tích tương quan Mưa - Dịch chuyển (chạy theo yêu cầu)
+        if include_correlation:
+            if model_key != "ls_rapid":
+                raise HTTPException(status_code=400, detail="Unsupported correlation_model. Use ls_rapid.")
+            if len(historical_gnss_requested) >= 2 and len(rain_data) >= 2:
+                historical_rain = [{"timestamp": d.timestamp, "data": d.data} for d in rain_data]
+                rain_correlation = analyzer.analyze_rainfall_displacement_correlation(
+                    gnss_data=historical_gnss_requested,
+                    rain_data=historical_rain,
+                    window_days=days,
+                    config=station.config or {}
+                )
+                rain_correlation["model"] = "ls_rapid"
+                result["rainfall_correlation"] = rain_correlation
+            else:
+                result["rainfall_correlation"] = {
+                    "available": False,
+                    "model": "ls_rapid",
+                    "message": "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+                }
         else:
             result["rainfall_correlation"] = {
                 "available": False,
-                "message": "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+                "model": "ls_rapid",
+                "message": "Chưa chạy phân tích tương quan LS-RAPID. Nhấn 'Chạy AI LS-RAPID' để thực hiện."
             }
         
         # 8. Phân tích đa cửa sổ (Multi-Window) - dùng full GNSS data
@@ -1427,13 +1876,106 @@ async def get_long_term_analysis(
         else:
             result["status"] = "insufficient_data"
             result["message"] = "Không đủ dữ liệu GNSS và IMU để phân tích."
-        
+
+        # 10. Cross-sensor consensus — đánh giá đồng thuận giữa các model
+        result["cross_sensor_consensus"] = analyzer.analyze_cross_sensor_consensus(
+            gnss_result=result.get("gnss", {}),
+            imu_result=result.get("imu", {}),
+            rain_corr_result=result.get("rainfall_correlation", {})
+        )
+
         return result
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in long-term analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stations/{station_id}/gnss-daily-summary")
+async def get_gnss_daily_summary(
+    station_id: int,
+    limit: int = 30,
+    db_data: AsyncSession = Depends(get_data_db)
+):
+    """Lấy summary GNSS theo ngày (đã rollup)."""
+    try:
+        n = max(1, min(int(limit), 365))
+        res = await db_data.execute(
+            select(model_data.GnssDailySummary)
+            .where(model_data.GnssDailySummary.station_id == station_id)
+            .order_by(model_data.GnssDailySummary.day_start_ts.desc())
+            .limit(n)
+        )
+        rows = list(reversed(res.scalars().all()))
+        return {
+            "station_id": station_id,
+            "count": len(rows),
+            "items": [
+                {
+                    "day_start_ts": r.day_start_ts,
+                    "day_end_ts": r.day_end_ts,
+                    "sample_count": r.sample_count,
+                    "duration_seconds": r.duration_seconds,
+                    "net_displacement_mm": r.net_displacement_mm,
+                    "velocity_mm_day": r.velocity_mm_day,
+                    "velocity_mm_second": r.velocity_mm_second,
+                    "classification": r.classification,
+                    "risk_level": r.risk_level,
+                    "is_safe": r.is_safe,
+                    "status": r.status,
+                    "message": r.message,
+                    "updated_at": r.updated_at,
+                }
+                for r in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching GNSS daily summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stations/{station_id}/gnss-weekly-summary")
+async def get_gnss_weekly_summary(
+    station_id: int,
+    limit: int = 12,
+    db_data: AsyncSession = Depends(get_data_db)
+):
+    """Lấy summary GNSS theo tuần (từ 7 daily summaries liên tiếp)."""
+    try:
+        n = max(1, min(int(limit), 104))
+        res = await db_data.execute(
+            select(model_data.GnssWeeklySummary)
+            .where(model_data.GnssWeeklySummary.station_id == station_id)
+            .order_by(model_data.GnssWeeklySummary.week_end_ts.desc())
+            .limit(n)
+        )
+        rows = list(reversed(res.scalars().all()))
+        return {
+            "station_id": station_id,
+            "count": len(rows),
+            "items": [
+                {
+                    "week_start_ts": r.week_start_ts,
+                    "week_end_ts": r.week_end_ts,
+                    "day_count": r.day_count,
+                    "total_displacement_mm": r.total_displacement_mm,
+                    "avg_velocity_mm_day": r.avg_velocity_mm_day,
+                    "max_velocity_mm_day": r.max_velocity_mm_day,
+                    "min_velocity_mm_day": r.min_velocity_mm_day,
+                    "classification": r.classification,
+                    "risk_level": r.risk_level,
+                    "is_safe": r.is_safe,
+                    "status": r.status,
+                    "message": r.message,
+                    "updated_at": r.updated_at,
+                }
+                for r in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching GNSS weekly summary: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

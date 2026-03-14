@@ -1312,7 +1312,7 @@
                                             value="0.30">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
+                                        <label class="form-label">Dangerous Confirm Steps</label>
                                         <input type="number" class="form-control" id="cfg-water-confirm" value="3"
                                             min="1" max="10">
                                         <small id="cfg-water-confirm-source" class="text-muted">Mặc định</small>
@@ -1348,7 +1348,7 @@
                                         <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
+                                        <label class="form-label">Dangerous Confirm Steps</label>
                                         <input type="number" class="form-control" id="cfg-rain-confirm" value="2"
                                             min="1" max="10">
                                         <small id="cfg-rain-confirm-source" class="text-muted">Mặc định</small>
@@ -1379,16 +1379,12 @@
                                             value="4.0">
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
+                                        <label class="form-label">Dangerous Confirm Steps</label>
                                         <input type="number" class="form-control" id="cfg-gnss-steps" value="3">
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
                                         <input type="number" class="form-control" id="cfg-gnss-safe-steps" value="5" min="1" max="20">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">Safe Streak</label>
-                                        <input type="number" class="form-control" id="cfg-gnss-streak" value="5">
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Degraded Timeout (s)</label>
@@ -1420,7 +1416,7 @@
                                             value="5.0">
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label">Confirm Steps <small class="text-muted">(nguy hiểm)</small></label>
+                                        <label class="form-label">Dangerous Confirm Steps</label>
                                         <input type="number" class="form-control" id="cfg-imu-confirm" value="2">
                                     </div>
                                     <div class="col-md-3">
@@ -1941,12 +1937,13 @@
                 <div class="modal-body">
                     <form id="assignPiPointForm">
                         <input type="hidden" id="assign-center-id">
+                        <input type="hidden" id="point-device-select">
                         <div class="mb-3">
                             <label class="form-label fw-bold">Chọn Pi Hiện trường cần gắn <span
                                     class="text-danger">*</span></label>
-                            <select class="form-select" id="point-device-select" required>
-                                <option value="">-- Đang tải danh sách Pi hiện trường... --</option>
-                            </select>
+                            <div id="point-device-options" class="device-pick-list">
+                                <div class="text-muted small">-- Đang tải danh sách Pi hiện trường... --</div>
+                            </div>
                             <small class="text-muted">Chỉ hiển thị các Pi Hiện trường đã được kích hoạt (Activated) và
                                 chưa gán.</small>
                         </div>

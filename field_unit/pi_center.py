@@ -38,6 +38,7 @@ WEBSOCKET_BACKEND = "wss://monitoring.aitogy.com/ws/updates"
 # Station Config
 MY_STATION_ID = 1                         
 AUDIO_DIR = Path(__file__).parent / "landslide_audio"  # Cùng thư mục với script
+SIREN_FILE = AUDIO_DIR / "siren.mp3"
 LOCAL_CONFIG = Path.home() / ".landslide_device.json"
 
 # Backend registration (for initial setup)
@@ -835,12 +836,13 @@ def main():
         logger.error(f"   Copy MP3 files there: cp *.mp3 {AUDIO_DIR}/")
         sys.exit(1)
     
-    # Kiểm tra file mp3
-    mp3_files = list(AUDIO_DIR.glob("*.mp3"))
-    if not mp3_files:
-        logger.warning(f"⚠️ No MP3 files found in {AUDIO_DIR}")
-    else:
-        logger.info(f"✅ Found {len(mp3_files)} audio files")
+    # Chỉ yêu cầu duy nhất file siren.mp3
+    if not SIREN_FILE.exists():
+        logger.error(f"❌ Required siren file not found: {SIREN_FILE}")
+        logger.error("   Please add siren.mp3 before starting this service")
+        sys.exit(1)
+
+    logger.info(f"✅ Siren file ready: {SIREN_FILE}")
     
     # Khởi tạo Audio Player
     audio_player = AudioPlayer(AUDIO_DIR)

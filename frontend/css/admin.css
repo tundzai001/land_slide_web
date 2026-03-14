@@ -64,6 +64,66 @@ body,
     min-height: 42px;
 }
 
+/* Custom device picker cards (replace default browser radio/select look) */
+.device-pick-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.device-pick-option,
+.center-pick-item,
+.wizard-pi-option {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    transition: all 0.2s ease;
+}
+
+.device-pick-option:hover,
+.center-pick-item:hover,
+.wizard-pi-option:hover {
+    border-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--bg-tertiary) 88%, var(--accent-primary) 12%);
+}
+
+.device-pick-option .pick-indicator,
+.center-pick-item .pick-indicator,
+.wizard-pi-option .pick-indicator {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    flex-shrink: 0;
+}
+
+.device-pick-option.is-selected,
+.center-pick-item.is-selected,
+.wizard-pi-option.is-selected {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+    background: color-mix(in srgb, var(--bg-tertiary) 78%, var(--accent-primary) 22%);
+}
+
+.device-pick-option.is-selected .pick-indicator,
+.center-pick-item.is-selected .pick-indicator,
+.wizard-pi-option.is-selected .pick-indicator {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+}
+
 :root {
     --sidebar-width: 80px;
     /* Narrow Sidebar */

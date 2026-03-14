@@ -12,6 +12,8 @@ let allStations = [];
 let currentView = 'realtime';
 let wsConnection = null;
 let latestRealtimeSensorTs = {}; // key: `${stationId}_${sensorType}` -> unix timestamp
+let isRainCorrelationAiEnabled = false;
+let rainCorrelationAiRunning = false;
 
 // Realtime 3D state
 let realtimeImuScene, realtimeImuCamera, realtimeImuRenderer, realtimeImuControls, realtimeImuAnimationId;
@@ -50,6 +52,11 @@ function normalizeAlertLevel(rawLevel) {
     if (level === 'CRITICAL' || level === 'EXTREME') return 'CRITICAL';
     if (level === 'WARNING' || level === 'MEDIUM' || level === 'HIGH') return 'WARNING';
     return 'WARNING';
+}
+
+function getAlertSeverity(rawLevel) {
+    const normalized = normalizeAlertLevel(rawLevel);
+    return normalized === 'CRITICAL' ? 2 : 1;
 }
 
 function updateAlertBannerTheme(rawLevel) {
@@ -158,9 +165,25 @@ function handleRealtimeUpdate(message) {
 
     if (message.type === 'sensor_status') {
         if (currentStationData && message.station_id === currentStationData.id && message.sensor_type === 'gnss') {
-            updateGnssFixBadge(message.data?.fix_mode, message.data?.fix_quality);
-            // Low-trust GNSS fixes should not keep stale velocity visible
-            setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+            const fixMode = message.data?.fix_mode;
+            const fixQuality = Number(message.data?.fix_quality);
+            updateGnssFixBadge(fixMode, fixQuality);
+
+            const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
+            const isNoData = (
+                !normalizedMode ||
+                normalizedMode === 'UNKNOWN' ||
+                normalizedMode === 'INVALID' ||
+                normalizedMode === 'NO_DATA' ||
+                normalizedMode === 'GNSS_UNKNOWN' ||
+                normalizedMode === 'GNSS_INVALID' ||
+                fixQuality <= 0
+            );
+
+            // Chỉ reset velocity khi trạng thái GNSS thực sự không có dữ liệu.
+            if (isNoData) {
+                setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+            }
         }
     }
 
@@ -186,6 +209,7 @@ function handleRealtimeUpdate(message) {
                 currentAlertStationId = null;
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
+            delete alertBannerSnoozeUntil[stationId];
             // Clear tất cả sensor card highlight khi trạm về safe
             clearAllSensorCardAlerts();
 
@@ -198,10 +222,28 @@ function handleRealtimeUpdate(message) {
         if (currentAlertStationId === stationId && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
             const banner = document.getElementById('alert-banner');
             if (banner?.classList.contains('show')) {
-                updateAlertBannerTheme(riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                const nextLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                const currentBannerLevel = String(banner.dataset.alertLevel || 'WARNING').toUpperCase();
+                const shouldDowngrade = getAlertSeverity(currentBannerLevel) > getAlertSeverity(nextLevel);
+                // Không hạ banner từ CRITICAL xuống WARNING khi vẫn đang hiển thị alert cho cùng trạm.
+                if (!shouldDowngrade) {
+                    updateAlertBannerTheme(nextLevel);
+                }
                 const alertTitle = document.getElementById('alert-title');
                 if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
                     alertTitle.textContent = `${riskUi.display} ALERT!`;
+                }
+            }
+        }
+
+        if (currentStationData && stationId === currentStationData.id && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
+            const banner = document.getElementById('alert-banner');
+            const isVisible = !!banner?.classList.contains('show');
+            const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
+            if (!isVisible && Date.now() >= snoozeUntil) {
+                const cachedAlert = latestAlertByStation[stationId];
+                if (cachedAlert) {
+                    showAlertBanner(cachedAlert, { silent: true });
                 }
             }
         }
@@ -249,6 +291,7 @@ function handleRealtimeUpdate(message) {
 
     // ✅ XỬ LÝ CẢNH BÁO MỚI — Chỉ hiện 1 lần per alert (dedup)
     if (message.type === 'alert') {
+        latestAlertByStation[message.station_id] = message;
         // Dedup theo station + sensor + level để không nuốt cảnh báo mới cùng level từ sensor khác.
         const alertKey = `${message.station_id}_${message.sensor_type || 'unknown'}_${message.level}`;
         if (alertKey !== lastAlertKey) {
@@ -350,8 +393,8 @@ function updateRealtimeSensorValues(message) {
 
     if (sensor_type === 'water' && data) {
         const level = data.water_level || data.level || data.processed_value_meters || 0;
-        animateValue('val-water', level, 2, 'm');
-
+        setHTML('val-water', formatWaterLevelDisplay(data));
+        console.log('💧 [WATER] Level value:', level, 'from data:', data);
         if (charts['chart-water']) {
             const chart = charts['chart-water'];
             chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -636,6 +679,10 @@ function setupEventListeners() {
     if (btnLongTerm && longtermOverlay) {
         btnLongTerm.addEventListener('click', () => {
             longtermOverlay.classList.add('active');
+            isRainCorrelationAiEnabled = false;
+            rainCorrelationAiRunning = false;
+            resetRainfallCorrelationUi();
+            updateRainCorrelationAiControls();
 
             // Đóng sidebar trái
             if (stationSidebar) {
@@ -658,6 +705,8 @@ function setupEventListeners() {
     if (closeLongtermBtn && longtermOverlay) {
         closeLongtermBtn.addEventListener('click', () => {
             longtermOverlay.classList.remove('active');
+            rainCorrelationAiRunning = false;
+            closeLsRapidResultPopup();
 
             // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
             if (stationSidebar) {
@@ -675,10 +724,45 @@ function setupEventListeners() {
             btn.addEventListener('click', () => {
                 rangeSelector.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                loadLongTermAnalysis();
+                loadLongTermAnalysis({ includeCorrelation: isRainCorrelationAiEnabled });
             });
         });
     }
+
+    const runRainCorrBtn = document.getElementById('btn-run-rain-correlation');
+    if (runRainCorrBtn) {
+        runRainCorrBtn.addEventListener('click', async () => {
+            if (rainCorrelationAiRunning) return;
+            isRainCorrelationAiEnabled = true;
+            rainCorrelationAiRunning = true;
+            updateRainCorrelationAiControls();
+            const analysisData = await loadLongTermAnalysis({ includeCorrelation: true });
+            showLsRapidResultPopup(analysisData?.rainfall_correlation || null);
+        });
+    }
+
+    const lsrapidPopupOverlay = document.getElementById('lsrapid-popup-overlay');
+    const lsrapidPopupClose = document.getElementById('lsrapid-popup-close');
+    const lsrapidPopupCloseBtn = document.getElementById('lsrapid-popup-close-btn');
+    const lsrapidPopupOkBtn = document.getElementById('lsrapid-popup-ok-btn');
+
+    [lsrapidPopupClose, lsrapidPopupCloseBtn, lsrapidPopupOkBtn].forEach(btn => {
+        if (btn) btn.addEventListener('click', closeLsRapidResultPopup);
+    });
+
+    if (lsrapidPopupOverlay) {
+        lsrapidPopupOverlay.addEventListener('click', (event) => {
+            if (event.target === lsrapidPopupOverlay) {
+                closeLsRapidResultPopup();
+            }
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeLsRapidResultPopup();
+        }
+    });
 
     // Nút tắt/bật còi trong sidebar
     const sirenToggleBtns = document.querySelectorAll('.btn-siren-toggle');
@@ -1075,6 +1159,46 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     return num.toFixed(decimals);
 }
 
+function formatWaterLevelDisplay(waterLatest) {
+    const unitRaw = String(waterLatest?.water_display_unit || '').trim().toLowerCase();
+    const displayRaw = parseFloat(waterLatest?.water_display_value);
+    let levelCm = null;
+
+    if (!Number.isNaN(displayRaw)) {
+        if (unitRaw === 'mm') {
+            levelCm = displayRaw / 10;
+        } else if (unitRaw === 'm' || unitRaw === 'meter' || unitRaw === 'meters') {
+            levelCm = displayRaw * 100;
+        } else if (unitRaw === 'cm') {
+            levelCm = displayRaw;
+        }
+    }
+
+    if (levelCm === null) {
+        const cmRaw = parseFloat(waterLatest?.water_level_cm);
+        if (!Number.isNaN(cmRaw)) {
+            levelCm = cmRaw;
+        }
+    }
+
+    if (levelCm === null) {
+        const meterRaw = parseFloat(waterLatest?.water_level ?? waterLatest?.processed_value_meters);
+        if (!Number.isNaN(meterRaw)) {
+            levelCm = meterRaw * 100;
+        }
+    }
+
+    if (levelCm === null) {
+        return `--<span class="sensor-unit">cm</span>`;
+    }
+
+    if (Math.abs(levelCm) >= 100) {
+        return `${safeNumber(levelCm / 100, 2)}<span class="sensor-unit">m</span>`;
+    }
+
+    return `${safeNumber(levelCm, 1)}<span class="sensor-unit">cm</span>`;
+}
+
 function formatImuDelta(val, axis) {
     const num = parseFloat(val);
     if (isNaN(num)) return '-- cm';
@@ -1105,27 +1229,37 @@ function updateGnssFixBadge(fixMode, fixQuality) {
     let text = 'NO DATA';
 
     switch (normalizedMode) {
+        case 'GNSS_RTK_FIXED':
         case 'RTK_FIXED':
             cls = 'GNSS_RTK_FIXED';
             text = 'RTK FIXED';
             break;
+        case 'GNSS_RTK_FLOAT':
         case 'RTK_FLOAT':
             cls = 'GNSS_RTK_FLOAT';
             text = 'RTK FLOAT';
             break;
+        case 'GNSS_DGPS_FLOAT':
         case 'DGPS_FLOAT':
             cls = 'GNSS_DGPS_FLOAT';
             text = 'DGPS FLOAT';
             break;
+        case 'GNSS_SINGLE':
         case 'GPS_SINGLE_NO_RTK':
         case 'SINGLE':
         case 'NO_RTK':
             cls = 'GNSS_SINGLE';
             text = 'NO RTK';
             break;
+        case 'GNSS_INVALID':
         case 'INVALID':
             cls = 'GNSS_INVALID';
             text = 'INVALID';
+            break;
+        case 'GNSS_UNKNOWN':
+        case 'NO_DATA':
+            cls = 'GNSS_UNKNOWN';
+            text = 'NO DATA';
             break;
         default:
             if (quality === 4) {
@@ -1193,7 +1327,7 @@ function updateSidebarUI(data) {
     if (data.status === 'offline') {
         setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
         setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
-        setHTML('val-water', `--<span class="sensor-unit">m</span>`);
+        setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
         setText('val-imu-roll', '--°');
         setText('val-imu-pitch', '--°');
         setText('val-imu-yaw', '--°');
@@ -1211,7 +1345,14 @@ function updateSidebarUI(data) {
     } else {
         // GNSS: chỉ hiện giá trị khi sensor đang online
         if (gnssOnline) {
-            const gnssSpeed = gnssLatest?.speed_2d_mm_s || (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) || null;
+            const gnssSpeed =
+                gnssLatest?.velocity_mm_s ||
+                gnssLatest?.speed_2d_mm_s ||
+                gnssLatest?.speed_mm_s ||
+                (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) ||
+                (gnssLatest?.velocity ? gnssLatest.velocity * 1000 : null) ||
+                (gnssLatest?.speed ? gnssLatest.speed * 1000 : null) ||
+                null;
             setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
         } else {
             setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
@@ -1231,14 +1372,12 @@ function updateSidebarUI(data) {
 
         // Water
         if (waterOnline) {
-            const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
-            setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+            setHTML('val-water', formatWaterLevelDisplay(waterLatest));
         } else if (waterLatest) {
             // Sensor offline nhưng vẫn có dữ liệu DB gần nhất -> giữ số liệu để tránh nhảy '--'
-            const waterLevel = waterLatest?.water_level ?? waterLatest?.processed_value_meters ?? null;
-            setHTML('val-water', `${safeNumber(waterLevel, 2)}<span class="sensor-unit">m</span>`);
+            setHTML('val-water', formatWaterLevelDisplay(waterLatest));
         } else {
-            setHTML('val-water', `--<span class="sensor-unit">m</span>`);
+            setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
         }
 
         // IMU
@@ -1509,15 +1648,16 @@ function renderImuChart(history) {
     });
 }
 
-async function loadLongTermAnalysis() {
+async function loadLongTermAnalysis(options = {}) {
     console.log('📊 [MAP] Loading long-term analysis...');
 
     if (!currentStationData) {
         console.error('❌ [MAP] No station selected');
-        return;
+        return null;
     }
 
     const stationId = currentStationData.id;
+    const includeCorrelation = options.includeCorrelation === true || isRainCorrelationAiEnabled;
 
     // Get selected days from range selector
     const activeBtn = document.querySelector('#longterm-range-selector .btn.active');
@@ -1526,9 +1666,15 @@ async function loadLongTermAnalysis() {
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';
     document.getElementById('longterm-error').style.display = 'none';
+    updateRainCorrelationAiControls();
 
     try {
-        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?days=${days}`);
+        const params = new URLSearchParams({
+            days: String(days),
+            include_correlation: includeCorrelation ? 'true' : 'false',
+            correlation_model: 'ls_rapid'
+        });
+        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?${params.toString()}`);
 
         if (!res.ok) {
             const error = await res.json();
@@ -1538,10 +1684,15 @@ async function loadLongTermAnalysis() {
         const data = await res.json();
 
         renderLongTermAnalysis(data);
+        return data;
 
     } catch (e) {
         console.error('❌ [MAP] Error loading long-term analysis:', e);
         showLongTermError(e.message);
+        return null;
+    } finally {
+        rainCorrelationAiRunning = false;
+        updateRainCorrelationAiControls();
     }
 }
 
@@ -1554,14 +1705,18 @@ function renderLongTermAnalysis(data) {
     document.getElementById('longterm-error').style.display = 'none';
 
     _lastLongTermData = data;
+    updateRainCorrelationAiControls(data.rainfall_correlation);
 
     // === GNSS Section ===
     const gnss = data.gnss;
+    const sourceNoteEl = document.getElementById('lt-gnss-source-note');
     if (gnss && gnss.status === 'success') {
         const analysis = gnss.analysis;
 
         const warningEl = document.getElementById('longterm-warning');
         const warningTextEl = document.getElementById('warning-text');
+        const reliabilityNoteEl = document.getElementById('lt-reliability-note');
+        const reliabilityTextEl = document.getElementById('lt-reliability-text');
 
         if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
             warningEl.style.display = 'block';
@@ -1575,15 +1730,33 @@ function renderLongTermAnalysis(data) {
             warningEl.style.display = 'none';
         }
 
-        setText('lt-velocity', `${safeNumber(analysis.velocity_mm_year, 2)} mm/năm`);
-        const ciVal = safeNumber(analysis.velocity_ci_95, 2);
-        setText('lt-velocity-ci', `(Khoảng tin cậy: ±${ciVal})`);
+        const velocityDisplay = formatLongTermVelocityDisplay(analysis);
+        setText('lt-velocity', velocityDisplay.text);
+        setText('lt-velocity-ci', velocityDisplay.ciText);
         setText('lt-classification', analysis.classification || 'N/A');
         
         // Use auto cm/mm formatting
         setText('lt-total-disp', formatDisplacementString(analysis.total_displacement_mm, 1));
         
         setText('lt-duration', formatDurationString(analysis.duration_days));
+
+        if (analysis.velocity_reliable === false) {
+            reliabilityNoteEl.style.display = 'flex';
+            reliabilityTextEl.textContent = analysis.reliability_message || 'Chưa đủ thời lượng quan sát.';
+        } else {
+            reliabilityNoteEl.style.display = 'none';
+            reliabilityTextEl.textContent = '';
+        }
+
+        if (sourceNoteEl) {
+            if (gnss.source === 'daily_summary_rollup') {
+                sourceNoteEl.style.display = 'block';
+                sourceNoteEl.innerHTML = '<i class="bi bi-calendar-week me-2"></i>GNSS đang phân tích từ dữ liệu tổng hợp ngày (daily summary). Dữ liệu raw cũ có thể đã được dọn để tối ưu hệ thống.';
+            } else {
+                sourceNoteEl.style.display = 'block';
+                sourceNoteEl.innerHTML = '<i class="bi bi-broadcast me-2"></i>GNSS đang phân tích trực tiếp từ dữ liệu raw theo thời gian thực.';
+            }
+        }
 
         const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
         const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
@@ -1603,7 +1776,15 @@ function renderLongTermAnalysis(data) {
         }
     } else {
         const warningEl = document.getElementById('longterm-warning');
+        const reliabilityNoteEl = document.getElementById('lt-reliability-note');
+        const reliabilityTextEl = document.getElementById('lt-reliability-text');
         if (warningEl) warningEl.style.display = 'none';
+        if (reliabilityNoteEl) reliabilityNoteEl.style.display = 'none';
+        if (reliabilityTextEl) reliabilityTextEl.textContent = '';
+        if (sourceNoteEl) {
+            sourceNoteEl.style.display = 'none';
+            sourceNoteEl.textContent = '';
+        }
         setText('lt-velocity', 'N/A');
         setText('lt-velocity-ci', '(Chưa có thông tin)');
         setText('lt-classification', 'N/A');
@@ -1630,6 +1811,106 @@ function renderLongTermAnalysis(data) {
 
     // === NEW: Multi-Window Analysis ===
     renderMultiWindowSection(data);
+
+    // === Cross-Sensor Consensus ===
+    renderCrossConsensusSection(data);
+}
+
+function resetRainfallCorrelationUi() {
+    const section = document.getElementById('rainfall-correlation-section');
+    if (section) {
+        section.style.display = 'none';
+    }
+    if (charts['chart-rainfall-correlation']) {
+        charts['chart-rainfall-correlation'].destroy();
+        delete charts['chart-rainfall-correlation'];
+    }
+}
+
+function updateRainCorrelationAiControls(rainCorr = null) {
+    const runBtn = document.getElementById('btn-run-rain-correlation');
+    const hintEl = document.getElementById('rain-correlation-hint');
+    if (!runBtn || !hintEl) return;
+
+    const canRun = !!currentStationData;
+    runBtn.disabled = !canRun || rainCorrelationAiRunning;
+
+    if (rainCorrelationAiRunning) {
+        runBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Đang chạy LS-RAPID...';
+        hintEl.textContent = 'Hệ thống đang phân tích tương quan mưa - dịch chuyển bằng LS-RAPID.';
+        return;
+    }
+
+    runBtn.innerHTML = '<i class="bi bi-stars me-2"></i>Chạy AI LS-RAPID';
+
+    if (!isRainCorrelationAiEnabled) {
+        hintEl.textContent = 'Tương quan mưa - dịch chuyển chỉ phân tích khi bạn bấm nút AI LS-RAPID.';
+        return;
+    }
+
+    if (rainCorr && rainCorr.available) {
+        hintEl.textContent = 'Đã chạy AI LS-RAPID thành công cho khoảng thời gian đang chọn.';
+        return;
+    }
+
+    hintEl.textContent = rainCorr?.message || 'Đã gửi yêu cầu AI LS-RAPID, nhưng chưa có đủ dữ liệu để tính.';
+}
+
+function closeLsRapidResultPopup() {
+    const overlay = document.getElementById('lsrapid-popup-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+}
+
+function showLsRapidResultPopup(rainCorr) {
+    const overlay = document.getElementById('lsrapid-popup-overlay');
+    const statusEl = document.getElementById('lsrapid-popup-status');
+    const corrEl = document.getElementById('lsrapid-popup-r');
+    const lagEl = document.getElementById('lsrapid-popup-lag');
+    const r2El = document.getElementById('lsrapid-popup-r2');
+    const triggerEl = document.getElementById('lsrapid-popup-trigger');
+    const msgEl = document.getElementById('lsrapid-popup-message');
+
+    if (!overlay || !statusEl || !corrEl || !lagEl || !r2El || !triggerEl || !msgEl) {
+        return;
+    }
+
+    const available = rainCorr?.available === true;
+    const corr = Number(rainCorr?.correlation);
+    const r2 = Number(rainCorr?.r_squared);
+    const lag = Number(rainCorr?.lag_days);
+    const trigger = String(rainCorr?.trigger_potential || 'LOW').toUpperCase();
+
+    if (available) {
+        corrEl.textContent = Number.isFinite(corr) ? corr.toFixed(4) : '--';
+        lagEl.textContent = Number.isFinite(lag) ? `${lag} ngày` : '--';
+        r2El.textContent = Number.isFinite(r2) ? r2.toFixed(4) : '--';
+        triggerEl.textContent = trigger;
+        msgEl.textContent = sanitizeLongTermText(rainCorr?.message || rainCorr?.assessment || 'LS-RAPID đã hoàn tất phân tích.');
+
+        if (trigger === 'HIGH') {
+            statusEl.className = 'lsrapid-popup-status status-fail';
+            statusEl.textContent = 'TRIGGER: HIGH';
+        } else if (trigger === 'MEDIUM') {
+            statusEl.className = 'lsrapid-popup-status status-warn';
+            statusEl.textContent = 'TRIGGER: MEDIUM';
+        } else {
+            statusEl.className = 'lsrapid-popup-status status-ok';
+            statusEl.textContent = 'TRIGGER: LOW';
+        }
+    } else {
+        corrEl.textContent = '--';
+        lagEl.textContent = '--';
+        r2El.textContent = '--';
+        triggerEl.textContent = '--';
+        msgEl.textContent = sanitizeLongTermText(rainCorr?.message || 'Không thể tạo kết quả LS-RAPID cho khoảng thời gian này.');
+        statusEl.className = 'lsrapid-popup-status status-warn';
+        statusEl.textContent = 'CHƯA ĐỦ DỮ LIỆU';
+    }
+
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
 }
 
 // Global references for 3D logic
@@ -1787,30 +2068,13 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
     const sphere = new THREE.Mesh(sphereGeo, sphereMat);
     gnssScene.add(sphere);
 
-    let progress = 0;
-    const speed = 0.005;
+    // Analysis mode: keep marker at the latest GNSS position (no autoplay movement).
+    if (points.length > 0) {
+        sphere.position.copy(points[points.length - 1]);
+    }
 
     function animate() {
         gnssAnimationId = requestAnimationFrame(animate);
-
-        // Animate sphere along the path
-        if (points.length > 1) {
-            progress += speed;
-            if (progress >= 1) progress = 0; // loop
-
-            const totalSegments = points.length - 1;
-            const floatIndex = progress * totalSegments;
-            const index = Math.floor(floatIndex);
-            const remainder = floatIndex - index;
-
-            if (index < totalSegments) {
-                const p1 = points[index];
-                const p2 = points[index + 1];
-                sphere.position.lerpVectors(p1, p2, remainder);
-            }
-        } else if (points.length === 1) {
-            sphere.position.copy(points[0]);
-        }
 
         gnssControls.update();
         gnssRenderer.render(gnssScene, gnssCamera);
@@ -2007,56 +2271,19 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     const rollData = timeSeries.rolls || timeSeries.roll || [];
     const pitchData = timeSeries.pitches || timeSeries.pitch || [];
 
-    let progress = 0;
-    const speed = 0.003; // Smooth flow
-
-    // Hover animation variables
-    let clock = new THREE.Clock();
+    // Analysis mode: use the latest tilt sample and keep IMU model static.
+    const hasTilt = rollData.length > 0 && pitchData.length > 0;
+    if (hasTilt) {
+        const lastIdx = Math.min(rollData.length, pitchData.length) - 1;
+        const finalPitch = (pitchData[lastIdx] || 0) * Math.PI / 180;
+        const finalRoll = (rollData[lastIdx] || 0) * Math.PI / 180;
+        const finalQ = new THREE.Quaternion();
+        finalQ.setFromEuler(new THREE.Euler(finalPitch, 0, finalRoll, 'XYZ'));
+        sensorBlock.quaternion.copy(finalQ);
+    }
 
     function animate() {
         imuAnimationId = requestAnimationFrame(animate);
-
-        const delta = clock.getDelta();
-        const elapsedTime = clock.getElapsedTime();
-
-        // Removed vertical hover and glowing effect to keep the sensor realistic and grounded
-
-        // 2. Playback IMU Tilt
-        if (rollData.length > 1) {
-            progress += speed;
-            if (progress >= 1) progress = 0;
-
-            const total = rollData.length - 1;
-            const floatIndex = progress * total;
-            const index = Math.floor(floatIndex);
-            const remainder = floatIndex - index;
-
-            if (index < total) {
-                // Degrees to Radians
-                const r1 = rollData[index] * Math.PI / 180;
-                const r2 = rollData[index + 1] * Math.PI / 180;
-                const p1 = pitchData[index] * Math.PI / 180;
-                const p2 = pitchData[index + 1] * Math.PI / 180;
-
-                const currRoll = r1 + (r2 - r1) * remainder;
-                const currPitch = p1 + (p2 - p1) * remainder;
-
-                // Typical aviation/IMU mapping: X=Pitch, Z=Roll
-                const targetQuaternion = new THREE.Quaternion();
-                const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
-                targetQuaternion.setFromEuler(euler);
-
-                // Smooth interpolation to avoid jitter
-                sensorBlock.quaternion.slerp(targetQuaternion, 0.1);
-            }
-        } else if (rollData.length === 1) {
-            const currPitch = pitchData[0] * Math.PI / 180;
-            const currRoll = rollData[0] * Math.PI / 180;
-            const targetQuaternion = new THREE.Quaternion();
-            const euler = new THREE.Euler(currPitch, 0, currRoll, 'XYZ');
-            targetQuaternion.setFromEuler(euler);
-            sensorBlock.quaternion.slerp(targetQuaternion, 0.1);
-        }
 
         // Cập nhật guy wires
         sensorBlock.updateMatrixWorld();
@@ -2696,6 +2923,60 @@ function formatDisplacementString(valMm, decimals=1) {
     return `${val.toFixed(decimals)} mm`;
 }
 
+function formatRateWithUnit(valueMm, periodLabel) {
+    const absValue = Math.abs(valueMm);
+    if (absValue >= 1000) {
+        return { value: valueMm / 1000, unit: `m/${periodLabel}`, decimals: 2 };
+    }
+    if (absValue >= 10) {
+        return { value: valueMm / 10, unit: `cm/${periodLabel}`, decimals: 2 };
+    }
+    return { value: valueMm, unit: `mm/${periodLabel}`, decimals: 2 };
+}
+
+function formatLongTermVelocityDisplay(metrics) {
+    if (metrics && metrics.velocity_reliable === false) {
+        const minDurationDays = parseFloat(metrics.min_reliable_duration_days) || (1 / 24);
+        return {
+            text: `Chờ đủ ${formatDurationString(minDurationDays)}`,
+            ciText: `(${metrics.reliability_message || 'Chưa đủ thời lượng quan sát để kết luận vận tốc trung bình.'})`
+        };
+    }
+
+    const durationDays = parseFloat(metrics?.duration_days) || 0;
+    const mmYear = parseFloat(metrics?.velocity_mm_year) || 0;
+    const mmDay = parseFloat(metrics?.velocity_mm_day) || (mmYear / 365);
+    const mmSecond = parseFloat(metrics?.velocity_mm_second) || (mmDay / 86400);
+    const ciYear = parseFloat(metrics?.velocity_ci_95) || 0;
+
+    let primary;
+    let ciValue;
+
+    if (durationDays > 0 && durationDays < (1 / 24)) {
+        if (Math.abs(mmSecond) >= 1) {
+            primary = formatRateWithUnit(mmSecond, 's');
+            ciValue = ciYear / 31536000;
+        } else {
+            primary = formatRateWithUnit(mmDay / 24, 'giờ');
+            ciValue = ciYear / 8760;
+        }
+    } else if (durationDays > 0 && durationDays < 1) {
+        primary = formatRateWithUnit(mmDay / 24, 'giờ');
+        ciValue = ciYear / 8760;
+    } else if (durationDays > 0 && durationDays < 30) {
+        primary = formatRateWithUnit(mmDay, 'ngày');
+        ciValue = ciYear / 365;
+    } else {
+        primary = formatRateWithUnit(mmYear, 'năm');
+        ciValue = ciYear;
+    }
+
+    return {
+        text: `${primary.value.toFixed(primary.decimals)} ${primary.unit}`,
+        ciText: `(Độ tin cậy xu hướng OLS: ±${Math.abs(ciValue / (primary.unit.startsWith('m/') ? 1000 : primary.unit.startsWith('cm/') ? 10 : 1)).toFixed(primary.decimals)} ${primary.unit})`
+    };
+}
+
 function formatDurationString(durationDays) {
     if (!durationDays || durationDays <= 0) return '0 phút';
     
@@ -2773,6 +3054,20 @@ function renderMultiWindowSection(data) {
     cardsContainer.innerHTML = (mw.windows || []).map(w => {
         const icon = typeIcons[w.window_days] || 'bi-calendar';
         const label = w.label || (w.window_days + ' ngày');
+        if (w.status === 'preliminary') {
+            return `
+                <div class="col-md-4 mb-2">
+                    <div class="longterm-metric-card h-100 is-preliminary">
+                        <div class="text-muted small mb-2"><i class="bi ${icon} me-1"></i>${label}</div>
+                        <div class="fs-6 fw-semibold text-secondary">${formatLongTermVelocityDisplay(w).text}</div>
+                        <div class="metric-inline-warning"><i class="bi bi-shield-exclamation"></i>Dữ liệu chưa đủ tin cậy</div>
+                        <div class="small mt-1">Dịch chuyển đầu-cuối: <strong class="text-info">${formatDisplacementString(w.displacement_mm, 1)}</strong></div>
+                        <div class="small text-muted">${formatDurationString(w.duration_days)} quan sát, ${w.data_points} điểm dữ liệu</div>
+                        <div class="small text-muted mt-1">${w.reliability_message || 'Chưa đủ thời lượng để kết luận vận tốc.'}</div>
+                    </div>
+                </div>`;
+        }
+
         if (w.status !== 'success') {
             return `
                 <div class="col-md-4 mb-2">
@@ -2787,13 +3082,84 @@ function renderMultiWindowSection(data) {
             <div class="col-md-4 mb-2">
                 <div class="longterm-metric-card h-100">
                     <div class="text-muted small mb-2"><i class="bi ${icon} me-1"></i>${label}</div>
-                    <div class="fs-4 fw-bold text-primary">${w.velocity_mm_year.toFixed(1)} <small class="fs-6 text-muted">mm/năm</small></div>
-                    <div class="small mt-1">Dịch chuyển: <strong class="text-info">${formatDisplacementString(w.displacement_mm, 1)}</strong></div>
+                    <div class="fs-4 fw-bold text-primary">${formatLongTermVelocityDisplay({ velocity_mm_day: w.velocity_mm_day, velocity_mm_year: w.velocity_mm_year, duration_days: w.duration_days }).text}</div>
+                    <div class="small mt-1">Dịch chuyển đầu-cuối: <strong class="text-info">${formatDisplacementString(w.displacement_mm, 1)}</strong></div>
                     <div class="small">Xu hướng: ${trendIcons[w.trend] || ''} ${trendTexts[w.trend] || '--'}</div>
-                    <div class="small text-muted">${w.data_points} điểm dữ liệu</div>
+                    <div class="small text-muted">${formatDurationString(w.duration_days)} quan sát, ${w.data_points} điểm dữ liệu</div>
                 </div>
             </div>`;
     }).join('');
+}
+
+// ============================================================================
+// CROSS-SENSOR CONSENSUS SECTION
+// ============================================================================
+function renderCrossConsensusSection(data) {
+    const section = document.getElementById('cross-consensus-section');
+    if (!section) return;
+
+    const cs = data.cross_sensor_consensus;
+    if (!cs || !cs.available) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    const banner = document.getElementById('consensus-banner');
+    const badge = document.getElementById('consensus-badge');
+    const summaryEl = document.getElementById('consensus-summary');
+    const sensorsEl = document.getElementById('consensus-sensors-with-data');
+    const trendEl = document.getElementById('consensus-trend-agreement');
+    const notesEl = document.getElementById('consensus-notes');
+
+    // Badge + banner colour
+    const levelConfig = {
+        STRONG:      { cls: 'consensus-strong',   icon: 'bi-check-circle-fill',      label: 'Đồng thuận mạnh' },
+        PARTIAL:     { cls: 'consensus-partial',  icon: 'bi-question-circle-fill',   label: 'Đồng thuận một phần' },
+        CONFLICT:    { cls: 'consensus-conflict', icon: 'bi-exclamation-circle-fill', label: 'Mâu thuẫn cảm biến' },
+        NONE:        { cls: 'consensus-none',     icon: 'bi-dash-circle-fill',        label: 'Không có bất thường' },
+        UNAVAILABLE: { cls: 'consensus-unknown',  icon: 'bi-info-circle-fill',        label: 'Chưa đủ dữ liệu' },
+    };
+    const cfg = levelConfig[cs.consensus_level] || levelConfig.UNAVAILABLE;
+
+    banner.className = `consensus-banner mb-3 ${cfg.cls}`;
+    badge.className = `consensus-badge ${cfg.cls}`;
+    badge.innerHTML = `<i class="bi ${cfg.icon} me-1"></i>${cfg.label}`;
+    summaryEl.textContent = cs.summary || '';
+
+    // Sensor chips
+    const sensorLabels = { gnss: 'GNSS', imu: 'IMU', rain: 'Mưa' };
+    const alertingSet = new Set(cs.sensors_alerting || []);
+    const corrobSet   = new Set(cs.sensors_corroborating || []);
+    const conflictSet = new Set(cs.sensors_conflicting || []);
+    sensorsEl.innerHTML = (cs.sensors_with_data || []).map(s => {
+        let extra = '';
+        if (conflictSet.has(s)) extra = 'sensor-chip-conflict';
+        else if (corrobSet.has(s)) extra = 'sensor-chip-ok';
+        else if (alertingSet.has(s)) extra = 'sensor-chip-alert';
+        return `<span class="sensor-chip ${extra}">${sensorLabels[s] || s}</span>`;
+    }).join('');
+
+    // Trend agreement
+    const trendMap = {
+        full:    { text: 'Cùng xu hướng ✓', cls: 'text-success' },
+        partial: { text: 'Một phần cùng hướng', cls: 'text-warning' },
+        conflict:{ text: 'Ngược hướng ⚠️', cls: 'text-danger' },
+    };
+    const tm = trendMap[cs.trend_agreement];
+    if (tm) {
+        trendEl.textContent = tm.text;
+        trendEl.className = `fs-5 fw-bold mt-1 ${tm.cls}`;
+    } else {
+        trendEl.textContent = 'Chưa xác định';
+        trendEl.className = 'fs-5 fw-bold mt-1 text-muted';
+    }
+
+    // Notes list
+    notesEl.innerHTML = (cs.notes || []).map(n =>
+        `<div class="consensus-note-item"><i class="bi bi-arrow-right-short me-1"></i>${n}</div>`
+    ).join('');
 }
 
 function sanitizeLongTermText(text) {
@@ -3071,6 +3437,8 @@ function setSirenButtonState(state, target = null) {
 
 let currentAlertStationId = null;
 let lastAlertKey = null;
+let latestAlertByStation = {};
+let alertBannerSnoozeUntil = {};
 
 // Map sensor_type từ backend → id của sensor card trong HTML
 const SENSOR_CARD_IDS = {
@@ -3112,6 +3480,19 @@ function showAlertBanner(alertData, options = {}) {
 
     const normalizedLevel = normalizeAlertLevel(alertData.level || alertData.risk_level);
 
+    // Nếu banner cùng trạm đang CRITICAL, không cho WARNING đè nội dung.
+    const isShowing = banner.classList.contains('show');
+    const existingLevel = String(banner.dataset.alertLevel || 'WARNING').toUpperCase();
+    const sameStation = currentAlertStationId === alertData.station_id;
+    const shouldSkipLowerSeverity = (
+        isShowing &&
+        sameStation &&
+        getAlertSeverity(existingLevel) > getAlertSeverity(normalizedLevel)
+    );
+    if (shouldSkipLowerSeverity) {
+        return;
+    }
+
     // Cập nhật nội dung
     updateAlertBannerTheme(normalizedLevel);
 
@@ -3126,6 +3507,7 @@ function showAlertBanner(alertData, options = {}) {
 
     // Lưu station ID
     currentAlertStationId = alertData.station_id;
+    alertBannerSnoozeUntil[alertData.station_id] = 0;
 
     // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
     // Lưu ý: siren button state được quản lý bởi _showSirenIfAlerting / WS handler,
@@ -3153,6 +3535,10 @@ function playSiren() {
 
             currentSirenAudio.play().catch(e => {
                 console.error('[ERROR] Siren auto-play blocked:', e);
+                if (navigator.vibrate) {
+                    navigator.vibrate([300, 140, 300]);
+                }
+                window.toast?.warning('Trình duyệt đang chặn âm thanh tự động. Hãy chạm màn hình một lần để bật còi cảnh báo.');
                 currentSirenAudio = null;
                 pendingSirenReplay = false;
             });
@@ -3191,6 +3577,21 @@ function playAlertSound() {
 
 // Setup event listeners cho Alert Banner
 document.addEventListener('DOMContentLoaded', () => {
+    const unlockSirenAudio = () => {
+        const probe = new Audio('/static/sounds/siren.mp3');
+        probe.muted = true;
+        probe.play()
+            .then(() => {
+                probe.pause();
+                probe.currentTime = 0;
+            })
+            .catch(() => {
+                // Best effort only.
+            });
+    };
+    document.addEventListener('touchstart', unlockSirenAudio, { once: true, passive: true });
+    document.addEventListener('click', unlockSirenAudio, { once: true, passive: true });
+
     // Nút "Theo dõi" → Zoom vào trạm + ẩn banner + hiện siren popup sau khi zoom xong
     const btnFollow = document.getElementById('btn-alert-follow');
     if (btnFollow) {
@@ -3226,6 +3627,10 @@ document.addEventListener('DOMContentLoaded', () => {
         btnDismiss.addEventListener('click', () => {
             const banner = document.getElementById('alert-banner');
             if (banner) {
+                const stationId = currentAlertStationId;
+                if (stationId) {
+                    alertBannerSnoozeUntil[stationId] = Date.now() + 10000;
+                }
                 banner.classList.remove('show');
                 banner.classList.remove('level-warning', 'level-critical');
             }

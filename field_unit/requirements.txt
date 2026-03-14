@@ -1,0 +1,19 @@
+# Dependencies for BOTH field_unit/pi_center.py and field_unit/pi_point.py
+# Install with: python3 -m pip install -r requirements.txt
+
+# MQTT communication
+paho-mqtt>=1.6,<3.0
+
+# HTTP calls for registration/heartbeat/license confirmation
+requests>=2.31,<3.0
+
+# WebSocket fallback used by pi_center.py
+websocket-client>=1.6,<2.0
+
+# GPIO control for Raspberry Pi (optional on non-Pi environments)
+RPi.GPIO>=0.7; platform_system == "Linux" and (platform_machine == "armv7l" or platform_machine == "aarch64")
+
+# NOTE (pi_center audio playback): these are SYSTEM packages, not pip packages.
+# Install on Raspberry Pi with apt:
+#   sudo apt-get update
+#   sudo apt-get install -y mpg123 alsa-utils pulseaudio-utils

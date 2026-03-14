@@ -784,7 +784,6 @@ class AdminManager {
             }
         }
             const gnssCfg = cfg.GnssAlerting || {};
-            document.getElementById('cfg-gnss-streak').value = gnssCfg.gnss_safe_streak ?? 10;
             document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
 
             const imuCfg = cfg.ImuAlerting || {};
@@ -929,7 +928,6 @@ class AdminManager {
                 water_confirm: 5,
                 rain_confirm: 3,
                 gnss_hdop: 3.0,
-                gnss_streak: 10,
                 gnss_timeout: 600,
                 water_warning: 0.20,
                 water_critical: 0.40,
@@ -946,7 +944,6 @@ class AdminManager {
                 water_confirm: 3,
                 rain_confirm: 2,
                 gnss_hdop: 4.0,
-                gnss_streak: 5,
                 gnss_timeout: 300,
                 water_warning: 0.15,
                 water_critical: 0.30,
@@ -963,7 +960,6 @@ class AdminManager {
                 water_confirm: 1,
                 rain_confirm: 1,
                 gnss_hdop: 5.0,
-                gnss_streak: 3,
                 gnss_timeout: 180,
                 water_warning: 0.10,
                 water_critical: 0.20,
@@ -997,12 +993,10 @@ class AdminManager {
         // GNSS Quality
         const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
         const gnssStepsEl = document.getElementById('cfg-gnss-steps');
-        const gnssStreakEl = document.getElementById('cfg-gnss-streak');
         const gnssTimeoutEl = document.getElementById('cfg-gnss-timeout');
 
         if (gnssHdopEl) gnssHdopEl.value = preset.gnss_hdop;
         if (gnssStepsEl) gnssStepsEl.value = preset.gnss_steps;
-        if (gnssStreakEl) gnssStreakEl.value = preset.gnss_streak;
         if (gnssTimeoutEl) gnssTimeoutEl.value = preset.gnss_timeout;
 
         // Water
@@ -1137,7 +1131,6 @@ class AdminManager {
                 gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
                 gnss_confirm_steps: parseInt(document.getElementById('cfg-gnss-steps').value) || 3,
                 gnss_safe_confirm_steps: parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
-                gnss_safe_streak: parseInt(document.getElementById('cfg-gnss-streak').value) || 10,
                 gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
             },
             ImuAlerting: {
@@ -1251,6 +1244,8 @@ class AdminManager {
         const tbody = document.getElementById('velocity-table-body');
         if (!tbody) return;
 
+        this.refreshVelocityDescriptions();
+
         tbody.innerHTML = this.velocityConfig.map((vel, index) => `
             <tr>
                 <td><strong>${vel.name}</strong></td>
@@ -1273,9 +1268,44 @@ class AdminManager {
     }
 
     updateVelocityThreshold(index, newValue) {
-        const value = parseFloat(newValue);
+        const value = parseFloat(String(newValue).replace(',', '.'));
         if (!isNaN(value)) {
             this.velocityConfig[index].threshold = value;
+            this.renderVelocityTable();
+        }
+    }
+
+    formatVelocityThreshold(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '--';
+        if (Math.abs(num) >= 1000) return num.toFixed(0);
+        if (Math.abs(num) >= 10) return num.toFixed(2).replace(/\.00$/, '');
+        if (Math.abs(num) >= 1) return num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+        return num.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+    }
+
+    refreshVelocityDescriptions() {
+        if (!Array.isArray(this.velocityConfig) || this.velocityConfig.length === 0) return;
+
+        const n = this.velocityConfig.length;
+        for (let i = 0; i < n; i++) {
+            const curr = this.velocityConfig[i] || {};
+            const next = this.velocityConfig[i + 1] || null;
+
+            const currVal = this.formatVelocityThreshold(curr.threshold);
+            const currUnit = curr.unit || 'mm/s';
+
+            if (i === 0 && next) {
+                const nextVal = this.formatVelocityThreshold(next.threshold);
+                const nextUnit = next.unit || currUnit;
+                curr.description = `< ${nextVal} ${nextUnit}`;
+            } else if (i === n - 1) {
+                curr.description = `> ${currVal} ${currUnit}`;
+            } else if (next) {
+                const nextVal = this.formatVelocityThreshold(next.threshold);
+                const nextUnit = next.unit || currUnit;
+                curr.description = `${currVal} ${currUnit} to ${nextVal} ${nextUnit}`;
+            }
         }
     }
 
@@ -2362,16 +2392,16 @@ class AdminManager {
                                 <p class="text-muted small mb-3">Chọn Pi Trung tâm để gán:</p>
                                 <div class="list-group list-group-flush" id="center-pick-list">
                                     ${centers.map(c => `
-                                        <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
-                                               style="cursor:pointer; background:transparent; border-color:var(--border-color)">
-                                            <input type="radio" name="center-pick" value="${c.id}" class="form-check-input">
-                                            <div>
+                                        <button type="button" class="list-group-item list-group-item-action d-flex gap-3 align-items-center center-pick-item"
+                                               data-center-id="${c.id}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                                            <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
+                                            <div class="text-start">
                                                 <strong>${c.name}</strong>
                                                 <small class="d-block text-muted font-monospace">${c.serial}</small>
                                                 ${c.station_name ? `<small class="text-info">📍 ${c.station_name}</small>` : ''}
                                             </div>
                                             <span class="badge ${c.status === 'assigned' ? 'bg-primary' : 'bg-success'} ms-auto">${c.status === 'assigned' ? '📍 Assigned' : '✅ Activated'}</span>
-                                        </label>
+                                        </button>
                                     `).join('')}
                                 </div>
                             </div>
@@ -2389,13 +2419,21 @@ class AdminManager {
             const bsModal = new bootstrap.Modal(document.getElementById('pickCenterModal'));
             bsModal.show();
 
+            let selectedCenterId = null;
+            modal.querySelectorAll('.center-pick-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    modal.querySelectorAll('.center-pick-item').forEach(x => x.classList.remove('is-selected'));
+                    item.classList.add('is-selected');
+                    selectedCenterId = parseInt(item.dataset.centerId, 10);
+                });
+            });
+
             document.getElementById('btn-confirm-center-pick').addEventListener('click', async () => {
-                const selected = document.querySelector('input[name="center-pick"]:checked');
-                if (!selected) {
+                if (!selectedCenterId) {
                     window.toast?.warning('Vui lòng chọn Pi Trung tâm');
                     return;
                 }
-                const centerId = parseInt(selected.value);
+                const centerId = selectedCenterId;
 
                 let ok = 0, fail = 0;
                 for (const pointId of pointIds) {
@@ -2438,7 +2476,9 @@ class AdminManager {
     async openAssignPiPointModal(centerId) {
         document.getElementById('assign-center-id').value = centerId;
         const select = document.getElementById('point-device-select');
-        select.innerHTML = '<option value="">-- Đang tải ... --</option>';
+        const optionsBox = document.getElementById('point-device-options');
+        if (select) select.value = '';
+        if (optionsBox) optionsBox.innerHTML = '<div class="text-muted small">-- Đang tải ... --</div>';
 
         const modal = new bootstrap.Modal(document.getElementById('assignPiPointModal'));
         modal.show();
@@ -2459,14 +2499,34 @@ class AdminManager {
             );
 
             if (pointsToAssign.length === 0) {
-                select.innerHTML = '<option value="">(Không có Pi Hiện trường nào đang rảnh và đã Activated)</option>';
+                if (optionsBox) {
+                    optionsBox.innerHTML = '<div class="text-muted small">(Không có Pi Hiện trường nào đang rảnh và đã Activated)</div>';
+                }
             } else {
-                select.innerHTML = '<option value="">-- Chọn 1 Pi Hiện Trường --</option>' +
-                    pointsToAssign.map(p => `<option value="${p.id}">${p.name} (${p.serial})</option>`).join('');
+                if (optionsBox) {
+                    optionsBox.innerHTML = pointsToAssign.map(p => `
+                        <button type="button" class="device-pick-option" data-point-id="${p.id}">
+                            <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
+                            <div class="text-start">
+                                <strong>${p.name}</strong>
+                                <small class="d-block text-muted font-monospace">${p.serial}</small>
+                            </div>
+                            <span class="badge bg-success ms-auto">✅ Activated</span>
+                        </button>
+                    `).join('');
+
+                    optionsBox.querySelectorAll('.device-pick-option').forEach(item => {
+                        item.addEventListener('click', () => {
+                            optionsBox.querySelectorAll('.device-pick-option').forEach(x => x.classList.remove('is-selected'));
+                            item.classList.add('is-selected');
+                            if (select) select.value = item.dataset.pointId || '';
+                        });
+                    });
+                }
             }
         } catch (e) {
             console.error(e);
-            select.innerHTML = '<option value="">(Lỗi tải danh sách)</option>';
+            if (optionsBox) optionsBox.innerHTML = '<div class="text-danger small">(Lỗi tải danh sách)</div>';
         }
     }
 
@@ -2555,23 +2615,27 @@ class AdminManager {
             listEl.innerHTML = `
                 <div class="list-group list-group-flush">
                     ${available.map(d => `
-                    <label class="list-group-item list-group-item-action d-flex gap-3 align-items-center"
-                           style="cursor:pointer; background:transparent; border-color:var(--border-color)">
-                        <input type="radio" name="pi-select" value="${d.id}" class="form-check-input">
-                        <div>
+                    <button type="button" class="list-group-item list-group-item-action d-flex gap-3 align-items-center wizard-pi-option"
+                           data-pi-id="${d.id}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                        <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
+                        <div class="text-start">
                             <strong class="font-monospace">${d.name}</strong>
                             <small class="d-block text-muted font-monospace">${d.serial}</small>
                         </div>
                         <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
-                    </label>
+                    </button>
                 `).join('')}
                 </div>`;
 
             if (btnRow) btnRow.style.display = 'block';
+            this._selectedWizardPiId = null;
 
-            // Show assign button row only when a radio is selected
-            listEl.querySelectorAll('input[name="pi-select"]').forEach(r => {
-                r.addEventListener('change', () => {
+            // Show assign button row only when a Pi is selected
+            listEl.querySelectorAll('.wizard-pi-option').forEach(r => {
+                r.addEventListener('click', () => {
+                    listEl.querySelectorAll('.wizard-pi-option').forEach(x => x.classList.remove('is-selected'));
+                    r.classList.add('is-selected');
+                    this._selectedWizardPiId = parseInt(r.dataset.piId, 10);
                     if (btnRow) btnRow.style.display = 'block';
                 });
             });
@@ -2584,12 +2648,11 @@ class AdminManager {
 
     /** Assign the selected Pi (from wizard radio) to the current station */
     async assignSelectedPiToStation() {
-        const selected = document.querySelector('input[name="pi-select"]:checked');
-        if (!selected) {
+        const piId = this._selectedWizardPiId;
+        if (!piId) {
             window.toast?.warning('Vui lòng chọn một Pi');
             return;
         }
-        const piId = parseInt(selected.value);
         try {
             const res = await fetch(`/api/field/pi-devices/${piId}/assign`, {
                 method: 'PUT',

@@ -49,3 +49,60 @@ class Alert(BaseData):
     category = Column(String, nullable=False)  # GNSS, RAIN, WATER, IMU
     message = Column(String, nullable=False)
     is_resolved = Column(Boolean, default=False, nullable=False)
+
+
+class GnssDailySummary(BaseData):
+    __tablename__ = "gnss_daily_summary"
+    __table_args__ = (
+        Index('ix_gnss_daily_station_day', 'station_id', 'day_start_ts', unique=True),
+        Index('ix_gnss_daily_day', 'day_start_ts'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    station_id = Column(Integer, index=True, nullable=False)
+    day_start_ts = Column(BigInteger, nullable=False)  # UTC 00:00:00
+    day_end_ts = Column(BigInteger, nullable=False)    # UTC 00:00:00 ngày kế tiếp
+
+    sample_count = Column(Integer, default=0, nullable=False)
+    first_ts = Column(BigInteger, nullable=True)
+    last_ts = Column(BigInteger, nullable=True)
+    duration_seconds = Column(BigInteger, default=0, nullable=False)
+
+    net_displacement_mm = Column(Float, default=0.0, nullable=False)
+    velocity_mm_day = Column(Float, default=0.0, nullable=False)
+    velocity_mm_second = Column(Float, default=0.0, nullable=False)
+    classification = Column(String, default="N/A", nullable=False)
+    risk_level = Column(String, default="UNKNOWN", nullable=False)
+    is_safe = Column(Boolean, default=True, nullable=False)
+    status = Column(String, default="insufficient_data", nullable=False)
+    message = Column(String, default="", nullable=False)
+
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+
+class GnssWeeklySummary(BaseData):
+    __tablename__ = "gnss_weekly_summary"
+    __table_args__ = (
+        Index('ix_gnss_weekly_station_range', 'station_id', 'week_start_ts', 'week_end_ts', unique=True),
+        Index('ix_gnss_weekly_end', 'week_end_ts'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    station_id = Column(Integer, index=True, nullable=False)
+    week_start_ts = Column(BigInteger, nullable=False)
+    week_end_ts = Column(BigInteger, nullable=False)
+
+    day_count = Column(Integer, default=0, nullable=False)
+    total_displacement_mm = Column(Float, default=0.0, nullable=False)
+    avg_velocity_mm_day = Column(Float, default=0.0, nullable=False)
+    max_velocity_mm_day = Column(Float, default=0.0, nullable=False)
+    min_velocity_mm_day = Column(Float, default=0.0, nullable=False)
+    classification = Column(String, default="N/A", nullable=False)
+    risk_level = Column(String, default="UNKNOWN", nullable=False)
+    is_safe = Column(Boolean, default=True, nullable=False)
+    status = Column(String, default="insufficient_data", nullable=False)
+    message = Column(String, default="", nullable=False)
+
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)

@@ -17,7 +17,7 @@ except ImportError:
     sys.exit(1)
 
 try:
-    import RPi.GPIO as GPIO
+    import RPi.GPIO as GPIO  # pyright: ignore[reportMissingModuleSource]
     GPIO_AVAILABLE = True
 except ImportError:
     print("⚠️  RPi.GPIO not installed or not running on Pi. GPIO will be simulated.")
@@ -37,6 +37,8 @@ MQTT_PASSWORD = ""
 
 LOCAL_CONFIG = Path.home() / ".landslide_point.json"
 BACKEND_URL = os.getenv('BACKEND_URL', 'https://monitoring.aitogy.com')
+AUDIO_DIR = Path(__file__).parent / "landslide_audio"
+SIREN_FILE = AUDIO_DIR / "siren.mp3"
 
 # Runtime values
 DEVICE_CODE = None
@@ -465,6 +467,18 @@ def main():
     gpio_setup()
     auto_register_device()
     load_local_config()
+
+    # Require audio assets for pi_point, same policy as pi_center.
+    if not AUDIO_DIR.exists():
+        logger.error(f"❌ Audio directory not found: {AUDIO_DIR}")
+        logger.error(f"   Create it: mkdir -p {AUDIO_DIR}")
+        logger.error(f"   Copy siren file: cp /path/to/siren.mp3 {SIREN_FILE}")
+        sys.exit(1)
+
+    if not SIREN_FILE.exists():
+        logger.error(f"❌ Required siren file not found: {SIREN_FILE}")
+        logger.error("   Please add siren.mp3 before starting this service")
+        sys.exit(1)
     
     logger.info(f"📍 Station ID: {MY_STATION_ID}")
     

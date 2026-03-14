@@ -23,10 +23,14 @@ class Settings(BaseSettings):
     TOPIC_RELOAD_INTERVAL: int = 60
 
     SAVE_INTERVAL_DEFAULT: int = 60
-    SAVE_INTERVAL_GNSS: int = 86400
+    SAVE_INTERVAL_GNSS: int = 1
     SAVE_INTERVAL_RAIN: int = 3600
     SAVE_INTERVAL_WATER: int = 3600
     SAVE_INTERVAL_IMU: int = 2592000
+
+    # GNSS rollup/purge workflow: thu thập dày theo giây, chốt ngày/tuần rồi dọn raw.
+    GNSS_ROLLUP_INTERVAL_SECONDS: int = 300
+    GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP: bool = True
 
     class Config:
         # Chỉ định đường dẫn tuyệt đối tới file .env để chạy ổn định trên IIS

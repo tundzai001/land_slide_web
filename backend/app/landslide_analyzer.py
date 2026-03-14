@@ -1,6 +1,7 @@
 # backend/app/landslide_analyzer.py - FIXED WITH CONFIRMATION COUNTER
 import logging
 import math
+import time
 import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -22,9 +23,40 @@ class LandslideAnalyzer:
         
     def _get_cfg(self, config: Dict, section: str, key: str, default: float) -> float:
         try:
-            return float(config.get(section, {}).get(key, default))
+            raw = config.get(section, {}).get(key, default)
+            if isinstance(raw, str):
+                raw = raw.strip().replace(',', '.')
+            return float(raw)
         except (ValueError, TypeError, AttributeError):
             return float(default)
+
+    def _get_gnss_min_reliable_window_days(self, config: Dict) -> float:
+        min_hours = self._get_cfg(config, "GnssAlerting", "longterm_min_duration_hours", 1.0)
+        return max(min_hours / 24.0, 1.0 / 1440.0)
+
+    def _is_reliable_observation_window(
+        self,
+        duration_days: float,
+        data_points: int,
+        min_duration_days: float,
+        min_points: int = 3
+    ) -> bool:
+        return duration_days >= min_duration_days and data_points >= min_points
+
+    def _build_gnss_preliminary_message(
+        self,
+        duration_days: float,
+        data_points: int,
+        min_duration_days: float,
+        min_points: int = 3
+    ) -> str:
+        observed_minutes = max(duration_days * 1440.0, 0.0)
+        required_minutes = max(min_duration_days * 1440.0, 1.0)
+        return (
+            f"Chưa đủ thời lượng để kết luận vận tốc GNSS dài hạn: "
+            f"cần >= {required_minutes:.0f} phút và >= {min_points} điểm, "
+            f"hiện có {observed_minutes:.0f} phút và {data_points} điểm."
+        )
 
     # =========================================================================
     # PHÂN TÍCH DÀI HẠN (Long-term Analysis) - IMPROVED
@@ -108,21 +140,37 @@ class LandslideAnalyzer:
             
             # Vector vận tốc tổng hợp (m/day)
             velocity_m_per_day = math.sqrt(vel_e_m_day**2 + vel_n_m_day**2 + vel_u_m_day**2)
-            
-            # Tính displacement ước lượng từ OLS (để hiển thị) thay vì cộng dồn noise
-            total_displacement_mm = (velocity_m_per_day * duration_days) * 1000
 
-            # Net displacement (first → last) chỉ dùng để tham khảo
+            # Tổng chuyển dịch dài hạn phải bám theo điểm đầu và điểm cuối của cửa sổ,
+            # tránh phóng đại do cộng dồn nhiễu giữa các mẫu liên tiếp.
             first_data = first_point['data']
             last_data = last_point['data']
             delta_e = last_data.get('pos_e', 0) - first_data.get('pos_e', 0)
             delta_n = last_data.get('pos_n', 0) - first_data.get('pos_n', 0)
             delta_u = last_data.get('pos_u', 0) - first_data.get('pos_u', 0)
             net_displacement_mm = math.sqrt(delta_e**2 + delta_n**2 + delta_u**2) * 1000
+            total_displacement_mm = net_displacement_mm
 
-            velocity_mm_per_day = velocity_m_per_day * 1000
+            regression_displacement_mm = (velocity_m_per_day * duration_days) * 1000
+
+            velocity_mm_per_day = total_displacement_mm / duration_days if duration_days > 0 else 0
             velocity_mm_per_year = velocity_mm_per_day * 365
             velocity_mm_per_second = velocity_mm_per_day / 86400
+            regression_velocity_mm_per_day = velocity_m_per_day * 1000
+            regression_velocity_mm_per_year = regression_velocity_mm_per_day * 365
+            regression_velocity_mm_per_second = regression_velocity_mm_per_day / 86400
+
+            min_reliable_duration_days = self._get_gnss_min_reliable_window_days(config)
+            velocity_reliable = self._is_reliable_observation_window(
+                duration_days,
+                len(sorted_data),
+                min_reliable_duration_days
+            )
+            reliability_message = self._build_gnss_preliminary_message(
+                duration_days,
+                len(sorted_data),
+                min_reliable_duration_days
+            )
 
             classification = self._classify_velocity_extended(
                 velocity_mm_per_second,
@@ -135,23 +183,28 @@ class LandslideAnalyzer:
             trend = self._detect_displacement_trend(sorted_data)
 
             cls_upper = classification.upper()
-            
-            if any(c in cls_upper for c in ("EXTREMELY RAPID", "VERY RAPID", "RAPID")):
-                risk_level = "CRITICAL"
-                warning_message = f"🚨 NGUY HIỂM: Vận tốc {classification}"
-            elif "MODERATE" in cls_upper:
-                risk_level = "HIGH"
-                warning_message = f"⚠️ CẢNH BÁO: Tăng tốc độ ({classification})"
-            elif "SLOW" in cls_upper:
-                risk_level = "MEDIUM"
-                warning_message = f"CẦN THEO DÕI: Vận tốc {classification}"
-            else:
-                risk_level = "LOW"
-                warning_message = f"An toàn: Vận tốc {classification}"
 
-            if trend == "accelerating" and risk_level in ("LOW", "MEDIUM"):
-                risk_level = "HIGH"
-                warning_message = f"⚠️ Chú ý: Xu hướng đang tăng tốc mạnh"
+            if velocity_reliable:
+                if any(c in cls_upper for c in ("EXTREMELY RAPID", "VERY RAPID", "RAPID")):
+                    risk_level = "CRITICAL"
+                    warning_message = f"🚨 NGUY HIỂM: Vận tốc {classification}"
+                elif "MODERATE" in cls_upper:
+                    risk_level = "HIGH"
+                    warning_message = f"⚠️ CẢNH BÁO: Tăng tốc độ ({classification})"
+                elif "SLOW" in cls_upper:
+                    risk_level = "MEDIUM"
+                    warning_message = f"CẦN THEO DÕI: Vận tốc {classification}"
+                else:
+                    risk_level = "LOW"
+                    warning_message = f"An toàn: Vận tốc {classification}"
+
+                if trend == "accelerating" and risk_level in ("LOW", "MEDIUM"):
+                    risk_level = "HIGH"
+                    warning_message = f"⚠️ Chú ý: Xu hướng đang tăng tốc mạnh"
+            else:
+                classification = "Chưa đủ thời lượng"
+                risk_level = "INFO"
+                warning_message = reliability_message
 
             # --- Bước 4b: Tính toán Khoảng tin cậy OLS (OLS Confidence Interval) ---
             velocity_ci_95 = self._calculate_ols_velocity_ci(sorted_data)
@@ -159,7 +212,7 @@ class LandslideAnalyzer:
             # --- Bước 4c: Phát hiện CUSUM Change Point ---
             cusum_result = self._detect_cusum_change_points(sorted_data)
             
-            if cusum_result['has_change']:
+            if velocity_reliable and cusum_result['has_change']:
                 # Nâng risk level nếu CUSUM phát hiện thay đổi
                 if risk_level in ("LOW", "MEDIUM"):
                     risk_level = "HIGH"
@@ -174,7 +227,7 @@ class LandslideAnalyzer:
             inverse_velocity = self._inverse_velocity_analysis(sorted_data)
 
             # Nâng risk nếu Fukuzono dự báo sụp lún gần
-            if inverse_velocity.get('predicted_failure'):
+            if velocity_reliable and inverse_velocity.get('predicted_failure'):
                 days_to_failure = inverse_velocity.get('days_to_failure', 999)
                 fukuzono_msg = ""
                 if days_to_failure <= 7:
@@ -193,15 +246,24 @@ class LandslideAnalyzer:
                 "analysis": {
                     "total_displacement_mm": round(total_displacement_mm, 2),
                     "net_displacement_mm": round(net_displacement_mm, 2),
+                    "regression_displacement_mm": round(regression_displacement_mm, 2),
                     "velocity_mm_year": round(velocity_mm_per_year, 2),
                     "velocity_ci_95": round(velocity_ci_95, 2),
                     "velocity_mm_day": round(velocity_mm_per_day, 4),
                     "velocity_mm_second": round(velocity_mm_per_second, 6),
+                    "regression_velocity_mm_year": round(regression_velocity_mm_per_year, 2),
+                    "regression_velocity_mm_day": round(regression_velocity_mm_per_day, 4),
+                    "regression_velocity_mm_second": round(regression_velocity_mm_per_second, 6),
                     "classification": classification,
                     "trend": trend,
                     "cusum_change": cusum_result['has_change'],
                     "cusum_message": cusum_result.get('message', ''),
-                    "duration_days": round(duration_days, 1),
+                    "displacement_basis": "first_last_point",
+                    "velocity_reliable": velocity_reliable,
+                    "reliability_message": reliability_message,
+                    "min_reliable_duration_days": round(min_reliable_duration_days, 4),
+                    "min_reliable_points": 3,
+                    "duration_days": round(duration_days, 4),
                     "data_points_used": len(sorted_data),
                     "start_date": datetime.fromtimestamp(first_point['timestamp']).isoformat(),
                     "end_date": datetime.fromtimestamp(last_point['timestamp']).isoformat()
@@ -222,6 +284,47 @@ class LandslideAnalyzer:
         velocity_mm_year: float,
         config: Dict
     ) -> str:
+        def _normalize_unit(raw_unit: Any) -> str:
+            u = str(raw_unit or 'mm/s').strip().lower().replace(' ', '')
+            aliases = {
+                'mm/s': 'mm/s',
+                'mmps': 'mm/s',
+                'mm/sec': 'mm/s',
+                'mm/second': 'mm/s',
+                'mm/day': 'mm/day',
+                'mm/d': 'mm/day',
+                'mm/year': 'mm/year',
+                'mm/y': 'mm/year',
+                'm/year': 'm/year',
+                'm/y': 'm/year',
+                'm/month': 'm/month',
+                'm/mo': 'm/month',
+                'm/hr': 'm/hr',
+                'm/h': 'm/hr',
+                'm/hour': 'm/hr',
+                'm/min': 'm/min',
+                'm/s': 'm/s',
+            }
+            return aliases.get(u, u)
+
+        def _infer_unit_from_description(desc: str) -> Optional[str]:
+            d = str(desc or '').lower().replace(' ', '')
+            if not d:
+                return None
+            if 'mm/year' in d or 'mm/y' in d:
+                return 'mm/year'
+            if 'm/year' in d or 'm/y' in d:
+                return 'm/year'
+            if 'm/month' in d or 'm/mo' in d:
+                return 'm/month'
+            if 'm/hour' in d or 'm/hr' in d or 'm/h' in d:
+                return 'm/hr'
+            if 'm/min' in d:
+                return 'm/min'
+            if 'm/s' in d:
+                return 'm/s'
+            return None
+
         classification_table = config.get("velocity_classification")
         if not classification_table:
             classification_table = [
@@ -236,8 +339,18 @@ class LandslideAnalyzer:
         
         normalized_table = []
         for cls in classification_table:
-            thresh = float(cls.get('threshold', 0))
-            unit = cls.get('unit', 'mm/s')
+            thresh_raw = cls.get('threshold', 0)
+            if isinstance(thresh_raw, str):
+                thresh_raw = thresh_raw.strip().replace(',', '.')
+            thresh = float(thresh_raw)
+
+            unit = _normalize_unit(cls.get('unit', 'mm/s'))
+            # Một số bản config cũ bị lưu sai unit='mm/s' cho toàn bộ dải Cruden.
+            # Khi đó ưu tiên suy luận lại từ mô tả để tránh phân loại sai nặng.
+            if unit == 'mm/s':
+                inferred = _infer_unit_from_description(cls.get('description') or cls.get('desc') or '')
+                if inferred:
+                    unit = inferred
             
             # Chuyển đổi mọi thứ về cùng 1 chuẩn để so sánh (mm/s)
             thresh_mm_s = thresh
@@ -560,14 +673,23 @@ class LandslideAnalyzer:
         self,
         gnss_data: List[Dict[str, Any]],
         rain_data: List[Dict[str, Any]],
-        window_days: float = 30.0
+        window_days: float = 30.0,
+        config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Phân tích tương quan giữa lượng mưa tích lũy và dịch chuyển.
-        Phương pháp: So sánh daily rainfall vs daily displacement.
+        Phân tích tương quan theo LS-RAPID (rainfall response + displacement rate).
+
+        Ý tưởng chính:
+        - Tạo chỉ số mưa hiệu dụng đa thang thời gian (short-term + long-term).
+        - Tìm độ trễ mưa -> dịch chuyển tốt nhất (lag scanning).
+        - Đánh giá mức liên hệ giữa chỉ số mưa LS-RAPID và vận tốc dịch chuyển ngày.
+
+        Ghi chú:
+        - Hàm vẫn trả về các trường cũ để tương thích frontend hiện tại.
         """
         result = {
             "available": False,
+            "model": "ls_rapid",
             "message": ""
         }
 
@@ -576,21 +698,36 @@ class LandslideAnalyzer:
             return result
 
         try:
-            # Aggregate daily displacement
+            cfg = config or {}
+            ls_cfg = cfg.get("LsRapid", {}) if isinstance(cfg, dict) else {}
+
+            short_half_life_days = max(float(ls_cfg.get("short_half_life_days", 1.5)), 0.1)
+            long_half_life_days = max(float(ls_cfg.get("long_half_life_days", 7.0)), 0.2)
+            short_weight = float(ls_cfg.get("short_weight", 0.7))
+            short_weight = min(max(short_weight, 0.0), 1.0)
+            max_lag_days = int(ls_cfg.get("max_lag_days", 3))
+            max_lag_days = min(max(max_lag_days, 0), 10)
+
             sorted_gnss = sorted(gnss_data, key=lambda x: x['timestamp'])
             sorted_rain = sorted(rain_data, key=lambda x: x['timestamp'])
 
-            daily_disp = OrderedDict()  # day_key -> cumulative_disp_mm
-            cumulative = 0.0
-            for i in range(1, len(sorted_gnss)):
-                prev = sorted_gnss[i - 1]['data']
-                curr = sorted_gnss[i]['data']
-                de = curr.get('pos_e', 0) - prev.get('pos_e', 0)
-                dn = curr.get('pos_n', 0) - prev.get('pos_n', 0)
-                du = curr.get('pos_u', 0) - prev.get('pos_u', 0)
-                cumulative += math.sqrt(de**2 + dn**2 + du**2) * 1000
-                day_key = datetime.fromtimestamp(sorted_gnss[i]['timestamp']).strftime('%Y-%m-%d')
-                daily_disp[day_key] = cumulative
+            # Lấy một giá trị GNSS đại diện theo ngày (median) để giảm nhiễu.
+            gnss_daily_raw = OrderedDict()  # day_key -> {'e':[], 'n':[], 'u':[]}
+            for point in sorted_gnss:
+                day_key = datetime.fromtimestamp(point['timestamp']).strftime('%Y-%m-%d')
+                data = point.get('data', {})
+                if day_key not in gnss_daily_raw:
+                    gnss_daily_raw[day_key] = {'e': [], 'n': [], 'u': []}
+                gnss_daily_raw[day_key]['e'].append(float(data.get('pos_e', 0.0)))
+                gnss_daily_raw[day_key]['n'].append(float(data.get('pos_n', 0.0)))
+                gnss_daily_raw[day_key]['u'].append(float(data.get('pos_u', 0.0)))
+
+            gnss_daily = OrderedDict()  # day_key -> (e, n, u)
+            for day_key, xyz in gnss_daily_raw.items():
+                e_med = float(np.median(np.array(xyz['e']))) if xyz['e'] else 0.0
+                n_med = float(np.median(np.array(xyz['n']))) if xyz['n'] else 0.0
+                u_med = float(np.median(np.array(xyz['u']))) if xyz['u'] else 0.0
+                gnss_daily[day_key] = (e_med, n_med, u_med)
 
             # Aggregate daily rainfall (tổng mm/ngày)
             daily_rain = OrderedDict()
@@ -601,59 +738,176 @@ class LandslideAnalyzer:
                     daily_rain[day_key] = 0.0
                 daily_rain[day_key] += float(rain_val) if rain_val else 0
 
-            # Tính cumulative rainfall
-            cumulative_rain = OrderedDict()
-            cum_r = 0.0
-            for day, val in daily_rain.items():
-                cum_r += val
-                cumulative_rain[day] = cum_r
-
             # Match days
-            common_days = sorted(set(daily_disp.keys()) & set(cumulative_rain.keys()))
-            if len(common_days) < 5:
-                result["message"] = f"Chỉ có {len(common_days)} ngày chung — cần ít nhất 5."
+            common_days = sorted(set(gnss_daily.keys()) & set(daily_rain.keys()))
+            if len(common_days) < 7:
+                result["message"] = f"Chỉ có {len(common_days)} ngày chung — cần ít nhất 7 cho LS-RAPID."
                 return result
 
-            disp_values = np.array([daily_disp[d] for d in common_days])
-            rain_values = np.array([cumulative_rain[d] for d in common_days])
+            # Chuẩn bị displacement theo ngày
+            cumulative_disp = []
+            daily_disp_inc = []
+            prev_norm = None
+            cum_val = 0.0
+            first_xyz = None
 
-            # Pearson correlation
-            if np.std(disp_values) > 0 and np.std(rain_values) > 0:
-                correlation = float(np.corrcoef(disp_values, rain_values)[0, 1])
+            for day in common_days:
+                e, n, u = gnss_daily[day]
+                if first_xyz is None:
+                    first_xyz = (e, n, u)
+                    cumulative_disp.append(0.0)
+                    daily_disp_inc.append(0.0)
+                    prev_norm = (e, n, u)
+                    continue
+
+                de0 = e - first_xyz[0]
+                dn0 = n - first_xyz[1]
+                du0 = u - first_xyz[2]
+                cumulative_disp.append(math.sqrt(de0**2 + dn0**2 + du0**2) * 1000.0)
+
+                dep = e - prev_norm[0]
+                dnp = n - prev_norm[1]
+                dup = u - prev_norm[2]
+                step_mm = math.sqrt(dep**2 + dnp**2 + dup**2) * 1000.0
+                daily_disp_inc.append(step_mm)
+                cum_val += step_mm
+                prev_norm = (e, n, u)
+
+            # Cumulative displacement theo cách cũ (tổng bước) để giữ tương thích chart cũ
+            cumulative_disp_legacy = []
+            cum_legacy = 0.0
+            for idx, step in enumerate(daily_disp_inc):
+                if idx == 0:
+                    cumulative_disp_legacy.append(0.0)
+                    continue
+                cum_legacy += float(step)
+                cumulative_disp_legacy.append(cum_legacy)
+
+            rain_arr = np.array([float(daily_rain.get(day, 0.0)) for day in common_days], dtype=float)
+            disp_rate_arr = np.array(daily_disp_inc, dtype=float)
+
+            # Effective rainfall (LS-RAPID-style multi-timescale memory)
+            decay_short = math.exp(-math.log(2.0) / short_half_life_days)
+            decay_long = math.exp(-math.log(2.0) / long_half_life_days)
+
+            rain_eff_short = np.zeros_like(rain_arr)
+            rain_eff_long = np.zeros_like(rain_arr)
+            for i in range(len(rain_arr)):
+                if i == 0:
+                    rain_eff_short[i] = rain_arr[i]
+                    rain_eff_long[i] = rain_arr[i]
+                else:
+                    rain_eff_short[i] = rain_arr[i] + decay_short * rain_eff_short[i - 1]
+                    rain_eff_long[i] = rain_arr[i] + decay_long * rain_eff_long[i - 1]
+
+            ls_rapid_index = short_weight * rain_eff_short + (1.0 - short_weight) * rain_eff_long
+
+            # Tìm lag tốt nhất: mưa dẫn, dịch chuyển theo sau.
+            best_lag = 0
+            best_corr = 0.0
+            best_pairs = 0
+            for lag in range(max_lag_days + 1):
+                if lag == 0:
+                    x = ls_rapid_index
+                    y = disp_rate_arr
+                else:
+                    x = ls_rapid_index[:-lag]
+                    y = disp_rate_arr[lag:]
+
+                if len(x) < 5:
+                    continue
+                if np.std(x) <= 1e-12 or np.std(y) <= 1e-12:
+                    continue
+
+                corr = float(np.corrcoef(x, y)[0, 1])
+                if abs(corr) > abs(best_corr):
+                    best_corr = corr
+                    best_lag = lag
+                    best_pairs = len(x)
+
+            if best_pairs < 5:
+                result["message"] = "Biến thiên dữ liệu quá thấp, chưa đủ để ước lượng LS-RAPID tin cậy."
+                return result
+
+            # Hồi quy tuyến tính cho cặp lag tốt nhất
+            if best_lag == 0:
+                x_fit = ls_rapid_index
+                y_fit = disp_rate_arr
             else:
-                correlation = 0.0
+                x_fit = ls_rapid_index[:-best_lag]
+                y_fit = disp_rate_arr[best_lag:]
 
-            # Đánh giá mức tương quan
+            slope, intercept = np.polyfit(x_fit, y_fit, 1)
+            y_pred = slope * x_fit + intercept
+            ss_res = float(np.sum((y_fit - y_pred) ** 2))
+            ss_tot = float(np.sum((y_fit - np.mean(y_fit)) ** 2))
+            r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+            # Giữ trường correlation như trước, nay là corr(LS-RAPID index, displacement rate)
+            correlation = float(best_corr)
+
+            # Đánh giá mức liên hệ
             abs_corr = abs(correlation)
             if abs_corr >= 0.8:
                 strength = "Rất mạnh"
-                assessment = "Mưa có ảnh hưởng rõ rệt đến dịch chuyển đất."
+                assessment = "LS-RAPID cho thấy mưa có liên hệ rất mạnh với gia tăng dịch chuyển."
             elif abs_corr >= 0.6:
                 strength = "Mạnh"
-                assessment = "Mưa có tương quan đáng kể với dịch chuyển."
+                assessment = "LS-RAPID cho thấy mưa có liên hệ đáng kể với dịch chuyển."
             elif abs_corr >= 0.4:
                 strength = "Trung bình"
-                assessment = "Mưa có ảnh hưởng nhất định đến dịch chuyển."
+                assessment = "LS-RAPID ghi nhận ảnh hưởng mức trung bình của mưa lên dịch chuyển."
             elif abs_corr >= 0.2:
                 strength = "Yếu"
-                assessment = "Tương quan mưa-dịch chuyển yếu."
+                assessment = "LS-RAPID ghi nhận liên hệ yếu giữa mưa và dịch chuyển."
             else:
                 strength = "Không đáng kể"
-                assessment = "Mưa không ảnh hưởng rõ đến dịch chuyển trong giai đoạn này."
+                assessment = "LS-RAPID chưa thấy ảnh hưởng rõ của mưa trong giai đoạn này."
 
-            # Daily rainfall (non-cumulative) cho chart
-            daily_rain_values = [daily_rain.get(d, 0) for d in common_days]
+            trigger_potential = "LOW"
+            if correlation >= 0.6 and slope > 0 and r2 >= 0.3:
+                trigger_potential = "HIGH"
+            elif correlation >= 0.4 and slope > 0:
+                trigger_potential = "MEDIUM"
+
+            # Cumulative rainfall cho chart cũ
+            cumulative_rain = []
+            rain_cum = 0.0
+            for rv in rain_arr:
+                rain_cum += float(rv)
+                cumulative_rain.append(rain_cum)
 
             result["available"] = True
             result["correlation"] = round(correlation, 4)
             result["strength"] = strength
             result["assessment"] = assessment
             result["common_days"] = len(common_days)
+            result["lag_days"] = int(best_lag)
+            result["r_squared"] = round(float(r2), 4)
+            result["slope_mm_day_per_rain_index"] = round(float(slope), 6)
+            result["trigger_potential"] = trigger_potential
+            result["ls_rapid"] = {
+                "short_half_life_days": short_half_life_days,
+                "long_half_life_days": long_half_life_days,
+                "short_weight": short_weight,
+                "max_lag_days": max_lag_days
+            }
+            result["message"] = (
+                f"LS-RAPID: r={correlation:.3f}, lag={best_lag} ngày, "
+                f"R²={r2:.2f}, trigger={trigger_potential}."
+            )
             result["time_series"] = {
                 "labels": [datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m') for d in common_days],
-                "cumulative_displacement_mm": [round(daily_disp[d], 2) for d in common_days],
-                "cumulative_rainfall_mm": [round(cumulative_rain[d], 1) for d in common_days],
-                "daily_rainfall_mm": [round(v, 1) for v in daily_rain_values]
+                # Legacy fields (frontend hiện dùng)
+                "cumulative_displacement_mm": [round(v, 2) for v in cumulative_disp_legacy],
+                "cumulative_rainfall_mm": [round(v, 1) for v in cumulative_rain],
+                "daily_rainfall_mm": [round(float(v), 1) for v in rain_arr],
+                # LS-RAPID-specific fields
+                "daily_displacement_mm": [round(float(v), 2) for v in disp_rate_arr],
+                "effective_rainfall_short_mm": [round(float(v), 2) for v in rain_eff_short],
+                "effective_rainfall_long_mm": [round(float(v), 2) for v in rain_eff_long],
+                "ls_rapid_index": [round(float(v), 2) for v in ls_rapid_index],
+                "net_displacement_mm": [round(float(v), 2) for v in cumulative_disp]
             }
 
             return result
@@ -685,6 +939,7 @@ class LandslideAnalyzer:
             sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
             latest_ts = sorted_data[-1]['timestamp']
             latest_dt = datetime.fromtimestamp(latest_ts)
+            min_reliable_duration_days = self._get_gnss_min_reliable_window_days(config)
 
             # Determine anchors
             # Day: data from 24h ago
@@ -720,33 +975,49 @@ class LandslideAnalyzer:
                     })
                     continue
 
-                # Tính cumulative displacement
-                cumulative = 0.0
-                for i in range(1, len(window_data)):
-                    prev = window_data[i - 1]['data']
-                    curr = window_data[i]['data']
-                    de = curr.get('pos_e', 0) - prev.get('pos_e', 0)
-                    dn = curr.get('pos_n', 0) - prev.get('pos_n', 0)
-                    du = curr.get('pos_u', 0) - prev.get('pos_u', 0)
-                    cumulative += math.sqrt(de**2 + dn**2 + du**2) * 1000
+                first_window = window_data[0]['data']
+                last_window = window_data[-1]['data']
+                de = last_window.get('pos_e', 0) - first_window.get('pos_e', 0)
+                dn = last_window.get('pos_n', 0) - first_window.get('pos_n', 0)
+                du = last_window.get('pos_u', 0) - first_window.get('pos_u', 0)
+                net_displacement_mm = math.sqrt(de**2 + dn**2 + du**2) * 1000
 
                 duration = (window_data[-1]['timestamp'] - window_data[0]['timestamp']) / 86400.0
-                vel_mm_day = cumulative / duration if duration > 0 else 0
+                vel_mm_day = net_displacement_mm / duration if duration > 0 else 0
                 trend = self._detect_displacement_trend(window_data)
+                velocity_reliable = self._is_reliable_observation_window(
+                    duration,
+                    len(window_data),
+                    min_reliable_duration_days
+                )
+                reliability_message = self._build_gnss_preliminary_message(
+                    duration,
+                    len(window_data),
+                    min_reliable_duration_days
+                )
 
                 window_results.append({
                     "window_days": interval["type"], 
                     "label": interval["label"],
-                    "status": "success",
+                    "status": "success" if velocity_reliable else "preliminary",
+                    "duration_days": round(duration, 4),
                     "velocity_mm_day": round(vel_mm_day, 4),
                     "velocity_mm_year": round(vel_mm_day * 365, 2),
-                    "displacement_mm": round(cumulative, 2),
+                    "displacement_mm": round(net_displacement_mm, 2),
+                    "displacement_basis": "first_last_point",
+                    "velocity_reliable": velocity_reliable,
+                    "reliability_message": reliability_message,
+                    "min_reliable_duration_days": round(min_reliable_duration_days, 4),
+                    "min_reliable_points": 3,
                     "data_points": len(window_data),
                     "trend": trend
                 })
 
             acceleration_alert = None
-            valid_windows = [w for w in window_results if w['status'] == 'success' and w['velocity_mm_day'] is not None]
+            valid_windows = [
+                w for w in window_results
+                if w['status'] == 'success' and w['velocity_reliable'] and w['velocity_mm_day'] is not None
+            ]
 
             if len(valid_windows) >= 2:
                 short_window = next((w for w in valid_windows if w['window_days'] == 'day'), valid_windows[0])
@@ -893,7 +1164,7 @@ class LandslideAnalyzer:
                     "roll_change_deg": round(roll_change, 2),
                     "pitch_change_deg": round(pitch_change, 2),
                     "trend": trend,
-                    "duration_days": round(duration_days, 1),
+                    "duration_days": round(duration_days, 4),
                     "data_points": len(rolls),
                     "start_date": datetime.fromtimestamp(timestamps[0]).isoformat(),
                     "end_date": datetime.fromtimestamp(timestamps[-1]).isoformat()
@@ -906,6 +1177,189 @@ class LandslideAnalyzer:
         except Exception as e:
             logger.error(f"Error in long-term tilt analysis: {e}", exc_info=True)
             return {"status": "error", "message": f"Lỗi: {str(e)}"}
+
+    # =========================================================================
+    # PHÂN TÍCH ĐỒNG THUẬN ĐA CẢM BIẾN (Cross-Sensor Consensus)
+    # =========================================================================
+    def analyze_cross_sensor_consensus(
+        self,
+        gnss_result: Dict[str, Any],
+        imu_result: Dict[str, Any],
+        rain_corr_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Đánh giá mức độ đồng thuận giữa các model cảm biến dài hạn.
+        Nguyên tắc: dữ liệu chỉ đáng tin khi nhiều cảm biến cùng chỉ về một
+        hướng — GNSS thấy dịch chuyển + IMU thấy góc nghiêng + mưa hỗ trợ.
+        Nếu chỉ một cảm biến báo bất thường mà các cảm biến khác flat, rất
+        có thể là nhiễu hoặc drift — không đủ cơ sở kết luận.
+        """
+        try:
+            sensors_with_data: List[str] = []
+            sensors_alerting: List[str] = []
+            sensors_corroborating: List[str] = []
+            sensors_conflicting: List[str] = []
+            notes: List[str] = []
+
+            # ── GNSS ──────────────────────────────────────────────────────────
+            gnss_ok = bool(gnss_result and gnss_result.get("status") == "success")
+            gnss_analysis = gnss_result.get("analysis", {}) if gnss_ok else {}
+            gnss_reliable = gnss_analysis.get("velocity_reliable", True)
+            gnss_trend = gnss_analysis.get("trend", "stable")
+            gnss_risk = (gnss_result.get("risk_level", "LOW") or "LOW") if gnss_ok else "LOW"
+            gnss_displacement_mm = float(gnss_analysis.get("total_displacement_mm", 0.0))
+            gnss_duration_days = float(gnss_analysis.get("duration_days", 0.0))
+            gnss_alerting = gnss_ok and gnss_risk not in ("LOW", "INFO")
+
+            if gnss_ok:
+                sensors_with_data.append("gnss")
+                if gnss_alerting:
+                    sensors_alerting.append("gnss")
+
+            # ── IMU ───────────────────────────────────────────────────────────
+            imu_ok = bool(imu_result and imu_result.get("status") == "success")
+            imu_analysis = imu_result.get("analysis", {}) if imu_ok else {}
+            imu_trend = imu_analysis.get("trend", "stable")
+            imu_risk = (imu_result.get("risk_level", "LOW") or "LOW") if imu_ok else "LOW"
+            imu_tilt_change = float(imu_analysis.get("total_tilt_change_deg", 0.0))
+            imu_alerting = imu_ok and imu_risk not in ("LOW",)
+
+            if imu_ok:
+                sensors_with_data.append("imu")
+                if imu_alerting:
+                    sensors_alerting.append("imu")
+
+            # ── Mưa ───────────────────────────────────────────────────────────
+            rain_ok = bool(rain_corr_result and rain_corr_result.get("available") is True)
+            rain_r = float(rain_corr_result.get("correlation", 0.0)) if rain_ok else 0.0
+            rain_supporting = rain_ok and abs(rain_r) >= 0.4
+
+            if rain_ok:
+                sensors_with_data.append("rain")
+
+            # ── So sánh xu hướng GNSS vs IMU ─────────────────────────────────
+            trend_agreement: Optional[str] = None
+            if gnss_ok and imu_ok:
+                t1 = gnss_trend or "stable"
+                t2 = imu_trend or "stable"
+                if t1 == t2:
+                    trend_agreement = "full"
+                elif (t1 == "accelerating" and t2 == "stable") or (t2 == "accelerating" and t1 == "stable"):
+                    trend_agreement = "partial"
+                elif {t1, t2} == {"accelerating", "decelerating"}:
+                    trend_agreement = "conflict"
+                else:
+                    trend_agreement = "full"
+
+            both_alerting = gnss_alerting and imu_alerting
+            one_alerting = gnss_alerting or imu_alerting
+
+            # ── Quyết định mức đồng thuận ─────────────────────────────────────
+            if len(sensors_with_data) == 0:
+                consensus_level = "UNAVAILABLE"
+                reliability_flag = "UNKNOWN"
+                notes.append("Chưa có dữ liệu từ cảm biến nào để đánh giá.")
+
+            elif both_alerting and trend_agreement in ("full", "partial"):
+                consensus_level = "STRONG"
+                reliability_flag = "HIGH"
+                sensors_corroborating = ["gnss", "imu"]
+                notes.append(
+                    f"GNSS và IMU đồng thuận: GNSS ghi nhận dịch chuyển "
+                    f"{gnss_displacement_mm:.1f} mm, IMU ghi nhận nghiêng "
+                    f"{imu_tilt_change:.2f}° — cùng xu hướng '{gnss_trend}'."
+                )
+
+            elif both_alerting and trend_agreement == "conflict":
+                consensus_level = "CONFLICT"
+                reliability_flag = "LOW"
+                sensors_conflicting = ["gnss", "imu"]
+                notes.append(
+                    f"GNSS xu hướng '{gnss_trend}' nhưng IMU xu hướng '{imu_trend}'. "
+                    f"Hai cảm biến chỉ về hướng khác nhau — hãy kiểm tra lại cài đặt và vị trí."
+                )
+
+            elif gnss_alerting and not imu_ok:
+                consensus_level = "PARTIAL"
+                reliability_flag = "MEDIUM"
+                sensors_corroborating = ["gnss"]
+                notes.append(
+                    f"GNSS ghi nhận dịch chuyển {gnss_displacement_mm:.1f} mm "
+                    f"nhưng chưa có dữ liệu IMU để xác nhận."
+                )
+
+            elif imu_alerting and not gnss_ok:
+                consensus_level = "PARTIAL"
+                reliability_flag = "MEDIUM"
+                sensors_corroborating = ["imu"]
+                notes.append(
+                    f"IMU ghi nhận nghiêng {imu_tilt_change:.2f}° "
+                    f"nhưng chưa có dữ liệu GNSS để xác nhận dịch chuyển."
+                )
+
+            elif one_alerting:
+                consensus_level = "PARTIAL"
+                reliability_flag = "MEDIUM"
+                sensors_corroborating = [s for s in ["gnss", "imu"]
+                                         if (s == "gnss" and gnss_alerting) or (s == "imu" and imu_alerting)]
+                alerting_name = "GNSS" if gnss_alerting else "IMU"
+                other_name = "IMU" if gnss_alerting else "GNSS"
+                notes.append(
+                    f"{alerting_name} ghi nhận bất thường nhưng {other_name} chưa xác nhận. "
+                    f"Cần thêm dữ liệu từ {other_name} để kết luận."
+                )
+
+            else:
+                consensus_level = "NONE"
+                reliability_flag = "STABLE"
+                notes.append("Không có cảm biến nào ghi nhận bất thường đáng kể trong giai đoạn này.")
+
+            # ── Ghi chú bổ sung mưa ───────────────────────────────────────────
+            if rain_supporting and one_alerting:
+                sensors_corroborating.append("rain")
+                notes.append(
+                    f"Mưa tương quan rõ với dịch chuyển (r={rain_r:.2f} — "
+                    f"{rain_corr_result.get('strength', '')}) — có thể là nguyên nhân kích hoạt."
+                )
+            elif rain_ok and not rain_supporting and one_alerting:
+                notes.append(
+                    f"Mưa không tương quan rõ (r={rain_r:.2f}) — nguyên nhân có thể không phải mưa."
+                )
+
+            # ── Ghi chú độ tin cậy GNSS ───────────────────────────────────────
+            if gnss_ok and not gnss_reliable:
+                notes.append(
+                    f"Lưu ý: Vận tốc GNSS chưa đủ thời lượng quan sát "
+                    f"({gnss_duration_days * 1440:.0f} phút). "
+                    f"Tổng chuyển dịch đầu-cuối vẫn hợp lệ nhưng vận tốc chỉ mang tính tham khảo."
+                )
+
+            summary_vn = {
+                "STRONG":      "Đồng thuận mạnh — nhiều cảm biến xác nhận",
+                "PARTIAL":     "Đồng thuận một phần — cần thêm dữ liệu để kết luận",
+                "CONFLICT":    "Mâu thuẫn cảm biến — hãy kiểm tra lại",
+                "NONE":        "Không có bất thường — theo dõi bình thường",
+                "UNAVAILABLE": "Chưa có đủ dữ liệu để đánh giá",
+            }
+
+            return {
+                "available": True,
+                "consensus_level": consensus_level,
+                "reliability_flag": reliability_flag,
+                "summary": summary_vn.get(consensus_level, consensus_level),
+                "sensors_with_data": sensors_with_data,
+                "sensors_alerting": sensors_alerting,
+                "sensors_corroborating": sensors_corroborating,
+                "sensors_conflicting": sensors_conflicting,
+                "trend_agreement": trend_agreement,
+                "rain_supporting": rain_supporting,
+                "rain_r": round(rain_r, 3) if rain_ok else None,
+                "notes": notes,
+            }
+
+        except Exception as e:
+            logger.error(f"Error in cross-sensor consensus: {e}", exc_info=True)
+            return {"available": False, "message": f"Lỗi: {str(e)}"}
 
     # =========================================================================
     # 1. PHÂN TÍCH GNSS - ✅ CÓ ĐẾM XÁC NHẬN
@@ -1005,17 +1459,33 @@ class LandslideAnalyzer:
                                 f"path={path_m*1000.0:.2f}mm, noise={noise_envelope_m*1000.0:.2f}mm, "
                                 f"significance={motion_significance:.2f}, directionality={directionality:.2f}"
                             )
+
+            # Dùng chung cho cả nhánh danger và safe (timeout/reset logic).
+            import time as _time
+            now = _time.time()
             
             # ✅ LOGIC ĐẾM XÁC NHẬN
             if current_level in ["WARNING", "CRITICAL"]:
+                latched_level = str(counter_info.get('latched_level') or '').upper()
+                level_rank = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
+
+                # Nếu đã latched ở mức nguy hiểm, giữ trạng thái pending cho tới khi thật sự về safe.
+                # Tránh trường hợp CRITICAL vừa xuất hiện rồi tụt WARNING làm bridge auto-resolve sai.
+                if latched_level in ("WARNING", "CRITICAL"):
+                    counter_info['safe_count'] = 0
+                    curr_rank = level_rank.get(current_level, 0)
+                    latched_rank = level_rank.get(latched_level, 0)
+
+                    # Còn cùng mức hoặc thấp hơn mức latched -> giữ pending, không resolve.
+                    if curr_rank <= latched_rank:
+                        return {'level': 'PENDING', 'category': 'gnss_velocity'}
+
                 # Đã confirm level này và chưa về safe hoàn toàn -> không bắn lại.
                 if counter_info['latched_level'] == current_level:
                     counter_info['safe_count'] = 0  # Reset safe countdown khi vẫn còn nguy hiểm
-                    return None
+                    return {'level': 'PENDING', 'category': 'gnss_velocity'}
 
                 # Nếu level thay đổi → Reset bộ đếm
-                import time as _time
-                now = _time.time()
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['safe_count'] = 0
@@ -1150,7 +1620,7 @@ class LandslideAnalyzer:
             if current_level in ["WARNING", "CRITICAL"]:
                 counter_info['safe_count'] = 0
                 if counter_info['latched_level'] == current_level:
-                    return None
+                    return {'level': 'PENDING', 'category': 'rainfall'}
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
@@ -1190,7 +1660,8 @@ class LandslideAnalyzer:
                         counter_info['last_level'] = None
 
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error analyzing RAIN for station {station_id}: {e}", exc_info=True)
             return None
 
     # =========================================================================
@@ -1218,7 +1689,7 @@ class LandslideAnalyzer:
             if current_level in ["WARNING", "CRITICAL"]:
                 counter_info['safe_count'] = 0
                 if counter_info['latched_level'] == current_level:
-                    return None
+                    return {'level': 'PENDING', 'category': 'water_level'}
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
@@ -1228,11 +1699,25 @@ class LandslideAnalyzer:
                     if counter_info['count'] >= confirm_steps:
                         counter_info['latched_level'] = current_level
                         counter_info['latched_time'] = time.time()  # Ghi timestamp
-                        logger.warning(f"💧 [WATER-{station_id}] ✅ CONFIRMED {current_level}")
+                        logger.warning(
+                            f"💧 [WATER-{station_id}] ✅ CONFIRMED {current_level} "
+                            f"(value={val:.3f}m, warn={warn:.3f}m, crit={crit:.3f}m)"
+                        )
                         audio_code = "water_warning"
                         if current_level == "CRITICAL":
                             audio_code = "water_critical"
-                        return {"level": current_level, "category": "water_level", "message": f"Nước cao: {val:.2f}m", "audio_code": audio_code, "details": {"val": val}}
+                        threshold_ref = crit if current_level == "CRITICAL" else warn
+                        return {
+                            "level": current_level,
+                            "category": "water_level",
+                            "message": f"Nước cao: {val:.2f}m (ngưỡng {current_level}: {threshold_ref:.2f}m)",
+                            "audio_code": audio_code,
+                            "details": {
+                                "val": val,
+                                "warning_threshold": warn,
+                                "critical_threshold": crit,
+                            }
+                        }
                     return None
             else:
                 if counter_info['latched_level'] is not None:
@@ -1258,7 +1743,8 @@ class LandslideAnalyzer:
                         counter_info['last_level'] = None
 
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error analyzing WATER for station {station_id}: {e}", exc_info=True)
             return None
 
     # =========================================================================
@@ -1322,7 +1808,7 @@ class LandslideAnalyzer:
             if current_level in ["WARNING", "CRITICAL"]:
                 counter_info['safe_count'] = 0
                 if counter_info['latched_level'] == current_level:
-                    return None
+                    return {'level': 'PENDING', 'category': alert_category}
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
@@ -1369,5 +1855,6 @@ class LandslideAnalyzer:
                         counter_info['last_level'] = None
 
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error analyzing IMU for station {station_id}: {e}", exc_info=True)
             return None

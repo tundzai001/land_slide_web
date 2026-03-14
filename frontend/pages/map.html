@@ -364,6 +364,12 @@
 
                     <h5 class="mb-3 text-primary border-bottom pb-2"><i class="bi bi-geo-alt me-2"></i>Thông số GNSS
                     </h5>
+                    <div id="lt-reliability-note" class="reliability-note reliability-note-warning" style="display: none;">
+                        <i class="bi bi-shield-exclamation me-2"></i>
+                        <strong>Dữ liệu chưa đủ tin cậy để kết luận vận tốc.</strong>
+                        <span id="lt-reliability-text" class="ms-1"></span>
+                    </div>
+                    <div id="lt-gnss-source-note" class="analysis-source-note" style="display: none;"></div>
                     <!-- GNSS Metrics -->
                     <div class="row g-3 mb-4">
                         <div class="col-md-3 col-6">
@@ -635,6 +641,14 @@
                             </div>
                         </div>
                     </div>
+                    <div id="rainfall-correlation-controls" class="mt-3 mb-4 text-center">
+                        <button class="btn btn-info fw-semibold" id="btn-run-rain-correlation">
+                            <i class="bi bi-stars me-2"></i>Chạy AI LS-RAPID
+                        </button>
+                        <div id="rain-correlation-hint" class="text-muted small mt-2">
+                            Tương quan mưa - dịch chuyển dùng model LS-RAPID và chỉ chạy khi bạn bấm nút AI.
+                        </div>
+                    </div>
 
                     <!-- ============================================ -->
                     <!-- MULTI-WINDOW ANALYSIS SECTION -->
@@ -650,44 +664,85 @@
                         <div class="row g-3 mb-3" id="multi-window-cards"></div>
                     </div>
 
+                    <!-- ============================================ -->
+                    <!-- CROSS-SENSOR CONSENSUS SECTION -->
+                    <!-- ============================================ -->
+                    <div id="cross-consensus-section" class="mt-4" style="display: none;">
+                        <h5 class="mb-3 border-bottom pb-2" style="color: var(--text-primary);">
+                            <i class="bi bi-intersect me-2"></i>Đồng thuận đa cảm biến
+                        </h5>
+                        <div id="consensus-banner" class="consensus-banner mb-3">
+                            <div class="d-flex align-items-center gap-3 flex-wrap">
+                                <span id="consensus-badge" class="consensus-badge">--</span>
+                                <span id="consensus-summary" class="fw-semibold"></span>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <div class="longterm-metric-card">
+                                    <div class="text-muted small mb-2">Cảm biến có dữ liệu</div>
+                                    <div id="consensus-sensors-with-data" class="d-flex flex-wrap gap-2 justify-content-center mt-1"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="longterm-metric-card">
+                                    <div class="text-muted small mb-2">Xu hướng GNSS vs IMU</div>
+                                    <div id="consensus-trend-agreement" class="fs-5 fw-bold mt-1">--</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="consensus-notes-list" id="consensus-notes"></div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- LS-RAPID RESULT POPUP -->
+        <div id="lsrapid-popup-overlay" class="lsrapid-popup-overlay" aria-hidden="true">
+            <div class="lsrapid-popup-card" role="dialog" aria-modal="true" aria-labelledby="lsrapid-popup-title">
+                <button class="lsrapid-popup-close" id="lsrapid-popup-close" aria-label="Đóng popup kết quả LS-RAPID">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+
+                <div class="lsrapid-popup-head">
+                    <div class="lsrapid-popup-kicker">AI Correlation</div>
+                    <h5 id="lsrapid-popup-title" class="mb-1">Kết quả LS-RAPID</h5>
+                    <div id="lsrapid-popup-status" class="lsrapid-popup-status">READY</div>
+                </div>
+
+                <div class="lsrapid-popup-body">
+                    <div class="lsrapid-popup-grid">
+                        <div class="lsrapid-popup-metric">
+                            <span class="label">Hệ số r</span>
+                            <span class="value" id="lsrapid-popup-r">--</span>
+                        </div>
+                        <div class="lsrapid-popup-metric">
+                            <span class="label">Lag tốt nhất</span>
+                            <span class="value" id="lsrapid-popup-lag">--</span>
+                        </div>
+                        <div class="lsrapid-popup-metric">
+                            <span class="label">R²</span>
+                            <span class="value" id="lsrapid-popup-r2">--</span>
+                        </div>
+                        <div class="lsrapid-popup-metric">
+                            <span class="label">Trigger</span>
+                            <span class="value" id="lsrapid-popup-trigger">--</span>
+                        </div>
+                    </div>
+
+                    <div class="lsrapid-popup-message" id="lsrapid-popup-message">
+                        --
+                    </div>
+                </div>
+
+                <div class="lsrapid-popup-actions">
+                    <button class="btn btn-outline-secondary" id="lsrapid-popup-close-btn">Đóng</button>
+                    <button class="btn btn-info" id="lsrapid-popup-ok-btn">OK</button>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- MOBILE BOTTOM NAVIGATION (Mobile only, <768px) -->
-    <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
-        <div class="nav-item active" data-view="map">
-            <a href="#" class="nav-link">
-                <i class="bi bi-map"></i>
-                <span>Map</span>
-            </a>
-        </div>
-        <div class="nav-item" data-view="stations">
-            <a href="#" class="nav-link">
-                <i class="bi bi-hdd-network"></i>
-                <span>Stations</span>
-            </a>
-        </div>
-        <div class="nav-item" data-view="details">
-            <a href="#" class="nav-link">
-                <i class="bi bi-info-circle"></i>
-                <span>Details</span>
-            </a>
-        </div>
-        <div class="nav-item" data-view="charts">
-            <a href="#" class="nav-link">
-                <i class="bi bi-graph-up"></i>
-                <span>Charts</span>
-            </a>
-        </div>
-        <div class="nav-item" data-view="account">
-            <a href="#" class="nav-link">
-                <i class="bi bi-person-circle"></i>
-                <span>Account</span>
-            </a>
-        </div>
-    </nav>
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

@@ -283,7 +283,6 @@ def get_default_station_config():
         "GnssAlerting": {
             "gnss_max_hdop": 4.0,
             "gnss_confirm_steps": 3,
-            "gnss_safe_streak": 10,
             "gnss_degraded_timeout": 300
         },
         # Nhóm cảnh báo Mưa
