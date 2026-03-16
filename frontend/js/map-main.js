@@ -1825,6 +1825,10 @@ function resetRainfallCorrelationUi() {
         charts['chart-rainfall-correlation'].destroy();
         delete charts['chart-rainfall-correlation'];
     }
+    if (charts['chart-lsrapid-index']) {
+        charts['chart-lsrapid-index'].destroy();
+        delete charts['chart-lsrapid-index'];
+    }
 }
 
 function updateRainCorrelationAiControls(rainCorr = null) {
@@ -1866,15 +1870,7 @@ function closeLsRapidResultPopup() {
 function showLsRapidResultPopup(rainCorr) {
     const overlay = document.getElementById('lsrapid-popup-overlay');
     const statusEl = document.getElementById('lsrapid-popup-status');
-    const corrEl = document.getElementById('lsrapid-popup-r');
-    const lagEl = document.getElementById('lsrapid-popup-lag');
-    const r2El = document.getElementById('lsrapid-popup-r2');
-    const triggerEl = document.getElementById('lsrapid-popup-trigger');
-    const msgEl = document.getElementById('lsrapid-popup-message');
-
-    if (!overlay || !statusEl || !corrEl || !lagEl || !r2El || !triggerEl || !msgEl) {
-        return;
-    }
+    if (!overlay || !statusEl) return;
 
     const available = rainCorr?.available === true;
     const corr = Number(rainCorr?.correlation);
@@ -1882,31 +1878,151 @@ function showLsRapidResultPopup(rainCorr) {
     const lag = Number(rainCorr?.lag_days);
     const trigger = String(rainCorr?.trigger_potential || 'LOW').toUpperCase();
 
-    if (available) {
-        corrEl.textContent = Number.isFinite(corr) ? corr.toFixed(4) : '--';
-        lagEl.textContent = Number.isFinite(lag) ? `${lag} ngày` : '--';
-        r2El.textContent = Number.isFinite(r2) ? r2.toFixed(4) : '--';
-        triggerEl.textContent = trigger;
-        msgEl.textContent = sanitizeLongTermText(rainCorr?.message || rainCorr?.assessment || 'LS-RAPID đã hoàn tất phân tích.');
+    // --- Tab switching ---
+    overlay.querySelectorAll('.lsrapid-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            overlay.querySelectorAll('.lsrapid-tab').forEach(t => t.classList.remove('active'));
+            overlay.querySelectorAll('.lsrapid-tab-pane').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            const target = document.getElementById(tab.dataset.tab);
+            if (target) target.classList.add('active');
+        });
+    });
+    // Reset to first tab
+    overlay.querySelectorAll('.lsrapid-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+    overlay.querySelectorAll('.lsrapid-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
 
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    const fmtDate = (d) => { if (!d) return '--'; try { const [y,m,dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
+
+    if (available) {
+        // === Overview tab ===
+        setVal('lsrapid-popup-r', Number.isFinite(corr) ? corr.toFixed(4) : '--');
+        setVal('lsrapid-popup-r2', Number.isFinite(r2) ? r2.toFixed(4) : '--');
+        setVal('lsrapid-popup-lag', Number.isFinite(lag) ? `${lag} ngày` : '--');
+        setVal('lsrapid-popup-trigger', trigger);
+        setVal('lsrapid-popup-strength', rainCorr?.strength || '--');
+        setVal('lsrapid-popup-slope', rainCorr?.slope_mm_day_per_rain_index != null
+            ? Number(rainCorr.slope_mm_day_per_rain_index).toFixed(4) : '--');
+        setVal('lsrapid-popup-message', sanitizeLongTermText(
+            rainCorr?.risk_message || rainCorr?.message || rainCorr?.assessment || 'LS-RAPID hoàn tất.'
+        ));
+
+        // Status badge
         if (trigger === 'HIGH') {
             statusEl.className = 'lsrapid-popup-status status-fail';
-            statusEl.textContent = 'TRIGGER: HIGH';
+            statusEl.textContent = '🚨 TRIGGER: HIGH';
         } else if (trigger === 'MEDIUM') {
             statusEl.className = 'lsrapid-popup-status status-warn';
-            statusEl.textContent = 'TRIGGER: MEDIUM';
+            statusEl.textContent = '⚠️ TRIGGER: MEDIUM';
         } else {
             statusEl.className = 'lsrapid-popup-status status-ok';
-            statusEl.textContent = 'TRIGGER: LOW';
+            statusEl.textContent = '✅ TRIGGER: LOW';
         }
+
+        // === Rain stats tab ===
+        const rs = rainCorr?.rain_stats || {};
+        setVal('lsrapid-rain-total', rs.total_mm != null ? `${rs.total_mm} mm` : '--');
+        setVal('lsrapid-rain-max', rs.max_daily_mm != null ? `${rs.max_daily_mm} mm` : '--');
+        setVal('lsrapid-rain-max-day', fmtDate(rs.max_rain_day));
+        setVal('lsrapid-rain-days', rs.rain_days != null ? `${rs.rain_days} ngày` : '--');
+        setVal('lsrapid-dry-days', rs.dry_days != null ? `${rs.dry_days} ngày` : '--');
+        setVal('lsrapid-rain-avg', rs.avg_rain_on_rainy_days_mm != null ? `${rs.avg_rain_on_rainy_days_mm} mm` : '--');
+        setVal('lsrapid-idx-max', rs.max_ls_rapid_index != null ? rs.max_ls_rapid_index.toFixed(2) : '--');
+        setVal('lsrapid-idx-mean', rs.mean_ls_rapid_index != null ? rs.mean_ls_rapid_index.toFixed(2) : '--');
+        setVal('lsrapid-common-days', rainCorr?.common_days != null ? `${rainCorr.common_days} ngày` : '--');
+
+        // === Displacement stats tab ===
+        const ds = rainCorr?.disp_stats || {};
+        setVal('lsrapid-disp-total', ds.total_mm != null ? `${ds.total_mm} mm` : '--');
+        setVal('lsrapid-disp-max', ds.max_daily_mm != null ? `${ds.max_daily_mm} mm` : '--');
+        setVal('lsrapid-disp-max-day', fmtDate(ds.max_disp_day));
+        setVal('lsrapid-disp-avg', ds.avg_daily_mm != null ? `${ds.avg_daily_mm} mm` : '--');
+        setVal('lsrapid-disp-rain', ds.disp_during_rain_mm != null ? `${ds.disp_during_rain_mm} mm` : '--');
+        setVal('lsrapid-disp-dry', ds.disp_during_dry_mm != null ? `${ds.disp_during_dry_mm} mm` : '--');
+        setVal('lsrapid-accel-ratio', ds.rain_acceleration_ratio != null
+            ? `${ds.rain_acceleration_ratio}x` : '--');
+        setVal('lsrapid-sensitivity', rainCorr?.sensitivity_mm_per_mm != null
+            ? `${rainCorr.sensitivity_mm_per_mm} mm/mm` : '--');
+
+        // Lag scan summary
+        const lagScan = rainCorr?.lag_scan || [];
+        if (lagScan.length > 0) {
+            const lagText = lagScan.map(l => `L${l.lag}:${l.correlation}`).join(' | ');
+            setVal('lsrapid-lag-scan', lagText);
+        } else {
+            setVal('lsrapid-lag-scan', '--');
+        }
+
+        // === Events tab: CWD ===
+        const cwdEl = document.getElementById('lsrapid-cwd-events');
+        const cwdEvents = rainCorr?.cwd_events || [];
+        if (cwdEl) {
+            if (cwdEvents.length > 0) {
+                cwdEl.innerHTML = cwdEvents.map(e => `
+                    <div class="lsrapid-event-item">
+                        <div class="lsrapid-event-header">
+                            <span class="lsrapid-event-date">${fmtDate(e.start)} → ${fmtDate(e.end)}</span>
+                            <span class="lsrapid-event-badge">${e.days} ngày</span>
+                        </div>
+                        <div class="lsrapid-event-stats">
+                            <span>🌧️ ${e.total_rain_mm} mm</span>
+                            <span>📏 ${e.displacement_mm} mm</span>
+                            <span>💧 TB ${e.avg_intensity} mm/ngày</span>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                cwdEl.innerHTML = '<div class="text-muted small">Không có đợt mưa liên tục ≥2 ngày</div>';
+            }
+        }
+
+        // === Events tab: Peak rain ===
+        const peakEl = document.getElementById('lsrapid-peak-events');
+        const peakEvents = rainCorr?.peak_rain_events || [];
+        if (peakEl) {
+            if (peakEvents.length > 0) {
+                peakEl.innerHTML = peakEvents.map(e => `
+                    <div class="lsrapid-event-item">
+                        <div class="lsrapid-event-header">
+                            <span class="lsrapid-event-date">${fmtDate(e.date)}</span>
+                            <span class="lsrapid-event-badge lsrapid-event-badge-danger">⚡ ${e.rain_mm} mm</span>
+                        </div>
+                        <div class="lsrapid-event-stats">
+                            <span>📏 Phản hồi: ${e.disp_response_mm} mm</span>
+                            <span>📊 Index: ${e.ls_rapid_index}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                peakEl.innerHTML = '<div class="text-muted small">Không có ngày mưa ≥20mm trong giai đoạn này</div>';
+            }
+        }
+
+        // === Risk insights tab ===
+        const riskEl = document.getElementById('lsrapid-risk-insights');
+        const riskInsights = rainCorr?.risk_insights || [];
+        if (riskEl) {
+            if (riskInsights.length > 0) {
+                riskEl.innerHTML = riskInsights.map(msg => `
+                    <div class="lsrapid-insight-item">${msg}</div>
+                `).join('');
+            } else {
+                riskEl.innerHTML = `<div class="lsrapid-insight-item lsrapid-insight-ok">
+                    ✅ ${rainCorr?.assessment || 'Không phát hiện yếu tố rủi ro đặc biệt từ tương quan mưa.'}
+                </div>`;
+            }
+        }
+
     } else {
-        corrEl.textContent = '--';
-        lagEl.textContent = '--';
-        r2El.textContent = '--';
-        triggerEl.textContent = '--';
-        msgEl.textContent = sanitizeLongTermText(rainCorr?.message || 'Không thể tạo kết quả LS-RAPID cho khoảng thời gian này.');
+        // Not available — reset all
+        ['lsrapid-popup-r','lsrapid-popup-r2','lsrapid-popup-lag','lsrapid-popup-trigger',
+         'lsrapid-popup-strength','lsrapid-popup-slope'].forEach(id => setVal(id, '--'));
+        setVal('lsrapid-popup-message', sanitizeLongTermText(
+            rainCorr?.message || 'Không thể tạo kết quả LS-RAPID cho khoảng thời gian này.'
+        ));
         statusEl.className = 'lsrapid-popup-status status-warn';
-        statusEl.textContent = 'CHƯA ĐỦ DỮ LIỆU';
+        statusEl.textContent = '⚠ CHƯA ĐỦ DỮ LIỆU';
     }
 
     overlay.classList.add('active');
@@ -2825,90 +2941,200 @@ function renderRainfallCorrelationSection(data) {
         corrEl.className = `fs-4 fw-bold mt-1 ${corrColor}`;
     }
     setText('rain-strength', rainCorr.strength || '--');
-    setText('rain-assessment', rainCorr.assessment || '--');
+    setText('rain-r2', rainCorr.r_squared != null ? rainCorr.r_squared.toFixed(4) : '--');
+    setText('rain-lag', rainCorr.lag_days != null ? `${rainCorr.lag_days} ngày` : '--');
 
-    // Chart: Dual-axis — cumulative displacement + cumulative/daily rainfall
+    // Trigger with color
+    const triggerEl = document.getElementById('rain-trigger');
+    if (triggerEl) {
+        const tp = String(rainCorr.trigger_potential || 'LOW').toUpperCase();
+        triggerEl.textContent = tp;
+        triggerEl.className = 'fs-5 fw-bold mt-1 ' + (tp === 'HIGH' ? 'text-danger' : tp === 'MEDIUM' ? 'text-warning' : 'text-success');
+    }
+
+    // Sensitivity
+    setText('rain-sensitivity', rainCorr.sensitivity_mm_per_mm != null
+        ? `${rainCorr.sensitivity_mm_per_mm} mm/mm` : '--');
+
+    // Assessment — prioritize risk_message if present
+    setText('rain-assessment', rainCorr.risk_message || rainCorr.assessment || '--');
+
+    // Chart 1: Dual-axis — cumulative displacement + cumulative/daily rainfall
     if (rainCorr.time_series) {
         const ctx = document.getElementById('chart-rainfall-correlation');
-        if (!ctx) return;
-        if (charts['chart-rainfall-correlation']) {
-            charts['chart-rainfall-correlation'].destroy();
-        }
+        if (ctx) {
+            if (charts['chart-rainfall-correlation']) {
+                charts['chart-rainfall-correlation'].destroy();
+            }
 
-        charts['chart-rainfall-correlation'] = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: rainCorr.time_series.labels,
-                datasets: [
-                    {
-                        label: 'Dịch chuyển tích lũy (mm)',
-                        data: rainCorr.time_series.cumulative_displacement_mm,
-                        borderColor: '#0ea5e9',
-                        backgroundColor: 'rgba(14, 165, 233, 0.08)',
-                        tension: 0.4,
-                        borderWidth: 2.5,
-                        fill: true,
-                        pointRadius: 2,
-                        yAxisID: 'y-disp'
-                    },
-                    {
-                        label: 'Mưa tích lũy (mm)',
-                        data: rainCorr.time_series.cumulative_rainfall_mm,
-                        borderColor: '#10b981',
-                        backgroundColor: 'transparent',
-                        tension: 0.4,
-                        borderWidth: 2,
-                        borderDash: [5, 3],
-                        fill: false,
-                        pointRadius: 2,
-                        yAxisID: 'y-rain'
-                    },
-                    {
-                        label: 'Mưa ngày (mm)',
-                        type: 'bar',
-                        data: rainCorr.time_series.daily_rainfall_mm,
-                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                        borderColor: '#3b82f6',
-                        borderWidth: 1,
-                        yAxisID: 'y-rain'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: {
-                        labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 16 }
-                    },
-                    tooltip: {
-                        backgroundColor: 'rgba(0,0,0,0.85)',
-                        padding: 12
-                    }
+            charts['chart-rainfall-correlation'] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: rainCorr.time_series.labels,
+                    datasets: [
+                        {
+                            label: 'Dịch chuyển tích lũy (mm)',
+                            data: rainCorr.time_series.cumulative_displacement_mm,
+                            borderColor: '#0ea5e9',
+                            backgroundColor: 'rgba(14, 165, 233, 0.08)',
+                            tension: 0.4,
+                            borderWidth: 2.5,
+                            fill: true,
+                            pointRadius: 2,
+                            yAxisID: 'y-disp'
+                        },
+                        {
+                            label: 'Mưa tích lũy (mm)',
+                            data: rainCorr.time_series.cumulative_rainfall_mm,
+                            borderColor: '#10b981',
+                            backgroundColor: 'transparent',
+                            tension: 0.4,
+                            borderWidth: 2,
+                            borderDash: [5, 3],
+                            fill: false,
+                            pointRadius: 2,
+                            yAxisID: 'y-rain'
+                        },
+                        {
+                            label: 'Mưa ngày (mm)',
+                            type: 'bar',
+                            data: rainCorr.time_series.daily_rainfall_mm,
+                            backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                            borderColor: '#3b82f6',
+                            borderWidth: 1,
+                            yAxisID: 'y-rain'
+                        }
+                    ]
                 },
-                scales: {
-                    x: {
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 16 }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.85)',
+                            padding: 12
+                        }
                     },
-                    'y-disp': {
-                        type: 'linear',
-                        position: 'left',
-                        title: { display: true, text: 'Dịch chuyển (mm)', color: '#0ea5e9' },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#0ea5e9' }
-                    },
-                    'y-rain': {
-                        type: 'linear',
-                        position: 'right',
-                        title: { display: true, text: 'Lượng mưa (mm)', color: '#10b981' },
-                        grid: { drawOnChartArea: false },
-                        ticks: { color: '#10b981' }
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+                        },
+                        'y-disp': {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: 'Dịch chuyển (mm)', color: '#0ea5e9' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#0ea5e9' }
+                        },
+                        'y-rain': {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'Lượng mưa (mm)', color: '#10b981' },
+                            grid: { drawOnChartArea: false },
+                            ticks: { color: '#10b981' }
+                        }
                     }
                 }
+            });
+        }
+
+        // Chart 2: LS-RAPID Index vs Daily Displacement
+        const ctx2 = document.getElementById('chart-lsrapid-index');
+        if (ctx2 && rainCorr.time_series.ls_rapid_index) {
+            if (charts['chart-lsrapid-index']) {
+                charts['chart-lsrapid-index'].destroy();
             }
-        });
+
+            charts['chart-lsrapid-index'] = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: rainCorr.time_series.labels,
+                    datasets: [
+                        {
+                            label: 'LS-RAPID Index',
+                            data: rainCorr.time_series.ls_rapid_index,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            tension: 0.4,
+                            borderWidth: 2.5,
+                            fill: true,
+                            pointRadius: 2,
+                            yAxisID: 'y-idx'
+                        },
+                        {
+                            label: 'Dịch chuyển ngày (mm)',
+                            data: rainCorr.time_series.daily_displacement_mm,
+                            borderColor: '#ec4899',
+                            backgroundColor: 'rgba(236, 72, 153, 0.08)',
+                            tension: 0.3,
+                            borderWidth: 2,
+                            fill: true,
+                            pointRadius: 2,
+                            yAxisID: 'y-disp2'
+                        },
+                        {
+                            label: 'Mưa hiệu dụng ngắn (mm)',
+                            data: rainCorr.time_series.effective_rainfall_short_mm,
+                            borderColor: 'rgba(34, 197, 94, 0.6)',
+                            borderWidth: 1.5,
+                            borderDash: [4, 2],
+                            pointRadius: 0,
+                            fill: false,
+                            yAxisID: 'y-idx'
+                        },
+                        {
+                            label: 'Mưa hiệu dụng dài (mm)',
+                            data: rainCorr.time_series.effective_rainfall_long_mm,
+                            borderColor: 'rgba(99, 102, 241, 0.6)',
+                            borderWidth: 1.5,
+                            borderDash: [8, 4],
+                            pointRadius: 0,
+                            fill: false,
+                            yAxisID: 'y-idx'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            labels: { color: 'var(--text-primary)', usePointStyle: true, padding: 12, font: { size: 11 } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.85)',
+                            padding: 12
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: 'var(--text-secondary)', maxRotation: 45 }
+                        },
+                        'y-idx': {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: 'LS-RAPID Index', color: '#f59e0b' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#f59e0b' }
+                        },
+                        'y-disp2': {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'Dịch chuyển ngày (mm)', color: '#ec4899' },
+                            grid: { drawOnChartArea: false },
+                            ticks: { color: '#ec4899' }
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 

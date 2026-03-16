@@ -287,23 +287,17 @@ class LandslideAnalyzer:
         def _normalize_unit(raw_unit: Any) -> str:
             u = str(raw_unit or 'mm/s').strip().lower().replace(' ', '')
             aliases = {
-                'mm/s': 'mm/s',
-                'mmps': 'mm/s',
-                'mm/sec': 'mm/s',
-                'mm/second': 'mm/s',
-                'mm/day': 'mm/day',
-                'mm/d': 'mm/day',
-                'mm/year': 'mm/year',
-                'mm/y': 'mm/year',
-                'm/year': 'm/year',
-                'm/y': 'm/year',
-                'm/month': 'm/month',
-                'm/mo': 'm/month',
-                'm/hr': 'm/hr',
-                'm/h': 'm/hr',
-                'm/hour': 'm/hr',
-                'm/min': 'm/min',
-                'm/s': 'm/s',
+                'mm/s': 'mm/s', 'mmps': 'mm/s', 'mm/sec': 'mm/s', 'mm/second': 'mm/s', 'mm/giây': 'mm/s',
+                'mm/day': 'mm/day', 'mm/d': 'mm/day', 'mm/ngày': 'mm/day',
+                'mm/year': 'mm/year', 'mm/y': 'mm/year', 'mm/năm': 'mm/year',
+                'm/year': 'm/year', 'm/y': 'm/year', 'm/năm': 'm/year',
+                'm/month': 'm/month', 'm/mo': 'm/month', 'm/tháng': 'm/month',
+                'm/hr': 'm/hr', 'm/h': 'm/hr', 'm/hour': 'm/hr', 'm/giờ': 'm/hr',
+                'm/min': 'm/min', 'm/phút': 'm/min',
+                'm/s': 'm/s', 'm/sec': 'm/s', 'm/giây': 'm/s',
+                'm/day': 'm/day', 'm/d': 'm/day', 'm/ngày': 'm/day',
+                'cm/day': 'cm/day', 'cm/ngày': 'cm/day',
+                'cm/year': 'cm/year', 'cm/năm': 'cm/year',
             }
             return aliases.get(u, u)
 
@@ -311,18 +305,22 @@ class LandslideAnalyzer:
             d = str(desc or '').lower().replace(' ', '')
             if not d:
                 return None
-            if 'mm/year' in d or 'mm/y' in d:
+            if 'mm/year' in d or 'mm/y' in d or 'mm/n' in d:
                 return 'mm/year'
-            if 'm/year' in d or 'm/y' in d:
+            if 'm/year' in d or 'm/y' in d or 'm/n' in d:
                 return 'm/year'
-            if 'm/month' in d or 'm/mo' in d:
+            if 'm/month' in d or 'm/mo' in d or 'm/th' in d:
                 return 'm/month'
-            if 'm/hour' in d or 'm/hr' in d or 'm/h' in d:
+            if 'm/hour' in d or 'm/hr' in d or 'm/h' in d or 'm/gi' in d:
                 return 'm/hr'
-            if 'm/min' in d:
+            if 'm/min' in d or 'm/ph' in d:
                 return 'm/min'
             if 'm/s' in d:
                 return 'm/s'
+            if 'm/day' in d or 'm/ng' in d:
+                return 'm/day'
+            if 'mm/day' in d or 'mm/ng' in d:
+                return 'mm/day'
             return None
 
         classification_table = config.get("velocity_classification")
@@ -342,7 +340,10 @@ class LandslideAnalyzer:
             thresh_raw = cls.get('threshold', 0)
             if isinstance(thresh_raw, str):
                 thresh_raw = thresh_raw.strip().replace(',', '.')
-            thresh = float(thresh_raw)
+            try:
+                thresh = float(thresh_raw)
+            except (ValueError, TypeError):
+                thresh = 0.0
 
             unit = _normalize_unit(cls.get('unit', 'mm/s'))
             # Một số bản config cũ bị lưu sai unit='mm/s' cho toàn bộ dải Cruden.
@@ -355,13 +356,20 @@ class LandslideAnalyzer:
             # Chuyển đổi mọi thứ về cùng 1 chuẩn để so sánh (mm/s)
             thresh_mm_s = thresh
             if unit == 'mm/year': thresh_mm_s = thresh / 31536000
+            elif unit == 'mm/month': thresh_mm_s = thresh / (30 * 86400)
             elif unit == 'mm/day': thresh_mm_s = thresh / 86400
             elif unit == 'm/year': thresh_mm_s = (thresh * 1000) / 31536000
             elif unit == 'm/month': thresh_mm_s = (thresh * 1000) / (30 * 86400)
+            elif unit == 'm/day': thresh_mm_s = (thresh * 1000) / 86400
             elif unit == 'm/hr': thresh_mm_s = (thresh * 1000) / 3600
             elif unit == 'm/min': thresh_mm_s = (thresh * 1000) / 60
             elif unit == 'm/s': thresh_mm_s = thresh * 1000
-            
+            elif unit == 'cm/day': thresh_mm_s = (thresh * 10) / 86400
+            elif unit == 'cm/year': thresh_mm_s = (thresh * 10) / 31536000
+            elif unit == 'mm/s': thresh_mm_s = thresh
+            else:
+                thresh_mm_s = thresh
+
             normalized_table.append({
                 "name": cls.get('name', 'Unknown'),
                 "threshold_mm_s": thresh_mm_s
@@ -677,15 +685,18 @@ class LandslideAnalyzer:
         config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Phân tích tương quan theo LS-RAPID (rainfall response + displacement rate).
+        Phân tích tương quan LS-RAPID nâng cao (v2).
 
-        Ý tưởng chính:
-        - Tạo chỉ số mưa hiệu dụng đa thang thời gian (short-term + long-term).
-        - Tìm độ trễ mưa -> dịch chuyển tốt nhất (lag scanning).
-        - Đánh giá mức liên hệ giữa chỉ số mưa LS-RAPID và vận tốc dịch chuyển ngày.
-
-        Ghi chú:
-        - Hàm vẫn trả về các trường cũ để tương thích frontend hiện tại.
+        Tính năng:
+        - Chỉ số mưa hiệu dụng đa thang thời gian (short + long memory).
+        - Lag scanning tìm độ trễ mưa → dịch chuyển tốt nhất.
+        - Hồi quy tuyến tính LS-RAPID index vs displacement rate.
+        - Thống kê mưa & dịch chuyển chi tiết.
+        - Phân tích CWD (Cumulative Working-Day rainfall events).
+        - Peak rain event detection & displacement response.
+        - Sensitivity factor (mm dịch chuyển / mm mưa).
+        - Rain acceleration ratio (rain vs dry day displacement).
+        - Risk insights tổng hợp.
         """
         result = {
             "available": False,
@@ -806,6 +817,7 @@ class LandslideAnalyzer:
             best_lag = 0
             best_corr = 0.0
             best_pairs = 0
+            lag_scan_results = []
             for lag in range(max_lag_days + 1):
                 if lag == 0:
                     x = ls_rapid_index
@@ -820,6 +832,7 @@ class LandslideAnalyzer:
                     continue
 
                 corr = float(np.corrcoef(x, y)[0, 1])
+                lag_scan_results.append({"lag": lag, "correlation": round(corr, 4), "pairs": int(len(x))})
                 if abs(corr) > abs(best_corr):
                     best_corr = corr
                     best_lag = lag
@@ -843,7 +856,6 @@ class LandslideAnalyzer:
             ss_tot = float(np.sum((y_fit - np.mean(y_fit)) ** 2))
             r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
-            # Giữ trường correlation như trước, nay là corr(LS-RAPID index, displacement rate)
             correlation = float(best_corr)
 
             # Đánh giá mức liên hệ
@@ -870,13 +882,119 @@ class LandslideAnalyzer:
             elif correlation >= 0.4 and slope > 0:
                 trigger_potential = "MEDIUM"
 
-            # Cumulative rainfall cho chart cũ
+            # Cumulative rainfall cho chart
             cumulative_rain = []
             rain_cum = 0.0
             for rv in rain_arr:
                 rain_cum += float(rv)
                 cumulative_rain.append(rain_cum)
 
+            # ================================================================
+            # ENHANCED ANALYSIS v2: Rich statistics & risk insights
+            # ================================================================
+
+            # --- 1. Rain Statistics ---
+            total_rain_mm = float(np.sum(rain_arr))
+            max_daily_rain_mm = float(np.max(rain_arr)) if len(rain_arr) > 0 else 0.0
+            max_rain_day_idx = int(np.argmax(rain_arr)) if len(rain_arr) > 0 else 0
+            max_rain_day_label = common_days[max_rain_day_idx] if max_rain_day_idx < len(common_days) else ""
+            rain_days_count = int(np.sum(rain_arr > 0.2))
+            avg_rain_on_rainy_days = float(np.mean(rain_arr[rain_arr > 0.2])) if rain_days_count > 0 else 0.0
+            dry_days_count = len(common_days) - rain_days_count
+            max_ls_rapid_index = float(np.max(ls_rapid_index)) if len(ls_rapid_index) > 0 else 0.0
+            mean_ls_rapid_index = float(np.mean(ls_rapid_index)) if len(ls_rapid_index) > 0 else 0.0
+
+            # --- 2. Displacement Statistics ---
+            total_disp_mm = float(np.sum(disp_rate_arr))
+            max_daily_disp_mm = float(np.max(disp_rate_arr)) if len(disp_rate_arr) > 0 else 0.0
+            max_disp_day_idx = int(np.argmax(disp_rate_arr)) if len(disp_rate_arr) > 0 else 0
+            max_disp_day_label = common_days[max_disp_day_idx] if max_disp_day_idx < len(common_days) else ""
+            avg_daily_disp_mm = float(np.mean(disp_rate_arr)) if len(disp_rate_arr) > 0 else 0.0
+
+            # --- 3. Sensitivity: mm displacement / mm rain ---
+            sensitivity_mm_per_mm = 0.0
+            if total_rain_mm > 1.0:
+                sensitivity_mm_per_mm = total_disp_mm / total_rain_mm
+
+            # --- 4. CWD - Cumulative Working-Day rainfall events ---
+            cwd_events = []
+            ev_start = None
+            ev_rain = 0.0
+            ev_days = 0
+            for i, day in enumerate(common_days):
+                r = float(rain_arr[i])
+                if r > 0.2:
+                    if ev_start is None:
+                        ev_start = day
+                    ev_rain += r
+                    ev_days += 1
+                else:
+                    if ev_start is not None and ev_days >= 2:
+                        si = common_days.index(ev_start)
+                        ev_disp = float(np.sum(disp_rate_arr[si:i]))
+                        cwd_events.append({
+                            "start": ev_start, "end": common_days[i - 1],
+                            "days": ev_days, "total_rain_mm": round(ev_rain, 1),
+                            "displacement_mm": round(ev_disp, 2),
+                            "avg_intensity": round(ev_rain / ev_days, 1)
+                        })
+                    ev_start = None
+                    ev_rain = 0.0
+                    ev_days = 0
+            if ev_start is not None and ev_days >= 2:
+                si = common_days.index(ev_start)
+                ev_disp = float(np.sum(disp_rate_arr[si:]))
+                cwd_events.append({
+                    "start": ev_start, "end": common_days[-1],
+                    "days": ev_days, "total_rain_mm": round(ev_rain, 1),
+                    "displacement_mm": round(ev_disp, 2),
+                    "avg_intensity": round(ev_rain / ev_days, 1)
+                })
+            cwd_events.sort(key=lambda e: e["total_rain_mm"], reverse=True)
+            top_cwd_events = cwd_events[:5]
+
+            # --- 5. Acceleration during rain vs dry ---
+            rain_mask = rain_arr > 0.2
+            disp_during_rain = float(np.mean(disp_rate_arr[rain_mask])) if np.any(rain_mask) else 0.0
+            disp_during_dry = float(np.mean(disp_rate_arr[~rain_mask])) if np.any(~rain_mask) else 0.0
+            rain_accel_ratio = (disp_during_rain / disp_during_dry) if disp_during_dry > 0.001 else 0.0
+
+            # --- 6. Peak rain events (>=20 mm/day) ---
+            peak_events = []
+            for i, day in enumerate(common_days):
+                r = float(rain_arr[i])
+                if r >= 20.0:
+                    resp_idx = min(i + best_lag, len(disp_rate_arr) - 1)
+                    peak_events.append({
+                        "date": day, "rain_mm": round(r, 1),
+                        "disp_response_mm": round(float(disp_rate_arr[resp_idx]), 2),
+                        "ls_rapid_index": round(float(ls_rapid_index[i]), 2)
+                    })
+            peak_events.sort(key=lambda e: e["rain_mm"], reverse=True)
+            top_peak_events = peak_events[:5]
+
+            # --- 7. Risk insights ---
+            risk_messages = []
+            if trigger_potential == "HIGH":
+                risk_messages.append("🚨 Mưa là tác nhân kích hoạt chính — cần cảnh giới khi dự báo mưa lớn.")
+            elif trigger_potential == "MEDIUM":
+                risk_messages.append("⚠️ Mưa có tác động đáng kể — cần theo dõi khi mưa kéo dài.")
+            if rain_accel_ratio > 3.0:
+                risk_messages.append(f"⚡ Dịch chuyển ngày mưa nhanh gấp {rain_accel_ratio:.1f}x so với ngày khô.")
+            elif rain_accel_ratio > 1.5:
+                risk_messages.append(f"📈 Dịch chuyển tăng {rain_accel_ratio:.1f}x trong ngày mưa.")
+            if top_cwd_events:
+                we = top_cwd_events[0]
+                risk_messages.append(
+                    f"🌧️ Đợt mưa lớn nhất: {we['days']} ngày ({we['total_rain_mm']}mm) → dịch {we['displacement_mm']}mm."
+                )
+            if sensitivity_mm_per_mm > 0.01:
+                risk_messages.append(f"📊 Độ nhạy: {sensitivity_mm_per_mm:.3f} mm dịch chuyển / mm mưa.")
+            combined_risk_message = " | ".join(risk_messages) if risk_messages else assessment
+
+            # ================================================================
+            # BUILD RESULT
+            # ================================================================
             result["available"] = True
             result["correlation"] = round(correlation, 4)
             result["strength"] = strength
@@ -885,6 +1003,7 @@ class LandslideAnalyzer:
             result["lag_days"] = int(best_lag)
             result["r_squared"] = round(float(r2), 4)
             result["slope_mm_day_per_rain_index"] = round(float(slope), 6)
+            result["intercept"] = round(float(intercept), 4)
             result["trigger_potential"] = trigger_potential
             result["ls_rapid"] = {
                 "short_half_life_days": short_half_life_days,
@@ -892,22 +1011,49 @@ class LandslideAnalyzer:
                 "short_weight": short_weight,
                 "max_lag_days": max_lag_days
             }
+            result["lag_scan"] = lag_scan_results
+            result["rain_stats"] = {
+                "total_mm": round(total_rain_mm, 1),
+                "max_daily_mm": round(max_daily_rain_mm, 1),
+                "max_rain_day": max_rain_day_label,
+                "rain_days": rain_days_count,
+                "dry_days": dry_days_count,
+                "avg_rain_on_rainy_days_mm": round(avg_rain_on_rainy_days, 1),
+                "max_ls_rapid_index": round(max_ls_rapid_index, 2),
+                "mean_ls_rapid_index": round(mean_ls_rapid_index, 2)
+            }
+            result["disp_stats"] = {
+                "total_mm": round(total_disp_mm, 2),
+                "max_daily_mm": round(max_daily_disp_mm, 2),
+                "max_disp_day": max_disp_day_label,
+                "avg_daily_mm": round(avg_daily_disp_mm, 2),
+                "disp_during_rain_mm": round(disp_during_rain, 3),
+                "disp_during_dry_mm": round(disp_during_dry, 3),
+                "rain_acceleration_ratio": round(rain_accel_ratio, 2)
+            }
+            result["sensitivity_mm_per_mm"] = round(sensitivity_mm_per_mm, 4)
+            result["cwd_events"] = top_cwd_events
+            result["peak_rain_events"] = top_peak_events
+            result["risk_insights"] = risk_messages
+            result["risk_message"] = combined_risk_message
+
             result["message"] = (
                 f"LS-RAPID: r={correlation:.3f}, lag={best_lag} ngày, "
-                f"R²={r2:.2f}, trigger={trigger_potential}."
+                f"R²={r2:.2f}, trigger={trigger_potential}. "
+                f"Tổng mưa: {total_rain_mm:.0f}mm ({rain_days_count} ngày mưa). "
+                f"Tổng dịch chuyển: {total_disp_mm:.1f}mm."
             )
             result["time_series"] = {
                 "labels": [datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m') for d in common_days],
-                # Legacy fields (frontend hiện dùng)
                 "cumulative_displacement_mm": [round(v, 2) for v in cumulative_disp_legacy],
                 "cumulative_rainfall_mm": [round(v, 1) for v in cumulative_rain],
                 "daily_rainfall_mm": [round(float(v), 1) for v in rain_arr],
-                # LS-RAPID-specific fields
                 "daily_displacement_mm": [round(float(v), 2) for v in disp_rate_arr],
                 "effective_rainfall_short_mm": [round(float(v), 2) for v in rain_eff_short],
                 "effective_rainfall_long_mm": [round(float(v), 2) for v in rain_eff_long],
                 "ls_rapid_index": [round(float(v), 2) for v in ls_rapid_index],
-                "net_displacement_mm": [round(float(v), 2) for v in cumulative_disp]
+                "net_displacement_mm": [round(float(v), 2) for v in cumulative_disp],
+                "regression_predicted": [round(float(v), 3) for v in y_pred],
             }
 
             return result

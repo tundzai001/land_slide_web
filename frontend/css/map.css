@@ -921,7 +921,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
 }
 
 .lsrapid-popup-card {
-    width: min(560px, calc(100vw - 28px));
+    width: min(720px, calc(100vw - 28px));
     border-radius: 14px;
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
@@ -966,10 +966,6 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .lsrapid-popup-status.status-fail {
     background: rgba(239, 68, 68, 0.18);
     color: #b91c1c;
-}
-
-.lsrapid-popup-body {
-    padding: 16px 20px;
 }
 
 .lsrapid-popup-grid {
@@ -1035,6 +1031,169 @@ body:has(.charts-panel.active) .toggle-list-btn {
 .lsrapid-popup-close:hover {
     color: var(--text-primary);
     border-color: var(--accent-primary);
+}
+
+/* LS-RAPID POPUP v2: Tabs */
+.lsrapid-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 14px;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    padding: 3px;
+    border: 1px solid var(--border-color);
+}
+
+.lsrapid-tab {
+    flex: 1;
+    padding: 7px 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.lsrapid-tab:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.lsrapid-tab.active {
+    background: var(--accent-primary);
+    color: white;
+    box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+}
+
+.lsrapid-tab i {
+    font-size: 0.85rem;
+}
+
+.lsrapid-tab-pane {
+    display: none;
+}
+
+.lsrapid-tab-pane.active {
+    display: block;
+    animation: lsrapidFadeIn 0.2s ease;
+}
+
+@keyframes lsrapidFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.lsrapid-popup-grid.lsrapid-grid-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.lsrapid-section-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+}
+
+.lsrapid-events-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lsrapid-event-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    transition: all 0.2s;
+}
+
+.lsrapid-event-item:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 2px 8px rgba(14, 165, 233, 0.1);
+}
+
+.lsrapid-event-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.lsrapid-event-date {
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--text-primary);
+}
+
+.lsrapid-event-badge {
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: rgba(14, 165, 233, 0.15);
+    color: #0369a1;
+    border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.lsrapid-event-badge-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.lsrapid-event-stats {
+    display: flex;
+    gap: 16px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.lsrapid-insights-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lsrapid-insight-item {
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--accent-warning);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 14px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+.lsrapid-insight-item.lsrapid-insight-ok {
+    border-left-color: var(--accent-success);
+}
+
+.lsrapid-popup-body {
+    padding: 16px 20px;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+[data-theme="dark"] .lsrapid-event-badge {
+    background: rgba(14, 165, 233, 0.25);
+    color: #7dd3fc;
+}
+
+[data-theme="dark"] .lsrapid-event-badge-danger {
+    background: rgba(239, 68, 68, 0.25);
+    color: #fca5a5;
 }
 
 /*  CHART BOX (Dùng chung)  */
@@ -2220,7 +2379,8 @@ body:has(.charts-panel.active) .toggle-list-btn {
         padding: 16px;
     }
 
-    .lsrapid-popup-grid {
+    .lsrapid-popup-grid,
+    .lsrapid-popup-grid.lsrapid-grid-3 {
         grid-template-columns: 1fr;
     }
 
