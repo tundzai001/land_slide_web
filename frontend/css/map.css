@@ -2488,7 +2488,7 @@ body:has(.charts-panel.active) .toggle-list-btn {
     border-color: rgba(248, 113, 113, 0.5);
 }
 
-.imu-offline-badge {
+.imu-offline-badge, .sensor-offline-badge {
     font-size: 0.6rem;
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -2501,7 +2501,8 @@ body:has(.charts-panel.active) .toggle-list-btn {
     background: #fee2e2;
 }
 
-[data-theme="dark"] .imu-offline-badge {
+[data-theme="dark"] .imu-offline-badge,
+[data-theme="dark"] .sensor-offline-badge {
     color: #fca5a5;
     background: rgba(239, 68, 68, 0.18);
     border-color: rgba(248, 113, 113, 0.5);

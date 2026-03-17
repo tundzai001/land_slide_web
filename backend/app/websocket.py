@@ -15,6 +15,7 @@ class ConnectionManager:
         
         # GIẢM THROTTLE - Cho phép cập nhật nhanh hơn
         self.last_broadcast_time = defaultdict(float)
+        self.last_station_risk_level = {}
         self.throttle_intervals = {
             'sensor_data': 0.1,      # 10 lần/giây (tăng từ 2 lần/giây)
             'station_status': 0.5,   # 2 lần/giây (tăng từ 1 lần/2s)
@@ -24,6 +25,20 @@ class ConnectionManager:
         #  GIẢM BUFFER TIME - Flush nhanh hơn
         self.message_buffer = defaultdict(dict)
         self.buffer_task = None
+
+    def _risk_severity(self, raw_level: str) -> int:
+        level = str(raw_level or '').upper()
+        severity_map = {
+            'LOW': 0,
+            'INFO': 0,
+            'MEDIUM': 1,
+            'WARNING': 1,
+            'HIGH': 2,
+            'CRITICAL': 3,
+            'EXTREME': 3,
+            'OFFLINE': -1,
+        }
+        return severity_map.get(level, 0)
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -52,12 +67,19 @@ class ConnectionManager:
         if msg_type == 'station_status':
             station_id = message.get('station_id')
             key = f"status_{station_id}"
+            current_level = str(message.get('risk_level') or message.get('level') or '').upper()
+            prev_level = self.last_station_risk_level.get(station_id, '')
+            is_escalation = self._risk_severity(current_level) > self._risk_severity(prev_level)
             
             current_time = time.time()
-            if current_time - self.last_broadcast_time[key] < self.throttle_intervals['station_status']:
+            if (
+                not is_escalation
+                and current_time - self.last_broadcast_time[key] < self.throttle_intervals['station_status']
+            ):
                 return
             
             self.last_broadcast_time[key] = current_time
+            self.last_station_risk_level[station_id] = current_level
             await self._send_to_all(message)
             return
 

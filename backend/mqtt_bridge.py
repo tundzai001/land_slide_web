@@ -146,9 +146,17 @@ class MQTTBridge:
         imu_cfg = dict(cfg.get("ImuAlerting", {}) or {})
 
         gnss_cfg.setdefault("gnss_confirm_steps", self.runtime_confirmation["gnss"])
+        gnss_cfg.setdefault("gnss_warning_confirm_steps", self.runtime_confirmation["gnss"])
+        gnss_cfg.setdefault("gnss_critical_confirm_steps", max(1, self.runtime_confirmation["gnss"] - 1))
         rain_cfg.setdefault("rain_confirm_steps", self.runtime_confirmation["rain"])
+        rain_cfg.setdefault("rain_warning_confirm_steps", self.runtime_confirmation["rain"])
+        rain_cfg.setdefault("rain_critical_confirm_steps", max(1, self.runtime_confirmation["rain"] - 1))
         water_cfg.setdefault("water_confirm_steps", self.runtime_confirmation["water"])
+        water_cfg.setdefault("water_warning_confirm_steps", self.runtime_confirmation["water"])
+        water_cfg.setdefault("water_critical_confirm_steps", max(1, self.runtime_confirmation["water"] - 1))
         imu_cfg.setdefault("imu_confirm_steps", self.runtime_confirmation["imu"])
+        imu_cfg.setdefault("imu_warning_confirm_steps", self.runtime_confirmation["imu"])
+        imu_cfg.setdefault("imu_critical_confirm_steps", max(1, self.runtime_confirmation["imu"] - 1))
 
         cfg["GnssAlerting"] = gnss_cfg
         cfg["RainAlerting"] = rain_cfg
@@ -428,20 +436,26 @@ class MQTTBridge:
         try:
             async with DataSessionLocal() as db_data:
                 db_data.add(model_data.SensorData(**sensor_record))
-                # Tìm alert chưa resolve cùng category, cập nhật hoặc tạo mới
-                res = await db_data.execute(
-                    select(model_data.Alert).where(
-                        and_(
-                            model_data.Alert.station_id == station_id,
-                            model_data.Alert.category == alert['category'],
-                            model_data.Alert.is_resolved == False
-                        )
-                    )
+                # Tìm alert chưa resolve cùng category, cập nhật hoặc tạo mới.
+                # Với IMU, gom cả alert legacy `tilt_warning` vào cùng luồng `tilt_critical`.
+                alert_query = and_(
+                    model_data.Alert.station_id == station_id,
+                    model_data.Alert.category == alert['category'],
+                    model_data.Alert.is_resolved == False
                 )
+                if sensor_record.get('sensor_type') == 'imu' and alert.get('category') == 'tilt_critical':
+                    alert_query = and_(
+                        model_data.Alert.station_id == station_id,
+                        model_data.Alert.category.in_(['tilt_critical', 'tilt_warning']),
+                        model_data.Alert.is_resolved == False
+                    )
+
+                res = await db_data.execute(select(model_data.Alert).where(alert_query))
                 existing_alert = res.scalar_one_or_none()
                 if existing_alert:
                     existing_alert.timestamp = current_timestamp
                     existing_alert.level = alert['level']
+                    existing_alert.category = alert['category']
                     existing_alert.message = alert['message']
                 else:
                     db_data.add(model_data.Alert(
@@ -502,7 +516,10 @@ class MQTTBridge:
             for level, category, ts in rows:
                 ttl = alert_ttl.get(category, 180)
                 if (now_ts - int(ts or 0)) <= ttl:
-                    fresh_levels.append(level)
+                    normalized_level = str(level or '').upper()
+                    if category in ('tilt_warning', 'tilt_critical', 'shock', 'tilt') and normalized_level == 'WARNING':
+                        normalized_level = 'CRITICAL'
+                    fresh_levels.append(normalized_level)
 
             priority = {
                 "EXTREME": 5,
@@ -762,6 +779,14 @@ class MQTTBridge:
             is_dangerous = True
         elif alert and alert.get('level') == 'PENDING':
             is_pending = True
+
+        # IMU policy: dangerous IMU alerts are always CRITICAL (no WARNING in UI)
+        if is_dangerous and sensor_type == 'imu' and alert:
+            alert['level'] = 'CRITICAL'
+            if alert.get('category') == 'tilt_warning':
+                alert['category'] = 'tilt_critical'
+            if not alert.get('audio_code') or alert.get('audio_code') == 'imu_warning':
+                alert['audio_code'] = 'imu_critical'
             
         if is_dangerous:
             try:

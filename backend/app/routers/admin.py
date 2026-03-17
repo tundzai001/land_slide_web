@@ -276,12 +276,16 @@ def get_default_station_config():
         "ImuAlerting": {
             "tilt_warning_deg": 5.0,
             "tilt_critical_deg": 15.0,
+            "imu_warning_confirm_steps": 2,
+            "imu_critical_confirm_steps": 1,
             "imu_confirm_steps": 2,
             "shock_threshold_ms2": 5.0
         },
         # Nhóm cảnh báo GNSS (kỹ thuật)
         "GnssAlerting": {
             "gnss_max_hdop": 4.0,
+            "gnss_warning_confirm_steps": 3,
+            "gnss_critical_confirm_steps": 2,
             "gnss_confirm_steps": 3,
             "gnss_degraded_timeout": 300
         },
@@ -290,12 +294,16 @@ def get_default_station_config():
             "rain_intensity_watch_threshold": 10.0,
             "rain_intensity_warning_threshold": 25.0,
             "rain_intensity_critical_threshold": 50.0,
+            "rain_warning_confirm_steps": 2,
+            "rain_critical_confirm_steps": 1,
             "rain_confirm_steps": 2
         },
         # Nhóm cảnh báo Mực nước & Chuyển dịch
         "Water": {
             "warning_threshold": 0.15,
             "critical_threshold": 0.30,
+            "water_warning_confirm_steps": 3,
+            "water_critical_confirm_steps": 2,
             "water_confirm_steps": 3
         },
         "offline_thresholds": {

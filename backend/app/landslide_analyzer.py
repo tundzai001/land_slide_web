@@ -1609,7 +1609,8 @@ class LandslideAnalyzer:
             
             # Lấy cấu hình xác nhận
             gnss_config = config.get('GnssAlerting', {})
-            confirm_steps = int(gnss_config.get('gnss_confirm_steps', 3))
+            warning_confirm_steps = int(gnss_config.get('gnss_warning_confirm_steps', gnss_config.get('gnss_confirm_steps', 3)))
+            critical_confirm_steps = int(gnss_config.get('gnss_critical_confirm_steps', gnss_config.get('gnss_confirm_steps', 2)))
             # Dù đủ confirm_steps, phải span ít nhất X giây liên tục.
             # Ngăn data burst 30Hz confirm trong <200ms.
             min_confirm_seconds = float(gnss_config.get('gnss_confirm_min_seconds', 3.0))
@@ -1695,6 +1696,7 @@ class LandslideAnalyzer:
             
             # ✅ LOGIC ĐẾM XÁC NHẬN
             if current_level in ["WARNING", "CRITICAL"]:
+                required_steps = critical_confirm_steps if current_level == "CRITICAL" else warning_confirm_steps
                 latched_level = str(counter_info.get('latched_level') or '').upper()
                 level_rank = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
 
@@ -1720,24 +1722,24 @@ class LandslideAnalyzer:
                     counter_info['safe_count'] = 0
                     counter_info['last_level'] = current_level
                     counter_info['first_detected'] = now
-                    logger.debug(f"[GNSS-{station_id}] Potential {current_level} detected, counting (1/{confirm_steps})")
+                    logger.debug(f"[GNSS-{station_id}] Potential {current_level} detected, counting (1/{required_steps})")
                     return None
                 else:
                     counter_info['count'] += 1
 
-                    # Cap tại confirm_steps để không re-fire
-                    if counter_info['count'] > confirm_steps:
-                        counter_info['count'] = confirm_steps
+                    # Cap tại required_steps để không re-fire
+                    if counter_info['count'] > required_steps:
+                        counter_info['count'] = required_steps
                         return None
 
                     elapsed = now - counter_info['first_detected']
                     logger.debug(
-                        f"[GNSS-{station_id}] {current_level} count: {counter_info['count']}/{confirm_steps}, "
+                        f"[GNSS-{station_id}] {current_level} count: {counter_info['count']}/{required_steps}, "
                         f"elapsed: {elapsed:.1f}/{min_confirm_seconds}s"
                     )
 
                     # Phải đủ CẢ HAI: số lần VÀ thời gian tối thiểu
-                    if counter_info['count'] == confirm_steps:
+                    if counter_info['count'] == required_steps:
                         if elapsed < min_confirm_seconds:
                             logger.debug(
                                 f"[GNSS-{station_id}] Count reached but too fast "
@@ -1745,11 +1747,11 @@ class LandslideAnalyzer:
                             )
                             # Không cap count — cho phép tiếp tục tăng để
                             # khi đủ thời gian sẽ re-check ở lần kế
-                            counter_info['count'] = confirm_steps - 1
+                            counter_info['count'] = required_steps - 1
                             return None
                         counter_info['latched_level'] = current_level
                         counter_info['latched_time'] = now  # Ghi timestamp để tracking timeout
-                        logger.warning(f"🚨 [GNSS-{station_id}] ✅ CONFIRMED {current_level} after {confirm_steps} readings over {elapsed:.1f}s!")
+                        logger.warning(f"🚨 [GNSS-{station_id}] ✅ CONFIRMED {current_level} after {required_steps} readings over {elapsed:.1f}s!")
                         
                         message = f"🚨 CỰC KỲ NGUY HIỂM: {velocity_mms:.2f} mm/s ({velocity_class})" if current_level == "CRITICAL" else f"⚠️ Tốc độ nhanh: {velocity_mms:.4f} mm/s ({velocity_class})"
                         
@@ -1765,7 +1767,7 @@ class LandslideAnalyzer:
                             "details": {
                                 "velocity_mm_s": velocity_mms,
                                 "classification": velocity_class,
-                                "confirmed_after": confirm_steps
+                                "confirmed_after": required_steps
                             }
                         }
                     else:
@@ -1809,7 +1811,7 @@ class LandslideAnalyzer:
                     # Chưa có alert latched, chỉ đếm ngược count thường
                     if counter_info['count'] > 0:
                         counter_info['count'] = max(0, counter_info['count'] - 1)
-                        logger.debug(f"[GNSS-{station_id}] Safe reading, counter → {counter_info['count']}/{confirm_steps}")
+                        logger.debug(f"[GNSS-{station_id}] Safe reading, counter → {counter_info['count']}/{max(warning_confirm_steps, critical_confirm_steps)}")
                     if counter_info['count'] == 0 and counter_info['last_level'] is not None:
                         logger.info(f"✅ [GNSS-{station_id}] Returned to safe after potential {counter_info['last_level']}")
                         counter_info['last_level'] = None
@@ -1830,7 +1832,8 @@ class LandslideAnalyzer:
             watch = self._get_cfg(config, 'RainAlerting', 'rain_intensity_watch_threshold', 10.0)
             warning = self._get_cfg(config, 'RainAlerting', 'rain_intensity_warning_threshold', 25.0)
             critical = self._get_cfg(config, 'RainAlerting', 'rain_intensity_critical_threshold', 50.0)
-            confirm_steps = int(config.get('RainAlerting', {}).get('rain_confirm_steps', 2))  # ✅ Mặc định 2 lần
+            warning_confirm_steps = int(config.get('RainAlerting', {}).get('rain_warning_confirm_steps', config.get('RainAlerting', {}).get('rain_confirm_steps', 2)))
+            critical_confirm_steps = int(config.get('RainAlerting', {}).get('rain_critical_confirm_steps', config.get('RainAlerting', {}).get('rain_confirm_steps', 1)))
             safe_confirm_steps = int(config.get('RainAlerting', {}).get('rain_safe_confirm_steps', 3))
 
             intensity = recent_data[-1]['data'].get('intensity_mm_h', 0.0)
@@ -1847,6 +1850,7 @@ class LandslideAnalyzer:
                 counter_info['safe_count'] = 0
 
             if current_level in ["WARNING", "CRITICAL"]:
+                required_steps = critical_confirm_steps if current_level == "CRITICAL" else warning_confirm_steps
                 counter_info['safe_count'] = 0
                 if counter_info['latched_level'] == current_level:
                     return {'level': 'PENDING', 'category': 'rainfall'}
@@ -1856,7 +1860,7 @@ class LandslideAnalyzer:
                     return None
                 else:
                     counter_info['count'] += 1
-                    if counter_info['count'] >= confirm_steps:
+                    if counter_info['count'] >= required_steps:
                         counter_info['latched_level'] = current_level
                         counter_info['latched_time'] = time.time()  # Ghi timestamp
                         logger.warning(f"🌧️ [RAIN-{station_id}] ✅ CONFIRMED {current_level}")
@@ -1902,7 +1906,8 @@ class LandslideAnalyzer:
             val = recent_data[-1]['data'].get('water_level', 0.0)
             warn = self._get_cfg(config, 'Water', 'warning_threshold', 999.0)
             crit = self._get_cfg(config, 'Water', 'critical_threshold', 999.0)
-            confirm_steps = int(config.get('Water', {}).get('water_confirm_steps', 3))  # ✅ Mặc định 3 lần
+            warning_confirm_steps = int(config.get('Water', {}).get('water_warning_confirm_steps', config.get('Water', {}).get('water_confirm_steps', 3)))
+            critical_confirm_steps = int(config.get('Water', {}).get('water_critical_confirm_steps', config.get('Water', {}).get('water_confirm_steps', 2)))
             safe_confirm_steps = int(config.get('Water', {}).get('water_safe_confirm_steps', 3))
 
             current_level = "INFO"
@@ -1916,6 +1921,7 @@ class LandslideAnalyzer:
                 counter_info['safe_count'] = 0
 
             if current_level in ["WARNING", "CRITICAL"]:
+                required_steps = critical_confirm_steps if current_level == "CRITICAL" else warning_confirm_steps
                 counter_info['safe_count'] = 0
                 if counter_info['latched_level'] == current_level:
                     return {'level': 'PENDING', 'category': 'water_level'}
@@ -1925,7 +1931,7 @@ class LandslideAnalyzer:
                     return None
                 else:
                     counter_info['count'] += 1
-                    if counter_info['count'] >= confirm_steps:
+                    if counter_info['count'] >= required_steps:
                         counter_info['latched_level'] = current_level
                         counter_info['latched_time'] = time.time()  # Ghi timestamp
                         logger.warning(
@@ -1989,14 +1995,13 @@ class LandslideAnalyzer:
             pitch = latest.get('pitch', 0.0)
             delta_tilt = math.sqrt(roll**2 + pitch**2)
             
-            tilt_warn = self._get_cfg(config, 'ImuAlerting', 'tilt_warning_deg', 5.0)
             tilt_crit = self._get_cfg(config, 'ImuAlerting', 'tilt_critical_deg', 15.0)
             
             # Va đập
             accel = latest.get('total_accel', 0.0)
             shock_thresh = self._get_cfg(config, 'ImuAlerting', 'shock_threshold_ms2', 20.0)
             
-            confirm_steps = int(config.get('ImuAlerting', {}).get('imu_confirm_steps', 2))
+            critical_confirm_steps = int(config.get('ImuAlerting', {}).get('imu_critical_confirm_steps', config.get('ImuAlerting', {}).get('imu_confirm_steps', 1)))
             safe_confirm_steps = int(config.get('ImuAlerting', {}).get('imu_safe_confirm_steps', 3))
 
             # Xác định mức nguy hiểm cao nhất hiện tại
@@ -2014,7 +2019,7 @@ class LandslideAnalyzer:
                 audio_code = "imu_shock"
                 details["shock_ms2"] = accel
                 # Shock có thể cần báo ngay lập tức
-                confirm_steps = 1 
+                critical_confirm_steps = 1
                 
             # 2. Xử lý độ nghiêng (Tilt)
             elif delta_tilt >= tilt_crit:
@@ -2022,11 +2027,6 @@ class LandslideAnalyzer:
                 alert_category = "tilt_critical"
                 alert_msg = f"Nghiêng nguy hiểm: {delta_tilt:.1f}°"
                 audio_code = "imu_critical"
-            elif delta_tilt >= tilt_warn:
-                current_level = "WARNING"
-                alert_category = "tilt_warning"
-                alert_msg = f"Nghiêng nhanh: {delta_tilt:.1f}°"
-                audio_code = "imu_warning"
             
             counter_info = self.alert_counters[station_id]['imu']
             if 'latched_level' not in counter_info:
@@ -2035,28 +2035,29 @@ class LandslideAnalyzer:
                 counter_info['safe_count'] = 0
 
             if current_level in ["WARNING", "CRITICAL"]:
+                required_steps = critical_confirm_steps
                 counter_info['safe_count'] = 0
                 if counter_info['latched_level'] == current_level:
                     return {'level': 'PENDING', 'category': alert_category}
                 if counter_info['last_level'] != current_level:
                     counter_info['count'] = 1
                     counter_info['last_level'] = current_level
-                    if counter_info['count'] >= confirm_steps:
+                    if counter_info['count'] >= required_steps:
                         counter_info['latched_level'] = current_level
                         logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category})")
                         return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
                     else:
-                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} (1/{confirm_steps})")
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} (1/{required_steps})")
                         return {"level": "PENDING", "category": alert_category}
                 else:
                     counter_info['count'] += 1
-                    if counter_info['count'] >= confirm_steps:
+                    if counter_info['count'] >= required_steps:
                         counter_info['latched_level'] = current_level
                         counter_info['latched_time'] = time.time()  # Ghi timestamp
-                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category}) after {confirm_steps} times")
+                        logger.warning(f"⚡ [IMU-{station_id}] ✅ CONFIRMED {current_level} ({alert_category}) after {required_steps} times")
                         return {"level": current_level, "category": alert_category, "message": alert_msg, "audio_code": audio_code, "details": details}
                     else:
-                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} ({counter_info['count']}/{confirm_steps})")
+                        logger.info(f"⏳ [IMU-{station_id}] WAITING CONFIRMATION {current_level} ({counter_info['count']}/{required_steps})")
                         return {"level": "PENDING", "category": alert_category}
             else:
                 if counter_info['latched_level'] is not None:

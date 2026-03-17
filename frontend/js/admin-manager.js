@@ -736,15 +736,20 @@ class AdminManager {
             document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
 
         // Water confirm steps - hiển thị nguồn giá trị
-        const waterConfirmEl = document.getElementById('cfg-water-confirm');
+        const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
+        const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
         const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
-        if (waterConfirmEl) {
-            const wcs = waterCfg.water_confirm_steps;
-            waterConfirmEl.value = wcs ?? 3;
+        if (waterWarningConfirmEl) {
+            const wcs = waterCfg.water_warning_confirm_steps ?? waterCfg.water_confirm_steps;
+            waterWarningConfirmEl.value = wcs ?? 3;
             if (waterConfirmSrc) {
                 waterConfirmSrc.textContent = wcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
                 waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
             }
+        }
+        if (waterCriticalConfirmEl) {
+            const wccs = waterCfg.water_critical_confirm_steps ?? waterCfg.water_confirm_steps;
+            waterCriticalConfirmEl.value = wccs ?? 2;
         }
         const waterSafeConfirmEl = document.getElementById('cfg-water-safe-confirm');
         const waterSafeConfirmSrc = document.getElementById('cfg-water-safe-confirm-source');
@@ -763,15 +768,20 @@ class AdminManager {
         document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
 
         // Rain confirm steps - hiển thị nguồn giá trị
-        const rainConfirmEl = document.getElementById('cfg-rain-confirm');
+        const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
+        const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
         const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
-        if (rainConfirmEl) {
-            const rcs = rainCfg.rain_confirm_steps;
-            rainConfirmEl.value = rcs ?? 2;
+        if (rainWarningConfirmEl) {
+            const rcs = rainCfg.rain_warning_confirm_steps ?? rainCfg.rain_confirm_steps;
+            rainWarningConfirmEl.value = rcs ?? 2;
             if (rainConfirmSrc) {
                 rainConfirmSrc.textContent = rcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
                 rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
             }
+        }
+        if (rainCriticalConfirmEl) {
+            const rccs = rainCfg.rain_critical_confirm_steps ?? rainCfg.rain_confirm_steps;
+            rainCriticalConfirmEl.value = rccs ?? 1;
         }
         const rainSafeConfirmEl = document.getElementById('cfg-rain-safe-confirm');
         const rainSafeConfirmSrc = document.getElementById('cfg-rain-safe-confirm-source');
@@ -788,14 +798,16 @@ class AdminManager {
 
             const imuCfg = cfg.ImuAlerting || {};
             document.getElementById('cfg-imu-shock').value = imuCfg.shock_threshold_ms2 ?? 5.0;
-            const tiltWarnEl = document.getElementById('cfg-imu-tilt-warn');
-            if (tiltWarnEl) tiltWarnEl.value = imuCfg.tilt_warning_deg ?? 5.0;
             const tiltCritEl = document.getElementById('cfg-imu-tilt-crit');
             if (tiltCritEl) tiltCritEl.value = imuCfg.tilt_critical_deg ?? 15.0;
-            const imuConfirmEl = document.getElementById('cfg-imu-confirm');
-            if (imuConfirmEl) imuConfirmEl.value = imuCfg.imu_confirm_steps ?? 2;
+            const imuCriticalConfirmEl = document.getElementById('cfg-imu-critical-confirm');
+            if (imuCriticalConfirmEl) imuCriticalConfirmEl.value = imuCfg.imu_critical_confirm_steps ?? imuCfg.imu_confirm_steps ?? 1;
             const imuSafeConfirmEl = document.getElementById('cfg-imu-safe-confirm');
             if (imuSafeConfirmEl) imuSafeConfirmEl.value = imuCfg.imu_safe_confirm_steps ?? 3;
+            const gnssWarningStepsEl = document.getElementById('cfg-gnss-warning-steps');
+            if (gnssWarningStepsEl) gnssWarningStepsEl.value = gnssCfg.gnss_warning_confirm_steps ?? gnssCfg.gnss_confirm_steps ?? 3;
+            const gnssCriticalStepsEl = document.getElementById('cfg-gnss-critical-steps');
+            if (gnssCriticalStepsEl) gnssCriticalStepsEl.value = gnssCfg.gnss_critical_confirm_steps ?? gnssCfg.gnss_confirm_steps ?? 2;
             const gnssSafeStepsEl = document.getElementById('cfg-gnss-safe-steps');
             if (gnssSafeStepsEl) gnssSafeStepsEl.value = gnssCfg.gnss_safe_confirm_steps ?? 5;
 
@@ -924,9 +936,12 @@ class AdminManager {
 
         const presets = {
             conservative: {
-                gnss_steps: 5,
-                water_confirm: 5,
-                rain_confirm: 3,
+                gnss_warning_steps: 5,
+                gnss_critical_steps: 3,
+                water_warning_confirm: 5,
+                water_critical_confirm: 3,
+                rain_warning_confirm: 3,
+                rain_critical_confirm: 2,
                 gnss_hdop: 3.0,
                 gnss_timeout: 600,
                 water_warning: 0.20,
@@ -934,15 +949,17 @@ class AdminManager {
                 rain_watch: 15.0,
                 rain_warning: 35.0,
                 rain_critical: 60.0,
-                imu_tilt_warn: 10.0,
                 imu_tilt_crit: 25.0,
                 imu_shock: 8.0,
-                imu_confirm: 2
+                imu_critical_confirm: 1
             },
             balanced: {
-                gnss_steps: 3,
-                water_confirm: 3,
-                rain_confirm: 2,
+                gnss_warning_steps: 3,
+                gnss_critical_steps: 2,
+                water_warning_confirm: 3,
+                water_critical_confirm: 2,
+                rain_warning_confirm: 2,
+                rain_critical_confirm: 1,
                 gnss_hdop: 4.0,
                 gnss_timeout: 300,
                 water_warning: 0.15,
@@ -950,15 +967,17 @@ class AdminManager {
                 rain_watch: 10.0,
                 rain_warning: 25.0,
                 rain_critical: 50.0,
-                imu_tilt_warn: 5.0,
                 imu_tilt_crit: 15.0,
                 imu_shock: 5.0,
-                imu_confirm: 1
+                imu_critical_confirm: 1
             },
             sensitive: {
-                gnss_steps: 1,
-                water_confirm: 1,
-                rain_confirm: 1,
+                gnss_warning_steps: 1,
+                gnss_critical_steps: 1,
+                water_warning_confirm: 1,
+                water_critical_confirm: 1,
+                rain_warning_confirm: 1,
+                rain_critical_confirm: 1,
                 gnss_hdop: 5.0,
                 gnss_timeout: 180,
                 water_warning: 0.10,
@@ -966,10 +985,9 @@ class AdminManager {
                 rain_watch: 5.0,
                 rain_warning: 15.0,
                 rain_critical: 30.0,
-                imu_tilt_warn: 3.0,
                 imu_tilt_crit: 8.0,
                 imu_shock: 3.0,
-                imu_confirm: 1
+                imu_critical_confirm: 1
             }
         };
 
@@ -978,11 +996,15 @@ class AdminManager {
 
         // ✅ ĐIỀN TỰ ĐỘNG CÁC GIÁ TRỊ VÀO FORM
 
-        // Rain/Water confirm steps - giờ có input field riêng
-        const rainConfirmEl = document.getElementById('cfg-rain-confirm');
-        const waterConfirmEl = document.getElementById('cfg-water-confirm');
-        if (rainConfirmEl) rainConfirmEl.value = preset.rain_confirm;
-        if (waterConfirmEl) waterConfirmEl.value = preset.water_confirm;
+        // Rain/Water confirm steps - warning/critical tách riêng
+        const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
+        const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
+        const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
+        const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
+        if (rainWarningConfirmEl) rainWarningConfirmEl.value = preset.rain_warning_confirm;
+        if (rainCriticalConfirmEl) rainCriticalConfirmEl.value = preset.rain_critical_confirm;
+        if (waterWarningConfirmEl) waterWarningConfirmEl.value = preset.water_warning_confirm;
+        if (waterCriticalConfirmEl) waterCriticalConfirmEl.value = preset.water_critical_confirm;
 
         // Cập nhật source indicator
         const rainSrc = document.getElementById('cfg-rain-confirm-source');
@@ -992,11 +1014,13 @@ class AdminManager {
 
         // GNSS Quality
         const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
-        const gnssStepsEl = document.getElementById('cfg-gnss-steps');
+        const gnssWarningStepsEl = document.getElementById('cfg-gnss-warning-steps');
+        const gnssCriticalStepsEl = document.getElementById('cfg-gnss-critical-steps');
         const gnssTimeoutEl = document.getElementById('cfg-gnss-timeout');
 
         if (gnssHdopEl) gnssHdopEl.value = preset.gnss_hdop;
-        if (gnssStepsEl) gnssStepsEl.value = preset.gnss_steps;
+        if (gnssWarningStepsEl) gnssWarningStepsEl.value = preset.gnss_warning_steps;
+        if (gnssCriticalStepsEl) gnssCriticalStepsEl.value = preset.gnss_critical_steps;
         if (gnssTimeoutEl) gnssTimeoutEl.value = preset.gnss_timeout;
 
         // Water
@@ -1016,15 +1040,13 @@ class AdminManager {
         if (rainCriticalEl) rainCriticalEl.value = preset.rain_critical;
 
         // IMU
-        const imuTiltWarnEl = document.getElementById('cfg-imu-tilt-warn');
         const imuTiltCritEl = document.getElementById('cfg-imu-tilt-crit');
         const imuShockEl = document.getElementById('cfg-imu-shock');
-        const imuConfirmEl = document.getElementById('cfg-imu-confirm');
+        const imuCriticalConfirmEl = document.getElementById('cfg-imu-critical-confirm');
 
-        if (imuTiltWarnEl) imuTiltWarnEl.value = preset.imu_tilt_warn;
         if (imuTiltCritEl) imuTiltCritEl.value = preset.imu_tilt_crit;
         if (imuShockEl) imuShockEl.value = preset.imu_shock;
-        if (imuConfirmEl) imuConfirmEl.value = preset.imu_confirm;
+        if (imuCriticalConfirmEl) imuCriticalConfirmEl.value = preset.imu_critical_confirm;
 
         // ✅ HIỆU ỨNG FLASH (để user biết đã áp dụng)
         const inputs = document.querySelectorAll('#stationConfigForm input[type="number"]');
@@ -1055,33 +1077,40 @@ class AdminManager {
         const checks = [
             {
                 name: 'GNSS',
-                dangerous: readInt('cfg-gnss-steps', 3),
+                warning: readInt('cfg-gnss-warning-steps', 3),
+                critical: readInt('cfg-gnss-critical-steps', 2),
                 safe: readInt('cfg-gnss-safe-steps', 5)
             },
             {
                 name: 'Rain',
-                dangerous: readInt('cfg-rain-confirm', 2),
+                warning: readInt('cfg-rain-warning-confirm', 2),
+                critical: readInt('cfg-rain-critical-confirm', 1),
                 safe: readInt('cfg-rain-safe-confirm', 3)
             },
             {
                 name: 'Water',
-                dangerous: readInt('cfg-water-confirm', 3),
+                warning: readInt('cfg-water-warning-confirm', 3),
+                critical: readInt('cfg-water-critical-confirm', 2),
                 safe: readInt('cfg-water-safe-confirm', 3)
             },
             {
                 name: 'IMU',
-                dangerous: readInt('cfg-imu-confirm', 2),
+                critical: readInt('cfg-imu-critical-confirm', 1),
                 safe: readInt('cfg-imu-safe-confirm', 3)
             }
         ];
 
         const warnings = [];
         checks.forEach((item) => {
-            if (item.dangerous <= 1) {
-                warnings.push(`${item.name}: Dangerous Confirm Steps = ${item.dangerous} (rất nhạy, dễ báo giả)`);
+            if (item.critical <= 0) {
+                warnings.push(`${item.name}: Critical Confirm Steps phải >= 1`);
             }
-            if (item.safe <= item.dangerous) {
-                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nên lớn hơn Dangerous (${item.dangerous})`);
+            if (item.name !== 'IMU' && item.critical > item.warning) {
+                warnings.push(`${item.name}: Critical Confirm Steps (${item.critical}) nên <= Warning (${item.warning}) để cảnh báo nặng phản ứng nhanh hơn`);
+            }
+            const compareBase = item.name === 'IMU' ? item.critical : Math.max(item.warning, item.critical);
+            if (item.safe <= compareBase) {
+                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nên lớn hơn ${item.name === 'IMU' ? 'Critical' : 'Warning/Critical'} (${item.name === 'IMU' ? item.critical : `${item.warning}/${item.critical}`})`);
             }
         });
 
@@ -1098,6 +1127,25 @@ class AdminManager {
             '',
             'Bạn vẫn muốn lưu cấu hình trạm?'
         ].join('\n');
+
+        return confirm(message);
+    }
+
+    confirmDeviceProvisionWarnings(deviceCode) {
+        const warnings = this.getConfirmStepWarnings();
+
+        const message = warnings.length > 0
+            ? [
+                `⚠ Cảnh báo trước khi gán thiết bị ${deviceCode}:`,
+                ...warnings.map(w => `- ${w}`),
+                '',
+                'Nếu vẫn tiếp tục, thiết bị sẽ dùng cấu hình confirm steps hiện tại của trạm.',
+                'Bạn có muốn tiếp tục?'
+            ].join('\n')
+            : [
+                `Xác nhận gán thiết bị ${deviceCode} vào trạm hiện tại?`,
+                'Bạn có muốn tiếp tục?'
+            ].join('\n');
 
         return confirm(message);
     }
@@ -1158,9 +1206,13 @@ class AdminManager {
         if (hasError) return;
         if (!this.confirmConfirmStepWarnings()) return;
 
-        // Rain/Water confirm steps: đọc trực tiếp từ input (user đã thấy và có thể sửa)
-        const finalRainConfirm = parseInt(document.getElementById('cfg-rain-confirm')?.value) || 2;
-        const finalWaterConfirm = parseInt(document.getElementById('cfg-water-confirm')?.value) || 3;
+        const finalRainWarningConfirm = parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
+        const finalRainCriticalConfirm = parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1;
+        const finalWaterWarningConfirm = parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3;
+        const finalWaterCriticalConfirm = parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2;
+        const finalGnssWarningConfirm = parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3;
+        const finalGnssCriticalConfirm = parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
+        const finalImuCriticalConfirm = parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
         const config = {
@@ -1174,26 +1226,34 @@ class AdminManager {
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
-                water_confirm_steps: finalWaterConfirm,
+                water_warning_confirm_steps: finalWaterWarningConfirm,
+                water_critical_confirm_steps: finalWaterCriticalConfirm,
+                water_confirm_steps: finalWaterWarningConfirm,
                 water_safe_confirm_steps: parseInt(document.getElementById('cfg-water-safe-confirm')?.value) || 3
             },
             RainAlerting: {
                 rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch').value),
                 rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning').value),
                 rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value),
-                rain_confirm_steps: finalRainConfirm,
+                rain_warning_confirm_steps: finalRainWarningConfirm,
+                rain_critical_confirm_steps: finalRainCriticalConfirm,
+                rain_confirm_steps: finalRainWarningConfirm,
                 rain_safe_confirm_steps: parseInt(document.getElementById('cfg-rain-safe-confirm')?.value) || 3
             },
             GnssAlerting: {
                 gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
-                gnss_confirm_steps: parseInt(document.getElementById('cfg-gnss-steps').value) || 3,
+                gnss_warning_confirm_steps: finalGnssWarningConfirm,
+                gnss_critical_confirm_steps: finalGnssCriticalConfirm,
+                gnss_confirm_steps: finalGnssWarningConfirm,
                 gnss_safe_confirm_steps: parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
                 gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
             },
             ImuAlerting: {
-                tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-warn').value) || 5.0,
                 tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
-                imu_confirm_steps: parseInt(document.getElementById('cfg-imu-confirm').value) || 2,
+                tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
+                imu_warning_confirm_steps: finalImuCriticalConfirm,
+                imu_critical_confirm_steps: finalImuCriticalConfirm,
+                imu_confirm_steps: finalImuCriticalConfirm,
                 imu_safe_confirm_steps: parseInt(document.getElementById('cfg-imu-safe-confirm')?.value) || 3,
                 shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
             },
@@ -1584,6 +1644,8 @@ class AdminManager {
             return;
         }
 
+        if (!this.confirmDeviceProvisionWarnings(device_code)) return;
+
         try {
             // Step 1: Generate license
             window.toast?.info('🔑 Đang tạo license...');
@@ -1625,6 +1687,8 @@ class AdminManager {
             window.toast?.warning('Lưu trạm trước khi gán thiết bị');
             return;
         }
+
+        if (!this.confirmDeviceProvisionWarnings(device_code)) return;
 
         const license = prompt('Nhập mã license/serial để lưu (hoặc để trống):');
         if (license === null) return; // cancelled

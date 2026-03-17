@@ -134,19 +134,26 @@
                         <div class="sensor-label d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity</span>
                             <span id="gnss-fix-badge" class="gnss-fix-badge GNSS_UNKNOWN">NO DATA</span>
+                            <span id="gnss-offline-badge" class="sensor-offline-badge" style="display:none;">OFFLINE</span>
                         </div>
                         <div class="sensor-value-large" id="val-gnss-vel">--<span class="sensor-unit">mm/s</span></div>
                     </div>
 
                     <!-- Rain Intensity -->
                     <div class="sensor-item" id="sensor-card-rain">
-                        <div class="sensor-label"><i class="bi bi-cloud-rain-fill me-1"></i>Rain Intensity</div>
+                        <div class="sensor-label d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-cloud-rain-fill me-1"></i>Rain Intensity</span>
+                            <span id="rain-offline-badge" class="sensor-offline-badge" style="display:none;">OFFLINE</span>
+                        </div>
                         <div class="sensor-value-large" id="val-rain">--<span class="sensor-unit">mm/h</span></div>
                     </div>
 
                     <!-- Water Level -->
                     <div class="sensor-item sensor-full-width" id="sensor-card-water">
-                        <div class="sensor-label"><i class="bi bi-water me-1"></i>Water Level</div>
+                        <div class="sensor-label d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-water me-1"></i>Water Level</span>
+                            <span id="water-offline-badge" class="sensor-offline-badge" style="display:none;">OFFLINE</span>
+                        </div>
                         <div class="sensor-value-large" id="val-water">--<span class="sensor-unit">m</span></div>
                     </div>
 

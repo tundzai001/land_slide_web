@@ -1433,16 +1433,28 @@ async def _calculate_station_risk_assessment(
             if (now_ts - int(a.timestamp or 0)) <= ttl:
                 fresh_alerts.append(a)
         
-        critical_count = sum(1 for a in fresh_alerts if a.level == "CRITICAL")
-        warning_count = sum(1 for a in fresh_alerts if a.level == "WARNING")
-        
-        if critical_count >= 2:
-            overall_risk = "EXTREME"
-        elif critical_count == 1 or warning_count >= 3:
-            overall_risk = "HIGH"
-        elif warning_count >= 1:
-            overall_risk = "MEDIUM"
-        else:
+        # Dùng logic max-level giống mqtt_bridge._get_station_active_alert_summary()
+        # để WebSocket và REST API trả về cùng giá trị risk_level.
+        priority = {
+            "EXTREME": 5,
+            "CRITICAL": 4,
+            "HIGH": 3,
+            "WARNING": 2,
+            "MEDIUM": 1,
+            "LOW": 0,
+        }
+        overall_risk = "LOW"
+        highest_score = -1
+        for a in fresh_alerts:
+            level = str(a.level or "").upper()
+            if a.category in ('tilt_warning', 'tilt_critical', 'shock', 'tilt') and level == 'WARNING':
+                level = 'CRITICAL'
+            score = priority.get(level, 0)
+            if score > highest_score:
+                overall_risk = level
+                highest_score = score
+
+        if overall_risk not in priority:
             overall_risk = "LOW"
         
         return {

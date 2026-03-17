@@ -54,6 +54,50 @@ function normalizeAlertLevel(rawLevel) {
     return 'WARNING';
 }
 
+function normalizeIncomingAlert(alertData) {
+    if (!alertData || typeof alertData !== 'object') return alertData;
+
+    const normalized = { ...alertData };
+    const sensorType = String(normalized.sensor_type || '').toLowerCase();
+    const rawLevel = String(normalized.level || normalized.risk_level || '').toUpperCase();
+    const isDangerous = ['WARNING', 'MEDIUM', 'HIGH', 'CRITICAL', 'EXTREME'].includes(rawLevel);
+
+    // FE safety net: IMU dangerous alerts are always treated as CRITICAL.
+    if (sensorType === 'imu' && isDangerous) {
+        normalized.level = 'CRITICAL';
+        if (normalized.category === 'tilt_warning') {
+            normalized.category = 'tilt_critical';
+        }
+        if (!normalized.audio_code || normalized.audio_code === 'imu_warning') {
+            normalized.audio_code = 'imu_critical';
+        }
+    }
+
+    return normalized;
+}
+
+function buildAlertKey(alertData) {
+    if (!alertData || typeof alertData !== 'object') return '';
+    const stationId = alertData.station_id ?? '';
+    const sensorType = String(alertData.sensor_type || alertData.category || 'unknown').toLowerCase();
+    const level = normalizeAlertLevel(alertData.level || alertData.risk_level || 'WARNING');
+    return `${stationId}_${sensorType}_${level}`;
+}
+
+function mapAlertCategoryToSensorType(category) {
+    const cat = String(category || '').toLowerCase();
+    if (cat === 'gnss_velocity') return 'gnss';
+    if (cat === 'rainfall') return 'rain';
+    if (cat === 'water_level') return 'water';
+    if (cat === 'tilt' || cat === 'tilt_warning' || cat === 'tilt_critical' || cat === 'shock') return 'imu';
+    return cat;
+}
+
+function isBannerSuppressed(stationId) {
+    const until = Number(bannerSuppressedUntilByStation[stationId] || 0);
+    return Date.now() < until;
+}
+
 function getAlertSeverity(rawLevel) {
     const normalized = normalizeAlertLevel(rawLevel);
     return normalized === 'CRITICAL' ? 2 : 1;
@@ -67,6 +111,13 @@ function updateAlertBannerTheme(rawLevel) {
     banner.classList.remove('level-warning', 'level-critical');
     banner.classList.add(normalized === 'CRITICAL' ? 'level-critical' : 'level-warning');
     banner.dataset.alertLevel = normalized;
+}
+
+function getDefaultAlertMessageForStationStatus(riskUi) {
+    if (riskUi?.normalized === 'CRITICAL') {
+        return 'Critical risk detected from realtime station status.';
+    }
+    return 'Warning risk detected from realtime station status.';
 }
 
 // =====================================================
@@ -210,12 +261,49 @@ function handleRealtimeUpdate(message) {
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
             delete alertBannerSnoozeUntil[stationId];
+            delete acknowledgedAlertKeyByStation[stationId];
+            delete bannerSuppressedUntilByStation[stationId];
             // Clear tất cả sensor card highlight khi trạm về safe
             clearAllSensorCardAlerts();
 
             // 3. Reset siren buttons to idle if viewing this station
             if (currentStationData && stationId === currentStationData.id) {
                 setSirenButtonState('idle');
+            }
+        }
+
+        const isAlertingRisk = (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL');
+        if (isAlertingRisk) {
+            const banner = document.getElementById('alert-banner');
+            const isVisible = !!banner?.classList.contains('show');
+            const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
+
+            if (Date.now() >= snoozeUntil) {
+                const incomingLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                const incomingSeverity = getAlertSeverity(incomingLevel);
+                const currentSeverity = getAlertSeverity(banner?.dataset?.alertLevel || 'WARNING');
+                const sameStation = currentAlertStationId === stationId;
+                const shouldShowOrReplace = !isVisible || sameStation || incomingSeverity > currentSeverity;
+
+                if (shouldShowOrReplace) {
+                    const cachedAlert = latestAlertByStation[stationId];
+                    const candidateAlert = cachedAlert ? {
+                        ...cachedAlert,
+                        level: incomingLevel
+                    } : {
+                        station_id: stationId,
+                        level: incomingLevel,
+                        message: message.message || message.warning_message || getDefaultAlertMessageForStationStatus(riskUi)
+                    };
+                    const candidateKey = buildAlertKey(candidateAlert);
+                    if (candidateKey && acknowledgedAlertKeyByStation[stationId] === candidateKey) {
+                        return;
+                    }
+                    if (isBannerSuppressed(stationId)) {
+                        return;
+                    }
+                    showAlertBanner(candidateAlert, { silent: true });
+                }
             }
         }
 
@@ -256,7 +344,14 @@ function handleRealtimeUpdate(message) {
                     // Ghi đè level bằng mức rủi ro HIỆN TẠI của trạm
                     // để banner luôn phản ánh đúng màu (WARNING→vàng, CRITICAL→đỏ)
                     const currentLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-                    showAlertBanner({ ...cachedAlert, level: currentLevel }, { silent: true });
+                    const candidateAlert = { ...cachedAlert, level: currentLevel };
+                    const candidateKey = buildAlertKey(candidateAlert);
+                    if (!candidateKey || acknowledgedAlertKeyByStation[stationId] !== candidateKey) {
+                        if (isBannerSuppressed(stationId)) {
+                            return;
+                        }
+                        showAlertBanner(candidateAlert, { silent: true });
+                    }
                 }
             }
         }
@@ -304,29 +399,34 @@ function handleRealtimeUpdate(message) {
 
     // ✅ XỬ LÝ CẢNH BÁO MỚI — Chỉ hiện 1 lần per alert (dedup)
     if (message.type === 'alert') {
-        latestAlertByStation[message.station_id] = message;
+        const incomingAlert = normalizeIncomingAlert(message);
+        latestAlertByStation[incomingAlert.station_id] = incomingAlert;
         // Dedup theo station + sensor + level để không nuốt cảnh báo mới cùng level từ sensor khác.
-        const alertKey = `${message.station_id}_${message.sensor_type || 'unknown'}_${message.level}`;
-        if (alertKey !== lastAlertKey) {
+        const alertKey = buildAlertKey(incomingAlert);
+        const isAcknowledged = acknowledgedAlertKeyByStation[incomingAlert.station_id] === alertKey;
+        if (!isAcknowledged) {
+            delete bannerSuppressedUntilByStation[incomingAlert.station_id];
+        }
+        if (alertKey !== lastAlertKey && !isAcknowledged) {
             lastAlertKey = alertKey;
-            showAlertBanner(message);
+            showAlertBanner(incomingAlert);
         }
         // Highlight sensor card nếu đang xem trạm đang báo
-        if (currentStationData && message.station_id === currentStationData.id && message.sensor_type) {
-            setSensorCardAlert(message.sensor_type, message.level);
+        if (currentStationData && incomingAlert.station_id === currentStationData.id && incomingAlert.sensor_type) {
+            setSensorCardAlert(incomingAlert.sensor_type, incomingAlert.level);
         }
         // ✅ Marker chuyển đỏ + nhấp nháy khi có cảnh báo
-        setMarkerAlert(message.station_id, true);
+        setMarkerAlert(incomingAlert.station_id, true);
         // Always attempt to play siren (it will handle its own dedup/overlap)
         playSiren();
 
         // ✅ Cập nhật siren buttons nếu đang xem trạm này
         // Phân biệt pi_point / pi_center — chỉ set 'alerting' nếu thiết bị online
-        if (currentStationData && message.station_id === currentStationData.id) {
+        if (currentStationData && incomingAlert.station_id === currentStationData.id) {
             const user = window.authManager?.getUserInfo();
             const userRole = user?.role;
             if (userRole === 'admin' || userRole === 'operator') {
-                currentAlertStationId = message.station_id;
+            currentAlertStationId = incomingAlert.station_id;
                 const piDevices = currentStationData.pi_devices || [];
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
                     const target = b.getAttribute('data-target');
@@ -891,10 +991,47 @@ async function loadStations() {
         });
 
         renderStationList(stations);
+        ensureGlobalAlertBannerFromStations(stations);
 
     } catch (e) {
         console.error('❌ [MAP] Error loading stations:', e);
     }
+}
+
+function ensureGlobalAlertBannerFromStations(stations) {
+    const banner = document.getElementById('alert-banner');
+    if (!banner || banner.classList.contains('show')) return;
+    if (!Array.isArray(stations) || stations.length === 0) return;
+
+    const candidates = stations
+        .map(st => {
+            const riskUi = getRiskPresentation(st.risk_level, st.status);
+            return { station: st, riskUi };
+        })
+        .filter(item => item.riskUi.normalized === 'CRITICAL' || item.riskUi.normalized === 'MEDIUM')
+        .sort((a, b) => (a.riskUi.normalized === 'CRITICAL' ? -1 : 1));
+
+    if (candidates.length === 0) return;
+
+    const chosen = candidates[0];
+    const stationId = chosen.station.id;
+    const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
+    if (Date.now() < snoozeUntil) return;
+    if (isBannerSuppressed(stationId)) return;
+
+    const level = chosen.riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING';
+    const cachedAlert = latestAlertByStation[stationId];
+    const candidateAlert = cachedAlert ? { ...cachedAlert, level } : {
+        station_id: stationId,
+        level,
+        message: chosen.riskUi.normalized === 'CRITICAL'
+            ? 'Critical risk detected from station state. Press Track to monitor now.'
+            : 'Warning risk detected from station state. Press Track to monitor now.'
+    };
+    const candidateKey = buildAlertKey(candidateAlert);
+    if (candidateKey && acknowledgedAlertKeyByStation[stationId] === candidateKey) return;
+
+    showAlertBanner(candidateAlert, { silent: true });
 }
 
 // ✅ Silently re-fetch current station detail to refresh per-sensor is_online status
@@ -1106,7 +1243,7 @@ function _showSirenIfAlerting(stationId, data) {
 }
 
 async function selectStation(stationId, options = {}) {
-    const { skipZoom = false, skipSiren = false } = options;
+    const { skipZoom = false, skipSiren = false, skipBannerRestore = false } = options;
     console.log(`🎯 [MAP] Selecting station: ${stationId}`, options);
 
     const sidebar = document.getElementById('detail-sidebar');
@@ -1126,6 +1263,7 @@ async function selectStation(stationId, options = {}) {
         }
 
         updateSidebarUI(data);
+        applySensorCardAlertsFromAssessment(data);
 
         // ✅ Siren popup logic — có thể bị skip bởi caller (ví dụ: Track button tự quản lý)
         if (!skipSiren) {
@@ -1138,6 +1276,8 @@ async function selectStation(stationId, options = {}) {
         const _riskBand = normalizeRiskLevel(_riskLevel, data.status);
         const _activeAlerts = data.risk_assessment?.active_alerts || [];
         if (!_banner?.classList.contains('show') &&
+            !skipBannerRestore &&
+            !isBannerSuppressed(data.id) &&
             (_riskBand === 'MEDIUM' || _riskBand === 'CRITICAL') &&
             _activeAlerts.length > 0 &&
             data.status !== 'offline') {
@@ -1147,7 +1287,7 @@ async function selectStation(stationId, options = {}) {
                 station_id: data.id,
                 level: _topAlert.level,
                 message: _topAlert.message,
-                sensor_type: _topAlert.category
+                sensor_type: mapAlertCategoryToSensorType(_topAlert.category)
             }, { silent: true });
             // Sync siren buttons đúng per-device (đã handle offline/online trong _showSirenIfAlerting)
             _showSirenIfAlerting(data.id, data);
@@ -1301,6 +1441,12 @@ function updateImuOfflineBadge(isOnline) {
     badge.style.display = isOnline ? 'none' : '';
 }
 
+function updateSensorOfflineBadge(sensorType, isOnline) {
+    const badge = document.getElementById(`${sensorType}-offline-badge`);
+    if (!badge) return;
+    badge.style.display = isOnline ? 'none' : '';
+}
+
 function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
@@ -1330,10 +1476,19 @@ function updateSidebarUI(data) {
     const imuOnline   = mqttConnected && data.status !== 'offline' && (data.sensors?.imu?.is_online   ?? false);
 
     if (gnssOnline) {
+        const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
+        const gnssOfflineBadgeEl = document.getElementById('gnss-offline-badge');
+        if (gnssFixBadgeEl) gnssFixBadgeEl.style.display = '';
+        if (gnssOfflineBadgeEl) gnssOfflineBadgeEl.style.display = 'none';
         updateGnssFixBadge(gnssLatest?.fix_mode, gnssLatest?.fix_quality);
     } else {
-        updateGnssFixBadge('UNKNOWN', 0);
+        const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
+        const gnssOfflineBadgeEl = document.getElementById('gnss-offline-badge');
+        if (gnssFixBadgeEl) gnssFixBadgeEl.style.display = 'none';
+        if (gnssOfflineBadgeEl) gnssOfflineBadgeEl.style.display = '';
     }
+    updateSensorOfflineBadge('rain', rainOnline);
+    updateSensorOfflineBadge('water', waterOnline);
     updateImuOfflineBadge(imuOnline);
 
     // ✅ Khi toàn trạm offline → hiển thị '--' cho TẤT CẢ sensor
@@ -1375,19 +1530,12 @@ function updateSidebarUI(data) {
         if (rainOnline) {
             const rainIntensity = rainLatest?.intensity_mm_h ?? null;
             setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
-        } else if (rainLatest) {
-            // Sensor offline nhưng vẫn có dữ liệu DB gần nhất -> giữ số liệu để tránh nhảy '--'
-            const rainIntensity = rainLatest?.intensity_mm_h ?? null;
-            setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
         } else {
             setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
         }
 
         // Water
         if (waterOnline) {
-            setHTML('val-water', formatWaterLevelDisplay(waterLatest));
-        } else if (waterLatest) {
-            // Sensor offline nhưng vẫn có dữ liệu DB gần nhất -> giữ số liệu để tránh nhảy '--'
             setHTML('val-water', formatWaterLevelDisplay(waterLatest));
         } else {
             setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
@@ -1427,20 +1575,6 @@ function updateSidebarUI(data) {
                 } else {
                     updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
                 }
-            }
-        } else if (imuLatest) {
-            // IMU offline nhưng có dữ liệu cũ trong DB → hiển thị giá trị mới nhất
-            setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
-            setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
-            setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
-            setText('val-imu-delta-roll', formatImuDelta(imuLatest?.roll, 'roll'));
-            setText('val-imu-delta-pitch', formatImuDelta(imuLatest?.pitch, 'pitch'));
-            setText('val-imu-delta-yaw', formatImuDelta(imuLatest?.yaw, 'yaw'));
-            if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-                setText('val-imu-drift-len', `${safeNumber((parseFloat(imuLatest.drift_len_mm) || 0) / 10, 1)} cm`);
-                setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
-            } else {
-                updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
             }
         } else {
             setText('val-imu-roll', '--°');
@@ -3770,6 +3904,8 @@ let currentAlertStationId = null;
 let lastAlertKey = null;
 let latestAlertByStation = {};
 let alertBannerSnoozeUntil = {};
+let acknowledgedAlertKeyByStation = {};
+let bannerSuppressedUntilByStation = {};
 
 // Map sensor_type từ backend → id của sensor card trong HTML
 const SENSOR_CARD_IDS = {
@@ -3785,7 +3921,8 @@ function setSensorCardAlert(sensorType, level) {
     const card = document.getElementById(cardId);
     if (!card) return;
     card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
-    const normalized = normalizeAlertLevel(level);
+    const effectiveLevel = String(sensorType || '').toLowerCase() === 'imu' ? 'CRITICAL' : level;
+    const normalized = normalizeAlertLevel(effectiveLevel);
     if (normalized === 'WARNING') {
         card.classList.add('sensor-alert-warning');
     } else if (normalized === 'CRITICAL') {
@@ -3800,16 +3937,31 @@ function clearAllSensorCardAlerts() {
     });
 }
 
+function applySensorCardAlertsFromAssessment(data) {
+    clearAllSensorCardAlerts();
+    const activeAlerts = data?.risk_assessment?.active_alerts || [];
+    activeAlerts.forEach(alert => {
+        const sensorType = mapAlertCategoryToSensorType(alert.category);
+        if (SENSOR_CARD_IDS[sensorType]) {
+            setSensorCardAlert(sensorType, alert.level || data?.risk_assessment?.overall_risk || 'WARNING');
+        }
+    });
+}
+
 function showAlertBanner(alertData, options = {}) {
     const banner = document.getElementById('alert-banner');
     if (!banner) return;
 
+    const safeAlertData = normalizeIncomingAlert(alertData);
+    if (isBannerSuppressed(safeAlertData.station_id)) return;
+
     // ✅ Lookup station info từ allStations (đã load sẵn)
-    const station = allStations.find(s => s.id === alertData.station_id);
-    const stationName = station?.name || `Station #${alertData.station_id}`;
+    const station = allStations.find(s => s.id === safeAlertData.station_id);
+    const stationName = station?.name || `Station #${safeAlertData.station_id}`;
     const stationCode = station?.station_code || '';
 
-    const normalizedLevel = normalizeAlertLevel(alertData.level || alertData.risk_level);
+    const normalizedLevel = normalizeAlertLevel(safeAlertData.level || safeAlertData.risk_level);
+    const alertKey = buildAlertKey(safeAlertData);
 
     // Cập nhật nội dung — luôn phản ánh mức cảnh báo hiện tại
     updateAlertBannerTheme(normalizedLevel);
@@ -3821,11 +3973,12 @@ function showAlertBanner(alertData, options = {}) {
         `Station: ${stationName} (${stationCode})`;
 
     document.getElementById('alert-message').textContent =
-        ` • ${alertData.message || 'Anomaly detected!'}`;
+        ` • ${safeAlertData.message || 'Anomaly detected!'}`;
 
     // Lưu station ID
-    currentAlertStationId = alertData.station_id;
-    alertBannerSnoozeUntil[alertData.station_id] = 0;
+    currentAlertStationId = safeAlertData.station_id;
+    alertBannerSnoozeUntil[safeAlertData.station_id] = 0;
+    banner.dataset.alertKey = alertKey;
 
     // Hiển thị banner (không auto-dismiss, user phải ấn X hoặc Theo dõi)
     // Lưu ý: siren button state được quản lý bởi _showSirenIfAlerting / WS handler,
@@ -3908,6 +4061,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     };
     document.addEventListener('touchstart', unlockSirenAudio, { once: true, passive: true });
+    document.addEventListener('pointerdown', unlockSirenAudio, { once: true, passive: true });
     document.addEventListener('click', unlockSirenAudio, { once: true, passive: true });
 
     // Nút "Theo dõi" → Zoom vào trạm + ẩn banner + hiện siren popup sau khi zoom xong
@@ -3917,13 +4071,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!currentAlertStationId) return;
 
             const alertStationId = currentAlertStationId;
+            const currentAlertKey = buildAlertKey(latestAlertByStation[alertStationId] || {
+                station_id: alertStationId,
+                level: document.getElementById('alert-banner')?.dataset?.alertLevel || 'WARNING'
+            });
+            if (currentAlertKey) {
+                acknowledgedAlertKeyByStation[alertStationId] = currentAlertKey;
+            }
+            bannerSuppressedUntilByStation[alertStationId] = Date.now() + 5 * 60 * 1000;
 
             // 1. Ẩn banner ngay
             const banner = document.getElementById('alert-banner');
             if (banner) banner.classList.remove('show');
 
             // 2. Load dữ liệu trạm (skip zoom và siren — tự quản lý bên dưới)
-            await selectStation(alertStationId, { skipZoom: true, skipSiren: true });
+            await selectStation(alertStationId, { skipZoom: true, skipSiren: true, skipBannerRestore: true });
 
             // 3. Zoom vào trạm
             if (markers[alertStationId]) {

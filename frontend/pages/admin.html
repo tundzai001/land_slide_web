@@ -1312,10 +1312,15 @@
                                             value="0.30">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label">Dangerous Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-water-confirm" value="3"
+                                        <label class="form-label">Warning Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-water-warning-confirm" value="3"
                                             min="1" max="10">
                                         <small id="cfg-water-confirm-source" class="text-muted">Mặc định</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Critical Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-water-critical-confirm" value="2"
+                                            min="1" max="10">
                                     </div>
                                 </div>
                                 <div class="row g-3 mt-1">
@@ -1348,10 +1353,15 @@
                                         <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label">Dangerous Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-rain-confirm" value="2"
+                                        <label class="form-label">Warning Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-rain-warning-confirm" value="2"
                                             min="1" max="10">
                                         <small id="cfg-rain-confirm-source" class="text-muted">Mặc định</small>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Critical Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-rain-critical-confirm" value="1"
+                                            min="1" max="10">
                                     </div>
                                     <div class="col-md-3">
                                         <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
@@ -1379,8 +1389,12 @@
                                             value="4.0">
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="form-label">Dangerous Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-gnss-steps" value="3">
+                                        <label class="form-label">Warning Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-gnss-warning-steps" value="3" min="1" max="10">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Critical Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-gnss-critical-steps" value="2" min="1" max="10">
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
@@ -1401,11 +1415,6 @@
                                 </div>
                                 <div class="row g-3">
                                     <div class="col-md-3">
-                                        <label class="form-label">Warning Tilt (°)</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-imu-tilt-warn"
-                                            value="5.0">
-                                    </div>
-                                    <div class="col-md-3">
                                         <label class="form-label">Critical Tilt (°)</label>
                                         <input type="number" step="0.1" class="form-control" id="cfg-imu-tilt-crit"
                                             value="15.0">
@@ -1416,8 +1425,8 @@
                                             value="5.0">
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label">Dangerous Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-imu-confirm" value="2">
+                                        <label class="form-label">Critical Confirm Steps</label>
+                                        <input type="number" class="form-control" id="cfg-imu-critical-confirm" value="1" min="1" max="10">
                                     </div>
                                     <div class="col-md-3">
                                         <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
