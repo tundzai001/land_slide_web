@@ -323,65 +323,139 @@ class LandslideAnalyzer:
                 return 'mm/day'
             return None
 
+        # Bảng Cruden & Varnes chuẩn (hardcoded) — luôn đúng
+        _CRUDEN_VARNES_DEFAULT = [
+            {"name": "Extremely Rapid", "threshold": 5, "unit": "m/s"},        # > 5 m/s
+            {"name": "Very Rapid",      "threshold": 3, "unit": "m/min"},      # > 3 m/min
+            {"name": "Rapid",           "threshold": 1.8, "unit": "m/hr"},     # > 1.8 m/hr
+            {"name": "Moderate",        "threshold": 13, "unit": "m/month"},   # > 13 m/month
+            {"name": "Slow",            "threshold": 1.6, "unit": "m/year"},   # > 1.6 m/year
+            {"name": "Very Slow",       "threshold": 16, "unit": "mm/year"},   # > 16 mm/year
+            {"name": "Extremely Slow",  "threshold": 0, "unit": "mm/year"}     # < 16 mm/year
+        ]
+
+        def _convert_threshold_to_mm_s(thresh: float, unit: str) -> float:
+            """Chuyển đổi threshold về mm/s để so sánh thống nhất."""
+            if unit == 'mm/year':   return thresh / 31536000
+            if unit == 'mm/month':  return thresh / (30 * 86400)
+            if unit == 'mm/day':    return thresh / 86400
+            if unit == 'm/year':    return (thresh * 1000) / 31536000
+            if unit == 'm/month':   return (thresh * 1000) / (30 * 86400)
+            if unit == 'm/day':     return (thresh * 1000) / 86400
+            if unit == 'm/hr':      return (thresh * 1000) / 3600
+            if unit == 'm/min':     return (thresh * 1000) / 60
+            if unit == 'm/s':       return thresh * 1000
+            if unit == 'cm/day':    return (thresh * 10) / 86400
+            if unit == 'cm/year':   return (thresh * 10) / 31536000
+            if unit == 'mm/s':      return thresh
+            return thresh
+
+        def _normalize_table(table):
+            """Chuyển đổi bảng classification thành list {name, threshold_mm_s} chuẩn."""
+            normalized = []
+            for cls in table:
+                thresh_raw = cls.get('threshold', 0)
+                if isinstance(thresh_raw, str):
+                    thresh_raw = thresh_raw.strip().replace(',', '.')
+                try:
+                    thresh = float(thresh_raw)
+                except (ValueError, TypeError):
+                    thresh = 0.0
+
+                unit = _normalize_unit(cls.get('unit', 'mm/s'))
+                # Một số bản config cũ bị lưu sai unit='mm/s' cho toàn bộ dải Cruden.
+                # Khi đó ưu tiên suy luận lại từ mô tả để tránh phân loại sai nặng.
+                if unit == 'mm/s':
+                    inferred = _infer_unit_from_description(cls.get('description') or cls.get('desc') or '')
+                    if inferred:
+                        unit = inferred
+
+                thresh_mm_s = _convert_threshold_to_mm_s(thresh, unit)
+                normalized.append({
+                    "name": cls.get('name', 'Unknown'),
+                    "threshold_mm_s": thresh_mm_s
+                })
+            return normalized
+
+        def _is_table_sane(normalized: list) -> bool:
+            """
+            Kiểm tra bảng phân loại có hợp lý không.
+            Bảng Cruden & Varnes phải có ít nhất 3 mức khác nhau (> 0)
+            và mức cao nhất phải > 0.001 mm/s (nếu không thì thresholds quá nhỏ
+            do đổi đơn vị sai) hoặc mức thấp nhất (ngoài 0) phải < 1 mm/s
+            (nếu không thì thresholds quá lớn do thiếu đổi đơn vị).
+            """
+            if len(normalized) < 2:
+                return False
+            non_zero = [c['threshold_mm_s'] for c in normalized if c['threshold_mm_s'] > 0]
+            if len(non_zero) < 2:
+                return False
+            max_thresh = max(non_zero)
+            min_thresh = min(non_zero)
+            # Mức nhỏ nhất (>0) phải nhỏ hơn 1 mm/s
+            # (16 mm/year ≈ 5e-7 mm/s, bất kỳ giá trị > 1 mm/s
+            #  cho mức Very Slow nghĩa là đơn vị bị sai)
+            if min_thresh > 1.0:
+                return False
+            # Mức lớn nhất phải > 0.001 mm/s
+            # (Extremely Rapid 5 m/s = 5000 mm/s, nếu < 0.001 thì toàn bộ
+            #  bảng bị co lại quá nhỏ)
+            if max_thresh < 0.001:
+                return False
+            return True
+
+        def _classify_from_sorted(sorted_classes, vel_mm_s):
+            for cls in sorted_classes:
+                if vel_mm_s >= cls['threshold_mm_s']:
+                    return cls['name']
+            return "Stable"
+
+        # --- Chọn bảng phân loại ---
         classification_table = config.get("velocity_classification")
-        if not classification_table:
-            classification_table = [
-                {"name": "Extremely Rapid", "threshold": 5, "unit": "m/s"},      # > 5 m/sec
-                {"name": "Very Rapid", "threshold": 3, "unit": "m/min"},      # > 3 m/min (0.05 m/s)
-                {"name": "Rapid", "threshold": 1.8, "unit": "m/hr"},       # > 1.8 m/hr (0.5 mm/s)
-                {"name": "Moderate", "threshold": 13, "unit": "m/month"},  # > 13 m/month (5x10^-3 mm/s)
-                {"name": "Slow", "threshold": 1.6, "unit": "m/year"},      # > 1.6 m/year (5x10^-5 mm/s)
-                {"name": "Very Slow", "threshold": 16, "unit": "mm/year"},    # > 16 mm/year (5x10^-7 mm/s)
-                {"name": "Extremely Slow", "threshold": 0, "unit": "mm/year"}     # < 16 mm/year
-            ]
-        
-        normalized_table = []
-        for cls in classification_table:
-            thresh_raw = cls.get('threshold', 0)
-            if isinstance(thresh_raw, str):
-                thresh_raw = thresh_raw.strip().replace(',', '.')
-            try:
-                thresh = float(thresh_raw)
-            except (ValueError, TypeError):
-                thresh = 0.0
+        normalized_table = _normalize_table(_CRUDEN_VARNES_DEFAULT)
 
-            unit = _normalize_unit(cls.get('unit', 'mm/s'))
-            # Một số bản config cũ bị lưu sai unit='mm/s' cho toàn bộ dải Cruden.
-            # Khi đó ưu tiên suy luận lại từ mô tả để tránh phân loại sai nặng.
-            if unit == 'mm/s':
-                inferred = _infer_unit_from_description(cls.get('description') or cls.get('desc') or '')
-                if inferred:
-                    unit = inferred
-            
-            # Chuyển đổi mọi thứ về cùng 1 chuẩn để so sánh (mm/s)
-            thresh_mm_s = thresh
-            if unit == 'mm/year': thresh_mm_s = thresh / 31536000
-            elif unit == 'mm/month': thresh_mm_s = thresh / (30 * 86400)
-            elif unit == 'mm/day': thresh_mm_s = thresh / 86400
-            elif unit == 'm/year': thresh_mm_s = (thresh * 1000) / 31536000
-            elif unit == 'm/month': thresh_mm_s = (thresh * 1000) / (30 * 86400)
-            elif unit == 'm/day': thresh_mm_s = (thresh * 1000) / 86400
-            elif unit == 'm/hr': thresh_mm_s = (thresh * 1000) / 3600
-            elif unit == 'm/min': thresh_mm_s = (thresh * 1000) / 60
-            elif unit == 'm/s': thresh_mm_s = thresh * 1000
-            elif unit == 'cm/day': thresh_mm_s = (thresh * 10) / 86400
-            elif unit == 'cm/year': thresh_mm_s = (thresh * 10) / 31536000
-            elif unit == 'mm/s': thresh_mm_s = thresh
+        if classification_table and isinstance(classification_table, list) and len(classification_table) >= 2:
+            candidate = _normalize_table(classification_table)
+            if _is_table_sane(candidate):
+                normalized_table = candidate
             else:
-                thresh_mm_s = thresh
-
-            normalized_table.append({
-                "name": cls.get('name', 'Unknown'),
-                "threshold_mm_s": thresh_mm_s
-            })
+                logger.warning(
+                    "⚠️ velocity_classification config không hợp lý (thresholds sai đơn vị?), "
+                    "dùng bảng Cruden & Varnes mặc định."
+                )
 
         sorted_classes = sorted(normalized_table, key=lambda x: x['threshold_mm_s'], reverse=True)
-        
-        for cls in sorted_classes:
-            if velocity_mm_s >= cls['threshold_mm_s']:
-                return cls['name']
-        
-        return "Stable"
+
+        result = _classify_from_sorted(sorted_classes, velocity_mm_s)
+
+        # --- Fallback cuối cùng: nếu vẫn ra Extremely Slow nhưng velocity thực tế lớn ---
+        # Dùng velocity_mm_day trực tiếp để phân loại theo thang Cruden & Varnes
+        # khi kết quả classification rõ ràng sai so với giá trị vận tốc.
+        if result.upper() == "EXTREMELY SLOW" and velocity_mm_day > 0.044:
+            # 0.044 mm/day ≈ 16 mm/year — ngưỡng tối thiểu của Very Slow
+            # Nếu vận tốc > 16 mm/year mà vẫn Extremely Slow → bảng bị lỗi,
+            # phân loại lại trực tiếp bằng bảng mặc định.
+            default_normalized = _normalize_table(_CRUDEN_VARNES_DEFAULT)
+            default_sorted = sorted(default_normalized, key=lambda x: x['threshold_mm_s'], reverse=True)
+            result = _classify_from_sorted(default_sorted, velocity_mm_s)
+            if result.upper() == "EXTREMELY SLOW" and velocity_mm_day > 0.044:
+                # Vẫn sai? Phân loại trực tiếp theo mm/day
+                if velocity_mm_day >= 432000000:       # 5 m/s = 432,000,000 mm/day
+                    result = "Extremely Rapid"
+                elif velocity_mm_day >= 4320000:       # 3 m/min = 4,320,000 mm/day
+                    result = "Very Rapid"
+                elif velocity_mm_day >= 43200:         # 1.8 m/hr = 43,200 mm/day
+                    result = "Rapid"
+                elif velocity_mm_day >= 433.33:        # 13 m/month ≈ 433.33 mm/day
+                    result = "Moderate"
+                elif velocity_mm_day >= 4.384:         # 1.6 m/year ≈ 4.384 mm/day
+                    result = "Slow"
+                elif velocity_mm_day >= 0.044:         # 16 mm/year ≈ 0.044 mm/day
+                    result = "Very Slow"
+                else:
+                    result = "Extremely Slow"
+
+        return result
 
     def _detect_displacement_trend(self, sorted_data: List[Dict], window_size: int = 5) -> str:
         """
