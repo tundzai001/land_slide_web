@@ -1246,7 +1246,18 @@ class AdminManager {
 
         this.refreshVelocityDescriptions();
 
-        tbody.innerHTML = this.velocityConfig.map((vel, index) => `
+        const unitOptions = [
+            'mm/s', 'mm/day', 'mm/month', 'mm/year',
+            'cm/day', 'cm/year',
+            'm/s', 'm/min', 'm/hr', 'm/day', 'm/month', 'm/year'
+        ];
+
+        tbody.innerHTML = this.velocityConfig.map((vel, index) => {
+            const unitSelectHtml = unitOptions.map(u =>
+                `<option value="${u}"${u === vel.unit ? ' selected' : ''}>${u}</option>`
+            ).join('');
+
+            return `
             <tr>
                 <td><strong>${vel.name}</strong></td>
                 <td>
@@ -1258,19 +1269,29 @@ class AdminManager {
                                    step="0.00001"
                                    data-index="${index}"
                                    onchange="window.adminManager.updateVelocityThreshold(${index}, this.value)">
-                            <span class="input-group-text">${vel.unit}</span>
+                            <select class="form-select form-select-sm" style="max-width:110px;"
+                                    onchange="window.adminManager.updateVelocityUnit(${index}, this.value)">
+                                ${unitSelectHtml}
+                            </select>
                         </div>
                     ` : `<code>${vel.threshold} ${vel.unit}</code>`}
                 </td>
                 <td class="text-muted small">${vel.description}</td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
     }
 
     updateVelocityThreshold(index, newValue) {
         const value = parseFloat(String(newValue).replace(',', '.'));
         if (!isNaN(value)) {
             this.velocityConfig[index].threshold = value;
+            this.renderVelocityTable();
+        }
+    }
+
+    updateVelocityUnit(index, newUnit) {
+        if (newUnit && this.velocityConfig[index]) {
+            this.velocityConfig[index].unit = newUnit;
             this.renderVelocityTable();
         }
     }

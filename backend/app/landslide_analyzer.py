@@ -825,8 +825,14 @@ class LandslideAnalyzer:
 
             # Match days
             common_days = sorted(set(gnss_daily.keys()) & set(daily_rain.keys()))
-            if len(common_days) < 7:
-                result["message"] = f"Chỉ có {len(common_days)} ngày chung — cần ít nhất 7 cho LS-RAPID."
+            if len(common_days) < 3:
+                gnss_days_str = ', '.join(sorted(gnss_daily.keys())[:5])
+                rain_days_str = ', '.join(sorted(daily_rain.keys())[:5])
+                result["message"] = (
+                    f"Chỉ có {len(common_days)} ngày chung giữa GNSS và mưa — cần ít nhất 3. "
+                    f"GNSS có {len(gnss_daily)} ngày (vd: {gnss_days_str}). "
+                    f"Mưa có {len(daily_rain)} ngày (vd: {rain_days_str})."
+                )
                 return result
 
             # Chuẩn bị displacement theo ngày
@@ -900,7 +906,7 @@ class LandslideAnalyzer:
                     x = ls_rapid_index[:-lag]
                     y = disp_rate_arr[lag:]
 
-                if len(x) < 5:
+                if len(x) < 3:
                     continue
                 if np.std(x) <= 1e-12 or np.std(y) <= 1e-12:
                     continue
@@ -912,8 +918,11 @@ class LandslideAnalyzer:
                     best_lag = lag
                     best_pairs = len(x)
 
-            if best_pairs < 5:
-                result["message"] = "Biến thiên dữ liệu quá thấp, chưa đủ để ước lượng LS-RAPID tin cậy."
+            if best_pairs < 3:
+                result["message"] = (
+                    f"Biến thiên dữ liệu quá thấp ({best_pairs} cặp hợp lệ), "
+                    f"chưa đủ để ước lượng LS-RAPID tin cậy."
+                )
                 return result
 
             # Hồi quy tuyến tính cho cặp lag tốt nhất

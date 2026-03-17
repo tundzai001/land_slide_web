@@ -1830,10 +1830,31 @@ async def get_long_term_analysis(
         if include_correlation:
             if model_key != "ls_rapid":
                 raise HTTPException(status_code=400, detail="Unsupported correlation_model. Use ls_rapid.")
-            if len(historical_gnss_requested) >= 2 and len(rain_data) >= 2:
+
+            # Nếu raw GNSS đã bị purge, dựng pseudo-GNSS từ daily summary
+            gnss_for_correlation = historical_gnss_requested
+            if len(gnss_for_correlation) < 2 and len(daily_gnss_requested) >= 2:
+                logger.info(f"[LS-RAPID] Raw GNSS insufficient ({len(historical_gnss_requested)} pts). "
+                            f"Synthesizing from {len(daily_gnss_requested)} daily summaries.")
+                cumulative_mm = 0.0
+                gnss_for_correlation = []
+                for row in sorted(daily_gnss_requested, key=lambda r: int(r.day_start_ts or 0)):
+                    ts = int(row.day_start_ts or 0) + 43200  # giữa ngày (12h)
+                    cumulative_mm += float(row.net_displacement_mm or 0.0)
+                    # Dựng pseudo pos_e = cumulative (m), pos_n=0, pos_u=0
+                    gnss_for_correlation.append({
+                        "timestamp": ts,
+                        "data": {
+                            "pos_e": cumulative_mm / 1000.0,
+                            "pos_n": 0.0,
+                            "pos_u": 0.0
+                        }
+                    })
+
+            if len(gnss_for_correlation) >= 2 and len(rain_data) >= 2:
                 historical_rain = [{"timestamp": d.timestamp, "data": d.data} for d in rain_data]
                 rain_correlation = analyzer.analyze_rainfall_displacement_correlation(
-                    gnss_data=historical_gnss_requested,
+                    gnss_data=gnss_for_correlation,
                     rain_data=historical_rain,
                     window_days=days,
                     config=station.config or {}
@@ -1841,10 +1862,13 @@ async def get_long_term_analysis(
                 rain_correlation["model"] = "ls_rapid"
                 result["rainfall_correlation"] = rain_correlation
             else:
+                gnss_count = len(gnss_for_correlation)
+                rain_count = len(rain_data)
                 result["rainfall_correlation"] = {
                     "available": False,
                     "model": "ls_rapid",
-                    "message": "Cần cả dữ liệu GNSS và mưa để phân tích tương quan."
+                    "message": f"Cần cả dữ liệu GNSS và mưa để phân tích tương quan. "
+                               f"Hiện có: {gnss_count} điểm GNSS, {rain_count} bản ghi mưa."
                 }
         else:
             result["rainfall_correlation"] = {

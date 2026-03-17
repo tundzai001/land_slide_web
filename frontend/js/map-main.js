@@ -223,12 +223,8 @@ function handleRealtimeUpdate(message) {
             const banner = document.getElementById('alert-banner');
             if (banner?.classList.contains('show')) {
                 const nextLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-                const currentBannerLevel = String(banner.dataset.alertLevel || 'WARNING').toUpperCase();
-                const shouldDowngrade = getAlertSeverity(currentBannerLevel) > getAlertSeverity(nextLevel);
-                // Không hạ banner từ CRITICAL xuống WARNING khi vẫn đang hiển thị alert cho cùng trạm.
-                if (!shouldDowngrade) {
-                    updateAlertBannerTheme(nextLevel);
-                }
+                // Luôn cập nhật theme theo mức cảnh báo hiện tại (WARNING → vàng, CRITICAL → đỏ)
+                updateAlertBannerTheme(nextLevel);
                 const alertTitle = document.getElementById('alert-title');
                 if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
                     alertTitle.textContent = `${riskUi.display} ALERT!`;
@@ -2925,9 +2921,101 @@ function renderRainfallCorrelationSection(data) {
     if (!section) return;
 
     const rainCorr = data.rainfall_correlation;
-    if (!rainCorr || !rainCorr.available) {
+
+    // Nếu chưa bật AI LS-RAPID thì ẩn section (chỉ hiện khi user đã bấm nút)
+    if (!isRainCorrelationAiEnabled) {
         section.style.display = 'none';
         return;
+    }
+
+    if (!rainCorr || !rainCorr.available) {
+        // Show the section with an informative status message instead of hiding it
+        const msg = (rainCorr && rainCorr.message)
+            ? rainCorr.message
+            : 'Không đủ dữ liệu để chạy LS-RAPID. Cần ít nhất 3 ngày chung giữa GNSS và cảm biến mưa.';
+        section.style.display = 'block';
+        section.innerHTML = `
+            <h5 class="mb-3 text-info border-bottom pb-2">
+                <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (LS-RAPID v2)
+            </h5>
+            <div class="alert alert-warning d-flex align-items-start gap-2 mb-0" role="alert">
+                <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
+                <div>
+                    <strong>Không thể chạy phân tích LS-RAPID</strong><br>
+                    <span class="small">${msg}</span>
+                </div>
+            </div>`;
+        return;
+    }
+
+    // Restore full section HTML in case it was replaced by the error state
+    if (!document.getElementById('rain-correlation')) {
+        section.innerHTML = `
+            <h5 class="mb-3 text-info border-bottom pb-2">
+                <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (LS-RAPID v2)
+            </h5>
+            <div class="row g-3 mb-3">
+                <div class="col-md-2 col-6">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">Hệ số r</div>
+                        <div class="fs-4 fw-bold text-info mt-1" id="rain-correlation">--</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">R²</div>
+                        <div class="fs-5 fw-bold mt-1" id="rain-r2">--</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">Lag</div>
+                        <div class="fs-5 fw-bold mt-1" id="rain-lag">--</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">Trigger</div>
+                        <div class="fs-5 fw-bold mt-1" id="rain-trigger">--</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">Mức tương quan</div>
+                        <div class="fs-5 fw-bold mt-1" id="rain-strength">--</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">Độ nhạy</div>
+                        <div class="fs-5 fw-bold mt-1" id="rain-sensitivity">--</div>
+                    </div>
+                </div>
+                <div class="col-md-12">
+                    <div class="longterm-metric-card">
+                        <div class="text-muted small">Nhận xét rủi ro</div>
+                        <div class="fs-6 mt-1" id="rain-assessment">--</div>
+                    </div>
+                </div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="chart-box border-0 shadow-sm">
+                        <div class="chart-title"><i class="bi bi-moisture me-2"></i>Mưa tích lũy vs Dịch chuyển tích lũy</div>
+                        <div style="height: 350px; padding: 10px;">
+                            <canvas id="chart-rainfall-correlation"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="chart-box border-0 shadow-sm">
+                        <div class="chart-title"><i class="bi bi-graph-up-arrow me-2"></i>LS-RAPID Index vs Dịch chuyển ngày</div>
+                        <div style="height: 350px; padding: 10px;">
+                            <canvas id="chart-lsrapid-index"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
     }
 
     section.style.display = 'block';
@@ -3706,20 +3794,7 @@ function showAlertBanner(alertData, options = {}) {
 
     const normalizedLevel = normalizeAlertLevel(alertData.level || alertData.risk_level);
 
-    // Nếu banner cùng trạm đang CRITICAL, không cho WARNING đè nội dung.
-    const isShowing = banner.classList.contains('show');
-    const existingLevel = String(banner.dataset.alertLevel || 'WARNING').toUpperCase();
-    const sameStation = currentAlertStationId === alertData.station_id;
-    const shouldSkipLowerSeverity = (
-        isShowing &&
-        sameStation &&
-        getAlertSeverity(existingLevel) > getAlertSeverity(normalizedLevel)
-    );
-    if (shouldSkipLowerSeverity) {
-        return;
-    }
-
-    // Cập nhật nội dung
+    // Cập nhật nội dung — luôn phản ánh mức cảnh báo hiện tại
     updateAlertBannerTheme(normalizedLevel);
 
     document.getElementById('alert-title').textContent =
