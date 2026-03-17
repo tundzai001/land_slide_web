@@ -230,6 +230,20 @@ function handleRealtimeUpdate(message) {
                     alertTitle.textContent = `${riskUi.display} ALERT!`;
                 }
             }
+
+            // ✅ Cập nhật sensor card highlight theo mức cảnh báo mới
+            // Khi CRITICAL → WARNING: chuyển card đang nháy đỏ sang nháy vàng
+            // Khi WARNING → CRITICAL: chuyển card đang nháy vàng sang nháy đỏ
+            if (currentStationData && stationId === currentStationData.id) {
+                const alertLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                Object.values(SENSOR_CARD_IDS).forEach(id => {
+                    const card = document.getElementById(id);
+                    if (card && (card.classList.contains('sensor-alert-warning') || card.classList.contains('sensor-alert-critical'))) {
+                        card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
+                        card.classList.add(alertLevel === 'CRITICAL' ? 'sensor-alert-critical' : 'sensor-alert-warning');
+                    }
+                });
+            }
         }
 
         if (currentStationData && stationId === currentStationData.id && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
@@ -239,7 +253,10 @@ function handleRealtimeUpdate(message) {
             if (!isVisible && Date.now() >= snoozeUntil) {
                 const cachedAlert = latestAlertByStation[stationId];
                 if (cachedAlert) {
-                    showAlertBanner(cachedAlert, { silent: true });
+                    // Ghi đè level bằng mức rủi ro HIỆN TẠI của trạm
+                    // để banner luôn phản ánh đúng màu (WARNING→vàng, CRITICAL→đỏ)
+                    const currentLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                    showAlertBanner({ ...cachedAlert, level: currentLevel }, { silent: true });
                 }
             }
         }

@@ -1046,6 +1046,62 @@ class AdminManager {
         window.toast?.success(`✅ Đã áp dụng preset: ${presetLabels[presetName]}`, 3000);
     }
 
+    getConfirmStepWarnings() {
+        const readInt = (id, fallback) => {
+            const val = parseInt(document.getElementById(id)?.value, 10);
+            return Number.isFinite(val) ? val : fallback;
+        };
+
+        const checks = [
+            {
+                name: 'GNSS',
+                dangerous: readInt('cfg-gnss-steps', 3),
+                safe: readInt('cfg-gnss-safe-steps', 5)
+            },
+            {
+                name: 'Rain',
+                dangerous: readInt('cfg-rain-confirm', 2),
+                safe: readInt('cfg-rain-safe-confirm', 3)
+            },
+            {
+                name: 'Water',
+                dangerous: readInt('cfg-water-confirm', 3),
+                safe: readInt('cfg-water-safe-confirm', 3)
+            },
+            {
+                name: 'IMU',
+                dangerous: readInt('cfg-imu-confirm', 2),
+                safe: readInt('cfg-imu-safe-confirm', 3)
+            }
+        ];
+
+        const warnings = [];
+        checks.forEach((item) => {
+            if (item.dangerous <= 1) {
+                warnings.push(`${item.name}: Dangerous Confirm Steps = ${item.dangerous} (rất nhạy, dễ báo giả)`);
+            }
+            if (item.safe <= item.dangerous) {
+                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nên lớn hơn Dangerous (${item.dangerous})`);
+            }
+        });
+
+        return warnings;
+    }
+
+    confirmConfirmStepWarnings() {
+        const warnings = this.getConfirmStepWarnings();
+        if (warnings.length === 0) return true;
+
+        const message = [
+            '⚠ Cảnh báo cấu hình Confirm Steps:',
+            ...warnings.map(w => `- ${w}`),
+            '',
+            'Bạn vẫn muốn lưu cấu hình trạm?'
+        ].join('\n');
+
+        return confirm(message);
+    }
+
     async saveStation() {
         const code = document.getElementById('edit-code').value.trim();
         const name = document.getElementById('edit-name').value.trim();
@@ -1100,6 +1156,7 @@ class AdminManager {
         });
 
         if (hasError) return;
+        if (!this.confirmConfirmStepWarnings()) return;
 
         // Rain/Water confirm steps: đọc trực tiếp từ input (user đã thấy và có thể sửa)
         const finalRainConfirm = parseInt(document.getElementById('cfg-rain-confirm')?.value) || 2;
