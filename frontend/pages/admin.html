@@ -713,6 +713,39 @@
                     </div>
 
                 </form>
+
+                <div class="config-section mt-4">
+                    <div class="section-header">
+                        <i class="bi bi-megaphone-fill"></i>
+                        <h5>Guest Rescue Requests</h5>
+                        <button type="button" class="btn btn-sm btn-outline-primary ms-auto"
+                            onclick="window.adminManager?.loadRescueRequests()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                        </button>
+                    </div>
+                    <div class="alert alert-info py-2 small mb-3">
+                        Guest có thể gửi vị trí GPS + thông tin cứu hộ từ web map. Admin xử lý tại đây.
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle" id="rescue-requests-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Thời gian</th>
+                                    <th>Người gửi</th>
+                                    <th>Liên hệ</th>
+                                    <th>Vị trí</th>
+                                    <th>Nội dung</th>
+                                    <th>Trạng thái</th>
+                                    <th>Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rescue-requests-body">
+                                <tr><td colspan="8" class="text-muted">Chưa có dữ liệu</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <!-- TAB 5: PI DEVICES -->
@@ -1432,6 +1465,12 @@
                                         <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
                                         <input type="number" class="form-control" id="cfg-imu-safe-confirm" value="3" min="1" max="20">
                                     </div>
+                                </div>
+                                <div class="alert alert-secondary py-2 mt-3 mb-0 small">
+                                    <strong>Backend formula (đơn vị độ):</strong>
+                                    <code>delta_tilt_deg = sqrt(roll^2 + pitch^2)</code>;
+                                    cảnh báo khi <code>delta_tilt_deg &gt;= tilt_critical_deg</code>.
+                                    Lưu ý: <code>roll/pitch</code> là delta so với baseline (không phải raw roll/pitch).
                                 </div>
                             </div>
 

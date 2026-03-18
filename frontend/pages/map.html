@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/css/theme-transition.css">
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/map.css">
+    <link rel="stylesheet" href="/css/rescue-markers.css">
 
     <!-- Three.js for 3D Simulations -->
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
@@ -916,9 +917,79 @@
         </div>
     </div>
 
+    <!-- MAP LAYER CONTROLS (toggle stations/rescue markers) -->
+    <div class="map-layer-controls" id="map-layer-controls"
+        style="position: fixed; right: 20px; bottom: 100px; z-index: 1100; display: flex; flex-direction: column; gap: 8px;">
+        <div class="btn-group-vertical" role="group">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-station-markers" 
+                title="Hiển thị/ẩn marker trạm">
+                <i class="bi bi-hdd-network me-1"></i>Trạm
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger" id="toggle-rescue-markers" 
+                title="Hiển thị/ẩn marker cứu hộ">
+                <i class="bi bi-exclamation-circle me-1"></i>Cứu hộ
+            </button>
+        </div>
+    </div>
+
+    <button id="btn-guest-rescue" class="btn btn-danger rounded-pill shadow"
+        style="position: fixed; right: 20px; bottom: 20px; z-index: 1200;">
+        <i class="bi bi-megaphone-fill me-1"></i> Cần cứu hộ
+    </button>
+
+    <div class="modal fade" id="guestRescueModal" tabindex="-1" aria-labelledby="guestRescueModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="guestRescueModalLabel"><i class="bi bi-geo-alt-fill me-2"></i>Yêu cầu cứu hộ</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning py-2 small">
+                        Vị trí sẽ lấy từ GPS của thiết bị bạn. Vui lòng kiểm tra kỹ trước khi gửi.
+                    </div>
+                    <div class="mb-3">
+                        <label for="guest-rescue-name" class="form-label">Họ tên</label>
+                        <input id="guest-rescue-name" class="form-control" maxlength="120" placeholder="Người cần hỗ trợ">
+                    </div>
+                    <div class="mb-3">
+                        <label for="guest-rescue-phone" class="form-label">Số điện thoại</label>
+                        <input id="guest-rescue-phone" class="form-control" maxlength="32" placeholder="Liên hệ khẩn">
+                    </div>
+                    <div class="mb-3">
+                        <label for="guest-rescue-note" class="form-label">Mô tả ngắn</label>
+                        <textarea id="guest-rescue-note" class="form-control" rows="3" maxlength="500"
+                            placeholder="Tình trạng hiện tại, số người, dấu mốc gần nhất..."></textarea>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">Latitude</label>
+                            <input id="guest-rescue-lat" class="form-control" readonly>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Longitude</label>
+                            <input id="guest-rescue-lon" class="form-control" readonly>
+                        </div>
+                    </div>
+                    <button id="btn-guest-rescue-locate" type="button" class="btn btn-outline-primary btn-sm mt-3">
+                        <i class="bi bi-crosshair me-1"></i>Lấy vị trí hiện tại
+                    </button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-danger" id="btn-guest-rescue-submit">
+                        <i class="bi bi-send-fill me-1"></i>Gửi yêu cầu
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/theme-manager.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/map-main.js"></script>

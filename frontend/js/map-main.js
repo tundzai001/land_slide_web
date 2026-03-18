@@ -14,6 +14,7 @@ let wsConnection = null;
 let latestRealtimeSensorTs = {}; // key: `${stationId}_${sensorType}` -> unix timestamp
 let isRainCorrelationAiEnabled = false;
 let rainCorrelationAiRunning = false;
+let localImuFallbackNextAllowedAtByStation = {}; // cooldown để tránh spam banner/siren từ local fallback
 
 // Realtime 3D state
 let realtimeImuScene, realtimeImuCamera, realtimeImuRenderer, realtimeImuControls, realtimeImuAnimationId;
@@ -21,6 +22,13 @@ let realtimeImuSensorBlock = null;
 let realtimeImuTargetQuaternion = null;
 let realtimeImuActive = false;
 let _THREE = null; // Cached Three.js module for use outside async import scope
+let guestRescueModal = null;
+
+// Rescue marker management
+let rescueMarkers = {}; // key: rescue_request_id -> marker
+let rescueRequestsData = []; // Store rescue data for popup reference
+let showStationMarkers = true;
+let showRescueMarkers = true;
 
 function normalizeRiskLevel(rawRisk, stationStatus = null) {
     if (stationStatus === 'offline') return 'OFFLINE';
@@ -120,6 +128,61 @@ function getDefaultAlertMessageForStationStatus(riskUi) {
     return 'Warning risk detected from realtime station status.';
 }
 
+function getImuCriticalThresholdDegFromCurrentStation() {
+    const cfg = currentStationData?.config || {};
+    const imuCfg = cfg.ImuAlerting || cfg.imu_alerting || {};
+    const raw = parseFloat(imuCfg.tilt_critical_deg);
+    return Number.isFinite(raw) && raw > 0 ? raw : 15.0;
+}
+
+function isImuCriticalAlertAlreadyKnown(stationId) {
+    const latest = latestAlertByStation[stationId];
+    if (latest && String(latest.sensor_type || '').toLowerCase() === 'imu') {
+        const lv = normalizeAlertLevel(latest.level || latest.risk_level);
+        if (lv === 'CRITICAL') return true;
+    }
+
+    const activeAlerts = currentStationData?.risk_assessment?.active_alerts || [];
+    return activeAlerts.some(a => {
+        const sensorType = mapAlertCategoryToSensorType(a.category);
+        return sensorType === 'imu' && normalizeAlertLevel(a.level) === 'CRITICAL';
+    });
+}
+
+function maybeTriggerLocalImuCriticalFallback(stationId, data) {
+    if (!stationId || !data) return;
+    if (isImuCriticalAlertAlreadyKnown(stationId)) return;
+
+    const roll = parseFloat(data.roll);
+    const pitch = parseFloat(data.pitch);
+    if (!Number.isFinite(roll) || !Number.isFinite(pitch)) return;
+
+    const deltaTiltDeg = Math.sqrt((roll * roll) + (pitch * pitch));
+    const criticalDeg = getImuCriticalThresholdDegFromCurrentStation();
+    if (deltaTiltDeg < criticalDeg) return;
+
+    const now = Date.now();
+    const nextAllowedAt = Number(localImuFallbackNextAllowedAtByStation[stationId] || 0);
+    if (now < nextAllowedAt) return;
+    localImuFallbackNextAllowedAtByStation[stationId] = now + 10000;
+
+    const localAlert = {
+        type: 'alert',
+        station_id: stationId,
+        sensor_type: 'imu',
+        level: 'CRITICAL',
+        category: 'tilt_critical',
+        audio_code: 'imu_critical',
+        message: `IMU local fallback: delta tilt ${deltaTiltDeg.toFixed(1)}° >= ${criticalDeg.toFixed(1)}°`
+    };
+
+    latestAlertByStation[stationId] = localAlert;
+    showAlertBanner(localAlert);
+    setMarkerAlert(stationId, true);
+    setSensorCardAlert('imu', 'CRITICAL');
+    playSiren();
+}
+
 // =====================================================
 // MAIN INITIALIZATION
 // =====================================================
@@ -141,7 +204,10 @@ function initialize() {
 
     initMap();
     setupEventListeners();
+    setupMarkerLayerControls();
+    setupGuestRescueUI();
     loadStations();
+    loadRescueMarkers();
     setupWebSocket();
 
     const stationSidebar = document.getElementById('station-list-sidebar');
@@ -155,6 +221,7 @@ function initialize() {
     }
 
     setInterval(loadStations, 30000);
+    setInterval(loadRescueMarkers, 60000);
 
     // ✅ Refresh sensor online status of currently-viewed station every 30s
     // (handles case where a device goes offline while the sidebar is already open)
@@ -445,6 +512,11 @@ function handleRealtimeUpdate(message) {
             }
         }
     }
+
+    // ✅ Handle rescue request updates from WebSocket
+    if (message.type === 'rescue_request') {
+        updateRescueMarkerFromWebSocket(message);
+    }
 }
 
 function updateRealtimeSensorValues(message) {
@@ -573,6 +645,9 @@ function updateRealtimeSensorValues(message) {
 
             chart.update();
         }
+
+        // Fallback phía client: vẫn báo đỏ/banner nếu IMU vượt ngưỡng nhưng backend chưa phát alert.
+        maybeTriggerLocalImuCriticalFallback(stationId, data);
     }
 }
 
@@ -661,6 +736,264 @@ function clearMarkerAlert(stationId) {
 }
 
 // (updateSidebarUI đã được chuyển xuống dưới — duy nhất 1 bản)
+
+function setupGuestRescueUI() {
+    const openBtn = document.getElementById('btn-guest-rescue');
+    const modalEl = document.getElementById('guestRescueModal');
+    if (!openBtn || !modalEl || !window.bootstrap) return;
+
+    guestRescueModal = new bootstrap.Modal(modalEl);
+    const locateBtn = document.getElementById('btn-guest-rescue-locate');
+    const submitBtn = document.getElementById('btn-guest-rescue-submit');
+
+    openBtn.addEventListener('click', () => {
+        guestRescueModal.show();
+        fillGuestRescueLocation();
+    });
+
+    if (locateBtn) {
+        locateBtn.addEventListener('click', () => fillGuestRescueLocation(true));
+    }
+
+    if (submitBtn) {
+        submitBtn.addEventListener('click', submitGuestRescueRequest);
+    }
+}
+
+function fillGuestRescueLocation(showToast = false) {
+    const latEl = document.getElementById('guest-rescue-lat');
+    const lonEl = document.getElementById('guest-rescue-lon');
+    if (!latEl || !lonEl) return;
+
+    if (!navigator.geolocation) {
+        if (showToast) window.toast?.warning('Thiết bị không hỗ trợ GPS');
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+            latEl.value = Number(pos.coords.latitude).toFixed(7);
+            lonEl.value = Number(pos.coords.longitude).toFixed(7);
+            latEl.dataset.accuracy = Number(pos.coords.accuracy || 0).toFixed(1);
+            if (showToast) {
+                window.toast?.success(`Đã lấy vị trí (±${latEl.dataset.accuracy}m)`);
+            }
+        },
+        (err) => {
+            console.warn('Geolocation error:', err);
+            if (showToast) window.toast?.error('Không lấy được vị trí. Hãy bật GPS/quyền vị trí.');
+        },
+        {
+            enableHighAccuracy: true,
+            timeout: 12000,
+            maximumAge: 15000,
+        }
+    );
+}
+
+async function submitGuestRescueRequest() {
+    const nameEl = document.getElementById('guest-rescue-name');
+    const phoneEl = document.getElementById('guest-rescue-phone');
+    const noteEl = document.getElementById('guest-rescue-note');
+    const latEl = document.getElementById('guest-rescue-lat');
+    const lonEl = document.getElementById('guest-rescue-lon');
+    const submitBtn = document.getElementById('btn-guest-rescue-submit');
+    if (!nameEl || !phoneEl || !noteEl || !latEl || !lonEl || !submitBtn) return;
+
+    const latitude = parseFloat(latEl.value);
+    const longitude = parseFloat(lonEl.value);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        window.toast?.warning('Vui lòng bấm "Lấy vị trí hiện tại" trước khi gửi');
+        return;
+    }
+
+    const payload = {
+        requester_name: String(nameEl.value || '').trim(),
+        phone: String(phoneEl.value || '').trim(),
+        message: String(noteEl.value || '').trim(),
+        latitude,
+        longitude,
+        accuracy_m: Number(latEl.dataset.accuracy || 0) || null,
+    };
+
+    if (!payload.message) {
+        window.toast?.warning('Hãy nhập mô tả ngắn tình trạng cần cứu hộ');
+        return;
+    }
+
+    const oldHtml = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang gửi...';
+
+    try {
+        const res = await fetch('/api/public/rescue-requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        window.toast?.success('Đã gửi yêu cầu cứu hộ thành công. Admin sẽ kiểm tra ngay.');
+        if (guestRescueModal) guestRescueModal.hide();
+        nameEl.value = '';
+        phoneEl.value = '';
+        noteEl.value = '';
+    } catch (e) {
+        console.error('submitGuestRescueRequest error:', e);
+        window.toast?.error('Gửi yêu cầu thất bại, vui lòng thử lại.');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = oldHtml;
+    }
+}
+
+// =====================================================
+// RESCUE MARKER MANAGEMENT
+// =====================================================
+
+function setupMarkerLayerControls() {
+    const stationBtn = document.getElementById('toggle-station-markers');
+    const rescueBtn = document.getElementById('toggle-rescue-markers');
+
+    if (stationBtn) {
+        stationBtn.addEventListener('click', () => {
+            showStationMarkers = !showStationMarkers;
+            toggleStationMarkersDisplay();
+            stationBtn.classList.toggle('active', showStationMarkers);
+            stationBtn.style.backgroundColor = showStationMarkers ? '' : '#f0f0f0';
+        });
+        // Set initial state
+        stationBtn.classList.add('active');
+    }
+
+    if (rescueBtn) {
+        rescueBtn.addEventListener('click', () => {
+            showRescueMarkers = !showRescueMarkers;
+            toggleRescueMarkersDisplay();
+            rescueBtn.classList.toggle('active', showRescueMarkers);
+            rescueBtn.style.backgroundColor = showRescueMarkers ? '' : '#f0f0f0';
+        });
+        // Set initial state
+        rescueBtn.classList.add('active');
+    }
+}
+
+function toggleStationMarkersDisplay() {
+    Object.values(markers).forEach(marker => {
+        if (showStationMarkers) {
+            marker.addTo(map);
+        } else {
+            map.removeLayer(marker);
+        }
+    });
+}
+
+function toggleRescueMarkersDisplay() {
+    Object.values(rescueMarkers).forEach(marker => {
+        if (showRescueMarkers) {
+            marker.addTo(map);
+        } else {
+            map.removeLayer(marker);
+        }
+    });
+}
+
+async function loadRescueMarkers() {
+    try {
+        const res = await fetch('/api/admin/rescue-requests?limit=100');
+        if (!res.ok) return;
+
+        const requests = await res.json();
+        if (!Array.isArray(requests)) return;
+
+        rescueRequestsData = requests;
+        // Remove old markers
+        Object.values(rescueMarkers).forEach(marker => map.removeLayer(marker));
+        rescueMarkers = {};
+
+        // Add new markers for each rescue request
+        requests.forEach(req => {
+            if (req.latitude && req.longitude && req.status === 'pending') {
+                addRescueMarker(req);
+            }
+        });
+    } catch (error) {
+        console.warn('[MAP] loadRescueMarkers error:', error);
+    }
+}
+
+function addRescueMarker(rescueRequest) {
+    const { id, latitude, longitude, requester_name, phone, message, accuracy_m, created_at } = rescueRequest;
+    if (!id || !latitude || !longitude) return;
+
+    const icon = L.divIcon({
+        className: 'custom-rescue-marker',
+        html: `<div style="
+            width: 24px; height: 24px; 
+            background: #dc3545; 
+            border-radius: 50%; 
+            border: 3px solid white;
+            box-shadow: 0 0 12px rgba(220, 53, 69, 0.7);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; color: white; font-weight: bold;
+        "><i class="bi bi-exclamation-fill" style="font-size: 12px;"></i></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+    });
+
+    const marker = L.marker([latitude, longitude], { icon })
+        .addTo(showRescueMarkers ? map : null)
+        .bindTooltip(`${requester_name || 'SOS'} - ${phone || 'N/A'}`, { 
+            direction: 'top', 
+            offset: [0, -15],
+            permanent: false 
+        });
+
+    const popupContent = `
+        <div class="rescue-popup" style="min-width: 280px;">
+            <h6 style="margin: 0 0 10px 0; color: #dc3545;">
+                <i class="bi bi-exclamation-circle me-1"></i>Yêu cầu cứu hộ
+            </h6>
+            <div style="font-size: 13px; line-height: 1.6;">
+                <div><strong>ID:</strong> #${id}</div>
+                <div><strong>Người yêu cầu:</strong> ${requester_name || '(Không có)'}</div>
+                <div><strong>Số điện thoại:</strong> ${phone || '(Không có)'}</div>
+                <div><strong>Vị trí:</strong> ${latitude.toFixed(6)}, ${longitude.toFixed(6)}</div>
+                ${accuracy_m ? `<div><strong>Độ chính xác:</strong> ±${accuracy_m}m</div>` : ''}
+                <div><strong>Thời gian:</strong> ${new Date(created_at).toLocaleString('vi-VN')}</div>
+                <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+                    <strong style="font-size: 12px;">Tình trạng:</strong>
+                    <div style="font-size: 13px; margin-top: 4px; word-wrap: break-word;">
+                        ${message || '(Không có mô tả)'}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    marker.bindPopup(popupContent, { maxWidth: 300, maxHeight: 400 });
+    marker.on('click', () => {
+        marker.openPopup();
+    });
+
+    rescueMarkers[id] = marker;
+}
+
+function updateRescueMarkerFromWebSocket(message) {
+    if (message.data?.type !== 'rescue_request') return;
+    if (message.data?.action === 'new') {
+        const rescueReq = message.data?.payload;
+        if (rescueReq && rescueReq.status === 'pending') {
+            addRescueMarker(rescueReq);
+            rescueRequestsData.push(rescueReq);
+        }
+    } else if (message.data?.action === 'update') {
+        const { id, status } = message.data?.payload || {};
+        if (id && status !== 'pending' && rescueMarkers[id]) {
+            map.removeLayer(rescueMarkers[id]);
+            delete rescueMarkers[id];
+        }
+    }
+}
 
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');

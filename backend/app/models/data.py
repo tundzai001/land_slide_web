@@ -106,3 +106,23 @@ class GnssWeeklySummary(BaseData):
 
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
+
+
+class RescueRequest(BaseData):
+    __tablename__ = "rescue_requests"
+    __table_args__ = (
+        Index('ix_rescue_requests_status_created', 'status', 'created_at'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at = Column(BigInteger, nullable=False, index=True)
+    requester_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    message = Column(String, nullable=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    accuracy_m = Column(Float, nullable=True)
+    status = Column(String, nullable=False, default='pending')  # pending/resolved/rejected
+    admin_note = Column(String, nullable=True)
+    handled_by = Column(String, nullable=True)
+    handled_at = Column(BigInteger, nullable=True)

@@ -75,6 +75,8 @@ class AdminManager {
             window.dbManager?.loadAllData?.();
         } else if (tabId === 'tab-pi') {
             this.loadPiDevices?.();
+        } else if (tabId === 'tab-system') {
+            this.loadRescueRequests?.();
         }
     }
 
@@ -133,6 +135,13 @@ class AdminManager {
                 this.loadPiDevices(true);
             }
         }, 15000);
+
+        setInterval(() => {
+            const systemTab = document.getElementById('tab-system');
+            if (systemTab && systemTab.classList.contains('active')) {
+                this.loadRescueRequests(true);
+            }
+        }, 20000);
 
         console.log('✅ [ADMIN] Initialized successfully');
     }
@@ -215,6 +224,86 @@ class AdminManager {
                 });
             }
         });
+    }
+
+    async loadRescueRequests(silent = false) {
+        const body = document.getElementById('rescue-requests-body');
+        if (!body) return;
+        try {
+            const res = await fetch('/api/admin/rescue-requests?limit=100', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const rows = await res.json();
+            this.renderRescueRequests(rows || []);
+        } catch (e) {
+            if (!silent) window.toast?.error('Không tải được danh sách rescue requests');
+            body.innerHTML = '<tr><td colspan="8" class="text-danger">Lỗi tải dữ liệu rescue requests</td></tr>';
+            console.error('loadRescueRequests error:', e);
+        }
+    }
+
+    renderRescueRequests(rows) {
+        const body = document.getElementById('rescue-requests-body');
+        if (!body) return;
+        if (!Array.isArray(rows) || rows.length === 0) {
+            body.innerHTML = '<tr><td colspan="8" class="text-muted">Chưa có yêu cầu cứu hộ</td></tr>';
+            return;
+        }
+
+        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[m]));
+
+        body.innerHTML = rows.map(r => {
+            const ts = r.created_at ? new Date(r.created_at * 1000).toLocaleString('vi-VN') : '--';
+            const mapsLink = Number.isFinite(Number(r.latitude)) && Number.isFinite(Number(r.longitude))
+                ? `<a href="https://maps.google.com/?q=${r.latitude},${r.longitude}" target="_blank" rel="noopener">${Number(r.latitude).toFixed(6)}, ${Number(r.longitude).toFixed(6)}</a>`
+                : '--';
+
+            const statusBadge = r.status === 'resolved'
+                ? '<span class="badge bg-success">resolved</span>'
+                : r.status === 'rejected'
+                    ? '<span class="badge bg-secondary">rejected</span>'
+                    : '<span class="badge bg-danger">pending</span>';
+
+            const actionBtns = r.status === 'pending'
+                ? `<div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-outline-success" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'resolved')">Done</button>
+                        <button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'rejected')">Reject</button>
+                   </div>`
+                : '<span class="text-muted small">--</span>';
+
+            return `<tr>
+                <td>${r.id}</td>
+                <td>${esc(ts)}</td>
+                <td>${esc(r.requester_name || '--')}</td>
+                <td>${esc(r.phone || '--')}</td>
+                <td>${mapsLink}</td>
+                <td>${esc(r.message || '--')}</td>
+                <td>${statusBadge}</td>
+                <td>${actionBtns}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    async updateRescueRequestStatus(requestId, status) {
+        try {
+            const res = await fetch(`/api/admin/rescue-requests/${requestId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ status })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            window.toast?.success(`Rescue request #${requestId} -> ${status}`);
+            await this.loadRescueRequests(true);
+        } catch (e) {
+            window.toast?.error('Cập nhật trạng thái rescue request thất bại');
+            console.error('updateRescueRequestStatus error:', e);
+        }
     }
 
     // ✅ THÊM HÀM MỚI: Format thời gian offline

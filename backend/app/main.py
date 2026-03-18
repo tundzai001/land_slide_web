@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func, delete, text
 
@@ -454,6 +455,136 @@ app.include_router(field_router.router)
 
 # Mount static files directory (for sounds, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+class RescueRequestCreate(BaseModel):
+    requester_name: Optional[str] = None
+    phone: Optional[str] = None
+    message: Optional[str] = None
+    latitude: float
+    longitude: float
+    accuracy_m: Optional[float] = None
+
+
+class RescueRequestUpdate(BaseModel):
+    status: str
+    admin_note: Optional[str] = None
+
+
+@app.post("/api/public/rescue-requests")
+async def create_rescue_request(
+    payload: RescueRequestCreate,
+    db: AsyncSession = Depends(get_data_db)
+):
+    if not (-90.0 <= float(payload.latitude) <= 90.0):
+        raise HTTPException(status_code=400, detail="Invalid latitude")
+    if not (-180.0 <= float(payload.longitude) <= 180.0):
+        raise HTTPException(status_code=400, detail="Invalid longitude")
+
+    now_ts = int(time.time())
+    req = model_data.RescueRequest(
+        created_at=now_ts,
+        requester_name=(payload.requester_name or '').strip()[:120] or None,
+        phone=(payload.phone or '').strip()[:32] or None,
+        message=(payload.message or '').strip()[:500] or None,
+        latitude=float(payload.latitude),
+        longitude=float(payload.longitude),
+        accuracy_m=float(payload.accuracy_m) if payload.accuracy_m is not None else None,
+        status='pending'
+    )
+    db.add(req)
+    await db.commit()
+    await db.refresh(req)
+
+    try:
+        await ws_manager.broadcast({
+            "type": "rescue_request",
+            "id": int(req.id),
+            "created_at": req.created_at,
+            "requester_name": req.requester_name,
+            "phone": req.phone,
+            "message": req.message,
+            "latitude": req.latitude,
+            "longitude": req.longitude,
+            "accuracy_m": req.accuracy_m,
+            "status": req.status,
+        })
+    except Exception as e:
+        logger.warning(f"WS rescue_request broadcast failed: {e}")
+
+    return {"status": "ok", "id": int(req.id), "created_at": req.created_at}
+
+
+@app.get("/api/admin/rescue-requests")
+async def get_rescue_requests(
+    status_filter: Optional[str] = None,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.get_current_user)
+):
+    if current_user.role not in ("admin", "operator"):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    q = select(model_data.RescueRequest)
+    normalized = (status_filter or '').strip().lower()
+    if normalized in ('pending', 'resolved', 'rejected'):
+        q = q.where(model_data.RescueRequest.status == normalized)
+
+    lim = max(1, min(int(limit), 500))
+    q = q.order_by(desc(model_data.RescueRequest.created_at)).limit(lim)
+    res = await db.execute(q)
+    rows = res.scalars().all()
+    return [
+        {
+            "id": int(r.id),
+            "created_at": int(r.created_at),
+            "requester_name": r.requester_name,
+            "phone": r.phone,
+            "message": r.message,
+            "latitude": r.latitude,
+            "longitude": r.longitude,
+            "accuracy_m": r.accuracy_m,
+            "status": r.status,
+            "admin_note": r.admin_note,
+            "handled_by": r.handled_by,
+            "handled_at": r.handled_at,
+        }
+        for r in rows
+    ]
+
+
+@app.patch("/api/admin/rescue-requests/{request_id}")
+async def update_rescue_request(
+    request_id: int,
+    payload: RescueRequestUpdate,
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.get_current_user)
+):
+    if current_user.role not in ("admin", "operator"):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    new_status = (payload.status or '').strip().lower()
+    if new_status not in ('pending', 'resolved', 'rejected'):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    res = await db.execute(
+        select(model_data.RescueRequest).where(model_data.RescueRequest.id == request_id)
+    )
+    row = res.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Rescue request not found")
+
+    row.status = new_status
+    row.admin_note = (payload.admin_note or '').strip()[:500] or None
+    if new_status in ('resolved', 'rejected'):
+        row.handled_by = current_user.username
+        row.handled_at = int(time.time())
+    else:
+        row.handled_by = None
+        row.handled_at = None
+
+    await db.commit()
+    return {"status": "ok", "id": int(row.id), "new_status": row.status}
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
