@@ -274,6 +274,13 @@
                     <span>Pi Devices</span>
                 </a>
             </div>
+            <div class="nav-item">
+                <a class="nav-link" href="#" data-tab="tab-rescue"
+                    onclick="window.adminManager?.switchTab('tab-rescue', this); window.adminManager?.loadRescueRequests()">
+                    <i class="bi bi-life-preserver" style="color:#ef4444"></i>
+                    <span>Cứu hộ</span>
+                </a>
+            </div>
             <div class="nav-item mt-5">
                 <a class="nav-link text-danger" href="#" id="logout-btn">
                     <i class="bi bi-box-arrow-left"></i>
@@ -713,38 +720,77 @@
                     </div>
 
                 </form>
+            </div>
 
-                <div class="config-section mt-4">
-                    <div class="section-header">
-                        <i class="bi bi-megaphone-fill"></i>
-                        <h5>Guest Rescue Requests</h5>
-                        <button type="button" class="btn btn-sm btn-outline-primary ms-auto"
-                            onclick="window.adminManager?.loadRescueRequests()">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-                        </button>
+            <!-- TAB: RESCUE -->
+            <div class="tab-pane fade" id="tab-rescue">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div>
+                        <h4 class="mb-1" style="font-weight:700;">
+                            <i class="bi bi-life-preserver me-2" style="color:#ef4444"></i>QUẢN LÝ CỨU HỘ
+                        </h4>
+                        <small class="text-muted">Danh sách yêu cầu cứu hộ khẩn cấp.</small>
                     </div>
-                    <div class="alert alert-info py-2 small mb-3">
-                        Guest có thể gửi vị trí GPS + thông tin cứu hộ từ web map. Admin xử lý tại đây.
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                        onclick="window.adminManager?.loadRescueRequests()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    </button>
+                </div>
+                <div class="alert alert-info py-2 small mb-3">
+                    Guest có thể gửi vị trí GPS + thông tin cứu hộ từ web map. Admin xử lý tại đây.
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6 col-md-3">
+                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
+                            <div class="card-body py-2 px-3">
+                                <div class="small text-muted">Tổng trường hợp</div>
+                                <div class="fw-bold fs-5" id="rescue-count-total">0</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle" id="rescue-requests-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Thời gian</th>
-                                    <th>Người gửi</th>
-                                    <th>Liên hệ</th>
-                                    <th>Vị trí</th>
-                                    <th>Nội dung</th>
-                                    <th>Trạng thái</th>
-                                    <th>Thao tác</th>
-                                </tr>
-                            </thead>
-                            <tbody id="rescue-requests-body">
-                                <tr><td colspan="8" class="text-muted">Chưa có dữ liệu</td></tr>
-                            </tbody>
-                        </table>
+                    <div class="col-6 col-md-3">
+                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
+                            <div class="card-body py-2 px-3">
+                                <div class="small text-muted">Đang chờ</div>
+                                <div class="fw-bold fs-5 text-danger" id="rescue-count-pending">0</div>
+                            </div>
+                        </div>
                     </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
+                            <div class="card-body py-2 px-3">
+                                <div class="small text-muted">Đã xong</div>
+                                <div class="fw-bold fs-5 text-success" id="rescue-count-resolved">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
+                            <div class="card-body py-2 px-3">
+                                <div class="small text-muted">Từ chối</div>
+                                <div class="fw-bold fs-5 text-secondary" id="rescue-count-rejected">0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="custom-table" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-hover table-sm align-middle mb-0" id="rescue-requests-table">
+                        <thead class="sticky-top">
+                            <tr>
+                                <th>ID</th>
+                                <th>Thời gian</th>
+                                <th>Người gửi</th>
+                                <th>Liên hệ</th>
+                                <th>Vị trí</th>
+                                <th>Nội dung</th>
+                                <th>Trạng thái</th>
+                                <th>Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rescue-requests-body">
+                            <tr><td colspan="8" class="text-muted text-center py-4">Chưa có dữ liệu</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

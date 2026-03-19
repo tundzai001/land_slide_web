@@ -23,12 +23,15 @@ let realtimeImuTargetQuaternion = null;
 let realtimeImuActive = false;
 let _THREE = null; // Cached Three.js module for use outside async import scope
 let guestRescueModal = null;
+let guestRescueImageBlob = null;
+let guestRescueImagePreviewUrl = null;
 
 // Rescue marker management
 let rescueMarkers = {}; // key: rescue_request_id -> marker
 let rescueRequestsData = []; // Store rescue data for popup reference
 let showStationMarkers = true;
 let showRescueMarkers = true;
+let currentMapMode = 'station';
 
 function normalizeRiskLevel(rawRisk, stationStatus = null) {
     if (stationStatus === 'offline') return 'OFFLINE';
@@ -745,6 +748,10 @@ function setupGuestRescueUI() {
     guestRescueModal = new bootstrap.Modal(modalEl);
     const locateBtn = document.getElementById('btn-guest-rescue-locate');
     const submitBtn = document.getElementById('btn-guest-rescue-submit');
+    const imageInput = document.getElementById('guest-rescue-image');
+    const imagePreviewWrap = document.getElementById('guest-rescue-image-preview-wrap');
+    const imagePreview = document.getElementById('guest-rescue-image-preview');
+    const clearImageBtn = document.getElementById('btn-guest-rescue-image-clear');
 
     openBtn.addEventListener('click', () => {
         guestRescueModal.show();
@@ -758,6 +765,92 @@ function setupGuestRescueUI() {
     if (submitBtn) {
         submitBtn.addEventListener('click', submitGuestRescueRequest);
     }
+
+    if (imageInput) {
+        imageInput.addEventListener('change', async () => {
+            const file = imageInput.files?.[0];
+            if (!file || !imagePreview || !imagePreviewWrap) {
+                return;
+            }
+
+            try {
+                const blob = await compressImageToBlob(file, 1280, 0.75);
+                guestRescueImageBlob = blob;
+
+                if (guestRescueImagePreviewUrl) {
+                    URL.revokeObjectURL(guestRescueImagePreviewUrl);
+                }
+                guestRescueImagePreviewUrl = URL.createObjectURL(blob);
+                imagePreview.src = guestRescueImagePreviewUrl;
+                imagePreviewWrap.style.display = 'block';
+            } catch (e) {
+                console.error('compressImageToBlob error:', e);
+                window.toast?.error('Không đọc được ảnh. Vui lòng thử ảnh khác.');
+            }
+        });
+    }
+
+    if (clearImageBtn) {
+        clearImageBtn.addEventListener('click', () => {
+            if (imageInput) {
+                imageInput.value = '';
+            }
+            guestRescueImageBlob = null;
+            if (imagePreview) {
+                imagePreview.src = '';
+            }
+            if (guestRescueImagePreviewUrl) {
+                URL.revokeObjectURL(guestRescueImagePreviewUrl);
+                guestRescueImagePreviewUrl = null;
+            }
+            if (imagePreviewWrap) {
+                imagePreviewWrap.style.display = 'none';
+            }
+        });
+    }
+}
+
+async function compressImageToBlob(file, maxWidth = 1280, jpegQuality = 0.75) {
+    const fileDataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
+    const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = fileDataUrl;
+    });
+
+    let targetWidth = img.width;
+    let targetHeight = img.height;
+    if (img.width > maxWidth) {
+        const ratio = maxWidth / img.width;
+        targetWidth = maxWidth;
+        targetHeight = Math.round(img.height * ratio);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        throw new Error('Canvas context unavailable');
+    }
+
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+    return await new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                reject(new Error('Canvas toBlob failed'));
+                return;
+            }
+            resolve(blob);
+        }, 'image/jpeg', jpegQuality);
+    });
 }
 
 function fillGuestRescueLocation(showToast = false) {
@@ -795,6 +888,12 @@ async function submitGuestRescueRequest() {
     const nameEl = document.getElementById('guest-rescue-name');
     const phoneEl = document.getElementById('guest-rescue-phone');
     const noteEl = document.getElementById('guest-rescue-note');
+    const typeEl = document.querySelector('input[name="guest-rescue-type"]:checked');
+    const provinceEl = document.getElementById('guest-rescue-province');
+    const sourceLinkEl = document.getElementById('guest-rescue-source-link');
+    const imagePreview = document.getElementById('guest-rescue-image-preview');
+    const imagePreviewWrap = document.getElementById('guest-rescue-image-preview-wrap');
+    const imageInput = document.getElementById('guest-rescue-image');
     const latEl = document.getElementById('guest-rescue-lat');
     const lonEl = document.getElementById('guest-rescue-lon');
     const submitBtn = document.getElementById('btn-guest-rescue-submit');
@@ -807,16 +906,14 @@ async function submitGuestRescueRequest() {
         return;
     }
 
-    const payload = {
-        requester_name: String(nameEl.value || '').trim(),
-        phone: String(phoneEl.value || '').trim(),
-        message: String(noteEl.value || '').trim(),
-        latitude,
-        longitude,
-        accuracy_m: Number(latEl.dataset.accuracy || 0) || null,
-    };
+    const message = String(noteEl.value || '').trim();
+    const requesterName = String(nameEl.value || '').trim();
+    const phone = String(phoneEl.value || '').trim();
+    const rescueType = String(typeEl?.value || 'can_cuu_ho');
+    const provinceCity = String(provinceEl?.value || '').trim();
+    const sourceLink = String(sourceLinkEl?.value || '').trim();
 
-    if (!payload.message) {
+    if (!message) {
         window.toast?.warning('Hãy nhập mô tả ngắn tình trạng cần cứu hộ');
         return;
     }
@@ -826,10 +923,23 @@ async function submitGuestRescueRequest() {
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang gửi...';
 
     try {
+        const formData = new FormData();
+        formData.append('requester_name', requesterName);
+        formData.append('phone', phone);
+        formData.append('message', message);
+        formData.append('latitude', String(latitude));
+        formData.append('longitude', String(longitude));
+        formData.append('accuracy_m', String(Number(latEl.dataset.accuracy || 0) || ''));
+        formData.append('rescue_type', rescueType);
+        formData.append('province_city', provinceCity);
+        formData.append('source_link', sourceLink);
+        if (guestRescueImageBlob) {
+            formData.append('image_file', guestRescueImageBlob, 'rescue.jpg');
+        }
+
         const res = await fetch('/api/public/rescue-requests', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: formData,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         window.toast?.success('Đã gửi yêu cầu cứu hộ thành công. Admin sẽ kiểm tra ngay.');
@@ -837,6 +947,24 @@ async function submitGuestRescueRequest() {
         nameEl.value = '';
         phoneEl.value = '';
         noteEl.value = '';
+        if (provinceEl) provinceEl.value = '';
+        if (sourceLinkEl) sourceLinkEl.value = '';
+        const defaultTypeEl = document.getElementById('guest-rescue-type-emergency');
+        if (defaultTypeEl) defaultTypeEl.checked = true;
+        guestRescueImageBlob = null;
+        if (imagePreview) {
+            imagePreview.src = '';
+        }
+        if (guestRescueImagePreviewUrl) {
+            URL.revokeObjectURL(guestRescueImagePreviewUrl);
+            guestRescueImagePreviewUrl = null;
+        }
+        if (imagePreviewWrap) {
+            imagePreviewWrap.style.display = 'none';
+        }
+        if (imageInput) {
+            imageInput.value = '';
+        }
     } catch (e) {
         console.error('submitGuestRescueRequest error:', e);
         window.toast?.error('Gửi yêu cầu thất bại, vui lòng thử lại.');
@@ -851,29 +979,98 @@ async function submitGuestRescueRequest() {
 // =====================================================
 
 function setupMarkerLayerControls() {
-    const stationBtn = document.getElementById('toggle-station-markers');
-    const rescueBtn = document.getElementById('toggle-rescue-markers');
+    const modeTrigger = document.getElementById('map-mode-trigger');
+    const modePanel = document.getElementById('map-mode-popup-panel');
+    const modeSwitch = document.getElementById('map-mode-switch');
 
-    if (stationBtn) {
-        stationBtn.addEventListener('click', () => {
-            showStationMarkers = !showStationMarkers;
-            toggleStationMarkersDisplay();
-            stationBtn.classList.toggle('active', showStationMarkers);
-            stationBtn.style.backgroundColor = showStationMarkers ? '' : '#f0f0f0';
+    if (modeTrigger && modePanel) {
+        modeTrigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const willShow = !modePanel.classList.contains('show');
+            modePanel.classList.toggle('show', willShow);
+            modeTrigger.setAttribute('aria-expanded', willShow ? 'true' : 'false');
         });
-        // Set initial state
-        stationBtn.classList.add('active');
+
+        modePanel.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+
+        document.addEventListener('click', () => {
+            modePanel.classList.remove('show');
+            modeTrigger.setAttribute('aria-expanded', 'false');
+        });
     }
 
-    if (rescueBtn) {
-        rescueBtn.addEventListener('click', () => {
-            showRescueMarkers = !showRescueMarkers;
-            toggleRescueMarkersDisplay();
-            rescueBtn.classList.toggle('active', showRescueMarkers);
-            rescueBtn.style.backgroundColor = showRescueMarkers ? '' : '#f0f0f0';
+    if (modeSwitch) {
+        modeSwitch.checked = false;
+        modeSwitch.addEventListener('change', () => {
+            setMapMode(modeSwitch.checked ? 'rescue' : 'station');
+
+            // Auto-close popup after user toggles mode.
+            if (modePanel) {
+                modePanel.classList.remove('show');
+            }
+            if (modeTrigger) {
+                modeTrigger.setAttribute('aria-expanded', 'false');
+            }
         });
-        // Set initial state
-        rescueBtn.classList.add('active');
+    }
+
+    // Default mode: station map
+    setMapMode('station');
+}
+
+function setMapMode(mode) {
+    const normalizedMode = mode === 'rescue' ? 'rescue' : 'station';
+    currentMapMode = normalizedMode;
+
+    showStationMarkers = normalizedMode === 'station';
+    showRescueMarkers = normalizedMode === 'rescue';
+    toggleStationMarkersDisplay();
+    toggleRescueMarkersDisplay();
+
+    const modeSwitch = document.getElementById('map-mode-switch');
+    if (modeSwitch) {
+        modeSwitch.checked = normalizedMode === 'rescue';
+    }
+
+    const modeState = document.getElementById('map-mode-state');
+    if (modeState) {
+        modeState.textContent = normalizedMode === 'rescue' ? 'Đang xem: Cứu hộ' : 'Đang xem: Trạm';
+    }
+
+    document.body.classList.toggle('rescue-mode-active', normalizedMode === 'rescue');
+
+    const stationSidebar = document.getElementById('station-list-sidebar');
+    const detailSidebar = document.getElementById('detail-sidebar');
+    const chartsPanel = document.getElementById('charts-panel');
+    const longtermOverlay = document.getElementById('longterm-overlay');
+    const alertBanner = document.getElementById('alert-banner');
+
+    if (normalizedMode === 'rescue') {
+        if (stationSidebar) {
+            stationSidebar.classList.add('hidden');
+            stationSidebar.classList.add('force-hidden');
+        }
+
+        if (detailSidebar) {
+            detailSidebar.classList.remove('active');
+        }
+
+        if (chartsPanel) {
+            chartsPanel.classList.remove('active');
+        }
+
+        if (longtermOverlay) {
+            longtermOverlay.classList.remove('active');
+        }
+
+        if (alertBanner) {
+            alertBanner.classList.remove('show', 'level-warning', 'level-critical');
+        }
+    } else if (stationSidebar) {
+        // Keep sidebar closed when switching back; user opens it manually.
+        stationSidebar.classList.remove('force-hidden');
     }
 }
 
@@ -899,8 +1096,12 @@ function toggleRescueMarkersDisplay() {
 
 async function loadRescueMarkers() {
     try {
-        const res = await fetch('/api/admin/rescue-requests?limit=100');
-        if (!res.ok) return;
+        if (!window.authManager || !window.authManager.isAuthenticated()) {
+            return; // Only authenticated users can fetch this
+        }
+
+        const res = await window.authManager.apiFetch('/api/admin/rescue-requests?limit=100');
+        if (!res || !res.ok) return;
 
         const requests = await res.json();
         if (!Array.isArray(requests)) return;
@@ -922,8 +1123,26 @@ async function loadRescueMarkers() {
 }
 
 function addRescueMarker(rescueRequest) {
-    const { id, latitude, longitude, requester_name, phone, message, accuracy_m, created_at } = rescueRequest;
+    const {
+        id,
+        latitude,
+        longitude,
+        requester_name,
+        phone,
+        message,
+        accuracy_m,
+        created_at,
+        rescue_type,
+        province_city,
+        source_link,
+        image_url,
+        image_data_url,
+    } = rescueRequest;
     if (!id || !latitude || !longitude) return;
+
+    const safeSourceLink = /^https?:\/\//i.test(String(source_link || '').trim())
+        ? String(source_link).trim()
+        : '';
 
     const icon = L.divIcon({
         className: 'custom-rescue-marker',
@@ -957,15 +1176,19 @@ function addRescueMarker(rescueRequest) {
                 <div><strong>ID:</strong> #${id}</div>
                 <div><strong>Người yêu cầu:</strong> ${requester_name || '(Không có)'}</div>
                 <div><strong>Số điện thoại:</strong> ${phone || '(Không có)'}</div>
+                <div><strong>Phân loại:</strong> ${rescue_type || '(Không có)'}</div>
+                <div><strong>Tỉnh/TP:</strong> ${province_city || '(Không có)'}</div>
                 <div><strong>Vị trí:</strong> ${latitude.toFixed(6)}, ${longitude.toFixed(6)}</div>
                 ${accuracy_m ? `<div><strong>Độ chính xác:</strong> ±${accuracy_m}m</div>` : ''}
                 <div><strong>Thời gian:</strong> ${new Date(created_at).toLocaleString('vi-VN')}</div>
+                ${safeSourceLink ? `<div><strong>Nguồn:</strong> <a href="${safeSourceLink}" target="_blank" rel="noopener">Mở link</a></div>` : ''}
                 <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
                     <strong style="font-size: 12px;">Tình trạng:</strong>
                     <div style="font-size: 13px; margin-top: 4px; word-wrap: break-word;">
                         ${message || '(Không có mô tả)'}
                     </div>
                 </div>
+                ${(image_url || image_data_url) ? `<div style="margin-top:8px;"><img src="${image_url || image_data_url}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : ''}
             </div>
         </div>
     `;
@@ -1005,6 +1228,7 @@ function setupEventListeners() {
     // Toggle sidebar trái
     if (toggleListBtn && stationSidebar) {
         toggleListBtn.addEventListener('click', () => {
+            if (currentMapMode === 'rescue') return;
             stationSidebar.classList.remove('hidden');
             stationSidebar.classList.remove('force-hidden');
         });
@@ -1031,7 +1255,7 @@ function setupEventListeners() {
             if (longtermOverlay) longtermOverlay.classList.remove('active');
 
             // Mở lại sidebar trái
-            if (stationSidebar) {
+            if (stationSidebar && currentMapMode !== 'rescue') {
                 stationSidebar.classList.remove('hidden');
                 stationSidebar.classList.remove('force-hidden');
             }
@@ -1076,7 +1300,7 @@ function setupEventListeners() {
             chartsPanel.classList.remove('active');
 
             // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
-            if (stationSidebar) {
+            if (stationSidebar && currentMapMode !== 'rescue') {
                 stationSidebar.classList.remove('force-hidden');
             }
 
@@ -1155,7 +1379,7 @@ function setupEventListeners() {
             closeLsRapidResultPopup();
 
             // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
-            if (stationSidebar) {
+            if (stationSidebar && currentMapMode !== 'rescue') {
                 stationSidebar.classList.remove('force-hidden');
             }
 
@@ -1225,10 +1449,10 @@ function setupEventListeners() {
 
                 if (state === 'alerting') {
                     // Đang kêu → Tắt còi
-                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/stop-siren?target=${target}`, {
+                    const response = await window.authManager.apiFetch(`/api/field/stations/${currentAlertStationId}/stop-siren?target=${target}`, {
                         method: 'POST'
                     });
-                    if (response.ok) {
+                    if (response && response.ok) {
                         window.toast?.success(`Mute command sent (${iconBase})`);
                         setSirenButtonState('muted', target);
                         // Tắt siren trên web (chỉ tắt khi mute center/point tùy logic, tạm thời cứ tắt JS audio)
@@ -1243,10 +1467,10 @@ function setupEventListeners() {
                     }
                 } else if (state === 'muted') {
                     // Đã tắt → Bật lại còi
-                    const response = await fetch(`/api/field/stations/${currentAlertStationId}/enable-siren?target=${target}`, {
+                    const response = await window.authManager.apiFetch(`/api/field/stations/${currentAlertStationId}/enable-siren?target=${target}`, {
                         method: 'POST'
                     });
-                    if (response.ok) {
+                    if (response && response.ok) {
                         window.toast?.success(`Alarm re-enabled (${iconBase})`);
                         setSirenButtonState('alerting', target);
                     } else {
@@ -1502,7 +1726,7 @@ function updateMarker(station) {
         });
 
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
-            .addTo(map)
+            .addTo(showStationMarkers ? map : null)
             .bindTooltip(station.name, { direction: 'top', offset: [0, -10] });
 
         marker.on('click', () => selectStation(station.id));
@@ -1576,6 +1800,10 @@ function _showSirenIfAlerting(stationId, data) {
 }
 
 async function selectStation(stationId, options = {}) {
+    if (currentMapMode === 'rescue') {
+        return;
+    }
+
     const { skipZoom = false, skipSiren = false, skipBannerRestore = false } = options;
     console.log(`🎯 [MAP] Selecting station: ${stationId}`, options);
 
@@ -4282,6 +4510,8 @@ function applySensorCardAlertsFromAssessment(data) {
 }
 
 function showAlertBanner(alertData, options = {}) {
+    if (currentMapMode === 'rescue') return;
+
     const banner = document.getElementById('alert-banner');
     if (!banner) return;
 

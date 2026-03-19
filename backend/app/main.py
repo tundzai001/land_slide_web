@@ -4,14 +4,19 @@
 
 import logging
 import asyncio
+import json
 import time
 import math
 import sys
 import os
+import base64
+import binascii
+import hashlib
+import uuid
 from contextlib import asynccontextmanager, suppress
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
@@ -456,6 +461,159 @@ app.include_router(field_router.router)
 # Mount static files directory (for sounds, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+RESCUE_META_PREFIX = "__RESCUE_META_V1__"
+RESCUE_IMAGE_DIR = os.path.join("static", "uploads", "rescue")
+
+
+def persist_rescue_image_data_url(image_data_url: Optional[str]) -> Optional[str]:
+    raw = (image_data_url or '').strip()
+    if not raw:
+        return None
+
+    if not raw.startswith('data:image/'):
+        raise HTTPException(status_code=400, detail="Invalid image format")
+
+    header, sep, b64_payload = raw.partition(',')
+    if not sep:
+        raise HTTPException(status_code=400, detail="Invalid image payload")
+
+    mime_type = header.split(';')[0].replace('data:', '').lower()
+    ext_map = {
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+    }
+    ext = ext_map.get(mime_type)
+    if not ext:
+        raise HTTPException(status_code=400, detail="Unsupported image type")
+
+    try:
+        image_bytes = base64.b64decode(b64_payload, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid image encoding")
+
+    # Limit decoded image size to 400KB for lightweight storage.
+    if len(image_bytes) > 400 * 1024:
+        raise HTTPException(status_code=400, detail="Image too large")
+
+    os.makedirs(RESCUE_IMAGE_DIR, exist_ok=True)
+    digest = hashlib.sha1(image_bytes).hexdigest()  # nosec B324 - non-crypto dedupe hash
+    file_name = f"{digest}{ext}"
+    file_path = os.path.join(RESCUE_IMAGE_DIR, file_name)
+
+    if not os.path.exists(file_path):
+        with open(file_path, 'wb') as f:
+            f.write(image_bytes)
+
+    return f"/static/uploads/rescue/{file_name}"
+
+
+async def persist_rescue_upload_file(image_file: Optional[UploadFile]) -> Optional[str]:
+    if image_file is None:
+        return None
+
+    mime_type = (image_file.content_type or '').lower()
+    ext_map = {
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+    }
+    ext = ext_map.get(mime_type)
+    if not ext:
+        raise HTTPException(status_code=400, detail="Unsupported image type")
+
+    image_bytes = await image_file.read()
+    if not image_bytes:
+        return None
+
+    if len(image_bytes) > 400 * 1024:
+        raise HTTPException(status_code=400, detail="Image too large")
+
+    os.makedirs(RESCUE_IMAGE_DIR, exist_ok=True)
+    file_name = f"{int(time.time())}_{uuid.uuid4().hex[:12]}{ext}"
+    file_path = os.path.join(RESCUE_IMAGE_DIR, file_name)
+    with open(file_path, 'wb') as f:
+        f.write(image_bytes)
+
+    return f"/static/uploads/rescue/{file_name}"
+
+
+def pack_rescue_message(text: Optional[str], rescue_type: Optional[str], province_city: Optional[str],
+                        source_link: Optional[str], image_url: Optional[str],
+                        image_data_url: Optional[str] = None) -> Optional[str]:
+    clean_text = (text or '').strip()
+    clean_type = (rescue_type or '').strip() or None
+    clean_province = (province_city or '').strip() or None
+    clean_link = (source_link or '').strip() or None
+    clean_image_url = (image_url or '').strip() or None
+    clean_image = (image_data_url or '').strip() or None
+
+    has_meta = any([clean_type, clean_province, clean_link, clean_image_url, clean_image])
+    if not has_meta:
+        return clean_text or None
+
+    payload = {
+        "text": clean_text,
+        "rescue_type": clean_type,
+        "province_city": clean_province,
+        "source_link": clean_link,
+        "image_url": clean_image_url,
+        "image_data_url": clean_image,
+    }
+    return f"{RESCUE_META_PREFIX}{json.dumps(payload, ensure_ascii=False)}"
+
+
+def unpack_rescue_message(raw_message: Optional[str]) -> dict:
+    raw = raw_message or ''
+    if not raw.startswith(RESCUE_META_PREFIX):
+        return {
+            "text": raw,
+            "rescue_type": None,
+            "province_city": None,
+            "source_link": None,
+            "image_url": None,
+            "image_data_url": None,
+        }
+
+
+def resolve_rescue_image_path(image_url: Optional[str]) -> Optional[str]:
+    url = (image_url or '').strip()
+    if not url:
+        return None
+
+    prefix = '/static/uploads/rescue/'
+    if not url.startswith(prefix):
+        return None
+
+    file_name = url[len(prefix):].strip().replace('..', '')
+    if not file_name:
+        return None
+
+    file_path = os.path.join(RESCUE_IMAGE_DIR, file_name)
+    return os.path.abspath(file_path)
+
+    try:
+        obj = json.loads(raw[len(RESCUE_META_PREFIX):])
+        return {
+            "text": str(obj.get("text") or ''),
+            "rescue_type": str(obj.get("rescue_type") or '') or None,
+            "province_city": str(obj.get("province_city") or '') or None,
+            "source_link": str(obj.get("source_link") or '') or None,
+            "image_url": str(obj.get("image_url") or '') or None,
+            "image_data_url": str(obj.get("image_data_url") or '') or None,
+        }
+    except Exception:
+        return {
+            "text": raw,
+            "rescue_type": None,
+            "province_city": None,
+            "source_link": None,
+            "image_url": None,
+            "image_data_url": None,
+        }
+
 
 class RescueRequestCreate(BaseModel):
     requester_name: Optional[str] = None
@@ -464,6 +622,10 @@ class RescueRequestCreate(BaseModel):
     latitude: float
     longitude: float
     accuracy_m: Optional[float] = None
+    rescue_type: Optional[str] = None
+    province_city: Optional[str] = None
+    source_link: Optional[str] = None
+    image_data_url: Optional[str] = None
 
 
 class RescueRequestUpdate(BaseModel):
@@ -473,20 +635,53 @@ class RescueRequestUpdate(BaseModel):
 
 @app.post("/api/public/rescue-requests")
 async def create_rescue_request(
-    payload: RescueRequestCreate,
+    request: Request,
     db: AsyncSession = Depends(get_data_db)
 ):
+    content_type = (request.headers.get('content-type') or '').lower()
+
+    if 'multipart/form-data' in content_type:
+        form = await request.form()
+        payload = RescueRequestCreate(
+            requester_name=str(form.get('requester_name') or '').strip() or None,
+            phone=str(form.get('phone') or '').strip() or None,
+            message=str(form.get('message') or '').strip() or None,
+            latitude=float(form.get('latitude') or 0),
+            longitude=float(form.get('longitude') or 0),
+            accuracy_m=float(form.get('accuracy_m')) if form.get('accuracy_m') not in (None, '', 'null') else None,
+            rescue_type=str(form.get('rescue_type') or '').strip() or None,
+            province_city=str(form.get('province_city') or '').strip() or None,
+            source_link=str(form.get('source_link') or '').strip() or None,
+            image_data_url=None,
+        )
+        raw_file = form.get('image_file')
+        image_file = raw_file if isinstance(raw_file, UploadFile) else None
+        image_url = await persist_rescue_upload_file(image_file)
+    else:
+        body = await request.json()
+        payload = RescueRequestCreate(**body)
+        clean_image_data_url = (payload.image_data_url or '').strip() or None
+        image_url = persist_rescue_image_data_url(clean_image_data_url)
+
     if not (-90.0 <= float(payload.latitude) <= 90.0):
         raise HTTPException(status_code=400, detail="Invalid latitude")
     if not (-180.0 <= float(payload.longitude) <= 180.0):
         raise HTTPException(status_code=400, detail="Invalid longitude")
+
+    packed_message = pack_rescue_message(
+        payload.message,
+        payload.rescue_type,
+        payload.province_city,
+        payload.source_link,
+        image_url,
+    )
 
     now_ts = int(time.time())
     req = model_data.RescueRequest(
         created_at=now_ts,
         requester_name=(payload.requester_name or '').strip()[:120] or None,
         phone=(payload.phone or '').strip()[:32] or None,
-        message=(payload.message or '').strip()[:500] or None,
+        message=packed_message,
         latitude=float(payload.latitude),
         longitude=float(payload.longitude),
         accuracy_m=float(payload.accuracy_m) if payload.accuracy_m is not None else None,
@@ -496,6 +691,8 @@ async def create_rescue_request(
     await db.commit()
     await db.refresh(req)
 
+    parsed = unpack_rescue_message(req.message)
+
     try:
         await ws_manager.broadcast({
             "type": "rescue_request",
@@ -503,11 +700,15 @@ async def create_rescue_request(
             "created_at": req.created_at,
             "requester_name": req.requester_name,
             "phone": req.phone,
-            "message": req.message,
+            "message": parsed["text"],
             "latitude": req.latitude,
             "longitude": req.longitude,
             "accuracy_m": req.accuracy_m,
             "status": req.status,
+            "rescue_type": parsed["rescue_type"],
+            "province_city": parsed["province_city"],
+            "source_link": parsed["source_link"],
+            "image_url": parsed["image_url"],
         })
     except Exception as e:
         logger.warning(f"WS rescue_request broadcast failed: {e}")
@@ -534,13 +735,15 @@ async def get_rescue_requests(
     q = q.order_by(desc(model_data.RescueRequest.created_at)).limit(lim)
     res = await db.execute(q)
     rows = res.scalars().all()
-    return [
-        {
+    result = []
+    for r in rows:
+        parsed = unpack_rescue_message(r.message)
+        result.append({
             "id": int(r.id),
             "created_at": int(r.created_at),
             "requester_name": r.requester_name,
             "phone": r.phone,
-            "message": r.message,
+            "message": parsed["text"],
             "latitude": r.latitude,
             "longitude": r.longitude,
             "accuracy_m": r.accuracy_m,
@@ -548,9 +751,12 @@ async def get_rescue_requests(
             "admin_note": r.admin_note,
             "handled_by": r.handled_by,
             "handled_at": r.handled_at,
-        }
-        for r in rows
-    ]
+            "rescue_type": parsed["rescue_type"],
+            "province_city": parsed["province_city"],
+            "source_link": parsed["source_link"],
+            "image_url": parsed["image_url"],
+        })
+    return result
 
 
 @app.patch("/api/admin/rescue-requests/{request_id}")
@@ -585,6 +791,60 @@ async def update_rescue_request(
 
     await db.commit()
     return {"status": "ok", "id": int(row.id), "new_status": row.status}
+
+
+@app.delete("/api/admin/rescue-requests/{request_id}")
+async def delete_rescue_request(
+    request_id: int,
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.get_current_user)
+):
+    if current_user.role not in ("admin", "operator"):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    res = await db.execute(
+        select(model_data.RescueRequest).where(model_data.RescueRequest.id == request_id)
+    )
+    row = res.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Rescue request not found")
+
+    if row.status == 'pending':
+        raise HTTPException(status_code=400, detail="Cannot delete pending request. Resolve or reject first")
+
+    parsed = unpack_rescue_message(row.message)
+    target_image_url = parsed.get('image_url')
+
+    # Only delete image file if no other rescue request references the same URL.
+    can_delete_image = False
+    if target_image_url:
+        ref_res = await db.execute(
+            select(model_data.RescueRequest)
+            .where(model_data.RescueRequest.id != request_id)
+        )
+        other_rows = ref_res.scalars().all()
+        still_referenced = False
+        for other in other_rows:
+            other_parsed = unpack_rescue_message(other.message)
+            if (other_parsed.get('image_url') or '').strip() == str(target_image_url).strip():
+                still_referenced = True
+                break
+        can_delete_image = not still_referenced
+
+    await db.delete(row)
+    await db.commit()
+
+    if can_delete_image:
+        image_path = resolve_rescue_image_path(target_image_url)
+        if image_path and os.path.exists(image_path):
+            try:
+                rescue_dir_abs = os.path.abspath(RESCUE_IMAGE_DIR)
+                if image_path.startswith(rescue_dir_abs):
+                    os.remove(image_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove rescue image {image_path}: {e}")
+
+    return {"status": "ok", "deleted_id": int(request_id)}
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS

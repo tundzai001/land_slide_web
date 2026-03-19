@@ -45,6 +45,25 @@
         </div>
 
         <div class="d-flex align-items-center gap-3">
+            <!-- MAP LAYER CONTROLS (Moved to navbar) -->
+            <div class="map-layer-controls me-2" id="map-layer-controls">
+                <button type="button" class="map-mode-trigger" id="map-mode-trigger" aria-haspopup="dialog" aria-controls="map-mode-popup-panel" aria-expanded="false">
+                    <i class="bi bi-sliders2 me-1"></i>Chế độ
+                </button>
+                <div class="map-mode-popup-panel" id="map-mode-popup-panel" role="dialog" aria-label="Chế độ hiển thị bản đồ">
+                    <div class="map-mode-popup-title">Chế độ hiển thị</div>
+                    <div class="map-mode-toggle-row">
+                        <span class="map-mode-label"><i class="bi bi-hdd-network me-1"></i>Trạm</span>
+                        <label class="map-mode-switch" for="map-mode-switch">
+                            <input type="checkbox" id="map-mode-switch" aria-label="Chuyển sang chế độ cứu hộ">
+                            <span class="map-mode-slider"></span>
+                        </label>
+                        <span class="map-mode-label map-mode-label-danger"><i class="bi bi-exclamation-circle me-1"></i>Cứu hộ</span>
+                    </div>
+                    <div class="map-mode-state" id="map-mode-state">Đang xem: Trạm</div>
+                </div>
+            </div>
+
             <button id="theme-toggle-btn" class="btn btn-link" style="color: var(--text-primary); font-size: 1.2rem;">
                 <i class="bi bi-moon-stars-fill"></i>
             </button>
@@ -917,23 +936,8 @@
         </div>
     </div>
 
-    <!-- MAP LAYER CONTROLS (toggle stations/rescue markers) -->
-    <div class="map-layer-controls" id="map-layer-controls"
-        style="position: fixed; right: 20px; bottom: 100px; z-index: 1100; display: flex; flex-direction: column; gap: 8px;">
-        <div class="btn-group-vertical" role="group">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-station-markers" 
-                title="Hiển thị/ẩn marker trạm">
-                <i class="bi bi-hdd-network me-1"></i>Trạm
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-danger" id="toggle-rescue-markers" 
-                title="Hiển thị/ẩn marker cứu hộ">
-                <i class="bi bi-exclamation-circle me-1"></i>Cứu hộ
-            </button>
-        </div>
-    </div>
-
     <button id="btn-guest-rescue" class="btn btn-danger rounded-pill shadow"
-        style="position: fixed; right: 20px; bottom: 20px; z-index: 1200;">
+        style="position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 900;">
         <i class="bi bi-megaphone-fill me-1"></i> Cần cứu hộ
     </button>
 
@@ -950,6 +954,38 @@
                         Vị trí sẽ lấy từ GPS của thiết bị bạn. Vui lòng kiểm tra kỹ trước khi gửi.
                     </div>
                     <div class="mb-3">
+                        <label class="form-label">Phân loại</label>
+                        <div class="d-flex flex-wrap gap-2" id="guest-rescue-type-group">
+                            <input type="radio" class="btn-check" name="guest-rescue-type" id="guest-rescue-type-emergency" value="can_cuu_ho" checked>
+                            <label class="btn btn-outline-danger btn-sm" for="guest-rescue-type-emergency">Cần Cứu Hộ</label>
+
+                            <input type="radio" class="btn-check" name="guest-rescue-type" id="guest-rescue-type-medical" value="can_nhu_yeu_pham">
+                            <label class="btn btn-outline-secondary btn-sm" for="guest-rescue-type-medical">Cần Nhu Yếu Phẩm</label>
+
+                            <input type="radio" class="btn-check" name="guest-rescue-type" id="guest-rescue-type-vehicle" value="can_cuu_ho_xe">
+                            <label class="btn btn-outline-secondary btn-sm" for="guest-rescue-type-vehicle">Cần Cứu Hộ Xe</label>
+
+                            <input type="radio" class="btn-check" name="guest-rescue-type" id="guest-rescue-type-other" value="khac">
+                            <label class="btn btn-outline-secondary btn-sm" for="guest-rescue-type-other">Khác</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="guest-rescue-province" class="form-label">Tỉnh/Thành phố</label>
+                        <select id="guest-rescue-province" class="form-select">
+                            <option value="">Chọn tỉnh/thành phố...</option>
+                            <option value="Ha Noi">Hà Nội</option>
+                            <option value="TP Ho Chi Minh">TP. Hồ Chí Minh</option>
+                            <option value="Da Nang">Đà Nẵng</option>
+                            <option value="Hai Phong">Hải Phòng</option>
+                            <option value="Can Tho">Cần Thơ</option>
+                            <option value="Nghe An">Nghệ An</option>
+                            <option value="Thanh Hoa">Thanh Hóa</option>
+                            <option value="Quang Nam">Quảng Nam</option>
+                            <option value="Quang Ngai">Quảng Ngãi</option>
+                            <option value="Khac">Khác</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
                         <label for="guest-rescue-name" class="form-label">Họ tên</label>
                         <input id="guest-rescue-name" class="form-control" maxlength="120" placeholder="Người cần hỗ trợ">
                     </div>
@@ -961,6 +997,23 @@
                         <label for="guest-rescue-note" class="form-label">Mô tả ngắn</label>
                         <textarea id="guest-rescue-note" class="form-control" rows="3" maxlength="500"
                             placeholder="Tình trạng hiện tại, số người, dấu mốc gần nhất..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="guest-rescue-source-link" class="form-label">Link nguồn (tùy chọn)</label>
+                        <input id="guest-rescue-source-link" class="form-control" maxlength="500"
+                            placeholder="Link Google Maps / Zalo / Facebook / nguồn xác minh khác">
+                    </div>
+                    <div class="mb-3">
+                        <label for="guest-rescue-image" class="form-label">Ảnh hiện trường (tùy chọn)</label>
+                        <input id="guest-rescue-image" type="file" class="form-control" accept="image/*">
+                        <div class="form-text">Hỗ trợ ảnh JPG/PNG. Ảnh sẽ được nén tự động để gửi nhanh.</div>
+                        <div id="guest-rescue-image-preview-wrap" class="mt-2" style="display:none;">
+                            <img id="guest-rescue-image-preview" alt="Ảnh hiện trường"
+                                style="width:100%; max-height:200px; object-fit:cover; border-radius:10px; border:1px solid var(--border-color);">
+                            <button id="btn-guest-rescue-image-clear" type="button" class="btn btn-sm btn-outline-secondary mt-2">
+                                <i class="bi bi-trash me-1"></i>Bỏ ảnh
+                            </button>
+                        </div>
                     </div>
                     <div class="row g-2">
                         <div class="col-6">

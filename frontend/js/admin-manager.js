@@ -75,7 +75,7 @@ class AdminManager {
             window.dbManager?.loadAllData?.();
         } else if (tabId === 'tab-pi') {
             this.loadPiDevices?.();
-        } else if (tabId === 'tab-system') {
+        } else if (tabId === 'tab-rescue') {
             this.loadRescueRequests?.();
         }
     }
@@ -137,8 +137,8 @@ class AdminManager {
         }, 15000);
 
         setInterval(() => {
-            const systemTab = document.getElementById('tab-system');
-            if (systemTab && systemTab.classList.contains('active')) {
+            const rescueTab = document.getElementById('tab-rescue');
+            if (rescueTab && rescueTab.classList.contains('active')) {
                 this.loadRescueRequests(true);
             }
         }, 20000);
@@ -246,6 +246,9 @@ class AdminManager {
     renderRescueRequests(rows) {
         const body = document.getElementById('rescue-requests-body');
         if (!body) return;
+
+        this.updateRescueSummary(rows);
+
         if (!Array.isArray(rows) || rows.length === 0) {
             body.innerHTML = '<tr><td colspan="8" class="text-muted">Chưa có yêu cầu cứu hộ</td></tr>';
             return;
@@ -261,6 +264,33 @@ class AdminManager {
                 ? `<a href="https://maps.google.com/?q=${r.latitude},${r.longitude}" target="_blank" rel="noopener">${Number(r.latitude).toFixed(6)}, ${Number(r.longitude).toFixed(6)}</a>`
                 : '--';
 
+            const rescueTypeLabelMap = {
+                can_cuu_ho: 'Cần cứu hộ',
+                can_nhu_yeu_pham: 'Cần nhu yếu phẩm',
+                can_cuu_ho_xe: 'Cần cứu hộ xe',
+                khac: 'Khác'
+            };
+            const rescueType = String(r.rescue_type || '').toLowerCase();
+            const rescueTypeLabel = rescueTypeLabelMap[rescueType] || '--';
+            const sourceLink = String(r.source_link || '').trim();
+            const isSafeSourceLink = /^https?:\/\//i.test(sourceLink);
+            const sourceLinkHtml = (sourceLink && isSafeSourceLink)
+                ? `<a href="${esc(sourceLink)}" target="_blank" rel="noopener">Mở link nguồn</a>`
+                : '<span class="text-muted">--</span>';
+            const provinceCity = String(r.province_city || '').trim() || '--';
+            const imageUrl = String(r.image_url || r.image_data_url || '').trim();
+            const imageHtml = imageUrl
+                ? `<a href="${esc(imageUrl)}" target="_blank" rel="noopener"><img src="${esc(imageUrl)}" alt="rescue-evidence" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ddd;"></a>`
+                : '<span class="text-muted">--</span>';
+
+            const detailCellHtml = `
+                <div class="small mb-1"><strong>Mô tả:</strong> ${esc(r.message || '--')}</div>
+                <div class="small mb-1"><strong>Phân loại:</strong> ${esc(rescueTypeLabel)}</div>
+                <div class="small mb-1"><strong>Tỉnh/TP:</strong> ${esc(provinceCity)}</div>
+                <div class="small mb-1"><strong>Nguồn:</strong> ${sourceLinkHtml}</div>
+                <div class="small"><strong>Ảnh:</strong> ${imageHtml}</div>
+            `;
+
             const statusBadge = r.status === 'resolved'
                 ? '<span class="badge bg-success">resolved</span>'
                 : r.status === 'rejected'
@@ -272,7 +302,9 @@ class AdminManager {
                         <button class="btn btn-outline-success" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'resolved')">Done</button>
                         <button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'rejected')">Reject</button>
                    </div>`
-                : '<span class="text-muted small">--</span>';
+                : `<button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteRescueRequest(${r.id})">
+                        <i class="bi bi-trash me-1"></i>Xóa
+                   </button>`;
 
             return `<tr>
                 <td>${r.id}</td>
@@ -280,11 +312,32 @@ class AdminManager {
                 <td>${esc(r.requester_name || '--')}</td>
                 <td>${esc(r.phone || '--')}</td>
                 <td>${mapsLink}</td>
-                <td>${esc(r.message || '--')}</td>
+                <td>${detailCellHtml}</td>
                 <td>${statusBadge}</td>
                 <td>${actionBtns}</td>
             </tr>`;
         }).join('');
+    }
+
+    updateRescueSummary(rows) {
+        const totalEl = document.getElementById('rescue-count-total');
+        const pendingEl = document.getElementById('rescue-count-pending');
+        const resolvedEl = document.getElementById('rescue-count-resolved');
+        const rejectedEl = document.getElementById('rescue-count-rejected');
+
+        const safeRows = Array.isArray(rows) ? rows : [];
+        const counts = safeRows.reduce((acc, row) => {
+            const status = String(row?.status || '').toLowerCase();
+            if (status === 'pending') acc.pending += 1;
+            else if (status === 'resolved') acc.resolved += 1;
+            else if (status === 'rejected') acc.rejected += 1;
+            return acc;
+        }, { pending: 0, resolved: 0, rejected: 0 });
+
+        if (totalEl) totalEl.textContent = String(safeRows.length);
+        if (pendingEl) pendingEl.textContent = String(counts.pending);
+        if (resolvedEl) resolvedEl.textContent = String(counts.resolved);
+        if (rejectedEl) rejectedEl.textContent = String(counts.rejected);
     }
 
     async updateRescueRequestStatus(requestId, status) {
@@ -303,6 +356,31 @@ class AdminManager {
         } catch (e) {
             window.toast?.error('Cập nhật trạng thái rescue request thất bại');
             console.error('updateRescueRequestStatus error:', e);
+        }
+    }
+
+    async deleteRescueRequest(requestId) {
+        const ok = window.confirm(`Xóa rescue request #${requestId}? Chỉ nên xóa các case đã xử lý.`);
+        if (!ok) return;
+
+        try {
+            const res = await fetch(`/api/admin/rescue-requests/${requestId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                }
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err?.detail || `HTTP ${res.status}`);
+            }
+
+            window.toast?.success(`Đã xóa rescue request #${requestId}`);
+            await this.loadRescueRequests(true);
+        } catch (e) {
+            window.toast?.error(`Xóa rescue request thất bại: ${e.message}`);
+            console.error('deleteRescueRequest error:', e);
         }
     }
 
