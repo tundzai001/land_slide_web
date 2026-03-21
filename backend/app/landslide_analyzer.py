@@ -20,6 +20,23 @@ class LandslideAnalyzer:
         })
         # Lịch sử ngắn hạn để phân biệt trượt thật với jitter GNSS dù fix=4.
         self.gnss_recent_history = defaultdict(lambda: deque(maxlen=120))
+        # Chống spam warning config phân loại vận tốc GNSS theo từng trạm.
+        self._velocity_config_warn_last_ts = defaultdict(float)
+
+    def _as_bool(self, value: Any, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in ('1', 'true', 'yes', 'on'):
+                return True
+            if v in ('0', 'false', 'no', 'off'):
+                return False
+        return default
         
     def _get_cfg(self, config: Dict, section: str, key: str, default: float) -> float:
         try:
@@ -176,7 +193,8 @@ class LandslideAnalyzer:
                 velocity_mm_per_second,
                 velocity_mm_per_day,
                 velocity_mm_per_year,
-                config
+                config,
+                station_id=station_id
             )
 
             # --- Bước 4: Trend detection bằng sliding window velocity ---
@@ -282,7 +300,8 @@ class LandslideAnalyzer:
         velocity_mm_s: float,
         velocity_mm_day: float, 
         velocity_mm_year: float,
-        config: Dict
+        config: Dict,
+        station_id: Optional[int] = None
     ) -> str:
         def _normalize_unit(raw_unit: Any) -> str:
             u = str(raw_unit or 'mm/s').strip().lower().replace(' ', '')
@@ -354,7 +373,20 @@ class LandslideAnalyzer:
             """Chuyển đổi bảng classification thành list {name, threshold_mm_s} chuẩn."""
             normalized = []
             for cls in table:
-                thresh_raw = cls.get('threshold', 0)
+                # Hỗ trợ cả định dạng mới (threshold+unit) và legacy (mm_giay/m_giay).
+                if cls.get('threshold') is not None:
+                    thresh_raw = cls.get('threshold', 0)
+                    unit = _normalize_unit(cls.get('unit', 'mm/s'))
+                elif cls.get('mm_giay') is not None:
+                    thresh_raw = cls.get('mm_giay', 0)
+                    unit = 'mm/s'
+                elif cls.get('m_giay') is not None:
+                    thresh_raw = cls.get('m_giay', 0)
+                    unit = 'm/s'
+                else:
+                    thresh_raw = 0
+                    unit = _normalize_unit(cls.get('unit', 'mm/s'))
+
                 if isinstance(thresh_raw, str):
                     thresh_raw = thresh_raw.strip().replace(',', '.')
                 try:
@@ -362,7 +394,6 @@ class LandslideAnalyzer:
                 except (ValueError, TypeError):
                     thresh = 0.0
 
-                unit = _normalize_unit(cls.get('unit', 'mm/s'))
                 # Một số bản config cũ bị lưu sai unit='mm/s' cho toàn bộ dải Cruden.
                 # Khi đó ưu tiên suy luận lại từ mô tả để tránh phân loại sai nặng.
                 if unit == 'mm/s':
@@ -419,10 +450,16 @@ class LandslideAnalyzer:
             if _is_table_sane(candidate):
                 normalized_table = candidate
             else:
-                logger.warning(
-                    "⚠️ velocity_classification config không hợp lý (thresholds sai đơn vị?), "
-                    "dùng bảng Cruden & Varnes mặc định."
-                )
+                warn_key = station_id if station_id is not None else -1
+                now_ts = time.time()
+                last_ts = self._velocity_config_warn_last_ts.get(warn_key, 0.0)
+                # Chỉ cảnh báo tối đa 1 lần / 10 phút cho mỗi trạm.
+                if now_ts - last_ts >= 600:
+                    logger.warning(
+                        "⚠️ velocity_classification config không hợp lý (thresholds sai đơn vị?), "
+                        "dùng bảng Cruden & Varnes mặc định."
+                    )
+                    self._velocity_config_warn_last_ts[warn_key] = now_ts
 
         sorted_classes = sorted(normalized_table, key=lambda x: x['threshold_mm_s'], reverse=True)
 
@@ -1603,12 +1640,16 @@ class LandslideAnalyzer:
         if not recent_data: return None
         
         try:
+            gnss_config = config.get('GnssAlerting', {}) if isinstance(config, dict) else {}
+            gnss_enabled = self._as_bool(gnss_config.get('enabled', True), default=True)
+            if not gnss_enabled:
+                return None
+
             latest = recent_data[-1]['data']
             velocity_ms = latest.get('speed_2d', 0.0) 
             velocity_mms = velocity_ms * 1000.0
             
             # Lấy cấu hình xác nhận
-            gnss_config = config.get('GnssAlerting', {})
             warning_confirm_steps = int(gnss_config.get('gnss_warning_confirm_steps', gnss_config.get('gnss_confirm_steps', 3)))
             critical_confirm_steps = int(gnss_config.get('gnss_critical_confirm_steps', gnss_config.get('gnss_confirm_steps', 2)))
             # Dù đủ confirm_steps, phải span ít nhất X giây liên tục.
@@ -1621,7 +1662,8 @@ class LandslideAnalyzer:
                 velocity_mms,
                 velocity_mms * 86400,
                 velocity_mms * 31536000,
-                config
+                config,
+                station_id=station_id
             )
             
             cls_upper = velocity_class.upper()

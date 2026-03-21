@@ -577,23 +577,6 @@ def unpack_rescue_message(raw_message: Optional[str]) -> dict:
             "image_data_url": None,
         }
 
-
-def resolve_rescue_image_path(image_url: Optional[str]) -> Optional[str]:
-    url = (image_url or '').strip()
-    if not url:
-        return None
-
-    prefix = '/static/uploads/rescue/'
-    if not url.startswith(prefix):
-        return None
-
-    file_name = url[len(prefix):].strip().replace('..', '')
-    if not file_name:
-        return None
-
-    file_path = os.path.join(RESCUE_IMAGE_DIR, file_name)
-    return os.path.abspath(file_path)
-
     try:
         obj = json.loads(raw[len(RESCUE_META_PREFIX):])
         return {
@@ -613,6 +596,23 @@ def resolve_rescue_image_path(image_url: Optional[str]) -> Optional[str]:
             "image_url": None,
             "image_data_url": None,
         }
+
+
+def resolve_rescue_image_path(image_url: Optional[str]) -> Optional[str]:
+    url = (image_url or '').strip()
+    if not url:
+        return None
+
+    prefix = '/static/uploads/rescue/'
+    if not url.startswith(prefix):
+        return None
+
+    file_name = url[len(prefix):].strip().replace('..', '')
+    if not file_name:
+        return None
+
+    file_path = os.path.join(RESCUE_IMAGE_DIR, file_name)
+    return os.path.abspath(file_path)
 
 
 class RescueRequestCreate(BaseModel):

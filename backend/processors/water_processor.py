@@ -61,9 +61,14 @@ class WaterEngine:
         sensor_type = str(payload.get("sensortype", "")).upper()
         sensor_name = str(payload.get("sensorname", "")).upper()
 
-        # ATG_GWL / GWL sends groundwater level in mm.
+        # ATG_GWL / GWL: Check if value is already in meters or needs conversion from mm
         if sensor_type == "GWL" or sensor_name == "ATG_GWL":
-            return parsed_value / 1000.0
+            # If value < 100, it's likely already in meters
+            # If value >= 100, it's in millimeters and needs conversion
+            if parsed_value < 100:
+                return parsed_value  # Already in meters
+            else:
+                return parsed_value / 1000.0  # Convert from mm to meters
 
         # Legacy payloads with explicit key are assumed to already be in meters.
         if payload.get("water_level") is not None:
@@ -94,10 +99,23 @@ class WaterEngine:
                 raise ValueError(f"Invalid water value format: {val}")
 
             is_gwl_sensor = sensor_type == "GWL" or sensor_name == "ATG_GWL"
-            display_value = parsed_value
-            display_unit = "mm" if is_gwl_sensor else "m"
-
             value_meters = self._to_meters(payload, parsed_value)
+            
+            # Determine display value and unit
+            # If GWL: check if parsed_value needs conversion; if small (<100), it's already in meters
+            if is_gwl_sensor:
+                if parsed_value < 100:
+                    # Already in meters, display as meters for clarity
+                    display_value = value_meters
+                    display_unit = "m"
+                else:
+                    # In millimeters as expected for GWL, display as mm
+                    display_value = parsed_value
+                    display_unit = "mm"
+            else:
+                display_value = value_meters
+                display_unit = "m"
+            
             if not (self.valid_min <= value_meters <= self.valid_max):
                 logger.debug(f"Water value {value_meters}m out of range, using last valid")
                 return {

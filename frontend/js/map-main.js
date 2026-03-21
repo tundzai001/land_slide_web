@@ -1874,13 +1874,23 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
 }
 
 function formatWaterLevelDisplay(waterLatest) {
+    // If sensor is offline or value is fallback, show -- immediately
+    if (waterLatest?.is_fallback === true) {
+        return `--<span class="sensor-unit">cm</span>`;
+    }
+    
     const unitRaw = String(waterLatest?.water_display_unit || '').trim().toLowerCase();
     const displayRaw = parseFloat(waterLatest?.water_display_value);
     let levelCm = null;
 
     if (!Number.isNaN(displayRaw)) {
         if (unitRaw === 'mm') {
-            levelCm = displayRaw / 10;
+            // Sanity check: if mm unit but value < 10, likely mislabeled as m
+            if (displayRaw < 10) {
+                levelCm = displayRaw * 100;  // Treat as meters
+            } else {
+                levelCm = displayRaw / 10;   // Treat as millimeters
+            }
         } else if (unitRaw === 'm' || unitRaw === 'meter' || unitRaw === 'meters') {
             levelCm = displayRaw * 100;
         } else if (unitRaw === 'cm') {
