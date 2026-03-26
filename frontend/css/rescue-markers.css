@@ -1,140 +1,177 @@
 /* =====================================================
-   RESCUE MARKER LAYER CONTROLS
+   RESCUE MARKER LAYER CONTROLS — FLOATING GLASS PANEL
 ===================================================== */
 
-.map-layer-controls {
-    position: relative;
+/* ---- Floating Layer Panel (sits on top-right of map) ---- */
+.map-floating-layer-panel {
+    position: absolute;
+    top: 80px;
+    right: 16px;
+    z-index: 1100;
+    width: 240px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.45) !important;
+    backdrop-filter: saturate(180%) blur(24px) !important;
+    -webkit-backdrop-filter: saturate(180%) blur(24px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.12),
+        0 1px 3px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+    transition: box-shadow 0.3s ease, transform 0.25s ease;
+}
+
+.map-floating-layer-panel:hover {
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.16),
+        0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .map-floating-layer-panel {
+    background: rgba(15, 23, 42, 0.45) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Header */
+.map-floating-layer-header {
     display: flex;
     align-items: center;
-}
-
-.map-mode-trigger {
-    border: 1px solid rgba(15, 23, 42, 0.15);
-    background: linear-gradient(135deg, #ffffff, #f5f9ff);
-    color: #0f172a;
-    border-radius: 999px;
-    padding: 8px 14px;
-    font-size: 0.88rem;
-    font-weight: 700;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.map-mode-trigger:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
-}
-
-.map-mode-popup-panel {
-    position: absolute;
-    top: calc(100% + 10px);
-    right: 0;
-    min-width: 280px;
-    padding: 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(8px);
-    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-    pointer-events: none;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    z-index: 20;
-}
-
-.map-mode-popup-panel.show {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    pointer-events: auto;
-}
-
-.map-mode-popup-title {
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    color: #475569;
+    gap: 8px;
+    padding: 14px 16px 10px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    margin-bottom: 10px;
+    color: #64748b;
 }
 
-.map-mode-toggle-row {
+.map-floating-layer-header i {
+    font-size: 0.9rem;
+    opacity: 0.6;
+}
+
+[data-theme="dark"] .map-floating-layer-header {
+    color: #94a3b8;
+}
+
+/* Body */
+.map-floating-layer-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 10px 12px;
+}
+
+/* Each layer item row */
+.map-floating-layer-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding: 10px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.15s ease;
+    user-select: none;
+}
+
+.map-floating-layer-item:hover {
+    background: rgba(0, 0, 0, 0.04);
+    transform: translateX(2px);
+}
+
+[data-theme="dark"] .map-floating-layer-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Item left info (icon + label) */
+.map-floating-layer-item-info {
+    display: flex;
+    align-items: center;
     gap: 10px;
 }
 
-.map-mode-label {
-    display: inline-flex;
-    align-items: center;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #0f172a;
-    white-space: nowrap;
-}
-
-.map-mode-label-danger {
-    color: #dc2626;
-}
-
-.map-mode-switch {
-    position: relative;
-    width: 64px;
-    height: 34px;
+.map-floating-layer-item-info i {
+    font-size: 1.05rem;
+    opacity: 0.8;
     flex-shrink: 0;
 }
 
-.map-mode-switch input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.map-mode-slider {
-    position: absolute;
-    inset: 0;
-    border-radius: 999px;
-    background: linear-gradient(90deg, #0ea5e9 0%, #06b6d4 100%);
-    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9);
-    cursor: pointer;
-    transition: background 0.25s ease;
-}
-
-.map-mode-slider::before {
-    content: '';
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.25);
-    transition: transform 0.25s ease;
-}
-
-.map-mode-switch input:checked + .map-mode-slider {
-    background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
-}
-
-.map-mode-switch input:checked + .map-mode-slider::before {
-    transform: translateX(30px);
-}
-
-.map-mode-state {
-    margin-top: 10px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: rgba(148, 163, 184, 0.14);
-    color: #334155;
-    font-size: 0.8rem;
+.map-floating-layer-item-info span {
+    font-size: 0.85rem;
     font-weight: 600;
+    color: #334155;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .map-floating-layer-item-info span {
+    color: #cbd5e1;
+}
+
+/* Custom checkboxes */
+.map-layer-checkbox {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px;
+    min-height: 20px;
+    border-radius: 5px;
+    border: 2px solid #0ea5e9;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0 !important;
+    margin: 0;
+    transition: all 0.2s ease;
+}
+
+.map-layer-checkbox:checked {
+    background: #0ea5e9;
+    border-color: #0ea5e9;
+}
+
+.map-layer-checkbox:checked::after {
+    content: "\F272";
+    font-family: "bootstrap-icons";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 12px;
+    color: white;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.map-layer-checkbox:hover {
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+
+.map-layer-checkbox:focus-visible {
+    outline: 2px solid #0ea5e9;
+    outline-offset: 2px;
+}
+
+/* Danger variant for rescue */
+.map-layer-checkbox-danger {
+    border-color: #dc3545;
+}
+
+.map-layer-checkbox-danger:checked {
+    background: #dc3545;
+    border-color: #dc3545;
+}
+
+.map-layer-checkbox-danger:hover {
+    box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.15);
+}
+
+.map-layer-checkbox-danger:focus-visible {
+    outline-color: #dc3545;
 }
 
 body.rescue-mode-active .toggle-list-btn {
@@ -143,10 +180,118 @@ body.rescue-mode-active .toggle-list-btn {
     transform: scale(0.8);
 }
 
+/* =====================================================
+   RESCUE FAB (Floating Action Button)
+===================================================== */
+
+.rescue-fab {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 56px;
+    padding: 0;
+    border: none;
+    border-radius: 28px;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    cursor: pointer;
+    box-shadow:
+        0 6px 20px rgba(220, 53, 69, 0.45),
+        0 2px 6px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: rescueFabPulse 2.5s infinite ease-in-out;
+}
+
+.rescue-fab:hover {
+    padding-right: 20px;
+    gap: 4px;
+    box-shadow:
+        0 10px 30px rgba(220, 53, 69, 0.55),
+        0 4px 10px rgba(0, 0, 0, 0.2);
+    transform: scale(1.05);
+    animation: none;
+}
+
+.rescue-fab:active {
+    transform: scale(0.96);
+}
+
+.rescue-fab-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    font-size: 1.4rem;
+    flex-shrink: 0;
+    transition: transform 0.3s ease;
+}
+
+.rescue-fab:hover .rescue-fab-icon {
+    transform: scale(1.15);
+}
+
+.rescue-fab-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    white-space: nowrap;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 0.35s ease, opacity 0.25s ease, padding 0.25s ease;
+    padding-left: 0;
+}
+
+.rescue-fab:hover .rescue-fab-label {
+    max-width: 180px;
+    opacity: 1;
+    padding-left: 2px;
+}
+
+@keyframes rescueFabPulse {
+    0%, 100% {
+        box-shadow:
+            0 6px 20px rgba(220, 53, 69, 0.45),
+            0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+    50% {
+        box-shadow:
+            0 6px 20px rgba(220, 53, 69, 0.45),
+            0 2px 6px rgba(0, 0, 0, 0.15),
+            0 0 0 8px rgba(220, 53, 69, 0.15);
+    }
+}
+
+/* Mobile: show label always */
 @media (max-width: 768px) {
-    .map-mode-popup-panel {
-        right: -8px;
-        min-width: 250px;
+    .rescue-fab {
+        bottom: 20px;
+        right: 16px;
+        height: 48px;
+        border-radius: 24px;
+        padding-right: 18px;
+        gap: 2px;
+    }
+    .rescue-fab-icon {
+        width: 48px;
+        height: 48px;
+        font-size: 1.2rem;
+    }
+    .rescue-fab-label {
+        max-width: 180px;
+        opacity: 1;
+        font-size: 0.8rem;
+        padding-left: 2px;
+    }
+    .map-floating-layer-panel {
+        top: 72px;
+        right: 8px;
+        width: 210px;
     }
 }
 
@@ -203,4 +348,162 @@ body.rescue-mode-active .toggle-list-btn {
 
 .leaflet-popup-close-button:hover {
     color: var(--text-primary);
+}
+
+/* =====================================================
+   GLASS MODAL (Rescue Request Form)
+===================================================== */
+
+/* iOS-like glass pane for the modal content */
+.glass-modal-content {
+    background: rgba(255, 255, 255, 0.45) !important;
+    backdrop-filter: saturate(180%) blur(24px) !important;
+    -webkit-backdrop-filter: saturate(180%) blur(24px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15) !important;
+    border-radius: 20px !important;
+    color: #1e293b; /* Dark slate text for light mode */
+}
+
+.glass-modal-content .form-label,
+.glass-modal-content .modal-title {
+    font-weight: 600;
+}
+
+.glass-modal-content .form-text,
+.glass-modal-content .text-muted {
+    color: #475569 !important;
+}
+
+[data-theme="dark"] .glass-modal-content {
+    background: rgba(15, 23, 42, 0.4) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4) !important;
+    color: #f8fafc; /* Light text for dark mode */
+}
+
+[data-theme="dark"] .glass-modal-content .form-text,
+[data-theme="dark"] .glass-modal-content .text-muted {
+    color: #94a3b8 !important;
+}
+
+.glass-modal-content .modal-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+[data-theme="dark"] .glass-modal-content .modal-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.glass-modal-content .modal-footer {
+    border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+[data-theme="dark"] .glass-modal-content .modal-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Make inputs inside glass modal also glassy to blend nicely! */
+.glass-modal-content .form-control,
+.glass-modal-content .form-select {
+    background: rgba(255, 255, 255, 0.5) !important;
+    border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    transition: all 0.3s ease;
+    color: var(--text-primary) !important;
+}
+
+.glass-modal-content .form-control:focus,
+.glass-modal-content .form-select:focus {
+    background: rgba(255, 255, 255, 0.8) !important;
+    border-color: #0ea5e9 !important;
+    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.15) !important;
+}
+
+.glass-modal-content .form-control::placeholder {
+    color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .glass-modal-content .form-control,
+[data-theme="dark"] .glass-modal-content .form-select {
+    background: rgba(0, 0, 0, 0.3) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .glass-modal-content .form-control:focus,
+[data-theme="dark"] .glass-modal-content .form-select:focus {
+    background: rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="dark"] .glass-modal-content .form-control::placeholder {
+    color: #64748b !important;
+}
+
+/* Glassy Backdrop so the map underneath is blurred heavily! */
+.modal-backdrop {
+    background-color: rgba(0, 0, 0, 0.15) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+}
+.modal-backdrop.show {
+    opacity: 1 !important;
+}
+
+/* =====================================================
+   GLASS SIDEBARS & PANELS (Station List & Detail)
+===================================================== */
+
+/* Outer Sidebars Glass Background */
+.station-list-sidebar,
+.detail-sidebar {
+    background: rgba(255, 255, 255, 0.45) !important;
+    backdrop-filter: saturate(180%) blur(24px) !important;
+    -webkit-backdrop-filter: saturate(180%) blur(24px) !important;
+    border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+[data-theme="dark"] .station-list-sidebar,
+[data-theme="dark"] .detail-sidebar {
+    background: rgba(15, 23, 42, 0.45) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Make internal headers transparent so glass shows through */
+.sidebar-header, 
+.sidebar-search,
+.charts-header {
+    background: transparent !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+[data-theme="dark"] .sidebar-header,
+[data-theme="dark"] .sidebar-search,
+[data-theme="dark"] .charts-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Make inner items glassy to match */
+.station-item,
+.sensor-item,
+.chart-box {
+    background: rgba(255, 255, 255, 0.5) !important;
+    border: 1px solid rgba(0, 0, 0, 0.05) !important;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.03) !important;
+}
+
+.station-item:hover,
+.sensor-item:hover {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-color: var(--accent-primary) !important;
+}
+
+[data-theme="dark"] .station-item,
+[data-theme="dark"] .sensor-item,
+[data-theme="dark"] .chart-box {
+    background: rgba(0, 0, 0, 0.25) !important;
+    border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme="dark"] .station-item:hover,
+[data-theme="dark"] .sensor-item:hover {
+    background: rgba(0, 0, 0, 0.4) !important;
+    border-color: var(--accent-primary) !important;
 }

@@ -745,7 +745,7 @@ function setupGuestRescueUI() {
     const modalEl = document.getElementById('guestRescueModal');
     if (!openBtn || !modalEl || !window.bootstrap) return;
 
-    guestRescueModal = new bootstrap.Modal(modalEl);
+    window.rescueFormModal = new bootstrap.Modal(modalEl);
     const locateBtn = document.getElementById('btn-guest-rescue-locate');
     const submitBtn = document.getElementById('btn-guest-rescue-submit');
     const imageInput = document.getElementById('guest-rescue-image');
@@ -753,8 +753,30 @@ function setupGuestRescueUI() {
     const imagePreview = document.getElementById('guest-rescue-image-preview');
     const clearImageBtn = document.getElementById('btn-guest-rescue-image-clear');
 
+    const typeRadios = document.querySelectorAll('input[name="guest-rescue-type"]');
+    const otherWrap = document.getElementById('guest-rescue-other-wrap');
+    if (typeRadios && otherWrap) {
+        typeRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.value === 'khac' && radio.checked) {
+                    otherWrap.style.display = 'block';
+                    setTimeout(() => {
+                        otherWrap.style.opacity = '1';
+                    }, 10);
+                } else {
+                    otherWrap.style.opacity = '0';
+                    setTimeout(() => {
+                        if (!document.getElementById('guest-rescue-type-other').checked) {
+                            otherWrap.style.display = 'none';
+                        }
+                    }, 300);
+                }
+            });
+        });
+    }
+
     openBtn.addEventListener('click', () => {
-        guestRescueModal.show();
+        if (window.rescueFormModal) window.rescueFormModal.show();
         fillGuestRescueLocation();
     });
 
@@ -805,6 +827,105 @@ function setupGuestRescueUI() {
             }
             if (imagePreviewWrap) {
                 imagePreviewWrap.style.display = 'none';
+            }
+        });
+    }
+
+    const searchActionBtn = document.getElementById('btn-guest-rescue-search-address-action');
+    const searchInput = document.getElementById('guest-rescue-address-search');
+    const searchResults = document.getElementById('guest-rescue-address-results');
+    const latEl = document.getElementById('guest-rescue-lat');
+    const lonEl = document.getElementById('guest-rescue-lon');
+
+    if (searchActionBtn && searchInput && searchResults) {
+        let isSearching = false;
+
+        const performSearch = async () => {
+            if (isSearching) return;
+            const query = searchInput.value.trim();
+            if (!query) return;
+
+            isSearching = true;
+            searchActionBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            searchResults.style.display = 'block';
+            searchResults.innerHTML = '<div class="list-group-item text-muted small text-center"><span class="spinner-border spinner-border-sm me-2"></span>Đang tìm...</div>';
+
+            try {
+                const encodedQuery = encodeURIComponent(query + ', Vietnam');
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedQuery}&limit=5`;
+                const response = await fetch(url, {
+                    headers: { 'Accept': 'application/json', 'User-Agent': 'LandslideRescueApp/1.0' }
+                });
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+
+                if (data && data.length > 0) {
+                    searchResults.innerHTML = '';
+                    data.forEach(item => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'list-group-item list-group-item-action py-2';
+                        btn.innerHTML = `<div class="d-flex align-items-center gap-2">
+                                            <i class="bi bi-geo-alt-fill text-danger text-opacity-75"></i>
+                                            <div style="font-size:0.8rem; line-height: 1.3; text-align: left;">
+                                                <div class="fw-bold text-truncate" style="max-width: 250px;">${item.name || 'Địa điểm'}</div>
+                                                <div class="text-muted text-truncate" style="font-size:0.75rem; max-width: 250px;">${item.display_name}</div>
+                                            </div>
+                                         </div>`;
+                        btn.addEventListener('click', () => {
+                            if (latEl) latEl.value = parseFloat(item.lat).toFixed(6);
+                            if (lonEl) lonEl.value = parseFloat(item.lon).toFixed(6);
+                            searchInput.value = item.display_name;
+                            searchResults.style.display = 'none';
+                            window.toast?.success('Đã ghim toạ độ từ địa chỉ!');
+                            
+                            // Optional: Draw marker on map directly
+                            if (window.map) {
+                                const lat = parseFloat(item.lat);
+                                const lon = parseFloat(item.lon);
+                                if (window.userLocationMarker) {
+                                    window.map.removeLayer(window.userLocationMarker);
+                                }
+                                if (window.userLocationCircle) {
+                                    window.map.removeLayer(window.userLocationCircle);
+                                }
+                                window.userLocationMarker = L.marker([lat, lon], {
+                                    icon: L.divIcon({
+                                        className: 'user-location-marker',
+                                        html: '<div style="width: 18px; height: 18px; background: #0d6efd; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 15px rgba(13,110,253,0.8); animation: guestRescuePulse 1.5s infinite;"></div>',
+                                        iconSize: [18, 18],
+                                        iconAnchor: [9, 9]
+                                    })
+                                }).addTo(window.map).bindPopup('Vị trí đã chọn từ địa chỉ');
+                                window.map.setView([lat, lon], 14, { animate: true });
+                            }
+                        });
+                        searchResults.appendChild(btn);
+                    });
+                } else {
+                    searchResults.innerHTML = '<div class="list-group-item text-danger small text-center">Không tìm thấy địa điểm này.</div>';
+                }
+            } catch (error) {
+                console.error('Nominatim search error:', error);
+                searchResults.innerHTML = '<div class="list-group-item text-danger small text-center">Lỗi mạng, kiểm tra kết nối internet.</div>';
+            } finally {
+                isSearching = false;
+                searchActionBtn.innerHTML = '<i class="bi bi-search d-none d-sm-inline"></i> Tìm toạ độ';
+            }
+        };
+
+        searchActionBtn.addEventListener('click', performSearch);
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                performSearch();
+            }
+        });
+
+        // Hide results if click outside
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target) && !searchActionBtn.contains(e.target)) {
+                searchResults.style.display = 'none';
             }
         });
     }
@@ -865,11 +986,41 @@ function fillGuestRescueLocation(showToast = false) {
 
     navigator.geolocation.getCurrentPosition(
         (pos) => {
-            latEl.value = Number(pos.coords.latitude).toFixed(7);
-            lonEl.value = Number(pos.coords.longitude).toFixed(7);
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            latEl.value = Number(lat).toFixed(7);
+            lonEl.value = Number(lon).toFixed(7);
             latEl.dataset.accuracy = Number(pos.coords.accuracy || 0).toFixed(1);
             if (showToast) {
                 window.toast?.success(`Đã lấy vị trí (±${latEl.dataset.accuracy}m)`);
+            }
+            
+            // Vẽ marker cho user location
+            if (window.userLocationMarker && window.map) {
+                window.map.removeLayer(window.userLocationMarker);
+            }
+            if (window.userLocationCircle && window.map) {
+                window.map.removeLayer(window.userLocationCircle);
+            }
+            if (window.map) {
+                window.userLocationMarker = L.marker([lat, lon], {
+                    icon: L.divIcon({
+                        className: 'user-location-marker',
+                        html: '<div style="width: 18px; height: 18px; background: #0d6efd; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 15px rgba(13,110,253,0.8); animation: guestRescuePulse 1.5s infinite;"></div>',
+                        iconSize: [18, 18],
+                        iconAnchor: [9, 9]
+                    })
+                }).addTo(window.map).bindPopup('Vị trí hiện tại của bạn');
+                
+                window.userLocationCircle = L.circle([lat, lon], {
+                    radius: pos.coords.accuracy,
+                    color: '#0d6efd',
+                    fillColor: '#0d6efd',
+                    fillOpacity: 0.15,
+                    weight: 1
+                }).addTo(window.map);
+                
+                window.map.setView([lat, lon], 14, { animate: true });
             }
         },
         (err) => {
@@ -906,12 +1057,30 @@ async function submitGuestRescueRequest() {
         return;
     }
 
-    const message = String(noteEl.value || '').trim();
+    let message = String(noteEl.value || '').trim();
     const requesterName = String(nameEl.value || '').trim();
     const phone = String(phoneEl.value || '').trim();
-    const rescueType = String(typeEl?.value || 'can_cuu_ho');
+    let rescueType = String(typeEl?.value || 'can_cuu_ho');
+    if (rescueType === 'khac') {
+        const otherInput = document.getElementById('guest-rescue-other-input');
+        if (otherInput && otherInput.value.trim() !== '') {
+            rescueType = `Khác: ${otherInput.value.trim()}`;
+        }
+    }
     const provinceCity = String(provinceEl?.value || '').trim();
     const sourceLink = String(sourceLinkEl?.value || '').trim();
+
+    const searchAddressEl = document.getElementById('guest-rescue-address-search');
+    const manualAddressEl = document.getElementById('guest-rescue-address-manual');
+    const typedAddress = String(searchAddressEl?.value || '').trim();
+    const manualAddress = String(manualAddressEl?.value || '').trim();
+    
+    if (manualAddress) {
+        message = `[Địa chỉ chi tiết]: ${manualAddress}\n\n${message}`;
+    }
+    if (typedAddress) {
+        message = `[Khu vực vị trí Map]: ${typedAddress}\n${message}`;
+    }
 
     if (!message) {
         window.toast?.warning('Hãy nhập mô tả ngắn tình trạng cần cứu hộ');
@@ -943,14 +1112,22 @@ async function submitGuestRescueRequest() {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         window.toast?.success('Đã gửi yêu cầu cứu hộ thành công. Admin sẽ kiểm tra ngay.');
-        if (guestRescueModal) guestRescueModal.hide();
+        if (window.rescueFormModal) window.rescueFormModal.hide();
         nameEl.value = '';
         phoneEl.value = '';
         noteEl.value = '';
         if (provinceEl) provinceEl.value = '';
         if (sourceLinkEl) sourceLinkEl.value = '';
         const defaultTypeEl = document.getElementById('guest-rescue-type-emergency');
-        if (defaultTypeEl) defaultTypeEl.checked = true;
+        if (defaultTypeEl) {
+            defaultTypeEl.checked = true;
+            defaultTypeEl.dispatchEvent(new Event('change'));
+        }
+        const otherInput = document.getElementById('guest-rescue-other-input');
+        if (otherInput) otherInput.value = '';
+        if (searchAddressEl) searchAddressEl.value = '';
+        const manualAddressEl = document.getElementById('guest-rescue-address-manual');
+        if (manualAddressEl) manualAddressEl.value = '';
         guestRescueImageBlob = null;
         if (imagePreview) {
             imagePreview.src = '';
@@ -979,98 +1156,61 @@ async function submitGuestRescueRequest() {
 // =====================================================
 
 function setupMarkerLayerControls() {
-    const modeTrigger = document.getElementById('map-mode-trigger');
-    const modePanel = document.getElementById('map-mode-popup-panel');
-    const modeSwitch = document.getElementById('map-mode-switch');
+    const layerStation = document.getElementById('layer-station');
+    const layerRescue = document.getElementById('layer-rescue');
 
-    if (modeTrigger && modePanel) {
-        modeTrigger.addEventListener('click', (event) => {
-            event.stopPropagation();
-            const willShow = !modePanel.classList.contains('show');
-            modePanel.classList.toggle('show', willShow);
-            modeTrigger.setAttribute('aria-expanded', willShow ? 'true' : 'false');
-        });
-
-        modePanel.addEventListener('click', (event) => {
-            event.stopPropagation();
-        });
-
-        document.addEventListener('click', () => {
-            modePanel.classList.remove('show');
-            modeTrigger.setAttribute('aria-expanded', 'false');
+    if (layerStation) {
+        layerStation.addEventListener('change', () => {
+            showStationMarkers = layerStation.checked;
+            toggleStationMarkersDisplay();
+            updateUIVisibilityBasedOnLayers();
         });
     }
 
-    if (modeSwitch) {
-        modeSwitch.checked = false;
-        modeSwitch.addEventListener('change', () => {
-            setMapMode(modeSwitch.checked ? 'rescue' : 'station');
-
-            // Auto-close popup after user toggles mode.
-            if (modePanel) {
-                modePanel.classList.remove('show');
-            }
-            if (modeTrigger) {
-                modeTrigger.setAttribute('aria-expanded', 'false');
-            }
+    if (layerRescue) {
+        layerRescue.addEventListener('change', () => {
+            showRescueMarkers = layerRescue.checked;
+            toggleRescueMarkersDisplay();
+            updateUIVisibilityBasedOnLayers();
         });
     }
 
-    // Default mode: station map
-    setMapMode('station');
-}
-
-function setMapMode(mode) {
-    const normalizedMode = mode === 'rescue' ? 'rescue' : 'station';
-    currentMapMode = normalizedMode;
-
-    showStationMarkers = normalizedMode === 'station';
-    showRescueMarkers = normalizedMode === 'rescue';
+    // Mặc định bật cả 2
+    showStationMarkers = true;
+    showRescueMarkers = true;
+    if (layerStation) layerStation.checked = true;
+    if (layerRescue) layerRescue.checked = true;
+    
     toggleStationMarkersDisplay();
     toggleRescueMarkersDisplay();
+    updateUIVisibilityBasedOnLayers();
+}
 
-    const modeSwitch = document.getElementById('map-mode-switch');
-    if (modeSwitch) {
-        modeSwitch.checked = normalizedMode === 'rescue';
-    }
-
-    const modeState = document.getElementById('map-mode-state');
-    if (modeState) {
-        modeState.textContent = normalizedMode === 'rescue' ? 'Đang xem: Cứu hộ' : 'Đang xem: Trạm';
-    }
-
-    document.body.classList.toggle('rescue-mode-active', normalizedMode === 'rescue');
-
+function updateUIVisibilityBasedOnLayers() {
     const stationSidebar = document.getElementById('station-list-sidebar');
     const detailSidebar = document.getElementById('detail-sidebar');
     const chartsPanel = document.getElementById('charts-panel');
     const longtermOverlay = document.getElementById('longterm-overlay');
     const alertBanner = document.getElementById('alert-banner');
 
-    if (normalizedMode === 'rescue') {
+    // Nếu chỉ xem phần cứu hộ, ẩn các info trạm
+    if (!showStationMarkers && showRescueMarkers) {
         if (stationSidebar) {
             stationSidebar.classList.add('hidden');
             stationSidebar.classList.add('force-hidden');
         }
 
-        if (detailSidebar) {
-            detailSidebar.classList.remove('active');
-        }
+        if (detailSidebar) detailSidebar.classList.remove('active');
+        if (chartsPanel) chartsPanel.classList.remove('active');
+        if (longtermOverlay) longtermOverlay.classList.remove('active');
+        if (alertBanner) alertBanner.classList.remove('show', 'level-warning', 'level-critical');
 
-        if (chartsPanel) {
-            chartsPanel.classList.remove('active');
+        document.body.classList.add('rescue-mode-active');
+    } else {
+        if (stationSidebar) {
+            stationSidebar.classList.remove('force-hidden');
         }
-
-        if (longtermOverlay) {
-            longtermOverlay.classList.remove('active');
-        }
-
-        if (alertBanner) {
-            alertBanner.classList.remove('show', 'level-warning', 'level-critical');
-        }
-    } else if (stationSidebar) {
-        // Keep sidebar closed when switching back; user opens it manually.
-        stationSidebar.classList.remove('force-hidden');
+        document.body.classList.remove('rescue-mode-active');
     }
 }
 
@@ -1160,12 +1300,16 @@ function addRescueMarker(rescueRequest) {
     });
 
     const marker = L.marker([latitude, longitude], { icon })
-        .addTo(showRescueMarkers ? map : null)
         .bindTooltip(`${requester_name || 'SOS'} - ${phone || 'N/A'}`, { 
             direction: 'top', 
             offset: [0, -15],
             permanent: false 
         });
+
+    // An toàn thêm marker thay vì addLayer(null)
+    if (showRescueMarkers && window.map) {
+        marker.addTo(window.map);
+    }
 
     const popupContent = `
         <div class="rescue-popup" style="min-width: 280px;">
@@ -1189,6 +1333,13 @@ function addRescueMarker(rescueRequest) {
                     </div>
                 </div>
                 ${(image_url || image_data_url) ? `<div style="margin-top:8px;"><img src="${image_url || image_data_url}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : ''}
+                <div style="margin-top: 15px;">
+                    <a href="https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}" 
+                       target="_blank" rel="noopener" 
+                       class="btn btn-sm btn-primary w-100 shadow-sm" style="font-size: 13px; font-weight: 600; border-radius: 6px;">
+                       <i class="bi bi-geo-alt-fill me-1"></i>Chỉ đường (Google Maps)
+                    </a>
+                </div>
             </div>
         </div>
     `;
@@ -1202,18 +1353,18 @@ function addRescueMarker(rescueRequest) {
 }
 
 function updateRescueMarkerFromWebSocket(message) {
-    if (message.data?.type !== 'rescue_request') return;
-    if (message.data?.action === 'new') {
-        const rescueReq = message.data?.payload;
-        if (rescueReq && rescueReq.status === 'pending') {
-            addRescueMarker(rescueReq);
-            rescueRequestsData.push(rescueReq);
+    if (message.type !== 'rescue_request') return;
+
+    if (message.status === 'pending') {
+        addRescueMarker(message);
+        // Only push to data array if it doesn't exist
+        if (!rescueRequestsData.some(r => r.id === message.id)) {
+            rescueRequestsData.push(message);
         }
-    } else if (message.data?.action === 'update') {
-        const { id, status } = message.data?.payload || {};
-        if (id && status !== 'pending' && rescueMarkers[id]) {
-            map.removeLayer(rescueMarkers[id]);
-            delete rescueMarkers[id];
+    } else {
+        if (message.id && rescueMarkers[message.id]) {
+            map.removeLayer(rescueMarkers[message.id]);
+            delete rescueMarkers[message.id];
         }
     }
 }
@@ -1221,16 +1372,21 @@ function updateRescueMarkerFromWebSocket(message) {
 function setupEventListeners() {
     console.log('🔧 [MAP] Setting up event listeners...');
 
-    const toggleListBtn = document.getElementById('toggle-list-btn');
+    const hamburgerBtn = document.getElementById('navbar-hamburger-btn');
     const sidebarCloseTab = document.getElementById('sidebar-close-tab');
     const stationSidebar = document.getElementById('station-list-sidebar');
 
-    // Toggle sidebar trái
-    if (toggleListBtn && stationSidebar) {
-        toggleListBtn.addEventListener('click', () => {
+    // Hamburger → Toggle sidebar trái
+    if (hamburgerBtn && stationSidebar) {
+        hamburgerBtn.addEventListener('click', () => {
             if (currentMapMode === 'rescue') return;
-            stationSidebar.classList.remove('hidden');
-            stationSidebar.classList.remove('force-hidden');
+            const isHidden = stationSidebar.classList.contains('hidden') || stationSidebar.classList.contains('force-hidden');
+            if (isHidden) {
+                stationSidebar.classList.remove('hidden');
+                stationSidebar.classList.remove('force-hidden');
+            } else {
+                stationSidebar.classList.add('hidden');
+            }
         });
     }
 
@@ -1238,6 +1394,36 @@ function setupEventListeners() {
         sidebarCloseTab.addEventListener('click', () => {
             stationSidebar.classList.add('hidden');
         });
+    }
+
+    // === Layer Toggle Switch Logic ===
+    const layerModeToggle = document.getElementById('layer-mode-toggle');
+    const layerStationCb = document.getElementById('layer-station');
+    const layerRescueCb = document.getElementById('layer-rescue');
+    if (layerModeToggle && layerStationCb && layerRescueCb) {
+        layerModeToggle.addEventListener('change', () => {
+            if (layerModeToggle.checked) {
+                // Rescue-only mode
+                layerStationCb.checked = false;
+                layerRescueCb.checked = true;
+            } else {
+                // Station mode (default: both on)
+                layerStationCb.checked = true;
+                layerRescueCb.checked = true;
+            }
+            layerStationCb.dispatchEvent(new Event('change'));
+            layerRescueCb.dispatchEvent(new Event('change'));
+        });
+    }
+
+    // === Custom Glass Zoom Controls ===
+    const zoomInBtn = document.getElementById('map-zoom-in');
+    const zoomOutBtn = document.getElementById('map-zoom-out');
+    if (zoomInBtn && map) {
+        zoomInBtn.addEventListener('click', () => map.zoomIn());
+    }
+    if (zoomOutBtn && map) {
+        zoomOutBtn.addEventListener('click', () => map.zoomOut());
     }
 
     // Đóng detailed sidebar
@@ -1495,15 +1681,37 @@ function setupEventListeners() {
 // OTHER FUNCTIONS
 // =====================================================
 
+let currentTileLayer = null;
+
+const TILE_URLS = {
+    light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+};
+const TILE_OPTIONS = {
+    light: { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] },
+    dark: { maxZoom: 20, subdomains: ['a', 'b', 'c', 'd'] }
+};
+
+function switchMapTiles(theme) {
+    if (!map) return;
+    const key = theme === 'dark' ? 'dark' : 'light';
+    if (currentTileLayer) {
+        map.removeLayer(currentTileLayer);
+    }
+    currentTileLayer = L.tileLayer(TILE_URLS[key], TILE_OPTIONS[key]).addTo(map);
+}
+
 function initMap() {
     try {
-        map = L.map('map', { zoomControl: false }).setView([16.047079, 108.206230], 6);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.047079, 108.206230], 6);
 
-        L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-            maxZoom: 20,
-            subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
-        }).addTo(map);
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+        switchMapTiles(currentTheme);
+
+        // Auto-switch tiles on theme change
+        window.addEventListener('themeChanged', (e) => {
+            switchMapTiles(e.detail?.theme || document.documentElement.getAttribute('data-theme'));
+        });
 
         console.log('✅ [MAP] Leaflet map initialized');
     } catch (error) {
@@ -4702,6 +4910,319 @@ window.mapManager = {
     setMarkerAlert,
     clearMarkerAlert,
     charts
+};
+
+// --- GUEST RESCUE PICK ON MAP LOGIC ---
+let isPickingRescueLocation = false;
+let rescueMapClickListener = null;
+
+window.enablePickOnMap = function() {
+    if (!window.map || !window.rescueFormModal) return;
+    
+    // Tạm ẩn modal
+    window.rescueFormModal.hide();
+    
+    // Đổi con trỏ chuột
+    isPickingRescueLocation = true;
+    document.getElementById('map').style.cursor = 'crosshair';
+    window.toast?.info('Click vào Bản đồ để chốt Vị trí Cứu hộ', 5000);
+    
+    // Huỷ listener cũ nếu có
+    if (rescueMapClickListener) {
+        window.map.off('click', rescueMapClickListener);
+    }
+    
+    // Lắng nghe sự kiện click
+    rescueMapClickListener = function(e) {
+        if (!isPickingRescueLocation) return;
+        
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        
+        // Cập nhật input
+        const latEl = document.getElementById('guest-rescue-lat');
+        const lonEl = document.getElementById('guest-rescue-lon');
+        if (latEl) latEl.value = Number(lat).toFixed(6);
+        if (lonEl) lonEl.value = Number(lon).toFixed(6);
+        
+        // Trả về trạng thái bình thường
+        isPickingRescueLocation = false;
+        document.getElementById('map').style.cursor = '';
+        window.map.off('click', rescueMapClickListener);
+        
+        // Vẽ marker tạm cho vị trí vừa click
+        if (window.userLocationMarker && window.map.hasLayer(window.userLocationMarker)) {
+            window.map.removeLayer(window.userLocationMarker);
+        }
+        if (window.userLocationCircle && window.map.hasLayer(window.userLocationCircle)) {
+            window.map.removeLayer(window.userLocationCircle);
+        }
+        
+        window.userLocationMarker = L.marker([lat, lon], {
+            icon: L.divIcon({
+                className: 'user-location-marker',
+                html: '<div style="width: 18px; height: 18px; background: #0d6efd; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 15px rgba(13,110,253,0.8); animation: guestRescuePulse 1.5s infinite;"></div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            })
+        }).addTo(window.map).bindPopup('Vị trí được chọn trên bản đồ');
+        
+        window.map.setView([lat, lon], 15, { animate: true });
+        
+        // Mở lại modal sau thời gian ngắn
+        setTimeout(() => {
+            window.toast?.success('Đã ghim toạ độ thành công!');
+            if (window.rescueFormModal) window.rescueFormModal.show();
+        }, 150);
+    };
+    
+    // Đợi 1 chút để không bắt nhầm sự kiện click vào nút
+    setTimeout(() => {
+        window.map.on('click', rescueMapClickListener);
+    }, 150);
+};
+
+// --- ADMIN DRAGGABLE MARKER UTILITY ---
+/**
+ * Dành cho Admin: Kéo thả một marker để lấy toạ độ mới
+ * Cách dùng: window.makeMarkerDraggable(markerObj)
+ */
+window.makeMarkerDraggable = function(marker, latInputId = 'input-lat', lngInputId = 'input-lng') {
+    if (!marker) return;
+    
+    // Kích hoạt tính năng kéo thả của marker
+    if (marker.dragging) {
+        marker.dragging.enable();
+    }
+    
+    // Lắng nghe sự kiện kết thúc thả chuột
+    marker.on('dragend', function(e) {
+        const position = marker.getLatLng();
+        const lat = position.lat.toFixed(6);
+        const lng = position.lng.toFixed(6);
+        
+        // Cập nhật DOM
+        const latInput = document.getElementById(latInputId);
+        const lngInput = document.getElementById(lngInputId);
+        
+        if (latInput) latInput.value = lat;
+        if (lngInput) lngInput.value = lng;
+        
+        // Thông báo cho Admin (Sử dụng SweetAlert2 nếu có)
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                title: 'Đã cập nhật vị trí!',
+                html: `Vị trí mới:<br><b>Lat:</b> ${lat}<br><b>Lng:</b> ${lng}`,
+                icon: 'success',
+                timer: 2500,
+                showConfirmButton: false,
+                toast: true,
+                position: 'bottom-end'
+            });
+        } else if (window.toast && window.toast.success) {
+            window.toast.success(`Đã lấy vị trí: ${lat}, ${lng}`);
+        } else {
+            alert(`Đã cập nhật vị trí mới!\nLat: ${lat}\nLng: ${lng}`);
+        }
+    });
+};
+
+// --- FEATURE 2: VOICE ALERT (Web Speech API) ---
+function playWarningVoice(stationName, level) {
+    if (!('speechSynthesis' in window)) {
+        console.warn('[VOICE] Web Speech API not supported');
+        return;
+    }
+    const text = `Cảnh báo! Trạm ${stationName} đang ở mức ${level}. Yêu cầu chú ý.`;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'vi-VN';
+    utterance.rate = 0.9;
+    utterance.pitch = 1.1;
+    utterance.volume = 1;
+
+    // Ưu tiên giọng nữ tiếng Việt
+    const voices = speechSynthesis.getVoices();
+    const viVoice = voices.find(v => v.lang.startsWith('vi') && v.name.toLowerCase().includes('female'))
+        || voices.find(v => v.lang.startsWith('vi'))
+        || null;
+    if (viVoice) utterance.voice = viVoice;
+
+    speechSynthesis.cancel(); // Hủy giọng cũ nếu đang phát
+    speechSynthesis.speak(utterance);
+}
+window.playWarningVoice = playWarningVoice;
+
+// --- FEATURE 3: QR CODE SHARING ---
+window.showStationQR = function(lat, lng, stationName) {
+    // Xoá popup cũ nếu có
+    let existing = document.getElementById('qr-popup-overlay');
+    if (existing) existing.remove();
+
+    const url = `${window.location.origin}/pages/map.html?lat=${lat}&lng=${lng}`;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'qr-popup-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+    overlay.innerHTML = `
+        <div class="qr-popup-glass">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0 fw-bold"><i class="bi bi-qr-code me-2"></i>${stationName || 'Trạm'}</h6>
+                <button class="btn btn-sm btn-close" id="qr-popup-close"></button>
+            </div>
+            <div id="qr-canvas-wrap" class="text-center mb-2"></div>
+            <div class="text-center small opacity-75 text-break" style="font-size:0.7rem;">${url}</div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Render QR (qrcode.js loaded from CDN)
+    if (typeof QRCode !== 'undefined') {
+        new QRCode(document.getElementById('qr-canvas-wrap'), {
+            text: url, width: 180, height: 180, colorDark: '#0f172a', colorLight: '#ffffff'
+        });
+    } else {
+        document.getElementById('qr-canvas-wrap').innerHTML = '<p class="text-muted">Thư viện QR chưa được tải.</p>';
+    }
+
+    document.getElementById('qr-popup-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+};
+
+// --- FEATURE 4: PDF EXPORT (Server-side) ---
+window.exportStationPDF = function() {
+    if (!currentStationData || !currentStationData.id) {
+        // Fallback client-side
+        const sidebar = document.getElementById('detail-sidebar');
+        if (!sidebar || typeof html2pdf === 'undefined') {
+            window.toast?.error('Không thể xuất PDF.');
+            return;
+        }
+        const stName = document.getElementById('st-name')?.textContent || 'Tram';
+        const fileName = `BaoCao_${stName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+        const clone = sidebar.cloneNode(true);
+        clone.style.cssText = 'position:absolute;left:-9999px;top:0;width:700px;background:#fff;color:#1e293b;padding:24px;';
+        clone.querySelectorAll('.sidebar-close-btn, .btn-export-pdf, .btn-qr-share').forEach(el => el.remove());
+        document.body.appendChild(clone);
+        html2pdf().set({ margin: [10,10,10,10], filename: fileName, image: {type:'jpeg',quality:0.95},
+            html2canvas: {scale:2,useCORS:true,backgroundColor:'#ffffff'},
+            jsPDF: {unit:'mm',format:'a4',orientation:'portrait'}
+        }).from(clone).save().then(() => { clone.remove(); window.toast?.success(`Đã tải ${fileName}`); })
+        .catch(() => { clone.remove(); window.toast?.error('Lỗi xuất PDF.'); });
+        return;
+    }
+
+    // Server-side professional PDF
+    const stationId = currentStationData.id;
+    window.toast?.info('Đang tạo báo cáo PDF trên server...');
+    const url = `/api/admin/export/station/${stationId}/pdf`;
+    fetch(url).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+    }).then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `BaoCao_${(currentStationData.name || 'Tram').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        window.toast?.success('Đã tải xuống báo cáo PDF!');
+    }).catch(err => {
+        console.error('[PDF Server]', err);
+        window.toast?.error('Lỗi khi xuất PDF từ server. Thử phương án client-side...');
+    });
+};
+// --- FEATURE 5: RESCUE HEATMAP LAYER ---
+let rescueHeatLayer = null;
+let heatmapVisible = false;
+
+function buildHeatmapData() {
+    // Sử dụng dữ liệu rescue thật nếu có, nếu không dùng mẫu
+    if (rescueRequestsData && rescueRequestsData.length > 0) {
+        return rescueRequestsData
+            .filter(r => r.latitude && r.longitude)
+            .map(r => [r.latitude, r.longitude, 0.8]);
+    }
+    // Dữ liệu mẫu 10 điểm quanh Đà Nẵng
+    return [
+        [16.047, 108.206, 0.9], [16.052, 108.212, 0.7], [16.041, 108.198, 0.8],
+        [16.060, 108.220, 0.6], [16.035, 108.190, 0.95], [16.055, 108.200, 0.5],
+        [16.043, 108.215, 0.85], [16.065, 108.208, 0.7], [16.038, 108.225, 0.6],
+        [16.050, 108.195, 0.75]
+    ];
+}
+
+function toggleHeatmap() {
+    const btn = document.getElementById('heatmap-toggle');
+    if (!map || typeof L.heatLayer === 'undefined') {
+        window.toast?.error('Plugin heatmap chưa sẵn sàng.');
+        return;
+    }
+
+    heatmapVisible = !heatmapVisible;
+
+    if (heatmapVisible) {
+        const data = buildHeatmapData();
+        rescueHeatLayer = L.heatLayer(data, {
+            radius: 30, blur: 20, maxZoom: 14,
+            gradient: { 0.2: '#2196f3', 0.4: '#4caf50', 0.6: '#ffeb3b', 0.8: '#ff9800', 1: '#f44336' }
+        }).addTo(map);
+        btn?.classList.add('active');
+        window.toast?.info('Heatmap đã bật');
+    } else {
+        if (rescueHeatLayer) {
+            map.removeLayer(rescueHeatLayer);
+            rescueHeatLayer = null;
+        }
+        btn?.classList.remove('active');
+        window.toast?.info('Heatmap đã tắt');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const heatBtn = document.getElementById('heatmap-toggle');
+    if (heatBtn) heatBtn.addEventListener('click', toggleHeatmap);
+});
+
+// --- FEATURE 6: TIMELINE SLIDER ---
+let timelineMarkers = []; // Sẽ được tạo từ rescueRequestsData
+
+function setupTimelineSlider() {
+    const slider = document.getElementById('timeline-slider');
+    const label = document.getElementById('timeline-label');
+    const wrap = document.getElementById('timeline-slider-wrap');
+    if (!slider || !label || !wrap) return;
+
+    slider.addEventListener('input', () => {
+        const dayValue = parseInt(slider.value, 10);
+        const targetDate = new Date();
+        targetDate.setDate(targetDate.getDate() - (30 - dayValue));
+        const dateStr = targetDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        label.textContent = `Ngày ${dateStr}`;
+
+        // Filter rescue markers: hiển thị marker thuộc ngày đó
+        Object.entries(rescueMarkers).forEach(([id, marker]) => {
+            const req = rescueRequestsData.find(r => String(r.id) === String(id));
+            if (!req || !req.created_at) return;
+
+            const reqDate = new Date(req.created_at);
+            const daysDiff = Math.floor((Date.now() - reqDate.getTime()) / (1000 * 60 * 60 * 24));
+            const reqDaySlot = 30 - daysDiff; // 1 = cũ nhất, 30 = mới nhất
+
+            if (reqDaySlot <= dayValue) {
+                if (!map.hasLayer(marker)) marker.addTo(map);
+            } else {
+                if (map.hasLayer(marker)) map.removeLayer(marker);
+            }
+        });
+    });
+}
+
+// Hiển thị timeline khi có đủ dữ liệu
+window.showTimelineSlider = function() {
+    const wrap = document.getElementById('timeline-slider-wrap');
+    if (wrap) {
+        wrap.style.display = wrap.style.display === 'none' ? 'flex' : 'none';
+        if (wrap.style.display === 'flex') setupTimelineSlider();
+    }
 };
 
 console.log('[MAP] Script fully loaded');
