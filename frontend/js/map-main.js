@@ -313,7 +313,7 @@ function handleRealtimeUpdate(message) {
         const riskUi = getRiskPresentation(riskLevel);
         const stationId = message.station_id;
 
-        // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan
+        // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan + dừng âm thanh
         if (riskUi.normalized === 'LOW' || riskUi.normalized === 'OFFLINE') {
             // 1. Clear marker flashing (phải gọi TRƯỚC updateStationMarker)
             if (markerAlertState[stationId]) {
@@ -340,16 +340,23 @@ function handleRealtimeUpdate(message) {
             if (currentStationData && stationId === currentStationData.id) {
                 setSirenButtonState('idle');
             }
+
+            // 4. ✅ Xóa cảnh báo âm thanh cho trạm này → âm thanh dừng nếu không còn trạm nào báo
+            AlertSoundManager.clearStationAlert(stationId);
         }
 
         const isAlertingRisk = (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL');
         if (isAlertingRisk) {
+            // ✅ Cập nhật âm thanh theo mức cảnh báo của trạm
+            const soundLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+            AlertSoundManager.setStationAlert(stationId, soundLevel);
+
             const banner = document.getElementById('alert-banner');
             const isVisible = !!banner?.classList.contains('show');
             const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
 
             if (Date.now() >= snoozeUntil) {
-                const incomingLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+                const incomingLevel = soundLevel;
                 const incomingSeverity = getAlertSeverity(incomingLevel);
                 const currentSeverity = getAlertSeverity(banner?.dataset?.alertLevel || 'WARNING');
                 const sameStation = currentAlertStationId === stationId;
@@ -487,8 +494,10 @@ function handleRealtimeUpdate(message) {
         }
         // ✅ Marker chuyển đỏ + nhấp nháy khi có cảnh báo
         setMarkerAlert(incomingAlert.station_id, true);
-        // Always attempt to play siren (it will handle its own dedup/overlap)
-        playSiren();
+
+        // ✅ Phát âm thanh theo cấp độ cảnh báo — loop liên tục cho đến khi về bình thường
+        const alertSoundLevel = normalizeAlertLevel(incomingAlert.level) === 'CRITICAL' ? 'CRITICAL' : 'WARNING';
+        AlertSoundManager.setStationAlert(incomingAlert.station_id, alertSoundLevel);
 
         // ✅ Cập nhật siren buttons nếu đang xem trạm này
         // Phân biệt pi_point / pi_center — chỉ set 'alerting' nếu thiết bị online
@@ -496,7 +505,7 @@ function handleRealtimeUpdate(message) {
             const user = window.authManager?.getUserInfo();
             const userRole = user?.role;
             if (userRole === 'admin' || userRole === 'operator') {
-            currentAlertStationId = incomingAlert.station_id;
+                currentAlertStationId = incomingAlert.station_id;
                 const piDevices = currentStationData.pi_devices || [];
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
                     const target = b.getAttribute('data-target');
@@ -878,7 +887,7 @@ function setupGuestRescueUI() {
                             searchInput.value = item.display_name;
                             searchResults.style.display = 'none';
                             window.toast?.success('Đã ghim toạ độ từ địa chỉ!');
-                            
+
                             // Optional: Draw marker on map directly
                             if (window.map) {
                                 const lat = parseFloat(item.lat);
@@ -994,7 +1003,7 @@ function fillGuestRescueLocation(showToast = false) {
             if (showToast) {
                 window.toast?.success(`Đã lấy vị trí (±${latEl.dataset.accuracy}m)`);
             }
-            
+
             // Vẽ marker cho user location
             if (window.userLocationMarker && window.map) {
                 window.map.removeLayer(window.userLocationMarker);
@@ -1011,7 +1020,7 @@ function fillGuestRescueLocation(showToast = false) {
                         iconAnchor: [9, 9]
                     })
                 }).addTo(window.map).bindPopup('Vị trí hiện tại của bạn');
-                
+
                 window.userLocationCircle = L.circle([lat, lon], {
                     radius: pos.coords.accuracy,
                     color: '#0d6efd',
@@ -1019,7 +1028,7 @@ function fillGuestRescueLocation(showToast = false) {
                     fillOpacity: 0.15,
                     weight: 1
                 }).addTo(window.map);
-                
+
                 window.map.setView([lat, lon], 14, { animate: true });
             }
         },
@@ -1074,7 +1083,7 @@ async function submitGuestRescueRequest() {
     const manualAddressEl = document.getElementById('guest-rescue-address-manual');
     const typedAddress = String(searchAddressEl?.value || '').trim();
     const manualAddress = String(manualAddressEl?.value || '').trim();
-    
+
     if (manualAddress) {
         message = `[Địa chỉ chi tiết]: ${manualAddress}\n\n${message}`;
     }
@@ -1180,7 +1189,7 @@ function setupMarkerLayerControls() {
     showRescueMarkers = true;
     if (layerStation) layerStation.checked = true;
     if (layerRescue) layerRescue.checked = true;
-    
+
     toggleStationMarkersDisplay();
     toggleRescueMarkersDisplay();
     updateUIVisibilityBasedOnLayers();
@@ -1300,10 +1309,11 @@ function addRescueMarker(rescueRequest) {
     });
 
     const marker = L.marker([latitude, longitude], { icon })
-        .bindTooltip(`${requester_name || 'SOS'} - ${phone || 'N/A'}`, { 
-            direction: 'top', 
+        .addTo(showRescueMarkers ? map : null)
+        .bindTooltip(`${requester_name || 'SOS'} - ${phone || 'N/A'}`, {
+            direction: 'top',
             offset: [0, -15],
-            permanent: false 
+            permanent: false
         });
 
     // An toàn thêm marker thay vì addLayer(null)
@@ -1641,12 +1651,8 @@ function setupEventListeners() {
                     if (response && response.ok) {
                         window.toast?.success(`Mute command sent (${iconBase})`);
                         setSirenButtonState('muted', target);
-                        // Tắt siren trên web (chỉ tắt khi mute center/point tùy logic, tạm thời cứ tắt JS audio)
-                        if (currentSirenAudio) {
-                            currentSirenAudio.pause();
-                            currentSirenAudio.currentTime = 0;
-                            currentSirenAudio = null;
-                        }
+                        // Tắt âm thanh trên trình duyệt web khi user nhấn Mute
+                        AlertSoundManager.mute();
                     } else {
                         window.toast?.error(`Failed to mute (${iconBase})`);
                         setSirenButtonState('alerting', target);
@@ -2086,7 +2092,7 @@ function formatWaterLevelDisplay(waterLatest) {
     if (waterLatest?.is_fallback === true) {
         return `--<span class="sensor-unit">cm</span>`;
     }
-    
+
     const unitRaw = String(waterLatest?.water_display_unit || '').trim().toLowerCase();
     const displayRaw = parseFloat(waterLatest?.water_display_value);
     let levelCm = null;
@@ -2143,9 +2149,9 @@ function formatImuDelta(val, axis) {
         : [dispMm.toFixed(1), 'mm'];
     const threshold = unit === 'cm' ? 0.05 : 0.5;
     const arrows = {
-        roll:  dispMm > threshold ? ' →' : dispMm < -threshold ? ' ←' : '',
+        roll: dispMm > threshold ? ' →' : dispMm < -threshold ? ' ←' : '',
         pitch: dispMm > threshold ? ' ↑' : dispMm < -threshold ? ' ↓' : '',
-        yaw:   dispMm > threshold ? ' ↻' : dispMm < -threshold ? ' ↺' : '',
+        yaw: dispMm > threshold ? ' ↻' : dispMm < -threshold ? ' ↺' : '',
     };
     return `${sign}${displayVal} ${unit}${arrows[axis] || ''}`;
 }
@@ -2249,10 +2255,10 @@ function updateSidebarUI(data) {
     // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
     const mqttConnected = data.mqtt_connected !== false;
     renderStaleInfo(data, mqttConnected, latestSensorTs);
-    const gnssOnline  = mqttConnected && data.status !== 'offline' && (data.sensors?.gnss?.is_online  ?? false);
-    const rainOnline  = mqttConnected && data.status !== 'offline' && (data.sensors?.rain?.is_online  ?? false);
+    const gnssOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.gnss?.is_online ?? false);
+    const rainOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.rain?.is_online ?? false);
     const waterOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.water?.is_online ?? false);
-    const imuOnline   = mqttConnected && data.status !== 'offline' && (data.sensors?.imu?.is_online   ?? false);
+    const imuOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.imu?.is_online ?? false);
 
     if (gnssOnline) {
         const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
@@ -2660,10 +2666,10 @@ function renderLongTermAnalysis(data) {
         setText('lt-velocity', velocityDisplay.text);
         setText('lt-velocity-ci', velocityDisplay.ciText);
         setText('lt-classification', analysis.classification || 'N/A');
-        
+
         // Use auto cm/mm formatting
         setText('lt-total-disp', formatDisplacementString(analysis.total_displacement_mm, 1));
-        
+
         setText('lt-duration', formatDurationString(analysis.duration_days));
 
         if (analysis.velocity_reliable === false) {
@@ -2819,7 +2825,7 @@ function showLsRapidResultPopup(rainCorr) {
     overlay.querySelectorAll('.lsrapid-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
 
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    const fmtDate = (d) => { if (!d) return '--'; try { const [y,m,dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
+    const fmtDate = (d) => { if (!d) return '--'; try { const [y, m, dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
 
     if (available) {
         // === Overview tab ===
@@ -2942,8 +2948,8 @@ function showLsRapidResultPopup(rainCorr) {
 
     } else {
         // Not available — reset all
-        ['lsrapid-popup-r','lsrapid-popup-r2','lsrapid-popup-lag','lsrapid-popup-trigger',
-         'lsrapid-popup-strength','lsrapid-popup-slope'].forEach(id => setVal(id, '--'));
+        ['lsrapid-popup-r', 'lsrapid-popup-r2', 'lsrapid-popup-lag', 'lsrapid-popup-trigger',
+            'lsrapid-popup-strength', 'lsrapid-popup-slope'].forEach(id => setVal(id, '--'));
         setVal('lsrapid-popup-message', sanitizeLongTermText(
             rainCorr?.message || 'Không thể tạo kết quả LS-RAPID cho khoảng thời gian này.'
         ));
@@ -3284,14 +3290,14 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     // ==========================================
     // GUY WIRES — 4 cáp neo thể hiện hướng lệch
     // ==========================================
-    const _gwDist    = 5.5;
-    const _gwFloor   = -1.49;
+    const _gwDist = 5.5;
+    const _gwFloor = -1.49;
     const _gwScrewR = plateRadius - 0.3;
-    const _gwSpecs   = [
-        { local: new THREE.Vector3( _gwScrewR, plateThickness,  0         ), anchor: [ _gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll+
-        { local: new THREE.Vector3(-_gwScrewR, plateThickness,  0         ), anchor: [-_gwDist, _gwFloor, 0      ], color: 0xff6b35 }, // Roll-
-        { local: new THREE.Vector3( 0, plateThickness,  _gwScrewR         ), anchor: [0, _gwFloor,  _gwDist     ], color: 0x00d4ff }, // Pitch+
-        { local: new THREE.Vector3( 0, plateThickness, -_gwScrewR         ), anchor: [0, _gwFloor, -_gwDist     ], color: 0x00d4ff }, // Pitch-
+    const _gwSpecs = [
+        { local: new THREE.Vector3(_gwScrewR, plateThickness, 0), anchor: [_gwDist, _gwFloor, 0], color: 0xff6b35 }, // Roll+
+        { local: new THREE.Vector3(-_gwScrewR, plateThickness, 0), anchor: [-_gwDist, _gwFloor, 0], color: 0xff6b35 }, // Roll-
+        { local: new THREE.Vector3(0, plateThickness, _gwScrewR), anchor: [0, _gwFloor, _gwDist], color: 0x00d4ff }, // Pitch+
+        { local: new THREE.Vector3(0, plateThickness, -_gwScrewR), anchor: [0, _gwFloor, -_gwDist], color: 0x00d4ff }, // Pitch-
     ];
     const imuWires = _gwSpecs.map(spec => {
         const geo = new THREE.BufferGeometry();
@@ -3330,7 +3336,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
         // Cập nhật guy wires
         sensorBlock.updateMatrixWorld();
         imuWires.forEach(w => {
-            const wp   = w.local.clone().applyMatrix4(sensorBlock.matrixWorld);
+            const wp = w.local.clone().applyMatrix4(sensorBlock.matrixWorld);
             const attr = w.line.geometry.attributes.position;
             attr.setXYZ(0, wp.x, wp.y, wp.z);
             attr.setXYZ(1, w.anchor.x, w.anchor.y, w.anchor.z);
@@ -3484,14 +3490,14 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         // ==========================================
         // GUY WIRES — 4 cáp neo realtime
         // ==========================================
-        const _rtGwDist    = 5.5;
-        const _rtGwFloor   = -1.49;
+        const _rtGwDist = 5.5;
+        const _rtGwFloor = -1.49;
         const _rtGwScrewR = plateRadius - 0.3;
-        const _rtGwSpecs   = [
-            { local: new THREE.Vector3( _rtGwScrewR, plateThickness,  0           ), anchor: [ _rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
-            { local: new THREE.Vector3(-_rtGwScrewR, plateThickness,  0           ), anchor: [-_rtGwDist, _rtGwFloor, 0          ], color: 0xff6b35 },
-            { local: new THREE.Vector3( 0, plateThickness,  _rtGwScrewR           ), anchor: [0,          _rtGwFloor,  _rtGwDist ], color: 0x00d4ff },
-            { local: new THREE.Vector3( 0, plateThickness, -_rtGwScrewR           ), anchor: [0,          _rtGwFloor, -_rtGwDist ], color: 0x00d4ff },
+        const _rtGwSpecs = [
+            { local: new THREE.Vector3(_rtGwScrewR, plateThickness, 0), anchor: [_rtGwDist, _rtGwFloor, 0], color: 0xff6b35 },
+            { local: new THREE.Vector3(-_rtGwScrewR, plateThickness, 0), anchor: [-_rtGwDist, _rtGwFloor, 0], color: 0xff6b35 },
+            { local: new THREE.Vector3(0, plateThickness, _rtGwScrewR), anchor: [0, _rtGwFloor, _rtGwDist], color: 0x00d4ff },
+            { local: new THREE.Vector3(0, plateThickness, -_rtGwScrewR), anchor: [0, _rtGwFloor, -_rtGwDist], color: 0x00d4ff },
         ];
         const rtImuWires = _rtGwSpecs.map(spec => {
             const geo = new THREE.BufferGeometry();
@@ -3525,7 +3531,7 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
             // Cập nhật guy wires realtime
             realtimeImuSensorBlock.updateMatrixWorld();
             rtImuWires.forEach(w => {
-                const wp   = w.local.clone().applyMatrix4(realtimeImuSensorBlock.matrixWorld);
+                const wp = w.local.clone().applyMatrix4(realtimeImuSensorBlock.matrixWorld);
                 const attr = w.line.geometry.attributes.position;
                 attr.setXYZ(0, wp.x, wp.y, wp.z);
                 attr.setXYZ(1, w.anchor.x, w.anchor.y, w.anchor.z);
@@ -4159,7 +4165,7 @@ function renderRainfallCorrelationSection(data) {
 // =========================================================================
 // MULTI-WINDOW ANALYSIS SECTION (CALENDAR INTERVALS)
 // =========================================================================
-function formatDisplacementString(valMm, decimals=1) {
+function formatDisplacementString(valMm, decimals = 1) {
     const val = parseFloat(valMm) || 0;
     if (Math.abs(val) >= 10) {
         return `${(val / 10).toFixed(decimals)} cm`;
@@ -4223,7 +4229,7 @@ function formatLongTermVelocityDisplay(metrics) {
 
 function formatDurationString(durationDays) {
     if (!durationDays || durationDays <= 0) return '0 phút';
-    
+
     if (durationDays < 1 / 24) { // less than 1 hour
         const minutes = Math.round(durationDays * 24 * 60);
         return `${minutes} phút`;
@@ -4359,11 +4365,11 @@ function renderCrossConsensusSection(data) {
 
     // Badge + banner colour
     const levelConfig = {
-        STRONG:      { cls: 'consensus-strong',   icon: 'bi-check-circle-fill',      label: 'Đồng thuận mạnh' },
-        PARTIAL:     { cls: 'consensus-partial',  icon: 'bi-question-circle-fill',   label: 'Đồng thuận một phần' },
-        CONFLICT:    { cls: 'consensus-conflict', icon: 'bi-exclamation-circle-fill', label: 'Mâu thuẫn cảm biến' },
-        NONE:        { cls: 'consensus-none',     icon: 'bi-dash-circle-fill',        label: 'Không có bất thường' },
-        UNAVAILABLE: { cls: 'consensus-unknown',  icon: 'bi-info-circle-fill',        label: 'Chưa đủ dữ liệu' },
+        STRONG: { cls: 'consensus-strong', icon: 'bi-check-circle-fill', label: 'Đồng thuận mạnh' },
+        PARTIAL: { cls: 'consensus-partial', icon: 'bi-question-circle-fill', label: 'Đồng thuận một phần' },
+        CONFLICT: { cls: 'consensus-conflict', icon: 'bi-exclamation-circle-fill', label: 'Mâu thuẫn cảm biến' },
+        NONE: { cls: 'consensus-none', icon: 'bi-dash-circle-fill', label: 'Không có bất thường' },
+        UNAVAILABLE: { cls: 'consensus-unknown', icon: 'bi-info-circle-fill', label: 'Chưa đủ dữ liệu' },
     };
     const cfg = levelConfig[cs.consensus_level] || levelConfig.UNAVAILABLE;
 
@@ -4375,7 +4381,7 @@ function renderCrossConsensusSection(data) {
     // Sensor chips
     const sensorLabels = { gnss: 'GNSS', imu: 'IMU', rain: 'Mưa' };
     const alertingSet = new Set(cs.sensors_alerting || []);
-    const corrobSet   = new Set(cs.sensors_corroborating || []);
+    const corrobSet = new Set(cs.sensors_corroborating || []);
     const conflictSet = new Set(cs.sensors_conflicting || []);
     sensorsEl.innerHTML = (cs.sensors_with_data || []).map(s => {
         let extra = '';
@@ -4387,9 +4393,9 @@ function renderCrossConsensusSection(data) {
 
     // Trend agreement
     const trendMap = {
-        full:    { text: 'Cùng xu hướng ✓', cls: 'text-success' },
+        full: { text: 'Cùng xu hướng ✓', cls: 'text-success' },
         partial: { text: 'Một phần cùng hướng', cls: 'text-warning' },
-        conflict:{ text: 'Ngược hướng ⚠️', cls: 'text-danger' },
+        conflict: { text: 'Ngược hướng ⚠️', cls: 'text-danger' },
     };
     const tm = trendMap[cs.trend_agreement];
     if (tm) {
@@ -4767,59 +4773,151 @@ function showAlertBanner(alertData, options = {}) {
     banner.classList.add('show');
 }
 
-let currentSirenAudio = null;
-let pendingSirenReplay = false;
+// =====================================================
+// ALERT SOUND MANAGER
+// Phát âm thanh liên tục (loop) khi WARNING hoặc CRITICAL.
+// Chỉ dừng khi tất cả trạm trở về trạng thái bình thường.
+// WARNING  → /static/sounds/system_health_warning.mp3 (loop)
+// CRITICAL → /static/sounds/siren.mp3                 (loop)
+// =====================================================
+const AlertSoundManager = (() => {
+    const SOUND_WARNING = '/static/sounds/siren.mp3';
+    const SOUND_CRITICAL = '/static/sounds/siren.mp3';
 
-function playSiren() {
-    try {
-        if (!currentSirenAudio) {
-            currentSirenAudio = new Audio('/static/sounds/siren.mp3');
-            currentSirenAudio.loop = false; // Phát 1 lần cho mỗi sự kiện alert
+    // Trạng thái âm thanh hiện tại: null | 'WARNING' | 'CRITICAL'
+    let _currentLevel = null;
+    let _audio = null;
+    let _unlocked = false;
 
-            // Nếu có alert mới trong lúc đang phát, phát nối tiếp thêm 1 lần.
-            currentSirenAudio.addEventListener('ended', () => {
-                currentSirenAudio = null;
-                if (pendingSirenReplay) {
-                    pendingSirenReplay = false;
-                    playSiren();
-                }
-            });
+    // Theo dõi mức cảnh báo của từng trạm: { stationId: 'WARNING'|'CRITICAL'|null }
+    const _stationLevels = {};
 
-            currentSirenAudio.play().catch(e => {
-                console.error('[ERROR] Siren auto-play blocked:', e);
-                if (navigator.vibrate) {
-                    navigator.vibrate([300, 140, 300]);
-                }
-                window.toast?.warning('Trình duyệt đang chặn âm thanh tự động. Hãy chạm màn hình một lần để bật còi cảnh báo.');
-                currentSirenAudio = null;
-                pendingSirenReplay = false;
-            });
-        } else {
-            pendingSirenReplay = true;
+    function _getSoundFile(level) {
+        return level === 'CRITICAL' ? SOUND_CRITICAL : SOUND_WARNING;
+    }
+
+    function _getHighestLevel() {
+        const levels = Object.values(_stationLevels).filter(Boolean);
+        if (levels.includes('CRITICAL')) return 'CRITICAL';
+        if (levels.includes('WARNING')) return 'WARNING';
+        return null;
+    }
+
+    function _stopAudio() {
+        if (_audio) {
+            try {
+                _audio.pause();
+                _audio.src = '';
+            } catch (_) { }
+            _audio = null;
         }
-    } catch (e) {
-        console.error('[ERROR] playSiren error:', e);
-        currentSirenAudio = null;
-        pendingSirenReplay = false;
+        _currentLevel = null;
+    }
+
+    function _startAudio(level) {
+        const src = _getSoundFile(level);
+        // Nếu đang phát đúng cấp độ rồi thì không làm gì
+        if (_audio && _currentLevel === level) return;
+        // Dừng âm thanh hiện tại trước
+        _stopAudio();
+
+        _currentLevel = level;
+        _audio = new Audio(src);
+        _audio.loop = true; // Phát liên tục
+
+        _audio.play().catch(e => {
+            console.warn('[AlertSoundManager] Autoplay blocked:', e);
+            if (navigator.vibrate) navigator.vibrate([300, 140, 300]);
+            window.toast?.warning(
+                'Trình duyệt đang chặn âm thanh tự động. Hãy chạm màn hình một lần để bật còi cảnh báo.'
+            );
+            _audio = null;
+            _currentLevel = null;
+        });
+        console.log(`🔊 [AlertSoundManager] Playing ${level} sound (loop):`, src);
+    }
+
+    /** Cập nhật trạng thái cảnh báo của một trạm và điều chỉnh âm thanh. */
+    function setStationAlert(stationId, level) {
+        // level: 'WARNING', 'CRITICAL', hoặc null (bình thường)
+        if (level) {
+            _stationLevels[stationId] = level;
+        } else {
+            delete _stationLevels[stationId];
+        }
+        _syncSound();
+    }
+
+    /** Xóa cảnh báo cho một trạm (về bình thường). */
+    function clearStationAlert(stationId) {
+        delete _stationLevels[stationId];
+        _syncSound();
+    }
+
+    /** Đồng bộ âm thanh với mức cảnh báo cao nhất hiện có. */
+    function _syncSound() {
+        const highest = _getHighestLevel();
+        if (!highest) {
+            // Không còn trạm nào đang báo → dừng âm thanh
+            if (_audio) {
+                console.log('✅ [AlertSoundManager] All stations normal — stopping sound.');
+                _stopAudio();
+            }
+        } else if (highest !== _currentLevel) {
+            // Chuyển cấp độ (ví dụ WARNING → CRITICAL hoặc ngược lại)
+            _startAudio(highest);
+        }
+        // Nếu highest === _currentLevel → âm thanh đang đúng, không làm gì
+    }
+
+    /** Unlock AudioContext sau tương tác người dùng lần đầu. */
+    function unlock() {
+        if (_unlocked) return;
+        _unlocked = true;
+        // Nếu đang có cảnh báo mà chưa phát được, thử lại
+        const highest = _getHighestLevel();
+        if (highest && !_audio) {
+            _startAudio(highest);
+        }
+    }
+
+    /** Tắt thủ công (nút Mute), không xóa trạng thái cảnh báo. */
+    function mute() {
+        _stopAudio();
+        console.log('🔇 [AlertSoundManager] Muted by user.');
+    }
+
+    return { setStationAlert, clearStationAlert, unlock, mute };
+})();
+
+/**
+ * Tương thích ngược — các nơi gọi playSiren() sẽ báo CRITICAL cho trạm hiện tại.
+ * @param {string|number} [stationId]
+ * @param {string} [level='CRITICAL']
+ */
+function playSiren(stationId, level) {
+    const sid = stationId ?? currentAlertStationId;
+    const lvl = level ?? 'CRITICAL';
+    if (sid != null) {
+        AlertSoundManager.setStationAlert(sid, lvl);
+    } else {
+        // Không biết trạm nào — vẫn kêu CRITICAL nhưng chỉ tạm (sẽ bị dừng khi status cập nhật)
+        AlertSoundManager.setStationAlert('_unknown', lvl);
     }
 }
 
 function playAlertSound() {
     try {
-        // Tạo beep sound đơn giản
+        // Beep đơn giản dùng Web Audio API (dùng khi autoplay bị block)
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
-
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
-
         oscillator.frequency.value = 800;
         oscillator.type = 'sine';
-
         gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-
         oscillator.start(audioContext.currentTime);
         oscillator.stop(audioContext.currentTime + 0.5);
     } catch (e) {
@@ -4829,18 +4927,8 @@ function playAlertSound() {
 
 // Setup event listeners cho Alert Banner
 document.addEventListener('DOMContentLoaded', () => {
-    const unlockSirenAudio = () => {
-        const probe = new Audio('/static/sounds/siren.mp3');
-        probe.muted = true;
-        probe.play()
-            .then(() => {
-                probe.pause();
-                probe.currentTime = 0;
-            })
-            .catch(() => {
-                // Best effort only.
-            });
-    };
+    // Unlock AudioContext sau tương tác người dùng đầu tiên
+    const unlockSirenAudio = () => AlertSoundManager.unlock();
     document.addEventListener('touchstart', unlockSirenAudio, { once: true, passive: true });
     document.addEventListener('pointerdown', unlockSirenAudio, { once: true, passive: true });
     document.addEventListener('click', unlockSirenAudio, { once: true, passive: true });
@@ -4909,6 +4997,7 @@ window.mapManager = {
     playSiren,
     setMarkerAlert,
     clearMarkerAlert,
+    AlertSoundManager,
     charts
 };
 
@@ -4916,40 +5005,40 @@ window.mapManager = {
 let isPickingRescueLocation = false;
 let rescueMapClickListener = null;
 
-window.enablePickOnMap = function() {
+window.enablePickOnMap = function () {
     if (!window.map || !window.rescueFormModal) return;
-    
+
     // Tạm ẩn modal
     window.rescueFormModal.hide();
-    
+
     // Đổi con trỏ chuột
     isPickingRescueLocation = true;
     document.getElementById('map').style.cursor = 'crosshair';
     window.toast?.info('Click vào Bản đồ để chốt Vị trí Cứu hộ', 5000);
-    
+
     // Huỷ listener cũ nếu có
     if (rescueMapClickListener) {
         window.map.off('click', rescueMapClickListener);
     }
-    
+
     // Lắng nghe sự kiện click
-    rescueMapClickListener = function(e) {
+    rescueMapClickListener = function (e) {
         if (!isPickingRescueLocation) return;
-        
+
         const lat = e.latlng.lat;
         const lon = e.latlng.lng;
-        
+
         // Cập nhật input
         const latEl = document.getElementById('guest-rescue-lat');
         const lonEl = document.getElementById('guest-rescue-lon');
         if (latEl) latEl.value = Number(lat).toFixed(6);
         if (lonEl) lonEl.value = Number(lon).toFixed(6);
-        
+
         // Trả về trạng thái bình thường
         isPickingRescueLocation = false;
         document.getElementById('map').style.cursor = '';
         window.map.off('click', rescueMapClickListener);
-        
+
         // Vẽ marker tạm cho vị trí vừa click
         if (window.userLocationMarker && window.map.hasLayer(window.userLocationMarker)) {
             window.map.removeLayer(window.userLocationMarker);
@@ -4957,7 +5046,7 @@ window.enablePickOnMap = function() {
         if (window.userLocationCircle && window.map.hasLayer(window.userLocationCircle)) {
             window.map.removeLayer(window.userLocationCircle);
         }
-        
+
         window.userLocationMarker = L.marker([lat, lon], {
             icon: L.divIcon({
                 className: 'user-location-marker',
@@ -4966,16 +5055,16 @@ window.enablePickOnMap = function() {
                 iconAnchor: [9, 9]
             })
         }).addTo(window.map).bindPopup('Vị trí được chọn trên bản đồ');
-        
+
         window.map.setView([lat, lon], 15, { animate: true });
-        
+
         // Mở lại modal sau thời gian ngắn
         setTimeout(() => {
             window.toast?.success('Đã ghim toạ độ thành công!');
             if (window.rescueFormModal) window.rescueFormModal.show();
         }, 150);
     };
-    
+
     // Đợi 1 chút để không bắt nhầm sự kiện click vào nút
     setTimeout(() => {
         window.map.on('click', rescueMapClickListener);
@@ -4987,27 +5076,27 @@ window.enablePickOnMap = function() {
  * Dành cho Admin: Kéo thả một marker để lấy toạ độ mới
  * Cách dùng: window.makeMarkerDraggable(markerObj)
  */
-window.makeMarkerDraggable = function(marker, latInputId = 'input-lat', lngInputId = 'input-lng') {
+window.makeMarkerDraggable = function (marker, latInputId = 'input-lat', lngInputId = 'input-lng') {
     if (!marker) return;
-    
+
     // Kích hoạt tính năng kéo thả của marker
     if (marker.dragging) {
         marker.dragging.enable();
     }
-    
+
     // Lắng nghe sự kiện kết thúc thả chuột
-    marker.on('dragend', function(e) {
+    marker.on('dragend', function (e) {
         const position = marker.getLatLng();
         const lat = position.lat.toFixed(6);
         const lng = position.lng.toFixed(6);
-        
+
         // Cập nhật DOM
         const latInput = document.getElementById(latInputId);
         const lngInput = document.getElementById(lngInputId);
-        
+
         if (latInput) latInput.value = lat;
         if (lngInput) lngInput.value = lng;
-        
+
         // Thông báo cho Admin (Sử dụng SweetAlert2 nếu có)
         if (typeof Swal !== 'undefined') {
             Swal.fire({
@@ -5053,7 +5142,7 @@ function playWarningVoice(stationName, level) {
 window.playWarningVoice = playWarningVoice;
 
 // --- FEATURE 3: QR CODE SHARING ---
-window.showStationQR = function(lat, lng, stationName) {
+window.showStationQR = function (lat, lng, stationName) {
     // Xoá popup cũ nếu có
     let existing = document.getElementById('qr-popup-overlay');
     if (existing) existing.remove();
@@ -5089,7 +5178,7 @@ window.showStationQR = function(lat, lng, stationName) {
 };
 
 // --- FEATURE 4: PDF EXPORT (Server-side) ---
-window.exportStationPDF = function() {
+window.exportStationPDF = function () {
     if (!currentStationData || !currentStationData.id) {
         // Fallback client-side
         const sidebar = document.getElementById('detail-sidebar');
@@ -5098,16 +5187,17 @@ window.exportStationPDF = function() {
             return;
         }
         const stName = document.getElementById('st-name')?.textContent || 'Tram';
-        const fileName = `BaoCao_${stName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+        const fileName = `BaoCao_${stName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
         const clone = sidebar.cloneNode(true);
         clone.style.cssText = 'position:absolute;left:-9999px;top:0;width:700px;background:#fff;color:#1e293b;padding:24px;';
         clone.querySelectorAll('.sidebar-close-btn, .btn-export-pdf, .btn-qr-share').forEach(el => el.remove());
         document.body.appendChild(clone);
-        html2pdf().set({ margin: [10,10,10,10], filename: fileName, image: {type:'jpeg',quality:0.95},
-            html2canvas: {scale:2,useCORS:true,backgroundColor:'#ffffff'},
-            jsPDF: {unit:'mm',format:'a4',orientation:'portrait'}
+        html2pdf().set({
+            margin: [10, 10, 10, 10], filename: fileName, image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         }).from(clone).save().then(() => { clone.remove(); window.toast?.success(`Đã tải ${fileName}`); })
-        .catch(() => { clone.remove(); window.toast?.error('Lỗi xuất PDF.'); });
+            .catch(() => { clone.remove(); window.toast?.error('Lỗi xuất PDF.'); });
         return;
     }
 
@@ -5121,7 +5211,7 @@ window.exportStationPDF = function() {
     }).then(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `BaoCao_${(currentStationData.name || 'Tram').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+        a.download = `BaoCao_${(currentStationData.name || 'Tram').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
         a.click();
         URL.revokeObjectURL(a.href);
         window.toast?.success('Đã tải xuống báo cáo PDF!');
@@ -5217,7 +5307,7 @@ function setupTimelineSlider() {
 }
 
 // Hiển thị timeline khi có đủ dữ liệu
-window.showTimelineSlider = function() {
+window.showTimelineSlider = function () {
     const wrap = document.getElementById('timeline-slider-wrap');
     if (wrap) {
         wrap.style.display = wrap.style.display === 'none' ? 'flex' : 'none';
