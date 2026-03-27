@@ -746,6 +746,16 @@ class AdminManager {
                 waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
             }
         }
+        const waterSafeConfirmEl = document.getElementById('cfg-water-safe-confirm');
+        const waterSafeConfirmSrc = document.getElementById('cfg-water-safe-confirm-source');
+        if (waterSafeConfirmEl) {
+            const wscs = waterCfg.water_safe_confirm_steps;
+            waterSafeConfirmEl.value = wscs ?? 3;
+            if (waterSafeConfirmSrc) {
+                waterSafeConfirmSrc.textContent = wscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                waterSafeConfirmSrc.className = wscs != null ? 'text-success small' : 'text-warning small';
+            }
+        }
 
         const rainCfg = cfg.RainAlerting || {};
         document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
@@ -763,6 +773,16 @@ class AdminManager {
                 rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
             }
         }
+        const rainSafeConfirmEl = document.getElementById('cfg-rain-safe-confirm');
+        const rainSafeConfirmSrc = document.getElementById('cfg-rain-safe-confirm-source');
+        if (rainSafeConfirmEl) {
+            const rscs = rainCfg.rain_safe_confirm_steps;
+            rainSafeConfirmEl.value = rscs ?? 3;
+            if (rainSafeConfirmSrc) {
+                rainSafeConfirmSrc.textContent = rscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                rainSafeConfirmSrc.className = rscs != null ? 'text-success small' : 'text-warning small';
+            }
+        }
             const gnssCfg = cfg.GnssAlerting || {};
             document.getElementById('cfg-gnss-streak').value = gnssCfg.gnss_safe_streak ?? 10;
             document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
@@ -775,6 +795,10 @@ class AdminManager {
             if (tiltCritEl) tiltCritEl.value = imuCfg.tilt_critical_deg ?? 15.0;
             const imuConfirmEl = document.getElementById('cfg-imu-confirm');
             if (imuConfirmEl) imuConfirmEl.value = imuCfg.imu_confirm_steps ?? 2;
+            const imuSafeConfirmEl = document.getElementById('cfg-imu-safe-confirm');
+            if (imuSafeConfirmEl) imuSafeConfirmEl.value = imuCfg.imu_safe_confirm_steps ?? 3;
+            const gnssSafeStepsEl = document.getElementById('cfg-gnss-safe-steps');
+            if (gnssSafeStepsEl) gnssSafeStepsEl.value = gnssCfg.gnss_safe_confirm_steps ?? 5;
 
             const imuBaseline = cfg.ImuBaseline || {};
             const baseRollEl = document.getElementById('cfg-imu-base-roll');
@@ -1099,17 +1123,20 @@ class AdminManager {
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
-                water_confirm_steps: finalWaterConfirm
+                water_confirm_steps: finalWaterConfirm,
+                water_safe_confirm_steps: parseInt(document.getElementById('cfg-water-safe-confirm')?.value) || 3
             },
             RainAlerting: {
                 rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch').value),
                 rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning').value),
                 rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value),
-                rain_confirm_steps: finalRainConfirm
+                rain_confirm_steps: finalRainConfirm,
+                rain_safe_confirm_steps: parseInt(document.getElementById('cfg-rain-safe-confirm')?.value) || 3
             },
             GnssAlerting: {
                 gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
                 gnss_confirm_steps: parseInt(document.getElementById('cfg-gnss-steps').value) || 3,
+                gnss_safe_confirm_steps: parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
                 gnss_safe_streak: parseInt(document.getElementById('cfg-gnss-streak').value) || 10,
                 gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
             },
@@ -1117,6 +1144,7 @@ class AdminManager {
                 tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-warn').value) || 5.0,
                 tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
                 imu_confirm_steps: parseInt(document.getElementById('cfg-imu-confirm').value) || 2,
+                imu_safe_confirm_steps: parseInt(document.getElementById('cfg-imu-safe-confirm')?.value) || 3,
                 shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
             },
             ImuBaseline: {
