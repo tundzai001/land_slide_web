@@ -554,6 +554,19 @@ function updateRealtimeSensorValues(message) {
         //console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
 
+        // Update Advanced Sidepanel fields if it exists and data is available
+        if (data.adv_x !== undefined) {
+            setText('adv-val-x', (data.adv_x || 0).toFixed(4));
+            setText('adv-val-y', (data.adv_y || 0).toFixed(4));
+            setText('adv-val-h', (data.adv_h || 0).toFixed(4));
+            setText('adv-val-dx', (data.adv_dx || 0).toFixed(4));
+            setText('adv-val-dy', (data.adv_dy || 0).toFixed(4));
+            setText('adv-val-dh', (data.adv_dh || 0).toFixed(4));
+            setText('adv-val-vdx', (data.adv_vdx || 0).toFixed(4));
+            setText('adv-val-vdy', (data.adv_vdy || 0).toFixed(4));
+            setText('adv-val-vdh', (data.adv_vdh || 0).toFixed(4));
+        }
+
         const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
 
         if (charts['chart-gnss']) {
@@ -1225,20 +1238,24 @@ function updateUIVisibilityBasedOnLayers() {
 
 function toggleStationMarkersDisplay() {
     Object.values(markers).forEach(marker => {
-        if (showStationMarkers) {
-            marker.addTo(map);
-        } else {
-            map.removeLayer(marker);
+        if (window.map) {
+            if (showStationMarkers) {
+                marker.addTo(window.map);
+            } else {
+                window.map.removeLayer(marker);
+            }
         }
     });
 }
 
 function toggleRescueMarkersDisplay() {
     Object.values(rescueMarkers).forEach(marker => {
-        if (showRescueMarkers) {
-            marker.addTo(map);
-        } else {
-            map.removeLayer(marker);
+        if (window.map) {
+            if (showRescueMarkers) {
+                marker.addTo(window.map);
+            } else {
+                window.map.removeLayer(marker);
+            }
         }
     });
 }
@@ -1257,7 +1274,9 @@ async function loadRescueMarkers() {
 
         rescueRequestsData = requests;
         // Remove old markers
-        Object.values(rescueMarkers).forEach(marker => map.removeLayer(marker));
+        Object.values(rescueMarkers).forEach(marker => {
+            if (window.map) window.map.removeLayer(marker);
+        });
         rescueMarkers = {};
 
         // Add new markers for each rescue request
@@ -1309,7 +1328,6 @@ function addRescueMarker(rescueRequest) {
     });
 
     const marker = L.marker([latitude, longitude], { icon })
-        .addTo(showRescueMarkers ? map : null)
         .bindTooltip(`${requester_name || 'SOS'} - ${phone || 'N/A'}`, {
             direction: 'top',
             offset: [0, -15],
@@ -1373,7 +1391,7 @@ function updateRescueMarkerFromWebSocket(message) {
         }
     } else {
         if (message.id && rescueMarkers[message.id]) {
-            map.removeLayer(rescueMarkers[message.id]);
+            if (window.map) window.map.removeLayer(rescueMarkers[message.id]);
             delete rescueMarkers[message.id];
         }
     }
@@ -1447,8 +1465,10 @@ function setupEventListeners() {
             // Đóng tất cả panels
             const chartsPanel = document.getElementById('charts-panel');
             const longtermOverlay = document.getElementById('longterm-overlay');
+            const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
             if (chartsPanel) chartsPanel.classList.remove('active');
             if (longtermOverlay) longtermOverlay.classList.remove('active');
+            if (advSidepanel) advSidepanel.classList.remove('active');
 
             // Mở lại sidebar trái
             if (stationSidebar && currentMapMode !== 'rescue') {
@@ -1477,6 +1497,10 @@ function setupEventListeners() {
         btnShowCharts.addEventListener('click', () => {
             chartsPanel.classList.add('active');
 
+            // Close advanced gnss panel if open
+            const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
+            if (advSidepanel) advSidepanel.classList.remove('active');
+
             // Đóng sidebar trái khi mở biểu đồ
             if (stationSidebar) {
                 stationSidebar.classList.add('hidden');
@@ -1488,6 +1512,30 @@ function setupEventListeners() {
             if (currentStationData) {
                 renderCharts(currentStationData);
             }
+        });
+    }
+
+    // Advanced GNSS Sidepanel
+    const gnssCard = document.getElementById('sensor-card-gnss');
+    const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
+    const advCloseBtn = document.getElementById('gnss-sidepanel-close');
+
+    if (gnssCard && advSidepanel) {
+        console.log('✅ [GNSS] Advanced sidepanel listener attached');
+        gnssCard.addEventListener('click', () => {
+            console.log('🖱️ [GNSS] GNSS Velocity card clicked');
+            advSidepanel.classList.toggle('active');
+            const isActive = advSidepanel.classList.contains('active');
+            console.log('✨ [GNSS] Sidepanel active:', isActive);
+        });
+    } else {
+        console.warn('⚠️ [GNSS] Could not find gnssCard or advSidepanel', { gnssCard: !!gnssCard, advSidepanel: !!advSidepanel });
+    }
+
+    if (advCloseBtn && advSidepanel) {
+        advCloseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            advSidepanel.classList.remove('active');
         });
     }
 
@@ -5254,12 +5302,12 @@ function toggleHeatmap() {
         rescueHeatLayer = L.heatLayer(data, {
             radius: 30, blur: 20, maxZoom: 14,
             gradient: { 0.2: '#2196f3', 0.4: '#4caf50', 0.6: '#ffeb3b', 0.8: '#ff9800', 1: '#f44336' }
-        }).addTo(map);
+        }).addTo(window.map);
         btn?.classList.add('active');
         window.toast?.info('Heatmap đã bật');
     } else {
-        if (rescueHeatLayer) {
-            map.removeLayer(rescueHeatLayer);
+        if (rescueHeatLayer && window.map) {
+            window.map.removeLayer(rescueHeatLayer);
             rescueHeatLayer = null;
         }
         btn?.classList.remove('active');
@@ -5297,10 +5345,12 @@ function setupTimelineSlider() {
             const daysDiff = Math.floor((Date.now() - reqDate.getTime()) / (1000 * 60 * 60 * 24));
             const reqDaySlot = 30 - daysDiff; // 1 = cũ nhất, 30 = mới nhất
 
-            if (reqDaySlot <= dayValue) {
-                if (!map.hasLayer(marker)) marker.addTo(map);
-            } else {
-                if (map.hasLayer(marker)) map.removeLayer(marker);
+            if (window.map) {
+                if (reqDaySlot <= dayValue) {
+                    if (!window.map.hasLayer(marker)) marker.addTo(window.map);
+                } else {
+                    if (window.map.hasLayer(marker)) window.map.removeLayer(marker);
+                }
             }
         });
     });

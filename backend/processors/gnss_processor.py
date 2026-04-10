@@ -399,6 +399,16 @@ class GNSSVelocityProcessor:
                 'fix_mode': self._fix_mode(point['fix_quality']),
                 'num_sats': point['num_sats'],
                 'hdop': point['hdop'],
+                # 9 Parameters for Advanced UI
+                'adv_x': float(pos_enu[0]),
+                'adv_y': float(pos_enu[1]),
+                'adv_h': float(point['wgs']['h']),
+                'adv_dx': float(pos_enu[0]),
+                'adv_dy': float(pos_enu[1]),
+                'adv_dh': float(pos_enu[2]),
+                'adv_vdx': float(v_enu_filtered[0] * 1000),
+                'adv_vdy': float(v_enu_filtered[1] * 1000),
+                'adv_vdh': float(v_enu_filtered[2] * 1000),
             }
         }
 
