@@ -264,7 +264,15 @@ async def handle_ipc_client(reader, writer):
         writer.close()
 
 async def start_ipc_server():
-    server = await asyncio.start_server(handle_ipc_client, '127.0.0.1', 9999)
-    logger.info("Security IPC Server started on 127.0.0.1:9999")
-    async with server:
-        await server.serve_forever()
+    try:
+        server = await asyncio.start_server(handle_ipc_client, '127.0.0.1', 9999)
+        logger.info("Security IPC Server started on 127.0.0.1:9999")
+        async with server:
+            await server.serve_forever()
+    except OSError as e:
+        if e.errno == 10048:
+            logger.warning("Security IPC Server already running (port 9999). Skipping startup for this worker.")
+        else:
+            logger.error(f"Failed to start Security IPC Server: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error in IPC Server: {e}")

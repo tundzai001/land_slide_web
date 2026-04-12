@@ -31,6 +31,10 @@ data_engine = create_pg_engine(settings.DATA_DB_URL)
 DataSessionLocal = sessionmaker(data_engine, class_=AsyncSession, expire_on_commit=False)
 BaseData = declarative_base()
 
+# Aliases cho backward compatibility (sửa lỗi ImportError trong các file cũ)
+Base = BaseData
+AuthBase = BaseAuth
+
 # Dependency Injection cho FastAPI (Giữ nguyên)
 async def get_auth_db():
     async with AuthSessionLocal() as session:

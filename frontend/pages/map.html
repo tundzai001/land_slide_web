@@ -157,55 +157,68 @@
             <button class="sidepanel-close" id="gnss-sidepanel-close"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="sidepanel-body">
-            <div class="adv-grid">
+            <!-- Nhóm 1: Vị trí -->
+            <div class="adv-section">
+                <div class="adv-section-title">Vị trí hiện tại (WGS84)</div>
                 <div class="adv-item">
-                    <span class="adv-label">X Coordinate</span>
+                    <span class="adv-label">Tọa độ X</span>
                     <span class="adv-value" id="adv-val-x">--</span>
                     <span class="adv-unit">m</span>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Y Coordinate</span>
+                    <span class="adv-label">Tọa độ Y</span>
                     <span class="adv-value" id="adv-val-y">--</span>
                     <span class="adv-unit">m</span>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">H Coordinate</span>
+                    <span class="adv-label">Cao độ H</span>
                     <span class="adv-value" id="adv-val-h">--</span>
                     <span class="adv-unit">m</span>
                 </div>
+            </div>
+
+            <!-- Nhóm 2: Biến dạng -->
+            <div class="adv-section">
+                <div class="adv-section-title">Biến dạng lũy kế</div>
                 <div class="adv-item">
-                    <span class="adv-label">dX Displacement</span>
+                    <span class="adv-label">Biến dạng &Delta;X</span>
                     <span class="adv-value highlight-dx" id="adv-val-dx">--</span>
                     <span class="adv-unit">m</span>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">dY Displacement</span>
+                    <span class="adv-label">Biến dạng &Delta;Y</span>
                     <span class="adv-value highlight-dy" id="adv-val-dy">--</span>
                     <span class="adv-unit">m</span>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">dH Displacement</span>
+                    <span class="adv-label">Biến dạng &Delta;H</span>
                     <span class="adv-value highlight-dh" id="adv-val-dh">--</span>
                     <span class="adv-unit">m</span>
                 </div>
+            </div>
+
+            <!-- Nhóm 3: Vận tốc -->
+            <div class="adv-section">
+                <div class="adv-section-title">Vận tốc biến dạng</div>
                 <div class="adv-item">
-                    <span class="adv-label">VdX Velocity</span>
+                    <span class="adv-label">Vận tốc V<sub>&Delta;X</sub></span>
                     <span class="adv-value" id="adv-val-vdx">--</span>
-                    <span class="adv-unit">mm/s</span>
+                    <span class="adv-unit">mm/phút</span>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">VdY Velocity</span>
+                    <span class="adv-label">Vận tốc V<sub>&Delta;Y</sub></span>
                     <span class="adv-value" id="adv-val-vdy">--</span>
-                    <span class="adv-unit">mm/s</span>
+                    <span class="adv-unit">mm/phút</span>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">VdH Velocity</span>
+                    <span class="adv-label">Vận tốc V<sub>&Delta;H</sub></span>
                     <span class="adv-value" id="adv-val-vdh">--</span>
-                    <span class="adv-unit">mm/s</span>
+                    <span class="adv-unit">mm/phút</span>
                 </div>
             </div>
-            <div class="mt-3 small text-muted text-center italic">
-                * Tọa độ ENU và độ cao WGS84.
+
+            <div class="mt-4 small text-muted text-center italic" style="font-size: 0.65rem;">
+                * Hệ tọa độ dự án VN2000 hoặc WGS84 tùy cấu hình.
             </div>
         </div>
     </div>

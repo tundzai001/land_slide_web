@@ -1701,6 +1701,19 @@ async def get_station_detail(
             # ✅ Per-sensor online check (dựa trên cache timestamp)
             sensor_is_online = bool(latest_ts and (current_time - latest_ts) < threshold)
 
+            # ✅ Sửa lỗi "ảo": Tự động bù đắp dữ liệu Advanced cho trạm Offline/Dữ liệu cũ
+            if sensor_type == 'gnss' and latest_data and 'adv_x' not in latest_data:
+                latest_data = dict(latest_data) # Clone to modify
+                latest_data['adv_x'] = latest_data.get('pos_e', latest_data.get('lon', 0.0))
+                latest_data['adv_y'] = latest_data.get('pos_n', latest_data.get('lat', 0.0))
+                latest_data['adv_h'] = latest_data.get('pos_u', latest_data.get('h', 0.0))
+                latest_data['adv_dx'] = 0.0
+                latest_data['adv_dy'] = 0.0
+                latest_data['adv_dh'] = 0.0
+                latest_data['adv_vdx'] = 0.0
+                latest_data['adv_vdy'] = 0.0
+                latest_data['adv_vdh'] = 0.0
+
             sensor_data[sensor_type] = {
                 "is_online": sensor_is_online,
                 "latest": latest_data,

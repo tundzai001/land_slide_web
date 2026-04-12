@@ -1526,6 +1526,12 @@ function setupEventListeners() {
             console.log('🖱️ [GNSS] GNSS Velocity card clicked');
             advSidepanel.classList.toggle('active');
             const isActive = advSidepanel.classList.contains('active');
+            
+            // ✅ ĐỒNG BỘ: Đóng Station Sidebar khi mở Advanced GNSS
+            if (isActive && stationSidebar) {
+                stationSidebar.classList.add('hidden');
+            }
+            
             console.log('✨ [GNSS] Sidepanel active:', isActive);
         });
     } else {
@@ -4493,10 +4499,10 @@ function formatAgeFromTimestamp(ts) {
     const now = Math.floor(Date.now() / 1000);
     const diff = Math.max(0, now - Number(ts));
 
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
+    if (diff < 60) return `${diff} giây trước`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} phút trước`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} giờ trước`;
+    return `${Math.floor(diff / 86400)} ngày trước`;
 }
 
 function renderStaleInfo(data, mqttConnected, latestSensorTs) {
@@ -4510,17 +4516,17 @@ function renderStaleInfo(data, mqttConnected, latestSensorTs) {
     }
 
     const ageText = formatAgeFromTimestamp(latestSensorTs);
-    const localTime = new Date(latestSensorTs * 1000).toLocaleString();
+    const localTime = new Date(latestSensorTs * 1000).toLocaleString('vi-VN');
 
     if (!mqttConnected) {
-        staleEl.innerHTML = `<span class="badge-label">STALE</span> Last data ${ageText} (${localTime})`;
-        staleEl.style.display = 'block';
+        staleEl.innerHTML = `<span class="badge-label">MẤT KẾT NỐI</span> Dữ liệu cuối: ${ageText} (${localTime})`;
+        staleEl.style.display = 'flex';
         return;
     }
 
     if (data.status === 'offline') {
-        staleEl.innerHTML = `<span class="badge-label">OFFLINE</span> Last data ${ageText} (${localTime})`;
-        staleEl.style.display = 'block';
+        staleEl.innerHTML = `<span class="badge-label">NGOẠI TUYẾN</span> Dữ liệu cuối: ${ageText} (${localTime})`;
+        staleEl.style.display = 'flex';
         return;
     }
 
