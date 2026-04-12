@@ -228,6 +228,92 @@
             font-weight: 700;
             letter-spacing: 1px;
         }
+
+        /* ============================================
+           iOS-STYLE TOGGLE (SGM OUTPUT PARAMS)
+        ============================================ */
+        .ios-toggle-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            transition: background 0.2s, border-color 0.2s;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .ios-toggle-wrap:hover {
+            border-color: rgba(14, 165, 233, 0.4);
+            background: rgba(14, 165, 233, 0.05);
+        }
+        .ios-toggle-wrap.is-on {
+            border-color: rgba(34, 197, 94, 0.35);
+            background: rgba(34, 197, 94, 0.06);
+        }
+        .ios-toggle-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .ios-toggle-info .param-name {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .ios-toggle-info .param-unit {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        /* The actual iOS switch */
+        .ios-switch {
+            position: relative;
+            width: 44px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+        .ios-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+        .ios-switch-track {
+            position: absolute;
+            inset: 0;
+            border-radius: 13px;
+            background: #3a3f4a;
+            transition: background 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1.5px solid rgba(255,255,255,0.06);
+        }
+        .ios-switch input:checked + .ios-switch-track {
+            background: #22c55e;
+            border-color: rgba(255,255,255,0.1);
+        }
+        .ios-switch-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+            transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .ios-switch input:checked + .ios-switch-track::after {
+            transform: translateX(18px);
+        }
+        /* Light mode adaptation */
+        @media (prefers-color-scheme: light) {
+            .ios-switch-track { background: #c7c7cc; }
+        }
+        [data-theme="light"] .ios-switch-track { background: #c7c7cc; }
     </style>
 
     <!-- Sidebar -->
@@ -1141,8 +1227,175 @@
                                             </button>
                                         </div>
                                     </div>
+
+                                    <!-- ✅ GNSS SGM OUTPUT CONFIG -->
+                                    <div class="mt-3 p-3 rounded border" style="background: rgba(14,165,233,0.06); border-color: rgba(14,165,233,0.25) !important;">
+                                        <div class="d-flex align-items-center gap-2 mb-3">
+                                            <i class="bi bi-broadcast-pin" style="color:#0ea5e9;font-size:1.1rem"></i>
+                                            <h6 class="mb-0 fw-bold" style="color:var(--text-primary)">GNSS Output → Server SGM</h6>
+                                            <span class="badge ms-auto" style="background:rgba(14,165,233,0.15);color:#0ea5e9;border:1px solid rgba(14,165,233,0.3)">VN2000</span>
+                                        </div>
+
+                                        <!-- MQTT Topics cho GNSS SGM -->
+                                        <div class="row g-2 mb-3">
+                                            <div class="col-12">
+                                                <label class="form-label small fw-semibold">
+                                                    <i class="bi bi-reception-4 text-success me-1"></i>Subscribe RTK Topic
+                                                    <span class="text-muted fw-normal">(1Hz, độ chính xác cm)</span>
+                                                </label>
+                                                <input type="text" class="form-control form-control-sm" id="gnss-rtk-topic"
+                                                    placeholder="GNSS/RTK/GNSS01">
+                                            </div>
+                                            <div class="col-12">
+                                                <label class="form-label small fw-semibold">
+                                                    <i class="bi bi-stars text-warning me-1"></i>Subscribe Static Topic
+                                                    <span class="text-muted fw-normal">(1-3h, độ chính xác mm)</span>
+                                                </label>
+                                                <input type="text" class="form-control form-control-sm" id="gnss-static-topic"
+                                                    placeholder="GNSS/STATIC/GNSS01">
+                                            </div>
+                                        </div>
+
+                                        <!-- 9 tham số đẩy lên server -->
+                                        <label class="form-label small fw-semibold mb-2">Chọn tham số đẩy lên server SGM:</label>
+
+                                        <!-- Tọa độ hiện tại -->
+                                        <div class="mb-2">
+                                            <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📍 Tọa độ hiện tại</small>
+                                            <div class="row g-2">
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-x" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-x')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">X <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
+                                                            <div class="param-unit">Tọa độ X VN2000</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-x" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-y" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-y')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">Y <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
+                                                            <div class="param-unit">Tọa độ Y VN2000</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-y" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-h" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-h')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">H <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
+                                                            <div class="param-unit">Độ cao H VN2000</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-h" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Chuyển vị -->
+                                        <div class="mb-2">
+                                            <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📐 Chuyển vị</small>
+                                            <div class="row g-2">
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-dx" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-dx')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">dX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
+                                                            <div class="param-unit">Chuyển vị X</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-dx" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-dy" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-dy')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">dY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
+                                                            <div class="param-unit">Chuyển vị Y</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-dy" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-dh" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-dh')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">dH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
+                                                            <div class="param-unit">Chuyển vị H</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-dh" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Vận tốc -->
+                                        <div class="mb-1">
+                                            <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">⚡ Vận tốc chuyển vị</small>
+                                            <div class="row g-2">
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-vdx" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-vdx')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">VdX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/phút)</span></div>
+                                                            <div class="param-unit">Vận tốc X</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-vdx" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-vdy" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-vdy')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">VdY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/phút)</span></div>
+                                                            <div class="param-unit">Vận tốc Y</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-vdy" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="ios-toggle-wrap is-on" id="wrap-sgm-vdh" onclick="window.adminManager.toggleSgmWrap(this,'sgm-toggle-vdh')">
+                                                        <div class="ios-toggle-info">
+                                                            <div class="param-name">VdH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/phút)</span></div>
+                                                            <div class="param-unit">Vận tốc H</div>
+                                                        </div>
+                                                        <div class="ios-switch">
+                                                            <input type="checkbox" id="sgm-toggle-vdh" checked>
+                                                            <span class="ios-switch-track"></span>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <small class="text-muted d-block mt-3">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            Dữ liệu RTK (1Hz) và Static bình sai lưới (1-3h) sẽ được xử lý và đẩy lên server SGM theo cấu hình trên.
+                                        </small>
+                                    </div>
                                 </div>
                             </div>
+
 
                             <div id="mqtt-rain-section" class="sensor-config-section" style="display: none;">
                                 <div class="sensor-config-header"><i

@@ -784,6 +784,14 @@ class AdminManager {
         if (rainConfirmSrc) { rainConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; rainConfirmSrc.className = 'text-warning small'; }
         if (waterConfirmSrc) { waterConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; waterConfirmSrc.className = 'text-warning small'; }
 
+        // ✅ Reset GNSS SGM Output về mặc định (tất cả bật)
+        const sgmToggleIds = ['sgm-toggle-x','sgm-toggle-y','sgm-toggle-h','sgm-toggle-dx','sgm-toggle-dy','sgm-toggle-dh','sgm-toggle-vdx','sgm-toggle-vdy','sgm-toggle-vdh'];
+        sgmToggleIds.forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
+        const rtkTopicEl = document.getElementById('gnss-rtk-topic');
+        const staticTopicEl = document.getElementById('gnss-static-topic');
+        if (rtkTopicEl) rtkTopicEl.value = '';
+        if (staticTopicEl) staticTopicEl.value = '';
+
         document.getElementById('mqtt-empty-state').style.display = 'block';
         document.getElementById('btn-delete-station').style.display = 'none';
 
@@ -985,6 +993,29 @@ class AdminManager {
             if (basePitchEl) basePitchEl.value = imuBaseline.baseline_pitch ?? 0;
             const baseYawEl = document.getElementById('cfg-imu-base-yaw');
             if (baseYawEl) baseYawEl.value = imuBaseline.baseline_yaw ?? 0;
+
+            // ✅ LOAD GNSS SGM OUTPUT
+            const sgmCfg = cfg.gnss_sgm_output || {};
+            const sgmFields = sgmCfg.fields || {};
+            const setToggle = (id, val, defaultVal = true) => {
+                const el = document.getElementById(id);
+                if (el) el.checked = (val !== undefined) ? !!val : defaultVal;
+            };
+            const rtkTopicEl = document.getElementById('gnss-rtk-topic');
+            const staticTopicEl = document.getElementById('gnss-static-topic');
+            if (rtkTopicEl) rtkTopicEl.value = sgmCfg.rtk_topic || '';
+            if (staticTopicEl) staticTopicEl.value = sgmCfg.static_topic || '';
+            setToggle('sgm-toggle-x',   sgmFields.X);
+            setToggle('sgm-toggle-y',   sgmFields.Y);
+            setToggle('sgm-toggle-h',   sgmFields.H);
+            setToggle('sgm-toggle-dx',  sgmFields.dX);
+            setToggle('sgm-toggle-dy',  sgmFields.dY);
+            setToggle('sgm-toggle-dh',  sgmFields.dH);
+            setToggle('sgm-toggle-vdx', sgmFields.VdX);
+            setToggle('sgm-toggle-vdy', sgmFields.VdY);
+            setToggle('sgm-toggle-vdh', sgmFields.VdH);
+            this.syncSgmWrapStates(); // sync is-on class với checkbox state
+
 
             const gnssOrigin = cfg.gnss_origin || {};
             if (gnssOrigin.lat) {
@@ -1382,6 +1413,23 @@ class AdminManager {
         const finalImuCriticalConfirm = parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
+        // ✅ ĐỌC GNSS SGM OUTPUT CONFIG
+        const gnss_sgm_output = {
+            rtk_topic: document.getElementById('gnss-rtk-topic')?.value.trim() || '',
+            static_topic: document.getElementById('gnss-static-topic')?.value.trim() || '',
+            fields: {
+                X:   !!document.getElementById('sgm-toggle-x')?.checked,
+                Y:   !!document.getElementById('sgm-toggle-y')?.checked,
+                H:   !!document.getElementById('sgm-toggle-h')?.checked,
+                dX:  !!document.getElementById('sgm-toggle-dx')?.checked,
+                dY:  !!document.getElementById('sgm-toggle-dy')?.checked,
+                dH:  !!document.getElementById('sgm-toggle-dh')?.checked,
+                VdX: !!document.getElementById('sgm-toggle-vdx')?.checked,
+                VdY: !!document.getElementById('sgm-toggle-vdy')?.checked,
+                VdH: !!document.getElementById('sgm-toggle-vdh')?.checked
+            }
+        };
+
         const config = {
             active_preset: this.activePreset || '',
             offline_thresholds: {
@@ -1390,6 +1438,7 @@ class AdminManager {
                 water: parseInt(document.getElementById('offline-water').value) || this.defaultOfflineThresholds.water,
                 imu: parseInt(document.getElementById('offline-imu').value) || this.defaultOfflineThresholds.imu
             },
+            gnss_sgm_output: gnss_sgm_output,
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
@@ -1511,6 +1560,38 @@ class AdminManager {
     }
 
     // =========================================================================
+    // iOS TOGGLE HANDLER (SGM Output params)
+    // =========================================================================
+
+    toggleSgmWrap(wrapEl, checkboxId) {
+        // Ngăn double-fire khi click vào chính checkbox input
+        const checkbox = document.getElementById(checkboxId);
+        if (!checkbox) return;
+        checkbox.checked = !checkbox.checked;
+        wrapEl.classList.toggle('is-on', checkbox.checked);
+    }
+
+    /** Sync class is-on với trạng thái checkbox (dùng khi load edit) */
+    syncSgmWrapStates() {
+        const map = {
+            'sgm-toggle-x':   'wrap-sgm-x',
+            'sgm-toggle-y':   'wrap-sgm-y',
+            'sgm-toggle-h':   'wrap-sgm-h',
+            'sgm-toggle-dx':  'wrap-sgm-dx',
+            'sgm-toggle-dy':  'wrap-sgm-dy',
+            'sgm-toggle-dh':  'wrap-sgm-dh',
+            'sgm-toggle-vdx': 'wrap-sgm-vdx',
+            'sgm-toggle-vdy': 'wrap-sgm-vdy',
+            'sgm-toggle-vdh': 'wrap-sgm-vdh',
+        };
+        for (const [cbId, wrapId] of Object.entries(map)) {
+            const cb = document.getElementById(cbId);
+            const wrap = document.getElementById(wrapId);
+            if (cb && wrap) wrap.classList.toggle('is-on', cb.checked);
+        }
+    }
+
+
     // VELOCITY CONFIG MODAL
     // =========================================================================
 
