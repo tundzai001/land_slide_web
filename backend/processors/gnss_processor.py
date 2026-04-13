@@ -399,7 +399,22 @@ class GNSSVelocityProcessor:
                 'fix_mode': self._fix_mode(point['fix_quality']),
                 'num_sats': point['num_sats'],
                 'hdop': point['hdop'],
-                # 9 Parameters for Advanced UI
+                # 9 Parameters for External Forwarding (1Hz)
+                # X, Y: Current ENU relative meters from origin
+                # H: Absolute WGS84 Altitude
+                # Velocity: mm/minute (m/s * 1000 * 60)
+                'forwarding_data': {
+                    'X':   float(pos_enu[0]),
+                    'Y':   float(pos_enu[1]),
+                    'H':   float(point['wgs']['h']),
+                    'dX':  float(pos_enu[0]),
+                    'dY':  float(pos_enu[1]),
+                    'dH':  float(pos_enu[2]),
+                    'VdX': float(v_enu_filtered[0] * 60000),
+                    'VdY': float(v_enu_filtered[1] * 60000),
+                    'VdH': float(v_enu_filtered[2] * 60000),
+                },
+                # Keep legacy keys for UI compatibility (Adv sidepanel)
                 'adv_x': float(pos_enu[0]),
                 'adv_y': float(pos_enu[1]),
                 'adv_h': float(point['wgs']['h']),

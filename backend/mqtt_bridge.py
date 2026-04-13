@@ -357,7 +357,8 @@ class MQTTBridge:
                         "station_name": station.name,
                         "type": device.device_type,
                         "processor": self.processors_cache[proc_key],
-                        "config": self._apply_runtime_defaults_to_station_config(station.config or {})
+                        "config": self._apply_runtime_defaults_to_station_config(station.config or {}),
+                        "forwarding": (station.config or {}).get("gnss_rtk_forwarding", {})
                     }
 
                 # Diff subscribe/unsubscribe
@@ -745,6 +746,24 @@ class MQTTBridge:
             })
         except Exception as e:
             logger.error(f"❌ WS Sensor Error: {e}")
+
+        # ✅ [NEW] GNSS RTK FORWARDING (1Hz)
+        if sensor_type == 'gnss' and processed_data.get('forwarding_data'):
+            fwd_cfg = info.get('forwarding', {})
+            if fwd_cfg.get('enabled') and fwd_cfg.get('rtk_topic'):
+                try:
+                    target_topic = fwd_cfg['rtk_topic']
+                    # Chỉ lấy các trường được chọn (nếu có cấu hình fields) hoặc mặc định lấy hết
+                    payload = processed_data['forwarding_data']
+                    fields_cfg = fwd_cfg.get('fields', {})
+                    if fields_cfg:
+                        # Lọc lại payload theo checkbox người dùng chọn
+                        payload = {k: v for k, v in payload.items() if fields_cfg.get(k, True)}
+                    
+                    self.client.publish(target_topic, json.dumps(payload))
+                    logger.debug(f"📤 [FORWARD] Published 1Hz data to {target_topic}")
+                except Exception as ex:
+                    logger.error(f"❌ [FORWARD] Error publishing: {ex}")
 
         # ✅ Upsert latest_sensor_cache — luôn lưu giá trị mới nhất bất kể chu kỳ save
         try:

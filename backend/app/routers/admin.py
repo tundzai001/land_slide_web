@@ -327,20 +327,20 @@ def get_default_station_config():
             "window_days": 30,
             "trend_detection": True
         },
-        # Cấu hình đầu ra GNSS → Server SGM (VN2000)
-        "gnss_sgm_output": {
-            "rtk_topic": "",       # Subscribe RTK Topic (1Hz, cm accuracy)
-            "static_topic": "",    # Subscribe Static Topic (1-3h, mm accuracy)
+        # Cấu hình Truyền dữ liệu RTK (1Hz) ra ngoài
+        "gnss_rtk_forwarding": {
+            "enabled": False,
+            "rtk_topic": "",       # Publish RTK Topic (1Hz, cm accuracy)
             "fields": {
-                "X":   True,   # Tọa độ X VN2000 (m)
-                "Y":   True,   # Tọa độ Y VN2000 (m)
-                "H":   True,   # Độ cao H VN2000 (m)
-                "dX":  True,   # Chuyển vị dX (m)
-                "dY":  True,   # Chuyển vị dY (m)
-                "dH":  True,   # Chuyển vị dH (m)
-                "VdX": True,   # Vận tốc chuyển vị VdX (mm/phút)
-                "VdY": True,   # Vận tốc chuyển vị VdY (mm/phút)
-                "VdH": True    # Vận tốc chuyển vị VdH (mm/phút)
+                "X":   True,   # Tọa độ E hiện tại (m)
+                "Y":   True,   # Tọa độ N hiện tại (m)
+                "H":   True,   # Độ cao tuyệt đối (m)
+                "dX":  True,   # Chuyển vị E (m)
+                "dY":  True,   # Chuyển vị N (m)
+                "dH":  True,   # Chuyển vị U (m)
+                "VdX": True,   # Vận tốc E (mm/phút)
+                "VdY": True,   # Vận tốc N (mm/phút)
+                "VdH": True    # Vận tốc U (mm/phút)
             }
         }
     }

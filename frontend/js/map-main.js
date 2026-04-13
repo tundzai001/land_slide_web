@@ -556,15 +556,27 @@ function updateRealtimeSensorValues(message) {
 
         // Update Advanced Sidepanel fields if it exists and data is available
         if (data.adv_x !== undefined) {
-            setText('adv-val-x', (data.adv_x || 0).toFixed(4));
-            setText('adv-val-y', (data.adv_y || 0).toFixed(4));
-            setText('adv-val-h', (data.adv_h || 0).toFixed(4));
-            setText('adv-val-dx', (data.adv_dx || 0).toFixed(4));
-            setText('adv-val-dy', (data.adv_dy || 0).toFixed(4));
-            setText('adv-val-dh', (data.adv_dh || 0).toFixed(4));
-            setText('adv-val-vdx', (data.adv_vdx || 0).toFixed(4));
-            setText('adv-val-vdy', (data.adv_vdy || 0).toFixed(4));
-            setText('adv-val-vdh', (data.adv_vdh || 0).toFixed(4));
+             setText('adv-val-x', (data.adv_x || 0).toFixed(4));
+             setText('adv-val-y', (data.adv_y || 0).toFixed(4));
+             setText('adv-val-h', (data.adv_h || 0).toFixed(4));
+             setText('adv-val-dx', (data.adv_dx || 0).toFixed(4));
+             setText('adv-val-dy', (data.adv_dy || 0).toFixed(4));
+             setText('adv-val-dh', (data.adv_dh || 0).toFixed(4));
+             setText('adv-val-vdx', (data.adv_vdx || 0).toFixed(4));
+             setText('adv-val-vdy', (data.adv_vdy || 0).toFixed(4));
+             setText('adv-val-vdh', (data.adv_vdh || 0).toFixed(4));
+
+             // ✅ CACHE: Lưu vào currentStationData để không bị mất khi refresh định kỳ
+             if (currentStationData?.sensors?.gnss?.latest) {
+                 if (!currentStationData.sensors.gnss.latest.data) {
+                     currentStationData.sensors.gnss.latest.data = {};
+                 }
+                 Object.assign(currentStationData.sensors.gnss.latest.data, {
+                     adv_x: data.adv_x, adv_y: data.adv_y, adv_h: data.adv_h,
+                     adv_dx: data.adv_dx, adv_dy: data.adv_dy, adv_dh: data.adv_dh,
+                     adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh
+                 });
+             }
         }
 
         const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
@@ -1522,8 +1534,9 @@ function setupEventListeners() {
 
     if (gnssCard && advSidepanel) {
         console.log('✅ [GNSS] Advanced sidepanel listener attached');
-        gnssCard.addEventListener('click', () => {
-            console.log('🖱️ [GNSS] GNSS Velocity card clicked');
+        gnssCard.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.log('鼠标️ [GNSS] GNSS Velocity card clicked');
             advSidepanel.classList.toggle('active');
             const isActive = advSidepanel.classList.contains('active');
             
@@ -2320,11 +2333,36 @@ function updateSidebarUI(data) {
         if (gnssFixBadgeEl) gnssFixBadgeEl.style.display = '';
         if (gnssOfflineBadgeEl) gnssOfflineBadgeEl.style.display = 'none';
         updateGnssFixBadge(gnssLatest?.fix_mode, gnssLatest?.fix_quality);
+
+        // ✅ POPULATE: Điền dữ liệu Gnss nâng cao nếu có sẵn trong cache/latest data
+        const adv = gnssLatest?.data;
+        if (adv && adv.adv_x !== undefined) {
+            setText('adv-val-x', (adv.adv_x || 0).toFixed(4));
+            setText('adv-val-y', (adv.adv_y || 0).toFixed(4));
+            setText('adv-val-h', (adv.adv_h || 0).toFixed(4));
+            setText('adv-val-dx', (adv.adv_dx || 0).toFixed(4));
+            setText('adv-val-dy', (adv.adv_dy || 0).toFixed(4));
+            setText('adv-val-dh', (adv.adv_dh || 0).toFixed(4));
+            setText('adv-val-vdx', (adv.adv_vdx || 0).toFixed(4));
+            setText('adv-val-vdy', (adv.adv_vdy || 0).toFixed(4));
+            setText('adv-val-vdh', (adv.adv_vdh || 0).toFixed(4));
+        }
     } else {
         const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
         const gnssOfflineBadgeEl = document.getElementById('gnss-offline-badge');
         if (gnssFixBadgeEl) gnssFixBadgeEl.style.display = 'none';
         if (gnssOfflineBadgeEl) gnssOfflineBadgeEl.style.display = '';
+
+        // Reset advanced fields if sensor is offline
+        setText('adv-val-x', '--');
+        setText('adv-val-y', '--');
+        setText('adv-val-h', '--');
+        setText('adv-val-dx', '--');
+        setText('adv-val-dy', '--');
+        setText('adv-val-dh', '--');
+        setText('adv-val-vdx', '--');
+        setText('adv-val-vdy', '--');
+        setText('adv-val-vdh', '--');
     }
     updateSensorOfflineBadge('rain', rainOnline);
     updateSensorOfflineBadge('water', waterOnline);

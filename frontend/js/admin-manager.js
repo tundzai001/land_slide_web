@@ -994,27 +994,33 @@ class AdminManager {
             const baseYawEl = document.getElementById('cfg-imu-base-yaw');
             if (baseYawEl) baseYawEl.value = imuBaseline.baseline_yaw ?? 0;
 
-            // ✅ LOAD GNSS SGM OUTPUT
-            const sgmCfg = cfg.gnss_sgm_output || {};
-            const sgmFields = sgmCfg.fields || {};
+            // ✅ LOAD GNSS RTK FORWARDING
+            const fwdCfg = cfg.gnss_rtk_forwarding || {};
+            const fwdFields = fwdCfg.fields || {};
             const setToggle = (id, val, defaultVal = true) => {
                 const el = document.getElementById(id);
                 if (el) el.checked = (val !== undefined) ? !!val : defaultVal;
             };
+
+            const fwdEnabledEl = document.getElementById('cfg-fwd-enabled');
+            if (fwdEnabledEl) {
+                fwdEnabledEl.checked = !!fwdCfg.enabled;
+                this.toggleRtkForwardingSlide(false); // Init slide state
+            }
+
             const rtkTopicEl = document.getElementById('gnss-rtk-topic');
-            const staticTopicEl = document.getElementById('gnss-static-topic');
-            if (rtkTopicEl) rtkTopicEl.value = sgmCfg.rtk_topic || '';
-            if (staticTopicEl) staticTopicEl.value = sgmCfg.static_topic || '';
-            setToggle('sgm-toggle-x',   sgmFields.X);
-            setToggle('sgm-toggle-y',   sgmFields.Y);
-            setToggle('sgm-toggle-h',   sgmFields.H);
-            setToggle('sgm-toggle-dx',  sgmFields.dX);
-            setToggle('sgm-toggle-dy',  sgmFields.dY);
-            setToggle('sgm-toggle-dh',  sgmFields.dH);
-            setToggle('sgm-toggle-vdx', sgmFields.VdX);
-            setToggle('sgm-toggle-vdy', sgmFields.VdY);
-            setToggle('sgm-toggle-vdh', sgmFields.VdH);
-            this.syncSgmWrapStates(); // sync is-on class với checkbox state
+            if (rtkTopicEl) rtkTopicEl.value = fwdCfg.rtk_topic || '';
+            
+            setToggle('fwd-toggle-x',   fwdFields.X);
+            setToggle('fwd-toggle-y',   fwdFields.Y);
+            setToggle('fwd-toggle-h',   fwdFields.H);
+            setToggle('fwd-toggle-dx',  fwdFields.dX);
+            setToggle('fwd-toggle-dy',  fwdFields.dY);
+            setToggle('fwd-toggle-dh',  fwdFields.dH);
+            setToggle('fwd-toggle-vdx', fwdFields.VdX);
+            setToggle('fwd-toggle-vdy', fwdFields.VdY);
+            setToggle('fwd-toggle-vdh', fwdFields.VdH);
+            this.syncForwardingWrapStates();
 
 
             const gnssOrigin = cfg.gnss_origin || {};
@@ -1413,20 +1419,20 @@ class AdminManager {
         const finalImuCriticalConfirm = parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
-        // ✅ ĐỌC GNSS SGM OUTPUT CONFIG
-        const gnss_sgm_output = {
+        // ✅ ĐỌC GNSS RTK FORWARDING CONFIG
+        const gnss_rtk_forwarding = {
+            enabled: !!document.getElementById('cfg-fwd-enabled')?.checked,
             rtk_topic: document.getElementById('gnss-rtk-topic')?.value.trim() || '',
-            static_topic: document.getElementById('gnss-static-topic')?.value.trim() || '',
             fields: {
-                X:   !!document.getElementById('sgm-toggle-x')?.checked,
-                Y:   !!document.getElementById('sgm-toggle-y')?.checked,
-                H:   !!document.getElementById('sgm-toggle-h')?.checked,
-                dX:  !!document.getElementById('sgm-toggle-dx')?.checked,
-                dY:  !!document.getElementById('sgm-toggle-dy')?.checked,
-                dH:  !!document.getElementById('sgm-toggle-dh')?.checked,
-                VdX: !!document.getElementById('sgm-toggle-vdx')?.checked,
-                VdY: !!document.getElementById('sgm-toggle-vdy')?.checked,
-                VdH: !!document.getElementById('sgm-toggle-vdh')?.checked
+                X:   !!document.getElementById('fwd-toggle-x')?.checked,
+                Y:   !!document.getElementById('fwd-toggle-y')?.checked,
+                H:   !!document.getElementById('fwd-toggle-h')?.checked,
+                dX:  !!document.getElementById('fwd-toggle-dx')?.checked,
+                dY:  !!document.getElementById('fwd-toggle-dy')?.checked,
+                dH:  !!document.getElementById('fwd-toggle-dh')?.checked,
+                VdX: !!document.getElementById('fwd-toggle-vdx')?.checked,
+                VdY: !!document.getElementById('fwd-toggle-vdy')?.checked,
+                VdH: !!document.getElementById('fwd-toggle-vdh')?.checked
             }
         };
 
@@ -1560,34 +1566,78 @@ class AdminManager {
     }
 
     // =========================================================================
-    // iOS TOGGLE HANDLER (SGM Output params)
+    // iOS TOGGLE HANDLER (Forwarding Output params)
     // =========================================================================
 
-    toggleSgmWrap(wrapEl, checkboxId) {
-        // Ngăn double-fire khi click vào chính checkbox input
+    toggleForwardingWrap(eventOrWrap, wrapOrId, maybeCheckboxId) {
+        const hasEvent = !!(maybeCheckboxId && eventOrWrap && typeof eventOrWrap === 'object');
+        const event = hasEvent ? eventOrWrap : null;
+        const wrapEl = hasEvent ? wrapOrId : eventOrWrap;
+        const checkboxId = hasEvent ? maybeCheckboxId : wrapOrId;
+
         const checkbox = document.getElementById(checkboxId);
         if (!checkbox) return;
+
+        if (event?.target?.closest('input')) {
+            // Let native checkbox behavior run, then sync visual state.
+            setTimeout(() => {
+                wrapEl.classList.toggle('is-on', checkbox.checked);
+            }, 0);
+            return;
+        }
+
+        event?.preventDefault?.();
         checkbox.checked = !checkbox.checked;
         wrapEl.classList.toggle('is-on', checkbox.checked);
     }
 
-    /** Sync class is-on với trạng thái checkbox (dùng khi load edit) */
-    syncSgmWrapStates() {
+    syncForwardingWrapStates() {
         const map = {
-            'sgm-toggle-x':   'wrap-sgm-x',
-            'sgm-toggle-y':   'wrap-sgm-y',
-            'sgm-toggle-h':   'wrap-sgm-h',
-            'sgm-toggle-dx':  'wrap-sgm-dx',
-            'sgm-toggle-dy':  'wrap-sgm-dy',
-            'sgm-toggle-dh':  'wrap-sgm-dh',
-            'sgm-toggle-vdx': 'wrap-sgm-vdx',
-            'sgm-toggle-vdy': 'wrap-sgm-vdy',
-            'sgm-toggle-vdh': 'wrap-sgm-vdh',
+            'fwd-toggle-x':   'wrap-fwd-x',
+            'fwd-toggle-y':   'wrap-fwd-y',
+            'fwd-toggle-h':   'wrap-fwd-h',
+            'fwd-toggle-dx':  'wrap-fwd-dx',
+            'fwd-toggle-dy':  'wrap-fwd-dy',
+            'fwd-toggle-dh':  'wrap-fwd-dh',
+            'fwd-toggle-vdx': 'wrap-fwd-vdx',
+            'fwd-toggle-vdy': 'wrap-fwd-vdy',
+            'fwd-toggle-vdh': 'wrap-fwd-vdh',
         };
         for (const [cbId, wrapId] of Object.entries(map)) {
             const cb = document.getElementById(cbId);
             const wrap = document.getElementById(wrapId);
             if (cb && wrap) wrap.classList.toggle('is-on', cb.checked);
+        }
+    }
+
+    toggleRtkForwardingSlide(animate = true) {
+        const checkbox = document.getElementById('cfg-fwd-enabled');
+        const content = document.getElementById('rtk-forwarding-content');
+        if (!checkbox || !content) return;
+
+        if (checkbox.checked) {
+            content.style.display = 'block';
+            if (animate) {
+                content.style.maxHeight = '0px';
+                content.style.opacity = '0';
+                setTimeout(() => {
+                    content.style.maxHeight = '600px';
+                    content.style.opacity = '1';
+                }, 10);
+            } else {
+                content.style.maxHeight = '600px';
+                content.style.opacity = '1';
+            }
+        } else {
+            if (animate) {
+                content.style.maxHeight = '0px';
+                content.style.opacity = '0';
+                setTimeout(() => {
+                    content.style.display = 'none';
+                }, 300);
+            } else {
+                content.style.display = 'none';
+            }
         }
     }
 
