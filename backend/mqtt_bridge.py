@@ -5,6 +5,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Dict, Any, Optional
 from collections import defaultdict
@@ -24,15 +25,6 @@ from processors.imu_processor import IMUEngine
 
 # from aes128decrypt import aes128_decrypt_base64  # tạm vô hiệu hoá
 
-# Cấu hình Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - BRIDGE - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('mqtt_bridge.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 class MQTTBridge:
@@ -95,8 +87,17 @@ class MQTTBridge:
         self._device_update_buffer: dict = {}   # {device_id: last_data_time}
         self._buffer_lock = asyncio.Lock()
         self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
+        self._diag_last_log_ts = defaultdict(int)
 
         self.loop = None
+
+    def _diag_should_log(self, key: str, interval_sec: int = 30) -> bool:
+        now_ts = int(time.time())
+        last_ts = int(self._diag_last_log_ts.get(key, 0) or 0)
+        if (now_ts - last_ts) >= interval_sec:
+            self._diag_last_log_ts[key] = now_ts
+            return True
+        return False
 
     async def load_runtime_config_from_db(self):
         """Load global system config (main_config) and apply as runtime defaults."""
@@ -257,15 +258,58 @@ class MQTTBridge:
             logger.error(f"❌ Retry failed: {e}. Next retry in 10s...")
             self.loop.call_later(10, self._retry_connect)
 
+    def _extract_gga_from_payload(self, payload_bytes: bytes) -> Optional[str]:
+        """Extract a single NMEA GGA sentence from mixed binary/text payload."""
+        if not payload_bytes:
+            return None
+
+        gga_regex = re.compile(rb'\$G[NP]GGA,[^\r\n*]*(?:\*[0-9A-Fa-f]{2})?')
+
+        match = gga_regex.search(payload_bytes)
+        if not match and b'\x00' in payload_bytes:
+            # Some encoders interleave NULL bytes; remove them and retry.
+            compact_bytes = payload_bytes.replace(b'\x00', b'')
+            match = gga_regex.search(compact_bytes)
+
+        if not match:
+            return None
+
+        return match.group(0).decode('ascii', errors='ignore').strip()
+
     def on_message(self, client, userdata, msg):
         try:
             topic = msg.topic
+            info = self.topic_map.get(topic)
+            if not info:
+                if self._diag_should_log(f"unknown_topic:{topic}", 60):
+                    logger.warning(f"[MQTT] Received message on unknown topic (not mapped in DB): {topic}")
+                return
+
+            sensor_type = (info or {}).get('type')
             try:
-                payload_str = msg.payload.decode('utf-8')
-                # sẽ thêm hàm giải mã AES ở đoạn này
-                # decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
-                # Tôi phải bỏ hàm giải mã AES vì hiện tại client không mã hóa dữ liệu, đồng chí nào tự ý sửa logic này mà không hiểu rõ sẽ ăn 500 cú Kamejoko vỡ bô đi ị.
-                decrypted_payload = payload_str.strip()
+                if sensor_type == 'gnss':
+                    # GNSS topic can contain mixed payload (RTCM binary + NMEA text).
+                    gga_sentence = self._extract_gga_from_payload(msg.payload)
+                    if gga_sentence:
+                        decrypted_payload = gga_sentence
+                    else:
+                        payload_str = msg.payload.decode('utf-8', errors='ignore')
+                        decrypted_payload = payload_str.strip()
+                else:
+                    payload_str = msg.payload.decode('utf-8')
+                    # sẽ thêm hàm giải mã AES ở đoạn này
+                    # decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
+                    # Tôi phải bỏ hàm giải mã AES vì hiện tại client không mã hóa dữ liệu, đồng chí nào tự ý sửa logic này mà không hiểu rõ sẽ ăn 500 cú Kamejoko vỡ bô đi ị.
+                    decrypted_payload = payload_str.strip()
+
+                if sensor_type == 'gnss' and not decrypted_payload:
+                    if self._diag_should_log(f"empty_gnss:{topic}", 30):
+                        logger.info(f"[GNSS] Payload decoded empty on topic={topic}; likely binary-only RTCM frame")
+                    return
+
+                if sensor_type == 'gnss' and ('$GNGGA' not in decrypted_payload and '$GPGGA' not in decrypted_payload):
+                    if self._diag_should_log(f"no_gga:{topic}", 30):
+                        logger.info(f"[GNSS] No GGA sentence in payload topic={topic}; waiting next frame")
                 
             except UnicodeDecodeError:
                 return # Bỏ qua dữ liệu nhị phân (RTCM)
@@ -391,6 +435,11 @@ class MQTTBridge:
             self._station_update_buffer.clear()
             self._device_update_buffer.clear()
 
+        logger.debug(
+            f"[FLUSH] Flushing: {len(sensor_batch)} sensor records, "
+            f"{len(station_batch)} station updates, {len(device_batch)} device updates"
+        )
+
         # 1. Bulk insert sensor data (1 INSERT nhiều rows thay vì nhiều INSERT)
         if sensor_batch:
             try:
@@ -415,7 +464,7 @@ class MQTTBridge:
                             Device.__table__.update().where(Device.id == did).values(last_data_time=ts)
                         )
                     await db.commit()
-                logger.debug(f"💾 [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
+                logger.info(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
             except Exception as e:
                 logger.error(f"❌ Batch config update error: {e}")
 
@@ -643,6 +692,19 @@ class MQTTBridge:
             }
             self._device_update_buffer[device_id] = current_timestamp
 
+    async def _touch_online_heartbeat(self, device_id: int, station_id: int, current_timestamp: int):
+        """Mark device/station alive even when payload is not persisted in this cycle."""
+        async with self._buffer_lock:
+            self._station_update_buffer[station_id] = {
+                "status": "online",
+                "last_update": current_timestamp
+            }
+            self._device_update_buffer[device_id] = current_timestamp
+            logger.debug(
+                f"[HEARTBEAT] Touched station_id={station_id}, device_id={device_id}, ts={current_timestamp}, "
+                f"queued_stations={len(self._station_update_buffer)}, queued_devices={len(self._device_update_buffer)}"
+            )
+
     async def process_pipeline(self, topic: str, raw_payload: str):
         info = self.topic_map.get(topic)
         if not info: return
@@ -656,6 +718,9 @@ class MQTTBridge:
         
         current_timestamp = int(time.time())
         processed_data = None
+
+        # Always refresh liveness on every message; do not depend on save interval.
+        await self._touch_online_heartbeat(device_id, station_id, current_timestamp)
         
         # 1. PROCESS DATA
         try:
@@ -670,8 +735,8 @@ class MQTTBridge:
                         "fix_mode": res.get('fix_mode'),
                         "message": res.get('message')
                     }
-                    if self._should_save_gnss_status(station_id, current_timestamp, station_config):
-                        await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
+                    # Always buffer status (even UNTRUSTED_FIX) to keep record consistent
+                    await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
                     # Broadcast GNSS fix status even when velocity is skipped (fix != 4)
                     try:
                         await manager.broadcast({

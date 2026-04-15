@@ -82,7 +82,8 @@ class GNSSVelocityProcessor:
             1: "GPS_SINGLE_NO_RTK",
             2: "DGPS_FLOAT",
             4: "RTK_FIXED",
-            5: "RTK_FLOAT"
+            5: "RTK_FLOAT",
+            7: "MANUAL_INPUT_MODE"
         }
         return mapping.get(fix_quality, "UNKNOWN")
 
@@ -352,7 +353,10 @@ class GNSSVelocityProcessor:
             self.history.pop()  # pop bad fix ra khỏi window trước khi nó nhiễm median
             logger.warning(
                 f"[GNSS-{self.device_id}] Bad fix rejected: step={step_2d_m:.3f}m "
-                f"(max={self.max_step_distance_m}m), dt={dt:.3f}s"
+                f"(max={self.max_step_distance_m}m), dt={dt:.3f}s | "
+                f"pos_old=[{p_old['pos_enu'][0]:.3f}, {p_old['pos_enu'][1]:.3f}, {p_old['pos_enu'][2]:.3f}]m -> "
+                f"pos_new=[{p_new['pos_enu'][0]:.3f}, {p_new['pos_enu'][1]:.3f}, {p_new['pos_enu'][2]:.3f}]m | "
+                f"wgs=[{point['wgs']['lat']:.6f}, {point['wgs']['lon']:.6f}, {point['wgs']['h']:.3f}]"
             )
             return None
 

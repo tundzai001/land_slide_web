@@ -784,13 +784,12 @@ class AdminManager {
         if (rainConfirmSrc) { rainConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; rainConfirmSrc.className = 'text-warning small'; }
         if (waterConfirmSrc) { waterConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; waterConfirmSrc.className = 'text-warning small'; }
 
-        // ✅ Reset GNSS SGM Output về mặc định (tất cả bật)
-        const sgmToggleIds = ['sgm-toggle-x','sgm-toggle-y','sgm-toggle-h','sgm-toggle-dx','sgm-toggle-dy','sgm-toggle-dh','sgm-toggle-vdx','sgm-toggle-vdy','sgm-toggle-vdh'];
-        sgmToggleIds.forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
+        // Reset RTK forwarding fields to default (all enabled)
+        const fwdToggleIds = ['fwd-toggle-x','fwd-toggle-y','fwd-toggle-h','fwd-toggle-dx','fwd-toggle-dy','fwd-toggle-dh','fwd-toggle-vdx','fwd-toggle-vdy','fwd-toggle-vdh'];
+        fwdToggleIds.forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
         const rtkTopicEl = document.getElementById('gnss-rtk-topic');
-        const staticTopicEl = document.getElementById('gnss-static-topic');
         if (rtkTopicEl) rtkTopicEl.value = '';
-        if (staticTopicEl) staticTopicEl.value = '';
+        this.syncForwardingWrapStates();
 
         document.getElementById('mqtt-empty-state').style.display = 'block';
         document.getElementById('btn-delete-station').style.display = 'none';
@@ -1444,7 +1443,6 @@ class AdminManager {
                 water: parseInt(document.getElementById('offline-water').value) || this.defaultOfflineThresholds.water,
                 imu: parseInt(document.getElementById('offline-imu').value) || this.defaultOfflineThresholds.imu
             },
-            gnss_sgm_output: gnss_sgm_output,
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),

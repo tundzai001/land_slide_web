@@ -157,68 +157,68 @@
             <button class="sidepanel-close" id="gnss-sidepanel-close"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="sidepanel-body">
-            <!-- Nhóm 1: Vị trí -->
+            <!-- Nhóm 1: Vị trí hiện tại (Lat/Lon/Alt từ GNGGA) -->
             <div class="adv-section">
                 <div class="adv-section-title">Vị trí hiện tại (WGS84)</div>
                 <div class="adv-item">
-                    <span class="adv-label">Tọa độ X</span>
-                    <span class="adv-value" id="adv-val-x">--</span>
-                    <span class="adv-unit">m</span>
+                    <span class="adv-label">Latitude</span>
+                    <div class="adv-value-row"><span class="adv-value" id="adv-val-lat">--</span><span
+                            class="adv-unit">°</span></div>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Tọa độ Y</span>
-                    <span class="adv-value" id="adv-val-y">--</span>
-                    <span class="adv-unit">m</span>
+                    <span class="adv-label">Longitude</span>
+                    <div class="adv-value-row"><span class="adv-value" id="adv-val-lon">--</span><span
+                            class="adv-unit">°</span></div>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Cao độ H</span>
-                    <span class="adv-value" id="adv-val-h">--</span>
-                    <span class="adv-unit">m</span>
+                    <span class="adv-label">Altitude</span>
+                    <div class="adv-value-row"><span class="adv-value" id="adv-val-alt">--</span><span
+                            class="adv-unit">m</span></div>
                 </div>
             </div>
 
-            <!-- Nhóm 2: Biến dạng -->
+            <!-- Nhóm 2: Biến dạng lũy kế -->
             <div class="adv-section">
                 <div class="adv-section-title">Biến dạng lũy kế</div>
                 <div class="adv-item">
-                    <span class="adv-label">Biến dạng &Delta;X</span>
-                    <span class="adv-value highlight-dx" id="adv-val-dx">--</span>
-                    <span class="adv-unit">m</span>
+                    <span class="adv-label">Biến dạng &Delta;X (East)</span>
+                    <div class="adv-value-row"><span class="adv-value highlight-dx" id="adv-val-dx">--</span><span
+                            class="adv-unit">m</span></div>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Biến dạng &Delta;Y</span>
-                    <span class="adv-value highlight-dy" id="adv-val-dy">--</span>
-                    <span class="adv-unit">m</span>
+                    <span class="adv-label">Biến dạng &Delta;Y (North)</span>
+                    <div class="adv-value-row"><span class="adv-value highlight-dy" id="adv-val-dy">--</span><span
+                            class="adv-unit">m</span></div>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Biến dạng &Delta;H</span>
-                    <span class="adv-value highlight-dh" id="adv-val-dh">--</span>
-                    <span class="adv-unit">m</span>
+                    <span class="adv-label">Biến dạng &Delta;H (Up)</span>
+                    <div class="adv-value-row"><span class="adv-value highlight-dh" id="adv-val-dh">--</span><span
+                            class="adv-unit">m</span></div>
                 </div>
             </div>
 
-            <!-- Nhóm 3: Vận tốc -->
+            <!-- Nhóm 3: Vận tốc biến dạng -->
             <div class="adv-section">
                 <div class="adv-section-title">Vận tốc biến dạng</div>
                 <div class="adv-item">
                     <span class="adv-label">Vận tốc V<sub>&Delta;X</sub></span>
-                    <span class="adv-value" id="adv-val-vdx">--</span>
-                    <span class="adv-unit">mm/phút</span>
+                    <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span><span
+                            class="adv-unit">mm/phút</span></div>
                 </div>
                 <div class="adv-item">
                     <span class="adv-label">Vận tốc V<sub>&Delta;Y</sub></span>
-                    <span class="adv-value" id="adv-val-vdy">--</span>
-                    <span class="adv-unit">mm/phút</span>
+                    <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span><span
+                            class="adv-unit">mm/s</span></div>
                 </div>
                 <div class="adv-item">
                     <span class="adv-label">Vận tốc V<sub>&Delta;H</sub></span>
-                    <span class="adv-value" id="adv-val-vdh">--</span>
-                    <span class="adv-unit">mm/phút</span>
+                    <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span><span
+                            class="adv-unit">mm/s</span></div>
                 </div>
             </div>
 
             <div class="mt-4 small text-muted text-center italic" style="font-size: 0.65rem;">
-                * Hệ tọa độ dự án VN2000 hoặc WGS84 tùy cấu hình.
+                * Hệ tọa độ WGS84.
             </div>
         </div>
     </div>
@@ -262,7 +262,8 @@
                     <!-- GNSS -->
                     <div class="sensor-item sensor-clickable" id="sensor-card-gnss" title="Xem chi tiết (Advanced)">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity <i class="bi bi-info-circle ms-1 small opacity-50"></i></span>
+                            <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity <i
+                                    class="bi bi-info-circle ms-1 small opacity-50"></i></span>
                             <span id="gnss-fix-badge" class="gnss-fix-badge GNSS_UNKNOWN">NO DATA</span>
                             <span id="gnss-offline-badge" class="sensor-offline-badge"
                                 style="display:none;">OFFLINE</span>

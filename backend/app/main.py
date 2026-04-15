@@ -25,6 +25,97 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func, delete, text
 
+LOG_FILE_NAME = 'landslide_system.log'
+_ORIGINAL_STDOUT = sys.__stdout__
+_ORIGINAL_STDERR = sys.__stderr__
+
+
+class _LoggerWriter:
+    """File-like adapter that redirects print/traceback output to logging."""
+    def __init__(self, log_method):
+        self.log_method = log_method
+        self._buffer = ''
+
+    def write(self, message):
+        if not message:
+            return 0
+        self._buffer += str(message)
+        while '\n' in self._buffer:
+            line, self._buffer = self._buffer.split('\n', 1)
+            clean_line = line.rstrip()
+            if clean_line:
+                self.log_method(clean_line)
+        return len(message)
+
+    def flush(self):
+        clean_line = self._buffer.rstrip()
+        if clean_line:
+            self.log_method(clean_line)
+        self._buffer = ''
+
+    def isatty(self):
+        return False
+
+
+def _configure_system_logging() -> None:
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.INFO)
+
+    file_handler = logging.FileHandler(LOG_FILE_NAME, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler(_ORIGINAL_STDOUT)
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    logging.captureWarnings(True)
+
+    # Force uvicorn/fastapi logs to reuse root handlers (same file).
+    for logger_name in ('uvicorn', 'uvicorn.error', 'uvicorn.access', 'fastapi'):
+        uv_logger = logging.getLogger(logger_name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = True
+        uv_logger.setLevel(logging.INFO)
+
+    sys.stdout = _LoggerWriter(logging.getLogger('CMD.stdout').info)
+    sys.stderr = _LoggerWriter(logging.getLogger('CMD.stderr').error)
+
+
+def _disable_windows_quick_edit_mode() -> None:
+    """Prevent accidental console clicks from pausing the process on Windows."""
+    if os.name != 'nt':
+        return
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        std_input_handle = -10  # STD_INPUT_HANDLE
+        handle = kernel32.GetStdHandle(std_input_handle)
+        if handle in (0, -1):
+            return
+
+        mode = ctypes.c_uint()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+
+        enable_quick_edit = 0x0040
+        enable_extended_flags = 0x0080
+        new_mode = (mode.value | enable_extended_flags) & ~enable_quick_edit
+        if new_mode != mode.value:
+            kernel32.SetConsoleMode(handle, new_mode)
+            logging.getLogger(__name__).info('Windows Quick Edit mode disabled for stable runtime.')
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'Cannot disable Quick Edit mode: {e}')
+
+
+_configure_system_logging()
+_disable_windows_quick_edit_mode()
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mqtt_bridge import MQTTBridge
 
@@ -45,20 +136,9 @@ from .websocket import manager as ws_manager
 from .landslide_analyzer import LandslideAnalyzer
 
 # Import security core
-import sys
-import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from security_core import AdvancedSecurityMiddleware, start_ipc_server
 
-# Cấu hình Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - API - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('landslide_system.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 # Tắt log spam cho /api/field/heartbeat của Uvicorn

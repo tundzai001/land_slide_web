@@ -3112,7 +3112,7 @@ body {
 .adv-section {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
 }
 
 .adv-section-title {
@@ -3121,7 +3121,7 @@ body {
     color: var(--accent-primary);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -3134,17 +3134,17 @@ body {
     background: var(--border-light);
 }
 
-/* Premium Card Item */
+/* Card Item — vertical stack */
 .adv-item {
     background: rgba(var(--bg-secondary-rgb), 0.4);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    padding: 16px 20px;
+    padding: 10px 16px;
     border-radius: var(--radius-lg);
     border: 1px solid var(--glass-border);
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 2px;
     transition: all 0.25s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
@@ -3157,25 +3157,35 @@ body {
 }
 
 .adv-label {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
+    font-size: 0.72rem;
+    color: var(--text-primary);
     text-transform: uppercase;
     font-weight: 800;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     opacity: 0.85;
+    white-space: nowrap;
 }
 
 .adv-value {
-    font-family: monospace;
+    font-family: 'Courier New', monospace;
     font-weight: 700;
-    font-size: 1rem;
-    color: #e2e8f0;
+    font-size: 1.15rem;
+    color: var(--accent-primary);
+    line-height: 1.2;
+}
+
+.adv-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
 }
 
 .adv-unit {
     font-size: 0.75rem;
-    color: #64748b;
+    font-weight: 600;
+    color: var(--text-primary);
     margin-left: 4px;
+    opacity: 0.6;
 }
 
 /* Highlight specific displacement values */

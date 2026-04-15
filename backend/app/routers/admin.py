@@ -1184,6 +1184,42 @@ class GNSSLiveFetcher:
             return {'lat': lat, 'lon': lon, 'h': h, 'fix_quality': fix_quality, 'num_sats': num_sats}
         except (ValueError, IndexError):
             return None
+
+    def _extract_gngga(self, payload_bytes: bytes) -> Optional[str]:
+        # Some topics can carry binary (e.g. RTCM) or mixed frames; keep only a GGA sentence.
+        payload_text = payload_bytes.decode('utf-8', errors='ignore')
+        if not payload_text:
+            return None
+
+        idx_gngga = payload_text.find('$GNGGA')
+        idx_gpgga = payload_text.find('$GPGGA')
+        start_candidates = [i for i in (idx_gngga, idx_gpgga) if i >= 0]
+        if not start_candidates:
+            return None
+
+        start = min(start_candidates)
+        tail = payload_text[start:]
+
+        end_candidates = []
+        for marker in ('\r', '\n'):
+            pos = tail.find(marker)
+            if pos >= 0:
+                end_candidates.append(pos)
+        next_sentence_pos = tail.find('$', 1)
+        if next_sentence_pos >= 0:
+            end_candidates.append(next_sentence_pos)
+
+        end = min(end_candidates) if end_candidates else len(tail)
+        sentence = tail[:end].strip()
+        if not (sentence.startswith('$GNGGA') or sentence.startswith('$GPGGA')):
+            return None
+
+        # Keep checksum if present and trim trailing noise after checksum bytes.
+        checksum_idx = sentence.find('*')
+        if checksum_idx >= 0 and len(sentence) >= checksum_idx + 3:
+            sentence = sentence[:checksum_idx + 3]
+
+        return sentence if ',' in sentence else None
     
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
@@ -1195,8 +1231,11 @@ class GNSSLiveFetcher:
     
     def _on_message(self, client, userdata, msg):
         try:
-            payload = msg.payload.decode('utf-8')
-            logger.info(f"[GNSSLiveFetcher] Received message on {msg.topic}: {payload}")
+            payload = self._extract_gngga(msg.payload)
+            if not payload:
+                return
+
+            logger.info(f"[GNSSLiveFetcher] Received GNSS message on {msg.topic}: {payload}")
             parsed = self._parse_gngga(payload)
             if parsed and parsed['fix_quality'] >= 1:
                 logger.info(f"[GNSSLiveFetcher] Valid GNSS parsed: {parsed}")
