@@ -27,12 +27,14 @@
             margin-bottom: 32px;
             position: relative;
         }
+
         #stationConfigModal .wizard-step {
             flex: 1;
             text-align: center;
             position: relative;
             z-index: 1;
         }
+
         #stationConfigModal .step-circle {
             width: 40px;
             height: 40px;
@@ -46,11 +48,13 @@
             margin-bottom: 8px;
             transition: all 0.3s;
         }
+
         #stationConfigModal .wizard-step.active .step-circle {
             background: var(--accent-primary);
             color: white;
             border-color: var(--accent-primary);
         }
+
         #stationConfigModal .wizard-steps-container {
             background-color: var(--bg-secondary) !important;
             border-bottom: 1px solid var(--border-color);
@@ -454,8 +458,8 @@
                                 <div class="input-group">
                                     <input type="password" class="form-control" id="sys-mqtt-password"
                                         name="sys_mqtt_password_runtime" autocomplete="new-password" readonly
-                                        onfocus="unlockProtectedInput(this)" placeholder="••••••••"
-                                        data-lpignore="true" onblur="lockProtectedInput(this)">
+                                        onfocus="unlockProtectedInput(this)" placeholder="••••••••" data-lpignore="true"
+                                        onblur="lockProtectedInput(this)">
                                     <button class="btn btn-outline-secondary" type="button"
                                         onclick="togglePasswordVisibility('sys-mqtt-password')">
                                         <i class="bi bi-eye"></i>
@@ -670,7 +674,9 @@
                             </tr>
                         </thead>
                         <tbody id="rescue-requests-body">
-                            <tr><td colspan="8" class="text-muted text-center py-4">Chưa có dữ liệu</td></tr>
+                            <tr>
+                                <td colspan="8" class="text-muted text-center py-4">Chưa có dữ liệu</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -972,12 +978,14 @@
                             <div class="d-flex flex-wrap gap-3 mb-4 p-3 border rounded">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-gnss">
-                                    <label class="form-check-label" for="edit-gnss"><i class="bi bi-geo-alt-fill text-danger me-1"></i>
+                                    <label class="form-check-label" for="edit-gnss"><i
+                                            class="bi bi-geo-alt-fill text-danger me-1"></i>
                                         GNSS</label>
                                 </div>
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-rain">
-                                    <label class="form-check-label" for="edit-rain"><i class="bi bi-cloud-rain-fill me-1"
+                                    <label class="form-check-label" for="edit-rain"><i
+                                            class="bi bi-cloud-rain-fill me-1"
                                             style="color: var(--accent-primary);"></i> Rain</label>
                                 </div>
                                 <div class="form-check form-switch">
@@ -1021,11 +1029,13 @@
                                         <div class="d-flex justify-content-between align-items-center">
                                             <small id="origin-status" class="text-muted">Chưa có dữ liệu gốc</small>
                                             <div class="d-flex gap-2">
-                                                <button type="button" class="btn btn-sm btn-outline-warning" id="btn-reset-origin"
+                                                <button type="button" class="btn btn-sm btn-outline-warning"
+                                                    id="btn-reset-origin"
                                                     onclick="window.adminManager.resetGnssOrigin(window.adminManager.currentStationId)">
                                                     <i class="bi bi-arrow-counterclockwise me-1"></i> Đặt lại điểm gốc
                                                 </button>
-                                                <button type="button" class="btn btn-sm btn-warning" id="btn-fetch-origin"
+                                                <button type="button" class="btn btn-sm btn-warning"
+                                                    id="btn-fetch-origin"
                                                     onclick="window.adminManager.fetchLatestOrigin()">
                                                     <i class="bi bi-arrow-repeat me-1"></i> Lấy tọa độ
                                                 </button>
@@ -1034,14 +1044,17 @@
                                     </div>
 
                                     <!-- ✅ GNSS EXTERNAL FORWARDING CONFIG -->
-                                    <div class="mt-3 p-3 rounded border" style="background: rgba(14,165,233,0.06); border-color: rgba(14,165,233,0.25) !important;">
+                                    <div class="mt-3 p-3 rounded border"
+                                        style="background: rgba(14,165,233,0.06); border-color: rgba(14,165,233,0.25) !important;">
                                         <div class="d-flex align-items-center gap-3 mb-1">
                                             <i class="bi bi-broadcast-pin" style="color:#0ea5e9;font-size:1.1rem"></i>
-                                            <h6 class="mb-0 fw-bold" style="color:var(--text-primary)">Truyền dữ liệu RTK (1Hz)</h6>
-                                            
+                                            <h6 class="mb-0 fw-bold" style="color:var(--text-primary)">Truyền dữ liệu
+                                                RTK (1Hz)</h6>
+
                                             <div class="ms-auto">
                                                 <div class="ios-switch">
-                                                    <input type="checkbox" id="cfg-fwd-enabled" onchange="window.adminManager.toggleRtkForwardingSlide()">
+                                                    <input type="checkbox" id="cfg-fwd-enabled"
+                                                        onchange="window.adminManager.toggleRtkForwardingSlide()">
                                                     <span class="ios-switch-track"></span>
                                                 </div>
                                             </div>
@@ -1050,706 +1063,808 @@
                                             Tự động đẩy 9 tham số GNSS nâng cao lên server qua MQTT theo tần suất 1Hz.
                                         </div>
 
-                                        <div id="rtk-forwarding-content" style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
-                                                <!-- MQTT Broker config cho RTK Forward -->
-                                                <div class="row g-2 mb-3">
-                                                    <div class="col-md-6">
-                                                        <label class="form-label small fw-semibold">MQTT Host (External)</label>
-                                                        <input type="text" class="form-control form-control-sm" id="gnss-rtk-host"
-                                                            placeholder="mqtt.example.com">
-                                                    </div>
-                                                    <div class="col-md-2">
-                                                        <label class="form-label small fw-semibold">Port</label>
-                                                        <input type="number" class="form-control form-control-sm" id="gnss-rtk-port"
-                                                            placeholder="1883" value="1883">
-                                                    </div>
-                                                    <div class="col-md-2">
-                                                        <label class="form-label small fw-semibold">User</label>
-                                                        <input type="text" class="form-control form-control-sm" id="gnss-rtk-user"
-                                                            placeholder="user">
-                                                    </div>
-                                                    <div class="col-md-2">
-                                                        <label class="form-label small fw-semibold">Pass</label>
-                                                        <input type="password" class="form-control form-control-sm" id="gnss-rtk-pass"
-                                                            placeholder="pass">
-                                                    </div>
+                                        <div id="rtk-forwarding-content"
+                                            style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
+                                            <!-- MQTT Broker config cho RTK Forward -->
+                                            <div class="row g-2 mb-3">
+                                                <div class="col-md-6">
+                                                    <label class="form-label small fw-semibold">MQTT Host
+                                                        (External)</label>
+                                                    <input type="text" class="form-control form-control-sm"
+                                                        id="gnss-rtk-host" placeholder="mqtt.example.com">
                                                 </div>
-
-                                                <!-- MQTT Topic cho RTK Forward -->
-                                                <div class="row g-2 mb-3 border-top pt-2">
-                                                    <div class="col-12">
-                                                        <label class="form-label small fw-semibold">
-                                                            <i class="bi bi-reception-4 text-success me-1"></i>Topic đẩy dữ liệu RTK (Publish)
-                                                            <span class="text-muted fw-normal">(Độ chính xác cm)</span>
-                                                        </label>
-                                                        <input type="text" class="form-control form-control-sm" id="gnss-rtk-topic"
-                                                            placeholder="GNSS/RTK/STATION_01">
-                                                    </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small fw-semibold">Port</label>
+                                                    <input type="number" class="form-control form-control-sm"
+                                                        id="gnss-rtk-port" placeholder="1883" value="1883">
                                                 </div>
-
-                                                <!-- 9 tham số đẩy lên server -->
-                                                <div class="alert alert-info py-2 px-3 mb-3" style="border:none; border-left:4px solid #3498db; background:#e8f4fd">
-                                                    <div class="d-flex align-items-center">
-                                                        <i class="fas fa-info-circle me-2 text-primary"></i>
-                                                        <div class="small">
-                                                            <strong>Giao thức đẩy dữ liệu:</strong> Dữ liệu được đóng gói theo chuẩn <strong>GNSS JSON</strong> (lồng nhau). Tắt các nút bên dưới sẽ xóa trường tương ứng khỏi JSON <code>data</code>.
-                                                        </div>
-                                                    </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small fw-semibold">User</label>
+                                                    <input type="text" class="form-control form-control-sm"
+                                                        id="gnss-rtk-user" placeholder="user">
                                                 </div>
-
-                                                <label class="form-label small fw-semibold mb-2">Chọn tham số trong gói tin JSON:</label>
-
-                                                <!-- Tọa độ hiện tại -->
-                                                <div class="mb-2">
-                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📍 Tọa độ hiện tại (Tương đối)</small>
-                                                    <div class="row g-2">
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-x" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-x')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">X <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_x</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-x" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-y" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-y')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">Y <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_y</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-y" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-h" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-h')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">H <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_h</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-h" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                    </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small fw-semibold">Pass</label>
+                                                    <input type="password" class="form-control form-control-sm"
+                                                        id="gnss-rtk-pass" placeholder="pass">
                                                 </div>
+                                            </div>
 
-                                                <!-- Chuyển vị -->
-                                                <div class="mb-2">
-                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📐 Chuyển vị (mm)</small>
-                                                    <div class="row g-2">
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-dx" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dx')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">dX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_dx</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-dx" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-dy" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dy')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">dY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_dy</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-dy" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-dh" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dh')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">dH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_dh</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-dh" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                    </div>
+                                            <!-- MQTT Topic cho RTK Forward -->
+                                            <div class="row g-2 mb-3 border-top pt-2">
+                                                <div class="col-md-8">
+                                                    <label class="form-label small fw-semibold">
+                                                        <i class="bi bi-reception-4 text-success me-1"></i>Topic đẩy dữ
+                                                        liệu RTK (Publish)
+                                                        <span class="text-muted fw-normal">(Độ chính xác cm)</span>
+                                                    </label>
+                                                    <input type="text" class="form-control form-control-sm"
+                                                        id="gnss-rtk-topic" placeholder="GNSS/RTK/STATION_01">
                                                 </div>
+                                                <div class="col-md-4">
+                                                    <label class="form-label small fw-semibold">
+                                                        <i class="bi bi-tag text-info me-1"></i>Mã định danh GNSS (Code)
+                                                    </label>
+                                                    <input type="text" class="form-control form-control-sm"
+                                                        id="gnss-rtk-code" placeholder="gnss_processed">
+                                                </div>
+                                            </div>
 
-                                                <!-- Vận tốc -->
-                                                <div class="mb-1">
-                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">⚡ Vận tốc chuyển vị (mm/phút)</small>
-                                                    <div class="row g-2">
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdx" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdx')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">VdX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_vdx</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-vdx" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdy" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdy')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">VdY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_vdy</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-vdy" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdh" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdh')">
-                                                                <div class="ios-toggle-info">
-                                                                    <div class="param-name">VdH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span></div>
-                                                                    <div class="param-unit">JSON: <code>adv_vdh</code></div>
-                                                                </div>
-                                                                <div class="ios-switch">
-                                                                    <input type="checkbox" id="fwd-toggle-vdh" checked>
-                                                                    <span class="ios-switch-track"></span>
-                                                                </div>
-                                                            </label>
-                                                        </div>
+                                            <!-- 9 tham số đẩy lên server -->
+                                            <div class="alert alert-info py-2 px-3 mb-3"
+                                                style="border:none; border-left:4px solid #3498db; background:#e8f4fd">
+                                                <div class="d-flex align-items-center">
+                                                    <i class="fas fa-info-circle me-2 text-primary"></i>
+                                                    <div class="small">
+                                                        <strong>Giao thức đẩy dữ liệu:</strong> Dữ liệu được đóng gói
+                                                        theo chuẩn <strong>GNSS JSON</strong> (lồng nhau). Tắt các nút
+                                                        bên dưới sẽ xóa trường tương ứng khỏi JSON <code>data</code>.
                                                     </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <!-- ✅ VN2000 TRANSFORMATION PARAMETERS (Advanced) -->
-                                        <div class="mt-3 p-3 rounded border" style="background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.25) !important;">
-                                            <div class="d-flex align-items-center gap-3 mb-1">
-                                                <i class="bi bi-gear-wide-connected" style="color:#10b981;font-size:1.1rem"></i>
-                                                <h6 class="mb-0 fw-bold" style="color:var(--text-primary)">Tham số VN2000 (Tùy chỉnh)</h6>
-                                                
-                                                <div class="ms-auto">
-                                                    <div class="ios-switch">
-                                                        <input type="checkbox" id="vn2000-enabled" onchange="window.adminManager.toggleVn2000AdvancedSlide()">
-                                                        <span class="ios-switch-track"></span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="text-muted small mb-3" style="font-size: 0.75rem;">
-                                                Sử dụng bộ tham số 7 tham số Helmert và các số hiệu chỉnh cục bộ (Dành cho chuyên gia).
-                                            </div>
+                                            <label class="form-label small fw-semibold mb-2">Chọn tham số trong gói tin
+                                                JSON:</label>
 
-                                            <div id="vn2000-advanced-content" style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
-                                                <!-- Helmert 7-Params -->
-                                                <h6 class="small fw-bold mb-2">1. Tham số dịch chuyển (Helmert 7-params)</h6>
-                                                <div class="row g-2 mb-3">
-                                                    <div class="col-md-4"><label class="form-label small">dX (m)</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-dx" value="191.90441429"></div>
-                                                    <div class="col-md-4"><label class="form-label small">dY (m)</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-dy" value="39.30318279"></div>
-                                                    <div class="col-md-4"><label class="form-label small">dZ (m)</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-dz" value="111.45032835"></div>
-                                                    <div class="col-md-4"><label class="form-label small">rX (")</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-rx" value="-0.00928836"></div>
-                                                    <div class="col-md-4"><label class="form-label small">rY (")</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-ry" value="0.01975479"></div>
-                                                    <div class="col-md-4"><label class="form-label small">rZ (")</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-rz" value="-0.00427372"></div>
-                                                    <div class="col-md-12"><label class="form-label small">Scale (k)</label><input type="number" step="1e-15" class="form-control form-control-sm" id="vn-k" value="1.000000252906278"></div>
-                                                </div>
-
-                                                <!-- Projection -->
-                                                <h6 class="small fw-bold mb-2 border-top pt-2">2. Kinh tuyến trục & Tỷ lệ chiếu</h6>
-                                                <div class="row g-2 mb-3">
-                                                    <div class="col-md-6"><label class="form-label small">L0 (deg)</label><input type="number" step="0.0001" class="form-control form-control-sm" id="vn-l0" value="105.0"></div>
-                                                    <div class="col-md-6"><label class="form-label small">k0</label><input type="number" step="0.0001" class="form-control form-control-sm" id="vn-k0" value="0.9999"></div>
-                                                </div>
-
-                                                <!-- Residuals -->
-                                                <h6 class="small fw-bold mb-2 border-top pt-2">3. Số hiệu chỉnh (Residuals)</h6>
+                                            <!-- Tọa độ hiện tại -->
+                                            <div class="mb-2">
+                                                <small class="text-muted text-uppercase d-block mb-1"
+                                                    style="font-size:0.68rem;letter-spacing:1px">📍 Tọa độ hiện tại
+                                                    (Tương đối)</small>
                                                 <div class="row g-2">
-                                                    <div class="col-md-4"><label class="form-label small">resB (rad)</label><input type="number" step="1e-12" class="form-control form-control-sm" id="vn-resb" value="0"></div>
-                                                    <div class="col-md-4"><label class="form-label small">resL (rad)</label><input type="number" step="1e-12" class="form-control form-control-sm" id="vn-resl" value="0"></div>
-                                                    <div class="col-md-4"><label class="form-label small">resH (m)</label><input type="number" step="0.001" class="form-control form-control-sm" id="vn-resh" value="0"></div>
-                                                    <div class="col-md-4"><label class="form-label small">resN (m)</label><input type="number" step="0.001" class="form-control form-control-sm" id="vn-resn" value="0"></div>
-                                                    <div class="col-md-4"><label class="form-label small">resE (m)</label><input type="number" step="0.001" class="form-control form-control-sm" id="vn-rese" value="0"></div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-x"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-x')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">X <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_x</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-x" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-y"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-y')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">Y <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_y</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-y" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-h"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-h')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">H <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_h</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-h" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Chuyển vị -->
+                                            <div class="mb-2">
+                                                <small class="text-muted text-uppercase d-block mb-1"
+                                                    style="font-size:0.68rem;letter-spacing:1px">📐 Chuyển vị
+                                                    (mm)</small>
+                                                <div class="row g-2">
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-dx"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dx')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">dX <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_dx</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-dx" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-dy"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dy')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">dY <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_dy</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-dy" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-dh"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dh')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">dH <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_dh</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-dh" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Vận tốc -->
+                                            <div class="mb-1">
+                                                <small class="text-muted text-uppercase d-block mb-1"
+                                                    style="font-size:0.68rem;letter-spacing:1px">⚡ Vận tốc chuyển vị
+                                                    (mm/phút)</small>
+                                                <div class="row g-2">
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdx"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdx')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">VdX <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_vdx</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-vdx" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdy"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdy')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">VdY <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_vdy</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-vdy" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdh"
+                                                            onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdh')">
+                                                            <div class="ios-toggle-info">
+                                                                <div class="param-name">VdH <span
+                                                                        style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span>
+                                                                </div>
+                                                                <div class="param-unit">JSON: <code>adv_vdh</code></div>
+                                                            </div>
+                                                            <div class="ios-switch">
+                                                                <input type="checkbox" id="fwd-toggle-vdh" checked>
+                                                                <span class="ios-switch-track"></span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- ✅ VN2000 TRANSFORMATION PARAMETERS (Advanced) -->
+                                    <div class="mt-3 p-3 rounded border"
+                                        style="background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.25) !important;">
+                                        <div class="d-flex align-items-center gap-3 mb-1">
+                                            <i class="bi bi-gear-wide-connected"
+                                                style="color:#10b981;font-size:1.1rem"></i>
+                                            <h6 class="mb-0 fw-bold" style="color:var(--text-primary)">Tham số VN2000
+                                                (Tùy chỉnh)</h6>
+
+                                            <div class="ms-auto">
+                                                <div class="ios-switch">
+                                                    <input type="checkbox" id="vn2000-enabled"
+                                                        onchange="window.adminManager.toggleVn2000AdvancedSlide()">
+                                                    <span class="ios-switch-track"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="text-muted small mb-3" style="font-size: 0.75rem;">
+                                            Sử dụng bộ tham số 7 tham số Helmert và các số hiệu chỉnh cục bộ (Dành cho
+                                            chuyên gia).
+                                        </div>
+
+                                        <div id="vn2000-advanced-content"
+                                            style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
+                                            <!-- Helmert 7-Params -->
+                                            <h6 class="small fw-bold mb-2">1. Tham số dịch chuyển (Helmert 7-params)
+                                            </h6>
+                                            <div class="row g-2 mb-3">
+                                                <div class="col-md-4"><label class="form-label small">dX
+                                                        (m)</label><input type="number" step="0.00000001"
+                                                        class="form-control form-control-sm" id="vn-dx"
+                                                        value="191.90441429"></div>
+                                                <div class="col-md-4"><label class="form-label small">dY
+                                                        (m)</label><input type="number" step="0.00000001"
+                                                        class="form-control form-control-sm" id="vn-dy"
+                                                        value="39.30318279"></div>
+                                                <div class="col-md-4"><label class="form-label small">dZ
+                                                        (m)</label><input type="number" step="0.00000001"
+                                                        class="form-control form-control-sm" id="vn-dz"
+                                                        value="111.45032835"></div>
+                                                <div class="col-md-4"><label class="form-label small">rX
+                                                        (")</label><input type="number" step="0.00000001"
+                                                        class="form-control form-control-sm" id="vn-rx"
+                                                        value="-0.00928836"></div>
+                                                <div class="col-md-4"><label class="form-label small">rY
+                                                        (")</label><input type="number" step="0.00000001"
+                                                        class="form-control form-control-sm" id="vn-ry"
+                                                        value="0.01975479"></div>
+                                                <div class="col-md-4"><label class="form-label small">rZ
+                                                        (")</label><input type="number" step="0.00000001"
+                                                        class="form-control form-control-sm" id="vn-rz"
+                                                        value="-0.00427372"></div>
+                                                <div class="col-md-12"><label class="form-label small">Scale
+                                                        (k)</label><input type="number" step="1e-15"
+                                                        class="form-control form-control-sm" id="vn-k"
+                                                        value="1.000000252906278"></div>
+                                            </div>
+
+                                            <!-- Projection -->
+                                            <h6 class="small fw-bold mb-2 border-top pt-2">2. Kinh tuyến trục & Tỷ lệ
+                                                chiếu</h6>
+                                            <div class="row g-2 mb-3">
+                                                <div class="col-md-6"><label class="form-label small">L0
+                                                        (deg)</label><input type="number" step="0.0001"
+                                                        class="form-control form-control-sm" id="vn-l0" value="105.0">
+                                                </div>
+                                                <div class="col-md-6"><label class="form-label small">k0</label><input
+                                                        type="number" step="0.0001" class="form-control form-control-sm"
+                                                        id="vn-k0" value="0.9999"></div>
+                                            </div>
+
+                                            <!-- Residuals -->
+                                            <h6 class="small fw-bold mb-2 border-top pt-2">3. Số hiệu chỉnh (Residuals)
+                                            </h6>
+                                            <div class="row g-2">
+                                                <div class="col-md-4"><label class="form-label small">resB
+                                                        (rad)</label><input type="number" step="1e-12"
+                                                        class="form-control form-control-sm" id="vn-resb" value="0">
+                                                </div>
+                                                <div class="col-md-4"><label class="form-label small">resL
+                                                        (rad)</label><input type="number" step="1e-12"
+                                                        class="form-control form-control-sm" id="vn-resl" value="0">
+                                                </div>
+                                                <div class="col-md-4"><label class="form-label small">resH
+                                                        (m)</label><input type="number" step="0.001"
+                                                        class="form-control form-control-sm" id="vn-resh" value="0">
+                                                </div>
+                                                <div class="col-md-4"><label class="form-label small">resN
+                                                        (m)</label><input type="number" step="0.001"
+                                                        class="form-control form-control-sm" id="vn-resn" value="0">
+                                                </div>
+                                                <div class="col-md-4"><label class="form-label small">resE
+                                                        (m)</label><input type="number" step="0.001"
+                                                        class="form-control form-control-sm" id="vn-rese" value="0">
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-
-
-                            <div id="mqtt-rain-section" class="sensor-config-section" style="display: none;">
-                                <div class="sensor-config-header"><i
-                                        class="bi bi-cloud-rain-fill text-primary"></i><span>Rain Configuration</span>
-                                </div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label">MQTT Topic</label><input type="text"
-                                        class="form-control mb-3" id="topic-rain">
-                                    <div class="coordinate-lock-box">
-                                        <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
-                                        <div class="row g-2">
-                                            <div class="col-md-4"><label class="form-label small">Lat</label><input
-                                                    type="number" step="0.00000001" class="form-control form-control-sm"
-                                                    id="origin-rain-lat"></div>
-                                            <div class="col-md-4"><label class="form-label small">Lon</label><input
-                                                    type="number" step="0.00000001" class="form-control form-control-sm"
-                                                    id="origin-rain-lon"></div>
-                                            <div class="col-md-4"><label class="form-label small">Height</label><input
-                                                    type="number" step="0.001" class="form-control form-control-sm"
-                                                    id="origin-rain-h"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div id="mqtt-water-section" class="sensor-config-section" style="display: none;">
-                                <div class="sensor-config-header"><i class="bi bi-water text-info"></i><span>Water
-                                        Configuration</span></div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label">MQTT Topic</label><input type="text"
-                                        class="form-control mb-3" id="topic-water">
-                                    <div class="coordinate-lock-box">
-                                        <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
-                                        <div class="row g-2">
-                                            <div class="col-md-4"><label class="form-label small">Lat</label><input
-                                                    type="number" step="0.00000001" class="form-control form-control-sm"
-                                                    id="origin-water-lat"></div>
-                                            <div class="col-md-4"><label class="form-label small">Lon</label><input
-                                                    type="number" step="0.00000001" class="form-control form-control-sm"
-                                                    id="origin-water-lon"></div>
-                                            <div class="col-md-4"><label class="form-label small">Height</label><input
-                                                    type="number" step="0.001" class="form-control form-control-sm"
-                                                    id="origin-water-h"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div id="mqtt-imu-section" class="sensor-config-section" style="display: none;">
-                                <div class="sensor-config-header"><i
-                                        class="bi bi-compass-fill text-warning"></i><span>IMU Configuration</span></div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label">MQTT Topic</label><input type="text"
-                                        class="form-control mb-3" id="topic-imu">
-                                    <div class="coordinate-lock-box">
-                                        <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
-                                        <div class="row g-2">
-                                            <div class="col-md-4"><label class="form-label small">Lat</label><input
-                                                    type="number" step="0.00000001" class="form-control form-control-sm"
-                                                    id="origin-imu-lat"></div>
-                                            <div class="col-md-4"><label class="form-label small">Lon</label><input
-                                                    type="number" step="0.00000001" class="form-control form-control-sm"
-                                                    id="origin-imu-lon"></div>
-                                            <div class="col-md-4"><label class="form-label small">Height</label><input
-                                                    type="number" step="0.001" class="form-control form-control-sm"
-                                                    id="origin-imu-h"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="mqtt-empty-state" class="text-center py-5 text-muted">
-                                <i class="bi bi-inbox fs-1"></i>
-                                <p class="mt-2">Chưa có thiết bị nào được chọn</p>
                             </div>
                         </div>
-                        <!-- STEP 3: NGƯỠNG CẢNH BÁO -->
-                        <div class="wizard-content" data-step="3">
 
-                            <!-- ✅ QUICK PRESETS CHO TRẠM -->
-                            <div class="mb-4 p-3 border rounded" style="background: rgba(14, 165, 233, 0.05);">
-                                <h6 class="mb-2">
-                                    <i class="bi bi-lightning-charge-fill text-primary me-2"></i>
-                                    Quick Presets (Áp dụng cho trạm này)
-                                </h6>
-                                <small class="text-muted d-block mb-3">
-                                    Chọn preset để tự động điền các tham số bên dưới phù hợp với mức độ nguy hiểm của
-                                    khu vực.
-                                </small>
 
-                                <div class="row g-2">
-                                    <div class="col-md-4">
-                                        <button type="button" id="btn-preset-conservative"
-                                            class="btn btn-sm btn-outline-primary w-100 preset-btn"
-                                            onclick="window.adminManager.applyStationPreset('conservative')">
-                                            <i class="bi bi-shield-check me-1"></i>
-                                            <strong>Conservative</strong>
-                                            <small class="d-block text-muted">Ít báo sai</small>
-                                        </button>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <button type="button" id="btn-preset-balanced"
-                                            class="btn btn-sm btn-outline-warning w-100 preset-btn"
-                                            onclick="window.adminManager.applyStationPreset('balanced')">
-                                            <i class="bi bi-sliders me-1"></i>
-                                            <strong>Balanced</strong>
-                                            <small class="d-block text-muted">Cân bằng</small>
-                                        </button>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <button type="button" id="btn-preset-sensitive"
-                                            class="btn btn-sm btn-outline-danger w-100 preset-btn"
-                                            onclick="window.adminManager.applyStationPreset('sensitive')">
-                                            <i class="bi bi-exclamation-diamond me-1"></i>
-                                            <strong>Sensitive</strong>
-                                            <small class="d-block text-muted">Báo sớm</small>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="mt-2">
-                                    <small class="text-muted">
-                                        <strong>Conservative:</strong> GNSS 5 lần, Rain 3, Water 5, IMU 2<br>
-                                        <strong>Balanced:</strong> GNSS 3 lần, Rain 2, Water 3, IMU 1 (Mặc định)<br>
-                                        <strong>Sensitive:</strong> Tất cả 1 lần (Cảnh báo nhanh)
-                                    </small>
-                                </div>
-                                <div class="alert alert-warning py-2 small mt-2 mb-0">
-                                    <i class="bi bi-diagram-3 me-1"></i>
-                                    <strong>Ưu tiên Confirm Steps:</strong> Giá trị nhập tại đây (trạm) &gt; Giá trị trong tab Hệ thống (toàn cục).
-                                    Nếu trạm đã lưu riêng, thay đổi ở Hệ thống sẽ <strong>không</strong> ảnh hưởng trạm này.
-                                </div>
+                        <div id="mqtt-rain-section" class="sensor-config-section" style="display: none;">
+                            <div class="sensor-config-header"><i
+                                    class="bi bi-cloud-rain-fill text-primary"></i><span>Rain Configuration</span>
                             </div>
-
-                            <!--1. OFFLINE TIMEOUTS -->
-                            <div class="config-section mb-4">
-                                <div class="section-header">
-                                    <i class="bi bi-clock-history"></i>
-                                    <h5>Offline Timeout (giây)</h5>
-                                </div>
-                                <p class="text-muted small mb-3">
-                                    <i class="bi bi-info-circle me-1"></i>
-                                    Thời gian tối đa không nhận dữ liệu trước khi sensor được coi là offline
-                                </p>
-
-                                <div class="row g-3">
-                                    <!-- GNSS Timeout -->
-                                    <div class="col-md-6">
-                                        <label class="form-label">
-                                            <i class="bi bi-geo-alt-fill text-danger me-2"></i>
-                                            GNSS Timeout
-                                        </label>
-                                        <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-gnss" value="30"
-                                                min="15" max="3600" step="15">
-                                            <span class="input-group-text">giây</span>
-                                            <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-gnss').value = 30; document.getElementById('offline-gnss').dispatchEvent(new Event('input'));"
-                                                title="Reset về 30 giây">
-                                                <i class="bi bi-arrow-clockwise"></i>
-                                            </button>
-                                        </div>
-                                        <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-gnss-display" class="fw-bold">30 giây</span>
-                                        </small>
-                                    </div>
-
-                                    <!-- Rain Timeout -->
-                                    <div class="col-md-6">
-                                        <label class="form-label">
-                                            <i class="bi bi-cloud-rain-fill text-primary me-2"></i>
-                                            Rain Timeout
-                                        </label>
-                                        <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-rain" value="60"
-                                                min="30" max="3600" step="30">
-                                            <span class="input-group-text">giây</span>
-                                            <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-rain').value = 60; document.getElementById('offline-rain').dispatchEvent(new Event('input'));"
-                                                title="Reset về 1 phút">
-                                                <i class="bi bi-arrow-clockwise"></i>
-                                            </button>
-                                        </div>
-                                        <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-rain-display" class="fw-bold">1 phút</span>
-                                        </small>
-                                    </div>
-
-                                    <!-- Water Timeout -->
-                                    <div class="col-md-6">
-                                        <label class="form-label">
-                                            <i class="bi bi-water text-info me-2"></i>
-                                            Water Timeout
-                                        </label>
-                                        <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-water" value="60"
-                                                min="30" max="3600" step="30">
-                                            <span class="input-group-text">giây</span>
-                                            <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-water').value = 60; document.getElementById('offline-water').dispatchEvent(new Event('input'));"
-                                                title="Reset về 1 phút">
-                                                <i class="bi bi-arrow-clockwise"></i>
-                                            </button>
-                                        </div>
-                                        <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-water-display" class="fw-bold">1 phút</span>
-                                        </small>
-                                    </div>
-
-                                    <!-- IMU Timeout -->
-                                    <div class="col-md-6">
-                                        <label class="form-label">
-                                            <i class="bi bi-compass-fill text-warning me-2"></i>
-                                            IMU Timeout
-                                        </label>
-                                        <div class="input-group">
-                                            <input type="number" class="form-control" id="offline-imu" value="2400"
-                                                min="60" max="7200" step="60">
-                                            <span class="input-group-text">giây</span>
-                                            <button class="btn btn-outline-secondary" type="button"
-                                                onclick="document.getElementById('offline-imu').value = 2400; document.getElementById('offline-imu').dispatchEvent(new Event('input'));"
-                                                title="Reset về 40 phút">
-                                                <i class="bi bi-arrow-clockwise"></i>
-                                            </button>
-                                        </div>
-                                        <small class="text-muted d-block mt-1">
-                                            Hiện tại: <span id="offline-imu-display" class="fw-bold">40 phút</span>
-                                        </small>
+                            <div class="sensor-config-body">
+                                <label class="form-label">MQTT Topic</label><input type="text" class="form-control mb-3"
+                                    id="topic-rain">
+                                <div class="coordinate-lock-box">
+                                    <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
+                                    <div class="row g-2">
+                                        <div class="col-md-4"><label class="form-label small">Lat</label><input
+                                                type="number" step="0.00000001" class="form-control form-control-sm"
+                                                id="origin-rain-lat"></div>
+                                        <div class="col-md-4"><label class="form-label small">Lon</label><input
+                                                type="number" step="0.00000001" class="form-control form-control-sm"
+                                                id="origin-rain-lon"></div>
+                                        <div class="col-md-4"><label class="form-label small">Height</label><input
+                                                type="number" step="0.001" class="form-control form-control-sm"
+                                                id="origin-rain-h"></div>
                                     </div>
                                 </div>
                             </div>
-
-                            <!--2. WATER LEVEL THRESHOLDS -->
-                            <div class="config-section mb-4">
-                                <div class="section-header">
-                                    <i class="bi bi-water"></i>
-                                    <h5>Water Level Thresholds</h5>
-                                </div>
-                                <div class="row g-3">
-                                    <div class="col-md-4">
-                                        <label class="form-label">Warning (m)</label>
-                                        <input type="number" step="0.01" class="form-control" id="cfg-water-warning"
-                                            value="0.15">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Critical (m)</label>
-                                        <input type="number" step="0.01" class="form-control" id="cfg-water-critical"
-                                            value="0.30">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Warning Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-water-warning-confirm" value="3"
-                                            min="1" max="10">
-                                        <small id="cfg-water-confirm-source" class="text-muted">Mặc định</small>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Critical Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-water-critical-confirm" value="2"
-                                            min="1" max="10">
-                                    </div>
-                                </div>
-                                <div class="row g-3 mt-1">
-                                    <div class="col-md-4">
-                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
-                                        <input type="number" class="form-control" id="cfg-water-safe-confirm" value="3"
-                                            min="1" max="20">
-                                        <small id="cfg-water-safe-confirm-source" class="text-muted">Mặc định</small>
+                        </div>
+                        <div id="mqtt-water-section" class="sensor-config-section" style="display: none;">
+                            <div class="sensor-config-header"><i class="bi bi-water text-info"></i><span>Water
+                                    Configuration</span></div>
+                            <div class="sensor-config-body">
+                                <label class="form-label">MQTT Topic</label><input type="text" class="form-control mb-3"
+                                    id="topic-water">
+                                <div class="coordinate-lock-box">
+                                    <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
+                                    <div class="row g-2">
+                                        <div class="col-md-4"><label class="form-label small">Lat</label><input
+                                                type="number" step="0.00000001" class="form-control form-control-sm"
+                                                id="origin-water-lat"></div>
+                                        <div class="col-md-4"><label class="form-label small">Lon</label><input
+                                                type="number" step="0.00000001" class="form-control form-control-sm"
+                                                id="origin-water-lon"></div>
+                                        <div class="col-md-4"><label class="form-label small">Height</label><input
+                                                type="number" step="0.001" class="form-control form-control-sm"
+                                                id="origin-water-h"></div>
                                     </div>
                                 </div>
                             </div>
-
-                            <!-- ✅ 3. RAIN THRESHOLDS -->
-                            <div class="config-section mb-4">
-                                <div class="section-header">
-                                    <i class="bi bi-cloud-rain-fill"></i>
-                                    <h5>Rain Intensity (mm/h)</h5>
-                                </div>
-                                <div class="row g-3">
-                                    <div class="col-md-3">
-                                        <label class="form-label">Watch</label>
-                                        <input type="number" class="form-control" id="cfg-rain-watch" value="10.0">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Warning</label>
-                                        <input type="number" class="form-control" id="cfg-rain-warning" value="25.0">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Critical</label>
-                                        <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Warning Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-rain-warning-confirm" value="2"
-                                            min="1" max="10">
-                                        <small id="cfg-rain-confirm-source" class="text-muted">Mặc định</small>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Critical Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-rain-critical-confirm" value="1"
-                                            min="1" max="10">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
-                                        <input type="number" class="form-control" id="cfg-rain-safe-confirm" value="3"
-                                            min="1" max="20">
-                                        <small id="cfg-rain-safe-confirm-source" class="text-muted">Mặc định</small>
+                        </div>
+                        <div id="mqtt-imu-section" class="sensor-config-section" style="display: none;">
+                            <div class="sensor-config-header"><i class="bi bi-compass-fill text-warning"></i><span>IMU
+                                    Configuration</span></div>
+                            <div class="sensor-config-body">
+                                <label class="form-label">MQTT Topic</label><input type="text" class="form-control mb-3"
+                                    id="topic-imu">
+                                <div class="coordinate-lock-box">
+                                    <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
+                                    <div class="row g-2">
+                                        <div class="col-md-4"><label class="form-label small">Lat</label><input
+                                                type="number" step="0.00000001" class="form-control form-control-sm"
+                                                id="origin-imu-lat"></div>
+                                        <div class="col-md-4"><label class="form-label small">Lon</label><input
+                                                type="number" step="0.00000001" class="form-control form-control-sm"
+                                                id="origin-imu-lon"></div>
+                                        <div class="col-md-4"><label class="form-label small">Height</label><input
+                                                type="number" step="0.001" class="form-control form-control-sm"
+                                                id="origin-imu-h"></div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <!-- ✅ 4. GNSS QUALITY -->
-                            <div class="config-section mb-4">
-                                <div class="section-header">
-                                    <i class="bi bi-geo-alt-fill"></i>
-                                    <h5>GNSS Quality & Velocity</h5>
-                                    <button type="button" class="btn btn-sm btn-outline-danger ms-auto"
-                                        onclick="window.adminManager.openVelocityModal()">
-                                        <i class="bi bi-speedometer2 me-1"></i>Bảng vận tốc
+                        <div id="mqtt-empty-state" class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox fs-1"></i>
+                            <p class="mt-2">Chưa có thiết bị nào được chọn</p>
+                        </div>
+                </div>
+                <!-- STEP 3: NGƯỠNG CẢNH BÁO -->
+                <div class="wizard-content" data-step="3">
+
+                    <!-- ✅ QUICK PRESETS CHO TRẠM -->
+                    <div class="mb-4 p-3 border rounded" style="background: rgba(14, 165, 233, 0.05);">
+                        <h6 class="mb-2">
+                            <i class="bi bi-lightning-charge-fill text-primary me-2"></i>
+                            Quick Presets (Áp dụng cho trạm này)
+                        </h6>
+                        <small class="text-muted d-block mb-3">
+                            Chọn preset để tự động điền các tham số bên dưới phù hợp với mức độ nguy hiểm của
+                            khu vực.
+                        </small>
+
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <button type="button" id="btn-preset-conservative"
+                                    class="btn btn-sm btn-outline-primary w-100 preset-btn"
+                                    onclick="window.adminManager.applyStationPreset('conservative')">
+                                    <i class="bi bi-shield-check me-1"></i>
+                                    <strong>Conservative</strong>
+                                    <small class="d-block text-muted">Ít báo sai</small>
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" id="btn-preset-balanced"
+                                    class="btn btn-sm btn-outline-warning w-100 preset-btn"
+                                    onclick="window.adminManager.applyStationPreset('balanced')">
+                                    <i class="bi bi-sliders me-1"></i>
+                                    <strong>Balanced</strong>
+                                    <small class="d-block text-muted">Cân bằng</small>
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" id="btn-preset-sensitive"
+                                    class="btn btn-sm btn-outline-danger w-100 preset-btn"
+                                    onclick="window.adminManager.applyStationPreset('sensitive')">
+                                    <i class="bi bi-exclamation-diamond me-1"></i>
+                                    <strong>Sensitive</strong>
+                                    <small class="d-block text-muted">Báo sớm</small>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <strong>Conservative:</strong> GNSS 5 lần, Rain 3, Water 5, IMU 2<br>
+                                <strong>Balanced:</strong> GNSS 3 lần, Rain 2, Water 3, IMU 1 (Mặc định)<br>
+                                <strong>Sensitive:</strong> Tất cả 1 lần (Cảnh báo nhanh)
+                            </small>
+                        </div>
+                        <div class="alert alert-warning py-2 small mt-2 mb-0">
+                            <i class="bi bi-diagram-3 me-1"></i>
+                            <strong>Ưu tiên Confirm Steps:</strong> Giá trị nhập tại đây (trạm) &gt; Giá trị trong tab
+                            Hệ thống (toàn cục).
+                            Nếu trạm đã lưu riêng, thay đổi ở Hệ thống sẽ <strong>không</strong> ảnh hưởng trạm này.
+                        </div>
+                    </div>
+
+                    <!--1. OFFLINE TIMEOUTS -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-clock-history"></i>
+                            <h5>Offline Timeout (giây)</h5>
+                        </div>
+                        <p class="text-muted small mb-3">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Thời gian tối đa không nhận dữ liệu trước khi sensor được coi là offline
+                        </p>
+
+                        <div class="row g-3">
+                            <!-- GNSS Timeout -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-geo-alt-fill text-danger me-2"></i>
+                                    GNSS Timeout
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="offline-gnss" value="30" min="15"
+                                        max="3600" step="15">
+                                    <span class="input-group-text">giây</span>
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="document.getElementById('offline-gnss').value = 30; document.getElementById('offline-gnss').dispatchEvent(new Event('input'));"
+                                        title="Reset về 30 giây">
+                                        <i class="bi bi-arrow-clockwise"></i>
                                     </button>
                                 </div>
-                                <div class="row g-3">
-                                    <div class="col-md-6">
-                                        <label class="form-label">Max HDOP</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-gnss-hdop"
-                                            value="4.0">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">Warning Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-gnss-warning-steps" value="3" min="1" max="10">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">Critical Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-gnss-critical-steps" value="2" min="1" max="10">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
-                                        <input type="number" class="form-control" id="cfg-gnss-safe-steps" value="5" min="1" max="20">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">Degraded Timeout (s)</label>
-                                        <input type="number" class="form-control" id="cfg-gnss-timeout" value="300">
-                                    </div>
-                                </div>
+                                <small class="text-muted d-block mt-1">
+                                    Hiện tại: <span id="offline-gnss-display" class="fw-bold">30 giây</span>
+                                </small>
                             </div>
 
-                            <!-- ✅ 5. IMU CONFIGURATION -->
-                            <div class="config-section mb-4">
-                                <div class="section-header">
-                                    <i class="bi bi-activity"></i>
-                                    <h5>IMU Alert Thresholds</h5>
+                            <!-- Rain Timeout -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-cloud-rain-fill text-primary me-2"></i>
+                                    Rain Timeout
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="offline-rain" value="60" min="30"
+                                        max="3600" step="30">
+                                    <span class="input-group-text">giây</span>
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="document.getElementById('offline-rain').value = 60; document.getElementById('offline-rain').dispatchEvent(new Event('input'));"
+                                        title="Reset về 1 phút">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                 </div>
-                                <div class="row g-3">
-                                    <div class="col-md-3">
-                                        <label class="form-label">Critical Tilt (°)</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-imu-tilt-crit"
-                                            value="15.0">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Shock Limit (m/s²)</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-imu-shock"
-                                            value="5.0">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Critical Confirm Steps</label>
-                                        <input type="number" class="form-control" id="cfg-imu-critical-confirm" value="1" min="1" max="10">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Safe Confirm Steps <small class="text-muted">(an toàn)</small></label>
-                                        <input type="number" class="form-control" id="cfg-imu-safe-confirm" value="3" min="1" max="20">
-                                    </div>
-                                </div>
-                                <div class="alert alert-secondary py-2 mt-3 mb-0 small">
-                                    <strong>Backend formula (đơn vị độ):</strong>
-                                    <code>delta_tilt_deg = sqrt(roll^2 + pitch^2)</code>;
-                                    cảnh báo khi <code>delta_tilt_deg &gt;= tilt_critical_deg</code>.
-                                    Lưu ý: <code>roll/pitch</code> là delta so với baseline (không phải raw roll/pitch).
-                                </div>
+                                <small class="text-muted d-block mt-1">
+                                    Hiện tại: <span id="offline-rain-display" class="fw-bold">1 phút</span>
+                                </small>
                             </div>
 
-                            <!-- ✅ 6. IMU BASELINE CONFIGURATION -->
-                            <div class="config-section mb-4">
-                                <div class="section-header">
-                                    <i class="bi bi-compass"></i>
-                                    <h5>IMU Baseline (Origin Angles)</h5>
+                            <!-- Water Timeout -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-water text-info me-2"></i>
+                                    Water Timeout
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="offline-water" value="60" min="30"
+                                        max="3600" step="30">
+                                    <span class="input-group-text">giây</span>
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="document.getElementById('offline-water').value = 60; document.getElementById('offline-water').dispatchEvent(new Event('input'));"
+                                        title="Reset về 1 phút">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                 </div>
-                                <div class="alert alert-info py-2 small mb-3">
-                                    <i class="bi bi-info-circle me-1"></i> Tự động khóa từ bản tin đầu tiên. Bạn cũng có
-                                    thể sửa tay.
-                                </div>
-                                <div class="row g-3">
-                                    <div class="col-md-4">
-                                        <label class="form-label">Baseline Roll (°)</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-imu-base-roll"
-                                            value="0.0">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Baseline Pitch (°)</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-imu-base-pitch"
-                                            value="0.0">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Baseline Yaw (°)</label>
-                                        <input type="number" step="0.1" class="form-control" id="cfg-imu-base-yaw"
-                                            value="0.0">
-                                    </div>
-                                </div>
+                                <small class="text-muted d-block mt-1">
+                                    Hiện tại: <span id="offline-water-display" class="fw-bold">1 phút</span>
+                                </small>
                             </div>
 
-                            <!-- PENDING DEVICES (Pi) - shown when editing existing station -->
-                            <div id="pending-devices-section" class="config-section mb-4" style="display: none;">
-                                <div class="section-header">
-                                    <i class="bi bi-cpu-fill" style="color:#0ea5e9"></i>
-                                    <h5>Gán thiết bị Pi vào trạm này</h5>
-                                    <span class="badge ms-auto" style="background:#0ea5e9">Pi Trung tâm</span>
+                            <!-- IMU Timeout -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-compass-fill text-warning me-2"></i>
+                                    IMU Timeout
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="offline-imu" value="2400" min="60"
+                                        max="7200" step="60">
+                                    <span class="input-group-text">giây</span>
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="document.getElementById('offline-imu').value = 2400; document.getElementById('offline-imu').dispatchEvent(new Event('input'));"
+                                        title="Reset về 40 phút">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                 </div>
-                                <div class="sensor-config-body">
-                                    <p class="text-muted small mb-3">
-                                        <i class="bi bi-info-circle me-1"></i>
-                                        Chọn một Pi Trung tâm đã kích hoạt (chưa gán trạm) để gắn vào trạm này.
-                                        Pi Trung tâm sẽ nhận cảnh báo âm thanh khi trạm phát hiện nguy hiểm.
-                                    </p>
-
-                                    <!-- Currently assigned Pi (if any) -->
-                                    <div id="current-pi-info" class="alert alert-success py-2 mb-3"
-                                        style="display:none">
-                                        <i class="bi bi-broadcast-pin me-2"></i>
-                                        Pi đang gán: <strong id="current-pi-name">--</strong>
-                                        <button type="button" class="btn btn-sm btn-outline-danger ms-3"
-                                            onclick="window.adminManager.unassignPiFromStation()">
-                                            <i class="bi bi-x-circle me-1"></i>Bỏ gán
-                                        </button>
-                                    </div>
-
-                                    <div id="pending-devices-list">
-                                        <div class="text-center py-3">
-                                            <div class="spinner-border spinner-border-sm text-primary"></div>
-                                            <small class="ms-2 text-muted">Đang tải danh sách Pi...</small>
-                                        </div>
-                                    </div>
-
-                                    <div id="pi-assign-btn-row" class="mt-3" style="display:none">
-                                        <button type="button" class="btn btn-gradient"
-                                            onclick="window.adminManager.assignSelectedPiToStation()">
-                                            <i class="bi bi-link-45deg me-2"></i>Gán Pi vào trạm này
-                                        </button>
-                                    </div>
-                                </div>
+                                <small class="text-muted d-block mt-1">
+                                    Hiện tại: <span id="offline-imu-display" class="fw-bold">40 phút</span>
+                                </small>
                             </div>
                         </div>
-
-                    </form>
-                </div>
-                <div class="modal-footer justify-content-end">
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-secondary" id="btn-wizard-back" style="display: none;"
-                            onclick="if (window.adminManager) { window.adminManager.wizardPrev(); } return false;">
-                            <i class="bi bi-arrow-left me-1"></i> Quay lại
-                        </button>
-                        <button type="button" class="btn btn-primary" id="btn-wizard-next"
-                            onclick="if (window.adminManager) { window.adminManager.wizardNext(); } return false;">
-                            Tiếp theo <i class="bi bi-arrow-right ms-1"></i>
-                        </button>
-                        <button type="button" class="btn btn-success" id="btn-wizard-save" style="display: none;"
-                            onclick="if (window.adminManager) { window.adminManager.saveStation(); } return false;">
-                            <i class="bi bi-save me-1"></i> Lưu cấu hình
-                        </button>
                     </div>
+
+                    <!--2. WATER LEVEL THRESHOLDS -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-water"></i>
+                            <h5>Water Level Thresholds</h5>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Warning (m)</label>
+                                <input type="number" step="0.01" class="form-control" id="cfg-water-warning"
+                                    value="0.15">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Critical (m)</label>
+                                <input type="number" step="0.01" class="form-control" id="cfg-water-critical"
+                                    value="0.30">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Warning Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-water-warning-confirm" value="3"
+                                    min="1" max="10">
+                                <small id="cfg-water-confirm-source" class="text-muted">Mặc định</small>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Critical Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-water-critical-confirm" value="2"
+                                    min="1" max="10">
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-4">
+                                <label class="form-label">Safe Confirm Steps <small class="text-muted">(an
+                                        toàn)</small></label>
+                                <input type="number" class="form-control" id="cfg-water-safe-confirm" value="3" min="1"
+                                    max="20">
+                                <small id="cfg-water-safe-confirm-source" class="text-muted">Mặc định</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ✅ 3. RAIN THRESHOLDS -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-cloud-rain-fill"></i>
+                            <h5>Rain Intensity (mm/h)</h5>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Watch</label>
+                                <input type="number" class="form-control" id="cfg-rain-watch" value="10.0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Warning</label>
+                                <input type="number" class="form-control" id="cfg-rain-warning" value="25.0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Critical</label>
+                                <input type="number" class="form-control" id="cfg-rain-critical" value="50.0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Warning Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-rain-warning-confirm" value="2"
+                                    min="1" max="10">
+                                <small id="cfg-rain-confirm-source" class="text-muted">Mặc định</small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Critical Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-rain-critical-confirm" value="1"
+                                    min="1" max="10">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Safe Confirm Steps <small class="text-muted">(an
+                                        toàn)</small></label>
+                                <input type="number" class="form-control" id="cfg-rain-safe-confirm" value="3" min="1"
+                                    max="20">
+                                <small id="cfg-rain-safe-confirm-source" class="text-muted">Mặc định</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ✅ 4. GNSS QUALITY -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-geo-alt-fill"></i>
+                            <h5>GNSS Quality & Velocity</h5>
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-auto"
+                                onclick="window.adminManager.openVelocityModal()">
+                                <i class="bi bi-speedometer2 me-1"></i>Bảng vận tốc
+                            </button>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Max HDOP</label>
+                                <input type="number" step="0.1" class="form-control" id="cfg-gnss-hdop" value="4.0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Warning Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-gnss-warning-steps" value="3" min="1"
+                                    max="10">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Critical Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-gnss-critical-steps" value="2" min="1"
+                                    max="10">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Safe Confirm Steps <small class="text-muted">(an
+                                        toàn)</small></label>
+                                <input type="number" class="form-control" id="cfg-gnss-safe-steps" value="5" min="1"
+                                    max="20">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Degraded Timeout (s)</label>
+                                <input type="number" class="form-control" id="cfg-gnss-timeout" value="300">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ✅ 5. IMU CONFIGURATION -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-activity"></i>
+                            <h5>IMU Alert Thresholds</h5>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Critical Tilt (°)</label>
+                                <input type="number" step="0.1" class="form-control" id="cfg-imu-tilt-crit"
+                                    value="15.0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Shock Limit (m/s²)</label>
+                                <input type="number" step="0.1" class="form-control" id="cfg-imu-shock" value="5.0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Critical Confirm Steps</label>
+                                <input type="number" class="form-control" id="cfg-imu-critical-confirm" value="1"
+                                    min="1" max="10">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Safe Confirm Steps <small class="text-muted">(an
+                                        toàn)</small></label>
+                                <input type="number" class="form-control" id="cfg-imu-safe-confirm" value="3" min="1"
+                                    max="20">
+                            </div>
+                        </div>
+                        <div class="alert alert-secondary py-2 mt-3 mb-0 small">
+                            <strong>Backend formula (đơn vị độ):</strong>
+                            <code>delta_tilt_deg = sqrt(roll^2 + pitch^2)</code>;
+                            cảnh báo khi <code>delta_tilt_deg &gt;= tilt_critical_deg</code>.
+                            Lưu ý: <code>roll/pitch</code> là delta so với baseline (không phải raw roll/pitch).
+                        </div>
+                    </div>
+
+                    <!-- ✅ 6. IMU BASELINE CONFIGURATION -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-compass"></i>
+                            <h5>IMU Baseline (Origin Angles)</h5>
+                        </div>
+                        <div class="alert alert-info py-2 small mb-3">
+                            <i class="bi bi-info-circle me-1"></i> Tự động khóa từ bản tin đầu tiên. Bạn cũng có
+                            thể sửa tay.
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Baseline Roll (°)</label>
+                                <input type="number" step="0.1" class="form-control" id="cfg-imu-base-roll" value="0.0">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Baseline Pitch (°)</label>
+                                <input type="number" step="0.1" class="form-control" id="cfg-imu-base-pitch"
+                                    value="0.0">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Baseline Yaw (°)</label>
+                                <input type="number" step="0.1" class="form-control" id="cfg-imu-base-yaw" value="0.0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PENDING DEVICES (Pi) - shown when editing existing station -->
+                    <div id="pending-devices-section" class="config-section mb-4" style="display: none;">
+                        <div class="section-header">
+                            <i class="bi bi-cpu-fill" style="color:#0ea5e9"></i>
+                            <h5>Gán thiết bị Pi vào trạm này</h5>
+                            <span class="badge ms-auto" style="background:#0ea5e9">Pi Trung tâm</span>
+                        </div>
+                        <div class="sensor-config-body">
+                            <p class="text-muted small mb-3">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Chọn một Pi Trung tâm đã kích hoạt (chưa gán trạm) để gắn vào trạm này.
+                                Pi Trung tâm sẽ nhận cảnh báo âm thanh khi trạm phát hiện nguy hiểm.
+                            </p>
+
+                            <!-- Currently assigned Pi (if any) -->
+                            <div id="current-pi-info" class="alert alert-success py-2 mb-3" style="display:none">
+                                <i class="bi bi-broadcast-pin me-2"></i>
+                                Pi đang gán: <strong id="current-pi-name">--</strong>
+                                <button type="button" class="btn btn-sm btn-outline-danger ms-3"
+                                    onclick="window.adminManager.unassignPiFromStation()">
+                                    <i class="bi bi-x-circle me-1"></i>Bỏ gán
+                                </button>
+                            </div>
+
+                            <div id="pending-devices-list">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                                    <small class="ms-2 text-muted">Đang tải danh sách Pi...</small>
+                                </div>
+                            </div>
+
+                            <div id="pi-assign-btn-row" class="mt-3" style="display:none">
+                                <button type="button" class="btn btn-gradient"
+                                    onclick="window.adminManager.assignSelectedPiToStation()">
+                                    <i class="bi bi-link-45deg me-2"></i>Gán Pi vào trạm này
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                </form>
+            </div>
+            <div class="modal-footer justify-content-end">
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" id="btn-wizard-back" style="display: none;"
+                        onclick="if (window.adminManager) { window.adminManager.wizardPrev(); } return false;">
+                        <i class="bi bi-arrow-left me-1"></i> Quay lại
+                    </button>
+                    <button type="button" class="btn btn-primary" id="btn-wizard-next"
+                        onclick="if (window.adminManager) { window.adminManager.wizardNext(); } return false;">
+                        Tiếp theo <i class="bi bi-arrow-right ms-1"></i>
+                    </button>
+                    <button type="button" class="btn btn-success" id="btn-wizard-save" style="display: none;"
+                        onclick="if (window.adminManager) { window.adminManager.saveStation(); } return false;">
+                        <i class="bi bi-save me-1"></i> Lưu cấu hình
+                    </button>
                 </div>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- 4. Modal Velocity Config -->
@@ -2250,6 +2365,3 @@
 </body>
 
 </html>
-
-
-

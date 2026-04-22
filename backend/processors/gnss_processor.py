@@ -149,18 +149,19 @@ class GNSSVelocityProcessor:
             logger.error(f"❌ Device {self.device_id}: Failed to load origin from DB: {repr(e)}")
 
     async def _save_origin_to_db(self):
-        """✅ Lưu origin vào DB"""
+        """✅ Lưu origin vào DB và đồng bộ vào Station Config"""
         try:
-            from app.models.config import GNSSOrigin
-            from sqlalchemy import select
+            from app.models.config import GNSSOrigin, Station
+            from sqlalchemy import select, update
+            from app.main import manager  # WebSocket manager
             
             async with self.db_session_factory() as db:
+                # 1. Cập nhật bảng GNSSOrigin (dành cho Processor)
                 result = await db.execute(
                     select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
                 )
                 existing = result.scalar_one_or_none()
                 
-                # Convert numpy array to list for JSON serialization
                 rot_matrix = self.origin['R'].tolist() if hasattr(self.origin['R'], 'tolist') else self.origin['R']
                 ecef_origin = self.origin['ecef'].tolist() if hasattr(self.origin['ecef'], 'tolist') else self.origin['ecef']
 
@@ -185,11 +186,47 @@ class GNSSVelocityProcessor:
                     )
                     db.add(new_origin)
                 
+                # 2. ✅ Đồng bộ ngược vào Station.config['gnss_origin'] (dành cho UI Admin)
+                # Tìm station_id từ device_id
+                from app.models.config import Device
+                dev_res = await db.execute(select(Device.station_id).where(Device.id == self.device_id))
+                station_id = dev_res.scalar_one_or_none()
+                
+                if station_id:
+                    st_res = await db.execute(select(Station).where(Station.id == station_id))
+                    station = st_res.scalar_one_or_none()
+                    if station:
+                        import copy
+                        from sqlalchemy.orm.attributes import flag_modified
+                        new_config = copy.deepcopy(station.config) if station.config else {}
+                        new_config['gnss_origin'] = {
+                            'lat': self.origin['lat'],
+                            'lon': self.origin['lon'],
+                            'h': self.origin['h'],
+                            'locked_at': int(time.time())
+                        }
+                        station.config = new_config
+                        flag_modified(station, 'config')
+                        logger.info(f"🔄 Synced origin to Station {station_id} config")
+
                 await db.commit()
                 logger.info(f"💾 Saved new origin for device {self.device_id} to DB")
+
+                # 3. ✅ Phát tín hiệu WebSocket để UI tự động cập nhật số mới
+                if station_id:
+                    await manager.broadcast({
+                        "type": "origin_locked_event",
+                        "station_id": station_id,
+                        "sensor_type": "gnss",
+                        "data": {
+                            'lat': self.origin['lat'],
+                            'lon': self.origin['lon'],
+                            'h': self.origin['h']
+                        }
+                    })
                 
         except Exception as e:
-            logger.error(f"❌ Error saving origin to DB: {e}")
+            logger.error(f"❌ Error saving origin to DB: {e}", exc_info=True)
 
     def process_gngga(self, raw_payload: str, station_config: Dict = None) -> Optional[Dict[str, Any]]:
         status_type = 'origin_status' if self.state == "AWAITING_CANDIDATES" else 'gnss_status'
@@ -488,7 +525,8 @@ class GNSSVelocityProcessor:
         # 4.3 Robust displacement:
         # Use median(center) of the recent ENU window to suppress outliers, then apply
         # a small EMA so "total displacement" does not jump while the station is still.
-        recent_history = list(self.history)[-30:] if len(self.history) >= 2 else list(self.history)
+        # Tăng cửa sổ median lên 60 điểm (~6-10 giây dữ liệu) để ổn định hơn
+        recent_history = list(self.history)[-60:] if len(self.history) >= 2 else list(self.history)
         if recent_history:
             enu_arr = np.array([p['pos_enu'] for p in recent_history], dtype=float)
             med_enu = np.median(enu_arr, axis=0)
@@ -498,30 +536,59 @@ class GNSSVelocityProcessor:
             except Exception:
                 disp_tau = 12.0
 
+            # --- Displacement Stabilization ---
+            # Ngưỡng đứng im mới: 5.0 mm/s (0.005 m/s) - Phù hợp với nhiễu RTK thông thường
+            # Khi đứng im, dùng Tau = 120s để triệt tiêu hoàn toàn rung động
+            current_disp_tau = disp_tau
+            if speed_2d < 0.005:  # < 5.0 mm/s
+                current_disp_tau = max(disp_tau, 120.0)
+
             if not self.disp_state_ready:
                 self.disp_enu_state = med_enu
                 self.disp_state_ready = True
             else:
-                alpha_disp = dt / (max(disp_tau, 0.1) + dt)
+                alpha_disp = dt / (max(current_disp_tau, 0.1) + dt)
                 self.disp_enu_state = (1.0 - alpha_disp) * self.disp_enu_state + alpha_disp * med_enu
 
-            total_displacement_m = float(np.linalg.norm(self.disp_enu_state))
+            # Mặc định chỉ lấy chuyển vị 2D (mặt bằng) để đảm bảo độ ổn định cao nhất cho giám sát
+            total_displacement_m = float(np.linalg.norm(self.disp_enu_state[:2]))
+            total_displacement_3d_m = float(np.linalg.norm(self.disp_enu_state))
         else:
-            total_displacement_m = float(np.linalg.norm(pos_enu))
+            total_displacement_m = float(np.linalg.norm(pos_enu[:2]))
+            total_displacement_3d_m = float(np.linalg.norm(pos_enu))
 
         # ── Unit conversions ──────────────────────────────────────────
         # ALL displacement outputs unified to CM (centimeters).
-        # pos_e/n/u  = adv_dx/dy/dh = ENU displacement from origin (cm)
-        # adv_vdx/vdy/vdh → mm/phút (velocity, m/s × 60000)
-        # total_displacement_mm → mm
-        # speed_2d_mm_s → mm/s
-        pos_e_cm = float(pos_enu[0] * 100.0)
-        pos_n_cm = float(pos_enu[1] * 100.0)
-        pos_u_cm = float(pos_enu[2] * 100.0)
+        # pos_e/n/u = ENU displacement from origin (cm)
+        # Use filtered state (self.disp_enu_state) for consistency across all fields
+        f_pos_e_cm = float(self.disp_enu_state[0] * 100.0)
+        f_pos_n_cm = float(self.disp_enu_state[1] * 100.0)
+        f_pos_u_cm = float(self.disp_enu_state[2] * 100.0)
 
         total_displacement_mm = total_displacement_m * 1000.0
+        total_displacement_3d_mm = total_displacement_3d_m * 1000.0
+        # Tách riêng 2D (mặt bằng) và Vertical (cao độ) để người dùng dễ đánh giá
+        total_displacement_2d_mm = float(np.hypot(self.disp_enu_state[0], self.disp_enu_state[1]) * 1000.0)
+        vertical_displacement_mm = float(abs(self.disp_enu_state[2]) * 1000.0)
+        
+        # Velocity in mm/s and mm/min
+        v_e_mm_s = float(v_enu_stable[0] * 1000.0)
+        v_n_mm_s = float(v_enu_stable[1] * 1000.0)
+        v_u_mm_s = float(v_enu_stable[2] * 1000.0)
+        
+        # Nếu đứng im (speed < 0.1 mm/s), ép vận tốc hiển thị về 0 nếu cực nhỏ
+        if speed_2d < 0.0001:
+            if abs(v_e_mm_s) < 0.05: v_e_mm_s = 0.0
+            if abs(v_n_mm_s) < 0.05: v_n_mm_s = 0.0
+            if abs(v_u_mm_s) < 0.1: v_u_mm_s = 0.0
 
         self.stats['total_processed'] += 1
+
+        # Chuyển Origin sang VN2000 để nhất quán với lat/lon/h nếu đang dùng VN2000
+        n_vn_origin, e_vn_origin, h_vn_origin = VN2000Converter.wgs84_to_vn2000(
+            self.origin['lat'], self.origin['lon'], self.origin['h'],
+            custom_params=custom_datum
+        )
 
         return {
             'type': 'gnss_processed',
@@ -530,62 +597,61 @@ class GNSSVelocityProcessor:
                 'lat': point['wgs']['lat'],
                 'lon': point['wgs']['lon'],
                 'h': point['wgs']['h'],
-                # ENU displacement from origin (cm)
-                'pos_e': pos_e_cm,
-                'pos_n': pos_n_cm,
-                'pos_u': pos_u_cm,
+                'pos_e': f_pos_e_cm,
+                'pos_n': f_pos_n_cm,
+                'pos_u': f_pos_u_cm,
                 'total_displacement_mm': total_displacement_mm,
-                'vel_e': float(v_enu_stable[0]),
-                'vel_n': float(v_enu_stable[1]),
-                'vel_u': float(v_enu_stable[2]),
+                'vel_e': v_e_mm_s,
+                'vel_n': v_n_mm_s,
+                'vel_u': v_u_mm_s,
                 'speed_2d': speed_2d,
                 'speed_2d_mm_s': float(speed_2d * 1000),
                 'fix_quality': point['fix_quality'],
                 'fix_mode': self._fix_mode(point['fix_quality']),
                 'num_sats': point['num_sats'],
                 'hdop': point['hdop'],
-                # VN2000 absolute position (m)
                 'vn2000_n': n_vn,
                 'vn2000_e': e_vn,
                 'vn2000_h': h_vn,
-                # Forwarding payload for external MQTT (all displacement in cm)
                 'forwarding_data': {
-                    'type': 'gnss_processed',
+                    'type': (station_config or {}).get('gnss_rtk_forwarding', {}).get('gnss_code', 'gnss_processed'),
                     'timestamp': int(ts),
                     'data': {
                         'lat': n_vn,
                         'lon': e_vn,
                         'h': h_vn,
-                        'pos_e': pos_e_cm,
-                        'pos_n': pos_n_cm,
-                        'pos_u': pos_u_cm,
+                        'pos_e': f_pos_e_cm,
+                        'pos_n': f_pos_n_cm,
+                        'pos_u': f_pos_u_cm,
                         'total_displacement_mm': total_displacement_mm,
                         'speed_2d_mm_s': float(speed_2d * 1000),
                         'fix_quality': point['fix_quality'],
                         'fix_mode': self._fix_mode(point['fix_quality']),
                         'num_sats': point['num_sats'],
                         'hdop': point['hdop'],
+                        'origin_lat': float(self.origin['lat']),
+                        'origin_lon': float(self.origin['lon']),
+                        'origin_h': float(self.origin['h']),
                         'adv_x': n_vn,
                         'adv_y': e_vn,
                         'adv_h': h_vn,
-                        'adv_dx': pos_e_cm,
-                        'adv_dy': pos_n_cm,
-                        'adv_dh': pos_u_cm,
-                        'adv_vdx': float(v_enu_stable[0] * 60000),
-                        'adv_vdy': float(v_enu_stable[1] * 60000),
-                        'adv_vdh': float(v_enu_stable[2] * 60000)
+                        'adv_dx': f_pos_e_cm,
+                        'adv_dy': f_pos_n_cm,
+                        'adv_dh': f_pos_u_cm,
+                        'adv_vdx': float(v_e_mm_s * 60.0),
+                        'adv_vdy': float(v_n_mm_s * 60.0),
+                        'adv_vdh': float(v_u_mm_s * 60.0)
                     }
                 },
-                # UI keys – adv_x/y/h = VN2000 (m), adv_dx/dy/dh = ENU displacement (cm)
                 'adv_x': n_vn,
                 'adv_y': e_vn,
                 'adv_h': h_vn,
-                'adv_dx': pos_e_cm,
-                'adv_dy': pos_n_cm,
-                'adv_dh': pos_u_cm,
-                'adv_vdx': float(v_enu_stable[0] * 60000),
-                'adv_vdy': float(v_enu_stable[1] * 60000),
-                'adv_vdh': float(v_enu_stable[2] * 60000),
+                'adv_dx': f_pos_e_cm,
+                'adv_dy': f_pos_n_cm,
+                'adv_dh': f_pos_u_cm,
+                'adv_vdx': float(v_e_mm_s * 60.0),
+                'adv_vdy': float(v_n_mm_s * 60.0),
+                'adv_vdh': float(v_u_mm_s * 60.0),
             }
         }
 

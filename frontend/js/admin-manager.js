@@ -50,6 +50,47 @@ class AdminManager {
         }
 
         this.init();
+        this.setupWebSocketListener();
+    }
+
+    /** Lắng nghe các sự kiện realtime từ Server */
+    setupWebSocketListener() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/admin?token=${this.token}`;
+        
+        try {
+            this.ws = new WebSocket(wsUrl);
+            this.ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
+                    console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
+                    
+                    // Cập nhật ngay lập tức lên UI
+                    const latEl = document.getElementById('origin-lat');
+                    const lonEl = document.getElementById('origin-lon');
+                    const hEl = document.getElementById('origin-h');
+                    const statusEl = document.getElementById('origin-status');
+                    
+                    if (latEl) latEl.value = message.data.lat;
+                    if (lonEl) lonEl.value = message.data.lon;
+                    if (hEl) hEl.value = message.data.h;
+                    
+                    if (statusEl) {
+                        statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
+                        statusEl.className = 'small mt-1';
+                    }
+                    
+                    window.toast?.success('Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+                }
+            };
+            
+            this.ws.onclose = () => {
+                // Thử kết nối lại sau 5 giây nếu mất kết nối
+                setTimeout(() => this.setupWebSocketListener(), 5000);
+            };
+        } catch (e) {
+            console.error('WebSocket connection error:', e);
+        }
     }
 
     /** Switch visible tab pane (called from sidebar icons) */
@@ -818,7 +859,7 @@ class AdminManager {
         if (waterConfirmSrc) { waterConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; waterConfirmSrc.className = 'text-warning small'; }
 
         // Reset RTK forwarding fields to default (all enabled)
-        const fwdToggleIds = ['fwd-toggle-x','fwd-toggle-y','fwd-toggle-h','fwd-toggle-dx','fwd-toggle-dy','fwd-toggle-dh','fwd-toggle-vdx','fwd-toggle-vdy','fwd-toggle-vdh'];
+        const fwdToggleIds = ['fwd-toggle-x', 'fwd-toggle-y', 'fwd-toggle-h', 'fwd-toggle-dx', 'fwd-toggle-dy', 'fwd-toggle-dh', 'fwd-toggle-vdx', 'fwd-toggle-vdy', 'fwd-toggle-vdh'];
         fwdToggleIds.forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
         const rtkTopicEl = document.getElementById('gnss-rtk-topic');
         if (rtkTopicEl) rtkTopicEl.value = '';
@@ -946,64 +987,64 @@ class AdminManager {
             document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
             document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
 
-        // Water confirm steps - hiển thị nguồn giá trị
-        const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
-        const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
-        const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
-        if (waterWarningConfirmEl) {
-            const wcs = waterCfg.water_warning_confirm_steps ?? waterCfg.water_confirm_steps;
-            waterWarningConfirmEl.value = wcs ?? 3;
-            if (waterConfirmSrc) {
-                waterConfirmSrc.textContent = wcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
+            // Water confirm steps - hiển thị nguồn giá trị
+            const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
+            const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
+            const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
+            if (waterWarningConfirmEl) {
+                const wcs = waterCfg.water_warning_confirm_steps ?? waterCfg.water_confirm_steps;
+                waterWarningConfirmEl.value = wcs ?? 3;
+                if (waterConfirmSrc) {
+                    waterConfirmSrc.textContent = wcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
+                }
             }
-        }
-        if (waterCriticalConfirmEl) {
-            const wccs = waterCfg.water_critical_confirm_steps ?? waterCfg.water_confirm_steps;
-            waterCriticalConfirmEl.value = wccs ?? 2;
-        }
-        const waterSafeConfirmEl = document.getElementById('cfg-water-safe-confirm');
-        const waterSafeConfirmSrc = document.getElementById('cfg-water-safe-confirm-source');
-        if (waterSafeConfirmEl) {
-            const wscs = waterCfg.water_safe_confirm_steps;
-            waterSafeConfirmEl.value = wscs ?? 3;
-            if (waterSafeConfirmSrc) {
-                waterSafeConfirmSrc.textContent = wscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                waterSafeConfirmSrc.className = wscs != null ? 'text-success small' : 'text-warning small';
+            if (waterCriticalConfirmEl) {
+                const wccs = waterCfg.water_critical_confirm_steps ?? waterCfg.water_confirm_steps;
+                waterCriticalConfirmEl.value = wccs ?? 2;
             }
-        }
+            const waterSafeConfirmEl = document.getElementById('cfg-water-safe-confirm');
+            const waterSafeConfirmSrc = document.getElementById('cfg-water-safe-confirm-source');
+            if (waterSafeConfirmEl) {
+                const wscs = waterCfg.water_safe_confirm_steps;
+                waterSafeConfirmEl.value = wscs ?? 3;
+                if (waterSafeConfirmSrc) {
+                    waterSafeConfirmSrc.textContent = wscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    waterSafeConfirmSrc.className = wscs != null ? 'text-success small' : 'text-warning small';
+                }
+            }
 
-        const rainCfg = cfg.RainAlerting || {};
-        document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
-        document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
-        document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
+            const rainCfg = cfg.RainAlerting || {};
+            document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
+            document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
+            document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
 
-        // Rain confirm steps - hiển thị nguồn giá trị
-        const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
-        const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
-        const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
-        if (rainWarningConfirmEl) {
-            const rcs = rainCfg.rain_warning_confirm_steps ?? rainCfg.rain_confirm_steps;
-            rainWarningConfirmEl.value = rcs ?? 2;
-            if (rainConfirmSrc) {
-                rainConfirmSrc.textContent = rcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
+            // Rain confirm steps - hiển thị nguồn giá trị
+            const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
+            const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
+            const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
+            if (rainWarningConfirmEl) {
+                const rcs = rainCfg.rain_warning_confirm_steps ?? rainCfg.rain_confirm_steps;
+                rainWarningConfirmEl.value = rcs ?? 2;
+                if (rainConfirmSrc) {
+                    rainConfirmSrc.textContent = rcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
+                }
             }
-        }
-        if (rainCriticalConfirmEl) {
-            const rccs = rainCfg.rain_critical_confirm_steps ?? rainCfg.rain_confirm_steps;
-            rainCriticalConfirmEl.value = rccs ?? 1;
-        }
-        const rainSafeConfirmEl = document.getElementById('cfg-rain-safe-confirm');
-        const rainSafeConfirmSrc = document.getElementById('cfg-rain-safe-confirm-source');
-        if (rainSafeConfirmEl) {
-            const rscs = rainCfg.rain_safe_confirm_steps;
-            rainSafeConfirmEl.value = rscs ?? 3;
-            if (rainSafeConfirmSrc) {
-                rainSafeConfirmSrc.textContent = rscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                rainSafeConfirmSrc.className = rscs != null ? 'text-success small' : 'text-warning small';
+            if (rainCriticalConfirmEl) {
+                const rccs = rainCfg.rain_critical_confirm_steps ?? rainCfg.rain_confirm_steps;
+                rainCriticalConfirmEl.value = rccs ?? 1;
             }
-        }
+            const rainSafeConfirmEl = document.getElementById('cfg-rain-safe-confirm');
+            const rainSafeConfirmSrc = document.getElementById('cfg-rain-safe-confirm-source');
+            if (rainSafeConfirmEl) {
+                const rscs = rainCfg.rain_safe_confirm_steps;
+                rainSafeConfirmEl.value = rscs ?? 3;
+                if (rainSafeConfirmSrc) {
+                    rainSafeConfirmSrc.textContent = rscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    rainSafeConfirmSrc.className = rscs != null ? 'text-success small' : 'text-warning small';
+                }
+            }
             const gnssCfg = cfg.GnssAlerting || {};
             document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
 
@@ -1046,7 +1087,7 @@ class AdminManager {
 
             const rtkTopicEl = document.getElementById('gnss-rtk-topic');
             if (rtkTopicEl) rtkTopicEl.value = fwdCfg.rtk_topic || '';
-            
+
             const rtkHostEl = document.getElementById('gnss-rtk-host');
             if (rtkHostEl) rtkHostEl.value = fwdCfg.host || '';
             const rtkPortEl = document.getElementById('gnss-rtk-port');
@@ -1055,18 +1096,20 @@ class AdminManager {
             if (rtkUserEl) rtkUserEl.value = fwdCfg.username || '';
             const rtkPassEl = document.getElementById('gnss-rtk-pass');
             if (rtkPassEl) rtkPassEl.value = fwdCfg.password || '';
+            const rtkCodeEl = document.getElementById('gnss-rtk-code');
+            if (rtkCodeEl) rtkCodeEl.value = fwdCfg.gnss_code || '';
 
-            setToggle('fwd-toggle-x',   fwdFields.X);
-            setToggle('fwd-toggle-y',   fwdFields.Y);
-            setToggle('fwd-toggle-h',   fwdFields.H);
-            setToggle('fwd-toggle-dx',  fwdFields.dX);
-            setToggle('fwd-toggle-dy',  fwdFields.dY);
-            setToggle('fwd-toggle-dh',  fwdFields.dH);
+            setToggle('fwd-toggle-x', fwdFields.X);
+            setToggle('fwd-toggle-y', fwdFields.Y);
+            setToggle('fwd-toggle-h', fwdFields.H);
+            setToggle('fwd-toggle-dx', fwdFields.dX);
+            setToggle('fwd-toggle-dy', fwdFields.dY);
+            setToggle('fwd-toggle-dh', fwdFields.dH);
             setToggle('fwd-toggle-vdx', fwdFields.VdX);
             setToggle('fwd-toggle-vdy', fwdFields.VdY);
             setToggle('fwd-toggle-vdh', fwdFields.VdH);
             this.syncForwardingWrapStates();
- 
+
             // ✅ LOAD VN2000 ADVANCED PARAMS
             const vnCfg = cfg.vn2000 || cfg.vn2000_params || {};
             const vnEnabledEl = document.getElementById('vn2000-enabled');
@@ -1663,11 +1706,12 @@ class AdminManager {
         // ✅ ĐỌC GNSS RTK FORWARDING CONFIG
         const rtkForwarding = {
             enabled: !!document.getElementById('cfg-fwd-enabled')?.checked,
-            rtk_host: document.getElementById('gnss-rtk-host')?.value?.trim() || '',
-            rtk_port: parseInt(document.getElementById('gnss-rtk-port')?.value) || 1883,
-            rtk_user: document.getElementById('gnss-rtk-user')?.value?.trim() || '',
-            rtk_pass: document.getElementById('gnss-rtk-pass')?.value?.trim() || '',
+            host: document.getElementById('gnss-rtk-host')?.value?.trim() || '',
+            port: parseInt(document.getElementById('gnss-rtk-port')?.value) || 1883,
+            username: document.getElementById('gnss-rtk-user')?.value?.trim() || '',
+            password: document.getElementById('gnss-rtk-pass')?.value?.trim() || '',
             rtk_topic: document.getElementById('gnss-rtk-topic')?.value?.trim() || '',
+            gnss_code: document.getElementById('gnss-rtk-code')?.value?.trim() || 'gnss_processed',
             fields: {
                 X: !!document.getElementById('fwd-toggle-x')?.checked,
                 Y: !!document.getElementById('fwd-toggle-y')?.checked,
@@ -1850,6 +1894,21 @@ class AdminManager {
 
             const data = await res.json();
             window.toast?.success(`Origin reset sent for ${data.reset_count} device(s)`);
+            
+            // ✅ Xóa trắng các ô nhập liệu trên UI để người dùng thấy rõ hiệu ứng reset
+            const latEl = document.getElementById('origin-lat');
+            const lonEl = document.getElementById('origin-lon');
+            const hEl = document.getElementById('origin-h');
+            const statusEl = document.getElementById('origin-status');
+            
+            if (latEl) latEl.value = '';
+            if (lonEl) lonEl.value = '';
+            if (hEl) hEl.value = '';
+            if (statusEl) {
+                statusEl.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Đang thu thập điểm gốc mới...';
+                statusEl.className = 'text-warning small';
+            }
+
             this.startOriginResetCountdown(60);
         } catch (e) {
             window.toast?.error('Reset origin failed: ' + e.message);
@@ -1918,12 +1977,12 @@ class AdminManager {
 
     syncForwardingWrapStates() {
         const map = {
-            'fwd-toggle-x':   'wrap-fwd-x',
-            'fwd-toggle-y':   'wrap-fwd-y',
-            'fwd-toggle-h':   'wrap-fwd-h',
-            'fwd-toggle-dx':  'wrap-fwd-dx',
-            'fwd-toggle-dy':  'wrap-fwd-dy',
-            'fwd-toggle-dh':  'wrap-fwd-dh',
+            'fwd-toggle-x': 'wrap-fwd-x',
+            'fwd-toggle-y': 'wrap-fwd-y',
+            'fwd-toggle-h': 'wrap-fwd-h',
+            'fwd-toggle-dx': 'wrap-fwd-dx',
+            'fwd-toggle-dy': 'wrap-fwd-dy',
+            'fwd-toggle-dh': 'wrap-fwd-dh',
             'fwd-toggle-vdx': 'wrap-fwd-vdx',
             'fwd-toggle-vdy': 'wrap-fwd-vdy',
             'fwd-toggle-vdh': 'wrap-fwd-vdh',

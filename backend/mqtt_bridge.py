@@ -502,7 +502,7 @@ class MQTTBridge:
                             Device.__table__.update().where(Device.id == did).values(last_data_time=ts)
                         )
                     await db.commit()
-                logger.info(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
+                logger.debug(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
             except Exception as e:
                 logger.error(f"❌ Batch config update error: {e}")
 
