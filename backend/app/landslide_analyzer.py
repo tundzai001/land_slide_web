@@ -313,6 +313,7 @@ class LandslideAnalyzer:
                 'm/month': 'm/month', 'm/mo': 'm/month', 'm/tháng': 'm/month',
                 'm/hr': 'm/hr', 'm/h': 'm/hr', 'm/hour': 'm/hr', 'm/giờ': 'm/hr',
                 'm/min': 'm/min', 'm/phút': 'm/min',
+                'mm/min': 'mm/min', 'mm/phút': 'mm/min',
                 'm/s': 'm/s', 'm/sec': 'm/s', 'm/giây': 'm/s',
                 'm/day': 'm/day', 'm/d': 'm/day', 'm/ngày': 'm/day',
                 'cm/day': 'cm/day', 'cm/ngày': 'cm/day',
@@ -362,8 +363,9 @@ class LandslideAnalyzer:
             if unit == 'm/month':   return (thresh * 1000) / (30 * 86400)
             if unit == 'm/day':     return (thresh * 1000) / 86400
             if unit == 'm/hr':      return (thresh * 1000) / 3600
-            if unit == 'm/min':     return (thresh * 1000) / 60
-            if unit == 'm/s':       return thresh * 1000
+            if (unit == 'm/min'):     return (thresh * 1000) / 60
+            if (unit == 'mm/min'):    return thresh / 60
+            if (unit == 'm/s'):       return thresh * 1000
             if unit == 'cm/day':    return (thresh * 10) / 86400
             if unit == 'cm/year':   return (thresh * 10) / 31536000
             if unit == 'mm/s':      return thresh

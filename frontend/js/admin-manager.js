@@ -86,7 +86,35 @@ class AdminManager {
         // Initialize modals
         const stationModalEl = document.getElementById('stationConfigModal');
         if (stationModalEl) {
-            this.stationModal = new bootstrap.Modal(stationModalEl);
+            // Keep wizard stable while configuring: avoid accidental close by backdrop click/Esc.
+            this.stationModal = new bootstrap.Modal(stationModalEl, {
+                backdrop: 'static',
+                keyboard: false
+            });
+
+            const stationForm = document.getElementById('stationConfigForm');
+            if (stationForm && !stationForm.dataset.boundNoSubmit) {
+                stationForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                });
+                stationForm.dataset.boundNoSubmit = '1';
+            }
+
+            // Always open the wizard from top to avoid inherited scroll position.
+            stationModalEl.addEventListener('shown.bs.modal', () => {
+                const body = stationModalEl.querySelector('.modal-body');
+                if (body) body.scrollTop = 0;
+
+                // Defensive re-sync in case stale DOM state leaked from previous opens.
+                if (![1, 2, 3].includes(this.currentStep)) {
+                    this.currentStep = 1;
+                }
+                this.updateWizardStep();
+                this.ensureWizardButtonInteractivity();
+            });
+
+            this.bindWizardButtons();
+            this.bindWizardButtonFallback();
         }
 
         const velocityModalEl = document.getElementById('velocityConfigModal');
@@ -739,6 +767,10 @@ class AdminManager {
         this.currentStationConfig = {};
         this.stationPresetConfirm = null;
         this.currentStep = 1;
+        if (this._originResetTimer) {
+            clearInterval(this._originResetTimer);
+            this._originResetTimer = null;
+        }
 
         document.getElementById('stationConfigForm').reset();
         document.getElementById('edit-station-id').value = '';
@@ -746,6 +778,7 @@ class AdminManager {
         document.getElementById('origin-lon').value = '';
         document.getElementById('origin-h').value = '';
         document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
+        this.updateOriginActionButtons(false);
 
         // Reset sub-sensor coordinates
         ['rain', 'water', 'imu'].forEach(s => {
@@ -792,7 +825,7 @@ class AdminManager {
         this.syncForwardingWrapStates();
 
         document.getElementById('mqtt-empty-state').style.display = 'block';
-        document.getElementById('btn-delete-station').style.display = 'none';
+        this.updateOriginActionButtons(false);
 
         this.highlightPreset(null);
         this.updateWizardStep();
@@ -804,6 +837,10 @@ class AdminManager {
             this.isEditMode = true;
             this.currentStationId = stationId;
             this.currentStep = 1;
+            if (this._originResetTimer) {
+                clearInterval(this._originResetTimer);
+                this._originResetTimer = null;
+            }
 
             window.toast?.info('Đang tải dữ liệu trạm...');
 
@@ -1010,6 +1047,15 @@ class AdminManager {
             const rtkTopicEl = document.getElementById('gnss-rtk-topic');
             if (rtkTopicEl) rtkTopicEl.value = fwdCfg.rtk_topic || '';
             
+            const rtkHostEl = document.getElementById('gnss-rtk-host');
+            if (rtkHostEl) rtkHostEl.value = fwdCfg.host || '';
+            const rtkPortEl = document.getElementById('gnss-rtk-port');
+            if (rtkPortEl) rtkPortEl.value = fwdCfg.port || 1883;
+            const rtkUserEl = document.getElementById('gnss-rtk-user');
+            if (rtkUserEl) rtkUserEl.value = fwdCfg.username || '';
+            const rtkPassEl = document.getElementById('gnss-rtk-pass');
+            if (rtkPassEl) rtkPassEl.value = fwdCfg.password || '';
+
             setToggle('fwd-toggle-x',   fwdFields.X);
             setToggle('fwd-toggle-y',   fwdFields.Y);
             setToggle('fwd-toggle-h',   fwdFields.H);
@@ -1020,6 +1066,28 @@ class AdminManager {
             setToggle('fwd-toggle-vdy', fwdFields.VdY);
             setToggle('fwd-toggle-vdh', fwdFields.VdH);
             this.syncForwardingWrapStates();
+ 
+            // ✅ LOAD VN2000 ADVANCED PARAMS
+            const vnCfg = cfg.vn2000 || cfg.vn2000_params || {};
+            const vnEnabledEl = document.getElementById('vn2000-enabled');
+            if (vnEnabledEl) {
+                vnEnabledEl.checked = !!vnCfg.enabled;
+                this.toggleVn2000AdvancedSlide(false); // Init slide state
+            }
+            if (document.getElementById('vn-dx')) document.getElementById('vn-dx').value = vnCfg.dx ?? 191.90441429;
+            if (document.getElementById('vn-dy')) document.getElementById('vn-dy').value = vnCfg.dy ?? 39.30318279;
+            if (document.getElementById('vn-dz')) document.getElementById('vn-dz').value = vnCfg.dz ?? 111.45032835;
+            if (document.getElementById('vn-rx')) document.getElementById('vn-rx').value = vnCfg.rx ?? 0.00928836;
+            if (document.getElementById('vn-ry')) document.getElementById('vn-ry').value = vnCfg.ry ?? -0.01975479;
+            if (document.getElementById('vn-rz')) document.getElementById('vn-rz').value = vnCfg.rz ?? 0.00427372;
+            if (document.getElementById('vn-k')) document.getElementById('vn-k').value = vnCfg.k ?? 0.999999747093722;
+            if (document.getElementById('vn-l0')) document.getElementById('vn-l0').value = vnCfg.l0_deg ?? 105.0;
+            if (document.getElementById('vn-k0')) document.getElementById('vn-k0').value = vnCfg.k0 ?? 0.9999;
+            if (document.getElementById('vn-resb')) document.getElementById('vn-resb').value = vnCfg.res_b ?? 0.0;
+            if (document.getElementById('vn-resl')) document.getElementById('vn-resl').value = vnCfg.res_l ?? 0.0;
+            if (document.getElementById('vn-resh')) document.getElementById('vn-resh').value = vnCfg.res_h ?? 0.0;
+            if (document.getElementById('vn-resn')) document.getElementById('vn-resn').value = vnCfg.res_n ?? 0.0;
+            if (document.getElementById('vn-rese')) document.getElementById('vn-rese').value = vnCfg.res_e ?? 0.0;
 
 
             const gnssOrigin = cfg.gnss_origin || {};
@@ -1028,11 +1096,13 @@ class AdminManager {
                 document.getElementById('origin-lon').value = gnssOrigin.lon;
                 document.getElementById('origin-h').value = gnssOrigin.h || 0;
                 document.getElementById('origin-status').innerHTML = '<span class="text-success">✅ Đã có tọa độ gốc</span>';
+                this.updateOriginActionButtons(true);
             } else {
                 document.getElementById('origin-lat').value = '';
                 document.getElementById('origin-lon').value = '';
                 document.getElementById('origin-h').value = '';
                 document.getElementById('origin-status').textContent = 'Chưa thiết lập';
+                this.updateOriginActionButtons(false);
             }
 
             // Load extra sensor origins
@@ -1047,7 +1117,6 @@ class AdminManager {
             });
 
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
-            document.getElementById('btn-delete-station').style.display = 'inline-block';
 
             this.highlightPreset(cfg.active_preset);
             this.updateWizardStep();
@@ -1060,15 +1129,26 @@ class AdminManager {
     }
 
     updateWizardStep() {
-        document.querySelectorAll('.wizard-step').forEach(step => {
+        const stationModalEl = document.getElementById('stationConfigModal');
+        const scope = stationModalEl || document;
+
+        scope.querySelectorAll('.wizard-step').forEach(step => {
             const stepNum = parseInt(step.dataset.step);
             step.classList.toggle('active', stepNum === this.currentStep);
         });
 
-        document.querySelectorAll('.wizard-content').forEach(content => {
+        scope.querySelectorAll('.wizard-content').forEach(content => {
             const stepNum = parseInt(content.dataset.step);
-            content.classList.toggle('active', stepNum === this.currentStep);
+            const isActive = stepNum === this.currentStep;
+            content.classList.toggle('active', isActive);
+            content.style.display = isActive ? 'block' : 'none';
+            content.setAttribute('aria-hidden', isActive ? 'false' : 'true');
         });
+
+        const modalBody = stationModalEl?.querySelector('.modal-body');
+        if (modalBody) {
+            modalBody.scrollTop = 0;
+        }
 
         const btnBack = document.getElementById('btn-wizard-back');
         const btnNext = document.getElementById('btn-wizard-next');
@@ -1077,28 +1157,183 @@ class AdminManager {
         if (btnBack) btnBack.style.display = this.currentStep > 1 ? 'inline-block' : 'none';
         if (btnNext) btnNext.style.display = this.currentStep < this.totalSteps ? 'inline-block' : 'none';
         if (btnSave) btnSave.style.display = this.currentStep === this.totalSteps ? 'inline-block' : 'none';
+        if (btnNext) btnNext.disabled = false;
+        if (btnSave) btnSave.disabled = false;
+        this.ensureWizardButtonInteractivity();
 
         // When reaching step 3, load pending devices for provisioning (only if editing existing station)
         const pendingSection = document.getElementById('pending-devices-section');
         if (this.currentStep === 3 && this.currentStationId) {
             if (pendingSection) pendingSection.style.display = 'block';
-            this.loadPendingDevices();
+            this.loadWizardPendingDevices().catch((e) => {
+                console.error('Failed to load pending devices in step 3:', e);
+            });
         } else {
             if (pendingSection) pendingSection.style.display = 'none';
         }
+
+        this.syncMqttSectionsForStep();
+    }
+
+    goToWizardStep(nextStep) {
+        const normalizedStep = Math.max(1, Math.min(this.totalSteps, Number(nextStep) || 1));
+        if (normalizedStep === this.currentStep) return;
+
+        this.currentStep = normalizedStep;
+
+        try {
+            this.updateWizardStep();
+        } catch (e) {
+            console.error('Wizard UI update failed, applying fallback render:', e);
+
+            // Fallback render: force-show only the target step content.
+            document.querySelectorAll('#stationConfigModal .wizard-content').forEach(content => {
+                const stepNum = Number(content.dataset.step);
+                const isActive = stepNum === this.currentStep;
+                content.classList.toggle('active', isActive);
+                content.style.display = isActive ? 'block' : 'none';
+            });
+        }
+    }
+
+    syncMqttSectionsForStep() {
+        const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
+        const sectionByType = {
+            gnss: document.getElementById('mqtt-gnss-section'),
+            rain: document.getElementById('mqtt-rain-section'),
+            water: document.getElementById('mqtt-water-section'),
+            imu: document.getElementById('mqtt-imu-section')
+        };
+        const emptyState = document.getElementById('mqtt-empty-state');
+
+        // Never show MQTT blocks outside step 2.
+        if (this.currentStep !== 2) {
+            sensorTypes.forEach(type => {
+                const section = sectionByType[type];
+                if (section) section.style.display = 'none';
+            });
+            if (emptyState) emptyState.style.display = 'none';
+            return;
+        }
+
+        let anyChecked = false;
+        sensorTypes.forEach(type => {
+            const checked = !!document.getElementById(`edit-${type}`)?.checked;
+            const section = sectionByType[type];
+            if (section) section.style.display = checked ? 'block' : 'none';
+            if (checked) anyChecked = true;
+        });
+
+        if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
+    }
+
+    bindWizardButtons() {
+        const btnBack = document.getElementById('btn-wizard-back');
+        const btnNext = document.getElementById('btn-wizard-next');
+        const btnSave = document.getElementById('btn-wizard-save');
+
+        // Use direct handler assignment so buttons always follow latest instance state.
+        if (btnBack) {
+            btnBack.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.wizardPrev();
+            };
+        }
+
+        if (btnNext) {
+            btnNext.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.wizardNext();
+            };
+        }
+
+        if (btnSave) {
+            btnSave.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.saveStation();
+            };
+        }
+    }
+
+    bindWizardButtonFallback() {
+        if (this._wizardFallbackBound) return;
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target?.closest?.('#btn-wizard-next, #btn-wizard-back, #btn-wizard-save');
+            if (!btn) return;
+
+            const modalEl = document.getElementById('stationConfigModal');
+            if (!modalEl || !modalEl.classList.contains('show')) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (btn.id === 'btn-wizard-next') {
+                this.wizardNext();
+            } else if (btn.id === 'btn-wizard-back') {
+                this.wizardPrev();
+            } else if (btn.id === 'btn-wizard-save') {
+                this.saveStation();
+            }
+        }, true);
+
+        // Extra fallback: bind directly on modal root so clicks still work even if another
+        // layer/listener interferes at document level.
+        const modalEl = document.getElementById('stationConfigModal');
+        if (modalEl) {
+            modalEl.addEventListener('click', (e) => {
+                const btn = e.target?.closest?.('#btn-wizard-next, #btn-wizard-back, #btn-wizard-save');
+                if (!btn) return;
+                if (!modalEl.classList.contains('show')) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (btn.id === 'btn-wizard-next') {
+                    this.wizardNext();
+                } else if (btn.id === 'btn-wizard-back') {
+                    this.wizardPrev();
+                } else if (btn.id === 'btn-wizard-save') {
+                    this.saveStation();
+                }
+            }, true);
+        }
+
+        this._wizardFallbackBound = true;
+    }
+
+    ensureWizardButtonInteractivity() {
+        const footer = document.querySelector('#stationConfigModal .modal-footer');
+        const btnIds = ['btn-wizard-next', 'btn-wizard-back', 'btn-wizard-save'];
+
+        if (footer) {
+            footer.style.pointerEvents = 'auto';
+            footer.style.position = 'relative';
+            footer.style.zIndex = '1061';
+        }
+
+        btnIds.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.disabled = false;
+            btn.style.pointerEvents = 'auto';
+            btn.style.position = 'relative';
+            btn.style.zIndex = '1062';
+        });
     }
 
     wizardNext() {
         if (this.currentStep < this.totalSteps) {
-            this.currentStep++;
-            this.updateWizardStep();
+            this.goToWizardStep(this.currentStep + 1);
         }
     }
 
     wizardPrev() {
         if (this.currentStep > 1) {
-            this.currentStep--;
-            this.updateWizardStep();
+            this.goToWizardStep(this.currentStep - 1);
         }
     }
 
@@ -1371,11 +1606,11 @@ class AdminManager {
             const checkbox = document.getElementById(`edit-${type}`);
             if (checkbox && checkbox.checked) {
                 const topicInput = document.getElementById(`topic-${type}`);
-                const topic = topicInput?.value.trim();
+                const topic = topicInput?.value?.trim();
 
                 if (!topic) {
                     window.toast?.error(`Vui lòng nhập MQTT Topic cho ${type.toUpperCase()}`);
-                    topicInput.focus();
+                    topicInput?.focus();
                     hasError = true;
                     return;
                 }
@@ -1418,64 +1653,88 @@ class AdminManager {
         const finalImuCriticalConfirm = parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
+        const offlineThresholds = {
+            gnss: parseInt(document.getElementById('offline-gnss')?.value) || this.defaultOfflineThresholds.gnss,
+            rain: parseInt(document.getElementById('offline-rain')?.value) || this.defaultOfflineThresholds.rain,
+            water: parseInt(document.getElementById('offline-water')?.value) || this.defaultOfflineThresholds.water,
+            imu: parseInt(document.getElementById('offline-imu')?.value) || this.defaultOfflineThresholds.imu
+        };
+
         // ✅ ĐỌC GNSS RTK FORWARDING CONFIG
-        const gnss_rtk_forwarding = {
+        const rtkForwarding = {
             enabled: !!document.getElementById('cfg-fwd-enabled')?.checked,
-            rtk_topic: document.getElementById('gnss-rtk-topic')?.value.trim() || '',
+            rtk_host: document.getElementById('gnss-rtk-host')?.value?.trim() || '',
+            rtk_port: parseInt(document.getElementById('gnss-rtk-port')?.value) || 1883,
+            rtk_user: document.getElementById('gnss-rtk-user')?.value?.trim() || '',
+            rtk_pass: document.getElementById('gnss-rtk-pass')?.value?.trim() || '',
+            rtk_topic: document.getElementById('gnss-rtk-topic')?.value?.trim() || '',
             fields: {
-                X:   !!document.getElementById('fwd-toggle-x')?.checked,
-                Y:   !!document.getElementById('fwd-toggle-y')?.checked,
-                H:   !!document.getElementById('fwd-toggle-h')?.checked,
-                dX:  !!document.getElementById('fwd-toggle-dx')?.checked,
-                dY:  !!document.getElementById('fwd-toggle-dy')?.checked,
-                dH:  !!document.getElementById('fwd-toggle-dh')?.checked,
+                X: !!document.getElementById('fwd-toggle-x')?.checked,
+                Y: !!document.getElementById('fwd-toggle-y')?.checked,
+                H: !!document.getElementById('fwd-toggle-h')?.checked,
+                dX: !!document.getElementById('fwd-toggle-dx')?.checked,
+                dY: !!document.getElementById('fwd-toggle-dy')?.checked,
+                dH: !!document.getElementById('fwd-toggle-dh')?.checked,
                 VdX: !!document.getElementById('fwd-toggle-vdx')?.checked,
                 VdY: !!document.getElementById('fwd-toggle-vdy')?.checked,
                 VdH: !!document.getElementById('fwd-toggle-vdh')?.checked
             }
         };
 
+
+        const vn2000 = {
+            enabled: !!document.getElementById('vn2000-enabled')?.checked,
+            dx: parseFloat(document.getElementById('vn-dx')?.value) || 191.90441429,
+            dy: parseFloat(document.getElementById('vn-dy')?.value) || 39.30318279,
+            dz: parseFloat(document.getElementById('vn-dz')?.value) || 111.45032835,
+            rx: parseFloat(document.getElementById('vn-rx')?.value) || 0.00928836,
+            ry: parseFloat(document.getElementById('vn-ry')?.value) || -0.01975479,
+            rz: parseFloat(document.getElementById('vn-rz')?.value) || 0.00427372,
+            k: parseFloat(document.getElementById('vn-k')?.value) || 0.999999747093722,
+            l0_deg: parseFloat(document.getElementById('vn-l0')?.value) || 105.0,
+            k0: parseFloat(document.getElementById('vn-k0')?.value) || 0.9999,
+            res_b: parseFloat(document.getElementById('vn-resb')?.value) || 0.0,
+            res_l: parseFloat(document.getElementById('vn-resl')?.value) || 0.0,
+            res_h: parseFloat(document.getElementById('vn-resh')?.value) || 0.0,
+            res_n: parseFloat(document.getElementById('vn-resn')?.value) || 0.0,
+            res_e: parseFloat(document.getElementById('vn-rese')?.value) || 0.0
+        };
+
         const config = {
             active_preset: this.activePreset || '',
-            offline_thresholds: {
-                gnss: parseInt(document.getElementById('offline-gnss').value) || this.defaultOfflineThresholds.gnss,
-                rain: parseInt(document.getElementById('offline-rain').value) || this.defaultOfflineThresholds.rain,
-                water: parseInt(document.getElementById('offline-water').value) || this.defaultOfflineThresholds.water,
-                imu: parseInt(document.getElementById('offline-imu').value) || this.defaultOfflineThresholds.imu
-            },
             Water: {
-                warning_threshold: parseFloat(document.getElementById('cfg-water-warning').value),
-                critical_threshold: parseFloat(document.getElementById('cfg-water-critical').value),
+                warning_threshold: parseFloat(document.getElementById('cfg-water-warning')?.value || 0),
+                critical_threshold: parseFloat(document.getElementById('cfg-water-critical')?.value || 0),
                 water_warning_confirm_steps: finalWaterWarningConfirm,
                 water_critical_confirm_steps: finalWaterCriticalConfirm,
                 water_confirm_steps: finalWaterWarningConfirm,
                 water_safe_confirm_steps: parseInt(document.getElementById('cfg-water-safe-confirm')?.value) || 3
             },
             RainAlerting: {
-                rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch').value),
-                rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning').value),
-                rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical').value),
+                rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch')?.value || 0),
+                rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning')?.value || 0),
+                rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical')?.value || 0),
                 rain_warning_confirm_steps: finalRainWarningConfirm,
                 rain_critical_confirm_steps: finalRainCriticalConfirm,
                 rain_confirm_steps: finalRainWarningConfirm,
                 rain_safe_confirm_steps: parseInt(document.getElementById('cfg-rain-safe-confirm')?.value) || 3
             },
             GnssAlerting: {
-                gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop').value) || 4.0,
+                gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop')?.value || 4.0),
                 gnss_warning_confirm_steps: finalGnssWarningConfirm,
                 gnss_critical_confirm_steps: finalGnssCriticalConfirm,
                 gnss_confirm_steps: finalGnssWarningConfirm,
                 gnss_safe_confirm_steps: parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
-                gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout').value) || 300
+                gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout')?.value || 300)
             },
             ImuAlerting: {
-                tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
-                tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit').value) || 15.0,
+                tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
+                tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
                 imu_warning_confirm_steps: finalImuCriticalConfirm,
                 imu_critical_confirm_steps: finalImuCriticalConfirm,
                 imu_confirm_steps: finalImuCriticalConfirm,
                 imu_safe_confirm_steps: parseInt(document.getElementById('cfg-imu-safe-confirm')?.value) || 3,
-                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock').value) || 5.0
+                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock')?.value || 5.0)
             },
             ImuBaseline: {
                 baseline_roll: parseFloat(document.getElementById('cfg-imu-base-roll')?.value) || 0.0,
@@ -1483,9 +1742,9 @@ class AdminManager {
                 baseline_yaw: parseFloat(document.getElementById('cfg-imu-base-yaw')?.value) || 0.0
             },
             gnss_origin: {
-                lat: document.getElementById('origin-lat').value,
-                lon: document.getElementById('origin-lon').value,
-                h: document.getElementById('origin-h').value
+                lat: document.getElementById('origin-lat')?.value || null,
+                lon: document.getElementById('origin-lon')?.value || null,
+                h: document.getElementById('origin-h')?.value || 0
             },
             rain_origin: {
                 lat: document.getElementById('origin-rain-lat')?.value !== '' ? document.getElementById('origin-rain-lat').value : undefined,
@@ -1502,8 +1761,13 @@ class AdminManager {
                 lon: document.getElementById('origin-imu-lon')?.value !== '' ? document.getElementById('origin-imu-lon').value : undefined,
                 h: document.getElementById('origin-imu-h')?.value !== '' ? document.getElementById('origin-imu-h').value : undefined
             },
-            velocity_classification: this.velocityConfig
+            velocity_classification: this.velocityConfig,
+            offline_thresholds: offlineThresholds,
+            gnss_rtk_forwarding: rtkForwarding,
+            vn2000: vn2000,
+            vn2000_params: vn2000
         };
+
 
         const payload = {
             station_code: code,
@@ -1561,6 +1825,69 @@ class AdminManager {
         } catch (e) {
             window.toast?.error('❌ Lỗi xóa trạm');
         }
+    }
+
+    async resetGnssOrigin(stationId) {
+        if (!stationId || Number.isNaN(Number(stationId))) {
+            window.toast?.warning('Save station first before resetting GNSS origin');
+            return;
+        }
+        if (!confirm('Reset GNSS origin for this station? The system will collect fresh samples for around 1 minute.')) return;
+
+        const resetBtn = document.getElementById('btn-reset-origin');
+        try {
+            if (resetBtn) resetBtn.disabled = true;
+
+            const res = await fetch(`/api/admin/gnss/reset-origin/${stationId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.detail || 'Unknown error');
+            }
+
+            const data = await res.json();
+            window.toast?.success(`Origin reset sent for ${data.reset_count} device(s)`);
+            this.startOriginResetCountdown(60);
+        } catch (e) {
+            window.toast?.error('Reset origin failed: ' + e.message);
+        } finally {
+            if (resetBtn) resetBtn.disabled = false;
+        }
+    }
+
+    startOriginResetCountdown(seconds = 60) {
+        const statusEl = document.getElementById('origin-status');
+        if (!statusEl) return;
+
+        if (this._originResetTimer) {
+            clearInterval(this._originResetTimer);
+            this._originResetTimer = null;
+        }
+
+        let remain = Math.max(1, Number(seconds) || 60);
+        statusEl.innerHTML = `<span class="text-warning">Collecting GNSS samples for new origin: ${remain}s</span>`;
+
+        this._originResetTimer = setInterval(() => {
+            remain -= 1;
+            if (remain > 0) {
+                statusEl.innerHTML = `<span class="text-warning">Collecting GNSS samples for new origin: ${remain}s</span>`;
+                return;
+            }
+
+            clearInterval(this._originResetTimer);
+            this._originResetTimer = null;
+            statusEl.innerHTML = '<span class="text-info">1 minute completed. Click "L?y t?a d?" to verify the new origin.</span>';
+        }, 1000);
+    }
+
+    updateOriginActionButtons(hasOrigin) {
+        const resetBtn = document.getElementById('btn-reset-origin');
+        const fetchBtn = document.getElementById('btn-fetch-origin');
+        if (resetBtn) resetBtn.style.display = hasOrigin ? 'inline-block' : 'none';
+        if (fetchBtn) fetchBtn.style.display = 'inline-block';
     }
 
     // =========================================================================
@@ -1801,13 +2128,30 @@ class AdminManager {
             const result = await res.json();
 
             if (res.ok) {
-                // Điền tọa độ nhận được vào form
-                document.getElementById('origin-lat').value = result.lat;
-                document.getElementById('origin-lon').value = result.lon;
-                document.getElementById('origin-h').value = result.h;
+                const latEl = document.getElementById('origin-lat');
+                const lonEl = document.getElementById('origin-lon');
+                const hEl = document.getElementById('origin-h');
+                const currentLat = parseFloat(latEl?.value);
+                const currentLon = parseFloat(lonEl?.value);
+                const currentH = parseFloat(hEl?.value);
+                const hasOrigin = Number.isFinite(currentLat) && Number.isFinite(currentLon);
 
-                statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
-                window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
+                if (!hasOrigin) {
+                    // No existing origin -> allow filling
+                    if (latEl) latEl.value = result.lat;
+                    if (lonEl) lonEl.value = result.lon;
+                    if (hEl) hEl.value = result.h;
+                    this.updateOriginActionButtons(true);
+
+                    statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
+                    window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
+                } else {
+                    // Existing origin -> verification only, do NOT overwrite locked origin fields
+                    const deltaM = this.computeGeoDistanceMeters(currentLat, currentLon, result.lat, result.lon);
+                    const deltaH = Number.isFinite(currentH) ? (result.h - currentH) : 0;
+                    statusEl.innerHTML = `<span class="text-info">ℹ Live check: Δxy=${deltaM.toFixed(3)}m, Δh=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
+                    window.toast?.info('Đã kiểm tra live GNSS. Origin hiện tại không bị ghi đè.');
+                }
             } else {
                 throw new Error(result.detail || 'Timeout hoặc thiết bị offline');
             }
@@ -1820,11 +2164,22 @@ class AdminManager {
         }
     }
 
+    computeGeoDistanceMeters(lat1, lon1, lat2, lon2) {
+        const toRad = (v) => (Number(v) * Math.PI) / 180;
+        const R = 6371000;
+        const p1 = toRad(lat1);
+        const p2 = toRad(lat2);
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * (Math.sin(dLon / 2) ** 2);
+        return 2 * R * Math.asin(Math.sqrt(a));
+    }
+
     // =========================================================================
     // PENDING DEVICES (ADMIN PROVISIONING)
     // =========================================================================
 
-    async loadPendingDevices() {
+    async loadAdminPendingDevices() {
         try {
             const res = await fetch('/api/admin/devices/pending', {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -1971,7 +2326,7 @@ class AdminManager {
             window.toast?.success(`✅ Pi ${device_code} đã gán vào trạm & license đã gửi!`);
 
             // Refresh pending list (device should disappear)
-            this.loadPendingDevices();
+            this.loadAdminPendingDevices();
         } catch (e) {
             console.error('Generate & provision error:', e);
             window.toast?.error('❌ ' + e.message);
@@ -2006,7 +2361,7 @@ class AdminManager {
 
             window.toast?.success('✅ Thiết bị đã được gán thành công');
             // refresh lists
-            this.loadPendingDevices();
+            this.loadAdminPendingDevices();
             // reload station devices view if open
             this.editStation(this.currentStationId);
         } catch (e) {
@@ -3005,7 +3360,7 @@ class AdminManager {
     // ---- Wizard: Pi section (step 3) ----
 
     /** Called by updateWizardStep() when step 3 is opened in station wizard */
-    async loadPendingDevices() {
+    async loadWizardPendingDevices() {
         const listEl = document.getElementById('pending-devices-list');
         const btnRow = document.getElementById('pi-assign-btn-row');
         const currentPiInfo = document.getElementById('current-pi-info');
@@ -3107,7 +3462,7 @@ class AdminManager {
             const data = await res.json();
             window.toast?.success(`✅ Đã gán Pi vào trạm "${data.station_name}"`);
             // Reload the wizard Pi section
-            this.loadPendingDevices();
+            this.loadWizardPendingDevices();
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
         }
@@ -3124,7 +3479,7 @@ class AdminManager {
             if (!res.ok) throw new Error('Lỗi');
             window.toast?.success('✅ Đã bỏ gán Pi');
             this._assignedPiId = null;
-            this.loadPendingDevices();
+            this.loadWizardPendingDevices();
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
         }
@@ -3133,6 +3488,56 @@ class AdminManager {
     logout() {
         localStorage.removeItem('token');
         window.location.href = '/';
+    }
+
+    toggleVn2000AdvancedSlide(animate = true) {
+        const checkbox = document.getElementById('vn2000-enabled');
+        const content = document.getElementById('vn2000-advanced-content');
+        if (!checkbox || !content) return;
+
+        if (checkbox.checked) {
+            content.style.display = 'block';
+            content.style.maxHeight = animate ? '0px' : 'none';
+            if (animate) {
+                setTimeout(() => {
+                    content.style.maxHeight = '1000px';
+                }, 10);
+            }
+        } else {
+            if (animate) {
+                content.style.maxHeight = '0px';
+                setTimeout(() => {
+                    content.style.display = 'none';
+                }, 300);
+            } else {
+                content.style.display = 'none';
+            }
+        }
+    }
+
+    toggleRtkForwardingSlide(animate = true) {
+        const checkbox = document.getElementById('cfg-fwd-enabled');
+        const content = document.getElementById('rtk-forwarding-content');
+        if (!checkbox || !content) return;
+
+        if (checkbox.checked) {
+            content.style.display = 'block';
+            content.style.maxHeight = animate ? '0px' : 'none';
+            if (animate) {
+                setTimeout(() => {
+                    content.style.maxHeight = '2000px';
+                }, 10);
+            }
+        } else {
+            if (animate) {
+                content.style.maxHeight = '0px';
+                setTimeout(() => {
+                    content.style.display = 'none';
+                }, 300);
+            } else {
+                content.style.display = 'none';
+            }
+        }
     }
 }
 
@@ -3178,3 +3583,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('Error updating admin UI:', e);
     }
 });
+
+
+
+
+

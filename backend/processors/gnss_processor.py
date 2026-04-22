@@ -7,6 +7,8 @@ import time
 from collections import deque
 from typing import Optional, Dict, Any
 
+from app.modules.geodetic import VN2000Converter, DatumParams
+
 logger = logging.getLogger(__name__)
 
 A_WGS84 = 6378137.0
@@ -25,12 +27,8 @@ def haversine_3d(lat1, lon1, h1, lat2, lon2, h2):
 
 class GNSSVelocityProcessor:
     """
-    Processor đơn giản: nhận GNGGA → tính ENU position → tính velocity 2-point
-    → làm mượt nhẹ bằng median window.
-
-    Không có ngưỡng cứng về tốc độ/gia tốc/HDOP ở đây.
-    Toàn bộ logic cảnh báo (ngưỡng, confirm_steps, min_confirm_seconds)
-    thuộc về LandslideAnalyzer, không thuộc processor.
+    Processor ổn định: nhận GNGGA → tính ENU position → tính velocity qua cửa sổ trượt.
+    Tích hợp chuyển đổi tọa độ VN2000 (NEH).
     """
     def __init__(
         self,
@@ -38,20 +36,21 @@ class GNSSVelocityProcessor:
         db_session_factory,
         required_points=5,
         max_spread_m=5.0,
-        filter_window_size=5,
+        filter_window_size=30,
         min_fix_quality=4,
         # Sanity gate: reject fix nếu thiết bị claim nhảy > X mét trong 1 sample.
-        # Không phải ngưỡng nhạy cảm — landslide thật không bao giờ nhảy cỡ này.
-        # Tăng lên nếu deploy ở nơi GPS baseline rất xa hoặc sample rate rất thấp.
         max_step_distance_m=3.0,
+        # Vertical jump gate (U-axis) to reject unrealistic altitude spikes.
+        max_step_vertical_m=0.6,
     ):
         self.device_id = device_id
         self.db_session_factory = db_session_factory
-        self.required_points = required_points
+        self.required_points = 60  # Increased for stability (approx 1 min at 1Hz)
         self.max_spread_m = max_spread_m
         self.min_fix_quality = min_fix_quality
         self.filter_window_size = filter_window_size
         self.max_step_distance_m = float(max_step_distance_m)
+        self.max_step_vertical_m = float(max_step_vertical_m)
 
         # State
         self.state = "AWAITING_CANDIDATES"
@@ -60,6 +59,12 @@ class GNSSVelocityProcessor:
 
         # history giữ filter_window_size + 1 mẫu để tính median window
         self.history = deque(maxlen=filter_window_size + 1)
+        # Output velocity state to suppress frame-to-frame jumps without forcing zero.
+        self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
+        self.v_state_ready = False
+        # Stable displacement state for UI/log (reduce "standing still but jumping total").
+        self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
+        self.disp_state_ready = False
 
         self.stats = {
             'total_processed': 0,
@@ -74,6 +79,22 @@ class GNSSVelocityProcessor:
             f"fix_required={min_fix_quality}, window={filter_window_size}, "
             f"max_step={self.max_step_distance_m}m"
         )
+
+    def reset_origin(self):
+        """Manually reset the origin calculation."""
+        self.origin = None
+        self.origin_candidates = []
+        self.state = "AWAITING_CANDIDATES"
+        self.history = deque(maxlen=self.filter_window_size + 1)
+        self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
+        self.v_state_ready = False
+        self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
+        self.disp_state_ready = False
+        self.last_process_time = 0
+        logger.info(f"🔄 [GNSS] Origin reset for device {self.device_id}")
+
+    def _update_last_data_time(self, timestamp: int):
+        self.last_process_time = timestamp
 
     def _fix_mode(self, fix_quality: int) -> str:
         # NMEA GGA fix quality mapping for UI/log readability
@@ -170,7 +191,7 @@ class GNSSVelocityProcessor:
         except Exception as e:
             logger.error(f"❌ Error saving origin to DB: {e}")
 
-    def process_gngga(self, raw_payload: str) -> Optional[Dict[str, Any]]:
+    def process_gngga(self, raw_payload: str, station_config: Dict = None) -> Optional[Dict[str, Any]]:
         status_type = 'origin_status' if self.state == "AWAITING_CANDIDATES" else 'gnss_status'
         try:
             # Extract câu GGA từ bất kỳ vị trí nào trong string.
@@ -211,7 +232,7 @@ class GNSSVelocityProcessor:
             if self.state == "AWAITING_CANDIDATES":
                 return self._handle_origin_collection(payload, fix_quality)
             elif self.state == "ORIGIN_LOCKED":
-                return self._handle_processing(payload, fix_quality)
+                return self._handle_processing(payload, fix_quality, station_config)
             
             return None
 
@@ -297,7 +318,7 @@ class GNSSVelocityProcessor:
             "target": self.required_points
         }
 
-    def _handle_processing(self, gngga_string, fix_quality):
+    def _handle_processing(self, gngga_string, fix_quality, station_config: Dict = None):
         # Chỉ tính vận tốc/displacement khi RTK FIXED (fix=4)
         if fix_quality != self.min_fix_quality:
             self.stats['low_quality_rejected'] += 1
@@ -348,28 +369,30 @@ class GNSSVelocityProcessor:
         # Sanity gate: reject fix vật lý không thể xảy ra (bad RTK fix, multipath)
         # Dùng displacement (mét) chứ không phải tốc độ để độc lập với sample rate.
         step_2d_m = float(np.hypot(v_enu_raw[0], v_enu_raw[1]) * dt)
-        if step_2d_m > self.max_step_distance_m:
+        step_u_m = float(abs(v_enu_raw[2]) * dt)
+        if step_2d_m > self.max_step_distance_m or step_u_m > self.max_step_vertical_m:
             self.stats['spike_rejected'] += 1
             self.history.pop()  # pop bad fix ra khỏi window trước khi nó nhiễm median
             logger.warning(
-                f"[GNSS-{self.device_id}] Bad fix rejected: step={step_2d_m:.3f}m "
-                f"(max={self.max_step_distance_m}m), dt={dt:.3f}s | "
+                f"[GNSS-{self.device_id}] Bad fix rejected: step2d={step_2d_m:.3f}m (max={self.max_step_distance_m}m), "
+                f"stepU={step_u_m:.3f}m (max={self.max_step_vertical_m}m), dt={dt:.3f}s | "
                 f"pos_old=[{p_old['pos_enu'][0]:.3f}, {p_old['pos_enu'][1]:.3f}, {p_old['pos_enu'][2]:.3f}]m -> "
                 f"pos_new=[{p_new['pos_enu'][0]:.3f}, {p_new['pos_enu'][1]:.3f}, {p_new['pos_enu'][2]:.3f}]m | "
                 f"wgs=[{point['wgs']['lat']:.6f}, {point['wgs']['lon']:.6f}, {point['wgs']['h']:.3f}]"
             )
             return None
 
-        # Median window smoothing over adjacent 2-point velocities
-        if len(self.history) >= self.filter_window_size:
-            velocities_enu = []
-            for i in range(1, len(self.history)):
-                p1 = self.history[i]
-                p0 = self.history[i - 1]
-                idt = p1['ts'] - p0['ts']
-                if idt >= 0.01:
-                    velocities_enu.append((p1['pos_enu'] - p0['pos_enu']) / idt)
-            v_enu_filtered = np.median(velocities_enu, axis=0) if velocities_enu else v_enu_raw
+        # Stable window smoothing:
+        # - đủ cửa sổ chuẩn: dùng full window
+        # - giai đoạn đầu: dùng first->last của toàn bộ history để tránh giật raw velocity
+        if len(self.history) >= 3:
+            p_end = self.history[-1]
+            p_start = self.history[0]
+            dt_window = p_end['ts'] - p_start['ts']
+            if dt_window > 0.1:
+                v_enu_filtered = (p_end['pos_enu'] - p_start['pos_enu']) / dt_window
+            else:
+                v_enu_filtered = v_enu_raw
         else:
             v_enu_filtered = v_enu_raw
 
@@ -378,8 +401,125 @@ class GNSSVelocityProcessor:
             self.history.pop()
             return None
 
-        speed_2d = float(np.hypot(v_enu_filtered[0], v_enu_filtered[1]))
-        total_displacement_m = float(np.sqrt(pos_enu[0]**2 + pos_enu[1]**2 + pos_enu[2]**2))
+        # Kinematic smoother: giữ dấu và dao động nhỏ, nhưng chặn cú nhảy vận tốc phi lý.
+        gnss_alert_cfg = (station_config or {}).get("GnssAlerting", {}) if isinstance(station_config, dict) else {}
+        try:
+            max_xy_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_xy_mm_s", 6.0))
+        except Exception:
+            max_xy_mm_s = 6.0
+        try:
+            max_z_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_z_mm_s", 15.0))
+        except Exception:
+            max_z_mm_s = 15.0
+        try:
+            accel_xy_mm_s2 = float(gnss_alert_cfg.get("velocity_accel_limit_xy_mm_s2", 1.0))
+        except Exception:
+            accel_xy_mm_s2 = 1.0
+        try:
+            accel_z_mm_s2 = float(gnss_alert_cfg.get("velocity_accel_limit_z_mm_s2", 3.0))
+        except Exception:
+            accel_z_mm_s2 = 3.0
+        try:
+            tau_seconds = float(gnss_alert_cfg.get("velocity_smoothing_tau_s", 8.0))
+        except Exception:
+            tau_seconds = 8.0
+
+        hard_cap = np.array([
+            max(max_xy_mm_s, 0.5) / 1000.0,
+            max(max_xy_mm_s, 0.5) / 1000.0,
+            max(max_z_mm_s, 1.0) / 1000.0,
+        ], dtype=float)
+        v_target = np.clip(np.array(v_enu_filtered, dtype=float, copy=True), -hard_cap, hard_cap)
+
+        if not self.v_state_ready:
+            self.v_enu_state = v_target
+            self.v_state_ready = True
+        else:
+            max_dv = np.array([
+                max(accel_xy_mm_s2, 0.1) / 1000.0 * dt,
+                max(accel_xy_mm_s2, 0.1) / 1000.0 * dt,
+                max(accel_z_mm_s2, 0.2) / 1000.0 * dt,
+            ], dtype=float)
+            dv = np.clip(v_target - self.v_enu_state, -max_dv, max_dv)
+            v_rate_limited = self.v_enu_state + dv
+
+            alpha = dt / (max(tau_seconds, 0.1) + dt)
+            self.v_enu_state = (1.0 - alpha) * self.v_enu_state + alpha * v_rate_limited
+
+        v_enu_stable = self.v_enu_state.copy()
+
+        # Parse VN2000 parameters from config if present.
+        # Accept both keys for backward compatibility:
+        # - vn2000 (new)
+        # - vn2000_params (legacy from older admin UI payload)
+        custom_datum = DatumParams()
+        vn_cfg = (station_config or {}).get("vn2000") or (station_config or {}).get("vn2000_params") or {}
+        if vn_cfg and vn_cfg.get("enabled"):
+            try:
+                custom_datum = DatumParams(
+                    dx=float(vn_cfg.get("dx", 191.90441429)),
+                    dy=float(vn_cfg.get("dy", 39.30318279)),
+                    dz=float(vn_cfg.get("dz", 111.45032835)),
+                    rx=float(vn_cfg.get("rx", 0.00928836)),
+                    ry=float(vn_cfg.get("ry", -0.01975479)),
+                    rz=float(vn_cfg.get("rz", 0.00427372)),
+                    k=float(vn_cfg.get("k", 0.999999747093722)),
+                    l0_deg=float(vn_cfg.get("l0_deg", 105.0)),
+                    k0=float(vn_cfg.get("k0", 0.9999)),
+                    false_e=float(vn_cfg.get("false_e", 500000.0)),
+                    false_n=float(vn_cfg.get("false_n", 0.0)),
+                    res_b=float(vn_cfg.get("res_b", 0.0)),
+                    res_l=float(vn_cfg.get("res_l", 0.0)),
+                    res_h=float(vn_cfg.get("res_h", 0.0)),
+                    res_n=float(vn_cfg.get("res_n", 0.0)),
+                    res_e=float(vn_cfg.get("res_e", 0.0)),
+                    res_h_shift=float(vn_cfg.get("res_h_shift", 0.0))
+                )
+            except Exception as e:
+                logger.error(f"Error parsing VN2000 custom params for device {self.device_id}: {e}")
+
+        # Calculate VN2000 NEH
+        n_vn, e_vn, h_vn = VN2000Converter.wgs84_to_vn2000(
+            point['wgs']['lat'], point['wgs']['lon'], point['wgs']['h'],
+            custom_params=custom_datum
+        )
+
+        speed_2d = float(np.hypot(v_enu_stable[0], v_enu_stable[1]))
+        # 4.3 Robust displacement:
+        # Use median(center) of the recent ENU window to suppress outliers, then apply
+        # a small EMA so "total displacement" does not jump while the station is still.
+        recent_history = list(self.history)[-30:] if len(self.history) >= 2 else list(self.history)
+        if recent_history:
+            enu_arr = np.array([p['pos_enu'] for p in recent_history], dtype=float)
+            med_enu = np.median(enu_arr, axis=0)
+
+            try:
+                disp_tau = float(gnss_alert_cfg.get("displacement_smoothing_tau_s", 12.0))
+            except Exception:
+                disp_tau = 12.0
+
+            if not self.disp_state_ready:
+                self.disp_enu_state = med_enu
+                self.disp_state_ready = True
+            else:
+                alpha_disp = dt / (max(disp_tau, 0.1) + dt)
+                self.disp_enu_state = (1.0 - alpha_disp) * self.disp_enu_state + alpha_disp * med_enu
+
+            total_displacement_m = float(np.linalg.norm(self.disp_enu_state))
+        else:
+            total_displacement_m = float(np.linalg.norm(pos_enu))
+
+        # ── Unit conversions ──────────────────────────────────────────
+        # ALL displacement outputs unified to CM (centimeters).
+        # pos_e/n/u  = adv_dx/dy/dh = ENU displacement from origin (cm)
+        # adv_vdx/vdy/vdh → mm/phút (velocity, m/s × 60000)
+        # total_displacement_mm → mm
+        # speed_2d_mm_s → mm/s
+        pos_e_cm = float(pos_enu[0] * 100.0)
+        pos_n_cm = float(pos_enu[1] * 100.0)
+        pos_u_cm = float(pos_enu[2] * 100.0)
+
+        total_displacement_mm = total_displacement_m * 1000.0
 
         self.stats['total_processed'] += 1
 
@@ -390,44 +530,62 @@ class GNSSVelocityProcessor:
                 'lat': point['wgs']['lat'],
                 'lon': point['wgs']['lon'],
                 'h': point['wgs']['h'],
-                'pos_e': float(pos_enu[0]),
-                'pos_n': float(pos_enu[1]),
-                'pos_u': float(pos_enu[2]),
-                'total_displacement_mm': total_displacement_m * 1000,
-                'vel_e': float(v_enu_filtered[0]),
-                'vel_n': float(v_enu_filtered[1]),
-                'vel_u': float(v_enu_filtered[2]),
+                # ENU displacement from origin (cm)
+                'pos_e': pos_e_cm,
+                'pos_n': pos_n_cm,
+                'pos_u': pos_u_cm,
+                'total_displacement_mm': total_displacement_mm,
+                'vel_e': float(v_enu_stable[0]),
+                'vel_n': float(v_enu_stable[1]),
+                'vel_u': float(v_enu_stable[2]),
                 'speed_2d': speed_2d,
                 'speed_2d_mm_s': float(speed_2d * 1000),
                 'fix_quality': point['fix_quality'],
                 'fix_mode': self._fix_mode(point['fix_quality']),
                 'num_sats': point['num_sats'],
                 'hdop': point['hdop'],
-                # 9 Parameters for External Forwarding (1Hz)
-                # X, Y: Current ENU relative meters from origin
-                # H: Absolute WGS84 Altitude
-                # Velocity: mm/minute (m/s * 1000 * 60)
+                # VN2000 absolute position (m)
+                'vn2000_n': n_vn,
+                'vn2000_e': e_vn,
+                'vn2000_h': h_vn,
+                # Forwarding payload for external MQTT (all displacement in cm)
                 'forwarding_data': {
-                    'X':   float(pos_enu[0]),
-                    'Y':   float(pos_enu[1]),
-                    'H':   float(point['wgs']['h']),
-                    'dX':  float(pos_enu[0]),
-                    'dY':  float(pos_enu[1]),
-                    'dH':  float(pos_enu[2]),
-                    'VdX': float(v_enu_filtered[0] * 60000),
-                    'VdY': float(v_enu_filtered[1] * 60000),
-                    'VdH': float(v_enu_filtered[2] * 60000),
+                    'type': 'gnss_processed',
+                    'timestamp': int(ts),
+                    'data': {
+                        'lat': n_vn,
+                        'lon': e_vn,
+                        'h': h_vn,
+                        'pos_e': pos_e_cm,
+                        'pos_n': pos_n_cm,
+                        'pos_u': pos_u_cm,
+                        'total_displacement_mm': total_displacement_mm,
+                        'speed_2d_mm_s': float(speed_2d * 1000),
+                        'fix_quality': point['fix_quality'],
+                        'fix_mode': self._fix_mode(point['fix_quality']),
+                        'num_sats': point['num_sats'],
+                        'hdop': point['hdop'],
+                        'adv_x': n_vn,
+                        'adv_y': e_vn,
+                        'adv_h': h_vn,
+                        'adv_dx': pos_e_cm,
+                        'adv_dy': pos_n_cm,
+                        'adv_dh': pos_u_cm,
+                        'adv_vdx': float(v_enu_stable[0] * 60000),
+                        'adv_vdy': float(v_enu_stable[1] * 60000),
+                        'adv_vdh': float(v_enu_stable[2] * 60000)
+                    }
                 },
-                # Keep legacy keys for UI compatibility (Adv sidepanel)
-                'adv_x': float(pos_enu[0]),
-                'adv_y': float(pos_enu[1]),
-                'adv_h': float(point['wgs']['h']),
-                'adv_dx': float(pos_enu[0]),
-                'adv_dy': float(pos_enu[1]),
-                'adv_dh': float(pos_enu[2]),
-                'adv_vdx': float(v_enu_filtered[0] * 1000),
-                'adv_vdy': float(v_enu_filtered[1] * 1000),
-                'adv_vdh': float(v_enu_filtered[2] * 1000),
+                # UI keys – adv_x/y/h = VN2000 (m), adv_dx/dy/dh = ENU displacement (cm)
+                'adv_x': n_vn,
+                'adv_y': e_vn,
+                'adv_h': h_vn,
+                'adv_dx': pos_e_cm,
+                'adv_dy': pos_n_cm,
+                'adv_dh': pos_u_cm,
+                'adv_vdx': float(v_enu_stable[0] * 60000),
+                'adv_vdy': float(v_enu_stable[1] * 60000),
+                'adv_vdh': float(v_enu_stable[2] * 60000),
             }
         }
 
@@ -441,7 +599,11 @@ class GNSSVelocityProcessor:
             
             if not lat_str or not lon_str: return None
 
-            h = float(parts[9]) if parts[9] else 0.0
+            # NMEA GGA field 9 is orthometric height (MSL), not ellipsoidal height.
+            # VN2000 conversion expects ellipsoidal h, so use: h = altitude_msl + geoid_separation.
+            altitude_msl = float(parts[9]) if parts[9] else 0.0
+            geoid_sep = float(parts[11]) if len(parts) > 11 and parts[11] else 0.0
+            h = altitude_msl + geoid_sep
             
             lat = float(lat_str[:2]) + float(lat_str[2:]) / 60.0
             if lat_dir == 'S': lat = -lat

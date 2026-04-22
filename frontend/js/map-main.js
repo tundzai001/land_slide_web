@@ -556,18 +556,18 @@ function updateRealtimeSensorValues(message) {
 
         // Update Advanced Sidepanel fields if it exists and data is available
         if (data.adv_x !== undefined) {
-             // Vị trí hiện tại: Lat/Lon/Alt từ GNGGA
-             setText('adv-val-lat', (data.lat || 0).toFixed(6));
-             setText('adv-val-lon', (data.lon || 0).toFixed(6));
-             setText('adv-val-alt', (data.adv_h || data.h || 0).toFixed(3));
+             // Vị trí hiện tại: VN2000 NEH
+             setText('adv-val-lat', (data.adv_y || 0).toFixed(3));
+             setText('adv-val-lon', (data.adv_x || 0).toFixed(3));
+             setText('adv-val-alt', (data.adv_h || 0).toFixed(3));
              // Biến dạng lũy kế
-             setText('adv-val-dx', (data.adv_dx || 0).toFixed(4));
-             setText('adv-val-dy', (data.adv_dy || 0).toFixed(4));
-             setText('adv-val-dh', (data.adv_dh || 0).toFixed(4));
-             // Vận tốc biến dạng
-             setText('adv-val-vdx', (data.adv_vdx || 0).toFixed(4));
-             setText('adv-val-vdy', (data.adv_vdy || 0).toFixed(4));
-             setText('adv-val-vdh', (data.adv_vdh || 0).toFixed(4));
+            setText('adv-val-dx', (data.adv_dx || 0).toFixed(2));
+            setText('adv-val-dy', (data.adv_dy || 0).toFixed(2));
+            setText('adv-val-dh', (data.adv_dh || 0).toFixed(2));
+             // Vận tốc biến dạng (mm/phút)
+             setText('adv-val-vdx', (data.adv_vdx || 0).toFixed(2));
+             setText('adv-val-vdy', (data.adv_vdy || 0).toFixed(2));
+             setText('adv-val-vdh', (data.adv_vdh || 0).toFixed(2));
 
              // ✅ CACHE: Lưu vào currentStationData để không bị mất khi refresh định kỳ
              if (currentStationData?.sensors?.gnss?.latest) {
@@ -2354,9 +2354,9 @@ function updateSidebarUI(data) {
         setText('adv-val-lon', (adv.lon || 0).toFixed(6));
         setText('adv-val-alt', (adv.adv_h || adv.h || 0).toFixed(3));
         // Biến dạng lũy kế
-        setText('adv-val-dx', (adv.adv_dx || 0).toFixed(4));
-        setText('adv-val-dy', (adv.adv_dy || 0).toFixed(4));
-        setText('adv-val-dh', (adv.adv_dh || 0).toFixed(4));
+        setText('adv-val-dx', (adv.adv_dx || 0).toFixed(2));
+        setText('adv-val-dy', (adv.adv_dy || 0).toFixed(2));
+        setText('adv-val-dh', (adv.adv_dh || 0).toFixed(2));
         // Vận tốc biến dạng
         setText('adv-val-vdx', (adv.adv_vdx || 0).toFixed(4));
         setText('adv-val-vdy', (adv.adv_vdy || 0).toFixed(4));

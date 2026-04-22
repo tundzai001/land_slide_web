@@ -19,7 +19,44 @@
     <link rel="stylesheet" href="/css/theme-variables.css">
     <link rel="stylesheet" href="/css/theme-transition.css">
     <link rel="stylesheet" href="/css/components.css">
-    <link rel="stylesheet" href="/css/admin.css">
+    <link rel="stylesheet" href="/css/admin.css?v=1.0.1">
+    <style>
+        #stationConfigModal .wizard-steps {
+            display: flex !important;
+            justify-content: space-between;
+            margin-bottom: 32px;
+            position: relative;
+        }
+        #stationConfigModal .wizard-step {
+            flex: 1;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+        #stationConfigModal .step-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 2px solid var(--border-color);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-bottom: 8px;
+            transition: all 0.3s;
+        }
+        #stationConfigModal .wizard-step.active .step-circle {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+        }
+        #stationConfigModal .wizard-steps-container {
+            background-color: var(--bg-secondary) !important;
+            border-bottom: 1px solid var(--border-color);
+            padding: 24px 24px 0 24px;
+        }
+    </style>
 </head>
 
 <body>
@@ -73,272 +110,7 @@
         })();
     </script>
 
-    <style>
-        /* ============================================
-   STYLES CHO ADMIN & WIZARD
-============================================ */
-        .sensor-config-section {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            margin-bottom: 16px;
-            overflow: hidden;
-            animation: slideDown 0.3s ease-out;
-        }
 
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                max-height: 0;
-                transform: translateY(-10px);
-            }
-
-            to {
-                opacity: 1;
-                max-height: 500px;
-                transform: translateY(0);
-            }
-        }
-
-        .sensor-config-header {
-            background: rgba(14, 165, 233, 0.08);
-            padding: 12px 16px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 700;
-            color: var(--text-primary);
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .sensor-config-body {
-            padding: 16px;
-        }
-
-        .coordinate-lock-box {
-            background: rgba(245, 158, 11, 0.08);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: 16px;
-        }
-
-        .wizard-steps {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 32px;
-            position: relative;
-        }
-
-        .wizard-steps::before {
-            content: '';
-            position: absolute;
-            top: 20px;
-            left: 10%;
-            right: 10%;
-            height: 2px;
-            background: var(--border-color);
-            z-index: 0;
-        }
-
-        .wizard-step {
-            flex: 1;
-            text-align: center;
-            position: relative;
-            z-index: 1;
-        }
-
-        .step-circle {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: var(--bg-tertiary);
-            border: 2px solid var(--border-color);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            margin-bottom: 8px;
-            transition: all 0.3s;
-        }
-
-        .wizard-step.active .step-circle {
-            background: var(--accent-primary);
-            color: white;
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
-        }
-
-        .step-label {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-
-        .wizard-step.active .step-label {
-            color: var(--accent-primary);
-            font-weight: 600;
-        }
-
-        .wizard-content {
-            display: none;
-        }
-
-        .wizard-content.active {
-            display: block;
-            animation: fadeIn 0.3s;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .btn-gradient {
-            background: var(--gradient-button);
-            border: none;
-            color: white;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-
-        .btn-gradient:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(14, 165, 233, 0.4);
-            color: white;
-        }
-
-        .sticky-top {
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            background: var(--bg-secondary);
-        }
-
-        /* Session Time Display */
-        .session-time {
-            font-family: 'Courier New', monospace;
-            font-size: 1.1rem;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-
-        /* ============================================
-           iOS-STYLE TOGGLE (SGM OUTPUT PARAMS)
-        ============================================ */
-        .ios-toggle-wrap {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            border-radius: 10px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            transition: background 0.2s, border-color 0.2s;
-            gap: 10px;
-            cursor: pointer;
-            user-select: none;
-        }
-        .ios-toggle-wrap:hover {
-            border-color: rgba(14, 165, 233, 0.4);
-            background: rgba(14, 165, 233, 0.05);
-        }
-        .ios-toggle-wrap.is-on {
-            border-color: rgba(34, 197, 94, 0.35);
-            background: rgba(34, 197, 94, 0.06);
-        }
-        .ios-toggle-info {
-            flex: 1;
-            min-width: 0;
-        }
-        .ios-toggle-info .param-name {
-            font-weight: 700;
-            font-size: 0.9rem;
-            color: var(--text-primary);
-            font-family: 'JetBrains Mono', monospace;
-        }
-        .ios-toggle-info .param-unit {
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            margin-top: 1px;
-        }
-
-        /* The actual iOS switch */
-        .ios-switch {
-            position: relative;
-            width: 44px;
-            height: 26px;
-            flex-shrink: 0;
-            display: inline-block;
-        }
-        .ios-switch input {
-            opacity: 0;
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            inset: 0;
-            margin: 0;
-            cursor: pointer;
-            z-index: 2;
-        }
-        .ios-switch-track {
-            position: absolute;
-            inset: 0;
-            border-radius: 13px;
-            background: #3a3f4a;
-            transition: background 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 1.5px solid rgba(255,255,255,0.06);
-            pointer-events: none;
-        }
-        .ios-switch input:checked + .ios-switch-track {
-            background: #22c55e;
-            border-color: rgba(255,255,255,0.1);
-        }
-        .ios-switch-track::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #ffffff;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-            transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .ios-switch input:checked + .ios-switch-track::after {
-            transform: translateX(18px);
-        }
-        /* Light mode adaptation */
-        @media (prefers-color-scheme: light) {
-            .ios-switch-track { background: #c7c7cc; }
-        }
-        [data-theme="light"] .ios-switch-track { background: #c7c7cc; }
-
-        /* Keep sensor switches visually aligned and fully clickable */
-        .form-check.form-switch {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding-left: 0;
-        }
-        .form-check.form-switch .form-check-input {
-            float: none;
-            margin-left: 0;
-            margin-top: 0;
-            cursor: pointer;
-        }
-        .form-check.form-switch .form-check-label {
-            margin-bottom: 0;
-            cursor: pointer;
-        }
-    </style>
 
     <!-- Sidebar -->
     <div class="admin-sidebar">
@@ -1149,9 +921,9 @@
                     <h5 class="modal-title" id="modal-title">Cấu hình Trạm</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <!-- Wizard Steps UI -->
-                    <div class="wizard-steps" id="wizard-steps">
+                <!-- WIZARD STEPS OUTSIDE SCROLLING BODY -->
+                <div class="wizard-steps-container">
+                    <div class="wizard-steps" id="wizard-steps" style="margin-bottom: 24px;">
                         <div class="wizard-step active" data-step="1">
                             <div class="step-circle">1</div>
                             <div class="step-label">Thông tin cơ bản</div>
@@ -1165,6 +937,9 @@
                             <div class="step-label">Ngưỡng cảnh báo</div>
                         </div>
                     </div>
+                </div>
+
+                <div class="modal-body">
 
                     <form id="stationConfigForm">
                         <input type="hidden" id="edit-station-id">
@@ -1245,10 +1020,16 @@
                                         </div>
                                         <div class="d-flex justify-content-between align-items-center">
                                             <small id="origin-status" class="text-muted">Chưa có dữ liệu gốc</small>
-                                            <button type="button" class="btn btn-sm btn-warning" id="btn-fetch-origin"
-                                                onclick="window.adminManager.fetchLatestOrigin()">
-                                                <i class="bi bi-arrow-repeat me-1"></i> Lấy tọa độ
-                                            </button>
+                                            <div class="d-flex gap-2">
+                                                <button type="button" class="btn btn-sm btn-outline-warning" id="btn-reset-origin"
+                                                    onclick="window.adminManager.resetGnssOrigin(window.adminManager.currentStationId)">
+                                                    <i class="bi bi-arrow-counterclockwise me-1"></i> Đặt lại điểm gốc
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-warning" id="btn-fetch-origin"
+                                                    onclick="window.adminManager.fetchLatestOrigin()">
+                                                    <i class="bi bi-arrow-repeat me-1"></i> Lấy tọa độ
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -1270,9 +1051,32 @@
                                         </div>
 
                                         <div id="rtk-forwarding-content" style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
-                                            <div class="border-top pt-3 mt-2">
-                                                <!-- MQTT Topic cho RTK Forward -->
+                                                <!-- MQTT Broker config cho RTK Forward -->
                                                 <div class="row g-2 mb-3">
+                                                    <div class="col-md-6">
+                                                        <label class="form-label small fw-semibold">MQTT Host (External)</label>
+                                                        <input type="text" class="form-control form-control-sm" id="gnss-rtk-host"
+                                                            placeholder="mqtt.example.com">
+                                                    </div>
+                                                    <div class="col-md-2">
+                                                        <label class="form-label small fw-semibold">Port</label>
+                                                        <input type="number" class="form-control form-control-sm" id="gnss-rtk-port"
+                                                            placeholder="1883" value="1883">
+                                                    </div>
+                                                    <div class="col-md-2">
+                                                        <label class="form-label small fw-semibold">User</label>
+                                                        <input type="text" class="form-control form-control-sm" id="gnss-rtk-user"
+                                                            placeholder="user">
+                                                    </div>
+                                                    <div class="col-md-2">
+                                                        <label class="form-label small fw-semibold">Pass</label>
+                                                        <input type="password" class="form-control form-control-sm" id="gnss-rtk-pass"
+                                                            placeholder="pass">
+                                                    </div>
+                                                </div>
+
+                                                <!-- MQTT Topic cho RTK Forward -->
+                                                <div class="row g-2 mb-3 border-top pt-2">
                                                     <div class="col-12">
                                                         <label class="form-label small fw-semibold">
                                                             <i class="bi bi-reception-4 text-success me-1"></i>Topic đẩy dữ liệu RTK (Publish)
@@ -1284,17 +1088,26 @@
                                                 </div>
 
                                                 <!-- 9 tham số đẩy lên server -->
+                                                <div class="alert alert-info py-2 px-3 mb-3" style="border:none; border-left:4px solid #3498db; background:#e8f4fd">
+                                                    <div class="d-flex align-items-center">
+                                                        <i class="fas fa-info-circle me-2 text-primary"></i>
+                                                        <div class="small">
+                                                            <strong>Giao thức đẩy dữ liệu:</strong> Dữ liệu được đóng gói theo chuẩn <strong>GNSS JSON</strong> (lồng nhau). Tắt các nút bên dưới sẽ xóa trường tương ứng khỏi JSON <code>data</code>.
+                                                        </div>
+                                                    </div>
+                                                </div>
+
                                                 <label class="form-label small fw-semibold mb-2">Chọn tham số trong gói tin JSON:</label>
 
                                                 <!-- Tọa độ hiện tại -->
                                                 <div class="mb-2">
-                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📍 Tọa độ hiện tại</small>
+                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📍 Tọa độ hiện tại (Tương đối)</small>
                                                     <div class="row g-2">
                                                         <div class="col-md-4">
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-x" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-x')">
                                                                 <div class="ios-toggle-info">
                                                                     <div class="param-name">X <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">Tọa độ E (METERS)</div>
+                                                                    <div class="param-unit">JSON: <code>adv_x</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-x" checked>
@@ -1306,7 +1119,7 @@
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-y" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-y')">
                                                                 <div class="ios-toggle-info">
                                                                     <div class="param-name">Y <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">Tọa độ N (METERS)</div>
+                                                                    <div class="param-unit">JSON: <code>adv_y</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-y" checked>
@@ -1318,7 +1131,7 @@
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-h" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-h')">
                                                                 <div class="ios-toggle-info">
                                                                     <div class="param-name">H <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">Độ cao H tuyệt đối</div>
+                                                                    <div class="param-unit">JSON: <code>adv_h</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-h" checked>
@@ -1331,13 +1144,13 @@
 
                                                 <!-- Chuyển vị -->
                                                 <div class="mb-2">
-                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📐 Chuyển vị</small>
+                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">📐 Chuyển vị (mm)</small>
                                                     <div class="row g-2">
                                                         <div class="col-md-4">
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-dx" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dx')">
                                                                 <div class="ios-toggle-info">
-                                                                    <div class="param-name">dX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">Chuyển vị E</div>
+                                                                    <div class="param-name">dX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span></div>
+                                                                    <div class="param-unit">JSON: <code>adv_dx</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-dx" checked>
@@ -1348,8 +1161,8 @@
                                                         <div class="col-md-4">
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-dy" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dy')">
                                                                 <div class="ios-toggle-info">
-                                                                    <div class="param-name">dY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">Chuyển vị N</div>
+                                                                    <div class="param-name">dY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span></div>
+                                                                    <div class="param-unit">JSON: <code>adv_dy</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-dy" checked>
@@ -1360,8 +1173,8 @@
                                                         <div class="col-md-4">
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-dh" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-dh')">
                                                                 <div class="ios-toggle-info">
-                                                                    <div class="param-name">dH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(m)</span></div>
-                                                                    <div class="param-unit">Chuyển vị U</div>
+                                                                    <div class="param-name">dH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm)</span></div>
+                                                                    <div class="param-unit">JSON: <code>adv_dh</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-dh" checked>
@@ -1374,13 +1187,13 @@
 
                                                 <!-- Vận tốc -->
                                                 <div class="mb-1">
-                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">⚡ Vận tốc chuyển vị (phút)</small>
+                                                    <small class="text-muted text-uppercase d-block mb-1" style="font-size:0.68rem;letter-spacing:1px">⚡ Vận tốc chuyển vị (mm/phút)</small>
                                                     <div class="row g-2">
                                                         <div class="col-md-4">
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdx" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdx')">
                                                                 <div class="ios-toggle-info">
                                                                     <div class="param-name">VdX <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span></div>
-                                                                    <div class="param-unit">Vận tốc E</div>
+                                                                    <div class="param-unit">JSON: <code>adv_vdx</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-vdx" checked>
@@ -1392,7 +1205,7 @@
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdy" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdy')">
                                                                 <div class="ios-toggle-info">
                                                                     <div class="param-name">VdY <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span></div>
-                                                                    <div class="param-unit">Vận tốc N</div>
+                                                                    <div class="param-unit">JSON: <code>adv_vdy</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-vdy" checked>
@@ -1404,7 +1217,7 @@
                                                             <label class="ios-toggle-wrap is-on" id="wrap-fwd-vdh" onclick="window.adminManager.toggleForwardingWrap(event,this,'fwd-toggle-vdh')">
                                                                 <div class="ios-toggle-info">
                                                                     <div class="param-name">VdH <span style="font-weight:400;font-family:inherit;font-size:0.78rem;color:var(--text-muted)">(mm/p)</span></div>
-                                                                    <div class="param-unit">Vận tốc U</div>
+                                                                    <div class="param-unit">JSON: <code>adv_vdh</code></div>
                                                                 </div>
                                                                 <div class="ios-switch">
                                                                     <input type="checkbox" id="fwd-toggle-vdh" checked>
@@ -1416,9 +1229,58 @@
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
+
+                                        <!-- ✅ VN2000 TRANSFORMATION PARAMETERS (Advanced) -->
+                                        <div class="mt-3 p-3 rounded border" style="background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.25) !important;">
+                                            <div class="d-flex align-items-center gap-3 mb-1">
+                                                <i class="bi bi-gear-wide-connected" style="color:#10b981;font-size:1.1rem"></i>
+                                                <h6 class="mb-0 fw-bold" style="color:var(--text-primary)">Tham số VN2000 (Tùy chỉnh)</h6>
+                                                
+                                                <div class="ms-auto">
+                                                    <div class="ios-switch">
+                                                        <input type="checkbox" id="vn2000-enabled" onchange="window.adminManager.toggleVn2000AdvancedSlide()">
+                                                        <span class="ios-switch-track"></span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="text-muted small mb-3" style="font-size: 0.75rem;">
+                                                Sử dụng bộ tham số 7 tham số Helmert và các số hiệu chỉnh cục bộ (Dành cho chuyên gia).
+                                            </div>
+
+                                            <div id="vn2000-advanced-content" style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
+                                                <!-- Helmert 7-Params -->
+                                                <h6 class="small fw-bold mb-2">1. Tham số dịch chuyển (Helmert 7-params)</h6>
+                                                <div class="row g-2 mb-3">
+                                                    <div class="col-md-4"><label class="form-label small">dX (m)</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-dx" value="191.90441429"></div>
+                                                    <div class="col-md-4"><label class="form-label small">dY (m)</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-dy" value="39.30318279"></div>
+                                                    <div class="col-md-4"><label class="form-label small">dZ (m)</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-dz" value="111.45032835"></div>
+                                                    <div class="col-md-4"><label class="form-label small">rX (")</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-rx" value="-0.00928836"></div>
+                                                    <div class="col-md-4"><label class="form-label small">rY (")</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-ry" value="0.01975479"></div>
+                                                    <div class="col-md-4"><label class="form-label small">rZ (")</label><input type="number" step="0.00000001" class="form-control form-control-sm" id="vn-rz" value="-0.00427372"></div>
+                                                    <div class="col-md-12"><label class="form-label small">Scale (k)</label><input type="number" step="1e-15" class="form-control form-control-sm" id="vn-k" value="1.000000252906278"></div>
+                                                </div>
+
+                                                <!-- Projection -->
+                                                <h6 class="small fw-bold mb-2 border-top pt-2">2. Kinh tuyến trục & Tỷ lệ chiếu</h6>
+                                                <div class="row g-2 mb-3">
+                                                    <div class="col-md-6"><label class="form-label small">L0 (deg)</label><input type="number" step="0.0001" class="form-control form-control-sm" id="vn-l0" value="105.0"></div>
+                                                    <div class="col-md-6"><label class="form-label small">k0</label><input type="number" step="0.0001" class="form-control form-control-sm" id="vn-k0" value="0.9999"></div>
+                                                </div>
+
+                                                <!-- Residuals -->
+                                                <h6 class="small fw-bold mb-2 border-top pt-2">3. Số hiệu chỉnh (Residuals)</h6>
+                                                <div class="row g-2">
+                                                    <div class="col-md-4"><label class="form-label small">resB (rad)</label><input type="number" step="1e-12" class="form-control form-control-sm" id="vn-resb" value="0"></div>
+                                                    <div class="col-md-4"><label class="form-label small">resL (rad)</label><input type="number" step="1e-12" class="form-control form-control-sm" id="vn-resl" value="0"></div>
+                                                    <div class="col-md-4"><label class="form-label small">resH (m)</label><input type="number" step="0.001" class="form-control form-control-sm" id="vn-resh" value="0"></div>
+                                                    <div class="col-md-4"><label class="form-label small">resN (m)</label><input type="number" step="0.001" class="form-control form-control-sm" id="vn-resn" value="0"></div>
+                                                    <div class="col-md-4"><label class="form-label small">resE (m)</label><input type="number" step="0.001" class="form-control form-control-sm" id="vn-rese" value="0"></div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
+                            </div>
 
 
                             <div id="mqtt-rain-section" class="sensor-config-section" style="display: none;">
@@ -1870,23 +1732,18 @@
 
                     </form>
                 </div>
-                <div class="modal-footer justify-content-between">
-                    <button type="button" class="btn btn-outline-danger"
-                        onclick="window.adminManager.deleteStation(window.adminManager.currentStationId)"
-                        id="btn-delete-station" style="display: none;">
-                        <i class="bi bi-trash"></i> Xóa trạm
-                    </button>
+                <div class="modal-footer justify-content-end">
                     <div class="d-flex gap-2">
                         <button type="button" class="btn btn-secondary" id="btn-wizard-back" style="display: none;"
-                            onclick="window.adminManager.wizardPrev()">
+                            onclick="if (window.adminManager) { window.adminManager.wizardPrev(); } return false;">
                             <i class="bi bi-arrow-left me-1"></i> Quay lại
                         </button>
                         <button type="button" class="btn btn-primary" id="btn-wizard-next"
-                            onclick="window.adminManager.wizardNext()">
+                            onclick="if (window.adminManager) { window.adminManager.wizardNext(); } return false;">
                             Tiếp theo <i class="bi bi-arrow-right ms-1"></i>
                         </button>
                         <button type="button" class="btn btn-success" id="btn-wizard-save" style="display: none;"
-                            onclick="window.adminManager.saveStation()">
+                            onclick="if (window.adminManager) { window.adminManager.saveStation(); } return false;">
                             <i class="bi bi-save me-1"></i> Lưu cấu hình
                         </button>
                     </div>
@@ -2007,7 +1864,7 @@
     <script src="/js/theme-manager.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/toast-notifications.js"></script>
-    <script src="/js/admin-manager.js"></script>
+    <script src="/js/admin-manager.js?v=20260422-4"></script>
     <script src="/js/db-manager.js"></script>
     <script src="/js/system-manager.js"></script>
 
@@ -2393,3 +2250,6 @@
 </body>
 
 </html>
+
+
+

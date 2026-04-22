@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, desc, text, func
+from sqlalchemy import select, delete, desc, text, func, and_
 from datetime import datetime, timedelta
 from .. import schemas, auth, config
 from ..database import get_auth_db, get_config_db, get_data_db
@@ -124,9 +124,51 @@ async def provision_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ------------------------------------------------------------------
+# GNSS Origin Reset
+# ------------------------------------------------------------------
+
+@router.post("/gnss/reset-origin/{station_id}")
+async def reset_gnss_origin(
+    station_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Reset the GNSS origin for all GNSS devices assigned to a station."""
+    try:
+        # Find all GNSS devices for this station
+        res = await db.execute(
+            select(model_config.Device).where(
+                and_(
+                    model_config.Device.station_id == station_id,
+                    model_config.Device.device_type == 'gnss'
+                )
+            )
+        )
+        devices = res.scalars().all()
+        
+        if not devices:
+            raise HTTPException(status_code=404, detail="No GNSS devices found for this station")
+
+        from app.main import mqtt_service
+        reset_count = 0
+        for device in devices:
+            success = await mqtt_service.reset_gnss_origin(device.id)
+            if success:
+                reset_count += 1
+        
+        return {"status": "ok", "reset_count": reset_count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting GNSS origin for station {station_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # -------------------------
 # License generation utils
 # -------------------------
+
 def get_license_code_from_string(string_number: str) -> str:
     """Tạo mã license từ một chuỗi số, thuật toán xáo trộn."""
     try:
@@ -1008,6 +1050,11 @@ async def update_station_config(
             
             current_config = copy.deepcopy(station.config) if station.config else get_default_station_config()
             new_config = config_data['config']
+
+            # Backward compatibility for VN2000 config key:
+            # normalize legacy `vn2000_params` into canonical `vn2000`.
+            if isinstance(new_config, dict) and 'vn2000_params' in new_config and 'vn2000' not in new_config:
+                new_config['vn2000'] = new_config.get('vn2000_params') or {}
             
             logger.info(f"📋 [CONFIG] Before merge, offline_thresholds: {current_config.get('offline_thresholds')}")
             logger.info(f"📋 [CONFIG] Incoming config keys: {list(new_config.keys())}")
@@ -1177,7 +1224,10 @@ class GNSSLiveFetcher:
             lon = float(lon_str[:3]) + float(lon_str[3:]) / 60.0
             if lon_dir == 'W': lon = -lon
             
-            h = float(parts[9]) if parts[9] else 0.0
+            # GGA altitude is MSL; convert to ellipsoidal for consistency with GNSS pipeline.
+            altitude_msl = float(parts[9]) if parts[9] else 0.0
+            geoid_sep = float(parts[11]) if len(parts) > 11 and parts[11] else 0.0
+            h = altitude_msl + geoid_sep
             fix_quality = int(parts[6]) if parts[6] else 0
             num_sats = int(parts[7]) if parts[7] else 0
             

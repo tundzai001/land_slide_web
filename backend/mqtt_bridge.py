@@ -75,6 +75,7 @@ class MQTTBridge:
         # Topic management
         self.topic_map: Dict[str, Dict[str, Any]] = {}
         self.processors_cache: Dict[str, Any] = {}
+        self._fwd_clients: Dict[tuple, mqtt.Client] = {}  # Cache for external brokers
         
         self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
 
@@ -228,6 +229,32 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"❌ Failed to reload runtime config: {e}")
 
+    def _get_fwd_client(self, host: str, port: int, user: Optional[str], password: Optional[str]):
+        """Get or create a persistent MQTT client for external forwarding."""
+        key = (host, port, user, password)
+        if key in self._fwd_clients:
+            client = self._fwd_clients[key]
+            if client.is_connected():
+                return client
+            try:
+                client.reconnect()
+                return client
+            except Exception:
+                pass
+
+        try:
+            logger.info(f"🌐 [FORWARD] Creating new external MQTT client for {host}:{port}")
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+            if user:
+                client.username_pw_set(user, password)
+            client.connect(host, port, 60)
+            client.loop_start()
+            self._fwd_clients[key] = client
+            return client
+        except Exception as e:
+            logger.error(f"❌ [FORWARD] Failed to connect to external broker {host}:{port}: {e}")
+            return None
+
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("✅ MQTT Connected to Broker.")
@@ -350,7 +377,18 @@ class MQTTBridge:
         self.client.loop_stop()
         self.client.disconnect()
 
+    async def reset_gnss_origin(self, device_id: int):
+        """Trigger origin reset for a specific GNSS device."""
+        proc_key = f"device_{device_id}"
+        processor = self.processors_cache.get(proc_key)
+        if processor and hasattr(processor, 'reset_origin'):
+            processor.reset_origin()
+            logger.info(f"🎯 [BRIDGE] Triggered origin reset for device {device_id}")
+            return True
+        return False
+
     async def reload_topics_from_db(self):
+
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
@@ -725,7 +763,7 @@ class MQTTBridge:
         # 1. PROCESS DATA
         try:
             if sensor_type == 'gnss':
-                res = processor.process_gngga(raw_payload)
+                res = processor.process_gngga(raw_payload, station_config)
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
                 elif res and res.get('type') == 'gnss_status':
@@ -818,15 +856,51 @@ class MQTTBridge:
             if fwd_cfg.get('enabled') and fwd_cfg.get('rtk_topic'):
                 try:
                     target_topic = fwd_cfg['rtk_topic']
-                    # Chỉ lấy các trường được chọn (nếu có cấu hình fields) hoặc mặc định lấy hết
+                    # Check for external broker config
+                    fwd_host = fwd_cfg.get('host')
+                    fwd_port = fwd_cfg.get('port', 1883)
+                    fwd_user = fwd_cfg.get('username')
+                    fwd_pass = fwd_cfg.get('password')
+
+                    # Take the full payload as structured in gnss_processor.py
                     payload = processed_data['forwarding_data']
                     fields_cfg = fwd_cfg.get('fields', {})
-                    if fields_cfg:
-                        # Lọc lại payload theo checkbox người dùng chọn
-                        payload = {k: v for k, v in payload.items() if fields_cfg.get(k, True)}
                     
-                    self.client.publish(target_topic, json.dumps(payload))
-                    logger.debug(f"📤 [FORWARD] Published 1Hz data to {target_topic}")
+                    if fields_cfg and 'data' in payload:
+                        # Map UI toggle names to JSON keys
+                        # Format: { 'UI_KEY': ['JSON_KEY1', 'JSON_KEY2', ...] }
+                        mapping = {
+                            'X':   ['adv_x'],
+                            'Y':   ['adv_y'],
+                            'H':   ['adv_h', 'h', 'lat', 'lon'], # Lat/Lon/H usually grouped
+                            'dX':  ['adv_dx', 'pos_e'],
+                            'dY':  ['adv_dy', 'pos_n'],
+                            'dH':  ['adv_dh', 'pos_u'],
+                            'VdX': ['adv_vdx'],
+                            'VdY': ['adv_vdy'],
+                            'VdH': ['adv_vdh']
+                        }
+                        
+                        # Filter the 'data' part of the nested payload
+                        data_part = payload['data']
+                        for ui_key, is_enabled in fields_cfg.items():
+                            if not is_enabled and ui_key in mapping:
+                                for json_key in mapping[ui_key]:
+                                    if json_key in data_part:
+                                        del data_part[json_key]
+                    
+                    # Decice which client to use
+                    if fwd_host:
+                        pub_client = self._get_fwd_client(fwd_host, int(fwd_port), fwd_user, fwd_pass)
+                        if pub_client:
+                            pub_client.publish(target_topic, json.dumps(payload))
+                            logger.debug(f"🌐 [FORWARD-EXT] Published 1Hz data to {fwd_host}:{fwd_port} -> {target_topic}")
+                        else:
+                            logger.warning(f"⚠️ [FORWARD-EXT] Skipping publish: External broker {fwd_host} unavailable")
+                    else:
+                        # Default to local broker
+                        self.client.publish(target_topic, json.dumps(payload))
+                        logger.debug(f"📤 [FORWARD-LOCAL] Published 1Hz data to {target_topic}")
                 except Exception as ex:
                     logger.error(f"❌ [FORWARD] Error publishing: {ex}")
 

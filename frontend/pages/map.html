@@ -55,7 +55,7 @@
 
         <div class="d-flex align-items-center gap-3">
             <!-- Compact Layer Toggle Switch -->
-            <div class="layer-toggle-switch" title="Chế độ hiển thị">
+            <div class="layer-toggle-switch" title="Cháº¿ Ä‘á»™ hiá»ƒn thá»‹">
                 <i class="bi bi-hdd-network-fill layer-toggle-icon" id="icon-layer-station"></i>
                 <label class="toggle-switch-track">
                     <input type="checkbox" id="layer-mode-toggle">
@@ -80,7 +80,7 @@
         </div>
     </nav>
 
-    <!-- ALERT BANNER - Hiển thị cảnh báo giữa màn hình -->
+    <!-- ALERT BANNER -->
     <div class="alert-banner" id="alert-banner">
         <div class="alert-banner-content">
             <div class="alert-icon">
@@ -90,7 +90,7 @@
                 <h4 class="alert-title" id="alert-title">CRITICAL ALERT!</h4>
                 <div class="alert-info-line">
                     <span class="alert-station" id="alert-station">Station: Loading...</span>
-                    <span class="alert-message" id="alert-message"> • Message...</span>
+                    <span class="alert-message" id="alert-message"> â€¢ Message...</span>
                 </div>
             </div>
             <div class="alert-actions">
@@ -139,7 +139,7 @@
 
     <!-- HEATMAP TOGGLE -->
     <div class="heatmap-toggle-wrap">
-        <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt Heatmap cứu hộ">
+        <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Báº­t/Táº¯t Heatmap cá»©u há»™">
             <i class="bi bi-fire"></i>
         </button>
     </div>
@@ -148,7 +148,7 @@
     <div class="timeline-slider-container" id="timeline-slider-wrap" style="display: none;">
         <span class="timeline-label" id="timeline-label">Ngày 30</span>
         <input type="range" min="1" max="30" value="30" id="timeline-slider">
-        <span class="timeline-label opacity-50" style="font-size:0.65rem;">30 ngày</span>
+        <span class="timeline-label opacity-50" style="font-size:0.65rem;">30 Ngày</span>
     </div>
 
     <div class="gnss-advanced-sidepanel" id="gnss-advanced-sidepanel">
@@ -157,43 +157,43 @@
             <button class="sidepanel-close" id="gnss-sidepanel-close"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="sidepanel-body">
-            <!-- Nhóm 1: Vị trí hiện tại (Lat/Lon/Alt từ GNGGA) -->
+            <!-- Nhóm 1: Vị trí hiện tại (VN2000) -->
             <div class="adv-section">
-                <div class="adv-section-title">Vị trí hiện tại (WGS84)</div>
+                <div class="adv-section-title">Vị trí hiện tại (VN2000 NEH)</div>
                 <div class="adv-item">
-                    <span class="adv-label">Latitude</span>
+                    <span class="adv-label">VN2000 North (m)</span>
                     <div class="adv-value-row"><span class="adv-value" id="adv-val-lat">--</span><span
-                            class="adv-unit">°</span></div>
+                            class="adv-unit">m</span></div>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Longitude</span>
+                    <span class="adv-label">VN2000 East (m)</span>
                     <div class="adv-value-row"><span class="adv-value" id="adv-val-lon">--</span><span
-                            class="adv-unit">°</span></div>
+                            class="adv-unit">m</span></div>
                 </div>
                 <div class="adv-item">
-                    <span class="adv-label">Altitude</span>
+                    <span class="adv-label">Elevation H (m)</span>
                     <div class="adv-value-row"><span class="adv-value" id="adv-val-alt">--</span><span
                             class="adv-unit">m</span></div>
                 </div>
             </div>
 
-            <!-- Nhóm 2: Biến dạng lũy kế -->
+            <!-- NhÃ³m 2: Biến dạng lũy kế -->
             <div class="adv-section">
-                <div class="adv-section-title">Biến dạng lũy kế</div>
+                <div class="adv-section-title">Biến dạng lũy kế (cm)</div>
                 <div class="adv-item">
                     <span class="adv-label">Biến dạng &Delta;X (East)</span>
                     <div class="adv-value-row"><span class="adv-value highlight-dx" id="adv-val-dx">--</span><span
-                            class="adv-unit">m</span></div>
+                            class="adv-unit">cm</span></div>
                 </div>
                 <div class="adv-item">
                     <span class="adv-label">Biến dạng &Delta;Y (North)</span>
                     <div class="adv-value-row"><span class="adv-value highlight-dy" id="adv-val-dy">--</span><span
-                            class="adv-unit">m</span></div>
+                            class="adv-unit">cm</span></div>
                 </div>
                 <div class="adv-item">
                     <span class="adv-label">Biến dạng &Delta;H (Up)</span>
                     <div class="adv-value-row"><span class="adv-value highlight-dh" id="adv-val-dh">--</span><span
-                            class="adv-unit">m</span></div>
+                            class="adv-unit">cm</span></div>
                 </div>
             </div>
 
@@ -208,17 +208,17 @@
                 <div class="adv-item">
                     <span class="adv-label">Vận tốc V<sub>&Delta;Y</sub></span>
                     <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span><span
-                            class="adv-unit">mm/s</span></div>
+                            class="adv-unit">mm/phút</span></div>
                 </div>
                 <div class="adv-item">
                     <span class="adv-label">Vận tốc V<sub>&Delta;H</sub></span>
                     <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span><span
-                            class="adv-unit">mm/s</span></div>
+                            class="adv-unit">mm/phút</span></div>
                 </div>
             </div>
 
             <div class="mt-4 small text-muted text-center italic" style="font-size: 0.65rem;">
-                * Hệ tọa độ WGS84.
+                * Há»‡ tá»a Ä‘á»™ VN2000.
             </div>
         </div>
     </div>
@@ -300,45 +300,45 @@
                         <div class="imu-axes">
                             <div class="axis-value">
                                 <div class="axis-label">Roll</div>
-                                <div class="axis-num" id="val-imu-roll">--°</div>
+                                <div class="axis-num" id="val-imu-roll">--Â°</div>
                             </div>
                             <div class="axis-value">
                                 <div class="axis-label">Pitch</div>
-                                <div class="axis-num" id="val-imu-pitch">--°</div>
+                                <div class="axis-num" id="val-imu-pitch">--Â°</div>
                             </div>
                             <div class="axis-value">
                                 <div class="axis-label">Yaw</div>
-                                <div class="axis-num" id="val-imu-yaw">--°</div>
+                                <div class="axis-num" id="val-imu-yaw">--Â°</div>
                             </div>
                         </div>
 
-                        <!-- Delta values — hiển thị hướng lệch rõ ràng -->
+                        <!-- Delta values â€” hiá»ƒn thá»‹ hÆ°á»›ng lá»‡ch rÃµ rÃ ng -->
                         <div class="mt-2 pt-1 border-top">
-                            <div class="imu-delta-header">Chuyển vị từ Baseline</div>
+                            <div class="imu-delta-header">Chuyá»ƒn vá»‹ tá»« Baseline</div>
                             <div class="imu-delta-grid">
                                 <div class="imu-delta-item">
                                     <span class="imu-delta-axis">Roll (X)</span>
-                                    <span class="imu-delta-hint">← Trái / Phải →</span>
+                                    <span class="imu-delta-hint">â† TrÃ¡i / Pháº£i â†’</span>
                                     <span class="imu-delta-num" id="val-imu-delta-roll">-- mm</span>
                                 </div>
                                 <div class="imu-delta-item">
                                     <span class="imu-delta-axis">Pitch (Y)</span>
-                                    <span class="imu-delta-hint">↓ Trước / Sau ↑</span>
+                                    <span class="imu-delta-hint">â†“ TrÆ°á»›c / Sau â†‘</span>
                                     <span class="imu-delta-num" id="val-imu-delta-pitch">-- mm</span>
                                 </div>
                                 <div class="imu-delta-item">
                                     <span class="imu-delta-axis">Yaw (Z)</span>
-                                    <span class="imu-delta-hint">↺ Trái / Phải ↻</span>
+                                    <span class="imu-delta-hint">â†º TrÃ¡i / Pháº£i â†»</span>
                                     <span class="imu-delta-num" id="val-imu-delta-yaw">-- mm</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Thêm khoảng cách dịch nghiêng -->
+                        <!-- ThÃªm khoáº£ng cÃ¡ch dá»‹ch nghiÃªng -->
                         <div class="mt-1 pt-1 border-top" style="opacity: 0.8;">
                             <div class="d-flex justify-content-between small px-1">
-                                <span style="font-size: 0.7rem;"><i class="bi bi-arrows-move me-1"></i>Độ lệch tâm
-                                    (tùy chỉnh):</span>
+                                <span style="font-size: 0.7rem;"><i class="bi bi-arrows-move me-1"></i>Äá»™ lá»‡ch tÃ¢m
+                                    (tÃ¹y chá»‰nh):</span>
                                 <div class="d-flex gap-2"
                                     style="font-size: 0.75rem; font-weight: bold; color: var(--accent-warning, #f59e0b);">
                                     <span id="val-imu-drift-len">-- cm</span>
@@ -395,10 +395,10 @@
         </div>
     </div>
 
-    <!--CENTER CHARTS PANEL (Tách biệt ở giữa màn hình) -->
+    <!--CENTER CHARTS PANEL (TÃ¡ch biá»‡t á»Ÿ giá»¯a mÃ n hÃ¬nh) -->
     <div class="charts-panel" id="charts-panel">
         <div class="charts-panel-header">
-            <h5><i class="bi bi-graph-up me-2"></i>Biểu đồ 24h</h5>
+            <h5><i class="bi bi-graph-up me-2"></i>Biá»ƒu Ä‘á»“ 24h</h5>
             <button class="btn btn-sm btn-outline-light" id="close-charts-btn">
                 <i class="bi bi-chevron-right"></i>
             </button>
@@ -407,7 +407,7 @@
         <div class="charts-panel-content">
             <!-- GNSS Chart -->
             <div class="chart-box" id="chart-box-gnss">
-                <div class="chart-title">📈 GNSS Displacement (24h)</div>
+                <div class="chart-title">ðŸ“ˆ GNSS Displacement (24h)</div>
                 <div style="height: 250px;">
                     <canvas id="chart-gnss"></canvas>
                 </div>
@@ -415,7 +415,7 @@
 
             <!-- Rain Chart -->
             <div class="chart-box" id="chart-box-rain">
-                <div class="chart-title">🌧️ Rain Intensity (24h)</div>
+                <div class="chart-title">ðŸŒ§ï¸ Rain Intensity (24h)</div>
                 <div style="height: 250px;">
                     <canvas id="chart-rain"></canvas>
                 </div>
@@ -423,7 +423,7 @@
 
             <!-- Water Chart -->
             <div class="chart-box" id="chart-box-water">
-                <div class="chart-title">🌊 Water Level (24h)</div>
+                <div class="chart-title">ðŸŒŠ Water Level (24h)</div>
                 <div style="height: 250px;">
                     <canvas id="chart-water"></canvas>
                 </div>
@@ -432,7 +432,7 @@
             <!-- IMU Chart (3-axis) -->
             <div class="chart-box" id="chart-box-imu">
                 <div class="chart-title d-flex justify-content-between align-items-center">
-                    <span>🧭 IMU Roll / Pitch / Yaw (24h)</span>
+                    <span>ðŸ§­ IMU Roll / Pitch / Yaw (24h)</span>
                     <button class="btn btn-sm btn-outline-primary" id="btn-toggle-imu-3d"
                         style="font-size: 0.7rem; padding: 2px 6px;">
                         <i class="bi bi-box me-1"></i>3D View
@@ -450,7 +450,7 @@
             <!-- Empty State -->
             <div class="text-center py-5" id="charts-empty-state" style="display: none;">
                 <i class="bi bi-inbox fs-1 text-muted"></i>
-                <p class="text-muted mt-2">Chưa có dữ liệu biểu đồ</p>
+                <p class="text-muted mt-2">ChÆ°a cÃ³ dá»¯ liá»‡u biá»ƒu Ä‘á»“</p>
             </div>
         </div>
     </div>
@@ -472,10 +472,10 @@
                 <!-- Time Range Selector (Always visible) -->
                 <div class="d-flex justify-content-center mb-4">
                     <div class="btn-group btn-group-sm shadow-sm" id="longterm-range-selector">
-                        <button class="btn btn-outline-primary fw-medium px-4" data-days="1">1 ngày</button>
+                        <button class="btn btn-outline-primary fw-medium px-4" data-days="1">1 Ngày</button>
                         <button class="btn btn-outline-primary fw-medium px-4" data-days="7">1 tuần</button>
                         <button class="btn btn-outline-primary fw-medium px-4 active" data-days="30">1 tháng</button>
-                        <button class="btn btn-outline-primary fw-medium px-4" data-days="365">1 năm</button>
+                        <button class="btn btn-outline-primary fw-medium px-4" data-days="365">1 nÄƒm</button>
                     </div>
                 </div>
 
@@ -483,7 +483,7 @@
                 <div id="longterm-loading" style="display: none;">
                     <div class="text-center my-5">
                         <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
-                        <p class="fs-5">Đang phân tích dữ liệu...</p>
+                        <p class="fs-5">Äang phÃ¢n tÃ­ch dá»¯ liá»‡u...</p>
                     </div>
                 </div>
 
@@ -491,8 +491,9 @@
                 <div id="longterm-error" style="display: none;">
                     <div class="alert alert-warning">
                         <i class="bi bi-exclamation-triangle me-2"></i>
-                        <strong>Không đủ dữ liệu</strong>
-                        <p id="error-message" class="mb-0 mt-2">Cần ít nhất 7 ngày dữ liệu GNSS để phân tích.</p>
+                        <strong>KhÃ´ng Ä‘á»§ dá»¯ liá»‡u</strong>
+                        <p id="error-message" class="mb-0 mt-2">Cáº§n Ã­t nháº¥t 7 Ngày dá»¯ liá»‡u GNSS Ä‘á»ƒ phÃ¢n
+                            tích.</p>
                     </div>
                 </div>
 
@@ -508,12 +509,12 @@
                     <!-- TOP SECTION: ALL METRICS -->
                     <!-- ============================================ -->
 
-                    <h5 class="mb-3 text-primary border-bottom pb-2"><i class="bi bi-geo-alt me-2"></i>Thông số GNSS
+                    <h5 class="mb-3 text-primary border-bottom pb-2"><i class="bi bi-geo-alt me-2"></i>ThÃ´ng sá»‘ GNSS
                     </h5>
                     <div id="lt-reliability-note" class="reliability-note reliability-note-warning"
                         style="display: none;">
                         <i class="bi bi-shield-exclamation me-2"></i>
-                        <strong>Dữ liệu chưa đủ tin cậy để kết luận vận tốc.</strong>
+                        <strong>Dá»¯ liá»‡u chÆ°a Ä‘á»§ tin cáº­y Ä‘á»ƒ káº¿t luáº­n váº­n tá»‘c.</strong>
                         <span id="lt-reliability-text" class="ms-1"></span>
                     </div>
                     <div id="lt-gnss-source-note" class="analysis-source-note" style="display: none;"></div>
@@ -521,8 +522,8 @@
                     <div class="row g-3 mb-4">
                         <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
-                                <div class="text-muted small">Vận tốc trung bình</div>
-                                <div class="fs-4 fw-bold text-primary mt-1" id="lt-velocity">-- mm/năm</div>
+                                <div class="text-muted small">Váº­n tá»‘c trung bÃ¬nh</div>
+                                <div class="fs-4 fw-bold text-primary mt-1" id="lt-velocity">-- mm/nÄƒm</div>
                                 <div class="text-muted" id="lt-velocity-ci"
                                     style="font-size: 0.75rem; margin-top: 2px;">(Khoảng tin cậy: ± --)</div>
                             </div>
@@ -535,14 +536,14 @@
                         </div>
                         <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
-                                <div class="text-muted small">Tổng chuyển dịch</div>
+                                <div class="text-muted small">Tá»•ng chuyá»ƒn dá»‹ch</div>
                                 <div class="fs-5 fw-bold text-danger mt-1" id="lt-total-disp">-- mm</div>
                             </div>
                         </div>
                         <div class="col-md-3 col-6">
                             <div class="longterm-metric-card">
                                 <div class="text-muted small">Thời gian theo dõi</div>
-                                <div class="fs-5 fw-bold mt-1" id="lt-duration">-- ngày</div>
+                                <div class="fs-5 fw-bold mt-1" id="lt-duration">-- Ngày</div>
                             </div>
                         </div>
                     </div>
@@ -553,13 +554,14 @@
                             <div class="card h-100 border-0 shadow-sm">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start">
-                                        <h6 class="card-title text-muted mb-0">Xu hướng GNSS</h6>
-                                        <span id="cusum-badge" class="badge bg-danger" style="display: none;">Biến động
+                                        <h6 class="card-title text-muted mb-0">Xu hÆ°á»›ng GNSS</h6>
+                                        <span id="cusum-badge" class="badge bg-danger" style="display: none;">Biến
+                                            Ä‘á»™ng
                                             CUSUM</span>
                                     </div>
                                     <div id="trend-indicator" class="d-flex align-items-center gap-2 mt-2">
                                         <span id="trend-icon" class="fs-3"></span>
-                                        <span id="trend-value" class="fs-5 fw-bold">Không xác định</span>
+                                        <span id="trend-value" class="fs-5 fw-bold">KhÃ´ng xÃ¡c Ä‘á»‹nh</span>
                                         <span id="cusum-message" class="text-danger small ms-2"
                                             style="display: none;"></span>
                                     </div>
@@ -568,14 +570,15 @@
                         </div>
                     </div>
 
-                    <h5 class="mb-3 mt-4 text-warning border-bottom pb-2"><i class="bi bi-compass me-2"></i>Thông số IMU
+                    <h5 class="mb-3 mt-4 text-warning border-bottom pb-2"><i class="bi bi-compass me-2"></i>ThÃ´ng sá»‘
+                        IMU
                     </h5>
                     <div id="imu-longterm-section">
                         <!-- IMU insufficient data message -->
                         <div id="imu-longterm-nodata" style="display: none;">
                             <div class="alert alert-warning">
                                 <i class="bi bi-info-circle me-2"></i>
-                                <span id="imu-nodata-msg">Không đủ dữ liệu IMU để phân tích.</span>
+                                <span id="imu-nodata-msg">KhÃ´ng Ä‘á»§ dá»¯ liá»‡u IMU Ä‘á»ƒ phÃ¢n tÃ­ch.</span>
                             </div>
                         </div>
 
@@ -593,26 +596,26 @@
                                 <div class="col-md-3 col-6">
                                     <div
                                         class="longterm-metric-card bg-warning bg-opacity-10 border-warning border-opacity-25">
-                                        <div class="text-muted small">Tổng thay đổi góc</div>
-                                        <div class="fs-4 fw-bold text-warning mt-1" id="lt-imu-tilt-change">-- °</div>
+                                        <div class="text-muted small">Tá»•ng thay Ä‘á»•i gÃ³c</div>
+                                        <div class="fs-4 fw-bold text-warning mt-1" id="lt-imu-tilt-change">-- Â°</div>
                                     </div>
                                 </div>
                                 <div class="col-md-3 col-6">
                                     <div class="longterm-metric-card border-0 shadow-sm">
-                                        <div class="text-muted small">Tốc độ nghiêng TB</div>
-                                        <div class="fs-5 fw-bold mt-1" id="lt-imu-rate">-- °/ngày</div>
+                                        <div class="text-muted small">Tá»‘c Ä‘á»™ nghiÃªng TB</div>
+                                        <div class="fs-5 fw-bold mt-1" id="lt-imu-rate">-- Â°/Ngày</div>
                                     </div>
                                 </div>
                                 <div class="col-md-3 col-6">
                                     <div class="longterm-metric-card border-0 shadow-sm">
                                         <div class="text-muted small">Roll max</div>
-                                        <div class="fs-5 fw-bold text-info mt-1" id="lt-imu-max-roll">-- °</div>
+                                        <div class="fs-5 fw-bold text-info mt-1" id="lt-imu-max-roll">-- Â°</div>
                                     </div>
                                 </div>
                                 <div class="col-md-3 col-6">
                                     <div class="longterm-metric-card border-0 shadow-sm">
                                         <div class="text-muted small">Pitch max</div>
-                                        <div class="fs-5 fw-bold text-info mt-1" id="lt-imu-max-pitch">-- °</div>
+                                        <div class="fs-5 fw-bold text-info mt-1" id="lt-imu-max-pitch">-- Â°</div>
                                     </div>
                                 </div>
                             </div>
@@ -622,10 +625,11 @@
                                 <div class="col-md-6">
                                     <div class="card h-100 border-0 shadow-sm">
                                         <div class="card-body">
-                                            <h6 class="card-title text-muted">Xu hướng nghiêng</h6>
+                                            <h6 class="card-title text-muted">Xu hÆ°á»›ng nghiÃªng</h6>
                                             <div class="d-flex align-items-center gap-2 mt-2">
                                                 <span id="imu-trend-icon" class="fs-3"></span>
-                                                <span id="imu-trend-value" class="fs-5 fw-bold">Không xác định</span>
+                                                <span id="imu-trend-value" class="fs-5 fw-bold">Không xác
+                                                    Ä‘á»‹nh</span>
                                             </div>
                                         </div>
                                     </div>
@@ -633,13 +637,13 @@
                                 <div class="col-md-6">
                                     <div class="card h-100 border-0 shadow-sm">
                                         <div class="card-body">
-                                            <h6 class="card-title text-muted">Thời gian & Dữ liệu IMU</h6>
+                                            <h6 class="card-title text-muted">Thá»i gian & Dá»¯ liá»‡u IMU</h6>
                                             <div class="d-flex flex-column gap-2 mt-2">
-                                                <span class="fs-6"><i class="bi bi-database me-2 text-primary"></i>Số
-                                                    điểm: <strong id="lt-imu-points">--</strong></span>
+                                                <span class="fs-6"><i class="bi bi-database me-2 text-primary"></i>Sá»‘
+                                                    Ä‘iá»ƒm: <strong id="lt-imu-points">--</strong></span>
                                                 <span class="fs-6"><i
                                                         class="bi bi-clock-history me-2 text-info"></i>Thời gian:
-                                                    <strong id="lt-imu-duration">-- ngày</strong></span>
+                                                    <strong id="lt-imu-duration">-- Ngày</strong></span>
                                             </div>
                                         </div>
                                     </div>
@@ -653,14 +657,15 @@
                     <!-- ============================================ -->
                     <hr class="my-5">
                     <h5 class="mb-4 text-center text-uppercase fw-bold"><i class="bi bi-display me-2"></i>Mô phỏng &
-                        Biểu đồ</h5>
+                        Biá»ƒu Ä‘á»“</h5>
 
                     <!-- Time Range Selector -->
                     <!-- 3D Simulations Row -->
                     <div class="row g-4 mb-4">
                         <div class="col-lg-6">
                             <div class="chart-box border-0 shadow-sm h-100 text-center">
-                                <div class="chart-title text-primary"><i class="bi bi-box me-2"></i>Mô phỏng Chuyển dịch
+                                <div class="chart-title text-primary"><i class="bi bi-box me-2"></i>MÃ´ phá»ng Chuyá»ƒn
+                                    dá»‹ch
                                     GNSS (3D)</div>
                                 <div id="container-3d-gnss"
                                     style="width: 100%; height: 350px; background: #0a0e17; border-radius: 8px; overflow: hidden; position: relative;">
@@ -673,15 +678,16 @@
                                     </div>
                                 </div>
                                 <div class="mt-2 text-muted small d-flex justify-content-center gap-3">
-                                    <span><span style="color:#ff0000;">■</span> X (East)</span>
-                                    <span><span style="color:#00ff00;">■</span> Z (North)</span>
-                                    <span><span style="color:#0000ff;">■</span> Y (Up)</span>
+                                    <span><span style="color:#ff0000;">â– </span> X (East)</span>
+                                    <span><span style="color:#00ff00;">â– </span> Z (North)</span>
+                                    <span><span style="color:#0000ff;">â– </span> Y (Up)</span>
                                 </div>
                             </div>
                         </div>
                         <div class="col-lg-6">
                             <div class="chart-box border-0 shadow-sm h-100 text-center">
-                                <div class="chart-title text-warning"><i class="bi bi-box me-2"></i>Mô phỏng Độ nghiêng
+                                <div class="chart-title text-warning"><i class="bi bi-box me-2"></i>MÃ´ phá»ng Äá»™
+                                    nghiêng
                                     IMU (3D)</div>
                                 <div id="container-3d-imu"
                                     style="width: 100%; height: 350px; background: #0a0e17; border-radius: 8px; overflow: hidden; position: relative;">
@@ -693,14 +699,16 @@
                                             3D...</small>
                                     </div>
                                 </div>
-                                <div class="mt-2 text-muted small">Sử dụng chuột trái để xoay, lăn chuột để zoom</div>
+                                <div class="mt-2 text-muted small">Sá»­ dá»¥ng chuá»™t trÃ¡i Ä‘á»ƒ xoay, lÄƒn chuá»™t
+                                    Ä‘á»ƒ zoom</div>
                             </div>
                         </div>
                     </div>
 
                     <!-- COMBINED 2D CHART -->
                     <div class="chart-box border-0 shadow-sm">
-                        <div class="chart-title"><i class="bi bi-graph-up me-2"></i>Biểu đồ tổng hợp chuỗi thời gian
+                        <div class="chart-title"><i class="bi bi-graph-up me-2"></i>Biá»ƒu Ä‘á»“ tá»•ng há»£p chuá»—i
+                            thời gian
                             GNSS & IMU</div>
                         <div style="height: 400px; padding: 10px;">
                             <canvas id="chart-longterm-combined"></canvas>
@@ -712,7 +720,8 @@
                     <!-- ============================================ -->
                     <div id="inverse-velocity-section" class="mt-4" style="display: none;">
                         <h5 class="mb-3 text-danger border-bottom pb-2">
-                            <i class="bi bi-exclamation-diamond me-2"></i>Phương pháp phân tích động học nghịch đảo -
+                            <i class="bi bi-exclamation-diamond me-2"></i>PhÆ°Æ¡ng phÃ¡p phÃ¢n tÃ­ch Ä‘á»™ng há»c
+                            nghá»‹ch Ä‘áº£o -
                             Inverse Velocity
                         </h5>
                         <div id="inv-vel-warning" class="alert alert-danger mb-3" style="display: none;">
@@ -734,7 +743,7 @@
                             </div>
                             <div class="col-md-3 col-6">
                                 <div class="longterm-metric-card">
-                                    <div class="text-muted small">Độ tin cậy (R²)</div>
+                                    <div class="text-muted small">Äá»™ tin cáº­y (RÂ²)</div>
                                     <div class="fs-5 fw-bold mt-1" id="inv-vel-r2">--</div>
                                 </div>
                             </div>
@@ -746,7 +755,8 @@
                             </div>
                         </div>
                         <div class="chart-box border-0 shadow-sm">
-                            <div class="chart-title"><i class="bi bi-graph-down me-2"></i>Biểu đồ 1/Velocity theo thời
+                            <div class="chart-title"><i class="bi bi-graph-down me-2"></i>Biá»ƒu Ä‘á»“ 1/Velocity theo
+                                thời
                                 gian</div>
                             <div style="height: 300px; padding: 10px;">
                                 <canvas id="chart-inverse-velocity"></canvas>
@@ -759,18 +769,18 @@
                     <!-- ============================================ -->
                     <div id="rainfall-correlation-section" class="mt-4" style="display: none;">
                         <h5 class="mb-3 text-info border-bottom pb-2">
-                            <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (LS-RAPID v2)
+                            <i class="bi bi-cloud-rain me-2"></i>TÆ°Æ¡ng quan MÆ°a - Dá»‹ch chuyá»ƒn (LS-RAPID v2)
                         </h5>
                         <div class="row g-3 mb-3">
                             <div class="col-md-2 col-6">
                                 <div class="longterm-metric-card">
-                                    <div class="text-muted small">Hệ số r</div>
+                                    <div class="text-muted small">Há»‡ sá»‘ r</div>
                                     <div class="fs-4 fw-bold text-info mt-1" id="rain-correlation">--</div>
                                 </div>
                             </div>
                             <div class="col-md-2 col-6">
                                 <div class="longterm-metric-card">
-                                    <div class="text-muted small">R²</div>
+                                    <div class="text-muted small">RÂ²</div>
                                     <div class="fs-5 fw-bold mt-1" id="rain-r2">--</div>
                                 </div>
                             </div>
@@ -794,7 +804,7 @@
                             </div>
                             <div class="col-md-2 col-6">
                                 <div class="longterm-metric-card">
-                                    <div class="text-muted small">Độ nhạy</div>
+                                    <div class="text-muted small">Äá»™ nháº¡y</div>
                                     <div class="fs-5 fw-bold mt-1" id="rain-sensitivity">--</div>
                                 </div>
                             </div>
@@ -808,8 +818,9 @@
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <div class="chart-box border-0 shadow-sm">
-                                    <div class="chart-title"><i class="bi bi-moisture me-2"></i>Mưa tích lũy vs Dịch
-                                        chuyển tích lũy</div>
+                                    <div class="chart-title"><i class="bi bi-moisture me-2"></i>Mưa tích lũy vs
+                                        Dá»‹ch
+                                        chuyá»ƒn tÃ­ch lÅ©y</div>
                                     <div style="height: 350px; padding: 10px;">
                                         <canvas id="chart-rainfall-correlation"></canvas>
                                     </div>
@@ -818,7 +829,7 @@
                             <div class="col-md-6">
                                 <div class="chart-box border-0 shadow-sm">
                                     <div class="chart-title"><i class="bi bi-graph-up-arrow me-2"></i>LS-RAPID Index vs
-                                        Dịch chuyển ngày</div>
+                                        Dá»‹ch chuyá»ƒn Ngày</div>
                                     <div style="height: 350px; padding: 10px;">
                                         <canvas id="chart-lsrapid-index"></canvas>
                                     </div>
@@ -831,7 +842,8 @@
                             <i class="bi bi-stars me-2"></i>Chạy AI LS-RAPID
                         </button>
                         <div id="rain-correlation-hint" class="text-muted small mt-2">
-                            Tương quan mưa - dịch chuyển dùng model LS-RAPID và chỉ chạy khi bạn bấm nút AI.
+                            TÆ°Æ¡ng quan mÆ°a - dá»‹ch chuyá»ƒn dÃ¹ng model LS-RAPID vÃ  chá»‰ cháº¡y khi báº¡n báº¥m
+                            nút AI.
                         </div>
                     </div>
 
@@ -840,7 +852,7 @@
                     <!-- ============================================ -->
                     <div id="multi-window-section" class="mt-4" style="display: none;">
                         <h5 class="mb-3 text-success border-bottom pb-2">
-                            <i class="bi bi-window-stack me-2"></i>Phân tích xu hướng theo kỳ
+                            <i class="bi bi-window-stack me-2"></i>PhÃ¢n tÃ­ch xu hÆ°á»›ng theo ká»³
                         </h5>
                         <div id="multi-window-alert" class="alert alert-warning mb-3" style="display: none;">
                             <i class="bi bi-lightning me-2"></i>
@@ -854,7 +866,7 @@
                     <!-- ============================================ -->
                     <div id="cross-consensus-section" class="mt-4" style="display: none;">
                         <h5 class="mb-3 border-bottom pb-2" style="color: var(--text-primary);">
-                            <i class="bi bi-intersect me-2"></i>Đồng thuận đa cảm biến
+                            <i class="bi bi-intersect me-2"></i>Äá»“ng thuáº­n Ä‘a cáº£m biáº¿n
                         </h5>
                         <div id="consensus-banner" class="consensus-banner mb-3">
                             <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -865,14 +877,14 @@
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <div class="longterm-metric-card">
-                                    <div class="text-muted small mb-2">Cảm biến có dữ liệu</div>
+                                    <div class="text-muted small mb-2">Cáº£m biáº¿n cÃ³ dá»¯ liá»‡u</div>
                                     <div id="consensus-sensors-with-data"
                                         class="d-flex flex-wrap gap-2 justify-content-center mt-1"></div>
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="longterm-metric-card">
-                                    <div class="text-muted small mb-2">Xu hướng GNSS vs IMU</div>
+                                    <div class="text-muted small mb-2">Xu hÆ°á»›ng GNSS vs IMU</div>
                                     <div id="consensus-trend-agreement" class="fs-5 fw-bold mt-1">--</div>
                                 </div>
                             </div>
@@ -884,16 +896,17 @@
             </div>
         </div>
 
-        <!-- LS-RAPID RESULT POPUP (v2 — comprehensive dashboard) -->
+        <!-- LS-RAPID RESULT POPUP (v2 â€” comprehensive dashboard) -->
         <div id="lsrapid-popup-overlay" class="lsrapid-popup-overlay" aria-hidden="true">
             <div class="lsrapid-popup-card" role="dialog" aria-modal="true" aria-labelledby="lsrapid-popup-title">
-                <button class="lsrapid-popup-close" id="lsrapid-popup-close" aria-label="Đóng popup kết quả LS-RAPID">
+                <button class="lsrapid-popup-close" id="lsrapid-popup-close"
+                    aria-label="Đóng popup kết quả LS-RAPID">
                     <i class="bi bi-x-lg"></i>
                 </button>
 
                 <div class="lsrapid-popup-head">
                     <div class="lsrapid-popup-kicker">AI LS-RAPID Engine v2</div>
-                    <h5 id="lsrapid-popup-title" class="mb-1">Phân tích tương quan Mưa — Dịch chuyển</h5>
+                    <h5 id="lsrapid-popup-title" class="mb-1">PhÃ¢n tÃ­ch tÆ°Æ¡ng quan MÆ°a â€” Dá»‹ch chuyá»ƒn</h5>
                     <div id="lsrapid-popup-status" class="lsrapid-popup-status">READY</div>
                 </div>
 
@@ -901,16 +914,16 @@
                     <!-- Tab navigation -->
                     <div class="lsrapid-tabs">
                         <button class="lsrapid-tab active" data-tab="lsrapid-tab-overview">
-                            <i class="bi bi-speedometer2"></i> Tổng quan
+                            <i class="bi bi-speedometer2"></i> Tá»•ng quan
                         </button>
                         <button class="lsrapid-tab" data-tab="lsrapid-tab-rain">
                             <i class="bi bi-cloud-rain"></i> Mưa
                         </button>
                         <button class="lsrapid-tab" data-tab="lsrapid-tab-disp">
-                            <i class="bi bi-arrows-move"></i> Dịch chuyển
+                            <i class="bi bi-arrows-move"></i> Dá»‹ch chuyá»ƒn
                         </button>
                         <button class="lsrapid-tab" data-tab="lsrapid-tab-events">
-                            <i class="bi bi-calendar-event"></i> Sự kiện
+                            <i class="bi bi-calendar-event"></i> Sá»± kiá»‡n
                         </button>
                         <button class="lsrapid-tab" data-tab="lsrapid-tab-risk">
                             <i class="bi bi-shield-exclamation"></i> Rủi ro
@@ -921,15 +934,15 @@
                     <div id="lsrapid-tab-overview" class="lsrapid-tab-pane active">
                         <div class="lsrapid-popup-grid">
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Hệ số tương quan (r)</span>
+                                <span class="label">Há»‡ sá»‘ tÆ°Æ¡ng quan (r)</span>
                                 <span class="value" id="lsrapid-popup-r">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">R² (hệ số xác định)</span>
+                                <span class="label">RÂ² (há»‡ sá»‘ xÃ¡c Ä‘á»‹nh)</span>
                                 <span class="value" id="lsrapid-popup-r2">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Lag tốt nhất</span>
+                                <span class="label">Lag tá»‘t nháº¥t</span>
                                 <span class="value" id="lsrapid-popup-lag">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
@@ -952,27 +965,27 @@
                     <div id="lsrapid-tab-rain" class="lsrapid-tab-pane">
                         <div class="lsrapid-popup-grid lsrapid-grid-3">
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Tổng lượng mưa</span>
+                                <span class="label">Tá»•ng lÆ°á»£ng mÆ°a</span>
                                 <span class="value" id="lsrapid-rain-total">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Mưa max/ngày</span>
+                                <span class="label">MÆ°a max/Ngày</span>
                                 <span class="value" id="lsrapid-rain-max">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Ngày mưa max</span>
+                                <span class="label">Ngày mÆ°a max</span>
                                 <span class="value" id="lsrapid-rain-max-day">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Số ngày mưa</span>
+                                <span class="label">Sá»‘ Ngày mÆ°a</span>
                                 <span class="value" id="lsrapid-rain-days">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Số ngày khô</span>
+                                <span class="label">Sá»‘ Ngày khÃ´</span>
                                 <span class="value" id="lsrapid-dry-days">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">TB ngày mưa</span>
+                                <span class="label">TB Ngày mÆ°a</span>
                                 <span class="value" id="lsrapid-rain-avg">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
@@ -984,7 +997,7 @@
                                 <span class="value" id="lsrapid-idx-mean">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Ngày phân tích</span>
+                                <span class="label">Ngày phÃ¢n tÃ­ch</span>
                                 <span class="value" id="lsrapid-common-days">--</span>
                             </div>
                         </div>
@@ -994,35 +1007,35 @@
                     <div id="lsrapid-tab-disp" class="lsrapid-tab-pane">
                         <div class="lsrapid-popup-grid lsrapid-grid-3">
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Tổng dịch chuyển</span>
+                                <span class="label">Tá»•ng dá»‹ch chuyá»ƒn</span>
                                 <span class="value" id="lsrapid-disp-total">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Max/ngày</span>
+                                <span class="label">Max/Ngày</span>
                                 <span class="value" id="lsrapid-disp-max">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Ngày dịch max</span>
+                                <span class="label">Ngày dá»‹ch max</span>
                                 <span class="value" id="lsrapid-disp-max-day">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">TB/ngày</span>
+                                <span class="label">TB/Ngày</span>
                                 <span class="value" id="lsrapid-disp-avg">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">TB ngày mưa</span>
+                                <span class="label">TB Ngày mÆ°a</span>
                                 <span class="value" id="lsrapid-disp-rain">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">TB ngày khô</span>
+                                <span class="label">TB Ngày khÃ´</span>
                                 <span class="value" id="lsrapid-disp-dry">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Hệ số gia tốc mưa</span>
+                                <span class="label">Há»‡ sá»‘ gia tá»‘c mÆ°a</span>
                                 <span class="value" id="lsrapid-accel-ratio">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
-                                <span class="label">Độ nhạy</span>
+                                <span class="label">Äá»™ nháº¡y</span>
                                 <span class="value" id="lsrapid-sensitivity">--</span>
                             </div>
                             <div class="lsrapid-popup-metric">
@@ -1034,15 +1047,17 @@
 
                     <!-- Tab: Events (CWD + Peak rain) -->
                     <div id="lsrapid-tab-events" class="lsrapid-tab-pane">
-                        <h6 class="lsrapid-section-title"><i class="bi bi-cloud-drizzle me-1"></i> Đợt mưa kéo dài (CWD)
+                        <h6 class="lsrapid-section-title"><i class="bi bi-cloud-drizzle me-1"></i> Đợt mưa kéo dài
+                            (CWD)
                         </h6>
                         <div id="lsrapid-cwd-events" class="lsrapid-events-list">
-                            <div class="text-muted small">Không có đợt mưa kéo dài</div>
+                            <div class="text-muted small">KhÃ´ng cÃ³ Ä‘á»£t mÆ°a kÃ©o dÃ i</div>
                         </div>
-                        <h6 class="lsrapid-section-title mt-3"><i class="bi bi-cloud-lightning-rain me-1"></i> Ngày mưa
-                            lớn (≥20mm)</h6>
+                        <h6 class="lsrapid-section-title mt-3"><i class="bi bi-cloud-lightning-rain me-1"></i> Ngày
+                            mưa
+                            lá»›n (â‰¥20mm)</h6>
                         <div id="lsrapid-peak-events" class="lsrapid-events-list">
-                            <div class="text-muted small">Không có ngày mưa lớn</div>
+                            <div class="text-muted small">KhÃ´ng cÃ³ Ngày mÆ°a lá»›n</div>
                         </div>
                     </div>
 
@@ -1063,11 +1078,11 @@
     </div>
 
     <!-- FLOATING RESCUE FAB -->
-    <button id="btn-guest-rescue" class="rescue-fab" aria-label="Yêu cầu cứu hộ">
+    <button id="btn-guest-rescue" class="rescue-fab" aria-label="YÃªu cáº§u cá»©u há»™">
         <span class="rescue-fab-icon">
             <i class="bi bi-exclamation-triangle-fill"></i>
         </span>
-        <span class="rescue-fab-label">Yêu cầu cứu hộ</span>
+        <span class="rescue-fab-label">YÃªu cáº§u cá»©u há»™</span>
     </button>
 
     <div class="modal fade" id="guestRescueModal" tabindex="-1" aria-labelledby="guestRescueModalLabel"
@@ -1076,7 +1091,7 @@
             <div class="modal-content glass-modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="guestRescueModalLabel"><i class="bi bi-geo-alt-fill me-2"></i>Yêu cầu
-                        cứu hộ</h5>
+                        cá»©u há»™</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -1085,16 +1100,17 @@
                             class="bi bi-person-lines-fill me-2"></i>Khu vực 1: Thông tin cơ bản</h6>
                     <div class="row g-2 mb-3">
                         <div class="col-sm-6">
-                            <label for="guest-rescue-name" class="form-label" style="font-size: 0.85rem;">Họ tên <span
-                                    class="text-danger">*</span></label>
+                            <label for="guest-rescue-name" class="form-label" style="font-size: 0.85rem;">Họ tên
+                                <span class="text-danger">*</span></label>
                             <input id="guest-rescue-name" class="form-control form-control-sm" maxlength="120"
-                                placeholder="Người cần hỗ trợ">
+                                placeholder="NgÆ°á»i cáº§n há»— trá»£">
                         </div>
                         <div class="col-sm-6">
-                            <label for="guest-rescue-phone" class="form-label" style="font-size: 0.85rem;">Số điện thoại
+                            <label for="guest-rescue-phone" class="form-label" style="font-size: 0.85rem;">Sá»‘ Ä‘iá»‡n
+                                thoại
                                 <span class="text-danger">*</span></label>
                             <input id="guest-rescue-phone" class="form-control form-control-sm" maxlength="32"
-                                placeholder="Liên hệ khẩn">
+                                placeholder="LiÃªn há»‡ kháº©n">
                         </div>
                     </div>
 
@@ -1105,7 +1121,7 @@
                             <input type="radio" class="btn-check" name="guest-rescue-type"
                                 id="guest-rescue-type-emergency" value="can_cuu_ho" checked>
                             <label class="btn btn-outline-danger btn-sm rounded-pill"
-                                for="guest-rescue-type-emergency">Cần Cứu Hộ</label>
+                                for="guest-rescue-type-emergency">Cáº§n Cá»©u Há»™</label>
 
                             <input type="radio" class="btn-check" name="guest-rescue-type"
                                 id="guest-rescue-type-medical" value="can_nhu_yeu_pham">
@@ -1115,7 +1131,7 @@
                             <input type="radio" class="btn-check" name="guest-rescue-type"
                                 id="guest-rescue-type-vehicle" value="can_cuu_ho_xe">
                             <label class="btn btn-outline-warning btn-sm rounded-pill"
-                                for="guest-rescue-type-vehicle">Cần Cứu Hộ Xe</label>
+                                for="guest-rescue-type-vehicle">Cáº§n Cá»©u Há»™ Xe</label>
 
                             <input type="radio" class="btn-check" name="guest-rescue-type" id="guest-rescue-type-other"
                                 value="khac">
@@ -1130,26 +1146,27 @@
                     </div>
 
                     <div class="mb-3">
-                        <label for="guest-rescue-note" class="form-label" style="font-size: 0.85rem;">Mô tả ngắn <span
-                                class="text-danger">*</span></label>
+                        <label for="guest-rescue-note" class="form-label" style="font-size: 0.85rem;">Mô tả ngắn
+                            <span class="text-danger">*</span></label>
                         <textarea id="guest-rescue-note" class="form-control form-control-sm" rows="2" maxlength="500"
-                            placeholder="Tình trạng hiện trường, đường bao xa, có vật cản gì..."></textarea>
+                            placeholder="TÃ¬nh tráº¡ng hiá»‡n trÆ°á»ng, Ä‘Æ°á»ng bao xa, cÃ³ váº­t cáº£n gÃ¬..."></textarea>
                     </div>
 
-                    <!-- Khu vực 2: Xác định Vị trí -->
+                    <!-- Khu vá»±c 2: XÃ¡c Ä‘á»‹nh Vá»‹ trÃ­ -->
                     <h6 class="fw-bold mt-4 mb-3 text-primary border-bottom pb-2"><i
-                            class="bi bi-geo-alt-fill me-2"></i>Khu vực 2: Xác định Vị trí</h6>
+                            class="bi bi-geo-alt-fill me-2"></i>Khu vá»±c 2: XÃ¡c Ä‘á»‹nh Vá»‹ trÃ­</h6>
                     <div class="card bg-transparent border-primary border-opacity-25 mb-4 shadow-sm"
                         style="border-radius: 12px; overflow: hidden;">
                         <div class="card-body p-3" style="background: rgba(13, 110, 253, 0.03);">
 
-                            <!-- Bấm chọn vị trí trên Bản đồ -->
+                            <!-- Báº¥m chá»n vá»‹ trÃ­ trÃªn Báº£n Ä‘á»“ -->
                             <button type="button"
                                 class="btn btn-primary w-100 mb-3 shadow-sm position-relative overflow-hidden"
                                 style="border-radius: 8px; padding: 12px; font-weight: 700; border: none; background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);"
                                 onclick="enablePickOnMap()">
-                                <i class="bi bi-pin-map-fill fs-5 me-2" style="vertical-align: middle;"></i> BẤM CHỌN VỊ
-                                TRÍ TRÊN BẢN ĐỒ
+                                <i class="bi bi-pin-map-fill fs-5 me-2" style="vertical-align: middle;"></i> BẤM
+                                CHá»ŒN Vá»Š
+                                TRÃ TRÃŠN Báº¢N Äá»’
                             </button>
 
                             <!-- Cụm công cụ: GPS & Search -->
@@ -1157,13 +1174,13 @@
                                 <div class="col-md-5">
                                     <button id="btn-guest-rescue-locate" type="button"
                                         class="btn btn-outline-primary btn-sm w-100 h-100 fw-semibold text-truncate">
-                                        <i class="bi bi-crosshair me-1"></i> Lấy GPS tự động
+                                        <i class="bi bi-crosshair me-1"></i> Láº¥y GPS tá»± Ä‘á»™ng
                                     </button>
                                 </div>
                                 <div class="col-md-7 position-relative">
                                     <div class="input-group input-group-sm h-100">
                                         <input type="text" id="guest-rescue-address-search" class="form-control"
-                                            placeholder="Tìm Xã, Huyện, Tỉnh...">
+                                            placeholder="TÃ¬m XÃ£, Huyá»‡n, Tá»‰nh...">
                                         <button class="btn btn-outline-primary" type="button"
                                             id="btn-guest-rescue-search-address-action">
                                             <i class="bi bi-search"></i>
@@ -1176,20 +1193,20 @@
                                 </div>
                             </div>
 
-                            <!-- Vị trí chi tiết & Tỉnh thành -->
+                            <!-- Vá»‹ trÃ­ chi tiáº¿t & Tá»‰nh thÃ nh -->
                             <div class="row g-2 mb-3">
                                 <div class="col-sm-5">
                                     <label for="guest-rescue-province" class="form-label"
-                                        style="font-size: 0.75rem; font-weight: 600; opacity: 0.8;">Tỉnh/Thành
-                                        phố</label>
+                                        style="font-size: 0.75rem; font-weight: 600; opacity: 0.8;">Tá»‰nh/ThÃ nh
+                                        phá»‘</label>
                                     <select id="guest-rescue-province" class="form-select form-select-sm">
-                                        <option value="">Chọn tỉnh/thành phố...</option>
-                                        <option value="Ha Noi">Hà Nội</option>
-                                        <option value="TP Ho Chi Minh">TP. Hồ Chí Minh</option>
+                                        <option value="">Chá»n tá»‰nh/thÃ nh phá»‘...</option>
+                                        <option value="Ha Noi">HÃ  Ná»™i</option>
+                                        <option value="TP Ho Chi Minh">TP. Há»“ ChÃ­ Minh</option>
                                         <option value="Da Nang">Đà Nẵng</option>
                                         <option value="Hai Phong">Hải Phòng</option>
                                         <option value="Can Tho">Cần Thơ</option>
-                                        <option value="Nghe An">Nghệ An</option>
+                                        <option value="Nghe An">Nghá»‡ An</option>
                                         <option value="Thanh Hoa">Thanh Hóa</option>
                                         <option value="Quang Nam">Quảng Nam</option>
                                         <option value="Quang Ngai">Quảng Ngãi</option>
@@ -1198,15 +1215,16 @@
                                 </div>
                                 <div class="col-sm-7">
                                     <label for="guest-rescue-address-manual" class="form-label"
-                                        style="font-size: 0.75rem; font-weight: 600; opacity: 0.8;">Địa chỉ chi tiết
+                                        style="font-size: 0.75rem; font-weight: 600; opacity: 0.8;">Äá»‹a chá»‰ chi
+                                        tiết
                                         (nếu cần)</label>
                                     <input id="guest-rescue-address-manual" type="text"
                                         class="form-control form-control-sm" maxlength="255"
-                                        placeholder="Hẻm, ngõ, số nhà, làng, xã...">
+                                        placeholder="Háº»m, ngÃµ, sá»‘ nhÃ , lÃ ng, xÃ£...">
                                 </div>
                             </div>
 
-                            <!-- Tọa độ hiển thị Readonly -->
+                            <!-- Tá»a Ä‘á»™ hiá»ƒn thá»‹ Readonly -->
                             <div class="row g-2 pt-2 border-top border-primary border-opacity-10 opacity-75">
                                 <div class="col-6 d-flex align-items-center gap-2">
                                     <label class="form-label mb-0 fw-bold text-danger text-opacity-75"
@@ -1232,15 +1250,16 @@
                     <div class="row g-3">
                         <div class="col-12">
                             <label for="guest-rescue-image" class="form-label"
-                                style="font-size: 0.8rem; font-weight: 600;">Ảnh hiện trường <span
+                                style="font-size: 0.8rem; font-weight: 600;">áº¢nh hiá»‡n trÆ°á»ng <span
                                     class="text-muted fw-normal">(tùy chọn)</span></label>
                             <div class="input-group input-group-sm">
                                 <input id="guest-rescue-image" type="file" class="form-control" accept="image/*">
                                 <button class="btn btn-outline-danger" type="button" id="btn-guest-rescue-image-clear"
                                     style="display: none;"><i class="bi bi-trash"></i></button>
                             </div>
-                            <div class="form-text mt-1" style="font-size: 0.7rem;">Ảnh giúp đội cứu hộ xác định tính
-                                chất. Nén tự động để tiết kiệm mạng.</div>
+                            <div class="form-text mt-1" style="font-size: 0.7rem;">áº¢nh giÃºp Ä‘á»™i cá»©u há»™ xÃ¡c
+                                Ä‘á»‹nh tÃ­nh
+                                cháº¥t. NÃ©n tá»± Ä‘á»™ng Ä‘á»ƒ tiáº¿t kiá»‡m máº¡ng.</div>
                             <div id="guest-rescue-image-preview-wrap" class="mt-2 text-center"
                                 style="display:none; background: rgba(0,0,0,0.03); border-radius: 8px; padding: 10px;">
                                 <img id="guest-rescue-image-preview" alt="Preview ảnh"
@@ -1249,7 +1268,7 @@
                         </div>
                         <div class="col-12">
                             <label for="guest-rescue-source-link" class="form-label"
-                                style="font-size: 0.8rem; font-weight: 600;">Link nguồn <span
+                                style="font-size: 0.8rem; font-weight: 600;">Link nguá»“n <span
                                     class="text-muted fw-normal">(tùy báo mxh, zalo...)</span></label>
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text bg-transparent"><i class="bi bi-link-45deg"></i></span>
@@ -1276,7 +1295,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/theme-manager.js"></script>
     <script src="/js/auth.js"></script>
-    <script src="/js/map-main.js"></script>
+    <script src="/js/map-main.js?v=20260422-1"></script>
 
 </body>
 
