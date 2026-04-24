@@ -536,18 +536,11 @@ class GNSSVelocityProcessor:
             except Exception:
                 disp_tau = 12.0
 
-            # --- Displacement Stabilization ---
-            # Ngưỡng đứng im mới: 5.0 mm/s (0.005 m/s) - Phù hợp với nhiễu RTK thông thường
-            # Khi đứng im, dùng Tau = 120s để triệt tiêu hoàn toàn rung động
-            current_disp_tau = disp_tau
-            if speed_2d < 0.005:  # < 5.0 mm/s
-                current_disp_tau = max(disp_tau, 120.0)
-
             if not self.disp_state_ready:
                 self.disp_enu_state = med_enu
                 self.disp_state_ready = True
             else:
-                alpha_disp = dt / (max(current_disp_tau, 0.1) + dt)
+                alpha_disp = dt / (max(disp_tau, 0.1) + dt)
                 self.disp_enu_state = (1.0 - alpha_disp) * self.disp_enu_state + alpha_disp * med_enu
 
             # Mặc định chỉ lấy chuyển vị 2D (mặt bằng) để đảm bảo độ ổn định cao nhất cho giám sát

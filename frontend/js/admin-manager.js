@@ -57,33 +57,33 @@ class AdminManager {
     setupWebSocketListener() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/admin?token=${this.token}`;
-        
+
         try {
             this.ws = new WebSocket(wsUrl);
             this.ws.onmessage = (event) => {
                 const message = JSON.parse(event.data);
                 if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
                     console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
-                    
+
                     // Cập nhật ngay lập tức lên UI
                     const latEl = document.getElementById('origin-lat');
                     const lonEl = document.getElementById('origin-lon');
                     const hEl = document.getElementById('origin-h');
                     const statusEl = document.getElementById('origin-status');
-                    
+
                     if (latEl) latEl.value = message.data.lat;
                     if (lonEl) lonEl.value = message.data.lon;
                     if (hEl) hEl.value = message.data.h;
-                    
+
                     if (statusEl) {
                         statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
                         statusEl.className = 'small mt-1';
                     }
-                    
+
                     window.toast?.success('Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
                 }
             };
-            
+
             this.ws.onclose = () => {
                 // Thử kết nối lại sau 5 giây nếu mất kết nối
                 setTimeout(() => this.setupWebSocketListener(), 5000);
@@ -1047,6 +1047,7 @@ class AdminManager {
             }
             const gnssCfg = cfg.GnssAlerting || {};
             document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
+            document.getElementById('cfg-gnss-hdop').value = gnssCfg.gnss_max_hdop ?? 4.0;
 
             const imuCfg = cfg.ImuAlerting || {};
             document.getElementById('cfg-imu-shock').value = imuCfg.shock_threshold_ms2 ?? 5.0;
@@ -1894,13 +1895,13 @@ class AdminManager {
 
             const data = await res.json();
             window.toast?.success(`Origin reset sent for ${data.reset_count} device(s)`);
-            
+
             // ✅ Xóa trắng các ô nhập liệu trên UI để người dùng thấy rõ hiệu ứng reset
             const latEl = document.getElementById('origin-lat');
             const lonEl = document.getElementById('origin-lon');
             const hEl = document.getElementById('origin-h');
             const statusEl = document.getElementById('origin-status');
-            
+
             if (latEl) latEl.value = '';
             if (lonEl) lonEl.value = '';
             if (hEl) hEl.value = '';

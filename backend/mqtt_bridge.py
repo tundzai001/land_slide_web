@@ -773,8 +773,11 @@ class MQTTBridge:
                         "fix_mode": res.get('fix_mode'),
                         "message": res.get('message')
                     }
-                    # Always buffer status (even UNTRUSTED_FIX) to keep record consistent
-                    await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
+                    
+                    # ✅ Cập nhật LatestSensorCache để tránh bị coi là Offline khi fix < 4
+                    try:
+                        await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
+                    except Exception: pass
                     # Broadcast GNSS fix status even when velocity is skipped (fix != 4)
                     try:
                         await manager.broadcast({
@@ -789,6 +792,10 @@ class MQTTBridge:
                     return
                 elif res and res.get('type') == 'origin_locked':
                     logger.info(f"🎯 [{station_name}] GNSS Origin locked")
+                    # ✅ Cập nhật cache để báo trạm online khi vừa khóa origin xong
+                    try:
+                        await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, res.get('data', {}))
+                    except Exception: pass
                     return
                 elif res and res.get('type') == 'origin_status':
                     status_payload = {
@@ -799,6 +806,12 @@ class MQTTBridge:
                     }
                     if self._should_save_gnss_status(station_id, current_timestamp, station_config):
                         await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
+                    
+                    # ✅ Cập nhật cache ngay cả khi đang thu thập origin
+                    try:
+                        await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
+                    except Exception: pass
+
                     # During origin collection, notify UI about current fix mode
                     try:
                         await manager.broadcast({
