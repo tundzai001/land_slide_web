@@ -1531,6 +1531,25 @@ function setupEventListeners() {
         });
     }
 
+    // ✅ NEW: Mở Digital Twin 3D
+    const btnDigitalTwin = document.getElementById('btn-digital-twin');
+    if (btnDigitalTwin) {
+        btnDigitalTwin.addEventListener('click', () => {
+            if (currentStationData) {
+                console.log('🌋 [DIGITAL TWIN] Opening for station:', currentStationData.id);
+                const rainData = currentStationData.sensors && currentStationData.sensors.rain && currentStationData.sensors.rain.latest ? currentStationData.sensors.rain.latest.data : null;
+                const h24 = rainData ? (rainData.rain_24h || rainData.rain_last_24h || rainData.value || 0) : 0;
+                
+                window.openDigitalTwin({
+                    id: currentStationData.id,
+                    rain: { h24: parseFloat(h24) }
+                });
+            } else {
+                window.openDigitalTwin(null);
+            }
+        });
+    }
+
     // Advanced GNSS Sidepanel
     const gnssCard = document.getElementById('sensor-card-gnss');
     const advSidepanel = document.getElementById('gnss-advanced-sidepanel');

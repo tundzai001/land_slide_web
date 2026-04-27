@@ -2822,6 +2822,7 @@ async def admin_delete_alert(
 # WEBSOCKET & HEALTH CHECK
 # ============================================================================
 @app.websocket("/ws/updates")
+@app.websocket("/ws/admin")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:

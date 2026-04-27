@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Twin — LS-RAPID 3D Landslide Simulation</title>
+    <meta name="description" content="Mô phỏng sạt lở đất 3D thời gian thực dựa trên mô hình LS-RAPID. Digital Twin cho hệ thống cảnh báo sớm.">
+
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+    <!-- Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/css/digital-twin.css">
+</head>
+
+<body>
+    <!-- ==================== TOP BAR ==================== -->
+    <header id="dt-header">
+        <div class="dt-header-left">
+            <a href="/" class="dt-logo">
+                <div class="dt-logo-icon"><i class="bi bi-tsunami"></i></div>
+                <span class="dt-logo-text">LS-RAPID Digital Twin</span>
+            </a>
+            <div class="dt-status-badge" id="sim-status-badge">
+                <span class="dt-status-dot"></span>
+                <span class="dt-status-text">STABLE</span>
+            </div>
+        </div>
+        <div class="dt-header-center">
+            <div class="dt-fos-mini" id="fos-mini-display">
+                <span class="dt-fos-label">FoS</span>
+                <span class="dt-fos-value" id="fos-value-header">2.45</span>
+            </div>
+        </div>
+        <div class="dt-header-right">
+            <button class="dt-btn-icon" id="btn-toggle-panel" title="Toggle Panel">
+                <i class="bi bi-layout-sidebar"></i>
+            </button>
+            <button class="dt-btn-icon" id="btn-fullscreen" title="Fullscreen">
+                <i class="bi bi-arrows-fullscreen"></i>
+            </button>
+            <a href="/pages/map.html" class="dt-btn-back">
+                <i class="bi bi-arrow-left"></i> Bản đồ
+            </a>
+        </div>
+    </header>
+
+    <!-- ==================== MAIN LAYOUT ==================== -->
+    <div id="dt-main">
+        <!-- ========== LEFT CONTROL PANEL ========== -->
+        <aside id="dt-panel" class="dt-panel-open">
+            <!-- Soil Parameters -->
+            <div class="dt-panel-section">
+                <div class="dt-section-header">
+                    <i class="bi bi-layers-half"></i>
+                    <span>Thông số Địa chất</span>
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Lực dính c' (kPa)</span>
+                        <output id="val-cohesion">15</output>
+                    </label>
+                    <input type="range" id="param-cohesion" min="0" max="50" value="15" step="1" class="dt-slider">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Góc ma sát φ' (°)</span>
+                        <output id="val-friction">30</output>
+                    </label>
+                    <input type="range" id="param-friction" min="10" max="45" value="30" step="1" class="dt-slider">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Trọng lượng riêng γ (kN/m³)</span>
+                        <output id="val-unit-weight">18</output>
+                    </label>
+                    <input type="range" id="param-unit-weight" min="14" max="24" value="18" step="0.5" class="dt-slider">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Chiều sâu mặt trượt z (m)</span>
+                        <output id="val-slip-depth">5</output>
+                    </label>
+                    <input type="range" id="param-slip-depth" min="1" max="20" value="5" step="0.5" class="dt-slider">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Góc dốc β (°)</span>
+                        <output id="val-slope-angle">25</output>
+                    </label>
+                    <input type="range" id="param-slope-angle" min="10" max="60" value="25" step="1" class="dt-slider">
+                </div>
+            </div>
+
+            <!-- Weather / Trigger -->
+            <div class="dt-panel-section">
+                <div class="dt-section-header">
+                    <i class="bi bi-cloud-rain-heavy"></i>
+                    <span>Điều kiện Kích hoạt</span>
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Cường độ mưa (mm/h)</span>
+                        <output id="val-rainfall">0</output>
+                    </label>
+                    <input type="range" id="param-rainfall" min="0" max="200" value="0" step="5" class="dt-slider dt-slider-rain">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Áp lực nước lỗ rỗng r<sub>u</sub></span>
+                        <output id="val-pore-pressure">0.00</output>
+                    </label>
+                    <input type="range" id="param-pore-pressure" min="0" max="0.6" value="0" step="0.01" class="dt-slider dt-slider-pore">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Gia tốc nền k<sub>h</sub> (động đất)</span>
+                        <output id="val-seismic">0.00</output>
+                    </label>
+                    <input type="range" id="param-seismic" min="0" max="0.5" value="0" step="0.01" class="dt-slider dt-slider-seismic">
+                </div>
+            </div>
+
+            <!-- Environment Settings -->
+            <div class="dt-panel-section">
+                <div class="dt-section-header">
+                    <i class="bi bi-tree"></i>
+                    <span>Môi trường</span>
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Số lượng nhà</span>
+                        <output id="val-houses">40</output>
+                    </label>
+                    <input type="range" id="param-houses" min="0" max="100" value="40" step="5" class="dt-slider">
+                </div>
+                <div class="dt-param-group">
+                    <label class="dt-param-label">
+                        <span>Số lượng cây</span>
+                        <output id="val-trees">300</output>
+                    </label>
+                    <input type="range" id="param-trees" min="0" max="1000" value="300" step="50" class="dt-slider">
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="dt-panel-actions">
+                <button id="btn-run-simulation" class="dt-btn-primary">
+                    <i class="bi bi-play-fill"></i> Chạy Mô phỏng
+                </button>
+                <button id="btn-reset-simulation" class="dt-btn-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> Đặt lại
+                </button>
+            </div>
+        </aside>
+
+        <!-- ========== 3D VIEWPORT ========== -->
+        <div id="dt-viewport">
+            <canvas id="dt-canvas"></canvas>
+
+            <!-- FoS Gauge Overlay -->
+            <div id="dt-fos-gauge" class="dt-hud-element">
+                <div class="dt-gauge-ring">
+                    <svg viewBox="0 0 120 120">
+                        <circle cx="60" cy="60" r="52" class="dt-gauge-bg"/>
+                        <circle cx="60" cy="60" r="52" class="dt-gauge-fill" id="fos-gauge-arc"/>
+                    </svg>
+                    <div class="dt-gauge-center">
+                        <div class="dt-gauge-value" id="fos-gauge-value">2.45</div>
+                        <div class="dt-gauge-label">FoS</div>
+                    </div>
+                </div>
+                <div class="dt-gauge-status" id="fos-gauge-status">ỔN ĐỊNH</div>
+            </div>
+
+            <!-- Damage Stats Overlay -->
+            <div id="dt-damage-stats" class="dt-hud-element" style="display:none;">
+                <div class="dt-damage-title"><i class="bi bi-exclamation-triangle-fill"></i> Thống kê Thiệt hại</div>
+                <div class="dt-damage-grid">
+                    <div class="dt-damage-item">
+                        <i class="bi bi-house-x-fill"></i>
+                        <span class="dt-damage-val" id="dmg-houses">0</span>
+                        <span class="dt-damage-lbl">Nhà sập</span>
+                    </div>
+                    <div class="dt-damage-item">
+                        <i class="bi bi-tree-fill"></i>
+                        <span class="dt-damage-val" id="dmg-trees">0</span>
+                        <span class="dt-damage-lbl">Cây đổ</span>
+                    </div>
+                    <div class="dt-damage-item">
+                        <i class="bi bi-speedometer2"></i>
+                        <span class="dt-damage-val" id="dmg-velocity">0</span>
+                        <span class="dt-damage-lbl">m/s</span>
+                    </div>
+                    <div class="dt-damage-item">
+                        <i class="bi bi-box-fill"></i>
+                        <span class="dt-damage-val" id="dmg-volume">0</span>
+                        <span class="dt-damage-lbl">m³</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timeline -->
+            <div id="dt-timeline" class="dt-hud-element">
+                <button class="dt-tl-btn" id="btn-tl-play" title="Play/Pause">
+                    <i class="bi bi-play-fill"></i>
+                </button>
+                <div class="dt-tl-bar">
+                    <div class="dt-tl-progress" id="tl-progress" style="width:0%"></div>
+                </div>
+                <div class="dt-tl-time" id="tl-time">00:00</div>
+                <select class="dt-tl-speed" id="tl-speed">
+                    <option value="1">1x</option>
+                    <option value="2">2x</option>
+                    <option value="5" selected>5x</option>
+                    <option value="10">10x</option>
+                </select>
+            </div>
+
+            <!-- Loading Overlay -->
+            <div id="dt-loading">
+                <div class="dt-loading-content">
+                    <div class="dt-loading-spinner"></div>
+                    <div class="dt-loading-text">Đang khởi tạo Digital Twin...</div>
+                </div>
+            </div>
+
+            <!-- Cinematic Warning Overlay -->
+            <div id="dt-warning-overlay" style="display:none;">
+                <div class="dt-warning-text">⚠ CẢNH BÁO SẠT LỞ ⚠</div>
+                <div class="dt-warning-sub" id="dt-warning-fos">FoS = 0.95</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== SCRIPTS ==================== -->
+    <script type="module" src="/js/engine/simulation-controller.js"></script>
+</body>
+
+</html>

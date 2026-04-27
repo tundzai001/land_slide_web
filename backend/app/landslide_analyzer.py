@@ -333,14 +333,20 @@ class LandslideAnalyzer:
                 return 'm/month'
             if 'm/hour' in d or 'm/hr' in d or 'm/h' in d or 'm/gi' in d:
                 return 'm/hr'
+            # IMPORTANT: check mm/s BEFORE m/s (because 'mm/s' contains 'm/s')
+            if 'mm/s' in d:
+                return 'mm/s'
+            # Check mm/min before m/min
+            if 'mm/min' in d or 'mm/ph' in d:
+                return 'mm/min'
             if 'm/min' in d or 'm/ph' in d:
                 return 'm/min'
             if 'm/s' in d:
                 return 'm/s'
-            if 'm/day' in d or 'm/ng' in d:
-                return 'm/day'
             if 'mm/day' in d or 'mm/ng' in d:
                 return 'mm/day'
+            if 'm/day' in d or 'm/ng' in d:
+                return 'm/day'
             return None
 
         # Bảng Cruden & Varnes chuẩn (hardcoded) — luôn đúng
@@ -398,9 +404,10 @@ class LandslideAnalyzer:
 
                 # Một số bản config cũ bị lưu sai unit='mm/s' cho toàn bộ dải Cruden.
                 # Khi đó ưu tiên suy luận lại từ mô tả để tránh phân loại sai nặng.
+                # Nhưng nếu description cũng cho ra mm/s, tức user cố ý set mm/s → giữ nguyên.
                 if unit == 'mm/s':
                     inferred = _infer_unit_from_description(cls.get('description') or cls.get('desc') or '')
-                    if inferred:
+                    if inferred and inferred != 'mm/s':
                         unit = inferred
 
                 thresh_mm_s = _convert_threshold_to_mm_s(thresh, unit)
@@ -466,33 +473,6 @@ class LandslideAnalyzer:
         sorted_classes = sorted(normalized_table, key=lambda x: x['threshold_mm_s'], reverse=True)
 
         result = _classify_from_sorted(sorted_classes, velocity_mm_s)
-
-        # --- Fallback cuối cùng: nếu vẫn ra Extremely Slow nhưng velocity thực tế lớn ---
-        # Dùng velocity_mm_day trực tiếp để phân loại theo thang Cruden & Varnes
-        # khi kết quả classification rõ ràng sai so với giá trị vận tốc.
-        if result.upper() == "EXTREMELY SLOW" and velocity_mm_day > 0.044:
-            # 0.044 mm/day ≈ 16 mm/year — ngưỡng tối thiểu của Very Slow
-            # Nếu vận tốc > 16 mm/year mà vẫn Extremely Slow → bảng bị lỗi,
-            # phân loại lại trực tiếp bằng bảng mặc định.
-            default_normalized = _normalize_table(_CRUDEN_VARNES_DEFAULT)
-            default_sorted = sorted(default_normalized, key=lambda x: x['threshold_mm_s'], reverse=True)
-            result = _classify_from_sorted(default_sorted, velocity_mm_s)
-            if result.upper() == "EXTREMELY SLOW" and velocity_mm_day > 0.044:
-                # Vẫn sai? Phân loại trực tiếp theo mm/day
-                if velocity_mm_day >= 432000000:       # 5 m/s = 432,000,000 mm/day
-                    result = "Extremely Rapid"
-                elif velocity_mm_day >= 4320000:       # 3 m/min = 4,320,000 mm/day
-                    result = "Very Rapid"
-                elif velocity_mm_day >= 43200:         # 1.8 m/hr = 43,200 mm/day
-                    result = "Rapid"
-                elif velocity_mm_day >= 433.33:        # 13 m/month ≈ 433.33 mm/day
-                    result = "Moderate"
-                elif velocity_mm_day >= 4.384:         # 1.6 m/year ≈ 4.384 mm/day
-                    result = "Slow"
-                elif velocity_mm_day >= 0.044:         # 16 mm/year ≈ 0.044 mm/day
-                    result = "Very Slow"
-                else:
-                    result = "Extremely Slow"
 
         return result
 

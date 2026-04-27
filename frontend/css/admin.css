@@ -2061,6 +2061,7 @@ input[type="number"] {
     display: flex;
     flex-direction: column;
     background-color: var(--bg-secondary) !important;
+    max-height: 85vh;
 }
 
 #stationConfigModal .modal-body {
@@ -2069,6 +2070,7 @@ input[type="number"] {
     overflow-y: auto;
     flex: 1 1 auto;
     padding-bottom: 24px;
+    min-height: 0;
 }
 
 #stationConfigModal .modal-header {
