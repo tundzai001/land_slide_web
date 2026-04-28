@@ -517,14 +517,14 @@
 /* Damage Stats */
 #dt-damage-stats {
     top: 16px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 16px;
     background: var(--dt-hud-bg);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(244, 63, 94, 0.3);
     border-radius: var(--dt-radius);
     padding: 12px 20px;
     min-width: 400px;
+    z-index: 1000;
 }
 
 .dt-damage-title {

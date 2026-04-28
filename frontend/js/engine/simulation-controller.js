@@ -8,13 +8,13 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SceneManager } from './scene-manager.js';
-import { TerrainGenerator } from './terrain-generator.js';
-import { EnvironmentBuilder } from './environment-builder.js';
-import { PhysicsEngine } from './physics-engine.js';
-import { DestructionSystem } from './destruction-system.js';
-import { ParticleSystem } from './particle-system.js';
-import { WeatherSystem } from './weather-system.js';
+import { SceneManager } from './scene-manager.js?v=20260428v3';
+import { TerrainGenerator } from './terrain-generator.js?v=20260428v3';
+import { EnvironmentBuilder } from './environment-builder.js?v=20260428v3';
+import { PhysicsEngine } from './physics-engine.js?v=20260428v3';
+import { DestructionSystem } from './destruction-system.js?v=20260428v3';
+import { ParticleSystem } from './particle-system.js?v=20260428v3';
+import { WeatherSystem } from './weather-system.js?v=20260428v3';
 
 // ─── Simulation States ───
 const SimState = {
@@ -38,7 +38,11 @@ class SimulationController {
         this.isPaused = false;
         this.simTime = 0;          // seconds of sim elapsed
         this.simSpeed = 5;
-        this.maxSimTime = 120;     // 2 minutes of sim time
+        this.maxSimTime = 86400;   // 24 hours of real-world time (seconds)
+        // Time scale: how many real-world seconds pass per 1 wall-clock second
+        // At 1x: 1 wall-second = 60 real-seconds (1 minute)
+        // At 10x: 1 wall-second = 600 real-seconds (10 minutes) 
+        this.timeScaleBase = 60; // Base: 1x = 60 real-seconds per wall-second
 
         // Physics params (from UI)
         this.params = {
@@ -60,6 +64,12 @@ class SimulationController {
             treesDestroyed: 0,
             velocity: 0,
             volume: 0
+        };
+
+        // Custom thresholds
+        this.fosThresholds = {
+            warning: 1.5,
+            critical: 1.0
         };
 
         // Sub-systems (initialized in init())
@@ -141,6 +151,11 @@ class SimulationController {
             'param-trees':         { key: 'treeCount',          output: 'val-trees' },
         };
 
+        const thresholdMap = {
+            'param-fos-warning':  { key: 'warning', output: 'val-fos-warning' },
+            'param-fos-critical': { key: 'critical', output: 'val-fos-critical' }
+        };
+
         for (const [sliderId, cfg] of Object.entries(sliderMap)) {
             const el = document.getElementById(sliderId);
             const out = document.getElementById(cfg.output);
@@ -189,6 +204,36 @@ class SimulationController {
                         });
                         this.destruction.fragments = [];
                     }
+                }
+            });
+        }
+
+        // Threshold Sliders
+        for (const [sliderId, cfg] of Object.entries(thresholdMap)) {
+            const el = document.getElementById(sliderId);
+            const out = document.getElementById(cfg.output);
+            if (!el) continue;
+
+            el.addEventListener('input', () => {
+                const val = parseFloat(el.value);
+                this.fosThresholds[cfg.key] = val;
+                if (out) out.textContent = val.toFixed(1);
+
+                if (!this.isRunning || this.state === SimState.STABLE) {
+                    this._updateFoS();
+                }
+            });
+        }
+
+        // Duration selector
+        const durationEl = document.getElementById('param-sim-duration');
+        if (durationEl) {
+            durationEl.addEventListener('change', () => {
+                this.maxSimTime = parseInt(durationEl.value);
+                const durationOut = document.getElementById('val-sim-duration');
+                if (durationOut) {
+                    const h = Math.round(this.maxSimTime / 3600);
+                    durationOut.textContent = h + 'h';
                 }
             });
         }
@@ -251,6 +296,14 @@ class SimulationController {
             });
         }
 
+        // Close report modal
+        const btnCloseReport = document.getElementById('btn-close-report');
+        if (btnCloseReport) {
+            btnCloseReport.addEventListener('click', () => {
+                document.getElementById('dt-report-overlay').style.display = 'none';
+            });
+        }
+
         // Initial FoS
         this._updateFoS();
     }
@@ -283,9 +336,9 @@ class SimulationController {
 
         // Color based on FoS
         let color, statusText, statusClass;
-        if (fos >= 1.5) {
+        if (fos >= this.fosThresholds.warning) {
             color = '#10b981'; statusText = 'ỔN ĐỊNH'; statusClass = '';
-        } else if (fos >= 1.0) {
+        } else if (fos >= this.fosThresholds.critical) {
             color = '#f59e0b'; statusText = 'CẢNH BÁO'; statusClass = 'warning';
         } else {
             color = '#f43f5e'; statusText = 'NGUY HIỂM'; statusClass = 'critical';
@@ -321,12 +374,22 @@ class SimulationController {
 
         const playIcon = document.querySelector('#btn-tl-play i');
         playIcon.className = 'bi bi-pause-fill';
+        
+        // Auto-collapse left panel to make room for simulation
+        const panel = document.getElementById('dt-panel');
+        if (panel && panel.classList.contains('dt-panel-open')) {
+            panel.classList.remove('dt-panel-open');
+            panel.classList.add('dt-panel-closed');
+            setTimeout(() => this.sceneManager.onResize(), 350);
+        }
 
         // Reset damage stats
         this.damageStats = { housesDestroyed: 0, treesDestroyed: 0, velocity: 0, volume: 0 };
+        this._maxVelocity = 0;
+        this._reportShown = false;
 
-        // Pore pressure will build up over time based on rainfall
-        this._porePressureAccumulated = 0;
+        // Reset physics engine state
+        this.physics.reset();
     }
 
     stop() {
@@ -340,19 +403,22 @@ class SimulationController {
 
         document.getElementById('dt-warning-overlay').style.display = 'none';
         document.getElementById('dt-damage-stats').style.display = 'none';
+        const reportOverlay = document.getElementById('dt-report-overlay');
+        if (reportOverlay) reportOverlay.style.display = 'none';
         this.viewport.classList.remove('camera-shake');
     }
 
     reset() {
         this.stop();
         this.simTime = 0;
-        this._porePressureAccumulated = 0;
+        this.physics.reset();
 
         // Reset sliders to defaults
         const defaults = {
             'param-cohesion': 15, 'param-friction': 30, 'param-unit-weight': 18,
             'param-slip-depth': 5, 'param-slope-angle': 25, 'param-rainfall': 0,
-            'param-pore-pressure': 0, 'param-seismic': 0
+            'param-pore-pressure': 0, 'param-seismic': 0,
+            'param-fos-warning': 1.5, 'param-fos-critical': 1.0
         };
         for (const [id, val] of Object.entries(defaults)) {
             const el = document.getElementById(id);
@@ -370,7 +436,7 @@ class SimulationController {
 
         // Reset timeline
         document.getElementById('tl-progress').style.width = '0%';
-        document.getElementById('tl-time').textContent = '00:00';
+        document.getElementById('tl-time').textContent = '00h00m';
 
         this._updateFoS();
     }
@@ -399,41 +465,58 @@ class SimulationController {
 
     // ─── SIMULATION STEP ────────────────────────────────────────────
     _simulationStep(delta) {
-        const dt = delta * this.simSpeed;
-        this.simTime += dt;
+        // Real-world dt: timeScaleBase * simSpeed * wall-clock delta
+        // e.g. at 5x speed: 60 * 5 = 300 real-seconds per wall-second
+        const realDt = delta * this.timeScaleBase * this.simSpeed;
+        
+        // Sub-stepping for numerical stability (max 30s per sub-step)
+        const maxSubDt = 30;
+        const numSteps = Math.max(1, Math.ceil(realDt / maxSubDt));
+        const subDt = realDt / numSteps;
+        
+        for (let step = 0; step < numSteps; step++) {
+            this.simTime += subDt;
+            this._simulationSubStep(subDt);
+        }
 
         // Update timeline UI
         const progress = Math.min(this.simTime / this.maxSimTime * 100, 100);
         document.getElementById('tl-progress').style.width = progress + '%';
-        const mins = Math.floor(this.simTime / 60);
-        const secs = Math.floor(this.simTime % 60);
+        
+        // Display as HH:MM (real-world hours)
+        const totalHours = this.simTime / 3600;
+        const hrs = Math.floor(totalHours);
+        const mins = Math.floor((totalHours - hrs) * 60);
         document.getElementById('tl-time').textContent =
-            String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+            String(hrs).padStart(2, '0') + 'h' + String(mins).padStart(2, '0') + 'm';
 
-        // ── Phase 1: Build up pore pressure from rainfall ──
+        // Auto-stop when reaching the time limit
+        if (this.simTime >= this.maxSimTime) {
+            this.isPaused = true;
+            const playIcon = document.querySelector('#btn-tl-play i');
+            if (playIcon) playIcon.className = 'bi bi-play-fill';
+        }
+    }
+
+    _simulationSubStep(dt) {
+
+        // ── Phase 1: Build up pore pressure from rainfall (Green-Ampt Infiltration) ──
         if (this.params.rainfall > 0) {
-            // Pore pressure increases based on rainfall intensity
-            // Simplified: ru increases ~0.001/s per mm/h of rainfall
-            const ruIncrease = (this.params.rainfall / 200) * 0.003 * dt;
-            this._porePressureAccumulated = Math.min(
-                (this._porePressureAccumulated || 0) + ruIncrease,
-                0.6
-            );
-
-            // Update slider and param
+            const infiltrationRu = this.physics.calculateInfiltration(this.params.rainfall, dt, this.params.slipDepth);
+            
             const totalRu = Math.min(
-                this.params.porePressureRatio + this._porePressureAccumulated,
+                (this.params.porePressureRatio || 0) + infiltrationRu,
                 0.6
             );
 
             // Update the pore pressure display
             const poreOutput = document.getElementById('val-pore-pressure');
             if (poreOutput) poreOutput.textContent = totalRu.toFixed(2);
-
+            
             // Use combined ru for FoS
             this.params._effectiveRu = totalRu;
         } else {
-            this.params._effectiveRu = this.params.porePressureRatio;
+            this.params._effectiveRu = this.params.porePressureRatio || 0;
         }
 
         // ── Calculate FoS ──
@@ -447,9 +530,9 @@ class SimulationController {
         const prevState = this.state;
 
         if (this.state === SimState.STABLE || this.state === SimState.WARNING || this.state === SimState.CRITICAL) {
-            if (fos >= 1.5) {
+            if (fos >= this.fosThresholds.warning) {
                 this.state = SimState.STABLE;
-            } else if (fos >= 1.0) {
+            } else if (fos >= this.fosThresholds.critical) {
                 this.state = SimState.WARNING;
             } else {
                 this.state = SimState.CRITICAL;
@@ -495,6 +578,10 @@ class SimulationController {
             this.damageStats.velocity = motion.velocity;
             this.damageStats.volume = motion.volume;
             
+            if (!this._maxVelocity || motion.velocity > this._maxVelocity) {
+                this._maxVelocity = motion.velocity;
+            }
+            
             // Accumulate displacement for terrain deformation
             if (!this._totalDisplacement) this._totalDisplacement = 0;
             this._totalDisplacement += motion.velocity * dt;
@@ -523,8 +610,8 @@ class SimulationController {
             document.getElementById('dmg-velocity').textContent = motion.velocity.toFixed(1);
             document.getElementById('dmg-volume').textContent = Math.round(motion.volume);
 
-            // After debris stops or max time
-            if (motion.velocity < 0.1 || slideElapsed > 30) {
+            // After debris stops or max slide time (5 min real-world)
+            if (motion.velocity < 0.1 || slideElapsed > 300) {
                 this.state = SimState.DEPOSITED;
                 this.viewport.classList.remove('camera-shake');
             }
@@ -535,6 +622,21 @@ class SimulationController {
             const badge = document.getElementById('sim-status-badge');
             badge.className = 'dt-status-badge';
             badge.querySelector('.dt-status-text').textContent = 'KẾT THÚC';
+
+            // Show report modal once
+            if (!this._reportShown) {
+                this._reportShown = true;
+                const reportOverlay = document.getElementById('dt-report-overlay');
+                if (reportOverlay) {
+                    reportOverlay.style.display = 'flex';
+                    const slideElapsed = this.simTime - (this._slideStartTime || 0);
+                    document.getElementById('rep-time').textContent = slideElapsed.toFixed(1);
+                    document.getElementById('rep-vel').textContent = (this._maxVelocity || this.damageStats.velocity).toFixed(1);
+                    document.getElementById('rep-vol').textContent = Math.round(this.damageStats.volume);
+                    document.getElementById('rep-house').textContent = this.damageStats.housesDestroyed;
+                    document.getElementById('rep-tree').textContent = this.damageStats.treesDestroyed;
+                }
+            }
         }
 
         // Reset critical timer if we're no longer critical

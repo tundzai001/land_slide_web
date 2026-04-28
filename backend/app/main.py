@@ -538,6 +538,23 @@ app.add_middleware(
 app.include_router(admin_router.router)
 app.include_router(field_router.router)
 
+# ── Anti-cache middleware for frontend assets ──
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
+
+class NoCacheHTMLMiddleware(BaseHTTPMiddleware):
+    """Prevent browser from caching HTML/JS/CSS so deploys take effect immediately."""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        path = request.url.path.lower()
+        if path.endswith(('.html', '.js', '.css')):
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        return response
+
+app.add_middleware(NoCacheHTMLMiddleware)
+
 # Mount static files directory (for sounds, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

@@ -39,9 +39,9 @@ class GNSSVelocityProcessor:
         filter_window_size=30,
         min_fix_quality=4,
         # Sanity gate: reject fix nếu thiết bị claim nhảy > X mét trong 1 sample.
-        max_step_distance_m=3.0,
+        max_step_distance_m=0.5,
         # Vertical jump gate (U-axis) to reject unrealistic altitude spikes.
-        max_step_vertical_m=0.6,
+        max_step_vertical_m=0.3,
     ):
         self.device_id = device_id
         self.db_session_factory = db_session_factory
@@ -356,16 +356,21 @@ class GNSSVelocityProcessor:
         }
 
     def _handle_processing(self, gngga_string, fix_quality, station_config: Dict = None):
-        # Chỉ tính vận tốc/displacement khi RTK FIXED (fix=4)
-        if fix_quality != self.min_fix_quality:
+        # Accept RTK FIXED (4) and RTK FLOAT (5) for processing.
+        # Only FIXED is trusted for alerting; FLOAT is processed for display/MQTT forwarding.
+        accepted_fixes = {4, 5}
+        if fix_quality not in accepted_fixes:
             self.stats['low_quality_rejected'] += 1
             return {
                 "type": "gnss_status",
                 "status": "UNTRUSTED_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
-                "message": f"Velocity skipped: need fix={self.min_fix_quality} (RTK FIXED), current={fix_quality}"
+                "message": f"Velocity skipped: need fix=4 or 5, current={fix_quality} ({self._fix_mode(fix_quality)})"
             }
+        
+        # Flag: only RTK FIXED is trusted for alerting analysis
+        is_trusted_fix = (fix_quality == 4)
 
         point = self._parse_gngga(gngga_string)
         if not point:
@@ -403,25 +408,53 @@ class GNSSVelocityProcessor:
             self.history.pop()
             return None
 
-        # Sanity gate: reject fix vật lý không thể xảy ra (bad RTK fix, multipath)
-        # Dùng displacement (mét) chứ không phải tốc độ để độc lập với sample rate.
+        # ── Spike rejection with cascade-break ──
+        # Compare new sample against last accepted sample.
         step_2d_m = float(np.hypot(v_enu_raw[0], v_enu_raw[1]) * dt)
         step_u_m = float(abs(v_enu_raw[2]) * dt)
-        if step_2d_m > self.max_step_distance_m or step_u_m > self.max_step_vertical_m:
+
+        # If dt is too large (stale reference), the comparison is meaningless.
+        # After 5 consecutive rejections OR dt > 60s, force-accept to break cascade.
+        if not hasattr(self, '_consecutive_rejects'):
+            self._consecutive_rejects = 0
+
+        is_spike = step_2d_m > self.max_step_distance_m or step_u_m > self.max_step_vertical_m
+        force_accept = self._consecutive_rejects >= 5 or dt > 60.0
+
+        if is_spike and not force_accept:
+            self._consecutive_rejects += 1
             self.stats['spike_rejected'] += 1
-            self.history.pop()  # pop bad fix ra khỏi window trước khi nó nhiễm median
+            self.history.pop()
             logger.warning(
-                f"[GNSS-{self.device_id}] Bad fix rejected: step2d={step_2d_m:.3f}m (max={self.max_step_distance_m}m), "
-                f"stepU={step_u_m:.3f}m (max={self.max_step_vertical_m}m), dt={dt:.3f}s | "
-                f"pos_old=[{p_old['pos_enu'][0]:.3f}, {p_old['pos_enu'][1]:.3f}, {p_old['pos_enu'][2]:.3f}]m -> "
-                f"pos_new=[{p_new['pos_enu'][0]:.3f}, {p_new['pos_enu'][1]:.3f}, {p_new['pos_enu'][2]:.3f}]m | "
-                f"wgs=[{point['wgs']['lat']:.6f}, {point['wgs']['lon']:.6f}, {point['wgs']['h']:.3f}]"
+                f"[GNSS-{self.device_id}] Bad fix rejected (#{self._consecutive_rejects}): "
+                f"step2d={step_2d_m:.3f}m (max={self.max_step_distance_m}m), "
+                f"stepU={step_u_m:.3f}m (max={self.max_step_vertical_m}m), dt={dt:.1f}s"
             )
             return None
 
+        if force_accept and is_spike:
+            # Break cascade: clear stale history, keep only the new sample
+            logger.warning(
+                f"[GNSS-{self.device_id}] CASCADE BREAK: {self._consecutive_rejects} consecutive rejects, "
+                f"dt={dt:.1f}s. Force-accepting new sample and resetting history."
+            )
+            new_sample = self.history[-1]
+            self.history.clear()
+            self.history.append(new_sample)
+            # Reset velocity and displacement state to avoid carry-over from stale data
+            self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
+            self.v_state_ready = False
+            self.disp_enu_state = pos_enu.copy()
+            self.disp_state_ready = True
+            self._consecutive_rejects = 0
+            # Return a status indicating reset happened (no velocity data yet)
+            return None
+
+        # Good sample accepted — reset consecutive reject counter
+        self._consecutive_rejects = 0
+
         # Stable window smoothing:
-        # - đủ cửa sổ chuẩn: dùng full window
-        # - giai đoạn đầu: dùng first->last của toàn bộ history để tránh giật raw velocity
+        # Use first->last of the recent window for velocity
         if len(self.history) >= 3:
             p_end = self.history[-1]
             p_start = self.history[0]
@@ -438,7 +471,8 @@ class GNSSVelocityProcessor:
             self.history.pop()
             return None
 
-        # Kinematic smoother: giữ dấu và dao động nhỏ, nhưng chặn cú nhảy vận tốc phi lý.
+        # ── Velocity smoothing ──
+        # Only smooth when we have enough history; avoid EMA drift when truly stationary.
         gnss_alert_cfg = (station_config or {}).get("GnssAlerting", {}) if isinstance(station_config, dict) else {}
         try:
             max_xy_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_xy_mm_s", 6.0))
@@ -448,14 +482,6 @@ class GNSSVelocityProcessor:
             max_z_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_z_mm_s", 15.0))
         except Exception:
             max_z_mm_s = 15.0
-        try:
-            accel_xy_mm_s2 = float(gnss_alert_cfg.get("velocity_accel_limit_xy_mm_s2", 1.0))
-        except Exception:
-            accel_xy_mm_s2 = 1.0
-        try:
-            accel_z_mm_s2 = float(gnss_alert_cfg.get("velocity_accel_limit_z_mm_s2", 3.0))
-        except Exception:
-            accel_z_mm_s2 = 3.0
         try:
             tau_seconds = float(gnss_alert_cfg.get("velocity_smoothing_tau_s", 8.0))
         except Exception:
@@ -472,16 +498,8 @@ class GNSSVelocityProcessor:
             self.v_enu_state = v_target
             self.v_state_ready = True
         else:
-            max_dv = np.array([
-                max(accel_xy_mm_s2, 0.1) / 1000.0 * dt,
-                max(accel_xy_mm_s2, 0.1) / 1000.0 * dt,
-                max(accel_z_mm_s2, 0.2) / 1000.0 * dt,
-            ], dtype=float)
-            dv = np.clip(v_target - self.v_enu_state, -max_dv, max_dv)
-            v_rate_limited = self.v_enu_state + dv
-
             alpha = dt / (max(tau_seconds, 0.1) + dt)
-            self.v_enu_state = (1.0 - alpha) * self.v_enu_state + alpha * v_rate_limited
+            self.v_enu_state = (1.0 - alpha) * self.v_enu_state + alpha * v_target
 
         v_enu_stable = self.v_enu_state.copy()
 
@@ -586,6 +604,7 @@ class GNSSVelocityProcessor:
         return {
             'type': 'gnss_processed',
             'timestamp': int(ts),
+            'is_trusted_fix': is_trusted_fix,  # Only True for RTK FIXED (4)
             'data': {
                 'lat': point['wgs']['lat'],
                 'lon': point['wgs']['lon'],

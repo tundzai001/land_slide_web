@@ -295,19 +295,23 @@ export class TerrainGenerator {
             const z = pos.getZ(i);
 
             const nx = x / this.width;
+            const nz = z / this.depth;
 
-            // Slip zone: upper-middle portion of the slope
-            const inSlipZone = nx < -0.05 && nx > -0.35 && y > 10;
+            // Slip zone: upper-middle portion of the slope, localized in Z
+            const distZ = Math.abs(nz);
+            const zFactor = 1.0 - (distZ / 0.15); // Slip width in Z (~30% of total depth)
+            
+            const inSlipZone = nx < -0.05 && nx > -0.35 && y > 10 && zFactor > 0;
 
             if (inSlipZone && level > 0) {
                 // Darken and redden
-                const factor = level * 0.4;
+                const factor = level * 0.4 * zFactor;
                 const origR = colors.getX(i);
                 const origG = colors.getY(i);
                 const origB = colors.getZ(i);
 
                 colors.setXYZ(i,
-                    origR + factor * 0.3,
+                    origR + factor * 0.4,
                     origG - factor * 0.2,
                     origB - factor * 0.15
                 );
@@ -325,42 +329,60 @@ export class TerrainGenerator {
         if (!this.mesh || !this.geometry || !this.initialPositions) return;
 
         const pos = this.geometry.attributes.position;
+        const colors = this.geometry.attributes.color;
         let deformed = false;
 
         for (let i = 0; i < pos.count; i++) {
             const x = this.initialPositions[i * 3];
             const origY = this.initialPositions[i * 3 + 1];
-            // const z = this.initialPositions[i * 3 + 2];
+            const z = this.initialPositions[i * 3 + 2];
             
             const nx = x / this.width;
+            const nz = z / this.depth;
+
+            // Localize in Z
+            const distZ = Math.abs(nz);
+            const zFactorSource = 1.0 - (distZ / 0.15); 
+            const zFactorToe = 1.0 - (distZ / 0.2); // Spreads wider at toe
 
             // Define the slip zone
-            const inSlipZone = nx < -0.05 && nx > -0.35 && origY > 10;
-            const isToe = nx >= -0.05 && nx < 0.1 && origY <= 15;
+            const inSlipZone = nx < -0.05 && nx > -0.35 && origY > 10 && zFactorSource > 0;
+            const isToe = nx >= -0.05 && nx < 0.15 && origY <= 15 && zFactorToe > 0;
 
             if (inSlipZone) {
                 // The source area sinks (scar)
-                const depth = Math.min(displacement * 0.15, 3.0); // max 3m deep scar
-                // Taper the depth at edges
-                const edgeFactor = 1.0 - Math.abs((nx + 0.2) / 0.15); // max depth at center (-0.2)
-                const sink = depth * Math.max(0, edgeFactor);
+                const depth = Math.min(displacement * 0.15, 3.5); // max 3.5m deep scar
+                // Taper the depth at edges (X and Z)
+                const edgeFactorX = 1.0 - Math.abs((nx + 0.2) / 0.15); // max depth at center (-0.2)
+                const sink = depth * Math.max(0, edgeFactorX) * Math.max(0, zFactorSource);
                 
                 pos.setY(i, origY - sink);
                 deformed = true;
+
+                // Color the exposed slip surface darker brown
+                if (sink > 0.5) {
+                    colors.setXYZ(i, 0.35, 0.2, 0.15); // dark reddish brown (exposed soil)
+                }
             } else if (isToe) {
                 // The toe area rises (deposit)
-                const bulge = Math.min(displacement * 0.1, 2.0); // max 2m bulge
-                const edgeFactor = 1.0 - Math.abs((nx - 0.025) / 0.075);
-                const rise = bulge * Math.max(0, edgeFactor);
+                const bulge = Math.min(displacement * 0.12, 2.5); // max 2.5m bulge
+                const edgeFactorX = 1.0 - Math.abs((nx - 0.05) / 0.1);
+                const rise = bulge * Math.max(0, edgeFactorX) * Math.max(0, zFactorToe);
                 
                 // Only rise if we haven't already
                 pos.setY(i, Math.max(pos.getY(i), origY + rise));
                 deformed = true;
+
+                // Color the deposited soil
+                if (rise > 0.5) {
+                    colors.setXYZ(i, 0.42, 0.28, 0.18); // muddy brown deposit
+                }
             }
         }
 
         if (deformed) {
             pos.needsUpdate = true;
+            colors.needsUpdate = true;
             this.geometry.computeVertexNormals();
         }
     }
