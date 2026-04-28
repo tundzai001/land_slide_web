@@ -1,7 +1,7 @@
 /**
  * simulation-controller.js
  * ========================
- * Main entry point & orchestrator for the LS-RAPID Digital Twin.
+ * Main entry point & orchestrator for the Slide model Digital Twin.
  * Bootstraps Three.js scene, terrain, environment, physics, particles, weather.
  * Manages simulation states: STABLE → WARNING → CRITICAL → SLIDING → DEPOSITED.
  */
@@ -55,7 +55,9 @@ class SimulationController {
             porePressureRatio: 0, // ru (0-0.6)
             seismicCoeff: 0,      // kh
             houseCount: 40,
-            treeCount: 300
+            treeCount: 300,
+            ks: 1.5e-5,           // Saturated conductivity
+            porosity: 0.25        // n
         };
 
         // Stats
@@ -149,6 +151,8 @@ class SimulationController {
             'param-seismic':       { key: 'seismicCoeff',       output: 'val-seismic' },
             'param-houses':        { key: 'houseCount',         output: 'val-houses' },
             'param-trees':         { key: 'treeCount',          output: 'val-trees' },
+            'param-ks':            { key: 'ks_scaled',          output: 'val-ks' },
+            'param-porosity':      { key: 'porosity',           output: 'val-porosity' },
         };
 
         const thresholdMap = {
@@ -180,6 +184,10 @@ class SimulationController {
                 if (cfg.key === 'houseCount' || cfg.key === 'treeCount' || cfg.key === 'slopeAngle') {
                     if (cfg.key === 'houseCount') this.envBuilder.houseCount = val;
                     if (cfg.key === 'treeCount') this.envBuilder.treeCount = val;
+
+                    if (cfg.key === 'ks_scaled') {
+                        this.params.ks = val * 1e-5;
+                    }
 
                     if (!this.isRunning || this.state === SimState.STABLE) {
                         
@@ -418,7 +426,8 @@ class SimulationController {
             'param-cohesion': 15, 'param-friction': 30, 'param-unit-weight': 18,
             'param-slip-depth': 5, 'param-slope-angle': 25, 'param-rainfall': 0,
             'param-pore-pressure': 0, 'param-seismic': 0,
-            'param-fos-warning': 1.5, 'param-fos-critical': 1.0
+            'param-fos-warning': 1.5, 'param-fos-critical': 1.0,
+            'param-ks': 1.5, 'param-porosity': 0.25
         };
         for (const [id, val] of Object.entries(defaults)) {
             const el = document.getElementById(id);
@@ -502,7 +511,13 @@ class SimulationController {
 
         // ── Phase 1: Build up pore pressure from rainfall (Green-Ampt Infiltration) ──
         if (this.params.rainfall > 0) {
-            const infiltrationRu = this.physics.calculateInfiltration(this.params.rainfall, dt, this.params.slipDepth);
+            const infiltrationRu = this.physics.calculateInfiltration(
+                this.params.rainfall, 
+                dt, 
+                this.params.slipDepth,
+                this.params.ks,
+                this.params.porosity
+            );
             
             const totalRu = Math.min(
                 (this.params.porePressureRatio || 0) + infiltrationRu,

@@ -1982,14 +1982,14 @@ async def get_long_term_analysis(
     station_id: int,
     days: float = 30.0,
     include_correlation: bool = False,
-    correlation_model: str = "ls_rapid",
+    correlation_model: str = "slide_model",
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db)
 ):
     """
     Phân tích dài hạn cho GNSS displacement + IMU tilt.
     Rainfall correlation chỉ chạy khi include_correlation=True.
-    correlation_model hiện hỗ trợ: ls_rapid.
+    correlation_model hiện hỗ trợ: slide_model.
     + Multi-window analysis + Inverse Velocity (Fukuzono)
     """
     try:
@@ -2216,7 +2216,7 @@ async def get_long_term_analysis(
         )
         rain_data = rain_result.scalars().all()
         
-        model_key = str(correlation_model or "ls_rapid").strip().lower()
+        model_key = str(correlation_model or "slide_model").strip().lower()
         result = {
             "station_id": station_id,
             "days": days,
@@ -2341,13 +2341,13 @@ async def get_long_term_analysis(
         
         # 7. Phân tích tương quan Mưa - Dịch chuyển (chạy theo yêu cầu)
         if include_correlation:
-            if model_key != "ls_rapid":
-                raise HTTPException(status_code=400, detail="Unsupported correlation_model. Use ls_rapid.")
+            if model_key != "slide_model":
+                raise HTTPException(status_code=400, detail="Unsupported correlation_model. Use slide_model.")
 
             # Nếu raw GNSS đã bị purge, dựng pseudo-GNSS từ daily summary
             gnss_for_correlation = historical_gnss_requested
             if len(gnss_for_correlation) < 2 and len(daily_gnss_requested) >= 2:
-                logger.info(f"[LS-RAPID] Raw GNSS insufficient ({len(historical_gnss_requested)} pts). "
+                logger.info(f"[Slide model] Raw GNSS insufficient ({len(historical_gnss_requested)} pts). "
                             f"Synthesizing from {len(daily_gnss_requested)} daily summaries.")
                 cumulative_mm = 0.0
                 gnss_for_correlation = []
@@ -2372,22 +2372,22 @@ async def get_long_term_analysis(
                     window_days=days,
                     config=station.config or {}
                 )
-                rain_correlation["model"] = "ls_rapid"
+                rain_correlation["model"] = "slide_model"
                 result["rainfall_correlation"] = rain_correlation
             else:
                 gnss_count = len(gnss_for_correlation)
                 rain_count = len(rain_data)
                 result["rainfall_correlation"] = {
                     "available": False,
-                    "model": "ls_rapid",
+                    "model": "slide_model",
                     "message": f"Cần cả dữ liệu GNSS và mưa để phân tích tương quan. "
                                f"Hiện có: {gnss_count} điểm GNSS, {rain_count} bản ghi mưa."
                 }
         else:
             result["rainfall_correlation"] = {
                 "available": False,
-                "model": "ls_rapid",
-                "message": "Chưa chạy phân tích tương quan LS-RAPID. Nhấn 'Chạy AI LS-RAPID' để thực hiện."
+                "model": "slide_model",
+                "message": "Chưa chạy phân tích tương quan Slide model. Nhấn 'Chạy AI Slide model' để thực hiện."
             }
         
         # 8. Phân tích đa cửa sổ (Multi-Window) - dùng full GNSS data

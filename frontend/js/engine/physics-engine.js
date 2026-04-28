@@ -1,7 +1,7 @@
 /**
  * physics-engine.js
  * =================
- * Advanced Geotechnical Physics Engine for the LS-RAPID Digital Twin.
+ * Advanced Geotechnical Physics Engine for the Slide model Digital Twin.
  *
  * Implements:
  * 1. Method of Slices (FoS) — Rigorous stability analysis over the slope profile.
@@ -25,18 +25,14 @@ export class PhysicsEngine {
     /**
      * Update infiltration model (Green-Ampt approximation)
      * Calculates realistic pore pressure buildup based on rainfall intensity and time.
-     * 
-     * @param {number} rainfall_mm_h - Rainfall intensity in mm/h
-     * @param {number} dt - Timestep in seconds
-     * @param {number} slipDepth - Depth of the slip surface in meters
      * @returns {number} Effective pore pressure ratio (ru)
      */
-    calculateInfiltration(rainfall_mm_h, dt, slipDepth) {
+    calculateInfiltration(rainfall_mm_h, dt, slipDepth, ks_override, n_override) {
         const I = (rainfall_mm_h / 1000) / 3600; // Intensity in m/s
         
-        // Soil hydraulic properties (Typical Silty Sand / Loam)
-        const Ks = 1.5e-5; // Saturated hydraulic conductivity m/s
-        const dTheta = 0.25; // Change in volumetric water content
+        // Soil hydraulic properties (Dynamic)
+        const Ks = ks_override !== undefined ? ks_override : 1.5e-5; // Saturated hydraulic conductivity m/s
+        const dTheta = n_override !== undefined ? n_override : 0.25; // Change in volumetric water content
         const psi = 0.3; // Suction head m
         
         if (I > 0) {

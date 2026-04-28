@@ -1,8 +1,8 @@
-# Kế hoạch Triển khai: Hệ Thống Mô Phỏng Sạt Lở 3D — LS-RAPID Digital Twin (Ultra-Premium)
+# Kế hoạch Triển khai: Hệ Thống Mô Phỏng Sạt Lở 3D — Slide model Digital Twin (Ultra-Premium)
 
 ## Tổng quan
 
-Xây dựng một **Digital Twin 3D thời gian thực** mô phỏng toàn bộ quá trình sạt lở đất — từ trạng thái ổn định, qua giai đoạn phá hoại lũy tiến (progressive failure), đến chuyển động khối trượt và lắng đọng cuối cùng — dựa trên nền tảng vật lý chuẩn xác của mô hình **LS-RAPID (Sassa, 2004)**.
+Xây dựng một **Digital Twin 3D thời gian thực** mô phỏng toàn bộ quá trình sạt lở đất — từ trạng thái ổn định, qua giai đoạn phá hoại lũy tiến (progressive failure), đến chuyển động khối trượt và lắng đọng cuối cùng — dựa trên nền tảng vật lý chuẩn xác của mô hình **Slide model (Sassa, 2004)**.
 
 Hệ thống không chỉ là hiệu ứng hình ảnh đẹp mắt, mà phản ánh đúng các phương trình cơ học đất (Mohr-Coulomb, Terzaghi Effective Stress), động lực học chất lưu mảnh vụn (Debris Flow Dynamics), và tương tác phá hủy với cơ sở hạ tầng xung quanh.
 
@@ -20,7 +20,7 @@ Hệ thống không chỉ là hiệu ứng hình ảnh đẹp mắt, mà phản 
 - Thiết kế HUD (Heads-Up Display) kiểu phi hành gia:
   - Gauge hình tròn cho **Factor of Safety (FoS)** — xanh khi FoS > 1.5, vàng khi 1.0–1.5, đỏ nhấp nháy khi < 1.0.
   - Timeline bar (Play / Pause / Tua) ở dưới cùng.
-  - Panel thông số LS-RAPID bên trái với các slider tương tác.
+  - Panel thông số Slide model bên trái với các slider tương tác.
   - Bảng thống kê thiệt hại (số nhà bị phá hủy, diện tích cây bị cuốn, khối lượng vật liệu di chuyển).
 
 ---
@@ -56,7 +56,7 @@ Hệ thống không chỉ là hiệu ứng hình ảnh đẹp mắt, mà phản 
 - **Xe cộ / Con người** (tùy chọn): Các khối nhỏ đặt trên đường để tăng tính sống động.
 
 #### [NEW] `frontend/js/engine/physics-engine.js`
-**Cốt lõi Vật lý — Triển khai đúng LS-RAPID trên Frontend:**
+**Cốt lõi Vật lý — Triển khai đúng Slide model trên Frontend:**
 
 **A) Tính toán Hệ số An toàn (Factor of Safety):**
 Dựa trên công thức Mohr-Coulomb + Terzaghi Effective Stress:
@@ -75,7 +75,7 @@ Trong đó:
 
 **B) Trigger Mechanism (Cơ chế Kích hoạt):**
 - Khi người dùng kéo thanh trượt "Lượng mưa", hệ thống tính toán:
-  1. Lượng mưa hiệu dụng tích lũy (Effective Rainfall) theo mô hình LS-RAPID:
+  1. Lượng mưa hiệu dụng tích lũy (Effective Rainfall) theo mô hình Slide model:
      `R_eff(t) = R(t) + α · R_eff(t-1)` với `α = exp(-ln2 / T_half)`
   2. Áp lực nước lỗ rỗng `u` tăng tỷ lệ thuận với `R_eff` (có trễ thấm).
   3. FoS giảm dần. Khi **FoS < 1.0** → **Trigger sạt lở**.
@@ -135,11 +135,11 @@ m(t+dt) = m(t) + ρ · h_entrain · A_front · v · dt
 
 ---
 
-### 3. Backend — Engine Vật lý LS-RAPID
+### 3. Backend — Engine Vật lý Slide model
 
 #### [NEW] `backend/simulation/ls_rapid_engine.py`
 **Solver mô phỏng chạy trên server (tuỳ chọn nâng cao):**
-- Chạy mô phỏng LS-RAPID trên lưới ô vuông (Grid-based Column Model) theo đúng paper của Sassa.
+- Chạy mô phỏng Slide model trên lưới ô vuông (Grid-based Column Model) theo đúng paper của Sassa.
 - Tính toán lưới áp lực nước lỗ rỗng từ mô hình thấm mưa (Green-Ampt infiltration).
 - Trả về mảng `{x, y, z, vx, vy, mass}[]` cho mỗi timestep.
 - Endpoint REST: `POST /api/simulation/run` nhận thông số và trả kết quả.
@@ -157,7 +157,7 @@ m(t+dt) = m(t) + ρ · h_entrain · A_front · v · dt
 - Khi nhấn, mở `digital-twin.html` và tự động truyền:
   - Thông số mưa hiện tại / 24h qua từ sensor.
   - Dữ liệu dịch chuyển GNSS và ls_rapid_index.
-  - Config LS-RAPID (half-life, weight...) từ cấu hình trạm.
+  - Config Slide model (half-life, weight...) từ cấu hình trạm.
 
 ---
 

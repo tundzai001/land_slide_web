@@ -773,7 +773,7 @@
                     <!-- ============================================ -->
                     <div id="rainfall-correlation-section" class="mt-4" style="display: none;">
                         <h5 class="mb-3 text-info border-bottom pb-2">
-                            <i class="bi bi-cloud-rain me-2"></i>TÆ°Æ¡ng quan MÆ°a - Dá»‹ch chuyá»ƒn (LS-RAPID v2)
+                            <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (Slide model v2)
                         </h5>
                         <div class="row g-3 mb-3">
                             <div class="col-md-2 col-6">
@@ -832,10 +832,10 @@
                             </div>
                             <div class="col-md-6">
                                 <div class="chart-box border-0 shadow-sm">
-                                    <div class="chart-title"><i class="bi bi-graph-up-arrow me-2"></i>LS-RAPID Index vs
+                                    <div class="chart-title"><i class="bi bi-graph-up-arrow me-2"></i>Slide model Index vs
                                         Dá»‹ch chuyá»ƒn Ngày</div>
                                     <div style="height: 350px; padding: 10px;">
-                                        <canvas id="chart-lsrapid-index"></canvas>
+                                        <canvas id="chart-sm-model-index"></canvas>
                                     </div>
                                 </div>
                             </div>
@@ -843,10 +843,10 @@
                     </div>
                     <div id="rainfall-correlation-controls" class="mt-3 mb-4 text-center">
                         <button class="btn btn-info fw-semibold" id="btn-run-rain-correlation">
-                            <i class="bi bi-stars me-2"></i>Chạy AI LS-RAPID
+                            <i class="bi bi-stars me-2"></i>Chạy AI Slide model
                         </button>
                         <div id="rain-correlation-hint" class="text-muted small mt-2">
-                            TÆ°Æ¡ng quan mÆ°a - dá»‹ch chuyá»ƒn dÃ¹ng model LS-RAPID vÃ  chá»‰ cháº¡y khi báº¡n báº¥m
+                            Tương quan mưa - dịch chuyển dùng model Slide model và chỉ chạy khi bạn bấm
                             nút AI.
                         </div>
                     </div>
@@ -900,182 +900,182 @@
             </div>
         </div>
 
-        <!-- LS-RAPID RESULT POPUP (v2 â€” comprehensive dashboard) -->
-        <div id="lsrapid-popup-overlay" class="lsrapid-popup-overlay" aria-hidden="true">
-            <div class="lsrapid-popup-card" role="dialog" aria-modal="true" aria-labelledby="lsrapid-popup-title">
-                <button class="lsrapid-popup-close" id="lsrapid-popup-close"
-                    aria-label="Đóng popup kết quả LS-RAPID">
+        <!-- Slide model RESULT POPUP (v2 — comprehensive dashboard) -->
+        <div id="sm-model-popup-overlay" class="sm-model-popup-overlay" aria-hidden="true">
+            <div class="sm-model-popup-card" role="dialog" aria-modal="true" aria-labelledby="sm-model-popup-title">
+                <button class="sm-model-popup-close" id="sm-model-popup-close"
+                    aria-label="Đóng popup kết quả Slide model">
                     <i class="bi bi-x-lg"></i>
                 </button>
 
-                <div class="lsrapid-popup-head">
-                    <div class="lsrapid-popup-kicker">AI LS-RAPID Engine v2</div>
-                    <h5 id="lsrapid-popup-title" class="mb-1">PhÃ¢n tÃ­ch tÆ°Æ¡ng quan MÆ°a â€” Dá»‹ch chuyá»ƒn</h5>
-                    <div id="lsrapid-popup-status" class="lsrapid-popup-status">READY</div>
+                <div class="sm-model-popup-head">
+                    <div class="sm-model-popup-kicker">AI Slide model Engine v2</div>
+                    <h5 id="sm-model-popup-title" class="mb-1">PhÃ¢n tÃ­ch tÆ°Æ¡ng quan MÆ°a â€” Dá»‹ch chuyá»ƒn</h5>
+                    <div id="sm-model-popup-status" class="sm-model-popup-status">READY</div>
                 </div>
 
-                <div class="lsrapid-popup-body">
+                <div class="sm-model-popup-body">
                     <!-- Tab navigation -->
-                    <div class="lsrapid-tabs">
-                        <button class="lsrapid-tab active" data-tab="lsrapid-tab-overview">
+                    <div class="sm-model-tabs">
+                        <button class="sm-model-tab active" data-tab="sm-model-tab-overview">
                             <i class="bi bi-speedometer2"></i> Tá»•ng quan
                         </button>
-                        <button class="lsrapid-tab" data-tab="lsrapid-tab-rain">
+                        <button class="sm-model-tab" data-tab="sm-model-tab-rain">
                             <i class="bi bi-cloud-rain"></i> Mưa
                         </button>
-                        <button class="lsrapid-tab" data-tab="lsrapid-tab-disp">
+                        <button class="sm-model-tab" data-tab="sm-model-tab-disp">
                             <i class="bi bi-arrows-move"></i> Dá»‹ch chuyá»ƒn
                         </button>
-                        <button class="lsrapid-tab" data-tab="lsrapid-tab-events">
+                        <button class="sm-model-tab" data-tab="sm-model-tab-events">
                             <i class="bi bi-calendar-event"></i> Sá»± kiá»‡n
                         </button>
-                        <button class="lsrapid-tab" data-tab="lsrapid-tab-risk">
+                        <button class="sm-model-tab" data-tab="sm-model-tab-risk">
                             <i class="bi bi-shield-exclamation"></i> Rủi ro
                         </button>
                     </div>
 
                     <!-- Tab: Overview -->
-                    <div id="lsrapid-tab-overview" class="lsrapid-tab-pane active">
-                        <div class="lsrapid-popup-grid">
-                            <div class="lsrapid-popup-metric">
+                    <div id="sm-model-tab-overview" class="sm-model-tab-pane active">
+                        <div class="sm-model-popup-grid">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Há»‡ sá»‘ tÆ°Æ¡ng quan (r)</span>
-                                <span class="value" id="lsrapid-popup-r">--</span>
+                                <span class="value" id="sm-model-popup-r">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">RÂ² (há»‡ sá»‘ xÃ¡c Ä‘á»‹nh)</span>
-                                <span class="value" id="lsrapid-popup-r2">--</span>
+                                <span class="value" id="sm-model-popup-r2">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Lag tá»‘t nháº¥t</span>
-                                <span class="value" id="lsrapid-popup-lag">--</span>
+                                <span class="value" id="sm-model-popup-lag">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Mức kích hoạt</span>
-                                <span class="value" id="lsrapid-popup-trigger">--</span>
+                                <span class="value" id="sm-model-popup-trigger">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Mức tương quan</span>
-                                <span class="value" id="lsrapid-popup-strength">--</span>
+                                <span class="value" id="sm-model-popup-strength">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Slope (mm/day / index)</span>
-                                <span class="value" id="lsrapid-popup-slope">--</span>
+                                <span class="value" id="sm-model-popup-slope">--</span>
                             </div>
                         </div>
-                        <div class="lsrapid-popup-message" id="lsrapid-popup-message">--</div>
+                        <div class="sm-model-popup-message" id="sm-model-popup-message">--</div>
                     </div>
 
                     <!-- Tab: Rain statistics -->
-                    <div id="lsrapid-tab-rain" class="lsrapid-tab-pane">
-                        <div class="lsrapid-popup-grid lsrapid-grid-3">
-                            <div class="lsrapid-popup-metric">
+                    <div id="sm-model-tab-rain" class="sm-model-tab-pane">
+                        <div class="sm-model-popup-grid sm-model-grid-3">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Tá»•ng lÆ°á»£ng mÆ°a</span>
-                                <span class="value" id="lsrapid-rain-total">--</span>
+                                <span class="value" id="sm-model-rain-total">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">MÆ°a max/Ngày</span>
-                                <span class="value" id="lsrapid-rain-max">--</span>
+                                <span class="value" id="sm-model-rain-max">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Ngày mÆ°a max</span>
-                                <span class="value" id="lsrapid-rain-max-day">--</span>
+                                <span class="value" id="sm-model-rain-max-day">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Sá»‘ Ngày mÆ°a</span>
-                                <span class="value" id="lsrapid-rain-days">--</span>
+                                <span class="value" id="sm-model-rain-days">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Sá»‘ Ngày khÃ´</span>
-                                <span class="value" id="lsrapid-dry-days">--</span>
+                                <span class="value" id="sm-model-dry-days">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">TB Ngày mÆ°a</span>
-                                <span class="value" id="lsrapid-rain-avg">--</span>
+                                <span class="value" id="sm-model-rain-avg">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
-                                <span class="label">LS-RAPID Index max</span>
-                                <span class="value" id="lsrapid-idx-max">--</span>
+                            <div class="sm-model-popup-metric">
+                                <span class="label">Slide model Index max</span>
+                                <span class="value" id="sm-model-idx-max">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
-                                <span class="label">LS-RAPID Index TB</span>
-                                <span class="value" id="lsrapid-idx-mean">--</span>
+                            <div class="sm-model-popup-metric">
+                                <span class="label">Slide model Index TB</span>
+                                <span class="value" id="sm-model-idx-mean">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Ngày phÃ¢n tÃ­ch</span>
-                                <span class="value" id="lsrapid-common-days">--</span>
+                                <span class="value" id="sm-model-common-days">--</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Tab: Displacement statistics -->
-                    <div id="lsrapid-tab-disp" class="lsrapid-tab-pane">
-                        <div class="lsrapid-popup-grid lsrapid-grid-3">
-                            <div class="lsrapid-popup-metric">
+                    <div id="sm-model-tab-disp" class="sm-model-tab-pane">
+                        <div class="sm-model-popup-grid sm-model-grid-3">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Tá»•ng dá»‹ch chuyá»ƒn</span>
-                                <span class="value" id="lsrapid-disp-total">--</span>
+                                <span class="value" id="sm-model-disp-total">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Max/Ngày</span>
-                                <span class="value" id="lsrapid-disp-max">--</span>
+                                <span class="value" id="sm-model-disp-max">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Ngày dá»‹ch max</span>
-                                <span class="value" id="lsrapid-disp-max-day">--</span>
+                                <span class="value" id="sm-model-disp-max-day">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">TB/Ngày</span>
-                                <span class="value" id="lsrapid-disp-avg">--</span>
+                                <span class="value" id="sm-model-disp-avg">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">TB Ngày mÆ°a</span>
-                                <span class="value" id="lsrapid-disp-rain">--</span>
+                                <span class="value" id="sm-model-disp-rain">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">TB Ngày khÃ´</span>
-                                <span class="value" id="lsrapid-disp-dry">--</span>
+                                <span class="value" id="sm-model-disp-dry">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Há»‡ sá»‘ gia tá»‘c mÆ°a</span>
-                                <span class="value" id="lsrapid-accel-ratio">--</span>
+                                <span class="value" id="sm-model-accel-ratio">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Äá»™ nháº¡y</span>
-                                <span class="value" id="lsrapid-sensitivity">--</span>
+                                <span class="value" id="sm-model-sensitivity">--</span>
                             </div>
-                            <div class="lsrapid-popup-metric">
+                            <div class="sm-model-popup-metric">
                                 <span class="label">Lag scan</span>
-                                <span class="value" id="lsrapid-lag-scan">--</span>
+                                <span class="value" id="sm-model-lag-scan">--</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Tab: Events (CWD + Peak rain) -->
-                    <div id="lsrapid-tab-events" class="lsrapid-tab-pane">
-                        <h6 class="lsrapid-section-title"><i class="bi bi-cloud-drizzle me-1"></i> Đợt mưa kéo dài
+                    <div id="sm-model-tab-events" class="sm-model-tab-pane">
+                        <h6 class="sm-model-section-title"><i class="bi bi-cloud-drizzle me-1"></i> Đợt mưa kéo dài
                             (CWD)
                         </h6>
-                        <div id="lsrapid-cwd-events" class="lsrapid-events-list">
+                        <div id="sm-model-cwd-events" class="sm-model-events-list">
                             <div class="text-muted small">KhÃ´ng cÃ³ Ä‘á»£t mÆ°a kÃ©o dÃ i</div>
                         </div>
-                        <h6 class="lsrapid-section-title mt-3"><i class="bi bi-cloud-lightning-rain me-1"></i> Ngày
+                        <h6 class="sm-model-section-title mt-3"><i class="bi bi-cloud-lightning-rain me-1"></i> Ngày
                             mưa
                             lá»›n (â‰¥20mm)</h6>
-                        <div id="lsrapid-peak-events" class="lsrapid-events-list">
+                        <div id="sm-model-peak-events" class="sm-model-events-list">
                             <div class="text-muted small">KhÃ´ng cÃ³ Ngày mÆ°a lá»›n</div>
                         </div>
                     </div>
 
                     <!-- Tab: Risk insights -->
-                    <div id="lsrapid-tab-risk" class="lsrapid-tab-pane">
-                        <div id="lsrapid-risk-insights" class="lsrapid-insights-list">
+                    <div id="sm-model-tab-risk" class="sm-model-tab-pane">
+                        <div id="sm-model-risk-insights" class="sm-model-insights-list">
                             <div class="text-muted small">Chưa có nhận xét rủi ro</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="lsrapid-popup-actions">
-                    <button class="btn btn-outline-secondary" id="lsrapid-popup-close-btn">Đóng</button>
-                    <button class="btn btn-info" id="lsrapid-popup-ok-btn">OK</button>
+                <div class="sm-model-popup-actions">
+                    <button class="btn btn-outline-secondary" id="sm-model-popup-close-btn">Đóng</button>
+                    <button class="btn btn-info" id="sm-model-popup-ok-btn">OK</button>
                 </div>
             </div>
         </div>
@@ -1298,7 +1298,7 @@
             <div class="dt-header-left">
                 <div class="dt-logo">
                     <div class="dt-logo-icon"><i class="bi bi-tsunami"></i></div>
-                    <span class="dt-logo-text">LS-RAPID Digital Twin</span>
+                    <span class="dt-logo-text">Slide model Digital Twin</span>
                 </div>
                 <div class="dt-status-badge" id="sim-status-badge">
                     <span class="dt-status-dot"></span>
@@ -1312,128 +1312,23 @@
                 </div>
             </div>
             <div class="dt-header-right">
-                <button class="dt-btn-icon" id="btn-toggle-panel" title="Toggle Panel">
-                    <i class="bi bi-layout-sidebar"></i>
-                </button>
-                <button class="dt-btn-icon" id="btn-fullscreen-dt" title="Fullscreen">
-                    <i class="bi bi-arrows-fullscreen"></i>
-                </button>
-                <button class="dt-btn-back" id="btn-close-dt" style="cursor:pointer; background:rgba(244,63,94,0.1); border-color:rgba(244,63,94,0.3); color:#f43f5e;">
+                <button class="dt-btn-icon" id="btn-toggle-panel" title="Toggle Panel"><i class="bi bi-layout-sidebar"></i></button>
+                <button class="dt-btn-icon" id="btn-fullscreen-dt" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                <button class="dt-btn-back" id="btn-close-dt" style="cursor:pointer;background:rgba(244,63,94,0.1);border-color:rgba(244,63,94,0.3);color:#f43f5e;">
                     <i class="bi bi-x-lg"></i> Đóng 3D
                 </button>
             </div>
         </header>
-
-        <div id="dt-main">
-            <aside id="dt-panel" class="dt-panel-open">
-                <div class="dt-panel-section">
-                    <div class="dt-section-header"><i class="bi bi-layers-half"></i><span>Thông số Địa chất</span></div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Lực dính c' (kPa)</span><output id="val-cohesion">15</output></label>
-                        <input type="range" id="param-cohesion" min="0" max="50" value="15" step="1" class="dt-slider">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Góc ma sát φ' (°)</span><output id="val-friction">30</output></label>
-                        <input type="range" id="param-friction" min="10" max="45" value="30" step="1" class="dt-slider">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Trọng lượng riêng γ (kN/m³)</span><output id="val-unit-weight">18</output></label>
-                        <input type="range" id="param-unit-weight" min="14" max="24" value="18" step="0.5" class="dt-slider">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Chiều sâu mặt trượt z (m)</span><output id="val-slip-depth">5</output></label>
-                        <input type="range" id="param-slip-depth" min="1" max="20" value="5" step="0.5" class="dt-slider">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Góc dốc β (°)</span><output id="val-slope-angle">25</output></label>
-                        <input type="range" id="param-slope-angle" min="10" max="60" value="25" step="1" class="dt-slider">
-                    </div>
-                </div>
-
-                <div class="dt-panel-section">
-                    <div class="dt-section-header"><i class="bi bi-cloud-rain-heavy"></i><span>Điều kiện Kích hoạt</span></div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Cường độ mưa (mm/h)</span><output id="val-rainfall">0</output></label>
-                        <input type="range" id="param-rainfall" min="0" max="200" value="0" step="5" class="dt-slider dt-slider-rain">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Áp lực nước r<sub>u</sub></span><output id="val-pore-pressure">0.00</output></label>
-                        <input type="range" id="param-pore-pressure" min="0" max="0.6" value="0" step="0.01" class="dt-slider dt-slider-pore">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Gia tốc nền k<sub>h</sub></span><output id="val-seismic">0.00</output></label>
-                        <input type="range" id="param-seismic" min="0" max="0.5" value="0" step="0.01" class="dt-slider dt-slider-seismic">
-                    </div>
-                </div>
-
-                <div class="dt-panel-section">
-                    <div class="dt-section-header"><i class="bi bi-tree"></i><span>Môi trường</span></div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Số lượng nhà</span><output id="val-houses">40</output></label>
-                        <input type="range" id="param-houses" min="0" max="100" value="40" step="5" class="dt-slider">
-                    </div>
-                    <div class="dt-param-group">
-                        <label class="dt-param-label"><span>Số lượng cây</span><output id="val-trees">300</output></label>
-                        <input type="range" id="param-trees" min="0" max="1000" value="300" step="50" class="dt-slider">
-                    </div>
-                </div>
-
-                <div class="dt-panel-actions">
-                    <button id="btn-run-simulation" class="dt-btn-primary"><i class="bi bi-play-fill"></i> Chạy Mô phỏng</button>
-                    <button id="btn-reset-simulation" class="dt-btn-secondary"><i class="bi bi-arrow-counterclockwise"></i> Đặt lại</button>
-                </div>
-            </aside>
-
-            <div id="dt-viewport">
-                <canvas id="dt-canvas"></canvas>
-
-                <div id="dt-fos-gauge" class="dt-hud-element">
-                    <div class="dt-gauge-ring">
-                        <svg viewBox="0 0 120 120">
-                            <circle cx="60" cy="60" r="52" class="dt-gauge-bg"/>
-                            <circle cx="60" cy="60" r="52" class="dt-gauge-fill" id="fos-gauge-arc"/>
-                        </svg>
-                        <div class="dt-gauge-center">
-                            <div class="dt-gauge-value" id="fos-gauge-value">--</div>
-                            <div class="dt-gauge-label">FoS</div>
-                        </div>
-                    </div>
-                    <div class="dt-gauge-status" id="fos-gauge-status">ĐANG TẢI</div>
-                </div>
-
-                <div id="dt-damage-stats" class="dt-hud-element" style="display:none;">
-                    <div class="dt-damage-title"><i class="bi bi-exclamation-triangle-fill"></i> Thống kê Thiệt hại</div>
-                    <div class="dt-damage-grid">
-                        <div class="dt-damage-item"><i class="bi bi-house-x-fill"></i><span class="dt-damage-val" id="dmg-houses">0</span><span class="dt-damage-lbl">Nhà sập</span></div>
-                        <div class="dt-damage-item"><i class="bi bi-tree-fill"></i><span class="dt-damage-val" id="dmg-trees">0</span><span class="dt-damage-lbl">Cây đổ</span></div>
-                        <div class="dt-damage-item"><i class="bi bi-speedometer2"></i><span class="dt-damage-val" id="dmg-velocity">0</span><span class="dt-damage-lbl">m/s</span></div>
-                        <div class="dt-damage-item"><i class="bi bi-box-fill"></i><span class="dt-damage-val" id="dmg-volume">0</span><span class="dt-damage-lbl">m³</span></div>
-                    </div>
-                </div>
-
-                <div id="dt-timeline" class="dt-hud-element">
-                    <button class="dt-tl-btn" id="btn-tl-play" title="Play/Pause"><i class="bi bi-play-fill"></i></button>
-                    <div class="dt-tl-bar"><div class="dt-tl-progress" id="tl-progress" style="width:0%"></div></div>
-                    <div class="dt-tl-time" id="tl-time">00:00</div>
-                    <select class="dt-tl-speed" id="tl-speed">
-                        <option value="1">1x</option><option value="2">2x</option><option value="5" selected>5x</option><option value="10">10x</option>
-                    </select>
-                </div>
-
-                <div id="dt-loading">
-                    <div class="dt-loading-content">
-                        <div class="dt-loading-spinner"></div>
-                        <div class="dt-loading-text">Đang khởi tạo Digital Twin...</div>
-                    </div>
-                </div>
-
-                <div id="dt-warning-overlay" style="display:none;">
-                    <div class="dt-warning-text">⚠ CẢNH BÁO SẠT LỞ ⚠</div>
-                    <div class="dt-warning-sub" id="dt-warning-fos">FoS = 0.95</div>
-                </div>
-            </div>
-        </div>
+        <!-- Panel + Viewport loaded from shared partial -->
+        <div id="dt-panel-placeholder"></div>
+        <script>
+            fetch('/pages/partials/dt-panel.html').then(r => r.text()).then(html => {
+                document.getElementById('dt-panel-placeholder').outerHTML = html;
+            });
+        </script>
     </div>
+
+
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1442,8 +1337,8 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/theme-manager.js"></script>
     <script src="/js/auth.js"></script>
-    <script src="/js/map-main.js?v=20260422-1"></script>
-    <script type="module" src="/js/engine/simulation-controller.js?v=20260428v3"></script>
+    <script src="/js/map-main.js?v=20260429-v1"></script>
+    <script type="module" src="/js/engine/simulation-controller.js?v=20260429-v2"></script>
 
 </body>
 

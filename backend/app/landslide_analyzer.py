@@ -778,12 +778,12 @@ class LandslideAnalyzer:
         config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Phân tích tương quan LS-RAPID nâng cao (v2).
+        Phân tích tương quan Slide model nâng cao (v2).
 
         Tính năng:
         - Chỉ số mưa hiệu dụng đa thang thời gian (short + long memory).
         - Lag scanning tìm độ trễ mưa → dịch chuyển tốt nhất.
-        - Hồi quy tuyến tính LS-RAPID index vs displacement rate.
+        - Hồi quy tuyến tính Slide model index vs displacement rate.
         - Thống kê mưa & dịch chuyển chi tiết.
         - Phân tích CWD (Cumulative Working-Day rainfall events).
         - Peak rain event detection & displacement response.
@@ -793,7 +793,7 @@ class LandslideAnalyzer:
         """
         result = {
             "available": False,
-            "model": "ls_rapid",
+            "model": "slide_model",
             "message": ""
         }
 
@@ -803,7 +803,7 @@ class LandslideAnalyzer:
 
         try:
             cfg = config or {}
-            ls_cfg = cfg.get("LsRapid", {}) if isinstance(cfg, dict) else {}
+            ls_cfg = cfg.get("SlideModel", {}) if isinstance(cfg, dict) else {}
 
             short_half_life_days = max(float(ls_cfg.get("short_half_life_days", 1.5)), 0.1)
             long_half_life_days = max(float(ls_cfg.get("long_half_life_days", 7.0)), 0.2)
@@ -896,7 +896,7 @@ class LandslideAnalyzer:
             rain_arr = np.array([float(daily_rain.get(day, 0.0)) for day in common_days], dtype=float)
             disp_rate_arr = np.array(daily_disp_inc, dtype=float)
 
-            # Effective rainfall (LS-RAPID-style multi-timescale memory)
+            # Effective rainfall (Slide model-style multi-timescale memory)
             decay_short = math.exp(-math.log(2.0) / short_half_life_days)
             decay_long = math.exp(-math.log(2.0) / long_half_life_days)
 
@@ -910,7 +910,7 @@ class LandslideAnalyzer:
                     rain_eff_short[i] = rain_arr[i] + decay_short * rain_eff_short[i - 1]
                     rain_eff_long[i] = rain_arr[i] + decay_long * rain_eff_long[i - 1]
 
-            ls_rapid_index = short_weight * rain_eff_short + (1.0 - short_weight) * rain_eff_long
+            slide_model_index = short_weight * rain_eff_short + (1.0 - short_weight) * rain_eff_long
 
             # Tìm lag tốt nhất: mưa dẫn, dịch chuyển theo sau.
             best_lag = 0
@@ -919,10 +919,10 @@ class LandslideAnalyzer:
             lag_scan_results = []
             for lag in range(max_lag_days + 1):
                 if lag == 0:
-                    x = ls_rapid_index
+                    x = slide_model_index
                     y = disp_rate_arr
                 else:
-                    x = ls_rapid_index[:-lag]
+                    x = slide_model_index[:-lag]
                     y = disp_rate_arr[lag:]
 
                 if len(x) < 3:
@@ -940,16 +940,16 @@ class LandslideAnalyzer:
             if best_pairs < 3:
                 result["message"] = (
                     f"Biến thiên dữ liệu quá thấp ({best_pairs} cặp hợp lệ), "
-                    f"chưa đủ để ước lượng LS-RAPID tin cậy."
+                    f"chưa đủ để ước lượng Slide model tin cậy."
                 )
                 return result
 
             # Hồi quy tuyến tính cho cặp lag tốt nhất
             if best_lag == 0:
-                x_fit = ls_rapid_index
+                x_fit = slide_model_index
                 y_fit = disp_rate_arr
             else:
-                x_fit = ls_rapid_index[:-best_lag]
+                x_fit = slide_model_index[:-best_lag]
                 y_fit = disp_rate_arr[best_lag:]
 
             slope, intercept = np.polyfit(x_fit, y_fit, 1)
@@ -964,19 +964,19 @@ class LandslideAnalyzer:
             abs_corr = abs(correlation)
             if abs_corr >= 0.8:
                 strength = "Rất mạnh"
-                assessment = "LS-RAPID cho thấy mưa có liên hệ rất mạnh với gia tăng dịch chuyển."
+                assessment = "Slide model cho thấy mưa có liên hệ rất mạnh với gia tăng dịch chuyển."
             elif abs_corr >= 0.6:
                 strength = "Mạnh"
-                assessment = "LS-RAPID cho thấy mưa có liên hệ đáng kể với dịch chuyển."
+                assessment = "Slide model cho thấy mưa có liên hệ đáng kể với dịch chuyển."
             elif abs_corr >= 0.4:
                 strength = "Trung bình"
-                assessment = "LS-RAPID ghi nhận ảnh hưởng mức trung bình của mưa lên dịch chuyển."
+                assessment = "Slide model ghi nhận ảnh hưởng mức trung bình của mưa lên dịch chuyển."
             elif abs_corr >= 0.2:
                 strength = "Yếu"
-                assessment = "LS-RAPID ghi nhận liên hệ yếu giữa mưa và dịch chuyển."
+                assessment = "Slide model ghi nhận liên hệ yếu giữa mưa và dịch chuyển."
             else:
                 strength = "Không đáng kể"
-                assessment = "LS-RAPID chưa thấy ảnh hưởng rõ của mưa trong giai đoạn này."
+                assessment = "Slide model chưa thấy ảnh hưởng rõ của mưa trong giai đoạn này."
 
             trigger_potential = "LOW"
             if correlation >= 0.6 and slope > 0 and r2 >= 0.3:
@@ -1003,8 +1003,8 @@ class LandslideAnalyzer:
             rain_days_count = int(np.sum(rain_arr > 0.2))
             avg_rain_on_rainy_days = float(np.mean(rain_arr[rain_arr > 0.2])) if rain_days_count > 0 else 0.0
             dry_days_count = len(common_days) - rain_days_count
-            max_ls_rapid_index = float(np.max(ls_rapid_index)) if len(ls_rapid_index) > 0 else 0.0
-            mean_ls_rapid_index = float(np.mean(ls_rapid_index)) if len(ls_rapid_index) > 0 else 0.0
+            max_slide_model_index = float(np.max(slide_model_index)) if len(slide_model_index) > 0 else 0.0
+            mean_slide_model_index = float(np.mean(slide_model_index)) if len(slide_model_index) > 0 else 0.0
 
             # --- 2. Displacement Statistics ---
             total_disp_mm = float(np.sum(disp_rate_arr))
@@ -1070,7 +1070,7 @@ class LandslideAnalyzer:
                     peak_events.append({
                         "date": day, "rain_mm": round(r, 1),
                         "disp_response_mm": round(float(disp_rate_arr[resp_idx]), 2),
-                        "ls_rapid_index": round(float(ls_rapid_index[i]), 2)
+                        "slide_model_index": round(float(slide_model_index[i]), 2)
                     })
             peak_events.sort(key=lambda e: e["rain_mm"], reverse=True)
             top_peak_events = peak_events[:5]
@@ -1107,7 +1107,7 @@ class LandslideAnalyzer:
             result["slope_mm_day_per_rain_index"] = round(float(slope), 6)
             result["intercept"] = round(float(intercept), 4)
             result["trigger_potential"] = trigger_potential
-            result["ls_rapid"] = {
+            result["slide_model"] = {
                 "short_half_life_days": short_half_life_days,
                 "long_half_life_days": long_half_life_days,
                 "short_weight": short_weight,
@@ -1121,8 +1121,8 @@ class LandslideAnalyzer:
                 "rain_days": rain_days_count,
                 "dry_days": dry_days_count,
                 "avg_rain_on_rainy_days_mm": round(avg_rain_on_rainy_days, 1),
-                "max_ls_rapid_index": round(max_ls_rapid_index, 2),
-                "mean_ls_rapid_index": round(mean_ls_rapid_index, 2)
+                "max_slide_model_index": round(max_slide_model_index, 2),
+                "mean_slide_model_index": round(mean_slide_model_index, 2)
             }
             result["disp_stats"] = {
                 "total_mm": round(total_disp_mm, 2),
@@ -1140,7 +1140,7 @@ class LandslideAnalyzer:
             result["risk_message"] = combined_risk_message
 
             result["message"] = (
-                f"LS-RAPID: r={correlation:.3f}, lag={best_lag} ngày, "
+                f"Slide model: r={correlation:.3f}, lag={best_lag} ngày, "
                 f"R²={r2:.2f}, trigger={trigger_potential}. "
                 f"Tổng mưa: {total_rain_mm:.0f}mm ({rain_days_count} ngày mưa). "
                 f"Tổng dịch chuyển: {total_disp_mm:.1f}mm."
@@ -1153,7 +1153,7 @@ class LandslideAnalyzer:
                 "daily_displacement_mm": [round(float(v), 2) for v in disp_rate_arr],
                 "effective_rainfall_short_mm": [round(float(v), 2) for v in rain_eff_short],
                 "effective_rainfall_long_mm": [round(float(v), 2) for v in rain_eff_long],
-                "ls_rapid_index": [round(float(v), 2) for v in ls_rapid_index],
+                "slide_model_index": [round(float(v), 2) for v in slide_model_index],
                 "net_displacement_mm": [round(float(v), 2) for v in cumulative_disp],
                 "regression_predicted": [round(float(v), 3) for v in y_pred],
             }

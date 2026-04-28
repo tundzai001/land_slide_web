@@ -39,9 +39,11 @@ class GNSSVelocityProcessor:
         filter_window_size=30,
         min_fix_quality=4,
         # Sanity gate: reject fix nếu thiết bị claim nhảy > X mét trong 1 sample.
-        max_step_distance_m=0.5,
+        # For RTK Fixed (4), we allow slightly more but still tight.
+        # For RTK Float (5), we should be much stricter because it's noisy.
+        max_step_distance_m=0.2,
         # Vertical jump gate (U-axis) to reject unrealistic altitude spikes.
-        max_step_vertical_m=0.3,
+        max_step_vertical_m=0.15,
     ):
         self.device_id = device_id
         self.db_session_factory = db_session_factory
@@ -418,18 +420,24 @@ class GNSSVelocityProcessor:
         if not hasattr(self, '_consecutive_rejects'):
             self._consecutive_rejects = 0
 
-        is_spike = step_2d_m > self.max_step_distance_m or step_u_m > self.max_step_vertical_m
-        force_accept = self._consecutive_rejects >= 5 or dt > 60.0
+        # Dynamic step limits based on fix quality
+        current_max_2d = self.max_step_distance_m if is_trusted_fix else self.max_step_distance_m * 0.5
+        current_max_u = self.max_step_vertical_m if is_trusted_fix else self.max_step_vertical_m * 0.5
+
+        is_spike = step_2d_m > current_max_2d or step_u_m > current_max_u
+        force_accept = self._consecutive_rejects >= 10 or dt > 60.0 # Increased consecutive rejects before force-accept
 
         if is_spike and not force_accept:
             self._consecutive_rejects += 1
             self.stats['spike_rejected'] += 1
             self.history.pop()
-            logger.warning(
-                f"[GNSS-{self.device_id}] Bad fix rejected (#{self._consecutive_rejects}): "
-                f"step2d={step_2d_m:.3f}m (max={self.max_step_distance_m}m), "
-                f"stepU={step_u_m:.3f}m (max={self.max_step_vertical_m}m), dt={dt:.1f}s"
-            )
+            # Only log every 5 rejections to avoid spamming
+            if self._consecutive_rejects % 5 == 0:
+                logger.warning(
+                    f"[GNSS-{self.device_id}] Bad fix rejected (#{self._consecutive_rejects}): "
+                    f"step2d={step_2d_m:.3f}m (max={current_max_2d}m), "
+                    f"stepU={step_u_m:.3f}m (max={current_max_u}m), quality={fix_quality}"
+                )
             return None
 
         if force_accept and is_spike:
@@ -498,7 +506,9 @@ class GNSSVelocityProcessor:
             self.v_enu_state = v_target
             self.v_state_ready = True
         else:
-            alpha = dt / (max(tau_seconds, 0.1) + dt)
+            # Confidence-based smoothing: RTK Float updates much slower than Fixed
+            quality_factor = 1.0 if is_trusted_fix else 0.2
+            alpha = (dt * quality_factor) / (max(tau_seconds, 0.1) + dt)
             self.v_enu_state = (1.0 - alpha) * self.v_enu_state + alpha * v_target
 
         v_enu_stable = self.v_enu_state.copy()
@@ -558,7 +568,9 @@ class GNSSVelocityProcessor:
                 self.disp_enu_state = med_enu
                 self.disp_state_ready = True
             else:
-                alpha_disp = dt / (max(disp_tau, 0.1) + dt)
+                # Same confidence-based smoothing for displacement
+                quality_factor_disp = 1.0 if is_trusted_fix else 0.1
+                alpha_disp = (dt * quality_factor_disp) / (max(disp_tau, 0.1) + dt)
                 self.disp_enu_state = (1.0 - alpha_disp) * self.disp_enu_state + alpha_disp * med_enu
 
             # Mặc định chỉ lấy chuyển vị 2D (mặt bằng) để đảm bảo độ ổn định cao nhất cho giám sát

@@ -1662,7 +1662,7 @@ function setupEventListeners() {
         closeLongtermBtn.addEventListener('click', () => {
             longtermOverlay.classList.remove('active');
             rainCorrelationAiRunning = false;
-            closeLsRapidResultPopup();
+            closeSlideModelResultPopup();
 
             // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
             if (stationSidebar && currentMapMode !== 'rescue') {
@@ -1693,30 +1693,30 @@ function setupEventListeners() {
             rainCorrelationAiRunning = true;
             updateRainCorrelationAiControls();
             const analysisData = await loadLongTermAnalysis({ includeCorrelation: true });
-            showLsRapidResultPopup(analysisData?.rainfall_correlation || null);
+            showSlideModelResultPopup(analysisData?.rainfall_correlation || null);
         });
     }
 
-    const lsrapidPopupOverlay = document.getElementById('lsrapid-popup-overlay');
-    const lsrapidPopupClose = document.getElementById('lsrapid-popup-close');
-    const lsrapidPopupCloseBtn = document.getElementById('lsrapid-popup-close-btn');
-    const lsrapidPopupOkBtn = document.getElementById('lsrapid-popup-ok-btn');
+    const smModelPopupOverlay = document.getElementById('sm-model-popup-overlay');
+    const smModelPopupClose = document.getElementById('sm-model-popup-close');
+    const smModelPopupCloseBtn = document.getElementById('sm-model-popup-close-btn');
+    const smModelPopupOkBtn = document.getElementById('sm-model-popup-ok-btn');
 
-    [lsrapidPopupClose, lsrapidPopupCloseBtn, lsrapidPopupOkBtn].forEach(btn => {
-        if (btn) btn.addEventListener('click', closeLsRapidResultPopup);
+    [smModelPopupClose, smModelPopupCloseBtn, smModelPopupOkBtn].forEach(btn => {
+        if (btn) btn.addEventListener('click', closeSlideModelResultPopup);
     });
 
-    if (lsrapidPopupOverlay) {
-        lsrapidPopupOverlay.addEventListener('click', (event) => {
-            if (event.target === lsrapidPopupOverlay) {
-                closeLsRapidResultPopup();
+    if (smModelPopupOverlay) {
+        smModelPopupOverlay.addEventListener('click', (event) => {
+            if (event.target === smModelPopupOverlay) {
+                closeSlideModelResultPopup();
             }
         });
     }
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            closeLsRapidResultPopup();
+            closeSlideModelResultPopup();
         }
     });
 
@@ -2713,7 +2713,7 @@ async function loadLongTermAnalysis(options = {}) {
         const params = new URLSearchParams({
             days: String(days),
             include_correlation: includeCorrelation ? 'true' : 'false',
-            correlation_model: 'ls_rapid'
+            correlation_model: 'slide_model'
         });
         const res = await fetch(`/api/stations/${stationId}/long-term-analysis?${params.toString()}`);
 
@@ -2866,9 +2866,9 @@ function resetRainfallCorrelationUi() {
         charts['chart-rainfall-correlation'].destroy();
         delete charts['chart-rainfall-correlation'];
     }
-    if (charts['chart-lsrapid-index']) {
-        charts['chart-lsrapid-index'].destroy();
-        delete charts['chart-lsrapid-index'];
+    if (charts['chart-sm-model-index']) {
+        charts['chart-sm-model-index'].destroy();
+        delete charts['chart-sm-model-index'];
     }
 }
 
@@ -2881,36 +2881,36 @@ function updateRainCorrelationAiControls(rainCorr = null) {
     runBtn.disabled = !canRun || rainCorrelationAiRunning;
 
     if (rainCorrelationAiRunning) {
-        runBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Đang chạy LS-RAPID...';
-        hintEl.textContent = 'Hệ thống đang phân tích tương quan mưa - dịch chuyển bằng LS-RAPID.';
+        runBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Đang chạy Slide model...';
+        hintEl.textContent = 'Hệ thống đang phân tích tương quan mưa - dịch chuyển bằng Slide model.';
         return;
     }
 
-    runBtn.innerHTML = '<i class="bi bi-stars me-2"></i>Chạy AI LS-RAPID';
+    runBtn.innerHTML = '<i class="bi bi-stars me-2"></i>Chạy AI Slide model';
 
     if (!isRainCorrelationAiEnabled) {
-        hintEl.textContent = 'Tương quan mưa - dịch chuyển chỉ phân tích khi bạn bấm nút AI LS-RAPID.';
+        hintEl.textContent = 'Tương quan mưa - dịch chuyển chỉ phân tích khi bạn bấm nút AI Slide model.';
         return;
     }
 
     if (rainCorr && rainCorr.available) {
-        hintEl.textContent = 'Đã chạy AI LS-RAPID thành công cho khoảng thời gian đang chọn.';
+        hintEl.textContent = 'Đã chạy AI Slide model thành công cho khoảng thời gian đang chọn.';
         return;
     }
 
-    hintEl.textContent = rainCorr?.message || 'Đã gửi yêu cầu AI LS-RAPID, nhưng chưa có đủ dữ liệu để tính.';
+    hintEl.textContent = rainCorr?.message || 'Đã gửi yêu cầu AI Slide model, nhưng chưa có đủ dữ liệu để tính.';
 }
 
-function closeLsRapidResultPopup() {
-    const overlay = document.getElementById('lsrapid-popup-overlay');
+function closeSlideModelResultPopup() {
+    const overlay = document.getElementById('sm-model-popup-overlay');
     if (!overlay) return;
     overlay.classList.remove('active');
     overlay.setAttribute('aria-hidden', 'true');
 }
 
-function showLsRapidResultPopup(rainCorr) {
-    const overlay = document.getElementById('lsrapid-popup-overlay');
-    const statusEl = document.getElementById('lsrapid-popup-status');
+function showSlideModelResultPopup(rainCorr) {
+    const overlay = document.getElementById('sm-model-popup-overlay');
+    const statusEl = document.getElementById('sm-model-popup-status');
     if (!overlay || !statusEl) return;
 
     const available = rainCorr?.available === true;
@@ -2920,93 +2920,93 @@ function showLsRapidResultPopup(rainCorr) {
     const trigger = String(rainCorr?.trigger_potential || 'LOW').toUpperCase();
 
     // --- Tab switching ---
-    overlay.querySelectorAll('.lsrapid-tab').forEach(tab => {
+    overlay.querySelectorAll('.sm-model-tab').forEach(tab => {
         tab.addEventListener('click', () => {
-            overlay.querySelectorAll('.lsrapid-tab').forEach(t => t.classList.remove('active'));
-            overlay.querySelectorAll('.lsrapid-tab-pane').forEach(p => p.classList.remove('active'));
+            overlay.querySelectorAll('.sm-model-tab').forEach(t => t.classList.remove('active'));
+            overlay.querySelectorAll('.sm-model-tab-pane').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             const target = document.getElementById(tab.dataset.tab);
             if (target) target.classList.add('active');
         });
     });
     // Reset to first tab
-    overlay.querySelectorAll('.lsrapid-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
-    overlay.querySelectorAll('.lsrapid-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
+    overlay.querySelectorAll('.sm-model-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+    overlay.querySelectorAll('.sm-model-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
 
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     const fmtDate = (d) => { if (!d) return '--'; try { const [y, m, dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
 
     if (available) {
         // === Overview tab ===
-        setVal('lsrapid-popup-r', Number.isFinite(corr) ? corr.toFixed(4) : '--');
-        setVal('lsrapid-popup-r2', Number.isFinite(r2) ? r2.toFixed(4) : '--');
-        setVal('lsrapid-popup-lag', Number.isFinite(lag) ? `${lag} ngày` : '--');
-        setVal('lsrapid-popup-trigger', trigger);
-        setVal('lsrapid-popup-strength', rainCorr?.strength || '--');
-        setVal('lsrapid-popup-slope', rainCorr?.slope_mm_day_per_rain_index != null
+        setVal('sm-model-popup-r', Number.isFinite(corr) ? corr.toFixed(4) : '--');
+        setVal('sm-model-popup-r2', Number.isFinite(r2) ? r2.toFixed(4) : '--');
+        setVal('sm-model-popup-lag', Number.isFinite(lag) ? `${lag} ngày` : '--');
+        setVal('sm-model-popup-trigger', trigger);
+        setVal('sm-model-popup-strength', rainCorr?.strength || '--');
+        setVal('sm-model-popup-slope', rainCorr?.slope_mm_day_per_rain_index != null
             ? Number(rainCorr.slope_mm_day_per_rain_index).toFixed(4) : '--');
-        setVal('lsrapid-popup-message', sanitizeLongTermText(
-            rainCorr?.risk_message || rainCorr?.message || rainCorr?.assessment || 'LS-RAPID hoàn tất.'
+        setVal('sm-model-popup-message', sanitizeLongTermText(
+            rainCorr?.risk_message || rainCorr?.message || rainCorr?.assessment || 'Slide model hoàn tất.'
         ));
 
         // Status badge
         if (trigger === 'HIGH') {
-            statusEl.className = 'lsrapid-popup-status status-fail';
+            statusEl.className = 'sm-model-popup-status status-fail';
             statusEl.textContent = '🚨 TRIGGER: HIGH';
         } else if (trigger === 'MEDIUM') {
-            statusEl.className = 'lsrapid-popup-status status-warn';
+            statusEl.className = 'sm-model-popup-status status-warn';
             statusEl.textContent = '⚠️ TRIGGER: MEDIUM';
         } else {
-            statusEl.className = 'lsrapid-popup-status status-ok';
+            statusEl.className = 'sm-model-popup-status status-ok';
             statusEl.textContent = '✅ TRIGGER: LOW';
         }
 
         // === Rain stats tab ===
         const rs = rainCorr?.rain_stats || {};
-        setVal('lsrapid-rain-total', rs.total_mm != null ? `${rs.total_mm} mm` : '--');
-        setVal('lsrapid-rain-max', rs.max_daily_mm != null ? `${rs.max_daily_mm} mm` : '--');
-        setVal('lsrapid-rain-max-day', fmtDate(rs.max_rain_day));
-        setVal('lsrapid-rain-days', rs.rain_days != null ? `${rs.rain_days} ngày` : '--');
-        setVal('lsrapid-dry-days', rs.dry_days != null ? `${rs.dry_days} ngày` : '--');
-        setVal('lsrapid-rain-avg', rs.avg_rain_on_rainy_days_mm != null ? `${rs.avg_rain_on_rainy_days_mm} mm` : '--');
-        setVal('lsrapid-idx-max', rs.max_ls_rapid_index != null ? rs.max_ls_rapid_index.toFixed(2) : '--');
-        setVal('lsrapid-idx-mean', rs.mean_ls_rapid_index != null ? rs.mean_ls_rapid_index.toFixed(2) : '--');
-        setVal('lsrapid-common-days', rainCorr?.common_days != null ? `${rainCorr.common_days} ngày` : '--');
+        setVal('sm-model-rain-total', rs.total_mm != null ? `${rs.total_mm} mm` : '--');
+        setVal('sm-model-rain-max', rs.max_daily_mm != null ? `${rs.max_daily_mm} mm` : '--');
+        setVal('sm-model-rain-max-day', fmtDate(rs.max_rain_day));
+        setVal('sm-model-rain-days', rs.rain_days != null ? `${rs.rain_days} ngày` : '--');
+        setVal('sm-model-dry-days', rs.dry_days != null ? `${rs.dry_days} ngày` : '--');
+        setVal('sm-model-rain-avg', rs.avg_rain_on_rainy_days_mm != null ? `${rs.avg_rain_on_rainy_days_mm} mm` : '--');
+        setVal('sm-model-idx-max', rs.max_slide_model_index != null ? rs.max_slide_model_index.toFixed(2) : '--');
+        setVal('sm-model-idx-mean', rs.mean_slide_model_index != null ? rs.mean_slide_model_index.toFixed(2) : '--');
+        setVal('sm-model-common-days', rainCorr?.common_days != null ? `${rainCorr.common_days} ngày` : '--');
 
         // === Displacement stats tab ===
         const ds = rainCorr?.disp_stats || {};
-        setVal('lsrapid-disp-total', ds.total_mm != null ? `${ds.total_mm} mm` : '--');
-        setVal('lsrapid-disp-max', ds.max_daily_mm != null ? `${ds.max_daily_mm} mm` : '--');
-        setVal('lsrapid-disp-max-day', fmtDate(ds.max_disp_day));
-        setVal('lsrapid-disp-avg', ds.avg_daily_mm != null ? `${ds.avg_daily_mm} mm` : '--');
-        setVal('lsrapid-disp-rain', ds.disp_during_rain_mm != null ? `${ds.disp_during_rain_mm} mm` : '--');
-        setVal('lsrapid-disp-dry', ds.disp_during_dry_mm != null ? `${ds.disp_during_dry_mm} mm` : '--');
-        setVal('lsrapid-accel-ratio', ds.rain_acceleration_ratio != null
+        setVal('sm-model-disp-total', ds.total_mm != null ? `${ds.total_mm} mm` : '--');
+        setVal('sm-model-disp-max', ds.max_daily_mm != null ? `${ds.max_daily_mm} mm` : '--');
+        setVal('sm-model-disp-max-day', fmtDate(ds.max_disp_day));
+        setVal('sm-model-disp-avg', ds.avg_daily_mm != null ? `${ds.avg_daily_mm} mm` : '--');
+        setVal('sm-model-disp-rain', ds.disp_during_rain_mm != null ? `${ds.disp_during_rain_mm} mm` : '--');
+        setVal('sm-model-disp-dry', ds.disp_during_dry_mm != null ? `${ds.disp_during_dry_mm} mm` : '--');
+        setVal('sm-model-accel-ratio', ds.rain_acceleration_ratio != null
             ? `${ds.rain_acceleration_ratio}x` : '--');
-        setVal('lsrapid-sensitivity', rainCorr?.sensitivity_mm_per_mm != null
+        setVal('sm-model-sensitivity', rainCorr?.sensitivity_mm_per_mm != null
             ? `${rainCorr.sensitivity_mm_per_mm} mm/mm` : '--');
 
         // Lag scan summary
         const lagScan = rainCorr?.lag_scan || [];
         if (lagScan.length > 0) {
             const lagText = lagScan.map(l => `L${l.lag}:${l.correlation}`).join(' | ');
-            setVal('lsrapid-lag-scan', lagText);
+            setVal('sm-model-lag-scan', lagText);
         } else {
-            setVal('lsrapid-lag-scan', '--');
+            setVal('sm-model-lag-scan', '--');
         }
 
         // === Events tab: CWD ===
-        const cwdEl = document.getElementById('lsrapid-cwd-events');
+        const cwdEl = document.getElementById('sm-model-cwd-events');
         const cwdEvents = rainCorr?.cwd_events || [];
         if (cwdEl) {
             if (cwdEvents.length > 0) {
                 cwdEl.innerHTML = cwdEvents.map(e => `
-                    <div class="lsrapid-event-item">
-                        <div class="lsrapid-event-header">
-                            <span class="lsrapid-event-date">${fmtDate(e.start)} → ${fmtDate(e.end)}</span>
-                            <span class="lsrapid-event-badge">${e.days} ngày</span>
+                    <div class="sm-model-event-item">
+                        <div class="sm-model-event-header">
+                            <span class="sm-model-event-date">${fmtDate(e.start)} → ${fmtDate(e.end)}</span>
+                            <span class="sm-model-event-badge">${e.days} ngày</span>
                         </div>
-                        <div class="lsrapid-event-stats">
+                        <div class="sm-model-event-stats">
                             <span>🌧️ ${e.total_rain_mm} mm</span>
                             <span>📏 ${e.displacement_mm} mm</span>
                             <span>💧 TB ${e.avg_intensity} mm/ngày</span>
@@ -3019,19 +3019,19 @@ function showLsRapidResultPopup(rainCorr) {
         }
 
         // === Events tab: Peak rain ===
-        const peakEl = document.getElementById('lsrapid-peak-events');
+        const peakEl = document.getElementById('sm-model-peak-events');
         const peakEvents = rainCorr?.peak_rain_events || [];
         if (peakEl) {
             if (peakEvents.length > 0) {
                 peakEl.innerHTML = peakEvents.map(e => `
-                    <div class="lsrapid-event-item">
-                        <div class="lsrapid-event-header">
-                            <span class="lsrapid-event-date">${fmtDate(e.date)}</span>
-                            <span class="lsrapid-event-badge lsrapid-event-badge-danger">⚡ ${e.rain_mm} mm</span>
+                    <div class="sm-model-event-item">
+                        <div class="sm-model-event-header">
+                            <span class="sm-model-event-date">${fmtDate(e.date)}</span>
+                            <span class="sm-model-event-badge sm-model-event-badge-danger">⚡ ${e.rain_mm} mm</span>
                         </div>
-                        <div class="lsrapid-event-stats">
+                        <div class="sm-model-event-stats">
                             <span>📏 Phản hồi: ${e.disp_response_mm} mm</span>
-                            <span>📊 Index: ${e.ls_rapid_index}</span>
+                            <span>📊 Index: ${e.slide_model_index}</span>
                         </div>
                     </div>
                 `).join('');
@@ -3041,15 +3041,15 @@ function showLsRapidResultPopup(rainCorr) {
         }
 
         // === Risk insights tab ===
-        const riskEl = document.getElementById('lsrapid-risk-insights');
+        const riskEl = document.getElementById('sm-model-risk-insights');
         const riskInsights = rainCorr?.risk_insights || [];
         if (riskEl) {
             if (riskInsights.length > 0) {
                 riskEl.innerHTML = riskInsights.map(msg => `
-                    <div class="lsrapid-insight-item">${msg}</div>
+                    <div class="sm-model-insight-item">${msg}</div>
                 `).join('');
             } else {
-                riskEl.innerHTML = `<div class="lsrapid-insight-item lsrapid-insight-ok">
+                riskEl.innerHTML = `<div class="sm-model-insight-item sm-model-insight-ok">
                     ✅ ${rainCorr?.assessment || 'Không phát hiện yếu tố rủi ro đặc biệt từ tương quan mưa.'}
                 </div>`;
             }
@@ -3057,12 +3057,12 @@ function showLsRapidResultPopup(rainCorr) {
 
     } else {
         // Not available — reset all
-        ['lsrapid-popup-r', 'lsrapid-popup-r2', 'lsrapid-popup-lag', 'lsrapid-popup-trigger',
-            'lsrapid-popup-strength', 'lsrapid-popup-slope'].forEach(id => setVal(id, '--'));
-        setVal('lsrapid-popup-message', sanitizeLongTermText(
-            rainCorr?.message || 'Không thể tạo kết quả LS-RAPID cho khoảng thời gian này.'
+        ['sm-model-popup-r', 'sm-model-popup-r2', 'sm-model-popup-lag', 'sm-model-popup-trigger',
+            'sm-model-popup-strength', 'sm-model-popup-slope'].forEach(id => setVal(id, '--'));
+        setVal('sm-model-popup-message', sanitizeLongTermText(
+            rainCorr?.message || 'Không thể tạo kết quả Slide model cho khoảng thời gian này.'
         ));
-        statusEl.className = 'lsrapid-popup-status status-warn';
+        statusEl.className = 'sm-model-popup-status status-warn';
         statusEl.textContent = '⚠ CHƯA ĐỦ DỮ LIỆU';
     }
 
@@ -3967,7 +3967,7 @@ function renderRainfallCorrelationSection(data) {
 
     const rainCorr = data.rainfall_correlation;
 
-    // Nếu chưa bật AI LS-RAPID thì ẩn section (chỉ hiện khi user đã bấm nút)
+    // Nếu chưa bật AI Slide model thì ẩn section (chỉ hiện khi user đã bấm nút)
     if (!isRainCorrelationAiEnabled) {
         section.style.display = 'none';
         return;
@@ -3977,16 +3977,16 @@ function renderRainfallCorrelationSection(data) {
         // Show the section with an informative status message instead of hiding it
         const msg = (rainCorr && rainCorr.message)
             ? rainCorr.message
-            : 'Không đủ dữ liệu để chạy LS-RAPID. Cần ít nhất 3 ngày chung giữa GNSS và cảm biến mưa.';
+            : 'Không đủ dữ liệu để chạy Slide model. Cần ít nhất 3 ngày chung giữa GNSS và cảm biến mưa.';
         section.style.display = 'block';
         section.innerHTML = `
             <h5 class="mb-3 text-info border-bottom pb-2">
-                <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (LS-RAPID v2)
+                <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (Slide model v2)
             </h5>
             <div class="alert alert-warning d-flex align-items-start gap-2 mb-0" role="alert">
                 <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
                 <div>
-                    <strong>Không thể chạy phân tích LS-RAPID</strong><br>
+                    <strong>Không thể chạy phân tích Slide model</strong><br>
                     <span class="small">${msg}</span>
                 </div>
             </div>`;
@@ -3997,7 +3997,7 @@ function renderRainfallCorrelationSection(data) {
     if (!document.getElementById('rain-correlation')) {
         section.innerHTML = `
             <h5 class="mb-3 text-info border-bottom pb-2">
-                <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (LS-RAPID v2)
+                <i class="bi bi-cloud-rain me-2"></i>Tương quan Mưa - Dịch chuyển (Slide model v2)
             </h5>
             <div class="row g-3 mb-3">
                 <div class="col-md-2 col-6">
@@ -4054,9 +4054,9 @@ function renderRainfallCorrelationSection(data) {
                 </div>
                 <div class="col-md-6">
                     <div class="chart-box border-0 shadow-sm">
-                        <div class="chart-title"><i class="bi bi-graph-up-arrow me-2"></i>LS-RAPID Index vs Dịch chuyển ngày</div>
+                        <div class="chart-title"><i class="bi bi-graph-up-arrow me-2"></i>Slide model Index vs Dịch chuyển ngày</div>
                         <div style="height: 350px; padding: 10px;">
-                            <canvas id="chart-lsrapid-index"></canvas>
+                            <canvas id="chart-sm-model-index"></canvas>
                         </div>
                     </div>
                 </div>
@@ -4176,21 +4176,21 @@ function renderRainfallCorrelationSection(data) {
             });
         }
 
-        // Chart 2: LS-RAPID Index vs Daily Displacement
-        const ctx2 = document.getElementById('chart-lsrapid-index');
-        if (ctx2 && rainCorr.time_series.ls_rapid_index) {
-            if (charts['chart-lsrapid-index']) {
-                charts['chart-lsrapid-index'].destroy();
+        // Chart 2: Slide model Index vs Daily Displacement
+        const ctx2 = document.getElementById('chart-sm-model-index');
+        if (ctx2 && rainCorr.time_series.slide_model_index) {
+            if (charts['chart-sm-model-index']) {
+                charts['chart-sm-model-index'].destroy();
             }
 
-            charts['chart-lsrapid-index'] = new Chart(ctx2, {
+            charts['chart-sm-model-index'] = new Chart(ctx2, {
                 type: 'line',
                 data: {
                     labels: rainCorr.time_series.labels,
                     datasets: [
                         {
-                            label: 'LS-RAPID Index',
-                            data: rainCorr.time_series.ls_rapid_index,
+                            label: 'Slide model Index',
+                            data: rainCorr.time_series.slide_model_index,
                             borderColor: '#f59e0b',
                             backgroundColor: 'rgba(245, 158, 11, 0.1)',
                             tension: 0.4,
@@ -4253,7 +4253,7 @@ function renderRainfallCorrelationSection(data) {
                         'y-idx': {
                             type: 'linear',
                             position: 'left',
-                            title: { display: true, text: 'LS-RAPID Index', color: '#f59e0b' },
+                            title: { display: true, text: 'Slide model Index', color: '#f59e0b' },
                             grid: { color: 'rgba(255,255,255,0.05)' },
                             ticks: { color: '#f59e0b' }
                         },
