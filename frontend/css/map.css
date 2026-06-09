@@ -266,7 +266,7 @@ body {
     gap: 4px;
 }
 
-/*  NÚT ĐÓNG SIDEBAR - Tab ở mép phải  */
+/*  NÃšT ÄÃ“NG SIDEBAR - Tab á»Ÿ mÃ©p pháº£i  */
 .sidebar-close-tab {
     position: absolute;
     top: 50%;
@@ -704,7 +704,7 @@ body {
     z-index: 1;
 }
 
-/* NÚT TẮT/BẬT ÂM BÁO trong sidebar — 3 trạng thái */
+/* NÃšT Táº®T/Báº¬T Ã‚M BÃO trong sidebar â€” 3 tráº¡ng thÃ¡i */
 .btn-siren-toggle {
     width: 100%;
     padding: 0.875rem 1rem;
@@ -721,7 +721,7 @@ body {
     color: white;
 }
 
-/* Trạng thái 1: idle (xám, disabled) — mặc định, chưa có cảnh báo */
+/* Tráº¡ng thÃ¡i 1: idle (xÃ¡m, disabled) â€” máº·c Ä‘á»‹nh, chÆ°a cÃ³ cáº£nh bÃ¡o */
 .btn-siren-toggle[data-siren-state="idle"],
 .btn-siren-toggle.disabled {
     background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
@@ -731,7 +731,7 @@ body {
     animation: none;
 }
 
-/* Trạng thái 2: alerting (đỏ, nhấp nháy) — có cảnh báo, bấm để tắt còi */
+/* Tráº¡ng thÃ¡i 2: alerting (Ä‘á», nháº¥p nhÃ¡y) â€” cÃ³ cáº£nh bÃ¡o, báº¥m Ä‘á»ƒ táº¯t cÃ²i */
 .btn-siren-toggle[data-siren-state="alerting"] {
     background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
     cursor: pointer;
@@ -750,7 +750,7 @@ body {
     transform: scale(0.97);
 }
 
-/* Trạng thái 3: muted (xanh) — còi đã tắt, bấm để bật lại */
+/* Tráº¡ng thÃ¡i 3: muted (xanh) â€” cÃ²i Ä‘Ã£ táº¯t, báº¥m Ä‘á»ƒ báº­t láº¡i */
 .btn-siren-toggle[data-siren-state="muted"] {
     background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
     cursor: pointer;
@@ -807,7 +807,7 @@ body {
     pointer-events: all;
 }
 
-/* Overlay backdrop khi charts mở */
+/* Overlay backdrop khi charts má»Ÿ */
 .charts-panel::before {
     content: '';
     position: fixed;
@@ -848,7 +848,7 @@ body {
     color: var(--accent-primary);
 }
 
-/* Nút đóng dạng chevron */
+/* NÃºt Ä‘Ã³ng dáº¡ng chevron */
 .charts-panel-header .btn {
     width: 40px;
     height: 40px;
@@ -874,7 +874,7 @@ body {
     background: var(--bg-primary);
 }
 
-/* Cải thiện chart boxes */
+/* Cáº£i thiá»‡n chart boxes */
 .charts-panel .chart-box {
     background: var(--bg-secondary);
     border-radius: 12px;
@@ -1277,7 +1277,7 @@ body {
     color: #fca5a5;
 }
 
-/*  CHART BOX (Dùng chung)  */
+/*  CHART BOX (DÃ¹ng chung)  */
 .chart-box {
     background: var(--bg-tertiary);
     border-radius: 12px;
@@ -1373,7 +1373,7 @@ body {
     border: 1px solid #f3d388;
 }
 
-/* ── Cross-sensor consensus ──────────────────────────────────── */
+/* â”€â”€ Cross-sensor consensus â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .consensus-banner {
     padding: 14px 16px;
     border-radius: 12px;
@@ -1543,7 +1543,7 @@ body {
     color: var(--text-secondary);
 }
 
-/*  RISK BADGE → STATUS BAR  */
+/*  RISK BADGE â†’ STATUS BAR  */
 .status-bar {
     display: flex;
     align-items: center;
@@ -1591,6 +1591,14 @@ body {
 }
 
 .status-badge.MEDIUM .status-dot {
+    background: var(--accent-warning);
+}
+
+.status-badge.STALE {
+    color: var(--accent-warning);
+}
+
+.status-badge.STALE .status-dot {
     background: var(--accent-warning);
 }
 
@@ -1705,7 +1713,7 @@ body {
     }
 }
 
-/* ✅ MARKER FLASHING ANIMATION for HIGH/EXTREME alerts */
+/* âœ… MARKER FLASHING ANIMATION for HIGH/EXTREME alerts */
 @keyframes markerPulse {
 
     0%,
@@ -1724,7 +1732,7 @@ body {
     animation: markerPulse 1s ease-in-out infinite !important;
 }
 
-/* ✅ DEVICE MARKER ALERT — Đỏ + nhấp nháy khi có cảnh báo */
+/* âœ… DEVICE MARKER ALERT â€” Äá» + nháº¥p nhÃ¡y khi cÃ³ cáº£nh bÃ¡o */
 @keyframes markerDeviceBlink {
 
     0%,
@@ -1909,7 +1917,7 @@ body {
 }
 
 /* ========================================
-   ALERT BANNER - Cảnh báo giữa màn hình
+   ALERT BANNER - Cáº£nh bÃ¡o giá»¯a mÃ n hÃ¬nh
 ======================================== */
 .alert-banner {
     --alert-banner-bg: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
@@ -1921,7 +1929,7 @@ body {
     display: none;
     position: fixed;
     top: 80px;
-    /* Nằm giữa khoảng trống: left sidebar 340px, right sidebar 420px */
+    /* Náº±m giá»¯a khoáº£ng trá»‘ng: left sidebar 340px, right sidebar 420px */
     left: calc(var(--sidebar-width) + (100vw - var(--sidebar-width) - 420px) / 2);
     transform: translateX(-50%) translateY(-120%);
     z-index: 9998;
@@ -1955,7 +1963,7 @@ body {
 
 .alert-banner.show {
     display: flex;
-    /* Hiện lại khi có class .show */
+    /* Hiá»‡n láº¡i khi cÃ³ class .show */
     transform: translateX(-50%) translateY(0);
 }
 
@@ -2734,7 +2742,7 @@ body {
     letter-spacing: -0.01em;
 }
 
-/* === Map Navbar buttons — visible in both themes === */
+/* === Map Navbar buttons â€” visible in both themes === */
 .top-navbar .btn-outline-primary {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
@@ -3046,7 +3054,7 @@ body {
     position: fixed;
     top: 64px;
     right: 420px;
-    /* Sát lề trái của detail-sidebar (420px) */
+    /* SÃ¡t lá» trÃ¡i cá»§a detail-sidebar (420px) */
     width: 320px;
     height: auto;
     max-height: calc(100vh - 100px);
@@ -3134,7 +3142,7 @@ body {
     background: var(--border-light);
 }
 
-/* Card Item — vertical stack */
+/* Card Item â€” vertical stack */
 .adv-item {
     background: rgba(var(--bg-secondary-rgb), 0.4);
     backdrop-filter: blur(8px);

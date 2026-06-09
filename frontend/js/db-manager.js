@@ -10,7 +10,10 @@ class DatabaseManager {
         this.currentEditModal = null;
 
         if (!this.token) {
-            window.location.href = '/pages/login.html';
+            window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
+            sessionStorage.setItem('loginReturnView', 'admin');
+            sessionStorage.setItem('openLandingLogin', 'true');
+            window.location.href = '/';
             return;
         }
 
@@ -500,7 +503,17 @@ class DatabaseManager {
 }
 
 // Initialization
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('✅ [DB MANAGER] DOM loaded, initializing...');
-    window.dbManager = new DatabaseManager();
-});
+function bootstrapDatabaseManager() {
+    console.log('[DB MANAGER] Initializing...');
+    if (!window.dbManager) {
+        window.dbManager = new DatabaseManager();
+    }
+}
+
+window.bootstrapDatabaseManager = bootstrapDatabaseManager;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapDatabaseManager, { once: true });
+} else {
+    bootstrapDatabaseManager();
+}

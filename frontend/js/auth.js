@@ -150,6 +150,7 @@ class AuthManager {
         localStorage.removeItem('rememberMe');
         sessionStorage.removeItem('token');
         sessionStorage.removeItem('justLoggedIn');
+        sessionStorage.removeItem('loginReturnView');
         sessionStorage.removeItem('kicked_alert_shown');
 
         // Redirect
@@ -164,7 +165,7 @@ class AuthManager {
 
         const authBtn = document.getElementById('auth-btn');
         if (!authBtn) {
-            console.warn('⚠️ [AUTH] Auth button not found');
+            console.debug('[AUTH] Auth button not mounted yet');
             return;
         }
 
@@ -225,10 +226,23 @@ class AuthManager {
             console.log('ℹ️ [AUTH] Not authenticated');
 
             // Reset auth button
-            authBtn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i> Đăng nhập';
+            authBtn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i> <span>Login</span>';
             authBtn.classList.add('btn-primary');
             authBtn.classList.remove('btn-outline-danger');
-            authBtn.onclick = () => window.location.href = '/pages/login.html';
+            authBtn.onclick = () => {
+                const currentPath = window.location.pathname;
+                const currentView = currentPath === '/management' || currentPath === '/admin'
+                    ? 'admin'
+                    : 'map';
+                sessionStorage.setItem('loginReturnView', currentView);
+                if (typeof window.appNavigate === 'function') {
+                    sessionStorage.setItem('openLandingLogin', 'true');
+                    window.location.href = '/';
+                    return;
+                }
+                sessionStorage.setItem('openLandingLogin', 'true');
+                window.location.href = '/';
+            };
 
             // Hide user elements
             const userDisplay = document.getElementById('user-display');
@@ -256,8 +270,9 @@ class AuthManager {
         }
     }
 
-    requireAuth(redirectUrl = '/pages/login.html') {
+    requireAuth(redirectUrl = '/') {
         if (!this.isAuthenticated()) {
+            sessionStorage.setItem('openLandingLogin', 'true');
             window.location.href = redirectUrl;
             return false;
         }
@@ -275,7 +290,8 @@ class AuthManager {
 
     async apiFetch(url, options = {}) {
         if (!this.token) {
-            window.location.href = '/pages/login.html';
+            sessionStorage.setItem('openLandingLogin', 'true');
+            window.location.href = '/';
             return;
         }
 

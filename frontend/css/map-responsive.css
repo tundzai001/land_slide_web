@@ -1,0 +1,385 @@
+/* Map route responsive contract
+   Desktop: right sidebar.
+   Tablet/mobile: detail panel becomes a bottom sheet, controls stay thumb-safe. */
+
+:root {
+    --map-navbar-h: 56px;
+    --map-edge: 16px;
+    --map-bottom-safe: max(18px, env(safe-area-inset-bottom));
+    --map-control-size: 42px;
+}
+
+.top-navbar {
+    height: var(--map-navbar-h);
+    gap: 12px;
+    padding-inline: var(--map-edge);
+}
+
+.top-navbar > .d-flex:first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.top-navbar > .d-flex:last-child {
+    min-width: 0;
+    flex: 0 1 auto;
+    justify-content: flex-end;
+}
+
+.brand-text,
+.brand-text span {
+    min-width: 0;
+}
+
+.brand-text {
+    white-space: nowrap;
+}
+
+.brand-text span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#map {
+    top: 0;
+    height: 100svh;
+}
+
+.station-list-sidebar {
+    top: calc(var(--map-navbar-h) + 8px);
+    height: calc(100svh - var(--map-navbar-h) - 8px);
+}
+
+.detail-sidebar {
+    top: calc(var(--map-navbar-h) + 8px);
+    width: clamp(360px, 34vw, 560px);
+    height: calc(100svh - var(--map-navbar-h) - 8px);
+}
+
+.gnss-advanced-sidepanel {
+    top: calc(var(--map-navbar-h) + 8px);
+    right: clamp(360px, 34vw, 560px);
+    width: clamp(300px, 28vw, 420px);
+    max-height: calc(100svh - var(--map-navbar-h) - 32px);
+}
+
+.sidebar-content {
+    padding: clamp(14px, 1.5vw, 20px);
+}
+
+.status-bar,
+.sensor-label,
+.sensor-label span,
+.sensor-value-large {
+    min-width: 0;
+}
+
+.sensor-label span:first-child {
+    overflow-wrap: anywhere;
+}
+
+.sensor-value-large {
+    font-size: clamp(1.15rem, 1.8vw, 1.45rem);
+}
+
+.sensor-full-width .sensor-value-large {
+    font-size: clamp(1.35rem, 2.3vw, 2rem);
+}
+
+.custom-map-controls,
+.heatmap-toggle-wrap {
+    right: max(var(--map-edge), env(safe-area-inset-right));
+}
+
+.custom-map-controls {
+    bottom: var(--map-bottom-safe);
+}
+
+.heatmap-toggle-wrap {
+    bottom: calc(var(--map-bottom-safe) + 94px);
+}
+
+.map-ctrl-btn,
+.heatmap-toggle-btn {
+    width: var(--map-control-size);
+    height: var(--map-control-size);
+}
+
+.rescue-fab {
+    right: calc(var(--map-edge) + var(--map-control-size) + 16px);
+    bottom: var(--map-bottom-safe);
+    max-width: min(360px, calc(100vw - var(--map-edge) * 2 - var(--map-control-size) - 24px));
+}
+
+@media (max-width: 1180px) {
+    .detail-sidebar {
+        width: min(50vw, 520px);
+    }
+
+    .gnss-advanced-sidepanel {
+        right: min(50vw, 520px);
+        width: min(42vw, 420px);
+    }
+}
+
+@media (max-width: 900px) {
+    :root {
+        --map-navbar-h: 58px;
+        --map-edge: 12px;
+    }
+
+    .top-navbar {
+        gap: 8px;
+    }
+
+    .top-navbar > .d-flex {
+        gap: 8px !important;
+    }
+
+    .navbar-hamburger {
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
+        padding: 0;
+        font-size: 1.35rem;
+    }
+
+    .brand-text {
+        max-width: min(34vw, 220px);
+        gap: 7px;
+        font-size: 1rem;
+    }
+
+    #admin-nav-btn {
+        max-width: 154px;
+        min-height: 38px;
+        padding: 0 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 0.84rem;
+    }
+
+    .layer-toggle-switch {
+        height: 38px;
+        padding: 0 7px;
+        gap: 5px;
+    }
+
+    #theme-toggle-btn {
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
+    }
+
+    #auth-btn {
+        min-width: 66px;
+        height: 38px;
+        padding: 0 10px !important;
+        border-radius: 9px;
+        font-size: 0.78rem;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    #auth-btn i {
+        margin: 0 !important;
+        font-size: 0.95rem;
+    }
+
+    #auth-btn span {
+        display: inline;
+    }
+
+    .station-list-sidebar {
+        top: var(--map-navbar-h);
+        width: 100%;
+        height: calc(100svh - var(--map-navbar-h));
+        border-right: 0;
+        transform: translateX(-100%);
+    }
+
+    .station-list-sidebar.active,
+    .station-list-sidebar:not(.hidden):not(.force-hidden) {
+        transform: translateX(0);
+    }
+
+    .sidebar-close-tab {
+        display: none;
+    }
+
+    .detail-sidebar {
+        top: auto;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: min(60svh, 560px);
+        border-left: 0;
+        border-top: 1px solid var(--border-color);
+        border-radius: 18px 18px 0 0;
+        transform: translateY(100%);
+        overscroll-behavior: contain;
+    }
+
+    .detail-sidebar.active {
+        transform: translateY(0) !important;
+    }
+
+    .gnss-advanced-sidepanel {
+        top: calc(var(--map-navbar-h) + 10px);
+        left: max(12px, env(safe-area-inset-left));
+        right: max(12px, env(safe-area-inset-right));
+        width: auto;
+        max-height: min(42svh, 440px);
+        border-radius: 14px;
+        transform: translateY(-12px);
+    }
+
+    .gnss-advanced-sidepanel.active {
+        transform: translateY(0);
+    }
+
+    .sensor-compact {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+}
+
+@media (max-width: 600px) {
+    :root {
+        --map-navbar-h: 52px;
+        --map-edge: 8px;
+        --map-control-size: 40px;
+    }
+
+    .top-navbar {
+        padding-inline: 8px;
+    }
+
+    .brand-text {
+        max-width: 118px;
+        font-size: 0.82rem;
+        gap: 5px;
+    }
+
+    .brand-text i {
+        display: none;
+    }
+
+    #admin-nav-btn {
+        max-width: 44px;
+        width: 44px;
+        min-width: 44px;
+        padding: 0 !important;
+        justify-content: center;
+        color: transparent;
+    }
+
+    #admin-nav-btn i {
+        color: #fff;
+        margin: 0 !important;
+        font-size: 1rem;
+    }
+
+    #theme-toggle-btn {
+        display: none;
+    }
+
+    .layer-toggle-switch {
+        transform: scale(0.92);
+        transform-origin: right center;
+    }
+
+    #auth-btn {
+        min-width: 56px;
+        height: 36px;
+        padding: 0 8px !important;
+        font-size: 0.72rem;
+    }
+
+    .detail-sidebar {
+        height: min(62svh, 520px);
+    }
+
+    .sidebar-header {
+        padding: 12px 14px !important;
+    }
+
+    .sidebar-content {
+        padding: 12px;
+    }
+
+    .status-bar {
+        padding: 12px 14px;
+    }
+
+    .sensor-compact {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .sensor-item {
+        padding: 10px;
+        border-radius: 10px;
+    }
+
+    .sensor-label {
+        font-size: 0.68rem;
+        line-height: 1.25;
+    }
+
+    .gnss-fix-badge,
+    .sensor-offline-badge,
+    .imu-offline-badge {
+        font-size: 0.56rem;
+        padding: 3px 5px;
+    }
+
+    .sensor-value-large {
+        font-size: 1.12rem;
+    }
+
+    .sensor-unit {
+        font-size: 0.76rem;
+    }
+
+    .custom-map-controls {
+        border-radius: 12px;
+    }
+
+    .heatmap-toggle-wrap {
+        bottom: calc(var(--map-bottom-safe) + 90px);
+    }
+
+    .rescue-fab {
+        left: var(--map-edge);
+        right: calc(var(--map-edge) + var(--map-control-size) + 14px);
+        width: auto;
+        min-width: 0;
+        height: 48px;
+        padding: 0 14px;
+        border-radius: 14px;
+    }
+
+    .rescue-fab-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 380px) {
+    .brand-text span {
+        max-width: 82px;
+    }
+
+    .layer-toggle-switch {
+        display: none;
+    }
+
+    #auth-btn {
+        min-width: 52px;
+        padding: 0 7px !important;
+    }
+}

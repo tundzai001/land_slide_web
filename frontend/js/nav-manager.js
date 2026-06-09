@@ -65,7 +65,9 @@ class NavManager {
                 if (window.authManager && window.authManager.isAuthenticated()) {
                     window.authManager.logout();
                 } else {
-                    window.location.href = '/pages/login.html';
+                    sessionStorage.setItem('loginReturnView', 'map');
+                    sessionStorage.setItem('openLandingLogin', 'true');
+                    window.location.href = '/';
                 }
             });
             console.log('✅ [NAV] Auth button connected');

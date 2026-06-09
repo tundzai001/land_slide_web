@@ -7,7 +7,7 @@ import time
 from collections import deque
 from typing import Optional, Dict, Any
 
-from app.modules.geodetic import VN2000Converter, DatumParams
+from app.modules.geodetic import VN2000Converter, DatumParams, parse_vn2000_central_meridian, normalize_vn2000_l0_value
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class GNSSVelocityProcessor:
         try:
             from app.models.config import GNSSOrigin, Station
             from sqlalchemy import select, update
-            from app.main import manager  # WebSocket manager
+            from app.websocket import manager  # WebSocket manager
             
             async with self.db_session_factory() as db:
                 # 1. Cập nhật bảng GNSSOrigin (dành cho Processor)
@@ -521,6 +521,10 @@ class GNSSVelocityProcessor:
         vn_cfg = (station_config or {}).get("vn2000") or (station_config or {}).get("vn2000_params") or {}
         if vn_cfg and vn_cfg.get("enabled"):
             try:
+                l0_deg, _ = normalize_vn2000_l0_value(vn_cfg.get("l0_deg", 105.0))
+                if vn_cfg.get("l0_raw") or str(vn_cfg.get("l0_input_format", "")).startswith("deg_min"):
+                    l0_deg, _ = parse_vn2000_central_meridian(vn_cfg.get("l0_raw", l0_deg), default=l0_deg)
+
                 custom_datum = DatumParams(
                     dx=float(vn_cfg.get("dx", 191.90441429)),
                     dy=float(vn_cfg.get("dy", 39.30318279)),
@@ -529,7 +533,7 @@ class GNSSVelocityProcessor:
                     ry=float(vn_cfg.get("ry", -0.01975479)),
                     rz=float(vn_cfg.get("rz", 0.00427372)),
                     k=float(vn_cfg.get("k", 0.999999747093722)),
-                    l0_deg=float(vn_cfg.get("l0_deg", 105.0)),
+                    l0_deg=l0_deg,
                     k0=float(vn_cfg.get("k0", 0.9999)),
                     false_e=float(vn_cfg.get("false_e", 500000.0)),
                     false_n=float(vn_cfg.get("false_n", 0.0)),

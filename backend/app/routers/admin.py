@@ -3,15 +3,15 @@
 # ==============================================================================
 
 import asyncio
+import csv
 import json
 import logging
 import time
-import zipfile 
+import zipfile
 from typing import Optional, Dict, List, Any
 
 import paho.mqtt.client as mqtt
-import pandas as pd
-from io import BytesIO
+from io import BytesIO, StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -36,6 +36,25 @@ router = APIRouter(
     prefix="/api/admin",
     tags=["Admin Console"]
 )
+
+
+def rows_to_csv(rows: List[Dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+
+    fieldnames = []
+    seen = set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                seen.add(key)
+                fieldnames.append(key)
+
+    out = StringIO()
+    writer = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()
 
 
 # ------------------------------------------------------------------
@@ -315,6 +334,9 @@ def get_default_station_config():
             "imu": ""
         },
         # Nhóm cảnh báo IMU
+        "alerting": {
+            "enabled": True
+        },
         "ImuAlerting": {
             "tilt_warning_deg": 5.0,
             "tilt_critical_deg": 15.0,
@@ -506,16 +528,16 @@ async def export_database_csv(
                     res = await config_db.execute(select(model_config.Project))
                     data = res.scalars().all()
                     if data:
-                        df = pd.DataFrame([{
+                        rows = [{
                             'id': p.id,
                             'code': p.project_code,
                             'name': p.name,
                             'description': p.description,
                             'active': p.is_active
-                        } for p in data])
+                        } for p in data]
                         
                         # Ghi vào file CSV bên trong ZIP
-                        zf.writestr("projects.csv", df.to_csv(index=False))
+                        zf.writestr("projects.csv", rows_to_csv(rows))
                         has_data = True
                         logger.info(f"✅ CSV: Exported {len(data)} projects")
                 except Exception as e:
@@ -529,16 +551,16 @@ async def export_database_csv(
                     res = await config_db.execute(select(model_config.Station))
                     data = res.scalars().all()
                     if data:
-                        df = pd.DataFrame([{
+                        rows = [{
                             'id': s.id,
                             'code': s.station_code,
                             'name': s.name,
                             'status': s.status,
                             'last_update': datetime.fromtimestamp(s.last_update).strftime('%Y-%m-%d %H:%M:%S') if s.last_update else '',
                             'location': str(s.location)
-                        } for s in data])
-                        
-                        zf.writestr("stations.csv", df.to_csv(index=False))
+                        } for s in data]
+
+                        zf.writestr("stations.csv", rows_to_csv(rows))
                         has_data = True
                         logger.info(f"✅ CSV: Exported {len(data)} stations")
                 except Exception as e:
@@ -552,15 +574,15 @@ async def export_database_csv(
                     res = await config_db.execute(select(model_config.Device))
                     data = res.scalars().all()
                     if data:
-                        df = pd.DataFrame([{
+                        rows = [{
                             'id': d.id,
                             'code': d.device_code,
                             'type': d.device_type,
                             'topic': d.mqtt_topic,
                             'station_id': d.station_id
-                        } for d in data])
-                        
-                        zf.writestr("devices.csv", df.to_csv(index=False))
+                        } for d in data]
+
+                        zf.writestr("devices.csv", rows_to_csv(rows))
                         has_data = True
                         logger.info(f"✅ CSV: Exported {len(data)} devices")
                 except Exception as e:
@@ -608,9 +630,8 @@ async def export_database_csv(
                             
                         # Ghi từng group ra từng file CSV trong file ZIP
                         for group_name, items in grouped_data.items():
-                            df = pd.DataFrame(items)
                             file_name = f"sensor_data/{group_name}.csv"
-                            zf.writestr(file_name, df.to_csv(index=False))
+                            zf.writestr(file_name, rows_to_csv(items))
                             has_data = True
                             
                         logger.info(f"✅ CSV: Exported {len(data)} sensor records into {len(grouped_data)} files")
@@ -632,7 +653,7 @@ async def export_database_csv(
                     data = res.scalars().all()
                     
                     if data:
-                        df = pd.DataFrame([{
+                        rows = [{
                             'id': a.id,
                             'time_str': datetime.fromtimestamp(a.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
                             'station_id': a.station_id,
@@ -640,9 +661,9 @@ async def export_database_csv(
                             'category': a.category,
                             'message': a.message,
                             'resolved': a.is_resolved
-                        } for a in data])
-                        
-                        zf.writestr("alerts.csv", df.to_csv(index=False))
+                        } for a in data]
+
+                        zf.writestr("alerts.csv", rows_to_csv(rows))
                         has_data = True
                         logger.info(f"✅ CSV: Exported {len(data)} alerts")
                 except Exception as e:

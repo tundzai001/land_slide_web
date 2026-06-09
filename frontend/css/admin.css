@@ -554,7 +554,7 @@ body {
 ======================================== */
 .form-label {
     color: var(--text-primary) !important;
-    /* ← THÊM */
+    /* Added */
     font-weight: 600;
     margin-bottom: 8px;
 }
@@ -862,7 +862,7 @@ body {
         --navbar-height: 60px;
     }
 
-    /* SIDEBAR → HORIZONTAL TOP NAV */
+    /* Sidebar to horizontal top nav */
     .admin-sidebar {
         position: fixed;
         top: 0;
@@ -1618,7 +1618,7 @@ small.text-muted span.fw-bold {
    COMPREHENSIVE LIGHT/DARK MODE TEXT FIXES
 ======================================== */
 
-/* === Card text — always use theme vars === */
+/* Card text uses theme vars */
 .card-title,
 .card-body h5,
 .card-body h6 {
@@ -1629,7 +1629,7 @@ small.text-muted span.fw-bold {
     color: var(--text-muted) !important;
 }
 
-/* === btn-outline-primary — visible in both modes === */
+/* btn-outline-primary visible in both modes */
 .btn-outline-primary {
     color: var(--accent-primary) !important;
     border-color: var(--accent-primary) !important;
@@ -1640,7 +1640,7 @@ small.text-muted span.fw-bold {
     color: white !important;
 }
 
-/* === btn-outline-danger — visible in both modes === */
+/* btn-outline-danger visible in both modes */
 .btn-outline-danger {
     color: var(--accent-danger) !important;
     border-color: var(--accent-danger) !important;
@@ -1894,7 +1894,7 @@ input[type="number"] {
     color: #22c55e !important;
 }
 
-/* Assigned device detail (station · project) */
+/* Assigned device detail: station and project */
 .pi-assign-detail {
     display: block;
     font-size: .7rem !important;
@@ -2223,4 +2223,29 @@ input[type="number"] {
 .form-check.form-switch .form-check-label {
     margin-bottom: 0;
     cursor: pointer;
+}
+
+.project-checkbox-list .form-check,
+#assignProjectModal .form-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding-left: 0;
+}
+
+.project-checkbox-list .form-check-input,
+#assignProjectModal .form-check-input {
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+    margin: 0 !important;
+    flex: 0 0 16px;
+}
+
+.project-checkbox-list .form-check-label,
+#assignProjectModal .form-check-label {
+    margin: 0;
+    line-height: 1.35;
 }

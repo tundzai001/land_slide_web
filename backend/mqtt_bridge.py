@@ -141,6 +141,9 @@ class MQTTBridge:
     def _apply_runtime_defaults_to_station_config(self, station_config: dict) -> dict:
         """Station config has priority; global system config is fallback."""
         cfg = dict(station_config or {})
+        alerting_cfg = dict(cfg.get("alerting", {}) or {})
+        alerting_cfg.setdefault("enabled", True)
+        cfg["alerting"] = alerting_cfg
 
         gnss_cfg = dict(cfg.get("GnssAlerting", {}) or {})
         rain_cfg = dict(cfg.get("RainAlerting", {}) or {})
@@ -165,6 +168,19 @@ class MQTTBridge:
         cfg["Water"] = water_cfg
         cfg["ImuAlerting"] = imu_cfg
         return cfg
+
+    def _is_station_alerting_enabled(self, station_config: Optional[dict]) -> bool:
+        cfg = station_config or {}
+        alerting_cfg = cfg.get("alerting", {}) or {}
+        return alerting_cfg.get("enabled", cfg.get("alerting_enabled", True)) is not False
+
+    def _reset_station_alert_state(self, station_id: int):
+        """Drop in-memory alert counters so disabled stations restart cleanly if re-enabled."""
+        try:
+            self.analyzer.alert_counters.pop(station_id, None)
+            self.analyzer.gnss_recent_history.pop(station_id, None)
+        except Exception as e:
+            logger.warning(f"Could not reset alert state for station {station_id}: {e}")
 
     def reload_config(self, config_dict: dict):
         """Apply system config at runtime and reconnect MQTT with new credentials."""
@@ -558,9 +574,38 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"❌ Alert data save error: {e}")
 
+    async def _suppress_station_alerts(self, station_id: int):
+        """Resolve active alerts and keep station status LOW when alerting is disabled."""
+        try:
+            async with DataSessionLocal() as db_data:
+                res = await db_data.execute(
+                    model_data.Alert.__table__.update()
+                    .where(and_(
+                        model_data.Alert.station_id == station_id,
+                        model_data.Alert.is_resolved == False
+                    ))
+                    .values(is_resolved=True)
+                )
+                if res.rowcount > 0:
+                    await db_data.commit()
+                    cmd_topic = f"landslide/{station_id}/command"
+                    self.client.publish(cmd_topic, json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())}), qos=1)
+                    logger.info(f"Alerting disabled for station {station_id}; resolved {res.rowcount} active alerts.")
+
+            await manager.broadcast({
+                "type": "station_status",
+                "station_id": station_id,
+                "risk_level": "LOW"
+            })
+        except Exception as e:
+            logger.error(f"Error suppressing alerts for station {station_id}: {e}")
+
     async def _get_station_active_alert_summary(self, station_id: int, station_config: Optional[dict] = None) -> Dict[str, Any]:
         """Return highest active risk level and unresolved alert count for a station."""
         try:
+            if not self._is_station_alerting_enabled(station_config):
+                return {"risk_level": "LOW", "unresolved_count": 0}
+
             now_ts = int(time.time())
             gnss_offline = self._get_sensor_offline_threshold(station_config or {}, 'gnss')
             rain_offline = self._get_sensor_offline_threshold(station_config or {}, 'rain')
@@ -923,21 +968,28 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"❌ LatestSensorCache upsert error: {e}")
 
+        alerting_enabled = self._is_station_alerting_enabled(station_config)
+
         # 2. ANALYZE
         alert = None
         data_wrapper = [{"timestamp": current_timestamp, "data": processed_data}]
-        
-        try:
-            if sensor_type == 'gnss':
-                alert = self.analyzer.analyze_gnss_displacement(station_id, data_wrapper, station_config)
-            elif sensor_type == 'rain':
-                alert = self.analyzer.analyze_rainfall(station_id, data_wrapper, [], station_config)
-            elif sensor_type == 'water':
-                alert = self.analyzer.analyze_water_level(station_id, data_wrapper, station_config)
-            elif sensor_type == 'imu':
-                alert = self.analyzer.analyze_tilt(station_id, data_wrapper, station_config)
-        except Exception as e:
-            logger.error(f"Analyzer error: {e}")
+
+        if not alerting_enabled:
+            self._reset_station_alert_state(station_id)
+            await self._suppress_station_alerts(station_id)
+            alert = {"level": "PENDING", "category": "alerting_disabled"}
+        else:
+            try:
+                if sensor_type == 'gnss':
+                    alert = self.analyzer.analyze_gnss_displacement(station_id, data_wrapper, station_config)
+                elif sensor_type == 'rain':
+                    alert = self.analyzer.analyze_rainfall(station_id, data_wrapper, [], station_config)
+                elif sensor_type == 'water':
+                    alert = self.analyzer.analyze_water_level(station_id, data_wrapper, station_config)
+                elif sensor_type == 'imu':
+                    alert = self.analyzer.analyze_tilt(station_id, data_wrapper, station_config)
+            except Exception as e:
+                logger.error(f"Analyzer error: {e}")
 
         # ---------------------------------------------------------
         # ✅ REALTIME BROADCAST 2: STATION STATUS (Màu sắc)

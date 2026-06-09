@@ -1,4 +1,4 @@
-// =====================================================
+﻿// =====================================================
 // ADMIN MANAGER - COMPLETE VERSION WITH ALL FEATURES
 // =====================================================
 
@@ -36,7 +36,7 @@ class AdminManager {
             { name: 'Extremely rapid', threshold: 5, unit: 'm/s', description: '> 5 m/s', editable: true }
         ];
 
-        // ✅ Default offline thresholds (seconds)
+        // âœ… Default offline thresholds (seconds)
         this.defaultOfflineThresholds = {
             gnss: 30,
             rain: 60,
@@ -45,7 +45,14 @@ class AdminManager {
         };
 
         if (!this.token) {
-            window.location.href = '/pages/login.html';
+            console.log('[SPA-NAV] admin no token redirect landing-login', {
+                path: window.location.pathname,
+                search: window.location.search,
+            });
+            window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
+            sessionStorage.setItem('loginReturnView', 'admin');
+            sessionStorage.setItem('openLandingLogin', 'true');
+            window.location.href = '/';
             return;
         }
 
@@ -53,7 +60,35 @@ class AdminManager {
         this.setupWebSocketListener();
     }
 
-    /** Lắng nghe các sự kiện realtime từ Server */
+    /** Láº¯ng nghe cÃ¡c sá»± kiá»‡n realtime tá»« Server */
+    parseVn2000CentralMeridian(rawValue) {
+        const raw = String(rawValue ?? '').trim().replace(',', '.');
+        if (!raw) return { value: 105.0, format: 'default' };
+
+        const dmsMatch = raw.match(/^([+-]?\d+(?:\.\d+)?)\s*(?:Â°|d|\s)\s*(\d+(?:\.\d+)?)\s*(?:'|m)?$/i);
+        if (dmsMatch) {
+            const deg = Number(dmsMatch[1]);
+            const minutes = Number(dmsMatch[2]);
+            if (Number.isFinite(deg) && Number.isFinite(minutes) && minutes >= 0 && minutes < 60) {
+                const sign = deg < 0 ? -1 : 1;
+                return { value: sign * (Math.abs(deg) + minutes / 60), format: 'deg_min' };
+            }
+        }
+
+        const compactMatch = raw.match(/^([+-]?\d+)\.(\d{2})$/);
+        if (compactMatch) {
+            const deg = Number(compactMatch[1]);
+            const minutes = Number(compactMatch[2]);
+            if (Number.isFinite(deg) && minutes > 0 && minutes < 60) {
+                const sign = deg < 0 ? -1 : 1;
+                return { value: sign * (Math.abs(deg) + minutes / 60), format: 'deg_min_compact' };
+            }
+        }
+
+        const decimal = Number(raw);
+        return { value: Number.isFinite(decimal) ? decimal : 105.0, format: 'decimal_deg' };
+    }
+
     setupWebSocketListener() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/admin?token=${this.token}`;
@@ -63,9 +98,9 @@ class AdminManager {
             this.ws.onmessage = (event) => {
                 const message = JSON.parse(event.data);
                 if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
-                    console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
+                    console.log('ðŸŽ¯ GNSS Origin Locked via WebSocket:', message.data);
 
-                    // Cập nhật ngay lập tức lên UI
+                    // Cáº­p nháº­t ngay láº­p tá»©c lÃªn UI
                     const latEl = document.getElementById('origin-lat');
                     const lonEl = document.getElementById('origin-lon');
                     const hEl = document.getElementById('origin-h');
@@ -76,16 +111,16 @@ class AdminManager {
                     if (hEl) hEl.value = message.data.h;
 
                     if (statusEl) {
-                        statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
+                        statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> ÄÃ£ tá»± Ä‘á»™ng cáº­p nháº­t Ä‘iá»ƒm gá»‘c má»›i!</span>';
                         statusEl.className = 'small mt-1';
                     }
 
-                    window.toast?.success('Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+                    window.toast?.success('Thiáº¿t bá»‹ Ä‘Ã£ tá»± Ä‘á»™ng khÃ³a Ä‘iá»ƒm gá»‘c má»›i vÃ  cáº­p nháº­t lÃªn mÃ n hÃ¬nh!');
                 }
             };
 
             this.ws.onclose = () => {
-                // Thử kết nối lại sau 5 giây nếu mất kết nối
+                // Thá»­ káº¿t ná»‘i láº¡i sau 5 giÃ¢y náº¿u máº¥t káº¿t ná»‘i
                 setTimeout(() => this.setupWebSocketListener(), 5000);
             };
         } catch (e) {
@@ -190,6 +225,12 @@ class AdminManager {
         const addUserModal = document.getElementById('addUserModal');
         if (addUserModal) {
             addUserModal.addEventListener('show.bs.modal', () => {
+                const roleEl = document.getElementById('new-role');
+                const groupEl = document.getElementById('project-assign-group');
+                if (groupEl) {
+                    const role = roleEl?.value || 'viewer';
+                    groupEl.style.display = (role === 'operator' || role === 'viewer') ? 'block' : 'none';
+                }
                 this.loadProjectsForModal();
             });
         }
@@ -197,7 +238,7 @@ class AdminManager {
         // Fetch current user role and apply restrictions
         this.fetchCurrentUserRole();
 
-        // ✅ Auto-refresh Pi Devices tab every 15s to see online status quickly
+        // âœ… Auto-refresh Pi Devices tab every 15s to see online status quickly
         setInterval(() => {
             const piTab = document.getElementById('tab-pi');
             if (piTab && piTab.classList.contains('active')) {
@@ -212,7 +253,7 @@ class AdminManager {
             }
         }, 20000);
 
-        console.log('✅ [ADMIN] Initialized successfully');
+        console.log('âœ… [ADMIN] Initialized successfully');
     }
 
     /** Fetch current user role from API and apply role-based restrictions */
@@ -238,22 +279,22 @@ class AdminManager {
         }
     }
 
-    /** Apply operator restrictions — hide Users/DB/System tabs, but allow editing stations in assigned projects */
+    /** Apply operator restrictions â€” hide Users/DB/System tabs, but allow editing stations in assigned projects */
     applyOperatorRestrictions() {
-        console.log('🔧 Applying operator restrictions');
+        console.log('ðŸ”§ Applying operator restrictions');
 
         // Hide sidebar tabs: Users, Database, System (keep Projects and Pi Devices)
         document.querySelectorAll('.admin-sidebar .nav-item').forEach(item => {
             const link = item.querySelector('[data-tab]');
             if (link) {
                 const tab = link.getAttribute('data-tab');
-                if (['tab-users', 'tab-database', 'tab-system'].includes(tab)) {
+                if (['tab-users', 'tab-database', 'tab-system', 'tab-rescue'].includes(tab)) {
                     item.style.display = 'none';
                 }
             }
         });
 
-        // Hide "Tạo Dự án" button (operator can't create new projects)
+        // Hide "Táº¡o Dá»± Ã¡n" button (operator can't create new projects)
         const createProjBtn = document.querySelector('#action-buttons-container');
         if (createProjBtn) createProjBtn.style.display = 'none';
 
@@ -261,7 +302,7 @@ class AdminManager {
         const summaryCards = document.getElementById('pi-summary-cards');
         if (summaryCards) summaryCards.style.display = 'none';
 
-        // Hide Chọn (select) toggle button
+        // Hide Chá»n (select) toggle button
         const selectToggle = document.getElementById('pi-select-toggle');
         if (selectToggle) selectToggle.style.display = 'none';
 
@@ -273,7 +314,7 @@ class AdminManager {
         // The backend already filters projects by assigned_projects
     }
 
-    // ✅ THÊM HÀM MỚI: Setup listeners cho offline threshold inputs
+    // âœ… THÃŠM HÃ€M Má»šI: Setup listeners cho offline threshold inputs
     setupOfflineThresholdListeners() {
         const timeoutInputs = [
             { id: 'offline-gnss', display: 'offline-gnss-display' },
@@ -306,8 +347,8 @@ class AdminManager {
             const rows = await res.json();
             this.renderRescueRequests(rows || []);
         } catch (e) {
-            if (!silent) window.toast?.error('Không tải được danh sách rescue requests');
-            body.innerHTML = '<tr><td colspan="8" class="text-danger">Lỗi tải dữ liệu rescue requests</td></tr>';
+            if (!silent) window.toast?.error('KhÃ´ng táº£i Ä‘Æ°á»£c danh sÃ¡ch rescue requests');
+            body.innerHTML = '<tr><td colspan="8" class="text-danger">Lá»—i táº£i dá»¯ liá»‡u rescue requests</td></tr>';
             console.error('loadRescueRequests error:', e);
         }
     }
@@ -319,7 +360,7 @@ class AdminManager {
         this.updateRescueSummary(rows);
 
         if (!Array.isArray(rows) || rows.length === 0) {
-            body.innerHTML = '<tr><td colspan="8" class="text-muted">Chưa có yêu cầu cứu hộ</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="text-muted">ChÆ°a cÃ³ yÃªu cáº§u cá»©u há»™</td></tr>';
             return;
         }
 
@@ -334,17 +375,17 @@ class AdminManager {
                 : '--';
 
             const rescueTypeLabelMap = {
-                can_cuu_ho: 'Cần cứu hộ',
-                can_nhu_yeu_pham: 'Cần nhu yếu phẩm',
-                can_cuu_ho_xe: 'Cần cứu hộ xe',
-                khac: 'Khác'
+                can_cuu_ho: 'Cáº§n cá»©u há»™',
+                can_nhu_yeu_pham: 'Cáº§n nhu yáº¿u pháº©m',
+                can_cuu_ho_xe: 'Cáº§n cá»©u há»™ xe',
+                khac: 'KhÃ¡c'
             };
             const rescueType = String(r.rescue_type || '').toLowerCase();
             const rescueTypeLabel = rescueTypeLabelMap[rescueType] || '--';
             const sourceLink = String(r.source_link || '').trim();
             const isSafeSourceLink = /^https?:\/\//i.test(sourceLink);
             const sourceLinkHtml = (sourceLink && isSafeSourceLink)
-                ? `<a href="${esc(sourceLink)}" target="_blank" rel="noopener">Mở link nguồn</a>`
+                ? `<a href="${esc(sourceLink)}" target="_blank" rel="noopener">Má»Ÿ link nguá»“n</a>`
                 : '<span class="text-muted">--</span>';
             const provinceCity = String(r.province_city || '').trim() || '--';
             const imageUrl = String(r.image_url || r.image_data_url || '').trim();
@@ -353,11 +394,11 @@ class AdminManager {
                 : '<span class="text-muted">--</span>';
 
             const detailCellHtml = `
-                <div class="small mb-1"><strong>Mô tả:</strong> ${esc(r.message || '--')}</div>
-                <div class="small mb-1"><strong>Phân loại:</strong> ${esc(rescueTypeLabel)}</div>
-                <div class="small mb-1"><strong>Tỉnh/TP:</strong> ${esc(provinceCity)}</div>
-                <div class="small mb-1"><strong>Nguồn:</strong> ${sourceLinkHtml}</div>
-                <div class="small"><strong>Ảnh:</strong> ${imageHtml}</div>
+                <div class="small mb-1"><strong>MÃ´ táº£:</strong> ${esc(r.message || '--')}</div>
+                <div class="small mb-1"><strong>PhÃ¢n loáº¡i:</strong> ${esc(rescueTypeLabel)}</div>
+                <div class="small mb-1"><strong>Tá»‰nh/TP:</strong> ${esc(provinceCity)}</div>
+                <div class="small mb-1"><strong>Nguá»“n:</strong> ${sourceLinkHtml}</div>
+                <div class="small"><strong>áº¢nh:</strong> ${imageHtml}</div>
             `;
 
             const statusBadge = r.status === 'resolved'
@@ -372,7 +413,7 @@ class AdminManager {
                         <button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'rejected')">Reject</button>
                    </div>`
                 : `<button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteRescueRequest(${r.id})">
-                        <i class="bi bi-trash me-1"></i>Xóa
+                        <i class="bi bi-trash me-1"></i>XÃ³a
                    </button>`;
 
             return `<tr>
@@ -423,13 +464,13 @@ class AdminManager {
             window.toast?.success(`Rescue request #${requestId} -> ${status}`);
             await this.loadRescueRequests(true);
         } catch (e) {
-            window.toast?.error('Cập nhật trạng thái rescue request thất bại');
+            window.toast?.error('Cáº­p nháº­t tráº¡ng thÃ¡i rescue request tháº¥t báº¡i');
             console.error('updateRescueRequestStatus error:', e);
         }
     }
 
     async deleteRescueRequest(requestId) {
-        const ok = window.confirm(`Xóa rescue request #${requestId}? Chỉ nên xóa các case đã xử lý.`);
+        const ok = window.confirm(`XÃ³a rescue request #${requestId}? Chá»‰ nÃªn xÃ³a cÃ¡c case Ä‘Ã£ xá»­ lÃ½.`);
         if (!ok) return;
 
         try {
@@ -445,25 +486,25 @@ class AdminManager {
                 throw new Error(err?.detail || `HTTP ${res.status}`);
             }
 
-            window.toast?.success(`Đã xóa rescue request #${requestId}`);
+            window.toast?.success(`ÄÃ£ xÃ³a rescue request #${requestId}`);
             await this.loadRescueRequests(true);
         } catch (e) {
-            window.toast?.error(`Xóa rescue request thất bại: ${e.message}`);
+            window.toast?.error(`XÃ³a rescue request tháº¥t báº¡i: ${e.message}`);
             console.error('deleteRescueRequest error:', e);
         }
     }
 
-    // ✅ THÊM HÀM MỚI: Format thời gian offline
+    // âœ… THÃŠM HÃ€M Má»šI: Format thá»i gian offline
     formatOfflineTime(seconds) {
-        if (seconds < 60) return `${seconds} giây`;
+        if (seconds < 60) return `${seconds} giÃ¢y`;
         if (seconds < 3600) {
             const minutes = Math.floor(seconds / 60);
             const secs = seconds % 60;
-            return secs > 0 ? `${minutes} phút ${secs} giây` : `${minutes} phút`;
+            return secs > 0 ? `${minutes} phÃºt ${secs} giÃ¢y` : `${minutes} phÃºt`;
         }
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
-        return minutes > 0 ? `${hours} giờ ${minutes} phút` : `${hours} giờ`;
+        return minutes > 0 ? `${hours} giá» ${minutes} phÃºt` : `${hours} giá»`;
     }
 
     setupTabHandlers() {
@@ -517,7 +558,7 @@ class AdminManager {
         const breadcrumb = document.getElementById('project-breadcrumb');
         if (!breadcrumb) return;
 
-        let html = '<li class="breadcrumb-item"><a href="#" onclick="window.adminManager.resetNavigation(); window.adminManager.loadProjects();">Dự án</a></li>';
+        let html = '<li class="breadcrumb-item"><a href="#" onclick="window.adminManager.resetNavigation(); window.adminManager.loadProjects();">Dá»± Ã¡n</a></li>';
 
         if (this.currentView === 'stations') {
             const projectName = this.getProjectName(this.currentProjectId);
@@ -536,7 +577,7 @@ class AdminManager {
 
     getProjectName(projectId) {
         const project = this.projectsData?.find(p => p.id === projectId);
-        return project?.name || 'Dự án';
+        return project?.name || 'Dá»± Ã¡n';
     }
 
     // =========================================================================
@@ -560,7 +601,7 @@ class AdminManager {
             this.renderProjects();
         } catch (e) {
             console.error('Error loading projects:', e);
-            window.toast?.error('Không thể tải danh sách dự án');
+            window.toast?.error('KhÃ´ng thá»ƒ táº£i danh sÃ¡ch dá»± Ã¡n');
         }
     }
 
@@ -569,11 +610,11 @@ class AdminManager {
         const title = document.getElementById('current-view-title');
         const actionButtons = document.getElementById('action-buttons-container');
 
-        if (title) title.textContent = 'Danh sách Dự án';
+        if (title) title.textContent = 'Danh sÃ¡ch Dá»± Ã¡n';
         if (actionButtons) {
             actionButtons.innerHTML = `
                 <button class="btn btn-gradient" onclick="window.adminManager.openCreateProjectModal()">
-                    <i class="bi bi-plus-circle me-2"></i>Tạo Dự án
+                    <i class="bi bi-plus-circle me-2"></i>Táº¡o Dá»± Ã¡n
                 </button>
             `;
         }
@@ -582,7 +623,7 @@ class AdminManager {
             container.innerHTML = `
                 <div class="text-center py-5">
                     <i class="bi bi-inbox fs-1 text-muted"></i>
-                    <p class="text-muted mt-2">Chưa có dự án nào</p>
+                    <p class="text-muted mt-2">ChÆ°a cÃ³ dá»± Ã¡n nÃ o</p>
                 </div>
             `;
             return;
@@ -606,7 +647,7 @@ class AdminManager {
                                 </div>
                                 ${p.description ? `<p class="text-muted small mb-0">${p.description}</p>` : ''}
                                 ${p.location ? `<p class="text-muted small mb-0 mt-2"><i class="bi bi-geo-alt"></i> ${p.location}</p>` : ''}
-                                
+
                             </div>
                             <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
                                 <div class="d-flex gap-2">
@@ -637,7 +678,7 @@ class AdminManager {
         const location = document.getElementById('project-location').value.trim();
 
         if (!code || !name) {
-            window.toast?.warning('Vui lòng nhập đầy đủ thông tin');
+            window.toast?.warning('Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ thÃ´ng tin');
             return;
         }
 
@@ -658,10 +699,10 @@ class AdminManager {
 
             if (!res.ok) {
                 const error = await res.json();
-                throw new Error(error.detail || 'Lỗi tạo dự án');
+                throw new Error(error.detail || 'Lá»—i táº¡o dá»± Ã¡n');
             }
 
-            window.toast?.success('✅ Tạo dự án thành công!');
+            window.toast?.success('âœ… Táº¡o dá»± Ã¡n thÃ nh cÃ´ng!');
 
             const modal = bootstrap.Modal.getInstance(document.getElementById('createProjectModal'));
             modal.hide();
@@ -670,12 +711,12 @@ class AdminManager {
             this.loadProjects();
 
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     async deleteProject(projectId) {
-        if (!confirm('Bạn có chắc muốn xóa dự án này? Tất cả trạm bên trong sẽ bị xóa!')) return;
+        if (!confirm('Báº¡n cÃ³ cháº¯c muá»‘n xÃ³a dá»± Ã¡n nÃ y? Táº¥t cáº£ tráº¡m bÃªn trong sáº½ bá»‹ xÃ³a!')) return;
 
         try {
             const res = await fetch(`/api/admin/projects/${projectId}`, {
@@ -685,11 +726,11 @@ class AdminManager {
 
             if (!res.ok) throw new Error('Failed');
 
-            window.toast?.success('✅ Xóa dự án thành công!');
+            window.toast?.success('âœ… XÃ³a dá»± Ã¡n thÃ nh cÃ´ng!');
             this.loadProjects();
 
         } catch (e) {
-            window.toast?.error('❌ Lỗi xóa dự án');
+            window.toast?.error('âŒ Lá»—i xÃ³a dá»± Ã¡n');
         }
     }
 
@@ -719,7 +760,7 @@ class AdminManager {
 
         } catch (e) {
             console.error('Error loading stations:', e);
-            window.toast?.error('Không thể tải danh sách trạm');
+            window.toast?.error('KhÃ´ng thá»ƒ táº£i danh sÃ¡ch tráº¡m');
         }
     }
 
@@ -730,11 +771,11 @@ class AdminManager {
 
         const projectName = this.getProjectName(this.currentProjectId);
 
-        if (title) title.textContent = `Trạm trong "${projectName}"`;
+        if (title) title.textContent = `Tráº¡m trong "${projectName}"`;
         if (actionButtons) {
             actionButtons.innerHTML = `
                 <button class="btn btn-gradient" onclick="window.adminManager.openAddStationModal()">
-                    <i class="bi bi-plus-circle me-2"></i>Thêm Trạm
+                    <i class="bi bi-plus-circle me-2"></i>ThÃªm Tráº¡m
                 </button>
             `;
         }
@@ -743,7 +784,7 @@ class AdminManager {
             container.innerHTML = `
                 <div class="text-center py-5">
                     <i class="bi bi-hdd-network fs-1 text-muted"></i>
-                    <p class="text-muted mt-2">Chưa có trạm nào</p>
+                    <p class="text-muted mt-2">ChÆ°a cÃ³ tráº¡m nÃ o</p>
                 </div>
             `;
             return;
@@ -751,22 +792,28 @@ class AdminManager {
 
         container.innerHTML = `
             <div class="row g-3">
-                ${this.stationsData.map(s => `
+                ${this.stationsData.map(s => {
+                    const alertingDisabled = (s.config?.alerting?.enabled === false) || s.config?.alerting_enabled === false;
+                    const offlineDisplayEnabled = (s.config?.offline_display?.enabled === true) || s.config?.offline_display_enabled === true;
+                    const statusAccent = s.status === 'online' ? 'success' : (s.status === 'stale' ? 'warning' : 'secondary');
+                    return `
                     <div class="col-md-6">
                         <div class="card hover-lift station-card">
                             <div class="card-body position-relative" style="z-index: 2;">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <div>
-                                        <h6 class="mb-1 fw-bold neon-text" style="color: var(--accent-${s.status === 'online' ? 'success' : 'secondary'})">
+                                        <h6 class="mb-1 fw-bold neon-text" style="color: var(--accent-${statusAccent})">
                                             <i class="bi bi-broadcast-pin me-2"></i>
                                             ${s.name}
                                         </h6>
                                         <small class="text-muted font-monospace">${s.station_code}</small>
+                                        ${alertingDisabled ? '<span class="badge bg-warning text-dark ms-2">KhÃ´ng cáº£nh bÃ¡o</span>' : ''}
+                                        ${offlineDisplayEnabled ? '<span class="badge bg-info text-dark ms-2">Offline giÃ¡m sÃ¡t</span>' : ''}
                                     </div>
                                     <div class="d-flex align-items-center gap-2">
-                                        <span class="status-dot ${s.status === 'online' ? 'pulsing' : ''}" 
-                                              style="background-color: var(--accent-${s.status === 'online' ? 'success' : 'secondary'})"></span>
-                                        <span class="small font-monospace text-uppercase" style="color: var(--accent-${s.status === 'online' ? 'success' : 'secondary'})">
+                                        <span class="status-dot ${s.status === 'online' ? 'pulsing' : ''}"
+                                              style="background-color: var(--accent-${statusAccent})"></span>
+                                        <span class="small font-monospace text-uppercase" style="color: var(--accent-${statusAccent})">
                                             ${s.status || 'OFFLINE'}
                                         </span>
                                     </div>
@@ -777,7 +824,7 @@ class AdminManager {
                                         LAT: ${s.location.lat?.toFixed(6)} | LON: ${s.location.lon?.toFixed(6)}
                                     </div>
                                 ` : ''}
-                                
+
 
                             </div>
                             <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
@@ -792,7 +839,8 @@ class AdminManager {
                             </div>
                         </div>
                     </div>
-                `).join('')
+                `;
+                }).join('')
             }
             </div >
     `;
@@ -818,7 +866,7 @@ class AdminManager {
         document.getElementById('origin-lat').value = '';
         document.getElementById('origin-lon').value = '';
         document.getElementById('origin-h').value = '';
-        document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
+        document.getElementById('origin-status').textContent = 'ChÆ°a cÃ³ tá»a Ä‘á»™ gá»‘c';
         this.updateOriginActionButtons(false);
 
         // Reset sub-sensor coordinates
@@ -831,7 +879,11 @@ class AdminManager {
             if (h) h.value = '';
         });
         document.getElementById('edit-project-id').value = this.currentProjectId;
-        document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
+        const alertingDisabledEl = document.getElementById('station-alerting-disabled');
+        if (alertingDisabledEl) alertingDisabledEl.checked = false;
+        const offlineDisplayEl = document.getElementById('station-offline-display-enabled');
+        if (offlineDisplayEl) offlineDisplayEl.checked = false;
+        document.getElementById('modal-title').textContent = 'ThÃªm Tráº¡m Má»›i';
 
         ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
             const checkbox = document.getElementById(`edit-${sensor}`);
@@ -840,23 +892,23 @@ class AdminManager {
             if (section) section.style.display = 'none';
         });
 
-        // ✅ Reset offline thresholds về mặc định
+        // âœ… Reset offline thresholds vá» máº·c Ä‘á»‹nh
         document.getElementById('offline-gnss').value = this.defaultOfflineThresholds.gnss;
         document.getElementById('offline-rain').value = this.defaultOfflineThresholds.rain;
         document.getElementById('offline-water').value = this.defaultOfflineThresholds.water;
         document.getElementById('offline-imu').value = this.defaultOfflineThresholds.imu;
 
-        // ✅ Update displays
+        // âœ… Update displays
         document.getElementById('offline-gnss-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.gnss);
         document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.rain);
         document.getElementById('offline-water-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.water);
         document.getElementById('offline-imu-display').textContent = this.formatOfflineTime(this.defaultOfflineThresholds.imu);
 
-        // Reset confirm steps source indicators cho trạm mới
+        // Reset confirm steps source indicators cho tráº¡m má»›i
         const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
         const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
-        if (rainConfirmSrc) { rainConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; rainConfirmSrc.className = 'text-warning small'; }
-        if (waterConfirmSrc) { waterConfirmSrc.textContent = '⚠ Sẽ dùng giá trị Hệ thống nếu không sửa'; waterConfirmSrc.className = 'text-warning small'; }
+        if (rainConfirmSrc) { rainConfirmSrc.textContent = 'âš  Sáº½ dÃ¹ng giÃ¡ trá»‹ Há»‡ thá»‘ng náº¿u khÃ´ng sá»­a'; rainConfirmSrc.className = 'text-warning small'; }
+        if (waterConfirmSrc) { waterConfirmSrc.textContent = 'âš  Sáº½ dÃ¹ng giÃ¡ trá»‹ Há»‡ thá»‘ng náº¿u khÃ´ng sá»­a'; waterConfirmSrc.className = 'text-warning small'; }
 
         // Reset RTK forwarding fields to default (all enabled)
         const fwdToggleIds = ['fwd-toggle-x', 'fwd-toggle-y', 'fwd-toggle-h', 'fwd-toggle-dx', 'fwd-toggle-dy', 'fwd-toggle-dh', 'fwd-toggle-vdx', 'fwd-toggle-vdy', 'fwd-toggle-vdh'];
@@ -883,7 +935,7 @@ class AdminManager {
                 this._originResetTimer = null;
             }
 
-            window.toast?.info('Đang tải dữ liệu trạm...');
+            window.toast?.info('Äang táº£i dá»¯ liá»‡u tráº¡m...');
 
             const [resConfig, resDevices] = await Promise.all([
                 fetch(`/api/admin/stations/${stationId}/config`, {
@@ -894,7 +946,7 @@ class AdminManager {
                 })
             ]);
 
-            if (!resConfig.ok || !resDevices.ok) throw new Error('Không thể tải dữ liệu');
+            if (!resConfig.ok || !resDevices.ok) throw new Error('KhÃ´ng thá»ƒ táº£i dá»¯ liá»‡u');
 
             const stationData = await resConfig.json();
             const devices = await resDevices.json();
@@ -924,9 +976,9 @@ class AdminManager {
                     const section = document.getElementById(`mqtt-${type}-section`);
                     const input = document.getElementById(`topic-${type}`);
 
-                    console.log(`📋 [EDIT] Device ${type}: is_active=${dev.is_active}, topic=${dev.mqtt_topic}`);
+                    console.log(`ðŸ“‹ [EDIT] Device ${type}: is_active=${dev.is_active}, topic=${dev.mqtt_topic}`);
 
-                    // Bật checkbox nếu device active (is_active !== false)
+                    // Báº­t checkbox náº¿u device active (is_active !== false)
                     if (checkbox && dev.is_active !== false) {
                         checkbox.checked = true;
                         if (section) section.style.display = 'block';
@@ -946,12 +998,20 @@ class AdminManager {
 
             // STEP 3: Thresholds
             const cfg = stationData.config || {};
+            const alertingDisabledEl = document.getElementById('station-alerting-disabled');
+            if (alertingDisabledEl) {
+                alertingDisabledEl.checked = (cfg.alerting?.enabled === false) || cfg.alerting_enabled === false;
+            }
+            const offlineDisplayEl = document.getElementById('station-offline-display-enabled');
+            if (offlineDisplayEl) {
+                offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
+            }
             this.currentStationConfig = cfg;
 
-            // ✅ ĐỌC OFFLINE THRESHOLDS
+            // âœ… Äá»ŒC OFFLINE THRESHOLDS
             const offlineThresholds = cfg.offline_thresholds || {};
-            console.log('📋 [EDIT] Config from API:', JSON.stringify(cfg));
-            console.log('📋 [EDIT] offline_thresholds:', JSON.stringify(offlineThresholds));
+            console.log('ðŸ“‹ [EDIT] Config from API:', JSON.stringify(cfg));
+            console.log('ðŸ“‹ [EDIT] offline_thresholds:', JSON.stringify(offlineThresholds));
 
             const gnssThreshold = offlineThresholds.gnss ?? this.defaultOfflineThresholds.gnss;
             const rainThreshold = offlineThresholds.rain ?? this.defaultOfflineThresholds.rain;
@@ -963,7 +1023,7 @@ class AdminManager {
             document.getElementById('offline-water').value = waterThreshold;
             document.getElementById('offline-imu').value = imuThreshold;
 
-            // ✅ Update displays
+            // âœ… Update displays
             document.getElementById('offline-gnss-display').textContent = this.formatOfflineTime(gnssThreshold);
             document.getElementById('offline-rain-display').textContent = this.formatOfflineTime(rainThreshold);
             document.getElementById('offline-water-display').textContent = this.formatOfflineTime(waterThreshold);
@@ -987,7 +1047,7 @@ class AdminManager {
             document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
             document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
 
-            // Water confirm steps - hiển thị nguồn giá trị
+            // Water confirm steps - hiá»ƒn thá»‹ nguá»“n giÃ¡ trá»‹
             const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
             const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
             const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
@@ -995,7 +1055,7 @@ class AdminManager {
                 const wcs = waterCfg.water_warning_confirm_steps ?? waterCfg.water_confirm_steps;
                 waterWarningConfirmEl.value = wcs ?? 3;
                 if (waterConfirmSrc) {
-                    waterConfirmSrc.textContent = wcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    waterConfirmSrc.textContent = wcs != null ? 'âœ… ÄÃ£ lÆ°u riÃªng cho tráº¡m' : 'âš  Sáº½ dÃ¹ng giÃ¡ trá»‹ Há»‡ thá»‘ng';
                     waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
                 }
             }
@@ -1009,7 +1069,7 @@ class AdminManager {
                 const wscs = waterCfg.water_safe_confirm_steps;
                 waterSafeConfirmEl.value = wscs ?? 3;
                 if (waterSafeConfirmSrc) {
-                    waterSafeConfirmSrc.textContent = wscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    waterSafeConfirmSrc.textContent = wscs != null ? 'âœ… ÄÃ£ lÆ°u riÃªng cho tráº¡m' : 'âš  Sáº½ dÃ¹ng giÃ¡ trá»‹ Há»‡ thá»‘ng';
                     waterSafeConfirmSrc.className = wscs != null ? 'text-success small' : 'text-warning small';
                 }
             }
@@ -1019,7 +1079,7 @@ class AdminManager {
             document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
             document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
 
-            // Rain confirm steps - hiển thị nguồn giá trị
+            // Rain confirm steps - hiá»ƒn thá»‹ nguá»“n giÃ¡ trá»‹
             const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
             const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
             const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
@@ -1027,7 +1087,7 @@ class AdminManager {
                 const rcs = rainCfg.rain_warning_confirm_steps ?? rainCfg.rain_confirm_steps;
                 rainWarningConfirmEl.value = rcs ?? 2;
                 if (rainConfirmSrc) {
-                    rainConfirmSrc.textContent = rcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    rainConfirmSrc.textContent = rcs != null ? 'âœ… ÄÃ£ lÆ°u riÃªng cho tráº¡m' : 'âš  Sáº½ dÃ¹ng giÃ¡ trá»‹ Há»‡ thá»‘ng';
                     rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
                 }
             }
@@ -1041,7 +1101,7 @@ class AdminManager {
                 const rscs = rainCfg.rain_safe_confirm_steps;
                 rainSafeConfirmEl.value = rscs ?? 3;
                 if (rainSafeConfirmSrc) {
-                    rainSafeConfirmSrc.textContent = rscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+                    rainSafeConfirmSrc.textContent = rscs != null ? 'âœ… ÄÃ£ lÆ°u riÃªng cho tráº¡m' : 'âš  Sáº½ dÃ¹ng giÃ¡ trá»‹ Há»‡ thá»‘ng';
                     rainSafeConfirmSrc.className = rscs != null ? 'text-success small' : 'text-warning small';
                 }
             }
@@ -1072,7 +1132,7 @@ class AdminManager {
             const baseYawEl = document.getElementById('cfg-imu-base-yaw');
             if (baseYawEl) baseYawEl.value = imuBaseline.baseline_yaw ?? 0;
 
-            // ✅ LOAD GNSS RTK FORWARDING
+            // âœ… LOAD GNSS RTK FORWARDING
             const fwdCfg = cfg.gnss_rtk_forwarding || {};
             const fwdFields = fwdCfg.fields || {};
             const setToggle = (id, val, defaultVal = true) => {
@@ -1111,7 +1171,7 @@ class AdminManager {
             setToggle('fwd-toggle-vdh', fwdFields.VdH);
             this.syncForwardingWrapStates();
 
-            // ✅ LOAD VN2000 ADVANCED PARAMS
+            // âœ… LOAD VN2000 ADVANCED PARAMS
             const vnCfg = cfg.vn2000 || cfg.vn2000_params || {};
             const vnEnabledEl = document.getElementById('vn2000-enabled');
             if (vnEnabledEl) {
@@ -1139,13 +1199,13 @@ class AdminManager {
                 document.getElementById('origin-lat').value = gnssOrigin.lat;
                 document.getElementById('origin-lon').value = gnssOrigin.lon;
                 document.getElementById('origin-h').value = gnssOrigin.h || 0;
-                document.getElementById('origin-status').innerHTML = '<span class="text-success">✅ Đã có tọa độ gốc</span>';
+                document.getElementById('origin-status').innerHTML = '<span class="text-success">âœ… ÄÃ£ cÃ³ tá»a Ä‘á»™ gá»‘c</span>';
                 this.updateOriginActionButtons(true);
             } else {
                 document.getElementById('origin-lat').value = '';
                 document.getElementById('origin-lon').value = '';
                 document.getElementById('origin-h').value = '';
-                document.getElementById('origin-status').textContent = 'Chưa thiết lập';
+                document.getElementById('origin-status').textContent = 'ChÆ°a thiáº¿t láº­p';
                 this.updateOriginActionButtons(false);
             }
 
@@ -1160,15 +1220,15 @@ class AdminManager {
                 if (hEl) hEl.value = sOrigin.h !== undefined ? sOrigin.h : '';
             });
 
-            document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
+            document.getElementById('modal-title').textContent = `Chá»‰nh sá»­a: ${stationData.name}`;
 
             this.highlightPreset(cfg.active_preset);
             this.updateWizardStep();
             if (this.stationModal) this.stationModal.show();
 
         } catch (e) {
-            console.error('❌ Error in editStation:', e);
-            window.toast?.error('Lỗi: ' + e.message);
+            console.error('âŒ Error in editStation:', e);
+            window.toast?.error('LÃ¡Â»â€”i: ' + e.message);
         }
     }
 
@@ -1476,9 +1536,9 @@ class AdminManager {
         const preset = presets[presetName];
         if (!preset) return;
 
-        // ✅ ĐIỀN TỰ ĐỘNG CÁC GIÁ TRỊ VÀO FORM
+        // âœ… ÄIá»€N Tá»° Äá»˜NG CÃC GIÃ TRá»Š VÃ€O FORM
 
-        // Rain/Water confirm steps - warning/critical tách riêng
+        // Rain/Water confirm steps - warning/critical tÃ¡ch riÃªng
         const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
         const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
         const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
@@ -1488,11 +1548,11 @@ class AdminManager {
         if (waterWarningConfirmEl) waterWarningConfirmEl.value = preset.water_warning_confirm;
         if (waterCriticalConfirmEl) waterCriticalConfirmEl.value = preset.water_critical_confirm;
 
-        // Cập nhật source indicator
+        // Cáº­p nháº­t source indicator
         const rainSrc = document.getElementById('cfg-rain-confirm-source');
         const waterSrc = document.getElementById('cfg-water-confirm-source');
-        if (rainSrc) { rainSrc.textContent = '🔧 Từ preset: ' + presetName; rainSrc.className = 'text-info small'; }
-        if (waterSrc) { waterSrc.textContent = '🔧 Từ preset: ' + presetName; waterSrc.className = 'text-info small'; }
+        if (rainSrc) { rainSrc.textContent = 'ðŸ”§ Tá»« preset: ' + presetName; rainSrc.className = 'text-info small'; }
+        if (waterSrc) { waterSrc.textContent = 'ðŸ”§ Tá»« preset: ' + presetName; waterSrc.className = 'text-info small'; }
 
         // GNSS Quality
         const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
@@ -1530,7 +1590,7 @@ class AdminManager {
         if (imuShockEl) imuShockEl.value = preset.imu_shock;
         if (imuCriticalConfirmEl) imuCriticalConfirmEl.value = preset.imu_critical_confirm;
 
-        // ✅ HIỆU ỨNG FLASH (để user biết đã áp dụng)
+        // âœ… HIá»†U á»¨NG FLASH (Ä‘á»ƒ user biáº¿t Ä‘Ã£ Ã¡p dá»¥ng)
         const inputs = document.querySelectorAll('#stationConfigForm input[type="number"]');
         inputs.forEach(input => {
             input.style.transition = 'background 0.5s';
@@ -1540,14 +1600,14 @@ class AdminManager {
             }, 500);
         });
 
-        // ✅ THÔNG BÁO
+        // âœ… THÃ”NG BÃO
         const presetLabels = {
-            'conservative': 'Conservative - Ít cảnh báo sai',
-            'balanced': 'Balanced - Cân bằng',
-            'sensitive': 'Sensitive - Phát hiện nhanh'
+            'conservative': 'Conservative - Ãt cáº£nh bÃ¡o sai',
+            'balanced': 'Balanced - CÃ¢n báº±ng',
+            'sensitive': 'Sensitive - PhÃ¡t hiá»‡n nhanh'
         };
 
-        window.toast?.success(`✅ Đã áp dụng preset: ${presetLabels[presetName]}`, 3000);
+        window.toast?.success(`âœ… ÄÃ£ Ã¡p dá»¥ng preset: ${presetLabels[presetName]}`, 3000);
     }
 
     getConfirmStepWarnings() {
@@ -1585,14 +1645,14 @@ class AdminManager {
         const warnings = [];
         checks.forEach((item) => {
             if (item.critical <= 0) {
-                warnings.push(`${item.name}: Critical Confirm Steps phải >= 1`);
+                warnings.push(`${item.name}: Critical Confirm Steps pháº£i >= 1`);
             }
             if (item.name !== 'IMU' && item.critical > item.warning) {
-                warnings.push(`${item.name}: Critical Confirm Steps (${item.critical}) nên <= Warning (${item.warning}) để cảnh báo nặng phản ứng nhanh hơn`);
+                warnings.push(`${item.name}: Critical Confirm Steps (${item.critical}) nÃªn <= Warning (${item.warning}) Ä‘á»ƒ cáº£nh bÃ¡o náº·ng pháº£n á»©ng nhanh hÆ¡n`);
             }
             const compareBase = item.name === 'IMU' ? item.critical : Math.max(item.warning, item.critical);
             if (item.safe <= compareBase) {
-                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nên lớn hơn ${item.name === 'IMU' ? 'Critical' : 'Warning/Critical'} (${item.name === 'IMU' ? item.critical : `${item.warning}/${item.critical}`})`);
+                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nÃªn lá»›n hÆ¡n ${item.name === 'IMU' ? 'Critical' : 'Warning/Critical'} (${item.name === 'IMU' ? item.critical : `${item.warning}/${item.critical}`})`);
             }
         });
 
@@ -1604,10 +1664,10 @@ class AdminManager {
         if (warnings.length === 0) return true;
 
         const message = [
-            '⚠ Cảnh báo cấu hình Confirm Steps:',
+            'âš  Cáº£nh bÃ¡o cáº¥u hÃ¬nh Confirm Steps:',
             ...warnings.map(w => `- ${w}`),
             '',
-            'Bạn vẫn muốn lưu cấu hình trạm?'
+            'Báº¡n váº«n muá»‘n lÆ°u cáº¥u hÃ¬nh tráº¡m?'
         ].join('\n');
 
         return confirm(message);
@@ -1618,15 +1678,15 @@ class AdminManager {
 
         const message = warnings.length > 0
             ? [
-                `⚠ Cảnh báo trước khi gán thiết bị ${deviceCode}:`,
+                `âš  Cáº£nh bÃ¡o trÆ°á»›c khi gÃ¡n thiáº¿t bá»‹ ${deviceCode}:`,
                 ...warnings.map(w => `- ${w}`),
                 '',
-                'Nếu vẫn tiếp tục, thiết bị sẽ dùng cấu hình confirm steps hiện tại của trạm.',
-                'Bạn có muốn tiếp tục?'
+                'Náº¿u váº«n tiáº¿p tá»¥c, thiáº¿t bá»‹ sáº½ dÃ¹ng cáº¥u hÃ¬nh confirm steps hiá»‡n táº¡i cá»§a tráº¡m.',
+                'Báº¡n cÃ³ muá»‘n tiáº¿p tá»¥c?'
             ].join('\n')
             : [
-                `Xác nhận gán thiết bị ${deviceCode} vào trạm hiện tại?`,
-                'Bạn có muốn tiếp tục?'
+                `XÃ¡c nháº­n gÃ¡n thiáº¿t bá»‹ ${deviceCode} vÃ o tráº¡m hiá»‡n táº¡i?`,
+                'Báº¡n cÃ³ muá»‘n tiáº¿p tá»¥c?'
             ].join('\n');
 
         return confirm(message);
@@ -1638,7 +1698,7 @@ class AdminManager {
         const projectId = document.getElementById('edit-project-id').value;
 
         if (!code || !name) {
-            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
+            window.toast?.warning('Vui lÃ²ng nháº­p mÃ£ tráº¡m vÃ  tÃªn tráº¡m');
             return;
         }
 
@@ -1653,7 +1713,7 @@ class AdminManager {
                 const topic = topicInput?.value?.trim();
 
                 if (!topic) {
-                    window.toast?.error(`Vui lòng nhập MQTT Topic cho ${type.toUpperCase()}`);
+                    window.toast?.error(`Vui lÃ²ng nháº­p MQTT Topic cho ${type.toUpperCase()}`);
                     topicInput?.focus();
                     hasError = true;
                     return;
@@ -1696,7 +1756,7 @@ class AdminManager {
         const finalGnssCriticalConfirm = parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
         const finalImuCriticalConfirm = parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
 
-        // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
+        // âœ… THÃŠM OFFLINE THRESHOLDS VÃ€O CONFIG
         const offlineThresholds = {
             gnss: parseInt(document.getElementById('offline-gnss')?.value) || this.defaultOfflineThresholds.gnss,
             rain: parseInt(document.getElementById('offline-rain')?.value) || this.defaultOfflineThresholds.rain,
@@ -1704,7 +1764,7 @@ class AdminManager {
             imu: parseInt(document.getElementById('offline-imu')?.value) || this.defaultOfflineThresholds.imu
         };
 
-        // ✅ ĐỌC GNSS RTK FORWARDING CONFIG
+        // âœ… Äá»ŒC GNSS RTK FORWARDING CONFIG
         const rtkForwarding = {
             enabled: !!document.getElementById('cfg-fwd-enabled')?.checked,
             host: document.getElementById('gnss-rtk-host')?.value?.trim() || '',
@@ -1726,6 +1786,10 @@ class AdminManager {
             }
         };
 
+        const l0Raw = document.getElementById('vn-l0')?.value;
+        const l0Parsed = this.parseVn2000CentralMeridian(l0Raw);
+        const l0Input = document.getElementById('vn-l0');
+        if (l0Input) l0Input.value = Number(l0Parsed.value.toFixed(10));
 
         const vn2000 = {
             enabled: !!document.getElementById('vn2000-enabled')?.checked,
@@ -1736,7 +1800,9 @@ class AdminManager {
             ry: parseFloat(document.getElementById('vn-ry')?.value) || -0.01975479,
             rz: parseFloat(document.getElementById('vn-rz')?.value) || 0.00427372,
             k: parseFloat(document.getElementById('vn-k')?.value) || 0.999999747093722,
-            l0_deg: parseFloat(document.getElementById('vn-l0')?.value) || 105.0,
+            l0_deg: l0Parsed.value,
+            l0_raw: String(l0Raw ?? '').trim(),
+            l0_input_format: l0Parsed.format,
             k0: parseFloat(document.getElementById('vn-k0')?.value) || 0.9999,
             res_b: parseFloat(document.getElementById('vn-resb')?.value) || 0.0,
             res_l: parseFloat(document.getElementById('vn-resl')?.value) || 0.0,
@@ -1747,6 +1813,12 @@ class AdminManager {
 
         const config = {
             active_preset: this.activePreset || '',
+            alerting: {
+                enabled: !document.getElementById('station-alerting-disabled')?.checked
+            },
+            offline_display: {
+                enabled: !!document.getElementById('station-offline-display-enabled')?.checked
+            },
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning')?.value || 0),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical')?.value || 0),
@@ -1822,8 +1894,8 @@ class AdminManager {
             location: null
         };
 
-        console.log('💾 [SAVE] isEditMode:', this.isEditMode, 'stationId:', this.currentStationId);
-        console.log('💾 [SAVE] Payload:', JSON.stringify(payload, null, 2));
+        console.log('ðŸ’¾ [SAVE] isEditMode:', this.isEditMode, 'stationId:', this.currentStationId);
+        console.log('ðŸ’¾ [SAVE] Payload:', JSON.stringify(payload, null, 2));
 
         try {
             let url = this.isEditMode
@@ -1841,18 +1913,18 @@ class AdminManager {
                 body: JSON.stringify(payload)
             });
 
-            if (!res.ok) throw new Error('Lỗi lưu trạm');
+            if (!res.ok) throw new Error('Lá»—i lÆ°u tráº¡m');
 
-            window.toast?.success('✅ Lưu thành công!');
+            window.toast?.success('âœ… LÆ°u thÃ nh cÃ´ng!');
             this.stationModal.hide();
             this.loadStations(projectId);
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     async deleteStation(stationId) {
-        if (!confirm('Bạn có chắc muốn xóa trạm này?')) return;
+        if (!confirm('Báº¡n cÃ³ cháº¯c muá»‘n xÃ³a tráº¡m nÃ y?')) return;
 
         try {
             const res = await fetch(`/api/admin/stations/${stationId}`, {
@@ -1862,13 +1934,13 @@ class AdminManager {
 
             if (!res.ok) throw new Error('Failed');
 
-            window.toast?.success('✅ Xóa trạm thành công!');
+            window.toast?.success('âœ… XÃ³a tráº¡m thÃ nh cÃ´ng!');
 
             if (this.stationModal) this.stationModal.hide();
             this.loadStations(this.currentProjectId);
 
         } catch (e) {
-            window.toast?.error('❌ Lỗi xóa trạm');
+            window.toast?.error('âŒ Lá»—i xÃ³a tráº¡m');
         }
     }
 
@@ -1896,7 +1968,7 @@ class AdminManager {
             const data = await res.json();
             window.toast?.success(`Origin reset sent for ${data.reset_count} device(s)`);
 
-            // ✅ Xóa trắng các ô nhập liệu trên UI để người dùng thấy rõ hiệu ứng reset
+            // âœ… XÃ³a tráº¯ng cÃ¡c Ã´ nháº­p liá»‡u trÃªn UI Ä‘á»ƒ ngÆ°á»i dÃ¹ng tháº¥y rÃµ hiá»‡u á»©ng reset
             const latEl = document.getElementById('origin-lat');
             const lonEl = document.getElementById('origin-lon');
             const hEl = document.getElementById('origin-h');
@@ -1906,7 +1978,7 @@ class AdminManager {
             if (lonEl) lonEl.value = '';
             if (hEl) hEl.value = '';
             if (statusEl) {
-                statusEl.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Đang thu thập điểm gốc mới...';
+                statusEl.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Äang thu tháº­p Ä‘iá»ƒm gá»‘c má»›i...';
                 statusEl.className = 'text-warning small';
             }
 
@@ -2031,7 +2103,7 @@ class AdminManager {
     // =========================================================================
 
     openVelocityModal() {
-        console.log('📊 [VELOCITY] Opening modal...');
+        console.log('ðŸ“Š [VELOCITY] Opening modal...');
         this.renderVelocityTable();
         if (this.velocityModal) this.velocityModal.show();
     }
@@ -2063,9 +2135,9 @@ class AdminManager {
                 <td>
                     ${vel.editable ? `
                         <div class="input-group input-group-sm">
-                            <input type="number" 
-                                   class="form-control" 
-                                   value="${vel.threshold}" 
+                            <input type="number"
+                                   class="form-control"
+                                   value="${vel.threshold}"
                                    step="0.00001"
                                    data-index="${index}"
                                    onchange="window.adminManager.updateVelocityThreshold(${index}, this.value)">
@@ -2132,17 +2204,17 @@ class AdminManager {
 
     applyVelocityConfig() {
 
-        console.log('✅ [VELOCITY] Applied config:', this.velocityConfig);
+        console.log('âœ… [VELOCITY] Applied config:', this.velocityConfig);
 
-        // Thông báo cho người dùng biết
-        window.toast?.success('✅ Đã áp dụng bảng vận tốc. Hãy bấm "Lưu cấu hình" để lưu trạm.');
+        // ThÃ´ng bÃ¡o cho ngÆ°á»i dÃ¹ng biáº¿t
+        window.toast?.success('âœ… ÄÃ£ Ã¡p dá»¥ng báº£ng váº­n tá»‘c. HÃ£y báº¥m "LÆ°u cáº¥u hÃ¬nh" Ä‘á»ƒ lÆ°u tráº¡m.');
 
-        // Đóng modal
+        // ÄÃ³ng modal
         this.closeVelocityModal();
     }
 
     resetVelocityConfig() {
-        // Khôi phục về mặc định Cruden & Varnes nếu cần
+        // KhÃ´i phá»¥c vá» máº·c Ä‘á»‹nh Cruden & Varnes náº¿u cáº§n
         this.velocityConfig = [
             { name: 'Extremely slow', threshold: 0, unit: 'mm/year', description: '< 16 mm/year', editable: true },
             { name: 'Very slow', threshold: 16, unit: 'mm/year', description: '16 mm/year to 1.6 m/year', editable: true },
@@ -2153,7 +2225,7 @@ class AdminManager {
             { name: 'Extremely rapid', threshold: 5, unit: 'm/s', description: '> 5 m/s', editable: true }
         ];
         this.renderVelocityTable();
-        window.toast?.info('Đã khôi phục cấu hình vận tốc mặc định');
+        window.toast?.info('ÄÃ£ khÃ´i phá»¥c cáº¥u hÃ¬nh váº­n tá»‘c máº·c Ä‘á»‹nh');
     }
 
 
@@ -2164,18 +2236,18 @@ class AdminManager {
     async fetchLatestOrigin() {
         const topic = document.getElementById('topic-gnss')?.value.trim();
         if (!topic) {
-            window.toast?.warning('Vui lòng nhập MQTT Topic của GNSS trước');
+            window.toast?.warning('Vui lÃ²ng nháº­p MQTT Topic cá»§a GNSS trÆ°á»›c');
             return;
         }
 
         const statusEl = document.getElementById('origin-status');
         const btnEl = document.getElementById('btn-fetch-origin');
 
-        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Đang kết nối thiết bị...';
+        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Äang káº¿t ná»‘i thiáº¿t bá»‹...';
         if (btnEl) btnEl.disabled = true;
 
         try {
-            // Gọi API backend để subscribe tạm thời vào topic và lấy message mới nhất
+            // Gá»i API backend Ä‘á»ƒ subscribe táº¡m thá»i vÃ o topic vÃ  láº¥y message má»›i nháº¥t
             const res = await fetch('/api/admin/gnss/fetch-live-origin', {
                 method: 'POST',
                 headers: {
@@ -2203,22 +2275,22 @@ class AdminManager {
                     if (hEl) hEl.value = result.h;
                     this.updateOriginActionButtons(true);
 
-                    statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
-                    window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
+                    statusEl.innerHTML = `<span class="text-success">âœ… ÄÃ£ nháº­n: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
+                    window.toast?.success('ÄÃ£ láº¥y tá»a Ä‘á»™ thá»±c tá»« thiáº¿t bá»‹!');
                 } else {
                     // Existing origin -> verification only, do NOT overwrite locked origin fields
                     const deltaM = this.computeGeoDistanceMeters(currentLat, currentLon, result.lat, result.lon);
                     const deltaH = Number.isFinite(currentH) ? (result.h - currentH) : 0;
-                    statusEl.innerHTML = `<span class="text-info">ℹ Live check: Δxy=${deltaM.toFixed(3)}m, Δh=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
-                    window.toast?.info('Đã kiểm tra live GNSS. Origin hiện tại không bị ghi đè.');
+                    statusEl.innerHTML = `<span class="text-info">â„¹ Live check: Î”xy=${deltaM.toFixed(3)}m, Î”h=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
+                    window.toast?.info('ÄÃ£ kiá»ƒm tra live GNSS. Origin hiá»‡n táº¡i khÃ´ng bá»‹ ghi Ä‘Ã¨.');
                 }
             } else {
-                throw new Error(result.detail || 'Timeout hoặc thiết bị offline');
+                throw new Error(result.detail || 'Timeout hoáº·c thiáº¿t bá»‹ offline');
             }
         } catch (e) {
             console.error(e);
-            statusEl.innerHTML = `<span class="text-danger">❌ Lỗi: ${e.message}</span>`;
-            window.toast?.error('Không lấy được tọa độ. Kiểm tra lại Topic hoặc thiết bị.');
+            statusEl.innerHTML = `<span class="text-danger">âŒ Lá»—i: ${e.message}</span>`;
+            window.toast?.error('KhÃ´ng láº¥y Ä‘Æ°á»£c tá»a Ä‘á»™. Kiá»ƒm tra láº¡i Topic hoáº·c thiáº¿t bá»‹.');
         } finally {
             if (btnEl) btnEl.disabled = false;
         }
@@ -2245,13 +2317,13 @@ class AdminManager {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
 
-            if (!res.ok) throw new Error('Không thể tải danh sách thiết bị chờ');
+            if (!res.ok) throw new Error('KhÃ´ng thá»ƒ táº£i danh sÃ¡ch thiáº¿t bá»‹ chá»');
 
             const devices = await res.json();
             this.renderPendingDevices(devices);
         } catch (e) {
             console.error('Error loading pending devices:', e);
-            window.toast?.error('Không lấy được danh sách Pi chờ');
+            window.toast?.error('KhÃ´ng láº¥y Ä‘Æ°á»£c danh sÃ¡ch Pi chá»');
         }
     }
 
@@ -2260,7 +2332,7 @@ class AdminManager {
         if (!container) return;
 
         if (!devices || devices.length === 0) {
-            container.innerHTML = `<div class="text-muted small p-3">Không có Pi chờ kích hoạt</div>`;
+            container.innerHTML = `<div class="text-muted small p-3">KhÃ´ng cÃ³ Pi chá» kÃ­ch hoáº¡t</div>`;
             return;
         }
 
@@ -2273,11 +2345,11 @@ class AdminManager {
                         <small class="text-muted ms-2">(${d.device_type})</small>
                     </div>
                     <button class="btn btn-sm btn-outline-primary" onclick="window.adminManager.showDeviceDetail('${d.device_code}')">
-                        <i class="bi bi-eye me-1"></i>Chi tiết
+                        <i class="bi bi-eye me-1"></i>Chi tiáº¿t
                     </button>
                 </div>
                 <div class="small text-muted">
-                    Đăng ký: ${new Date((d.created_at || 0) * 1000).toLocaleString()}
+                    ÄÄƒng kÃ½: ${new Date((d.created_at || 0) * 1000).toLocaleString()}
                 </div>
                 <div id="detail-${d.device_code}" class="mt-2" style="display:none;">
                     <div class="bg-body-tertiary rounded p-3 mb-2">
@@ -2290,16 +2362,16 @@ class AdminManager {
                         <div class="mb-2">
                             <label class="form-label small fw-bold mb-1">License:</label>
                             <div id="license-display-${d.device_code}" class="font-monospace text-muted small">
-                                ${d.config?.license ? '<span class="text-success">✅ ' + d.config.license + '</span>' : '<span class="text-warning">⚠️ Chưa có license</span>'}
+                                ${d.config?.license ? '<span class="text-success">âœ… ' + d.config.license + '</span>' : '<span class="text-warning">âš ï¸ ChÆ°a cÃ³ license</span>'}
                             </div>
                         </div>
                     </div>
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm btn-warning flex-fill" onclick="window.adminManager.generateAndProvision('${d.device_code}')">
-                            <i class="bi bi-key me-1"></i>Tạo Key & Gán vào trạm
+                            <i class="bi bi-key me-1"></i>Táº¡o Key & GÃ¡n vÃ o tráº¡m
                         </button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="window.adminManager.generateLicense('${d.device_code}')">
-                            <i class="bi bi-key me-1"></i>Chỉ tạo Key
+                            <i class="bi bi-key me-1"></i>Chá»‰ táº¡o Key
                         </button>
                     </div>
                 </div>
@@ -2327,7 +2399,7 @@ class AdminManager {
 
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi tạo license');
+                throw new Error(err.detail || 'Lá»—i táº¡o license');
             }
 
             const data = await res.json();
@@ -2335,23 +2407,23 @@ class AdminManager {
             // Update license display
             const licenseEl = document.getElementById(`license-display-${device_code}`);
             if (licenseEl) {
-                licenseEl.innerHTML = `<span class="text-success">✅ ${data.license}</span>`;
+                licenseEl.innerHTML = `<span class="text-success">âœ… ${data.license}</span>`;
                 if (data.pushed) {
-                    licenseEl.innerHTML += ` <span class="badge bg-info">Đã gửi qua MQTT</span>`;
+                    licenseEl.innerHTML += ` <span class="badge bg-info">ÄÃ£ gá»­i qua MQTT</span>`;
                 }
             }
 
-            window.toast?.success(`✅ License tạo xong${data.pushed ? ' & đã gửi đến Pi' : ''}`);
+            window.toast?.success(`âœ… License táº¡o xong${data.pushed ? ' & Ä‘Ã£ gá»­i Ä‘áº¿n Pi' : ''}`);
             return data;
         } catch (e) {
             console.error('Generate license error:', e);
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     async generateAndProvision(device_code) {
         if (!this.currentStationId) {
-            window.toast?.warning('Lưu trạm trước khi gán thiết bị');
+            window.toast?.warning('LÆ°u tráº¡m trÆ°á»›c khi gÃ¡n thiáº¿t bá»‹');
             return;
         }
 
@@ -2359,12 +2431,12 @@ class AdminManager {
 
         try {
             // Step 1: Generate license
-            window.toast?.info('🔑 Đang tạo license...');
+            window.toast?.info('ðŸ”‘ Äang táº¡o license...');
             const licenseData = await this.generateLicense(device_code);
             if (!licenseData) return;
 
             // Step 2: Provision (assign to station) with license
-            window.toast?.info('📡 Đang gán thiết bị vào trạm...');
+            window.toast?.info('ðŸ“¡ Äang gÃ¡n thiáº¿t bá»‹ vÃ o tráº¡m...');
             const res = await fetch('/api/admin/devices/provision', {
                 method: 'POST',
                 headers: {
@@ -2380,28 +2452,28 @@ class AdminManager {
 
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi khi gán thiết bị');
+                throw new Error(err.detail || 'Lá»—i khi gÃ¡n thiáº¿t bá»‹');
             }
 
-            window.toast?.success(`✅ Pi ${device_code} đã gán vào trạm & license đã gửi!`);
+            window.toast?.success(`âœ… Pi ${device_code} Ä‘Ã£ gÃ¡n vÃ o tráº¡m & license Ä‘Ã£ gá»­i!`);
 
             // Refresh pending list (device should disappear)
             this.loadAdminPendingDevices();
         } catch (e) {
             console.error('Generate & provision error:', e);
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     async provisionDevice(device_code) {
         if (!this.currentStationId) {
-            window.toast?.warning('Lưu trạm trước khi gán thiết bị');
+            window.toast?.warning('LÆ°u tráº¡m trÆ°á»›c khi gÃ¡n thiáº¿t bá»‹');
             return;
         }
 
         if (!this.confirmDeviceProvisionWarnings(device_code)) return;
 
-        const license = prompt('Nhập mã license/serial để lưu (hoặc để trống):');
+        const license = prompt('Nháº­p mÃ£ license/serial Ä‘á»ƒ lÆ°u (hoáº·c Ä‘á»ƒ trá»‘ng):');
         if (license === null) return; // cancelled
 
         try {
@@ -2416,17 +2488,17 @@ class AdminManager {
 
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi khi gán thiết bị');
+                throw new Error(err.detail || 'Lá»—i khi gÃ¡n thiáº¿t bá»‹');
             }
 
-            window.toast?.success('✅ Thiết bị đã được gán thành công');
+            window.toast?.success('âœ… Thiáº¿t bá»‹ Ä‘Ã£ Ä‘Æ°á»£c gÃ¡n thÃ nh cÃ´ng');
             // refresh lists
             this.loadAdminPendingDevices();
             // reload station devices view if open
             this.editStation(this.currentStationId);
         } catch (e) {
             console.error('Provision error:', e);
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
@@ -2460,7 +2532,7 @@ class AdminManager {
         if (!tbody) return;
 
         if (!users || users.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Chưa có người dùng</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">ChÆ°a cÃ³ ngÆ°á»i dÃ¹ng</td></tr>`;
             return;
         }
 
@@ -2475,10 +2547,12 @@ class AdminManager {
         tbody.innerHTML = users.map(u => {
             // Show assigned projects for operators (by name)
             let projectBadges = '';
-            if (u.role === 'operator' && u.assigned_projects && u.assigned_projects.length > 0) {
-                projectBadges = `<br><small class="text-muted">Dự án: ${u.assigned_projects.map(
+            if ((u.role === 'operator' || u.role === 'viewer') && u.assigned_projects && u.assigned_projects.length > 0) {
+                projectBadges = `<br><small class="text-muted">Dá»± Ã¡n: ${u.assigned_projects.map(
                     pid => `<span class="badge bg-dark text-info border border-info" style="font-size:.65rem">${this.getProjectName(pid)}</span>`
                 ).join(' ')}</small>`;
+            } else if (u.role === 'viewer') {
+                projectBadges = `<br><small class="text-muted">Dự án: <span class="badge bg-dark text-success border border-success" style="font-size:.65rem">Tất cả</span></small>`;
             }
 
             return `
@@ -2489,7 +2563,7 @@ class AdminManager {
                 <td>${roleBadge(u.role)}${projectBadges}</td>
                 <td>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="status-dot ${u.is_active ? 'pulsing' : ''}" 
+                        <span class="status-dot ${u.is_active ? 'pulsing' : ''}"
                               style="background-color: var(--accent-${u.is_active ? 'success' : 'secondary'})"></span>
                         <span class="small font-monospace" style="color: var(--accent-${u.is_active ? 'success' : 'secondary'})">
                             ${u.is_active ? 'ACTIVE' : 'LOCKED'}
@@ -2498,12 +2572,12 @@ class AdminManager {
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        ${u.role === 'operator' ? `<button class="btn btn-outline-info" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="Gán dự án"><i class="bi bi-folder-plus"></i></button>` : ''}
+                        ${(u.role === 'operator' || u.role === 'viewer') ? `<button class="btn btn-outline-info" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="GÃ¡n dá»± Ã¡n"><i class="bi bi-folder-plus"></i></button>` : ''}
                         ${u.username === 'admin' ? '' : `
-                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'}" onclick="window.adminManager.toggleUserStatus(${u.id}, '${u.username}', ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}">
+                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'}" onclick="window.adminManager.toggleUserStatus(${u.id}, '${u.username}', ${!u.is_active})" title="${u.is_active ? 'KhÃ³a tÃ i khoáº£n' : 'Má»Ÿ khÃ³a'}">
                             <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
                         </button>
-                        <button class="btn btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')" title="Xóa tài khoản">
+                        <button class="btn btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')" title="XÃ³a tÃ i khoáº£n">
                             <i class="bi bi-trash"></i>
                         </button>
                         `}
@@ -2526,7 +2600,7 @@ class AdminManager {
         });
 
         if (!username || !password) {
-            window.toast?.warning('Thiếu tài khoản hoặc mật khẩu');
+            window.toast?.warning('Thiáº¿u tÃ i khoáº£n hoáº·c máº­t kháº©u');
             return;
         }
 
@@ -2539,37 +2613,37 @@ class AdminManager {
                 },
                 body: JSON.stringify({
                     username, password, full_name: fullname, role,
-                    assigned_projects: role === 'operator' ? assignedProjects : []
+                    assigned_projects: (role === 'operator' || role === 'viewer') ? assignedProjects : []
                 })
             });
 
             if (res.ok) {
-                window.toast?.success('✅ Tạo tài khoản thành công');
+                window.toast?.success('âœ… Táº¡o tÃ i khoáº£n thÃ nh cÃ´ng');
                 bootstrap.Modal.getInstance(document.getElementById('addUserModal'))?.hide();
                 document.getElementById('addUserForm').reset();
-                document.getElementById('project-assign-group').style.display = 'none';
+                document.getElementById('project-assign-group').style.display = 'block';
                 this.loadUsers();
             } else {
-                throw new Error((await res.json()).detail || 'Lỗi tạo user');
+                throw new Error((await res.json()).detail || 'Lá»—i táº¡o user');
             }
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     async deleteUser(userId, username) {
-        if (!confirm(`Xóa người dùng ${username}?`)) return;
+        if (!confirm(`XÃ³a ngÆ°á»i dÃ¹ng ${username}?`)) return;
         try {
             const res = await fetch(`/api/admin/users/${userId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (res.ok) {
-                window.toast?.success('Đã xóa người dùng');
+                window.toast?.success('ÄÃ£ xÃ³a ngÆ°á»i dÃ¹ng');
                 this.loadUsers();
             } else {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi xóa');
+                throw new Error(err.detail || 'Lá»—i xÃ³a');
             }
         } catch (e) {
             window.toast?.error(e.message);
@@ -2577,8 +2651,8 @@ class AdminManager {
     }
 
     async toggleUserStatus(userId, username, isActive) {
-        const action = isActive ? 'mở khóa' : 'khóa';
-        if (!confirm(`Bạn có chắc muốn ${action} người dùng ${username}?`)) return;
+        const action = isActive ? 'má»Ÿ khÃ³a' : 'khÃ³a';
+        if (!confirm(`Báº¡n cÃ³ cháº¯c muá»‘n ${action} ngÆ°á»i dÃ¹ng ${username}?`)) return;
         try {
             const res = await fetch(`/api/admin/users/${userId}/status`, {
                 method: 'PUT',
@@ -2590,11 +2664,11 @@ class AdminManager {
             });
 
             if (res.ok) {
-                window.toast?.success(`Đã ${action} người dùng ${username}`);
+                window.toast?.success(`ÄÃ£ ${action} ngÆ°á»i dÃ¹ng ${username}`);
                 this.loadUsers();
             } else {
                 const err = await res.json();
-                throw new Error(err.detail || `Lỗi ${action} tài khoản`);
+                throw new Error(err.detail || `Lá»—i ${action} tÃ i khoáº£n`);
             }
         } catch (e) {
             window.toast?.error(e.message);
@@ -2614,7 +2688,7 @@ class AdminManager {
             if (!container) return;
 
             if (projects.length === 0) {
-                container.innerHTML = '<small class="text-muted">Chưa có dự án nào</small>';
+                container.innerHTML = '<small class="text-muted">ChÆ°a cÃ³ dá»± Ã¡n nÃ o</small>';
                 return;
             }
 
@@ -2662,15 +2736,15 @@ class AdminManager {
                     <div class="modal-dialog">
                         <div class="modal-content">
                             <div class="modal-header">
-                                <h5 class="modal-title">Gán dự án cho ${username}</h5>
+                                <h5 class="modal-title">GÃ¡n dá»± Ã¡n cho ${username}</h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body">
-                                <div style="max-height:300px;overflow-y:auto">${checkboxes || '<p class="text-muted">Chưa có dự án</p>'}</div>
+                                <div style="max-height:300px;overflow-y:auto">${checkboxes || '<p class="text-muted">ChÆ°a cÃ³ dá»± Ã¡n</p>'}</div>
                             </div>
                             <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                                <button type="button" class="btn btn-gradient" id="save-assign-btn">Lưu</button>
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">HÃ¡Â»Â§y</button>
+                                <button type="button" class="btn btn-gradient" id="save-assign-btn">LÆ°u</button>
                             </div>
                         </div>
                     </div>
@@ -2696,11 +2770,11 @@ class AdminManager {
                 });
 
                 if (res.ok) {
-                    window.toast?.success(`✅ Đã gán ${selected.length} dự án cho ${username}`);
+                    window.toast?.success(`âœ… ÄÃ£ gÃ¡n ${selected.length} dá»± Ã¡n cho ${username}`);
                     bsModal.hide();
                     this.loadUsers();
                 } else {
-                    window.toast?.error('❌ Lỗi gán dự án');
+                    window.toast?.error('âŒ Lá»—i gÃ¡n dá»± Ã¡n');
                 }
             });
 
@@ -2708,13 +2782,13 @@ class AdminManager {
                 modal.remove();
             });
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
-    /** Apply viewer restrictions — hide all edit/create/delete UI elements */
+    /** Apply viewer restrictions â€” hide all edit/create/delete UI elements */
     applyViewerRestrictions() {
-        console.log('🔒 Applying viewer restrictions');
+        console.log('ðŸ”’ Applying viewer restrictions');
 
         // Hide sidebar tabs: Users, Database, System, Pi Devices (only show Projects)
         document.querySelectorAll('.admin-sidebar .nav-item').forEach(item => {
@@ -2734,7 +2808,7 @@ class AdminManager {
         const createProjBtn = document.querySelector('#action-buttons-container');
         if (createProjBtn) createProjBtn.style.display = 'none';
 
-        // Hide "Thêm user" button
+        // Hide "ThÃªm user" button
         const addUserBtn = document.querySelector('[data-bs-target="#addUserModal"]');
         if (addUserBtn) addUserBtn.style.display = 'none';
 
@@ -2760,7 +2834,7 @@ class AdminManager {
 
             const isOperator = this.currentUserRole === 'operator';
 
-            // ─── Operator: only show devices assigned to their projects ───
+            // â”€â”€â”€ Operator: only show devices assigned to their projects â”€â”€â”€
             if (isOperator && this.currentUserAssignedProjects?.length > 0) {
                 const myProjects = this.currentUserAssignedProjects;
                 devices = devices.filter(d =>
@@ -2775,7 +2849,7 @@ class AdminManager {
                 const activated = devices.filter(d => d.status === 'activated');
                 const assigned = devices.filter(d => d.status === 'assigned');
 
-                // ─── Update summary cards ───
+                // â”€â”€â”€ Update summary cards â”€â”€â”€
                 const setCount = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
                 setCount('pi-pending-count', pending.length);
                 setCount('pi-activated-count', activated.length);
@@ -2787,10 +2861,10 @@ class AdminManager {
                     : `${pending.length} device(s) awaiting activation`;
             }
 
-            // ─── Render grid table ───
+            // â”€â”€â”€ Render grid table â”€â”€â”€
             this._renderPiGrid(devices);
 
-            // ─── Inject action bar (admin only) ───
+            // â”€â”€â”€ Inject action bar (admin only) â”€â”€â”€
             if (isOperator) {
                 // Operator: hide select toggle button, read-only view
                 const selectToggle = document.getElementById('pi-select-toggle');
@@ -2807,21 +2881,21 @@ class AdminManager {
                     transition: bottom .35s cubic-bezier(.4,0,.2,1);
                 `;
                 bar.innerHTML = `
-                    <span id="pi-sel-count" style="color:#94a3b8;font-size:.85rem;margin-right:6px">0 đã chọn</span>
+                    <span id="pi-sel-count" style="color:#94a3b8;font-size:.85rem;margin-right:6px">0 Ä‘Ã£ chá»n</span>
                     <button class="btn btn-sm btn-primary"   id="pi-act-activate" onclick="window.adminManager._piActionBatch('activate')" style="display:none">
-                        <i class="bi bi-key me-1"></i>Kích hoạt</button>
+                        <i class="bi bi-key me-1"></i>KÃ­ch hoáº¡t</button>
                     <button class="btn btn-sm btn-warning"   id="pi-act-unassign" onclick="window.adminManager._piActionBatch('unassign')" style="display:none">
-                        <i class="bi bi-x-circle me-1"></i>Bỏ gán</button>
+                        <i class="bi bi-x-circle me-1"></i>Bá» gÃ¡n</button>
                     <button class="btn btn-sm btn-secondary" id="pi-act-lock"     onclick="window.adminManager._piActionBatch('lock')" style="display:none">
-                        <i class="bi bi-lock me-1"></i>Khóa</button>
+                        <i class="bi bi-lock me-1"></i>KhÃ³a</button>
                     <button class="btn btn-sm btn-success"   id="pi-act-unlock"   onclick="window.adminManager._piActionBatch('unlock')" style="display:none">
-                        <i class="bi bi-unlock me-1"></i>Mở khóa</button>
+                        <i class="bi bi-unlock me-1"></i>Má»Ÿ khÃ³a</button>
                     <button class="btn btn-sm btn-info"      id="pi-act-reset"    onclick="window.adminManager._piActionBatch('reset')" style="display:none">
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
                     <button class="btn btn-sm btn-danger"    id="pi-act-delete"   onclick="window.adminManager._piActionBatch('delete')">
-                        <i class="bi bi-trash me-1"></i>Xóa</button>
+                        <i class="bi bi-trash me-1"></i>XÃ³a</button>
                     <button class="btn btn-sm btn-outline-warning" id="pi-act-assign-center" onclick="window.adminManager.assignSelectedPointToCenter()" style="display:none">
-                        <i class="bi bi-link-45deg me-1"></i>Gán vào Pi Trung tâm</button>
+                        <i class="bi bi-link-45deg me-1"></i>GÃ¡n vÃ o Pi Trung tÃ¢m</button>
                     <button class="btn btn-sm btn-outline-light ms-2" onclick="window.adminManager.togglePiSelectMode()">
                         <i class="bi bi-x-lg"></i></button>
                 `;
@@ -2829,7 +2903,7 @@ class AdminManager {
             }
         } catch (e) {
             console.error('Error loading Pi devices:', e);
-            window.toast?.error('Không thể tải danh sách Pi');
+            window.toast?.error('KhÃ´ng thá»ƒ táº£i danh sÃ¡ch Pi');
         }
     }
 
@@ -2839,7 +2913,7 @@ class AdminManager {
         const infoEl = document.getElementById('pi-grid-info');
         if (!tbody) return;
 
-        // Tách riêng pi center và pi point
+        // TÃ¡ch riÃªng pi center vÃ  pi point
         const trueCenters = devices.filter(d => (d.pi_center_id === null || d.pi_center_id === undefined) && d.device_type !== 'pi_point');
         const points = devices.filter(d => d.pi_center_id !== null && d.pi_center_id !== undefined);
         const unassignedPoints = devices.filter(d => (d.pi_center_id === null || d.pi_center_id === undefined) && d.device_type === 'pi_point');
@@ -2854,47 +2928,47 @@ class AdminManager {
         const statusColors = { pending: '#f59e0b', activating: '#f59e0b', activated: '#22c55e', assigned: '#0ea5e9' };
         const statusLabels = { pending: 'Pending', activating: 'Activating', activated: 'Activated', assigned: 'Assigned' };
 
-        // Render từng center
+        // Render tá»«ng center
         trueCenters.forEach(c => {
             const childPoints = points.filter(p => p.pi_center_id === c.id);
 
             // Status badge for center
             const color = statusColors[c.status] || '#6b7280';
-            let statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">● ${statusLabels[c.status] || c.status}</span>`;
+            let statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">â— ${statusLabels[c.status] || c.status}</span>`;
             if (c.is_locked) {
-                statusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+                statusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiáº¿t bá»‹ bá»‹ khÃ³a">ðŸ”’</span>`;
             }
             if (c.status === 'assigned') {
-                statusBadge += `<br><small class="pi-assign-detail">${c.station_name || ''}${c.project_name ? ' · ' + c.project_name : ''}</small>`;
+                statusBadge += `<br><small class="pi-assign-detail">${c.station_name || ''}${c.project_name ? ' Â· ' + c.project_name : ''}</small>`;
 
-                // Thêm nút gắn Pi Hiện trường (nếu chưa có thiết bị con nào được gắn)
+                // ThÃªm nÃºt gáº¯n Pi Hiá»‡n trÆ°á»ng (náº¿u chÆ°a cÃ³ thiáº¿t bá»‹ con nÃ o Ä‘Æ°á»£c gáº¯n)
                 if (childPoints.length === 0) {
-                    statusBadge += `<div class="mt-1"><button class="btn btn-sm btn-outline-success py-0 px-2" style="font-size:0.7rem" onclick="window.adminManager.openAssignPiPointModal(${c.id})"><i class="bi bi-plus"></i> Gắn Pi Hiện trường</button></div>`;
+                    statusBadge += `<div class="mt-1"><button class="btn btn-sm btn-outline-success py-0 px-2" style="font-size:0.7rem" onclick="window.adminManager.openAssignPiPointModal(${c.id})"><i class="bi bi-plus"></i> Gáº¯n Pi Hiá»‡n trÆ°á»ng</button></div>`;
                 }
             }
 
-            let devType = 'Pi Trung tâm';
-            if (c.device_type && c.device_type.toLowerCase() === 'win') devType = 'PC Window Trung tâm';
+            let devType = 'Pi Trung tÃ¢m';
+            if (c.device_type && c.device_type.toLowerCase() === 'win') devType = 'PC Window Trung tÃ¢m';
 
             let pointsHtml = '';
             if (childPoints.length > 0) {
                 pointsHtml = childPoints.map(p => {
                     const pIsOnline = p.last_seen && (Date.now() / 1000 - p.last_seen) < 120;
-                    const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : '—';
+                    const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : 'â€”';
                     return `
                     <div style="margin-top: 6px; padding: 4px 8px; background-color: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; border-radius: 4px; font-size: 0.75rem; display: inline-block;">
-                        <span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span>
-                        <strong style="color:var(--text-color)">${p.name}</strong> 
+                        <span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiá»‡n trÆ°á»ng</span>
+                        <strong style="color:var(--text-color)">${p.name}</strong>
                         <code class="text-muted mx-1">${p.serial}</code>
-                        <span class="mx-1" style="font-size: 0.7rem; color: ${pIsOnline ? '#10b981' : '#ef4444'}">● ${pLastPingText}</span>
-                        <a href="javascript:void(0)" class="text-danger ms-2 text-decoration-none" title="Bỏ gán điểm này" onclick="window.adminManager.unassignPiDevice(${p.id}, event)">
+                        <span class="mx-1" style="font-size: 0.7rem; color: ${pIsOnline ? '#10b981' : '#ef4444'}">â— ${pLastPingText}</span>
+                        <a href="javascript:void(0)" class="text-danger ms-2 text-decoration-none" title="Bá» gÃ¡n Ä‘iá»ƒm nÃ y" onclick="window.adminManager.unassignPiDevice(${p.id}, event)">
                             <i class="bi bi-x-circle"></i>
                         </a>
                     </div>`;
                 }).join('<br>');
             }
 
-            // Box để bọc name
+            // Box Ä‘á»ƒ bá»c name
             const stationTag = c.station_id
                 ? `<span class="badge me-2" style="background:#1e293b;color:#0ea5e9;border:1px solid #0ea5e933;font-size:.7rem">${c.station_id}</span>`
                 : '';
@@ -2905,7 +2979,7 @@ class AdminManager {
             const fullCellLabel = `<div style="line-height:1.4">${stationTag}${nameLabel}</div>${pointsHtml ? '<div>' + pointsHtml + '</div>' : ''}`;
 
             const isOnline = c.last_seen && (Date.now() / 1000 - c.last_seen) < 120;
-            const lastPingText = c.last_seen ? this._formatTimeAgo(c.last_seen, isOnline) : '—';
+            const lastPingText = c.last_seen ? this._formatTimeAgo(c.last_seen, isOnline) : 'â€”';
 
             html += `<tr class="pi-grid-row" data-pi-id="${c.id}" data-pi-status="${c.status}" data-pi-locked="${c.is_locked ? '1' : '0'}" data-pi-type="${c.device_type || 'pi'}" data-search="${(c.name + c.serial + (c.station_name || '')).toLowerCase()}" style="background-color: var(--bs-table-bg);">
             <td>
@@ -2917,22 +2991,22 @@ class AdminManager {
             <td>${fullCellLabel}</td>
             <td><code style="font-size:.8rem;color:var(--text-muted)">${c.serial}</code></td>
             <td>${statusBadge}</td>
-            <td><span class="${isOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${lastPingText}</small></td>
+            <td><span class="${isOnline ? 'ping-online' : 'ping-offline'} me-1">â—</span><small>${lastPingText}</small></td>
         </tr>`;
         });
 
-        // Những điểm (pi points) chưa được gán pi_center_id sẽ nằm riêng ở cuối
-        // unassignedPoints đã được khai báo ở đầu hàm (line 1827)
+        // Nhá»¯ng Ä‘iá»ƒm (pi points) chÆ°a Ä‘Æ°á»£c gÃ¡n pi_center_id sáº½ náº±m riÃªng á»Ÿ cuá»‘i
+        // unassignedPoints Ä‘Ã£ Ä‘Æ°á»£c khai bÃ¡o á»Ÿ Ä‘áº§u hÃ m (line 1827)
         unassignedPoints.forEach(p => {
             const pColor = statusColors[p.status] || '#6b7280';
-            let pStatusBadge = `<span class="badge" style="background:${pColor};color:#000;font-size:.72rem">● ${statusLabels[p.status] || p.status}</span>`;
+            let pStatusBadge = `<span class="badge" style="background:${pColor};color:#000;font-size:.72rem">â— ${statusLabels[p.status] || p.status}</span>`;
             if (p.is_locked) {
-                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiáº¿t bá»‹ bá»‹ khÃ³a">ðŸ”’</span>`;
             }
 
-            const nameLabel = `<strong>${p.name}</strong><br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;
+            const nameLabel = `<strong>${p.name}</strong><br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiá»‡n trÆ°á»ng</span><span style="font-size:.6rem">(ChÆ°a Gáº¯n)</span></small>`;
             const pIsOnline = p.last_seen && (Date.now() / 1000 - p.last_seen) < 120;
-            const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : '—';
+            const pLastPingText = p.last_seen ? this._formatTimeAgo(p.last_seen, pIsOnline) : 'â€”';
 
             html += `<tr class="pi-grid-row" data-pi-id="${p.id}" data-pi-status="${p.status}" data-pi-locked="${p.is_locked ? '1' : '0'}" data-pi-type="pi_point" data-search="${(p.name + p.serial).toLowerCase()}" style="background-color: var(--bs-table-bg);">
                 <td>
@@ -2944,7 +3018,7 @@ class AdminManager {
                 <td><div style="line-height:1.4">${nameLabel}</div></td>
                 <td><code style="font-size:.8rem;color:var(--text-muted)">${p.serial}</code></td>
                 <td>${pStatusBadge}</td>
-                <td><span class="${pIsOnline ? 'ping-online' : 'ping-offline'} me-1">●</span><small>${pLastPingText}</small></td>
+                <td><span class="${pIsOnline ? 'ping-online' : 'ping-offline'} me-1">â—</span><small>${pLastPingText}</small></td>
             </tr>`;
         });
 
@@ -2954,7 +3028,7 @@ class AdminManager {
 
     /** Format epoch timestamp to human-readable time ago */
     _formatTimeAgo(epoch, isOnline) {
-        if (!epoch) return '—';
+        if (!epoch) return 'â€”';
         const now = Math.floor(Date.now() / 1000);
         const diff = now - epoch;
 
@@ -2997,10 +3071,10 @@ class AdminManager {
 
         if (this._piSelectMode) {
             overlays.forEach(el => el.style.display = 'block');
-            if (btn) { btn.classList.replace('btn-outline-secondary', 'btn-primary'); btn.innerHTML = '<i class="bi bi-x-lg me-1"></i>Hủy chọn'; }
+            if (btn) { btn.classList.replace('btn-outline-secondary', 'btn-primary'); btn.innerHTML = '<i class="bi bi-x-lg me-1"></i>Há»§y chá»n'; }
         } else {
             overlays.forEach(el => { el.style.display = 'none'; el.querySelector('input').checked = false; });
-            if (btn) { btn.classList.replace('btn-primary', 'btn-outline-secondary'); btn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chọn'; }
+            if (btn) { btn.classList.replace('btn-primary', 'btn-outline-secondary'); btn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chá»n'; }
             if (bar) bar.style.bottom = '-80px';
         }
     }
@@ -3013,7 +3087,7 @@ class AdminManager {
 
         if (checked.length > 0) {
             bar.style.bottom = '24px';
-            countEl.textContent = `${checked.length} đã chọn`;
+            countEl.textContent = `${checked.length} Ä‘Ã£ chá»n`;
 
             // Determine which actions to show based on selected statuses
             const statuses = new Set();
@@ -3037,7 +3111,7 @@ class AdminManager {
             show('pi-act-reset', statuses.has('activated') || statuses.has('assigned'));
             show('pi-act-delete', true);
 
-            // Show "Gán vào Pi Trung tâm" if any selected is pi_point + activated
+            // Show "GÃ¡n vÃ o Pi Trung tÃ¢m" if any selected is pi_point + activated
             const types = new Set();
             checked.forEach(cb => {
                 const row = cb.closest('.pi-grid-row') || cb.closest('tr');
@@ -3056,17 +3130,17 @@ class AdminManager {
         if (ids.length === 0) return;
 
         const actionMap = {
-            'activate': { method: 'POST', path: id => `/api/field/pi-devices/${id}/activate`, label: 'Kích hoạt' },
-            'unassign': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/unassign`, label: 'Bỏ gán' },
-            'lock': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/lock`, body: { is_locked: true }, label: 'Khóa' },
-            'unlock': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/lock`, body: { is_locked: false }, label: 'Mở khóa' },
+            'activate': { method: 'POST', path: id => `/api/field/pi-devices/${id}/activate`, label: 'KÃ­ch hoáº¡t' },
+            'unassign': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/unassign`, label: 'Bá» gÃ¡n' },
+            'lock': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/lock`, body: { is_locked: true }, label: 'KhÃ³a' },
+            'unlock': { method: 'PUT', path: id => `/api/field/pi-devices/${id}/lock`, body: { is_locked: false }, label: 'Má»Ÿ khÃ³a' },
             'reset': { method: 'POST', path: id => `/api/field/pi-devices/${id}/reset`, label: 'Reset' },
-            'delete': { method: 'DELETE', path: id => `/api/field/pi-devices/${id}`, label: 'Xóa' },
+            'delete': { method: 'DELETE', path: id => `/api/field/pi-devices/${id}`, label: 'XÃ³a' },
         };
         const cfg = actionMap[action];
         if (!cfg) return;
 
-        window.toast?.info(`⏳ Đang ${cfg.label} ${ids.length} thiết bị...`);
+        window.toast?.info(`â³ Äang ${cfg.label} ${ids.length} thiáº¿t bá»‹...`);
 
         let ok = 0, fail = 0;
         for (const id of ids) {
@@ -3079,12 +3153,12 @@ class AdminManager {
             } catch { fail++; }
         }
 
-        if (ok > 0) window.toast?.success(`✅ ${cfg.label}: ${ok} thành công`);
-        if (fail > 0) window.toast?.error(`❌ ${fail} thất bại`);
+        if (ok > 0) window.toast?.success(`âœ… ${cfg.label}: ${ok} thÃ nh cÃ´ng`);
+        if (fail > 0) window.toast?.error(`âŒ ${fail} tháº¥t báº¡i`);
 
         this._piSelectMode = false;
         const toggleBtn = document.getElementById('pi-select-toggle');
-        if (toggleBtn) { toggleBtn.classList.replace('btn-primary', 'btn-outline-secondary'); toggleBtn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chọn'; }
+        if (toggleBtn) { toggleBtn.classList.replace('btn-primary', 'btn-outline-secondary'); toggleBtn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chá»n'; }
         const bar = document.getElementById('pi-action-bar');
         if (bar) bar.style.bottom = '-80px';
 
@@ -3095,19 +3169,19 @@ class AdminManager {
     /** Activate a Pi device - generate key and send via MQTT */
     async activatePiDevice(piId) {
         try {
-            window.toast?.info('⏳ Đang gửi yêu cầu kích hoạt...');
+            window.toast?.info('â³ Äang gá»­i yÃªu cáº§u kÃ­ch hoáº¡t...');
             const res = await fetch(`/api/field/pi-devices/${piId}/activate`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi kích hoạt');
+                throw new Error(err.detail || 'Lá»—i kÃ­ch hoáº¡t');
             }
-            window.toast?.success('✅ Đã gửi key kích hoạt đến Pi qua MQTT. Vui lòng chờ Pi xác nhận...');
+            window.toast?.success('âœ… ÄÃ£ gá»­i key kÃ­ch hoáº¡t Ä‘áº¿n Pi qua MQTT. Vui lÃ²ng chá» Pi xÃ¡c nháº­n...');
             setTimeout(() => this.loadPiDevices(), 2000);
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
@@ -3116,7 +3190,7 @@ class AdminManager {
         const selectEl = document.getElementById(`assign-station-${piId}`);
         const stationId = selectEl?.value;
         if (!stationId) {
-            window.toast?.warning('Vui lòng chọn trạm trước');
+            window.toast?.warning('Vui lÃ²ng chá»n tráº¡m trÆ°á»›c');
             return;
         }
         try {
@@ -3130,31 +3204,31 @@ class AdminManager {
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi gán trạm');
+                throw new Error(err.detail || 'Lá»—i gÃ¡n tráº¡m');
             }
             const data = await res.json();
-            window.toast?.success(`✅ Đã gán Pi vào trạm "${data.station_name}"`);
+            window.toast?.success(`âœ… ÄÃ£ gÃ¡n Pi vÃ o tráº¡m "${data.station_name}"`);
             this.loadPiDevices();
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     /** Remove Pi assignment (set back to activated) */
     async unassignPiDevice(piId, event) {
         if (event) event.stopPropagation();
-        if (!confirm('Bạn có chắc chắn muốn BỎ GÁN thiết bị này không?')) return;
+        if (!confirm('Báº¡n cÃ³ cháº¯c cháº¯n muá»‘n Bá»Ž GÃN thiáº¿t bá»‹ nÃ y khÃ´ng?')) return;
 
         try {
             const res = await fetch(`/api/field/pi-devices/${piId}/unassign`, {
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            if (!res.ok) throw new Error('Lỗi bỏ gán');
-            window.toast?.success('✅ Đã bỏ gán Pi khỏi trạm');
+            if (!res.ok) throw new Error('Lá»—i bá» gÃ¡n');
+            window.toast?.success('âœ… ÄÃ£ bá» gÃ¡n Pi khá»i tráº¡m');
             this.loadPiDevices();
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
@@ -3165,35 +3239,35 @@ class AdminManager {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            if (!res.ok) throw new Error('Lỗi xóa');
-            window.toast?.success('✅ Đã xóa Pi');
+            if (!res.ok) throw new Error('Lá»—i xÃ³a');
+            window.toast?.success('âœ… ÄÃ£ xÃ³a Pi');
             setTimeout(() => this.loadPiDevices(), 500);
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     /** Factory-reset a Pi device: clear license, station, set back to pending */
     async resetPiDevice(piId) {
         try {
-            window.toast?.info('🔄 Đang reset thiết bị Pi...');
+            window.toast?.info('ðŸ”„ Äang reset thiáº¿t bá»‹ Pi...');
             const res = await fetch(`/api/field/pi-devices/${piId}/reset`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi reset');
+                throw new Error(err.detail || 'LÃ¡Â»â€”i reset');
             }
-            window.toast?.success('✅ Pi đã được reset về trạng thái ban đầu (pending)');
+            window.toast?.success('âœ… Pi Ä‘Ã£ Ä‘Æ°á»£c reset vá» tráº¡ng thÃ¡i ban Ä‘áº§u (pending)');
             setTimeout(() => this.loadPiDevices(), 500);
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     // =========================================================================
-    // FIELD STATION GẮN LIỀN VỚI PI CENTER
+    // FIELD STATION Gáº®N LIá»€N Vá»šI PI CENTER
     // =========================================================================
 
     /** Assign selected pi_point(s) from the action bar to a Pi Center */
@@ -3207,7 +3281,7 @@ class AdminManager {
             }
         });
         if (pointIds.length === 0) {
-            window.toast?.warning('Không có Pi Hiện trường nào được chọn');
+            window.toast?.warning('KhÃ´ng cÃ³ Pi Hiá»‡n trÆ°á»ng nÃ o Ä‘Æ°á»£c chá»n');
             return;
         }
 
@@ -3224,7 +3298,7 @@ class AdminManager {
             );
 
             if (centers.length === 0) {
-                window.toast?.warning('Không có Pi Trung tâm nào khả dụng. Hãy kích hoạt Pi Trung tâm trước.');
+                window.toast?.warning('KhÃ´ng cÃ³ Pi Trung tÃ¢m nÃ o kháº£ dá»¥ng. HÃ£y kÃ­ch hoáº¡t Pi Trung tÃ¢m trÆ°á»›c.');
                 return;
             }
 
@@ -3238,11 +3312,11 @@ class AdminManager {
                     <div class="modal-dialog modal-dialog-centered">
                         <div class="modal-content">
                             <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff">
-                                <h5 class="modal-title"><i class="bi bi-link-45deg me-2"></i>Gán ${pointIds.length} Pi Hiện trường vào Pi Trung tâm</h5>
+                                <h5 class="modal-title"><i class="bi bi-link-45deg me-2"></i>GÃ¡n ${pointIds.length} Pi Hiá»‡n trÆ°á»ng vÃ o Pi Trung tÃ¢m</h5>
                                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body">
-                                <p class="text-muted small mb-3">Chọn Pi Trung tâm để gán:</p>
+                                <p class="text-muted small mb-3">Chá»n Pi Trung tÃ¢m Ä‘á»ƒ gÃ¡n:</p>
                                 <div class="list-group list-group-flush" id="center-pick-list">
                                     ${centers.map(c => `
                                         <button type="button" class="list-group-item list-group-item-action d-flex gap-3 align-items-center center-pick-item"
@@ -3251,17 +3325,17 @@ class AdminManager {
                                             <div class="text-start">
                                                 <strong>${c.name}</strong>
                                                 <small class="d-block text-muted font-monospace">${c.serial}</small>
-                                                ${c.station_name ? `<small class="text-info">📍 ${c.station_name}</small>` : ''}
+                                                ${c.station_name ? `<small class="text-info">ðŸ“ ${c.station_name}</small>` : ''}
                                             </div>
-                                            <span class="badge ${c.status === 'assigned' ? 'bg-primary' : 'bg-success'} ms-auto">${c.status === 'assigned' ? '📍 Assigned' : '✅ Activated'}</span>
+                                            <span class="badge ${c.status === 'assigned' ? 'bg-primary' : 'bg-success'} ms-auto">${c.status === 'assigned' ? 'ðŸ“ Assigned' : 'âœ… Activated'}</span>
                                         </button>
                                     `).join('')}
                                 </div>
                             </div>
                             <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">HÃ¡Â»Â§y</button>
                                 <button type="button" class="btn btn-primary" id="btn-confirm-center-pick">
-                                    <i class="bi bi-check-lg me-1"></i>Gán
+                                    <i class="bi bi-check-lg me-1"></i>GÃ¡n
                                 </button>
                             </div>
                         </div>
@@ -3283,7 +3357,7 @@ class AdminManager {
 
             document.getElementById('btn-confirm-center-pick').addEventListener('click', async () => {
                 if (!selectedCenterId) {
-                    window.toast?.warning('Vui lòng chọn Pi Trung tâm');
+                    window.toast?.warning('Vui lÃ²ng chá»n Pi Trung tÃ¢m');
                     return;
                 }
                 const centerId = selectedCenterId;
@@ -3304,13 +3378,13 @@ class AdminManager {
                 }
 
                 bsModal.hide();
-                if (ok > 0) window.toast?.success(`✅ Đã gán ${ok} Pi Hiện trường thành công!`);
-                if (fail > 0) window.toast?.error(`❌ ${fail} thất bại`);
+                if (ok > 0) window.toast?.success(`âœ… ÄÃ£ gÃ¡n ${ok} Pi Hiá»‡n trÆ°á»ng thÃ nh cÃ´ng!`);
+                if (fail > 0) window.toast?.error(`âŒ ${fail} tháº¥t báº¡i`);
 
                 // Exit select mode and reload
                 this._piSelectMode = false;
                 const toggleBtn = document.getElementById('pi-select-toggle');
-                if (toggleBtn) { toggleBtn.classList.replace('btn-primary', 'btn-outline-secondary'); toggleBtn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chọn'; }
+                if (toggleBtn) { toggleBtn.classList.replace('btn-primary', 'btn-outline-secondary'); toggleBtn.innerHTML = '<i class="bi bi-check2-square me-1"></i>Chá»n'; }
                 const bar = document.getElementById('pi-action-bar');
                 if (bar) bar.style.bottom = '-80px';
                 setTimeout(() => this.loadPiDevices(), 500);
@@ -3321,7 +3395,7 @@ class AdminManager {
             });
 
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
@@ -3331,7 +3405,7 @@ class AdminManager {
         const select = document.getElementById('point-device-select');
         const optionsBox = document.getElementById('point-device-options');
         if (select) select.value = '';
-        if (optionsBox) optionsBox.innerHTML = '<div class="text-muted small">-- Đang tải ... --</div>';
+        if (optionsBox) optionsBox.innerHTML = '<div class="text-muted small">-- Äang táº£i ... --</div>';
 
         const modal = new bootstrap.Modal(document.getElementById('assignPiPointModal'));
         modal.show();
@@ -3353,7 +3427,7 @@ class AdminManager {
 
             if (pointsToAssign.length === 0) {
                 if (optionsBox) {
-                    optionsBox.innerHTML = '<div class="text-muted small">(Không có Pi Hiện trường nào đang rảnh và đã Activated)</div>';
+                    optionsBox.innerHTML = '<div class="text-muted small">(KhÃ´ng cÃ³ Pi Hiá»‡n trÆ°á»ng nÃ o Ä‘ang ráº£nh vÃ  Ä‘Ã£ Activated)</div>';
                 }
             } else {
                 if (optionsBox) {
@@ -3364,7 +3438,7 @@ class AdminManager {
                                 <strong>${p.name}</strong>
                                 <small class="d-block text-muted font-monospace">${p.serial}</small>
                             </div>
-                            <span class="badge bg-success ms-auto">✅ Activated</span>
+                            <span class="badge bg-success ms-auto">âœ… Activated</span>
                         </button>
                     `).join('');
 
@@ -3379,7 +3453,7 @@ class AdminManager {
             }
         } catch (e) {
             console.error(e);
-            if (optionsBox) optionsBox.innerHTML = '<div class="text-danger small">(Lỗi tải danh sách)</div>';
+            if (optionsBox) optionsBox.innerHTML = '<div class="text-danger small">(Lá»—i táº£i danh sÃ¡ch)</div>';
         }
     }
 
@@ -3390,7 +3464,7 @@ class AdminManager {
         const pointId = select.value;
 
         if (!pointId) {
-            window.toast?.warning("Vui lòng chọn 1 Pi Hiện Trường");
+            window.toast?.warning("Vui lÃ²ng chá»n 1 Pi Hiá»‡n TrÆ°á»ng");
             return;
         }
 
@@ -3406,14 +3480,14 @@ class AdminManager {
 
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi gắn thiết bị');
+                throw new Error(err.detail || 'Lá»—i gáº¯n thiáº¿t bá»‹');
             }
 
-            window.toast?.success("✅ Đã gắn Pi Hiện Trường thành công!");
+            window.toast?.success("âœ… ÄÃ£ gáº¯n Pi Hiá»‡n TrÆ°á»ng thÃ nh cÃ´ng!");
             bootstrap.Modal.getInstance(document.getElementById('assignPiPointModal'))?.hide();
             this.loadPiDevices();
         } catch (e) {
-            window.toast?.error("❌ " + e.message);
+            window.toast?.error("âŒ " + e.message);
         }
     }
 
@@ -3429,7 +3503,7 @@ class AdminManager {
 
         listEl.innerHTML = `<div class="text-center py-3">
                     <div class="spinner-border spinner-border-sm text-primary"></div>
-                    <small class="ms-2 text-muted">Đang tải...</small>
+                    <small class="ms-2 text-muted">Äang táº£i...</small>
                 </div>`;
 
         try {
@@ -3456,9 +3530,9 @@ class AdminManager {
 
             if (available.length === 0) {
                 listEl.innerHTML = `<p class="text-muted small">
-                Không có Pi nào đã kích hoạt và chưa được gán. 
+                KhÃ´ng cÃ³ Pi nÃ o Ä‘Ã£ kÃ­ch hoáº¡t vÃ  chÆ°a Ä‘Æ°á»£c gÃ¡n.
                 <a href="#" onclick="event.preventDefault(); bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target=&apos;#tab-pi&apos;]')).show(); window.adminManager.loadPiDevices();">
-                    Đến tab Pi Devices để kích hoạt
+                    Äáº¿n tab Pi Devices Ä‘á»ƒ kÃ­ch hoáº¡t
                 </a>
             </p>`;
                 if (btnRow) btnRow.style.display = 'none';
@@ -3475,7 +3549,7 @@ class AdminManager {
                             <strong class="font-monospace">${d.name}</strong>
                             <small class="d-block text-muted font-monospace">${d.serial}</small>
                         </div>
-                        <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
+                        <span class="badge bg-success ms-auto">âœ… Sáºµn sÃ ng</span>
                     </button>
                 `).join('')}
                 </div>`;
@@ -3494,7 +3568,7 @@ class AdminManager {
             });
 
         } catch (e) {
-            listEl.innerHTML = '<p class="text-danger small">Lỗi tải danh sách Pi</p>';
+            listEl.innerHTML = '<p class="text-danger small">Lá»—i táº£i danh sÃ¡ch Pi</p>';
             console.error(e);
         }
     }
@@ -3503,7 +3577,7 @@ class AdminManager {
     async assignSelectedPiToStation() {
         const piId = this._selectedWizardPiId;
         if (!piId) {
-            window.toast?.warning('Vui lòng chọn một Pi');
+            window.toast?.warning('Vui lÃ²ng chá»n má»™t Pi');
             return;
         }
         try {
@@ -3517,14 +3591,14 @@ class AdminManager {
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Lỗi gán trạm');
+                throw new Error(err.detail || 'Lá»—i gÃ¡n tráº¡m');
             }
             const data = await res.json();
-            window.toast?.success(`✅ Đã gán Pi vào trạm "${data.station_name}"`);
+            window.toast?.success(`âœ… ÄÃ£ gÃ¡n Pi vÃ o tráº¡m "${data.station_name}"`);
             // Reload the wizard Pi section
             this.loadWizardPendingDevices();
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
@@ -3536,16 +3610,21 @@ class AdminManager {
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            if (!res.ok) throw new Error('Lỗi');
-            window.toast?.success('✅ Đã bỏ gán Pi');
+            if (!res.ok) throw new Error('LÃ¡Â»â€”i');
+            window.toast?.success('âœ… ÄÃ£ bá» gÃ¡n Pi');
             this._assignedPiId = null;
             this.loadWizardPendingDevices();
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            window.toast?.error('âŒ ' + e.message);
         }
     }
 
     logout() {
+        console.log('[SPA-NAV] admin logout redirect landing', {
+            path: window.location.pathname,
+            search: window.location.search,
+        });
+        window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
         localStorage.removeItem('token');
         window.location.href = '/';
     }
@@ -3604,21 +3683,18 @@ class AdminManager {
 // =========================================================================
 // INITIALIZATION
 // =========================================================================
-document.addEventListener('DOMContentLoaded', () => {
-    // Đảm bảo các modal và components đã load xong
-    if (document.getElementById('projects-content-area')) {
+async function bootstrapAdminManager() {
+    const hasAdminDom = document.getElementById('projects-content-area');
+    if (hasAdminDom && !window.adminManager) {
         window.adminManager = new AdminManager();
-    } else {
-        console.error('❌ Admin Dashboard DOM element missing');
+    } else if (!hasAdminDom) {
+        console.error('[ADMIN] Dashboard DOM element missing');
+        return;
     }
-});
 
-// Update UI: set username and reveal System tab for admins (moved from inline HTML)
-document.addEventListener('DOMContentLoaded', async () => {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (!token) return;
 
-    // Prefer using authManager if available
     try {
         let user = window.authManager?.getUserInfo() || window.authManager?.user;
 
@@ -3635,16 +3711,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const systemTab = document.getElementById('system-tab');
                 if (systemTab) {
                     systemTab.style.display = 'block';
-                    console.log('✅ System tab enabled (admin)');
+                    console.log('[ADMIN] System tab enabled');
                 }
             }
         }
     } catch (e) {
-        console.error('Error updating admin UI:', e);
+        console.error('[ADMIN] Error updating admin UI:', e);
     }
-});
+}
 
+window.bootstrapAdminManager = bootstrapAdminManager;
 
-
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapAdminManager, { once: true });
+} else {
+    bootstrapAdminManager();
+}
 
 

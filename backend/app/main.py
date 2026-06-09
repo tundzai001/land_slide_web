@@ -9,10 +9,21 @@ import time
 import math
 import sys
 import os
+import mimetypes
+
+mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('text/css', '.css')
+# Force utf-8 for text files to fix mojibake on Windows
+mimetypes.init()
+mimetypes.types_map['.js'] = 'application/javascript; charset=utf-8'
+mimetypes.types_map['.css'] = 'text/css; charset=utf-8'
+mimetypes.types_map['.html'] = 'text/html; charset=utf-8'
+
 import base64
 import binascii
 import hashlib
 import uuid
+import requests
 from contextlib import asynccontextmanager, suppress
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -20,10 +31,52 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func, delete, text
+
+CORS_BASE_STATIONS_URL = "https://cors.aitogy.com/api/public/map-stations"
+CORS_BASE_STATION_NAMES = {"SinQuyen1", "SinQuyen2"}
+
+
+def is_offline_display_enabled(station_config: Optional[Dict[str, Any]]) -> bool:
+    cfg = station_config or {}
+    return bool(
+        cfg.get("offline_display_enabled") is True or
+        cfg.get("offline_display", {}).get("enabled") is True
+    )
+
+
+async def get_optional_current_user_from_request(
+    request: Request,
+    db: AsyncSession,
+) -> Optional[Any]:
+    auth_header = request.headers.get("authorization") or ""
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        payload = auth.jwt.decode(token, config.settings.SECRET_KEY, algorithms=[config.settings.ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            return None
+        result = await db.execute(select(model_auth.User).where(model_auth.User.username == username))
+        user = result.scalar_one_or_none()
+        if user is None or not user.is_active:
+            return None
+        return user
+    except Exception:
+        return None
+
+
+def user_project_filter_ids(user: Optional[Any]) -> Optional[set]:
+    if user is None or user.role == "admin":
+        return None
+    assigned = getattr(user, "assigned_projects", None) or []
+    if user.role == "viewer" and not assigned:
+        return None
+    return {int(project_id) for project_id in assigned}
 
 LOG_FILE_NAME = 'landslide_system.log'
 _ORIGINAL_STDOUT = sys.__stdout__
@@ -58,6 +111,14 @@ class _LoggerWriter:
 
 
 def _configure_system_logging() -> None:
+    if os.name == 'nt':
+        os.system('chcp 65001 >nul')
+    if hasattr(_ORIGINAL_STDOUT, "reconfigure"):
+        try:
+            _ORIGINAL_STDOUT.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     root_logger = logging.getLogger()
@@ -81,8 +142,8 @@ def _configure_system_logging() -> None:
         uv_logger.propagate = True
         uv_logger.setLevel(logging.INFO)
 
-    sys.stdout = _LoggerWriter(logging.getLogger('CMD.stdout').info)
-    sys.stderr = _LoggerWriter(logging.getLogger('CMD.stderr').error)
+    # Keep stdio untouched. Redirecting sys.stdout/sys.stderr through logging can
+    # recurse when logging itself raises during startup, which hides the real error.
 
 
 def _disable_windows_quick_edit_mode() -> None:
@@ -535,6 +596,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+class CharsetMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        content_type = response.headers.get("content-type", "")
+        if content_type and ("text/" in content_type or "application/javascript" in content_type or "application/json" in content_type):
+            if "charset=" not in content_type.lower():
+                response.headers["content-type"] = f"{content_type}; charset=utf-8"
+        return response
+
+app.add_middleware(CharsetMiddleware)
 app.include_router(admin_router.router)
 app.include_router(field_router.router)
 
@@ -730,6 +804,60 @@ class RescueRequestUpdate(BaseModel):
     admin_note: Optional[str] = None
 
 
+def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
+    response = requests.get(CORS_BASE_STATIONS_URL, timeout=8)
+    response.raise_for_status()
+    payload = response.json()
+    raw_stations = payload.get("value") if isinstance(payload, dict) else payload
+    if not isinstance(raw_stations, list):
+        return []
+
+    stations: List[Dict[str, Any]] = []
+    for item in raw_stations:
+        if not isinstance(item, dict):
+            continue
+
+        name = str(item.get("name") or "").strip()
+        if name not in CORS_BASE_STATION_NAMES:
+            continue
+
+        try:
+            lat = float(item.get("lat"))
+            lon = float(item.get("lon"))
+        except (TypeError, ValueError):
+            continue
+
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            continue
+
+        service_config = item.get("service_config") if isinstance(item.get("service_config"), dict) else {}
+        stations.append({
+            "serial": item.get("serial"),
+            "name": name,
+            "status": item.get("status"),
+            "lat": lat,
+            "lon": lon,
+            "mountpoint": service_config.get("mountpoint1") or name,
+            "is_provisioned": bool(item.get("is_provisioned")),
+            "server_host": service_config.get("serverhost1"),
+            "stream_active": bool(service_config.get("stream_active")),
+            "ntrip_connected": bool(item.get("ntrip_connected")),
+            "bps": item.get("bps"),
+        })
+
+    stations.sort(key=lambda st: st["name"])
+    return stations
+
+
+@app.get("/api/public/cors-base-stations")
+async def get_cors_base_stations():
+    try:
+        return await asyncio.to_thread(_fetch_cors_base_stations_sync)
+    except requests.RequestException as e:
+        logger.warning(f"CORS base station fetch failed: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch CORS base stations")
+
+
 @app.post("/api/public/rescue-requests")
 async def create_rescue_request(
     request: Request,
@@ -820,7 +948,7 @@ async def get_rescue_requests(
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
-    if current_user.role not in ("admin", "operator"):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     q = select(model_data.RescueRequest)
@@ -863,7 +991,7 @@ async def update_rescue_request(
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
-    if current_user.role not in ("admin", "operator"):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     new_status = (payload.status or '').strip().lower()
@@ -896,7 +1024,7 @@ async def delete_rescue_request(
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
-    if current_user.role not in ("admin", "operator"):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
     res = await db.execute(
@@ -1022,7 +1150,8 @@ async def create_user(
         hashed_password=hashed_pw,
         full_name=user_in.full_name,
         role=user_in.role,
-        is_active=True
+        is_active=True,
+        assigned_projects=user_in.assigned_projects or []
     )
     db.add(new_user)
     await db.commit()
@@ -1281,7 +1410,8 @@ async def get_stations_by_project(
                 station_online = True
                 break
         
-        computed_status = "online" if station_online else "offline"
+        offline_display_enabled = is_offline_display_enabled(station.config)
+        computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
         
         stations_with_status.append({
             "id": station.id,
@@ -1607,14 +1737,25 @@ async def delete_device(
 # ============================================================================
 @app.get("/api/stations")
 async def get_stations(
+    request: Request,
     db_config: AsyncSession = Depends(get_config_db),
-    db_data: AsyncSession = Depends(get_data_db)
+    db_data: AsyncSession = Depends(get_data_db),
+    db_auth: AsyncSession = Depends(get_auth_db)
 ):
     """
     ✅ Trả về danh sách tất cả các trạm với offline threshold tùy chỉnh
     """
     try:
-        result = await db_config.execute(select(model_config.Station))
+        current_user = await get_optional_current_user_from_request(request, db_auth)
+        project_filter_ids = user_project_filter_ids(current_user)
+
+        stmt = select(model_config.Station)
+        if project_filter_ids is not None:
+            if not project_filter_ids:
+                return []
+            stmt = stmt.where(model_config.Station.project_id.in_(project_filter_ids))
+
+        result = await db_config.execute(stmt)
         stations = result.scalars().all()
         
         current_time = int(time.time())
@@ -1681,13 +1822,16 @@ async def get_stations(
                 station.config
             )
             computed_risk = risk_assessment.get("overall_risk", "LOW")
+            offline_display_enabled = is_offline_display_enabled(station.config)
+            computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
             
             stations_with_status.append({
                 "id": station.id,
                 "station_code": station.station_code,
                 "name": station.name,
                 "location": station.location,
-                "status": "online" if station_online else "offline",
+                "status": computed_status,
+                "offline_display_enabled": offline_display_enabled,
                 "last_update": station.last_update, 
                 "risk_level": computed_risk
             })
@@ -1702,8 +1846,10 @@ async def get_stations(
 @app.get("/api/stations/{station_id}/detail")
 async def get_station_detail(
     station_id: int,
+    request: Request,
     db_config: AsyncSession = Depends(get_config_db),
-    db_data: AsyncSession = Depends(get_data_db)
+    db_data: AsyncSession = Depends(get_data_db),
+    db_auth: AsyncSession = Depends(get_auth_db)
 ):
     try:
         # 1. Lấy thông tin trạm từ Config DB
@@ -1714,6 +1860,11 @@ async def get_station_detail(
         
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
+
+        current_user = await get_optional_current_user_from_request(request, db_auth)
+        project_filter_ids = user_project_filter_ids(current_user)
+        if project_filter_ids is not None and station.project_id not in project_filter_ids:
+            raise HTTPException(status_code=403, detail="Station not allowed")
         
         # 2. Lấy devices của trạm
         devices_result = await db_config.execute(
@@ -1825,7 +1976,8 @@ async def get_station_detail(
             }
         
         # ✅ Tính status dựa trên offline threshold tùy chỉnh
-        computed_status = "online" if station_online else "offline"
+        offline_display_enabled = is_offline_display_enabled(station.config)
+        computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
         
         # 4. Tính risk assessment
         risk_assessment = await _calculate_station_risk_assessment(
@@ -1869,6 +2021,8 @@ async def get_station_detail(
             "name": station.name,
             "location": station.location,
             "status": computed_status,
+            "offline_display_enabled": offline_display_enabled,
+            "offline_display": {"enabled": offline_display_enabled},
             "mqtt_connected": mqtt_connected,
             "last_update": latest_data_timestamp if has_recent_data else station.last_update,
             "config": station.config,
@@ -1891,6 +2045,10 @@ async def _calculate_station_risk_assessment(
     """Helper: Tính toán risk assessment từ unresolved alerts còn hiệu lực thời gian."""
     try:
         now_ts = int(time.time())
+        alerting_cfg = (station_config or {}).get("alerting", {}) if station_config else {}
+        if alerting_cfg.get("enabled", (station_config or {}).get("alerting_enabled", True)) is False:
+            return {"overall_risk": "LOW", "active_alerts": []}
+
         gnss_offline = get_offline_threshold(station_config or {}, 'gnss')
         rain_offline = get_offline_threshold(station_config or {}, 'rain')
         water_offline = get_offline_threshold(station_config or {}, 'water')
@@ -2855,11 +3013,32 @@ async def health_check():
     return {"status": "ok", "time": time.time(), "db_status": "3-DB-Active"}
 
 @app.get("/")
-async def read_root():
+async def read_root(request: Request):
+    legacy_view = (request.query_params.get("view") or "").lower()
+    if legacy_view in {"admin", "management"}:
+        return RedirectResponse(url="/management", status_code=307)
+    if legacy_view in {"map", "login"}:
+        return RedirectResponse(url="/", status_code=307)
+
     file_path = os.path.join(os.path.dirname(__file__), "../../frontend/index.html")
     if os.path.exists(file_path):
-        return FileResponse(file_path)
+        return FileResponse(file_path, media_type="text/html; charset=utf-8")
     return {"error": "Frontend not found"}
+
+@app.get("/management")
+@app.get("/management.html")
+@app.get("/admin")
+@app.get("/admin.html")
+async def read_app():
+    file_path = os.path.join(os.path.dirname(__file__), "../../frontend/app.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="text/html; charset=utf-8")
+    return {"error": "Frontend not found"}
+
+@app.get("/map")
+@app.get("/login")
+async def redirect_legacy_frontend_routes_to_landing():
+    return RedirectResponse(url="/", status_code=307)
 
 
 # =====================

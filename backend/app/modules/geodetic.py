@@ -65,6 +65,69 @@ VN2000_PROVINCE_TABLE = [
 
 from dataclasses import dataclass, field
 
+def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[float, str]:
+    """Parse VN2000 central meridian.
+
+    Operators often enter province meridians as compact degree-minute notation
+    (104.45 means 104 degrees 45 minutes). Decimal-degree values such as 104.75
+    remain valid and are returned unchanged.
+    """
+    if raw_value is None:
+        return default, "default"
+
+    raw = str(raw_value).strip().replace(",", ".")
+    if not raw:
+        return default, "default"
+
+    import re
+    dms_match = re.match(r"^([+-]?\d+(?:\.\d+)?)\s*(?:°|d|\s)\s*(\d+(?:\.\d+)?)\s*(?:'|m)?$", raw, re.I)
+    if dms_match:
+        deg = float(dms_match.group(1))
+        minutes = float(dms_match.group(2))
+        if 0 <= minutes < 60:
+            sign = -1 if deg < 0 else 1
+            return sign * (abs(deg) + minutes / 60.0), "deg_min"
+
+    compact_match = re.match(r"^([+-]?\d+)\.(\d{2})$", raw)
+    if compact_match:
+        deg = float(compact_match.group(1))
+        minutes = float(compact_match.group(2))
+        if 0 < minutes < 60:
+            sign = -1 if deg < 0 else 1
+            return sign * (abs(deg) + minutes / 60.0), "deg_min_compact"
+
+    try:
+        return float(raw), "decimal_deg"
+    except ValueError:
+        return default, "default"
+
+def normalize_vn2000_l0_value(value, default: float = 105.0) -> Tuple[float, str]:
+    """Normalize stored VN2000 L0 values.
+
+    Old configs stored the operator input directly as a number, so 104.45 was
+    persisted as l0_deg=104.45 even though the intended survey notation was
+    104 degrees 45 minutes. Known decimal-degree L0 values are preserved.
+    """
+    try:
+        l0 = float(value)
+    except (TypeError, ValueError):
+        return default, "default"
+
+    known_decimal_l0 = {
+        103.0, 104.0, 104.5, 104.75, 105.0, 105.5, 105.75,
+        106.0, 106.5, 107.0, 107.25, 107.75, 108.0, 108.25, 108.5
+    }
+    if any(abs(l0 - known) < 1e-9 for known in known_decimal_l0):
+        return l0, "decimal_deg"
+
+    deg = math.trunc(l0)
+    minutes = round(abs(l0 - deg) * 100.0, 8)
+    if 0 < minutes < 60:
+        sign = -1 if l0 < 0 else 1
+        return sign * (abs(deg) + minutes / 60.0), "legacy_deg_min_compact"
+
+    return l0, "decimal_deg"
+
 @dataclass
 class DatumParams:
     """Transformation parameters from ITRF/WGS84 to VN2000 (standard or RTCM 1021/1023/1025)"""

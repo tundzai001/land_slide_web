@@ -95,8 +95,10 @@ class ConnectionManager:
                 return
             
             self.last_broadcast_time[key] = current_time
-            await self._send_to_all(message)  
+            await self._send_to_all(message)
             return
+
+        await self._send_to_all(message)
     
     async def _flush_buffer_periodically(self):
         while True:

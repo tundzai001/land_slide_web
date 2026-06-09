@@ -242,9 +242,16 @@ class SystemManager {
     }
 }
 
-// Khởi tạo
-document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('tab-system')) {
+function bootstrapSystemManager() {
+    if (document.getElementById('tab-system') && !window.systemManager) {
         window.systemManager = new SystemManager();
     }
-});
+}
+
+window.bootstrapSystemManager = bootstrapSystemManager;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapSystemManager, { once: true });
+} else {
+    bootstrapSystemManager();
+}

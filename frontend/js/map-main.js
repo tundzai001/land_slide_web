@@ -5,6 +5,7 @@
 console.log('[MAP] Script loaded, waiting for DOM...');
 
 let map;
+let currentTileLayer = null;
 let markers = {};
 let charts = {};
 let currentStationData = null;
@@ -29,15 +30,35 @@ let guestRescueImagePreviewUrl = null;
 // Rescue marker management
 let rescueMarkers = {}; // key: rescue_request_id -> marker
 let rescueRequestsData = []; // Store rescue data for popup reference
+let corsBaseMarkers = {}; // key: station name -> marker
 let showStationMarkers = true;
 let showRescueMarkers = true;
 let currentMapMode = 'station';
 
+const TILE_URLS = {
+    light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+};
+const TILE_OPTIONS = {
+    light: { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] },
+    dark: { maxZoom: 20, subdomains: ['a', 'b', 'c', 'd'] }
+};
+
+function runWhenDomReady(callback) {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', callback, { once: true });
+    } else {
+        callback();
+    }
+}
+
 function normalizeRiskLevel(rawRisk, stationStatus = null) {
     if (stationStatus === 'offline') return 'OFFLINE';
+    if (stationStatus === 'stale') return 'STALE';
 
     const level = String(rawRisk || 'LOW').toUpperCase();
     if (level === 'OFFLINE') return 'OFFLINE';
+    if (level === 'STALE') return 'STALE';
     if (level === 'LOW' || level === 'SAFE') return 'LOW';
     if (level === 'WARNING' || level === 'MEDIUM' || level === 'HIGH') return 'MEDIUM';
     if (level === 'CRITICAL' || level === 'EXTREME') return 'CRITICAL';
@@ -48,6 +69,9 @@ function getRiskPresentation(rawRisk, stationStatus = null) {
     const normalized = normalizeRiskLevel(rawRisk, stationStatus);
     if (normalized === 'OFFLINE') {
         return { normalized, display: 'OFFLINE', className: 'OFFLINE' };
+    }
+    if (normalized === 'STALE') {
+        return { normalized, display: 'STALE', className: 'STALE' };
     }
     if (normalized === 'MEDIUM') {
         return { normalized, display: 'WARNING', className: 'MEDIUM' };
@@ -190,11 +214,7 @@ function maybeTriggerLocalImuCriticalFallback(stationId, data) {
 // MAIN INITIALIZATION
 // =====================================================
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-} else {
-    initialize();
-}
+runWhenDomReady(initialize);
 
 function initialize() {
     console.log('✅ [MAP] DOM ready, initializing...');
@@ -210,6 +230,7 @@ function initialize() {
     setupMarkerLayerControls();
     setupGuestRescueUI();
     loadStations();
+    loadCorsBaseStations();
     loadRescueMarkers();
     setupWebSocket();
 
@@ -224,6 +245,7 @@ function initialize() {
     }
 
     setInterval(loadStations, 30000);
+    setInterval(loadCorsBaseStations, 300000);
     setInterval(loadRescueMarkers, 60000);
 
     // ✅ Refresh sensor online status of currently-viewed station every 30s
@@ -1252,13 +1274,31 @@ function updateUIVisibilityBasedOnLayers() {
     }
 }
 
+function getLeafletMap() {
+    if (map && typeof map.addLayer === 'function') return map;
+    if (window.map && typeof window.map.addLayer === 'function') return window.map;
+    return null;
+}
+
 function toggleStationMarkersDisplay() {
     Object.values(markers).forEach(marker => {
-        if (window.map) {
+        const leafletMap = getLeafletMap();
+        if (leafletMap) {
             if (showStationMarkers) {
-                marker.addTo(window.map);
+                marker.addTo(leafletMap);
             } else {
-                window.map.removeLayer(marker);
+                leafletMap.removeLayer(marker);
+            }
+        }
+    });
+
+    Object.values(corsBaseMarkers).forEach(marker => {
+        const leafletMap = getLeafletMap();
+        if (leafletMap) {
+            if (showStationMarkers) {
+                marker.addTo(leafletMap);
+            } else {
+                leafletMap.removeLayer(marker);
             }
         }
     });
@@ -1266,20 +1306,190 @@ function toggleStationMarkersDisplay() {
 
 function toggleRescueMarkersDisplay() {
     Object.values(rescueMarkers).forEach(marker => {
-        if (window.map) {
+        const leafletMap = getLeafletMap();
+        if (leafletMap) {
             if (showRescueMarkers) {
-                marker.addTo(window.map);
+                marker.addTo(leafletMap);
             } else {
-                window.map.removeLayer(marker);
+                leafletMap.removeLayer(marker);
             }
         }
     });
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeCorsBaseStations(payload) {
+    const rawStations = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload?.value) ? payload.value : []);
+
+    const wanted = new Set(['SinQuyen1', 'SinQuyen2']);
+    return rawStations
+        .filter(st => wanted.has(String(st?.name || '').trim()))
+        .map(st => ({
+            ...st,
+            name: String(st.name || '').trim(),
+            lat: Number(st.lat),
+            lon: Number(st.lon),
+        }))
+        .filter(st => Number.isFinite(st.lat) && Number.isFinite(st.lon));
+}
+
+async function loadCorsBaseStations() {
+    try {
+        const res = await fetch('/api/public/cors-base-stations', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const payload = await res.json();
+        const stations = normalizeCorsBaseStations(payload);
+        const activeNames = new Set(stations.map(st => st.name));
+
+        Object.entries(corsBaseMarkers).forEach(([name, marker]) => {
+            if (!activeNames.has(name)) {
+                const leafletMap = getLeafletMap();
+                if (leafletMap) leafletMap.removeLayer(marker);
+                delete corsBaseMarkers[name];
+            }
+        });
+
+        stations.forEach(addOrUpdateCorsBaseMarker);
+        console.log(`[CORS-BASE] Loaded ${stations.length} base station marker(s)`, stations.map(st => st.name));
+    } catch (error) {
+        console.warn('[CORS-BASE] load error:', error);
+    }
+}
+
+function addOrUpdateCorsBaseMarker(station) {
+    if (!station?.name || !Number.isFinite(station.lat) || !Number.isFinite(station.lon)) return;
+
+    const isConnected = station.ntrip_connected || station.stream_active;
+    const fill = isConnected ? '#0ea5e9' : '#64748b';
+    const glow = isConnected ? 'rgba(14, 165, 233, 0.55)' : 'rgba(100, 116, 139, 0.45)';
+    const safeName = escapeHtml(station.name);
+    const safeStatus = escapeHtml(station.status || 'unknown');
+    const safeMountpoint = escapeHtml(station.mountpoint || station.name);
+
+    const icon = L.divIcon({
+        className: 'custom-cors-base-marker',
+        html: `
+            <div title="${safeName}" style="
+                width: 0;
+                height: 0;
+                border-left: 13px solid transparent;
+                border-right: 13px solid transparent;
+                border-bottom: 24px solid ${fill};
+                filter: drop-shadow(0 0 8px ${glow});
+                position: relative;
+            ">
+                <div style="
+                    position: absolute;
+                    left: -9px;
+                    top: 8px;
+                    width: 18px;
+                    height: 18px;
+                    color: white;
+                    font-size: 11px;
+                    font-weight: 800;
+                    line-height: 18px;
+                    text-align: center;
+                ">B</div>
+            </div>
+        `,
+        iconSize: [26, 24],
+        iconAnchor: [13, 18],
+        popupAnchor: [0, -18],
+    });
+
+    const popupContent = `
+        <div style="
+            min-width: 230px;
+            overflow: hidden;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+            color: #0f172a;
+            font-size: 13px;
+            line-height: 1.45;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+        ">
+            <div style="
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 12px;
+                color: #0369a1;
+                font-weight: 800;
+                border-bottom: 1px solid #e2e8f0;
+            ">
+                <span style="color:#0ea5e9;"><i class="bi bi-triangle-fill"></i></span>
+                <span>${safeName}</span>
+            </div>
+            <div style="padding: 10px 12px; display: grid; gap: 7px;">
+                <div style="display:flex;justify-content:space-between;gap:14px;">
+                    <span style="color:#64748b;">Name</span><strong>${safeName}</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:14px;">
+                    <span style="color:#64748b;">Lat</span><code style="color:#0f172a;">${station.lat.toFixed(9)}</code>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:14px;">
+                    <span style="color:#64748b;">Lon</span><code style="color:#0f172a;">${station.lon.toFixed(9)}</code>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:14px;">
+                    <span style="color:#64748b;">Mountpoint</span><strong>${safeMountpoint}</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
+                    <span style="color:#64748b;">NTRIP</span>
+                    <span style="
+                        padding: 2px 8px;
+                        border-radius: 999px;
+                        background: ${isConnected ? '#dcfce7' : '#f1f5f9'};
+                        color: ${isConnected ? '#166534' : '#475569'};
+                        font-weight: 700;
+                    ">${isConnected ? 'connected' : safeStatus}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (corsBaseMarkers[station.name]) {
+        corsBaseMarkers[station.name]
+            .setLatLng([station.lat, station.lon])
+            .setIcon(icon)
+            .bindTooltip(safeName, { direction: 'top', offset: [0, -18] })
+            .bindPopup(popupContent, { maxWidth: 300 });
+        return;
+    }
+
+    const marker = L.marker([station.lat, station.lon], { icon, zIndexOffset: 300 })
+        .bindTooltip(safeName, { direction: 'top', offset: [0, -18] })
+        .bindPopup(popupContent, { maxWidth: 300 });
+
+    const leafletMap = getLeafletMap();
+    if (showStationMarkers && leafletMap) {
+        marker.addTo(leafletMap);
+    }
+
+    corsBaseMarkers[station.name] = marker;
+}
+
 async function loadRescueMarkers() {
     try {
-        if (!window.authManager || !window.authManager.isAuthenticated()) {
-            return; // Only authenticated users can fetch this
+        const userRole = window.authManager?.getUserInfo?.()?.role;
+        if (!window.authManager || !window.authManager.isAuthenticated() || userRole !== 'admin') {
+            Object.values(rescueMarkers).forEach(marker => {
+                const leafletMap = getLeafletMap();
+                if (leafletMap) leafletMap.removeLayer(marker);
+            });
+            rescueMarkers = {};
+            rescueRequestsData = [];
+            return; // Rescue markers are admin-only
         }
 
         const res = await window.authManager.apiFetch('/api/admin/rescue-requests?limit=100');
@@ -1331,9 +1541,9 @@ function addRescueMarker(rescueRequest) {
     const icon = L.divIcon({
         className: 'custom-rescue-marker',
         html: `<div style="
-            width: 24px; height: 24px; 
-            background: #dc3545; 
-            border-radius: 50%; 
+            width: 24px; height: 24px;
+            background: #dc3545;
+            border-radius: 50%;
             border: 3px solid white;
             box-shadow: 0 0 12px rgba(220, 53, 69, 0.7);
             display: flex; align-items: center; justify-content: center;
@@ -1351,8 +1561,9 @@ function addRescueMarker(rescueRequest) {
         });
 
     // An toàn thêm marker thay vì addLayer(null)
-    if (showRescueMarkers && window.map) {
-        marker.addTo(window.map);
+    const leafletMap = getLeafletMap();
+    if (showRescueMarkers && leafletMap) {
+        marker.addTo(leafletMap);
     }
 
     const popupContent = `
@@ -1378,8 +1589,8 @@ function addRescueMarker(rescueRequest) {
                 </div>
                 ${(image_url || image_data_url) ? `<div style="margin-top:8px;"><img src="${image_url || image_data_url}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : ''}
                 <div style="margin-top: 15px;">
-                    <a href="https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}" 
-                       target="_blank" rel="noopener" 
+                    <a href="https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}"
+                       target="_blank" rel="noopener"
                        class="btn btn-sm btn-primary w-100 shadow-sm" style="font-size: 13px; font-weight: 600; border-radius: 6px;">
                        <i class="bi bi-geo-alt-fill me-1"></i>Chỉ đường (Google Maps)
                     </a>
@@ -1407,7 +1618,8 @@ function updateRescueMarkerFromWebSocket(message) {
         }
     } else {
         if (message.id && rescueMarkers[message.id]) {
-            if (window.map) window.map.removeLayer(rescueMarkers[message.id]);
+            const leafletMap = getLeafletMap();
+            if (leafletMap) leafletMap.removeLayer(rescueMarkers[message.id]);
             delete rescueMarkers[message.id];
         }
     }
@@ -1539,7 +1751,6 @@ function setupEventListeners() {
                 console.log('🌋 [DIGITAL TWIN] Opening for station:', currentStationData.id);
                 const rainData = currentStationData.sensors && currentStationData.sensors.rain && currentStationData.sensors.rain.latest ? currentStationData.sensors.rain.latest.data : null;
                 const h24 = rainData ? (rainData.rain_24h || rainData.rain_last_24h || rainData.value || 0) : 0;
-                
                 window.openDigitalTwin({
                     id: currentStationData.id,
                     rain: { h24: parseFloat(h24) }
@@ -1562,12 +1773,12 @@ function setupEventListeners() {
             console.log('鼠标️ [GNSS] GNSS Velocity card clicked');
             advSidepanel.classList.toggle('active');
             const isActive = advSidepanel.classList.contains('active');
-            
+
             // ✅ ĐỒNG BỘ: Đóng Station Sidebar khi mở Advanced GNSS
             if (isActive && stationSidebar) {
                 stationSidebar.classList.add('hidden');
             }
-            
+
             console.log('✨ [GNSS] Sidepanel active:', isActive);
         });
     } else {
@@ -1646,7 +1857,7 @@ function setupEventListeners() {
                 stationSidebar.classList.add('force-hidden');
             }
 
-            // Cập nhật tên trạm 
+            // Cập nhật tên trạm
             const longtermStationName = document.getElementById('longterm-station-name');
             if (longtermStationName && currentStationData) {
                 longtermStationName.textContent = `${currentStationData.name} (${currentStationData.station_code})`;
@@ -1777,17 +1988,6 @@ function setupEventListeners() {
 // OTHER FUNCTIONS
 // =====================================================
 
-let currentTileLayer = null;
-
-const TILE_URLS = {
-    light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-};
-const TILE_OPTIONS = {
-    light: { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] },
-    dark: { maxZoom: 20, subdomains: ['a', 'b', 'c', 'd'] }
-};
-
 function switchMapTiles(theme) {
     if (!map) return;
     const key = theme === 'dark' ? 'dark' : 'light';
@@ -1800,6 +2000,7 @@ function switchMapTiles(theme) {
 function initMap() {
     try {
         map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.047079, 108.206230], 6);
+        window.map = map;
 
         const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
         switchMapTiles(currentTheme);
@@ -1817,7 +2018,9 @@ function initMap() {
 
 async function loadStations() {
     try {
-        const res = await fetch('/api/stations');
+        const res = window.authManager?.isAuthenticated?.()
+            ? await window.authManager.apiFetch('/api/stations')
+            : await fetch('/api/stations');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const stations = await res.json();
@@ -1902,7 +2105,9 @@ async function refreshCurrentStationDetail() {
     if (!sidebar || !sidebar.classList.contains('active')) return;
 
     try {
-        const res = await fetch(`/api/stations/${currentStationData.id}/detail`);
+        const res = window.authManager?.isAuthenticated?.()
+            ? await window.authManager.apiFetch(`/api/stations/${currentStationData.id}/detail`)
+            : await fetch(`/api/stations/${currentStationData.id}/detail`);
         if (!res.ok) return;
         const data = await res.json();
         const stationId = data.id;
@@ -1969,6 +2174,7 @@ function getRiskBadgeClass(level) {
         'MEDIUM': 'bg-warning text-dark',
         'HIGH': 'bg-warning text-dark',
         'WARNING': 'bg-warning text-dark',
+        'STALE': 'bg-warning text-dark',
         'LOW': 'bg-success',
         'OFFLINE': 'bg-secondary'
     };
@@ -1982,6 +2188,7 @@ function updateMarker(station) {
     const colors = {
         'CRITICAL': '#fa5252',
         'MEDIUM': '#ffd43b',
+        'STALE': '#f59e0b',
         'LOW': '#51cf66',
         'OFFLINE': '#6c757d'
     };
@@ -1993,7 +2200,7 @@ function updateMarker(station) {
     const shouldPulse = currentLevel === 'CRITICAL';
 
     // ✅ KIỂM TRA CACHE: Nếu trạng thái không đổi thì KHÔNG LÀM GÌ CẢ
-    const cacheKey = `${station.id}_${currentLevel}_${station.location.lat}_${station.location.lon}`;
+    const cacheKey = `${station.id}_${currentLevel}_${station.status}_${station.location.lat}_${station.location.lon}`;
     if (stationStateCache[station.id] === cacheKey) {
         return; // Dữ liệu y hệt cũ -> Bỏ qua, không vẽ lại (Giảm tải CPU)
     }
@@ -2030,8 +2237,12 @@ function updateMarker(station) {
         });
 
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
-            .addTo(showStationMarkers ? map : null)
             .bindTooltip(station.name, { direction: 'top', offset: [0, -10] });
+
+        const leafletMap = getLeafletMap();
+        if (showStationMarkers && leafletMap) {
+            marker.addTo(leafletMap);
+        }
 
         marker.on('click', () => selectStation(station.id));
         markers[station.id] = marker;
@@ -2117,7 +2328,9 @@ async function selectStation(stationId, options = {}) {
     }
 
     try {
-        const res = await fetch(`/api/stations/${stationId}/detail`);
+        const res = window.authManager?.isAuthenticated?.()
+            ? await window.authManager.apiFetch(`/api/stations/${stationId}/detail`)
+            : await fetch(`/api/stations/${stationId}/detail`);
         if (!res.ok) throw new Error('Failed to load station detail');
 
         const data = await res.json();
@@ -2345,10 +2558,16 @@ function updateSidebarUI(data) {
     // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
     const mqttConnected = data.mqtt_connected !== false;
     renderStaleInfo(data, mqttConnected, latestSensorTs);
-    const gnssOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.gnss?.is_online ?? false);
-    const rainOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.rain?.is_online ?? false);
-    const waterOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.water?.is_online ?? false);
-    const imuOnline = mqttConnected && data.status !== 'offline' && (data.sensors?.imu?.is_online ?? false);
+    const staleDisplay = data.status === 'stale' &&
+        ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
+    const gnssOnline = mqttConnected && data.status !== 'offline' &&
+        ((data.sensors?.gnss?.is_online ?? false) || (staleDisplay && !!gnssLatest));
+    const rainOnline = mqttConnected && data.status !== 'offline' &&
+        ((data.sensors?.rain?.is_online ?? false) || (staleDisplay && !!rainLatest));
+    const waterOnline = mqttConnected && data.status !== 'offline' &&
+        ((data.sensors?.water?.is_online ?? false) || (staleDisplay && !!waterLatest));
+    const imuOnline = mqttConnected && data.status !== 'offline' &&
+        ((data.sensors?.imu?.is_online ?? false) || (staleDisplay && !!imuLatest));
 
     if (gnssOnline) {
         const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
@@ -5035,7 +5254,7 @@ function playAlertSound() {
 }
 
 // Setup event listeners cho Alert Banner
-document.addEventListener('DOMContentLoaded', () => {
+runWhenDomReady(() => {
     // Unlock AudioContext sau tương tác người dùng đầu tiên
     const unlockSirenAudio = () => AlertSoundManager.unlock();
     document.addEventListener('touchstart', unlockSirenAudio, { once: true, passive: true });
@@ -5256,7 +5475,7 @@ window.showStationQR = function (lat, lng, stationName) {
     let existing = document.getElementById('qr-popup-overlay');
     if (existing) existing.remove();
 
-    const url = `${window.location.origin}/pages/map.html?lat=${lat}&lng=${lng}`;
+    const url = `${window.location.origin}/map?lat=${lat}&lng=${lng}`;
 
     const overlay = document.createElement('div');
     overlay.id = 'qr-popup-overlay';
@@ -5376,7 +5595,7 @@ function toggleHeatmap() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+runWhenDomReady(() => {
     const heatBtn = document.getElementById('heatmap-toggle');
     if (heatBtn) heatBtn.addEventListener('click', toggleHeatmap);
 });
