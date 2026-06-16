@@ -409,28 +409,39 @@ class MQTTBridge:
         while True:
             try:
                 await self.load_runtime_config_from_db()
-                from app.models.config import Device, Station
+                from app.models.config import Device, Station, Project
                 from sqlalchemy import select
                 
                 async with ConfigSessionLocal() as db:
                     result = await db.execute(
-                        select(Device, Station)
+                        select(Device, Station, Project)
                         .join(Station, Device.station_id == Station.id)
+                        .join(Project, Station.project_id == Project.id)
                         .where(Device.is_active == True)
                     )
                     devices_with_stations = result.all()
                 
                 new_map = {}
-                for device, station in devices_with_stations:
+                for device, station, project in devices_with_stations:
                     if not device.mqtt_topic or device.mqtt_topic.strip() == "": continue
                     
                     topic = device.mqtt_topic
                     sensor_type = device.device_type
                     proc_key = f"device_{device.id}"
+                    device_context = (
+                        f"project={project.name}({project.project_code}) "
+                        f"station={station.name}({station.station_code}, id={station.id}) "
+                        f"device={device.name}({device.device_code}, id={device.id}) "
+                        f"topic={topic}"
+                    )
                     
                     if proc_key not in self.processors_cache:
                         if device.device_type == 'gnss':
-                            self.processors_cache[proc_key] = GNSSVelocityProcessor(device.id, ConfigSessionLocal)
+                            self.processors_cache[proc_key] = GNSSVelocityProcessor(
+                                device.id,
+                                ConfigSessionLocal,
+                                context_label=device_context
+                            )
                         elif sensor_type == 'rain':
                             self.processors_cache[proc_key] = RainEngine()
                         elif sensor_type == 'water':
@@ -447,6 +458,8 @@ class MQTTBridge:
                                 )
                                 logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
                             self.processors_cache[proc_key] = imu_engine
+                    elif device.device_type == 'gnss' and hasattr(self.processors_cache[proc_key], 'set_context'):
+                        self.processors_cache[proc_key].set_context(device_context)
                     
                     new_map[topic] = {
                         "device_id": device.id,
@@ -739,8 +752,8 @@ class MQTTBridge:
         val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
 
         if sensor_type == 'gnss':
-            val_1 = processed_data.get('speed_2d_mm_s', 0.0) or 0.0
-            val_2 = processed_data.get('total_displacement_mm', 0.0) or 0.0
+            val_1 = processed_data.get('speed_2d_mm_s') if 'speed_2d_mm_s' in processed_data else None
+            val_2 = processed_data.get('total_displacement_mm') if 'total_displacement_mm' in processed_data else None
         elif sensor_type == 'rain':
             val_1 = processed_data.get('intensity_mm_h', 0.0) or 0.0
             val_2 = processed_data.get('accumulated_mm', 0.0) or 0.0
@@ -849,9 +862,10 @@ class MQTTBridge:
                         "fix_mode": res.get('fix_mode'),
                         "message": res.get('message')
                     }
-                    if self._should_save_gnss_status(station_id, current_timestamp, station_config):
-                        await self._buffer_sensor_record(device_id, station_id, 'gnss', current_timestamp, status_payload)
-                    
+                    # Status heartbeats keep liveness/fix mode current, but they are
+                    # not velocity measurements. Do not store them in sensor_data,
+                    # otherwise history charts and forwarded JSON can see fake 0s.
+
                     # ✅ Cập nhật cache ngay cả khi đang thu thập origin
                     try:
                         await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)

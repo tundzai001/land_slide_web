@@ -6,6 +6,7 @@ class ThemeManager {
     constructor() {
         this.theme = this.getInitialTheme();
         this.toggleButton = null;
+        this.delegatedListenerReady = false;
         this.init();
     }
 
@@ -21,6 +22,7 @@ class ThemeManager {
     init() {
         this.applyTheme(this.theme);
         this.createToggleButton();
+        this.setupDelegatedToggle();
         this.watchSystemTheme();
         this.updateFavicon();
     }
@@ -71,20 +73,17 @@ class ThemeManager {
         if (document.querySelector('.theme-toggle')) {
             this.toggleButton = document.querySelector('.theme-toggle');
             this.updateToggleIcon();
-            this.toggleButton.onclick = () => this.toggle();
         }
 
         // Also wire up navbar toggle button (#theme-toggle-btn)
         const navToggle = document.getElementById('theme-toggle-btn');
         if (navToggle) {
-            navToggle.onclick = () => this.toggle();
             this.navToggleButton = navToggle;
         }
 
         // Also wire up admin page mini toggle (.theme-toggle-mini)  
         const miniToggle = document.querySelector('.theme-toggle-mini');
         if (miniToggle) {
-            miniToggle.onclick = () => this.toggle();
             this.miniToggleButton = miniToggle;
         }
 
@@ -101,6 +100,22 @@ class ThemeManager {
         }
 
         this.updateToggleIcon();
+    }
+
+    setupDelegatedToggle() {
+        if (this.delegatedListenerReady) return;
+        this.delegatedListenerReady = true;
+
+        document.addEventListener('click', (event) => {
+            const toggle = event.target.closest?.('#theme-toggle-btn, .theme-toggle-mini, .theme-toggle');
+            if (!toggle) return;
+
+            event.preventDefault();
+            this.toggleButton = toggle.classList.contains('theme-toggle') ? toggle : this.toggleButton;
+            this.navToggleButton = toggle.id === 'theme-toggle-btn' ? toggle : this.navToggleButton;
+            this.miniToggleButton = toggle.classList.contains('theme-toggle-mini') ? toggle : this.miniToggleButton;
+            this.toggle();
+        });
     }
 
     updateToggleIcon() {

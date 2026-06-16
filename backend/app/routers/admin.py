@@ -1780,13 +1780,15 @@ async def export_station_pdf(
         doc.build(elements)
         buffer.seek(0)
 
+        import urllib.parse
         safe_name = station.name.replace(' ', '_')
         filename = f"BaoCao_{safe_name}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        encoded_filename = urllib.parse.quote(filename)
 
         return StreamingResponse(
             buffer,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}"}
         )
 
     except HTTPException:

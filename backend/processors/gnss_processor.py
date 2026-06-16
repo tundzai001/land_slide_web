@@ -44,9 +44,11 @@ class GNSSVelocityProcessor:
         max_step_distance_m=0.2,
         # Vertical jump gate (U-axis) to reject unrealistic altitude spikes.
         max_step_vertical_m=0.15,
+        context_label: str = None,
     ):
         self.device_id = device_id
         self.db_session_factory = db_session_factory
+        self.context_label = context_label or f"device_id={device_id}"
         self.required_points = 60  # Increased for stability (approx 1 min at 1Hz)
         self.max_spread_m = max_spread_m
         self.min_fix_quality = min_fix_quality
@@ -61,7 +63,10 @@ class GNSSVelocityProcessor:
 
         # history giữ filter_window_size + 1 mẫu để tính median window
         self.history = deque(maxlen=filter_window_size + 1)
-        # Output velocity state to suppress frame-to-frame jumps without forcing zero.
+        # Recent per-sample velocities. Keep this short so speed_2d remains instantaneous
+        # and does not ramp because of a long sliding window or EMA state.
+        self.velocity_history = deque(maxlen=5)
+        self.reacquire_candidates = deque(maxlen=10)
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
         # Stable displacement state for UI/log (reduce "standing still but jumping total").
@@ -77,10 +82,17 @@ class GNSSVelocityProcessor:
 
         self._schedule_load_origin()
         logger.info(
-            f"GNSS Processor init for device {device_id}: "
+            f"GNSS Processor init for {self._log_prefix()}: "
             f"fix_required={min_fix_quality}, window={filter_window_size}, "
             f"max_step={self.max_step_distance_m}m"
         )
+
+    def set_context(self, context_label: str):
+        if context_label:
+            self.context_label = context_label
+
+    def _log_prefix(self) -> str:
+        return f"GNSS-{self.device_id} {self.context_label}"
 
     def reset_origin(self):
         """Manually reset the origin calculation."""
@@ -88,6 +100,8 @@ class GNSSVelocityProcessor:
         self.origin_candidates = []
         self.state = "AWAITING_CANDIDATES"
         self.history = deque(maxlen=self.filter_window_size + 1)
+        self.velocity_history = deque(maxlen=5)
+        self.reacquire_candidates = deque(maxlen=10)
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
         self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
@@ -416,102 +430,142 @@ class GNSSVelocityProcessor:
         step_u_m = float(abs(v_enu_raw[2]) * dt)
 
         # If dt is too large (stale reference), the comparison is meaningless.
-        # After 5 consecutive rejections OR dt > 60s, force-accept to break cascade.
+        # Do not force-accept a bad fix just because rejects are consecutive:
+        # that would silently move the accepted trajectory away from the locked origin.
         if not hasattr(self, '_consecutive_rejects'):
             self._consecutive_rejects = 0
+        if not hasattr(self, '_last_stale_reject_log_ts'):
+            self._last_stale_reject_log_ts = 0.0
+        if not hasattr(self, '_last_bad_fix_log_ts'):
+            self._last_bad_fix_log_ts = 0.0
 
         # Dynamic step limits based on fix quality
         current_max_2d = self.max_step_distance_m if is_trusted_fix else self.max_step_distance_m * 0.5
         current_max_u = self.max_step_vertical_m if is_trusted_fix else self.max_step_vertical_m * 0.5
 
         is_spike = step_2d_m > current_max_2d or step_u_m > current_max_u
-        force_accept = self._consecutive_rejects >= 10 or dt > 60.0 # Increased consecutive rejects before force-accept
+        stale_reference = dt > 60.0
 
-        if is_spike and not force_accept:
+        if is_spike:
             self._consecutive_rejects += 1
             self.stats['spike_rejected'] += 1
             self.history.pop()
-            # Only log every 5 rejections to avoid spamming
-            if self._consecutive_rejects % 5 == 0:
+            self.reacquire_candidates.append({
+                'ts': ts,
+                'pos_enu': pos_enu,
+                'fix_quality': fix_quality,
+            })
+
+            if len(self.reacquire_candidates) >= 6:
+                candidate_positions = np.array([c['pos_enu'] for c in self.reacquire_candidates], dtype=float)
+                candidate_center = np.median(candidate_positions, axis=0)
+                candidate_xy_spread = float(np.max(np.linalg.norm(candidate_positions[:, :2] - candidate_center[:2], axis=1)))
+                candidate_u_spread = float(np.max(np.abs(candidate_positions[:, 2] - candidate_center[2])))
+                reacquire_xy_limit = self.max_step_distance_m if is_trusted_fix else self.max_step_distance_m * 0.75
+                reacquire_u_limit = self.max_step_vertical_m if is_trusted_fix else self.max_step_vertical_m * 0.75
+
+                if candidate_xy_spread <= reacquire_xy_limit and candidate_u_spread <= reacquire_u_limit:
+                    reacquired_sample = {
+                        'ts': ts,
+                        'pos_enu': candidate_center,
+                    }
+                    self.history.clear()
+                    self.history.append(reacquired_sample)
+                    self.velocity_history.clear()
+                    self.reacquire_candidates.clear()
+                    self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
+                    self.v_state_ready = False
+                    self._consecutive_rejects = 0
+                    logger.warning(
+                        f"[{self._log_prefix()}] Tracking reacquired after stable rejected cluster: "
+                        f"spread2d={candidate_xy_spread:.3f}m, spreadU={candidate_u_spread:.3f}m. "
+                        "Keeping original origin; waiting next sample for velocity."
+                    )
+                    return {
+                        "type": "gnss_status",
+                        "status": "TRACKING_REACQUIRED",
+                        "fix_quality": fix_quality,
+                        "fix_mode": self._fix_mode(fix_quality),
+                        "message": "Tracking reacquired from stable GNSS cluster; velocity resumes on next sample"
+                    }
+
+            if (ts - self._last_bad_fix_log_ts) >= 30.0:
+                self._last_bad_fix_log_ts = ts
                 logger.warning(
-                    f"[GNSS-{self.device_id}] Bad fix rejected (#{self._consecutive_rejects}): "
+                    f"[{self._log_prefix()}] Bad fix rejected (#{self._consecutive_rejects}): "
                     f"step2d={step_2d_m:.3f}m (max={current_max_2d}m), "
                     f"stepU={step_u_m:.3f}m (max={current_max_u}m), quality={fix_quality}"
                 )
-            return None
 
-        if force_accept and is_spike:
-            # Break cascade: clear stale history, keep only the new sample
-            logger.warning(
-                f"[GNSS-{self.device_id}] CASCADE BREAK: {self._consecutive_rejects} consecutive rejects, "
-                f"dt={dt:.1f}s. Force-accepting new sample and resetting history."
-            )
-            new_sample = self.history[-1]
-            self.history.clear()
-            self.history.append(new_sample)
-            # Reset velocity and displacement state to avoid carry-over from stale data
-            self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
-            self.v_state_ready = False
-            self.disp_enu_state = pos_enu.copy()
-            self.disp_state_ready = True
-            self._consecutive_rejects = 0
-            # Return a status indicating reset happened (no velocity data yet)
-            return None
+            if stale_reference and (ts - self._last_stale_reject_log_ts) >= 30.0:
+                self._last_stale_reject_log_ts = ts
+                logger.warning(
+                    f"[{self._log_prefix()}] Stale reference after reject: dt={dt:.1f}s. "
+                    "Keeping locked origin and last accepted displacement; waiting for a stable fix."
+                )
+            return {
+                "type": "gnss_status",
+                "status": "UNSTABLE_FIX",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "message": (
+                    f"Velocity skipped: rejected jump step2d={step_2d_m:.3f}m "
+                    f"stepU={step_u_m:.3f}m from last accepted fix"
+                )
+            }
 
         # Good sample accepted — reset consecutive reject counter
         self._consecutive_rejects = 0
+        self.reacquire_candidates.clear()
 
-        # Stable window smoothing:
-        # Use first->last of the recent window for velocity
-        if len(self.history) >= 3:
-            p_end = self.history[-1]
-            p_start = self.history[0]
-            dt_window = p_end['ts'] - p_start['ts']
-            if dt_window > 0.1:
-                v_enu_filtered = (p_end['pos_enu'] - p_start['pos_enu']) / dt_window
+        # Near-instantaneous velocity:
+        # Consecutive raw RTK samples are still noisy enough to create impossible
+        # mm/s spikes. Use a short 5-sample first->last window, then median a few
+        # recent velocities. This keeps the output responsive without the long
+        # ramp-up/ramp-down caused by the old 30-sample window + EMA.
+        velocity_window = list(self.history)[-5:]
+        if len(velocity_window) >= 3:
+            p_start_short = velocity_window[0]
+            p_end_short = velocity_window[-1]
+            dt_short = p_end_short['ts'] - p_start_short['ts']
+            if dt_short > 0.1:
+                v_enu_measure = (p_end_short['pos_enu'] - p_start_short['pos_enu']) / dt_short
             else:
-                v_enu_filtered = v_enu_raw
+                v_enu_measure = v_enu_raw
         else:
-            v_enu_filtered = v_enu_raw
+            v_enu_measure = v_enu_raw
 
-        if not np.all(np.isfinite(v_enu_filtered)):
-            logger.warning(f"Non-finite filtered velocity rejected (device {self.device_id})")
-            self.history.pop()
-            return None
+        self.velocity_history.append(np.array(v_enu_measure, dtype=float, copy=True))
 
-        # ── Velocity smoothing ──
-        # Only smooth when we have enough history; avoid EMA drift when truly stationary.
         gnss_alert_cfg = (station_config or {}).get("GnssAlerting", {}) if isinstance(station_config, dict) else {}
         try:
-            max_xy_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_xy_mm_s", 6.0))
+            max_xy_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_xy_mm_s", 1.0))
         except Exception:
-            max_xy_mm_s = 6.0
+            max_xy_mm_s = 1.0
         try:
             max_z_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_z_mm_s", 15.0))
         except Exception:
             max_z_mm_s = 15.0
-        try:
-            tau_seconds = float(gnss_alert_cfg.get("velocity_smoothing_tau_s", 8.0))
-        except Exception:
-            tau_seconds = 8.0
 
         hard_cap = np.array([
             max(max_xy_mm_s, 0.5) / 1000.0,
             max(max_xy_mm_s, 0.5) / 1000.0,
             max(max_z_mm_s, 1.0) / 1000.0,
         ], dtype=float)
-        v_target = np.clip(np.array(v_enu_filtered, dtype=float, copy=True), -hard_cap, hard_cap)
-
-        if not self.v_state_ready:
-            self.v_enu_state = v_target
-            self.v_state_ready = True
+        if len(self.velocity_history) >= 3:
+            v_enu_instant = np.median(np.array(self.velocity_history, dtype=float), axis=0)
         else:
-            # Confidence-based smoothing: RTK Float updates much slower than Fixed
-            quality_factor = 1.0 if is_trusted_fix else 0.2
-            alpha = (dt * quality_factor) / (max(tau_seconds, 0.1) + dt)
-            self.v_enu_state = (1.0 - alpha) * self.v_enu_state + alpha * v_target
+            v_enu_instant = v_enu_raw
 
-        v_enu_stable = self.v_enu_state.copy()
+        if not np.all(np.isfinite(v_enu_instant)):
+            logger.warning(f"Non-finite instantaneous velocity rejected (device {self.device_id})")
+            self.history.pop()
+            self.velocity_history.pop()
+            return None
+
+        v_enu_stable = np.clip(np.array(v_enu_instant, dtype=float, copy=True), -hard_cap, hard_cap)
+        self.v_enu_state = v_enu_stable.copy()
+        self.v_state_ready = True
 
         # Parse VN2000 parameters from config if present.
         # Accept both keys for backward compatibility:

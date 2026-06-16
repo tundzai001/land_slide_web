@@ -566,15 +566,12 @@ function updateRealtimeSensorValues(message) {
     if (sensor_type === 'gnss' && data) {
         updateGnssFixBadge(data.fix_mode, data.fix_quality);
 
-        const velocityMmS = data.velocity_mm_s ||
-            data.speed_2d_mm_s ||
-            data.speed_mm_s ||
-            (data.speed_2d ? data.speed_2d * 1000 : null) ||
-            (data.velocity ? data.velocity * 1000 : null) ||
-            (data.speed ? data.speed * 1000 : null) || 0;
+        const velocityMmS = getGnssVelocity(data);
 
         //console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
-        animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
+        if (velocityMmS !== null) {
+            animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
+        }
 
         // Update Advanced Sidepanel fields if it exists and data is available
         if (data.adv_x !== undefined) {
@@ -605,19 +602,19 @@ function updateRealtimeSensorValues(message) {
              }
         }
 
-        const displacement = data.total_displacement_mm || data.displacement_mm || data.displacement || 0;
-
         if (charts['chart-gnss']) {
             const chart = charts['chart-gnss'];
-            chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-            chart.data.datasets[0].data.push(displacement);
+            if (velocityMmS !== null) {
+                chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                chart.data.datasets[0].data.push(velocityMmS);
 
-            if (chart.data.labels.length > 50) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
+                if (chart.data.labels.length > 50) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+
+                chart.update();
             }
-
-            chart.update();
         }
     }
 
@@ -2377,6 +2374,33 @@ async function selectStation(stationId, options = {}) {
     }
 }
 
+function getGnssVelocity(gnssLatest) {
+    if (!gnssLatest) return null;
+    const data = gnssLatest.data || gnssLatest;
+    const toFinite = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : null;
+    };
+
+    const velE = toFinite(data.vel_e);
+    const velN = toFinite(data.vel_n);
+    if (velE !== null && velN !== null) {
+        return Math.sqrt(Math.pow(velE, 2) + Math.pow(velN, 2));
+    }
+
+    for (const key of ['velocity_mm_s', 'speed_2d_mm_s', 'speed_mm_s']) {
+        const value = toFinite(data[key]);
+        if (value !== null) return value;
+    }
+
+    for (const key of ['speed_2d', 'velocity', 'speed']) {
+        const value = toFinite(data[key]);
+        if (value !== null) return value * 1000;
+    }
+
+    return null;
+}
+
 function safeNumber(value, decimals = 2, defaultValue = '--') {
     if (value === null || value === undefined || value === '') {
         return defaultValue;
@@ -2539,9 +2563,16 @@ function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
 
+    // ✅ Handle offline_display_enabled to force STALE status and show old data
+    const isOfflineDisplayEnabled = ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
+    let effectiveStatus = data.status;
+    if (effectiveStatus === 'offline' && isOfflineDisplayEnabled) {
+        effectiveStatus = 'stale'; // turn yellow
+    }
+
     const riskEl = document.getElementById('st-risk');
     if (riskEl) {
-        const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, data.status);
+        const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, effectiveStatus);
         riskEl.className = `status-badge ${riskUi.className}`;
         riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
     }
@@ -2558,15 +2589,17 @@ function updateSidebarUI(data) {
     // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
     const mqttConnected = data.mqtt_connected !== false;
     renderStaleInfo(data, mqttConnected, latestSensorTs);
-    const staleDisplay = data.status === 'stale' &&
-        ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
-    const gnssOnline = mqttConnected && data.status !== 'offline' &&
+    
+    // staleDisplay is true if station is stale OR if we forced it to stale because of offline_display_enabled
+    const staleDisplay = (effectiveStatus === 'stale' || data.status === 'stale') && isOfflineDisplayEnabled;
+    
+    const gnssOnline = mqttConnected && effectiveStatus !== 'offline' &&
         ((data.sensors?.gnss?.is_online ?? false) || (staleDisplay && !!gnssLatest));
-    const rainOnline = mqttConnected && data.status !== 'offline' &&
+    const rainOnline = mqttConnected && effectiveStatus !== 'offline' &&
         ((data.sensors?.rain?.is_online ?? false) || (staleDisplay && !!rainLatest));
-    const waterOnline = mqttConnected && data.status !== 'offline' &&
+    const waterOnline = mqttConnected && effectiveStatus !== 'offline' &&
         ((data.sensors?.water?.is_online ?? false) || (staleDisplay && !!waterLatest));
-    const imuOnline = mqttConnected && data.status !== 'offline' &&
+    const imuOnline = mqttConnected && effectiveStatus !== 'offline' &&
         ((data.sensors?.imu?.is_online ?? false) || (staleDisplay && !!imuLatest));
 
     if (gnssOnline) {
@@ -2605,7 +2638,7 @@ function updateSidebarUI(data) {
     updateImuOfflineBadge(imuOnline);
 
     // ✅ Khi toàn trạm offline → hiển thị '--' cho TẤT CẢ sensor
-    if (data.status === 'offline') {
+    if (effectiveStatus === 'offline') {
         setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
         setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
         setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
@@ -2626,14 +2659,7 @@ function updateSidebarUI(data) {
     } else {
         // GNSS: chỉ hiện giá trị khi sensor đang online
         if (gnssOnline) {
-            const gnssSpeed =
-                gnssLatest?.velocity_mm_s ||
-                gnssLatest?.speed_2d_mm_s ||
-                gnssLatest?.speed_mm_s ||
-                (gnssLatest?.speed_2d ? gnssLatest.speed_2d * 1000 : null) ||
-                (gnssLatest?.velocity ? gnssLatest.velocity * 1000 : null) ||
-                (gnssLatest?.speed ? gnssLatest.speed * 1000 : null) ||
-                null;
+            const gnssSpeed = getGnssVelocity(gnssLatest);
             setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
         } else {
             setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
@@ -2724,7 +2750,15 @@ function renderCharts(data) {
     if (data.sensors.gnss) {
         activeChartBoxIds.push('chart-box-gnss');
         const history = data.sensors.gnss.history || [];
-        renderChart('chart-gnss', history, 'total_displacement_mm', '#fa5252', 'Displacement (mm)');
+        // Compute velocity from vel_e/vel_n components (đã qua bộ lọc zeroing, khớp sidebar)
+        const gnssHistory = history.map(h => ({
+            timestamp: h.timestamp,
+            data: {
+                ...h.data,
+                _chart_velocity: getGnssVelocity(h.data)
+            }
+        })).filter(h => h.data._chart_velocity !== null);
+        renderChart('chart-gnss', gnssHistory, '_chart_velocity', '#fa5252', 'Velocity (mm/s)');
     }
 
     // Rain
@@ -2765,8 +2799,9 @@ function renderCharts(data) {
 }
 
 function renderChart(id, history, key, color, label) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
 
     const labels = (history || []).map(h => {
         const date = new Date(h.timestamp * 1000);
@@ -2775,8 +2810,39 @@ function renderChart(id, history, key, color, label) {
 
     const values = (history || []).map(h => {
         const val = h.data?.[key];
-        return val !== null && val !== undefined ? parseFloat(val) : 0;
+        if (val === null || val === undefined || val === '') return null;
+        const num = parseFloat(val);
+        return Number.isFinite(num) ? num : null;
     });
+    const numericValues = values.filter(value => value !== null);
+
+    // Cập nhật chỉ số thống kê
+    if (numericValues.length > 0) {
+        const maxVal = Math.max(...numericValues);
+        const minVal = Math.min(...numericValues);
+        const avgVal = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+        const latestVal = numericValues[numericValues.length - 1];
+
+        const elLatest = document.getElementById(`stat-${id}-latest`);
+        const elMax = document.getElementById(`stat-${id}-max`);
+        const elMin = document.getElementById(`stat-${id}-min`);
+        const elAvg = document.getElementById(`stat-${id}-avg`);
+
+        if (elLatest) elLatest.innerText = latestVal.toFixed(2);
+        if (elMax) elMax.innerText = maxVal.toFixed(2);
+        if (elMin) elMin.innerText = minVal.toFixed(2);
+        if (elAvg) elAvg.innerText = avgVal.toFixed(2);
+    } else {
+        const elLatest = document.getElementById(`stat-${id}-latest`);
+        const elMax = document.getElementById(`stat-${id}-max`);
+        const elMin = document.getElementById(`stat-${id}-min`);
+        const elAvg = document.getElementById(`stat-${id}-avg`);
+        
+        if (elLatest) elLatest.innerText = '--';
+        if (elMax) elMax.innerText = '--';
+        if (elMin) elMin.innerText = '--';
+        if (elAvg) elAvg.innerText = '--';
+    }
 
     if (charts[id]) {
         charts[id].destroy();
@@ -2784,10 +2850,22 @@ function renderChart(id, history, key, color, label) {
 
     // Theme-aware colors
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
-    const tickColor = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)';
+    const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+    const tickColor = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
 
-    charts[id] = new Chart(ctx, {
+    // Extract RGB from hex for gradient
+    let r = 13, g = 110, b = 253; // Default blue
+    if (color.startsWith('#') && color.length === 7) {
+        r = parseInt(color.slice(1, 3), 16);
+        g = parseInt(color.slice(3, 5), 16);
+        b = parseInt(color.slice(5, 7), 16);
+    }
+    
+    let gradient = ctx.createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.5)`);
+    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.0)`);
+
+    charts[id] = new Chart(canvas, {
         type: 'line',
         data: {
             labels: labels,
@@ -2795,20 +2873,58 @@ function renderChart(id, history, key, color, label) {
                 label: label,
                 data: values,
                 borderColor: color,
-                tension: 0.3,
+                backgroundColor: gradient,
+                fill: true,
+                tension: 0.4,
                 borderWidth: 2,
-                pointRadius: 0
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                pointBackgroundColor: color,
+                pointBorderColor: '#fff',
+                pointBorderWidth: 1.5,
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                    titleColor: isDark ? '#fff' : '#1e293b',
+                    bodyColor: isDark ? '#cbd5e1' : '#475569',
+                    borderColor: isDark ? '#334155' : '#e2e8f0',
+                    borderWidth: 1,
+                    padding: 10,
+                    boxPadding: 4,
+                    usePointStyle: true,
+                }
+            },
             scales: {
-                x: { display: false },
+                x: { 
+                    display: true,
+                    grid: { display: false },
+                    ticks: {
+                        color: tickColor,
+                        maxTicksLimit: 6,
+                        maxRotation: 0
+                    }
+                },
                 y: {
-                    grid: { color: gridColor },
-                    ticks: { color: tickColor }
+                    grid: { 
+                        color: gridColor,
+                        borderDash: [5, 5],
+                        drawBorder: false
+                    },
+                    ticks: { 
+                        color: tickColor,
+                        padding: 8
+                    },
+                    beginAtZero: true
                 }
             }
         }

@@ -1945,6 +1945,15 @@ async def get_station_detail(
                 .limit(500)
             )
             history = history_result.scalars().all()
+            if sensor_type == 'gnss':
+                history = [
+                    h for h in history
+                    if isinstance(h.data, dict)
+                    and (
+                        h.data.get('speed_2d_mm_s') is not None
+                        or (h.data.get('vel_e') is not None and h.data.get('vel_n') is not None)
+                    )
+                ]
             
             # ✅ Per-sensor online check (dựa trên cache timestamp)
             sensor_is_online = bool(latest_ts and (current_time - latest_ts) < threshold)

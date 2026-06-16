@@ -1,4 +1,4 @@
-﻿// Generated legacy HTML templates used by the React CDN shell.
+// Generated legacy HTML templates used by the React CDN shell.
 // Keep this readable: each template is stored as a real multiline string.
 window.LegacyTemplates = {
   "map": String.raw`
@@ -378,7 +378,25 @@ window.LegacyTemplates = {
         <div class="charts-panel-content">
             <!-- GNSS Chart -->
             <div class="chart-box" id="chart-box-gnss">
-                <div class="chart-title">📈 GNSS Displacement (24h)</div>
+                <div class="chart-title">📈 GNSS Velocity (24h)</div>
+                <div class="d-flex justify-content-around px-3 pb-2 pt-2 text-center border-bottom mb-2" style="background-color: var(--bg-secondary); border-radius: 6px;">
+                    <div class="flex-fill">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
+                        <div class="fw-bold text-primary" id="stat-chart-gnss-latest">--</div>
+                    </div>
+                    <div class="flex-fill border-start">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Max</div>
+                        <div class="fw-bold text-danger" id="stat-chart-gnss-max">--</div>
+                    </div>
+                    <div class="flex-fill border-start">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Min</div>
+                        <div class="fw-bold text-success" id="stat-chart-gnss-min">--</div>
+                    </div>
+                    <div class="flex-fill border-start">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Trung bình</div>
+                        <div class="fw-bold text-info" id="stat-chart-gnss-avg">--</div>
+                    </div>
+                </div>
                 <div style="height: 250px;">
                     <canvas id="chart-gnss"></canvas>
                 </div>
@@ -395,6 +413,24 @@ window.LegacyTemplates = {
             <!-- Water Chart -->
             <div class="chart-box" id="chart-box-water">
                 <div class="chart-title">🌊 Water Level (24h)</div>
+                <div class="d-flex justify-content-around px-3 pb-2 pt-2 text-center border-bottom mb-2" style="background-color: var(--bg-secondary); border-radius: 6px;">
+                    <div class="flex-fill">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
+                        <div class="fw-bold text-primary" id="stat-chart-water-latest">--</div>
+                    </div>
+                    <div class="flex-fill border-start">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Max</div>
+                        <div class="fw-bold text-danger" id="stat-chart-water-max">--</div>
+                    </div>
+                    <div class="flex-fill border-start">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Min</div>
+                        <div class="fw-bold text-success" id="stat-chart-water-min">--</div>
+                    </div>
+                    <div class="flex-fill border-start">
+                        <div class="small text-muted" style="font-size: 0.7rem;">Trung bình</div>
+                        <div class="fw-bold text-info" id="stat-chart-water-avg">--</div>
+                    </div>
+                </div>
                 <div style="height: 250px;">
                     <canvas id="chart-water"></canvas>
                 </div>
@@ -1481,7 +1517,7 @@ window.LegacyTemplates = {
                 </h5>
             </div>
             <div class="navbar-right d-flex align-items-center gap-3">
-                <div class="theme-toggle-mini" id="theme-toggle" onclick="window.themeManager.toggle()">
+                <div class="theme-toggle-mini" id="theme-toggle">
                     <i class="bi bi-moon-stars-fill"></i>
                 </div>
                 <div class="user-profile d-flex align-items-center gap-2">
