@@ -1,4 +1,4 @@
-﻿// =====================================================
+// =====================================================
 // ADMIN MANAGER - COMPLETE VERSION WITH ALL FEATURES
 // =====================================================
 
@@ -863,6 +863,18 @@ class AdminManager {
 
         document.getElementById('stationConfigForm').reset();
         document.getElementById('edit-station-id').value = '';
+
+        // Reset custom MQTT Broker inputs
+        const mqttHostEl = document.getElementById('station-mqtt-host');
+        if (mqttHostEl) mqttHostEl.value = '';
+        const mqttPortEl = document.getElementById('station-mqtt-port');
+        if (mqttPortEl) mqttPortEl.value = '';
+        const mqttTlsEl = document.getElementById('station-mqtt-tls');
+        if (mqttTlsEl) mqttTlsEl.checked = false;
+        const mqttUserEl = document.getElementById('station-mqtt-user');
+        if (mqttUserEl) mqttUserEl.value = '';
+        const mqttPassEl = document.getElementById('station-mqtt-pass');
+        if (mqttPassEl) mqttPassEl.value = '';
         document.getElementById('origin-lat').value = '';
         document.getElementById('origin-lon').value = '';
         document.getElementById('origin-h').value = '';
@@ -983,6 +995,33 @@ class AdminManager {
                         checkbox.checked = true;
                         if (section) section.style.display = 'block';
                         if (input) input.value = dev.mqtt_topic || '';
+                        
+                        const devConfig = dev.config || {};
+                        const mqttCfg = devConfig.mqtt || {};
+                        
+                        const hostEl = document.getElementById(`cfg-${type}-mqtt-host`);
+                        const portEl = document.getElementById(`cfg-${type}-mqtt-port`);
+                        const tlsEl = document.getElementById(`cfg-${type}-mqtt-tls`);
+                        const userEl = document.getElementById(`cfg-${type}-mqtt-user`);
+                        const passEl = document.getElementById(`cfg-${type}-mqtt-pass`);
+                        
+                        if (hostEl) hostEl.value = mqttCfg.host || '';
+                        if (portEl) portEl.value = mqttCfg.port || '';
+                        if (tlsEl) {
+                            tlsEl.checked = !!mqttCfg.use_tls;
+                            const wrap = document.getElementById(`wrap-${type}-mqtt-tls`);
+                            if (wrap) {
+                                if (tlsEl.checked) {
+                                    wrap.classList.add('is-on');
+                                    wrap.classList.remove('is-off');
+                                } else {
+                                    wrap.classList.add('is-off');
+                                    wrap.classList.remove('is-on');
+                                }
+                            }
+                        }
+                        if (userEl) userEl.value = mqttCfg.username || '';
+                        if (passEl) passEl.value = mqttCfg.password || '';
                     } else if (checkbox) {
                         // Explicitly uncheck if inactive
                         checkbox.checked = false;
@@ -1007,6 +1046,19 @@ class AdminManager {
                 offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
             }
             this.currentStationConfig = cfg;
+
+            // Populate custom MQTT Broker fields
+            const mqttCfg = cfg.mqtt || {};
+            const mqttHostEl = document.getElementById('station-mqtt-host');
+            if (mqttHostEl) mqttHostEl.value = mqttCfg.host || '';
+            const mqttPortEl = document.getElementById('station-mqtt-port');
+            if (mqttPortEl) mqttPortEl.value = mqttCfg.port || '';
+            const mqttTlsEl = document.getElementById('station-mqtt-tls');
+            if (mqttTlsEl) mqttTlsEl.checked = !!mqttCfg.use_tls;
+            const mqttUserEl = document.getElementById('station-mqtt-user');
+            if (mqttUserEl) mqttUserEl.value = mqttCfg.username || '';
+            const mqttPassEl = document.getElementById('station-mqtt-pass');
+            if (mqttPassEl) mqttPassEl.value = mqttCfg.password || '';
 
             // ✅ ĐỌC OFFLINE THRESHOLDS
             const offlineThresholds = cfg.offline_thresholds || {};
@@ -1719,7 +1771,22 @@ class AdminManager {
                     return;
                 }
 
-                sensors[type] = { topic: topic };
+                const mqttHost = document.getElementById(`cfg-${type}-mqtt-host`)?.value?.trim() || null;
+                const mqttPort = document.getElementById(`cfg-${type}-mqtt-port`)?.value ? parseInt(document.getElementById(`cfg-${type}-mqtt-port`).value) : null;
+                const mqttTls = !!document.getElementById(`cfg-${type}-mqtt-tls`)?.checked;
+                const mqttUser = document.getElementById(`cfg-${type}-mqtt-user`)?.value?.trim() || null;
+                const mqttPass = document.getElementById(`cfg-${type}-mqtt-pass`)?.value?.trim() || null;
+
+                sensors[type] = { 
+                    topic: topic,
+                    mqtt: {
+                        host: mqttHost,
+                        port: mqttPort,
+                        use_tls: mqttTls,
+                        username: mqttUser,
+                        password: mqttPass
+                    }
+                };
 
                 if (type === 'gnss') {
                     const lat = document.getElementById('origin-lat').value;
@@ -1811,6 +1878,14 @@ class AdminManager {
             res_e: parseFloat(document.getElementById('vn-rese')?.value) || 0.0
         };
 
+        const stationMqtt = {
+            host: document.getElementById('station-mqtt-host')?.value?.trim() || '',
+            port: document.getElementById('station-mqtt-port')?.value ? parseInt(document.getElementById('station-mqtt-port').value) : null,
+            use_tls: !!document.getElementById('station-mqtt-tls')?.checked,
+            username: document.getElementById('station-mqtt-user')?.value?.trim() || '',
+            password: document.getElementById('station-mqtt-pass')?.value?.trim() || ''
+        };
+
         const config = {
             active_preset: this.activePreset || '',
             alerting: {
@@ -1882,7 +1957,8 @@ class AdminManager {
             offline_thresholds: offlineThresholds,
             gnss_rtk_forwarding: rtkForwarding,
             vn2000: vn2000,
-            vn2000_params: vn2000
+            vn2000_params: vn2000,
+            mqtt: stationMqtt
         };
 
 
@@ -2254,7 +2330,16 @@ class AdminManager {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ topic: topic })
+                body: JSON.stringify({ 
+                    topic: topic,
+                    mqtt: {
+                        host: document.getElementById('cfg-gnss-mqtt-host')?.value?.trim() || '',
+                        port: document.getElementById('cfg-gnss-mqtt-port')?.value ? parseInt(document.getElementById('cfg-gnss-mqtt-port').value) : null,
+                        username: document.getElementById('cfg-gnss-mqtt-user')?.value?.trim() || '',
+                        password: document.getElementById('cfg-gnss-mqtt-pass')?.value?.trim() || '',
+                        use_tls: !!document.getElementById('cfg-gnss-mqtt-tls')?.checked
+                    }
+                })
             });
 
             const result = await res.json();

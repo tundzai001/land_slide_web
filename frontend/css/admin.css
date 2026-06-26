@@ -2249,3 +2249,12 @@ input[type="number"] {
     margin: 0;
     line-height: 1.35;
 }
+
+/* ========================================
+   MOBILE BOTTOM NAV — ẩn trên desktop,
+   chỉ hiển thị ở trang bản đồ (< 768px)
+   Trên trang admin/management luôn ẩn.
+======================================== */
+.mobile-bottom-nav {
+    display: none !important;
+}

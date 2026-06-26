@@ -473,7 +473,11 @@
             const response = await fetch(src);
             if (!response.ok) throw new Error(`Cannot load ${src}`);
             const source = await response.text();
-            const compiled = Babel.transform(source, { presets: ['react'] }).code;
+            const compiled = Babel.transform(source, {
+                presets: [
+                    ['react', { runtime: 'classic' }]
+                ]
+            }).code;
             const script = document.createElement('script');
             script.dataset.babelSrc = src;
             script.charset = 'utf-8';

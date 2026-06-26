@@ -686,18 +686,46 @@ async def stop_siren_command(
             "target": target
         })
         
+        # Lấy thông tin broker từ cấu hình trạm
+        from app.models.config import Station
+        from sqlalchemy import select
+        res = await db.execute(select(Station).where(Station.id == station_id))
+        station = res.scalar_one_or_none()
+        
         from app.config import settings
+        broker = settings.MQTT_BROKER
+        port = settings.MQTT_PORT
+        username = settings.MQTT_USER
+        password = settings.MQTT_PASSWORD
+        use_tls = False
+        
+        if station and station.config:
+            st_cfg = station.config
+            mqtt_cfg = st_cfg.get("mqtt", {}) or {}
+            if mqtt_cfg.get("host"):
+                broker = mqtt_cfg["host"].strip()
+                port = int(mqtt_cfg.get("port") or 1883)
+                username = mqtt_cfg.get("username", "").strip() or None
+                password = mqtt_cfg.get("password") or None
+                use_tls = bool(mqtt_cfg.get("use_tls", False))
+                
         auth_info = None
-        if settings.MQTT_USER and settings.MQTT_PASSWORD:
-            auth_info = {'username': settings.MQTT_USER, 'password': settings.MQTT_PASSWORD}
+        if username:
+            auth_info = {'username': username, 'password': password}
             
-        logger.info(f"📡 Sending stop_siren command to {cmd_topic} (target: {target})")
+        tls_info = None
+        if use_tls:
+            import ssl
+            tls_info = {} # Sử dụng mặc định TLS
+            
+        logger.info(f"📡 Sending stop_siren command to {cmd_topic} (target: {target}) via broker {broker}:{port}")
         publish.single(
             topic=cmd_topic,
             payload=payload_data,
-            hostname=settings.MQTT_BROKER,
-            port=settings.MQTT_PORT,
+            hostname=broker,
+            port=port,
             auth=auth_info,
+            tls=tls_info,
             qos=1
         )
         return {"status": "success", "message": "Stop siren command sent"}
@@ -726,18 +754,46 @@ async def enable_siren_command(
             "target": target
         })
         
+        # Lấy thông tin broker từ cấu hình trạm
+        from app.models.config import Station
+        from sqlalchemy import select
+        res = await db.execute(select(Station).where(Station.id == station_id))
+        station = res.scalar_one_or_none()
+        
         from app.config import settings
+        broker = settings.MQTT_BROKER
+        port = settings.MQTT_PORT
+        username = settings.MQTT_USER
+        password = settings.MQTT_PASSWORD
+        use_tls = False
+        
+        if station and station.config:
+            st_cfg = station.config
+            mqtt_cfg = st_cfg.get("mqtt", {}) or {}
+            if mqtt_cfg.get("host"):
+                broker = mqtt_cfg["host"].strip()
+                port = int(mqtt_cfg.get("port") or 1883)
+                username = mqtt_cfg.get("username", "").strip() or None
+                password = mqtt_cfg.get("password") or None
+                use_tls = bool(mqtt_cfg.get("use_tls", False))
+                
         auth_info = None
-        if settings.MQTT_USER and settings.MQTT_PASSWORD:
-            auth_info = {'username': settings.MQTT_USER, 'password': settings.MQTT_PASSWORD}
+        if username:
+            auth_info = {'username': username, 'password': password}
             
-        logger.info(f"📡 Sending enable_siren command to {cmd_topic}")
+        tls_info = None
+        if use_tls:
+            import ssl
+            tls_info = {} # Sử dụng mặc định TLS
+            
+        logger.info(f"📡 Sending enable_siren command to {cmd_topic} via broker {broker}:{port}")
         publish.single(
             topic=cmd_topic,
             payload=payload_data,
-            hostname=settings.MQTT_BROKER,
-            port=settings.MQTT_PORT,
+            hostname=broker,
+            port=port,
             auth=auth_info,
+            tls=tls_info,
             qos=1
         )
         return {"status": "success", "message": "Enable siren command sent"}

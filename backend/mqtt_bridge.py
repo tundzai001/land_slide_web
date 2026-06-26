@@ -73,9 +73,12 @@ class MQTTBridge:
         self.client.on_disconnect = self.on_disconnect
         
         # Topic management
-        self.topic_map: Dict[str, Dict[str, Any]] = {}
+        self.topic_map: Dict[tuple, Dict[str, Any]] = {}  # Key: (broker_key, topic)
         self.processors_cache: Dict[str, Any] = {}
         self._fwd_clients: Dict[tuple, mqtt.Client] = {}  # Cache for external brokers
+        self._sub_clients: Dict[tuple, mqtt.Client] = {}  # Dynamic clients for subscriptions
+        self._client_topics: Dict[tuple, set] = defaultdict(set)  # Broker key -> set of subscribed topics
+        self._station_brokers: Dict[int, tuple] = {}  # station_id -> broker_key
         
         self.last_save_time = defaultdict(lambda: defaultdict(int))  # {station_id: {sensor_type: timestamp}}
 
@@ -272,26 +275,50 @@ class MQTTBridge:
             return None
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
+        if not isinstance(userdata, tuple) or len(userdata) < 5:
+            # Default client
+            if rc == 0:
+                logger.info("✅ Default MQTT Connected to Broker.")
+            else:
+                logger.error(f"❌ Default MQTT Connection failed: rc={rc}")
+            return
+
+        broker_key = userdata
         if rc == 0:
-            logger.info("✅ MQTT Connected to Broker.")
-            for topic in self.topic_map.keys():
+            logger.info(f"✅ MQTT Connected to Broker {broker_key[0]}:{broker_key[1]}.")
+            topics = self._client_topics.get(broker_key, set())
+            for topic in topics:
                 client.subscribe(topic)
-                logger.info(f"   ✓ Subscribed: {topic}")
+                logger.info(f"   ✓ Subscribed: {topic} on {broker_key[0]}:{broker_key[1]}")
         else:
-            logger.error(f"❌ MQTT Connection failed: rc={rc}")
+            logger.error(f"❌ MQTT Connection to {broker_key[0]}:{broker_key[1]} failed: rc={rc}")
 
     def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        if not isinstance(userdata, tuple) or len(userdata) < 5:
+            # Default client
+            if reason_code != 0:
+                logger.warning(f"⚠️ Default MQTT disconnect: rc={reason_code}. Reconnecting...")
+                try:
+                    client.reconnect()
+                    logger.info("✅ Default MQTT Reconnected successfully")
+                except Exception as e:
+                    logger.error(f"❌ Default Reconnect failed: {e}. Will retry in 5s...")
+                    if self.loop and self.loop.is_running():
+                        self.loop.call_later(5, self._retry_connect)
+            else:
+                logger.info("✅ Default MQTT Disconnected gracefully")
+            return
+
+        broker_key = userdata
         if reason_code != 0:
-            logger.warning(f"⚠️ MQTT disconnect: rc={reason_code}. Reconnecting...")
+            logger.warning(f"⚠️ MQTT disconnect from {broker_key[0]}:{broker_key[1]}: rc={reason_code}. Reconnecting...")
             try:
                 client.reconnect()
-                logger.info("✅ MQTT Reconnected successfully")
+                logger.info(f"✅ MQTT Reconnected to {broker_key[0]}:{broker_key[1]} successfully")
             except Exception as e:
-                logger.error(f"❌ Reconnect failed: {e}. Will retry in 5s...")
-                if self.loop and self.loop.is_running():
-                    self.loop.call_later(5, self._retry_connect)
+                logger.error(f"❌ Reconnect to {broker_key[0]}:{broker_key[1]} failed: {e}.")
         else:
-            logger.info("✅ MQTT Disconnected gracefully")
+            logger.info(f"✅ MQTT Disconnected from {broker_key[0]}:{broker_key[1]} gracefully")
 
     def _retry_connect(self):
         try:
@@ -322,10 +349,28 @@ class MQTTBridge:
     def on_message(self, client, userdata, msg):
         try:
             topic = msg.topic
-            info = self.topic_map.get(topic)
+            
+            # Resolve the correct broker key for lookup
+            if isinstance(userdata, tuple) and len(userdata) >= 5:
+                broker_key = userdata
+            else:
+                # Default client's broker key
+                broker_key = (
+                    self.runtime_mqtt["broker"],
+                    self.runtime_mqtt["port"],
+                    self.runtime_mqtt["user"] or None,
+                    self.runtime_mqtt["password"] or None,
+                    False
+                )
+                
+            info = self.topic_map.get((broker_key, topic))
             if not info:
-                if self._diag_should_log(f"unknown_topic:{topic}", 60):
-                    logger.warning(f"[MQTT] Received message on unknown topic (not mapped in DB): {topic}")
+                # Fallback to check with TLS=True in case default client gets hit
+                info = self.topic_map.get(((broker_key[0], broker_key[1], broker_key[2], broker_key[3], True), topic))
+                
+            if not info:
+                if self._diag_should_log(f"unknown_topic:{broker_key}:{topic}", 60):
+                    logger.warning(f"[MQTT] Received message from {broker_key[0]}:{broker_key[1]} on unknown topic: {topic}")
                 return
 
             sensor_type = (info or {}).get('type')
@@ -340,9 +385,6 @@ class MQTTBridge:
                         decrypted_payload = payload_str.strip()
                 else:
                     payload_str = msg.payload.decode('utf-8')
-                    # sẽ thêm hàm giải mã AES ở đoạn này
-                    # decrypted_payload = str(aes128_decrypt_base64(bytearray(payload_str, 'utf-8')))
-                    # Tôi phải bỏ hàm giải mã AES vì hiện tại client không mã hóa dữ liệu, đồng chí nào tự ý sửa logic này mà không hiểu rõ sẽ ăn 500 cú Kamejoko vỡ bô đi ị.
                     decrypted_payload = payload_str.strip()
 
                 if sensor_type == 'gnss' and not decrypted_payload:
@@ -362,7 +404,7 @@ class MQTTBridge:
             
             if self.loop and self.loop.is_running():
                 asyncio.run_coroutine_threadsafe(
-                    self.process_pipeline(topic, decrypted_payload), 
+                    self.process_pipeline(info, decrypted_payload), 
                     self.loop
                 )
         except Exception as e:
@@ -404,7 +446,6 @@ class MQTTBridge:
         return False
 
     async def reload_topics_from_db(self):
-
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
@@ -422,8 +463,12 @@ class MQTTBridge:
                     devices_with_stations = result.all()
                 
                 new_map = {}
+                new_client_topics = defaultdict(set)
+                new_station_brokers = {}
+                
                 for device, station, project in devices_with_stations:
-                    if not device.mqtt_topic or device.mqtt_topic.strip() == "": continue
+                    if not device.mqtt_topic or device.mqtt_topic.strip() == "":
+                        continue
                     
                     topic = device.mqtt_topic
                     sensor_type = device.device_type
@@ -434,6 +479,34 @@ class MQTTBridge:
                         f"device={device.name}({device.device_code}, id={device.id}) "
                         f"topic={topic}"
                     )
+                    
+                    # Determine MQTT Broker configuration for this station/device
+                    dev_cfg = device.config or {}
+                    mqtt_cfg = dev_cfg.get("mqtt")
+                    
+                    if not mqtt_cfg:
+                        # Fallback to station config for backward compatibility
+                        st_cfg = station.config or {}
+                        mqtt_cfg = st_cfg.get("mqtt", {}) or {}
+                    
+                    broker_host = (mqtt_cfg.get("host") or "").strip() or self.runtime_mqtt["broker"]
+                    
+                    broker_port = mqtt_cfg.get("port")
+                    if broker_port is not None:
+                        try:
+                            broker_port = int(broker_port)
+                        except (ValueError, TypeError):
+                            broker_port = None
+                    if not broker_port:
+                        broker_port = self.runtime_mqtt["port"]
+                        
+                    broker_user = (mqtt_cfg.get("username") or "").strip() or self.runtime_mqtt["user"] or None
+                    broker_pass = mqtt_cfg.get("password") or self.runtime_mqtt["password"] or None
+                    broker_tls = bool(mqtt_cfg.get("use_tls", False))
+                    
+                    broker_key = (broker_host, broker_port, broker_user, broker_pass, broker_tls)
+                    new_station_brokers[station.id] = broker_key
+                    new_client_topics[broker_key].add(topic)
                     
                     if proc_key not in self.processors_cache:
                         if device.device_type == 'gnss':
@@ -461,7 +534,7 @@ class MQTTBridge:
                     elif device.device_type == 'gnss' and hasattr(self.processors_cache[proc_key], 'set_context'):
                         self.processors_cache[proc_key].set_context(device_context)
                     
-                    new_map[topic] = {
+                    new_map[(broker_key, topic)] = {
                         "device_id": device.id,
                         "device_name": device.name,
                         "station_id": station.id,
@@ -471,14 +544,75 @@ class MQTTBridge:
                         "config": self._apply_runtime_defaults_to_station_config(station.config or {}),
                         "forwarding": (station.config or {}).get("gnss_rtk_forwarding", {})
                     }
-
-                # Diff subscribe/unsubscribe
-                current_topics = set(self.topic_map.keys())
-                new_topics = set(new_map.keys())
-                for t in new_topics - current_topics: self.client.subscribe(t)
-                for t in current_topics - new_topics: self.client.unsubscribe(t)
+                
+                # 1. Terminate clients that are no longer needed
+                for b_key in list(self._sub_clients.keys()):
+                    if b_key not in new_client_topics:
+                        logger.info(f"🔌 [DYNAMIC MQTT] Stopping client for {b_key[0]}:{b_key[1]} (no active topics)")
+                        client = self._sub_clients[b_key]
+                        try:
+                            client.loop_stop()
+                            client.disconnect()
+                        except Exception as e:
+                            logger.error(f"Error disconnecting client {b_key[0]}:{b_key[1]}: {e}")
+                        self._sub_clients.pop(b_key, None)
+                        self._client_topics.pop(b_key, None)
+                
+                # 2. Add or update clients for new/active broker keys
+                for b_key, new_topics in new_client_topics.items():
+                    broker_host, broker_port, broker_user, broker_pass, broker_tls = b_key
+                    
+                    # Create client if it doesn't exist
+                    if b_key not in self._sub_clients:
+                        logger.info(f"🔌 [DYNAMIC MQTT] Creating new subscription client for {broker_host}:{broker_port}")
+                        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                        client.user_data_set(b_key)
+                        client.on_connect = self.on_connect
+                        client.on_message = self.on_message
+                        client.on_disconnect = self.on_disconnect
+                        
+                        if broker_user:
+                            client.username_pw_set(broker_user, broker_pass)
+                        
+                        if broker_tls:
+                            import ssl
+                            try:
+                                client.tls_set_context(ssl.create_default_context())
+                                logger.info(f"🔒 Enabled TLS for client {broker_host}:{broker_port}")
+                            except Exception as tls_e:
+                                logger.error(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
+                        
+                        try:
+                            client.connect(broker_host, broker_port, 60)
+                            client.loop_start()
+                            self._sub_clients[b_key] = client
+                        except Exception as conn_e:
+                            logger.error(f"❌ Failed to connect dynamic client to {broker_host}:{broker_port}: {conn_e}")
+                            self._sub_clients[b_key] = client
+                    
+                    client = self._sub_clients[b_key]
+                    current_topics = self._client_topics[b_key]
+                    
+                    # Perform diff subscribe/unsubscribe on this client
+                    for t in new_topics - current_topics:
+                        try:
+                            client.subscribe(t)
+                            logger.info(f"   ✓ Dynamic Subscribed to {t} on {broker_host}:{broker_port}")
+                        except Exception as sub_e:
+                            logger.error(f"❌ Failed to subscribe to {t} on {broker_host}:{broker_port}: {sub_e}")
+                            
+                    for t in current_topics - new_topics:
+                        try:
+                            client.unsubscribe(t)
+                            logger.info(f"   ✓ Dynamic Unsubscribed from {t} on {broker_host}:{broker_port}")
+                        except Exception as unsub_e:
+                            logger.error(f"❌ Failed to unsubscribe from {t} on {broker_host}:{broker_port}: {unsub_e}")
+                    
+                    self._client_topics[b_key] = new_topics
+                
                 self.topic_map = new_map
-
+                self._station_brokers = new_station_brokers
+                
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
             await asyncio.sleep(self.topic_reload_interval)
@@ -602,7 +736,7 @@ class MQTTBridge:
                 if res.rowcount > 0:
                     await db_data.commit()
                     cmd_topic = f"landslide/{station_id}/command"
-                    self.client.publish(cmd_topic, json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())}), qos=1)
+                    self._get_client_for_station(station_id).publish(cmd_topic, json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())}), qos=1)
                     logger.info(f"Alerting disabled for station {station_id}; resolved {res.rowcount} active alerts.")
 
             await manager.broadcast({
@@ -801,8 +935,14 @@ class MQTTBridge:
                 f"queued_stations={len(self._station_update_buffer)}, queued_devices={len(self._device_update_buffer)}"
             )
 
-    async def process_pipeline(self, topic: str, raw_payload: str):
-        info = self.topic_map.get(topic)
+    def _get_client_for_station(self, station_id: int) -> mqtt.Client:
+        broker_key = self._station_brokers.get(station_id)
+        if broker_key and broker_key in self._sub_clients:
+            return self._sub_clients[broker_key]
+        return self.client # Fallback to default client
+
+
+    async def process_pipeline(self, info: dict, raw_payload: str):
         if not info: return
             
         device_id = info['device_id']
@@ -971,7 +1111,7 @@ class MQTTBridge:
                             logger.warning(f"⚠️ [FORWARD-EXT] Skipping publish: External broker {fwd_host} unavailable")
                     else:
                         # Default to local broker
-                        self.client.publish(target_topic, json.dumps(payload))
+                        self._get_client_for_station(station_id).publish(target_topic, json.dumps(payload))
                         logger.debug(f"📤 [FORWARD-LOCAL] Published 1Hz data to {target_topic}")
                 except Exception as ex:
                     logger.error(f"❌ [FORWARD] Error publishing: {ex}")
@@ -1055,7 +1195,7 @@ class MQTTBridge:
                         "message": alert['message'],
                         "ts": int(time.time())
                     })
-                    self.client.publish(cmd_topic, cmd_payload, qos=1)
+                    self._get_client_for_station(station_id).publish(cmd_topic, cmd_payload, qos=1)
                     logger.warning(f"🔊 [{station_name}] MQTT audio command → {cmd_topic}: {audio_code}")
 
                 logger.warning(f"🚨 [{station_name}] Alert broadcast: {alert['message']}")
@@ -1091,7 +1231,7 @@ class MQTTBridge:
                                 # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
                                 cmd_topic = f"landslide/{station_id}/command"
                                 cmd_payload = json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())})
-                                self.client.publish(cmd_topic, cmd_payload, qos=1)
+                                self._get_client_for_station(station_id).publish(cmd_topic, cmd_payload, qos=1)
                             else:
                                 logger.info(
                                     f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}) "

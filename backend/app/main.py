@@ -1494,6 +1494,7 @@ async def create_station_in_project(
                         device_type=s_type,
                         mqtt_topic=topic,
                         is_active=True,
+                        config={"mqtt": info.get('mqtt')} if info.get('mqtt') else {},
                         created_at=int(time.time()),
                         updated_at=int(time.time())
                     ))
@@ -1549,9 +1550,16 @@ async def update_station_full_config(
                     # Update existing
                     existing_devices[s_type].mqtt_topic = topic
                     existing_devices[s_type].is_active = True
-                    logger.info(f"  ✅ Updated device {s_type}: topic={topic}, is_active=True")
+                    dev_config = dict(existing_devices[s_type].config) if existing_devices[s_type].config else {}
+                    dev_config['mqtt'] = info.get('mqtt')
+                    existing_devices[s_type].config = dev_config
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(existing_devices[s_type], "config")
+                    
+                    logger.info(f"  ✅ Updated device {s_type}: topic={topic}, is_active=True, config.mqtt={dev_config.get('mqtt')}")
                 else:
                     # Create new
+                    dev_config = {'mqtt': info.get('mqtt')}
                     db.add(model_config.Device(
                         device_code=f"{station.station_code}_{s_type.upper()}",
                         name=f"{station.name} - {s_type.upper()}",
@@ -1559,6 +1567,7 @@ async def update_station_full_config(
                         device_type=s_type,
                         mqtt_topic=topic,
                         is_active=True,
+                        config=dev_config,
                         created_at=int(time.time()),
                         updated_at=int(time.time())
                     ))
@@ -1607,11 +1616,26 @@ async def fetch_live_gnss_origin(
         # Sử dụng Import nội bộ để tránh lỗi vòng lặp
         from app.routers.admin import GNSSLiveFetcher
         
+        mqtt_cfg = request_data.get('mqtt', {}) or {}
+        broker = (mqtt_cfg.get('host') or '').strip() or config.settings.MQTT_BROKER
+        port = mqtt_cfg.get('port')
+        if port is not None:
+            try:
+                port = int(port)
+            except (ValueError, TypeError):
+                port = None
+        if not port:
+            port = config.settings.MQTT_PORT
+        username = (mqtt_cfg.get('username') or '').strip() or config.settings.MQTT_USER or ""
+        password = mqtt_cfg.get('password') or config.settings.MQTT_PASSWORD or ""
+        use_tls = bool(mqtt_cfg.get('use_tls', False))
+        
         fetcher = GNSSLiveFetcher(
-            broker=config.settings.MQTT_BROKER,
-            port=config.settings.MQTT_PORT,
-            username=config.settings.MQTT_USER,
-            password=config.settings.MQTT_PASSWORD
+            broker=broker,
+            port=port,
+            username=username,
+            password=password,
+            use_tls=use_tls
         )
         result = await fetcher.fetch_origin(topic, timeout=30)
         if not result: raise HTTPException(status_code=408, detail="Timeout")
@@ -1649,7 +1673,8 @@ async def get_station_devices(
                 "mqtt_topic": d.mqtt_topic,
                 "position": d.position,
                 "is_active": d.is_active,
-                "last_data_time": d.last_data_time
+                "last_data_time": d.last_data_time,
+                "config": d.config or {}
             }
             for d in devices
         ]

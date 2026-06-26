@@ -45,7 +45,26 @@
     <script src="/js/theme-manager.js" charset="utf-8"></script>
     <script src="/js/auth.js" charset="utf-8"></script>
     <script src="/js/legacy-templates.js?v=react-spa-12" charset="utf-8"></script>
-    <script type="text/babel" src="/js/react-app.js?v=react-spa-12" charset="utf-8"></script>
+    <script>
+        (async function() {
+            try {
+                const response = await fetch('/js/react-app.js?v=react-spa-12');
+                if (!response.ok) throw new Error('Cannot load react-app.js');
+                const source = await response.text();
+                const compiled = Babel.transform(source, {
+                    presets: [
+                        ['react', { runtime: 'classic' }]
+                    ]
+                }).code;
+                const script = document.createElement('script');
+                script.charset = 'utf-8';
+                script.textContent = compiled;
+                document.body.appendChild(script);
+            } catch (error) {
+                console.error('Failed to load/compile react-app.js:', error);
+            }
+        })();
+    </script>
 </body>
 
 </html>

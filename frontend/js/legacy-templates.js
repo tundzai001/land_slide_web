@@ -2350,7 +2350,7 @@ window.LegacyTemplates = {
                                 </div>
                             </div>
 
-                            <h6 class="mb-3">2. Cấu hình MQTT Topics:</h6>
+                            <h6 class="mb-3">2. Cấu hình MQTT & Tọa độ theo cảm biến:</h6>
 
                             <div id="mqtt-gnss-section" class="sensor-config-section" style="display: none;">
                                 <div class="sensor-config-header">
@@ -2358,9 +2358,45 @@ window.LegacyTemplates = {
                                     <span>GNSS Configuration</span>
                                 </div>
                                 <div class="sensor-config-body">
+
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-semibold">MQTT Host / Broker</label>
+                                            <input type="text" class="form-control form-control-sm" id="cfg-gnss-mqtt-host" placeholder="Để trống để dùng mặc định">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small fw-semibold">Port</label>
+                                            <input type="number" class="form-control form-control-sm" id="cfg-gnss-mqtt-port" placeholder="1883">
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-semibold d-block">&nbsp;</label>
+                                            <label class="ios-toggle-wrap is-off" id="wrap-gnss-mqtt-tls" onclick="window.adminManager.toggleForwardingWrap(event,this,'cfg-gnss-mqtt-tls')">
+                                                <div class="ios-toggle-info">
+                                                    <div class="param-name">Bật TLS (SSL)</div>
+                                                    <div class="param-unit text-muted" style="font-size: 0.7rem;">Mã hoá kết nối</div>
+                                                </div>
+                                                <div class="ios-switch">
+                                                    <input type="checkbox" id="cfg-gnss-mqtt-tls">
+                                                    <span class="ios-switch-track"></span>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3 border-bottom pb-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label small fw-semibold">Username</label>
+                                            <input type="text" class="form-control form-control-sm" id="cfg-gnss-mqtt-user" placeholder="Tài khoản">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label small fw-semibold">Password</label>
+                                            <input type="password" class="form-control form-control-sm" id="cfg-gnss-mqtt-pass" placeholder="Mật khẩu">
+                                        </div>
+                                    </div>
+
                                     <label class="form-label">MQTT Topic</label>
                                     <input type="text" class="form-control mb-3" id="topic-gnss"
                                         placeholder="station/ST01/gnss">
+
 
                                     <div class="coordinate-lock-box">
                                         <h6 class="mb-2"><i class="bi bi-crosshair me-2"></i>Khóa Tọa độ Gốc (Origin)
@@ -2748,6 +2784,40 @@ window.LegacyTemplates = {
                             <div class="sensor-config-body">
                                 <label class="form-label">MQTT Topic</label><input type="text" class="form-control mb-3"
                                     id="topic-rain">
+
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-semibold">MQTT Host / Broker</label>
+                                        <input type="text" class="form-control form-control-sm" id="cfg-rain-mqtt-host" placeholder="Để trống để dùng mặc định">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-semibold">Port</label>
+                                        <input type="number" class="form-control form-control-sm" id="cfg-rain-mqtt-port" placeholder="1883">
+                                    </div>
+                                    <div class="col-md-5">
+                                            <label class="form-label small fw-semibold d-block">&nbsp;</label>
+                                        <label class="ios-toggle-wrap is-off" id="wrap-rain-mqtt-tls" onclick="window.adminManager.toggleForwardingWrap(event,this,'cfg-rain-mqtt-tls')">
+                                            <div class="ios-toggle-info">
+                                                <div class="param-name">Bật TLS (SSL)</div>
+                                                <div class="param-unit text-muted" style="font-size: 0.7rem;">Mã hoá kết nối</div>
+                                            </div>
+                                            <div class="ios-switch">
+                                                <input type="checkbox" id="cfg-rain-mqtt-tls">
+                                                <span class="ios-switch-track"></span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3 border-bottom pb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-semibold">Username</label>
+                                        <input type="text" class="form-control form-control-sm" id="cfg-rain-mqtt-user" placeholder="Tài khoản">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-semibold">Password</label>
+                                        <input type="password" class="form-control form-control-sm" id="cfg-rain-mqtt-pass" placeholder="Mật khẩu">
+                                    </div>
+                                </div>
                                 <div class="coordinate-lock-box">
                                     <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
                                     <div class="row g-2">
@@ -2770,6 +2840,40 @@ window.LegacyTemplates = {
                             <div class="sensor-config-body">
                                 <label class="form-label">MQTT Topic</label><input type="text" class="form-control mb-3"
                                     id="topic-water">
+
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-semibold">MQTT Host / Broker</label>
+                                        <input type="text" class="form-control form-control-sm" id="cfg-water-mqtt-host" placeholder="Để trống để dùng mặc định">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-semibold">Port</label>
+                                        <input type="number" class="form-control form-control-sm" id="cfg-water-mqtt-port" placeholder="1883">
+                                    </div>
+                                    <div class="col-md-5">
+                                            <label class="form-label small fw-semibold d-block">&nbsp;</label>
+                                        <label class="ios-toggle-wrap is-off" id="wrap-water-mqtt-tls" onclick="window.adminManager.toggleForwardingWrap(event,this,'cfg-water-mqtt-tls')">
+                                            <div class="ios-toggle-info">
+                                                <div class="param-name">Bật TLS (SSL)</div>
+                                                <div class="param-unit text-muted" style="font-size: 0.7rem;">Mã hoá kết nối</div>
+                                            </div>
+                                            <div class="ios-switch">
+                                                <input type="checkbox" id="cfg-water-mqtt-tls">
+                                                <span class="ios-switch-track"></span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3 border-bottom pb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-semibold">Username</label>
+                                        <input type="text" class="form-control form-control-sm" id="cfg-water-mqtt-user" placeholder="Tài khoản">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-semibold">Password</label>
+                                        <input type="password" class="form-control form-control-sm" id="cfg-water-mqtt-pass" placeholder="Mật khẩu">
+                                    </div>
+                                </div>
                                 <div class="coordinate-lock-box">
                                     <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
                                     <div class="row g-2">
@@ -2792,6 +2896,40 @@ window.LegacyTemplates = {
                             <div class="sensor-config-body">
                                 <label class="form-label">MQTT Topic</label><input type="text" class="form-control mb-3"
                                     id="topic-imu">
+
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-semibold">MQTT Host / Broker</label>
+                                        <input type="text" class="form-control form-control-sm" id="cfg-imu-mqtt-host" placeholder="Để trống để dùng mặc định">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-semibold">Port</label>
+                                        <input type="number" class="form-control form-control-sm" id="cfg-imu-mqtt-port" placeholder="1883">
+                                    </div>
+                                    <div class="col-md-5">
+                                            <label class="form-label small fw-semibold d-block">&nbsp;</label>
+                                        <label class="ios-toggle-wrap is-off" id="wrap-imu-mqtt-tls" onclick="window.adminManager.toggleForwardingWrap(event,this,'cfg-imu-mqtt-tls')">
+                                            <div class="ios-toggle-info">
+                                                <div class="param-name">Bật TLS (SSL)</div>
+                                                <div class="param-unit text-muted" style="font-size: 0.7rem;">Mã hoá kết nối</div>
+                                            </div>
+                                            <div class="ios-switch">
+                                                <input type="checkbox" id="cfg-imu-mqtt-tls">
+                                                <span class="ios-switch-track"></span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3 border-bottom pb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-semibold">Username</label>
+                                        <input type="text" class="form-control form-control-sm" id="cfg-imu-mqtt-user" placeholder="Tài khoản">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-semibold">Password</label>
+                                        <input type="password" class="form-control form-control-sm" id="cfg-imu-mqtt-pass" placeholder="Mật khẩu">
+                                    </div>
+                                </div>
                                 <div class="coordinate-lock-box">
                                     <h6 class="mb-2"><i class="bi bi-geo-alt me-2"></i>Tọa độ Lắp đặt</h6>
                                     <div class="row g-2">

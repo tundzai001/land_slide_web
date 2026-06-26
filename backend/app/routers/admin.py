@@ -1112,11 +1112,22 @@ async def update_station_config(
                 
                 active_types.add(s_type)
                 
+                # Build per-device MQTT config from sensor payload
+                mqtt_payload = info.get('mqtt') if isinstance(info, dict) else None
+                
                 if s_type in existing_devices:
                     existing_devices[s_type].mqtt_topic = topic
                     existing_devices[s_type].is_active = True
                     existing_devices[s_type].updated_at = int(time.time())
-                    logger.info(f"  ✅ Updated {s_type}: topic={topic}")
+                    
+                    # Save per-device MQTT broker config
+                    import copy
+                    dev_config = copy.deepcopy(existing_devices[s_type].config) if existing_devices[s_type].config else {}
+                    dev_config['mqtt'] = mqtt_payload
+                    existing_devices[s_type].config = dev_config
+                    flag_modified(existing_devices[s_type], "config")
+                    
+                    logger.info(f"  ✅ Updated {s_type}: topic={topic}, config.mqtt={mqtt_payload}")
                 else:
                     # Check if device_code already exists globally (orphaned or other station)
                     dev_code = f"{station.station_code}_{s_type.upper()}"
@@ -1132,7 +1143,13 @@ async def update_station_config(
                         found_dev.mqtt_topic = topic
                         found_dev.is_active = True
                         found_dev.updated_at = int(time.time())
-                        logger.info(f"  🔄 Reassigned existing device {dev_code}: topic={topic}")
+                        
+                        dev_config = copy.deepcopy(found_dev.config) if found_dev.config else {}
+                        dev_config['mqtt'] = mqtt_payload
+                        found_dev.config = dev_config
+                        flag_modified(found_dev, "config")
+                        
+                        logger.info(f"  🔄 Reassigned existing device {dev_code}: topic={topic}, config.mqtt={mqtt_payload}")
                     else:
                         db.add(model_config.Device(
                             device_code=dev_code,
@@ -1141,10 +1158,11 @@ async def update_station_config(
                             device_type=s_type,
                             mqtt_topic=topic,
                             is_active=True,
+                            config={"mqtt": mqtt_payload},
                             created_at=int(time.time()),
                             updated_at=int(time.time())
                         ))
-                        logger.info(f"  🆕 Created {s_type}: topic={topic}")
+                        logger.info(f"  🆕 Created {s_type}: topic={topic}, config.mqtt={mqtt_payload}")
             
             # 3. Deactivate unchecked sensors
             for d_type, dev in existing_devices.items():
@@ -1224,11 +1242,12 @@ async def reset_station_config(
 # ============================================================================
 
 class GNSSLiveFetcher:
-    def __init__(self, broker: str, port: int, username: str = "", password: str = ""):
+    def __init__(self, broker: str, port: int, username: str = "", password: str = "", use_tls: bool = False):
         self.broker = broker
         self.port = port
         self.username = username
         self.password = password
+        self.use_tls = use_tls
         self.received_data = None
         self.is_connected = False
         
@@ -1257,40 +1276,22 @@ class GNSSLiveFetcher:
             return None
 
     def _extract_gngga(self, payload_bytes: bytes) -> Optional[str]:
-        # Some topics can carry binary (e.g. RTCM) or mixed frames; keep only a GGA sentence.
-        payload_text = payload_bytes.decode('utf-8', errors='ignore')
-        if not payload_text:
+        if not payload_bytes:
             return None
 
-        idx_gngga = payload_text.find('$GNGGA')
-        idx_gpgga = payload_text.find('$GPGGA')
-        start_candidates = [i for i in (idx_gngga, idx_gpgga) if i >= 0]
-        if not start_candidates:
+        import re
+        gga_regex = re.compile(rb'\$G[NP]GGA,[^\r\n*]*(?:\*[0-9A-Fa-f]{2})?')
+
+        match = gga_regex.search(payload_bytes)
+        if not match and b'\x00' in payload_bytes:
+            # Some encoders interleave NULL bytes; remove them and retry.
+            compact_bytes = payload_bytes.replace(b'\x00', b'')
+            match = gga_regex.search(compact_bytes)
+
+        if not match:
             return None
 
-        start = min(start_candidates)
-        tail = payload_text[start:]
-
-        end_candidates = []
-        for marker in ('\r', '\n'):
-            pos = tail.find(marker)
-            if pos >= 0:
-                end_candidates.append(pos)
-        next_sentence_pos = tail.find('$', 1)
-        if next_sentence_pos >= 0:
-            end_candidates.append(next_sentence_pos)
-
-        end = min(end_candidates) if end_candidates else len(tail)
-        sentence = tail[:end].strip()
-        if not (sentence.startswith('$GNGGA') or sentence.startswith('$GPGGA')):
-            return None
-
-        # Keep checksum if present and trim trailing noise after checksum bytes.
-        checksum_idx = sentence.find('*')
-        if checksum_idx >= 0 and len(sentence) >= checksum_idx + 3:
-            sentence = sentence[:checksum_idx + 3]
-
-        return sentence if ',' in sentence else None
+        return match.group(0).decode('ascii', errors='ignore').strip()
     
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
@@ -1304,6 +1305,9 @@ class GNSSLiveFetcher:
         try:
             payload = self._extract_gngga(msg.payload)
             if not payload:
+                # Log full payload representation if it's binary or invalid
+                raw_repr = msg.payload[:100].hex() if b'\x00' in msg.payload else msg.payload[:100].decode('utf-8', errors='ignore')
+                logger.info(f"[GNSSLiveFetcher] No GGA found in payload on {msg.topic}. Raw start: {raw_repr}")
                 return
 
             logger.info(f"[GNSSLiveFetcher] Received GNSS message on {msg.topic}: {payload}")
@@ -1325,6 +1329,10 @@ class GNSSLiveFetcher:
             client.on_message = self._on_message
             if self.username: client.username_pw_set(self.username, self.password)
             
+            if self.use_tls:
+                import ssl
+                client.tls_set_context(ssl.create_default_context())
+                
             client.connect(self.broker, self.port, 60)
             client.loop_start()
             
@@ -1353,11 +1361,26 @@ async def fetch_live_gnss_origin(
         if not topic:
             raise HTTPException(status_code=400, detail="MQTT topic is required")
         
+        mqtt_cfg = request_data.get('mqtt', {}) or {}
+        broker = (mqtt_cfg.get('host') or '').strip() or config.settings.MQTT_BROKER
+        port = mqtt_cfg.get('port')
+        if port is not None:
+            try:
+                port = int(port)
+            except (ValueError, TypeError):
+                port = None
+        if not port:
+            port = config.settings.MQTT_PORT
+        username = (mqtt_cfg.get('username') or '').strip() or config.settings.MQTT_USER or ""
+        password = mqtt_cfg.get('password') or config.settings.MQTT_PASSWORD or ""
+        use_tls = bool(mqtt_cfg.get('use_tls', False))
+        
         fetcher = GNSSLiveFetcher(
-            broker=config.settings.MQTT_BROKER,
-            port=config.settings.MQTT_PORT,
-            username=config.settings.MQTT_USER,
-            password=config.settings.MQTT_PASSWORD
+            broker=broker,
+            port=port,
+            username=username,
+            password=password,
+            use_tls=use_tls
         )
         
         result = await fetcher.fetch_origin(topic, timeout=30)
