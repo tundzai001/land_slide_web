@@ -279,6 +279,7 @@ class MQTTBridge:
             # Default client
             if rc == 0:
                 logger.info("✅ Default MQTT Connected to Broker.")
+                client.subscribe("command/ntrip/#")
             else:
                 logger.error(f"❌ Default MQTT Connection failed: rc={rc}")
             return
@@ -350,6 +351,10 @@ class MQTTBridge:
         try:
             topic = msg.topic
             
+            if topic.startswith("command/ntrip/"):
+                self._handle_ntrip_command(msg)
+                return
+            
             # Resolve the correct broker key for lookup
             if isinstance(userdata, tuple) and len(userdata) >= 5:
                 broker_key = userdata
@@ -374,6 +379,12 @@ class MQTTBridge:
                 return
 
             sensor_type = (info or {}).get('type')
+            if sensor_type == 'gnss':
+                station_code = (info or {}).get('station_code')
+                if station_code:
+                    from app.modules.ntrip_pusher import ntrip_manager
+                    ntrip_manager.feed_data(station_code, msg.payload)
+                    
             try:
                 if sensor_type == 'gnss':
                     # GNSS topic can contain mixed payload (RTCM binary + NMEA text).
@@ -409,6 +420,35 @@ class MQTTBridge:
                 )
         except Exception as e:
             logger.error(f"Error in on_message: {e}")
+
+    def _handle_ntrip_command(self, msg):
+        try:
+            import json
+            payload = json.loads(msg.payload.decode('utf-8'))
+            from app.modules.ntrip_pusher import ntrip_manager
+            import asyncio
+            if msg.topic == "command/ntrip/route/start":
+                station_code = payload.get("station_code")
+                host = payload.get("host", "127.0.0.1")
+                port = int(payload.get("port", 2101))
+                mountpoint = payload.get("mountpoint")
+                password = payload.get("password", "")
+                if station_code and mountpoint:
+                    if self.loop and self.loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            ntrip_manager.start_pusher(station_code, host, port, mountpoint, password),
+                            self.loop
+                        )
+            elif msg.topic == "command/ntrip/route/stop":
+                station_code = payload.get("station_code")
+                if station_code:
+                    if self.loop and self.loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            ntrip_manager.stop_pusher(station_code),
+                            self.loop
+                        )
+        except Exception as e:
+            logger.error(f"[NTRIP COMMAND] Error processing command: {e}")
 
     def start(self):
         logger.info("🚀 Starting MQTT Bridge inside FastAPI...")
@@ -539,6 +579,7 @@ class MQTTBridge:
                         "device_name": device.name,
                         "station_id": station.id,
                         "station_name": station.name,
+                        "station_code": getattr(station, "station_code", None),
                         "type": device.device_type,
                         "processor": self.processors_cache[proc_key],
                         "config": self._apply_runtime_defaults_to_station_config(station.config or {}),

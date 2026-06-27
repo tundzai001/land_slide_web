@@ -143,3 +143,9 @@ class SystemConfigPayload(BaseModel):
     mqtt: MqttConfig
     confirmation: ConfirmationConfig
     save_intervals: SaveIntervalsConfig
+
+class NtripRouteStart(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = 2101
+    mountpoint: str
+    password: str = ""
