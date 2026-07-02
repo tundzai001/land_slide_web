@@ -1310,7 +1310,11 @@ class MQTTBridge:
             last_saved = self.last_save_time[station_id].get(sensor_type, 0)
             
             interval = self.runtime_save_intervals.get('default', settings.SAVE_INTERVAL_DEFAULT)
-            if sensor_type == 'gnss': interval = self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)
+            if sensor_type == 'gnss':
+                try:
+                    interval = int(station_config.get("gnss_save_interval", self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)))
+                except (ValueError, TypeError):
+                    interval = self.runtime_save_intervals.get('gnss', settings.SAVE_INTERVAL_GNSS)
             elif sensor_type == 'imu': interval = self.runtime_save_intervals.get('imu', settings.SAVE_INTERVAL_IMU)
             elif sensor_type == 'rain': interval = self.runtime_save_intervals.get('rain', settings.SAVE_INTERVAL_RAIN)
             elif sensor_type == 'water': interval = self.runtime_save_intervals.get('water', settings.SAVE_INTERVAL_WATER)
@@ -1341,6 +1345,14 @@ class MQTTBridge:
             else:
                 # Chưa đủ chu kỳ → Skip
                 logger.debug(f"⏭️ [SKIP SAVE] {station_name} - {sensor_type.upper()} ({time_since_last_save}/{interval}s)")
+
+        # ✅ Thêm option chỉ lưu GNSS khi fix (fix_quality >= 4)
+        if save_data_now and sensor_type == 'gnss':
+            # Option gnss_save_only_fix trong station_config (mặc định False để tương thích ngược, có thể set True để bật)
+            only_save_fix = station_config.get("gnss_save_only_fix", False)
+            if only_save_fix and processed_data and processed_data.get('fix_quality', 0) < 4:
+                save_data_now = False
+                logger.info(f"⏭️ [SKIP SAVE] {station_name} - GNSS (Not fixed, quality={processed_data.get('fix_quality')})")
 
         try:
             if save_data_now:
