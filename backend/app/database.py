@@ -9,10 +9,10 @@ def create_pg_engine(url):
         url,
         echo=False,
         pool_pre_ping=True,
-        pool_size=10,        # Tăng lên 10 để phục vụ nhiều trạm đồng thời
-        max_overflow=20,     # Cho phép tối đa 30 kết nối khi tải cao
+        pool_size=20,        # Tăng lên 20 để phục vụ nhiều trạm GNSS đồng thời
+        max_overflow=40,     # Cho phép tối đa 60 kết nối khi tải cao (10+ trạm * nhiều sensor)
         pool_recycle=1800,
-        pool_timeout=30,
+        pool_timeout=60,     # Tăng timeout lên 60s để tránh lỗi khi burst
         pool_use_lifo=True,  # Tái sử dụng kết nối gần nhất (tốt cho cache)
     )
 

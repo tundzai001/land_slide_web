@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # GNSS rollup/purge workflow: thu thập dày theo giây, chốt ngày/tuần rồi dọn raw.
     GNSS_ROLLUP_INTERVAL_SECONDS: int = 300
-    GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP: bool = True
+    GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP: bool = False
 
     class Config:
         # Chỉ định đường dẫn tuyệt đối tới file .env để chạy ổn định trên IIS

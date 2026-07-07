@@ -1,0 +1,412 @@
+import math
+import re
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+import numpy as np
+
+from .gnss_adjustment.models import Baseline, Network, NetworkError, Point
+from .gnss_adjustment.solver import adjust_network
+
+
+@dataclass(frozen=True)
+class AgricaObservation:
+    project_id: int
+    station_id: int
+    rover_name: str
+    epoch_ts: int
+    position_type: Optional[int]
+    baseline_neu: tuple[float, float, float]
+    std_neu: tuple[float, float, float]
+    std_ecef: Optional[tuple[float, float, float]]
+    rover_llh: Optional[tuple[float, float, float]]
+    rover_ecef: Optional[tuple[float, float, float]]
+    base_llh: Optional[tuple[float, float, float]]
+    raw: str
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return None
+        result = float(str(value).strip())
+        if not math.isfinite(result):
+            return None
+        return result
+    except Exception:
+        return None
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        if value is None or value == "":
+            return None
+        return int(float(str(value).strip()))
+    except Exception:
+        return None
+
+
+def _positive_std(value: Optional[float], fallback: float = 0.02) -> float:
+    if value is None or value <= 0:
+        return fallback
+    return max(float(value), 1e-4)
+
+
+def extract_agrica_sentences(raw_payload: str) -> list[str]:
+    if not raw_payload:
+        return []
+    compact = raw_payload.replace("\r", "").replace("\n", "")
+    return [
+        match.strip()
+        for match in re.findall(r"#AGRICA[^;]*;GNSS,[^*]*(?:\*[0-9A-Fa-f]+)?", compact)
+        if match.strip()
+    ]
+
+
+def parse_agrica(
+    raw_payload: str,
+    *,
+    project_id: int,
+    station_id: int,
+    rover_name: str,
+    received_ts: Optional[int] = None,
+) -> list[AgricaObservation]:
+    observations: list[AgricaObservation] = []
+    for sentence in extract_agrica_sentences(raw_payload):
+        if ";" not in sentence:
+            continue
+        data_part = sentence.split(";", 1)[1].split("*", 1)[0]
+        parts = data_part.split(",")
+        if len(parts) < 44 or parts[0] != "GNSS":
+            continue
+
+        # Field order follows mqtt_parser.py's AGRICA mapping:
+        # 13/14/15 = Baseline_N/E/U, 16/17/18 = std_N/E/U,
+        # 29/30/31 = rover LLH, 32/33/34 = rover ECEF, 41/42/43 = base LLH.
+        baseline_n = _safe_float(parts[13])
+        baseline_e = _safe_float(parts[14])
+        baseline_u = _safe_float(parts[15])
+        if baseline_n is None or baseline_e is None or baseline_u is None:
+            continue
+
+        year = _safe_int(parts[2])
+        month = _safe_int(parts[3])
+        day = _safe_int(parts[4])
+        hour = _safe_int(parts[5])
+        minute = _safe_int(parts[6])
+        second = _safe_float(parts[7])
+        epoch_ts = int(received_ts or time.time())
+        if None not in (year, month, day, hour, minute) and second is not None:
+            try:
+                import calendar
+
+                full_year = year if year and year > 1900 else 2000 + int(year or 0)
+                epoch_ts = int(calendar.timegm((
+                    int(full_year), int(month), int(day),
+                    int(hour), int(minute), int(second),
+                )))
+            except Exception:
+                pass
+
+        rover_llh = None
+        lat, lon, alt = _safe_float(parts[29]), _safe_float(parts[30]), _safe_float(parts[31])
+        if lat is not None and lon is not None and alt is not None:
+            rover_llh = (lat, lon, alt)
+
+        rover_ecef = None
+        x, y, z = _safe_float(parts[32]), _safe_float(parts[33]), _safe_float(parts[34])
+        if x is not None and y is not None and z is not None:
+            rover_ecef = (x, y, z)
+
+        base_llh = None
+        base_lat, base_lon, base_alt = _safe_float(parts[41]), _safe_float(parts[42]), _safe_float(parts[43])
+        if base_lat is not None and base_lon is not None and base_alt is not None:
+            base_llh = (base_lat, base_lon, base_alt)
+            
+        std_ecef = None
+        std_x, std_y, std_z = _safe_float(parts[38]), _safe_float(parts[39]), _safe_float(parts[40])
+        if std_x is not None and std_y is not None and std_z is not None:
+            std_ecef = (_positive_std(std_x), _positive_std(std_y), _positive_std(std_z))
+
+        observations.append(AgricaObservation(
+            project_id=int(project_id),
+            station_id=int(station_id),
+            rover_name=str(rover_name or station_id),
+            epoch_ts=epoch_ts,
+            position_type=_safe_int(parts[8]),
+            baseline_neu=(float(baseline_n), float(baseline_e), float(baseline_u)),
+            std_neu=(
+                _positive_std(_safe_float(parts[16])),
+                _positive_std(_safe_float(parts[17])),
+                _positive_std(_safe_float(parts[18])),
+            ),
+            std_ecef=std_ecef,
+            rover_llh=rover_llh,
+            rover_ecef=rover_ecef,
+            base_llh=base_llh,
+            raw=sentence,
+        ))
+    return observations
+
+
+class AgricaAdjustmentRuntime:
+    """AGRICA -> tested gnss_adjustment.Network -> tested adjust_network()."""
+
+    def __init__(self, epoch_tolerance_s: int = 2, max_epoch_age_s: int = 15):
+        self.epoch_tolerance_s = int(epoch_tolerance_s)
+        self.max_epoch_age_s = int(max_epoch_age_s)
+        self._buffers: dict[tuple[int, int], dict[int, AgricaObservation]] = {}
+
+    def add_payload(self, raw_payload: str, info: Dict[str, Any], received_ts: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        project_id = int(info.get("project_id") or info.get("station_id") or 0)
+        station_id = int(info.get("station_id") or 0)
+        rover_name = str(info.get("station_code") or info.get("station_name") or f"station_{station_id}")
+        observations = parse_agrica(
+            raw_payload,
+            project_id=project_id,
+            station_id=station_id,
+            rover_name=rover_name,
+            received_ts=received_ts,
+        )
+        if not observations:
+            return None
+
+        latest = None
+        now_ts = int(received_ts or time.time())
+        project_gnss_clusters = info.get("project_gnss_clusters")
+        station_origins = info.get("station_origins") or {}
+
+        for obs in observations:
+            epoch_bucket = int(round(obs.epoch_ts / self.epoch_tolerance_s) * self.epoch_tolerance_s)
+            key = (obs.project_id, epoch_bucket)
+            bucket = self._buffers.setdefault(key, {})
+            bucket[obs.station_id] = obs
+            latest = self._adjust_bucket(key, now_ts, project_gnss_clusters, station_origins)
+
+        self._prune(now_ts)
+        return latest
+
+def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, float, float]:
+    a = 6378137.0
+    f = 1 / 298.257223563
+    e2 = 2*f - f**2
+    lat, lon = math.radians(lat_deg), math.radians(lon_deg)
+    sin_lat = math.sin(lat)
+    cos_lat = math.cos(lat)
+    N = a / math.sqrt(1 - e2 * sin_lat**2)
+    x = (N + h_m) * cos_lat * math.cos(lon)
+    y = (N + h_m) * cos_lat * math.sin(lon)
+    z = (N * (1 - e2) + h_m) * sin_lat
+    return x, y, z
+
+    def _prune(self, now_ts: int) -> None:
+        stale = [key for key in self._buffers if abs(now_ts - key[1]) > self.max_epoch_age_s]
+        for key in stale:
+            self._buffers.pop(key, None)
+
+    def _adjust_bucket(self, key: tuple[int, int], now_ts: int, gnss_clusters: Optional[list[list[int]]] = None, station_origins: Optional[dict[int, tuple[float, float, float]]] = None) -> Optional[Dict[str, Any]]:
+        observations = list(self._buffers.get(key, {}).values())
+        observations = [obs for obs in observations if obs.position_type in (4, 7)]
+        if not observations:
+            return None
+
+        station_origins = station_origins or {}
+
+        # Build clusters mapping
+        clusters = []
+        if gnss_clusters and isinstance(gnss_clusters, list):
+            for c in gnss_clusters:
+                if isinstance(c, list):
+                    clusters.append(set(c))
+        
+        if not clusters:
+            # Fallback to single cluster
+            clusters = [set(obs.station_id for obs in observations)]
+        else:
+            # Add any unassigned stations to a default cluster
+            assigned = set().union(*clusters)
+            unassigned = set(obs.station_id for obs in observations if obs.station_id not in assigned)
+            if unassigned:
+                clusters.append(unassigned)
+        
+        final_adjusted_points = {}
+        final_adjusted_baselines = []
+
+        for cluster_stations in clusters:
+            cluster_obs = [obs for obs in observations if obs.station_id in cluster_stations]
+            if not cluster_obs:
+                continue
+            
+            # --- PHÂN GIẢI BASE VÀ KHỚP VECTOR ---
+            resolved_base_ecef = None
+            best_base_match = None
+            min_diff = 5.0  # Dung sai 5 mét
+            
+            for obs in cluster_obs:
+                if obs.rover_ecef and obs.base_llh and station_origins.get(obs.station_id):
+                    # Toạ độ Base do Rover nhận (có thể bị lỗi bằng 0)
+                    rep_base_ecef = _llh_to_ecef(obs.base_llh[0], obs.base_llh[1], obs.base_llh[2])
+                    # Vector baseline thực tế Rover -> Base do Rover tự đo
+                    actual_baseline = (
+                        obs.rover_ecef[0] - rep_base_ecef[0],
+                        obs.rover_ecef[1] - rep_base_ecef[1],
+                        obs.rover_ecef[2] - rep_base_ecef[2],
+                    )
+                    
+                    rover_origin = station_origins[obs.station_id]
+                    
+                    # So sánh vector thực tế với sai lệch giữa các origin trong DB để tìm Base
+                    for cand_sid, cand_origin in station_origins.items():
+                        if cand_sid == obs.station_id:
+                            continue
+                        expected_baseline = (
+                            cand_origin[0] - rover_origin[0],
+                            cand_origin[1] - rover_origin[1],
+                            cand_origin[2] - rover_origin[2],
+                        )
+                        diff = math.sqrt(
+                            (actual_baseline[0] - expected_baseline[0])**2 +
+                            (actual_baseline[1] - expected_baseline[1])**2 +
+                            (actual_baseline[2] - expected_baseline[2])**2
+                        )
+                        if diff < min_diff:
+                            min_diff = diff
+                            best_base_match = cand_origin
+
+            if best_base_match:
+                resolved_base_ecef = best_base_match
+            else:
+                # Nếu không khớp được vector, fallback dùng LLH của Base do Rover gửi lên
+                base_llh = next((obs.base_llh for obs in cluster_obs if obs.base_llh), None)
+                if not base_llh:
+                    continue
+                resolved_base_ecef = _llh_to_ecef(base_llh[0], base_llh[1], base_llh[2])
+            
+            points = [Point("BASE", resolved_base_ecef, fixed=True)]
+            baselines = []
+            
+            for obs in cluster_obs:
+                if obs.rover_ecef is None or not obs.base_llh:
+                    continue
+                
+                # Toạ độ Base do Rover nhận
+                rep_base_ecef = _llh_to_ecef(obs.base_llh[0], obs.base_llh[1], obs.base_llh[2])
+                baseline_ecef = (
+                    obs.rover_ecef[0] - rep_base_ecef[0],
+                    obs.rover_ecef[1] - rep_base_ecef[1],
+                    obs.rover_ecef[2] - rep_base_ecef[2]
+                )
+                
+                # Override toạ độ đầu vào của Rover = Base chuẩn + Baseline ECEF
+                rover_ecef_adjusted_input = (
+                    resolved_base_ecef[0] + baseline_ecef[0],
+                    resolved_base_ecef[1] + baseline_ecef[1],
+                    resolved_base_ecef[2] + baseline_ecef[2]
+                )
+                
+                std = obs.std_ecef if obs.std_ecef else obs.std_neu
+                
+                points.append(Point(obs.rover_name, rover_ecef_adjusted_input, fixed=False, identifier=obs.station_id))
+                baselines.append(Baseline(
+                    "BASE",
+                    obs.rover_name,
+                    baseline_ecef,
+                    standard_deviation=std,
+                    identifier=obs.station_id,
+                ))
+
+            if len(points) < 2:
+                continue
+
+            try:
+                result = adjust_network(Network.from_items(points, baselines))
+            except NetworkError:
+                continue
+
+            obs_by_name = {obs.rover_name: obs for obs in cluster_obs}
+            for point in result.points:
+                if point.name == "BASE":
+                    continue
+                obs = obs_by_name.get(point.name)
+                final_adjusted_points[point.name] = {
+                    "station_id": obs.station_id if obs else None,
+                    "position_type": obs.position_type if obs else None,
+                    "adjusted_n": point.coordinate[0], # Using ECEF X as N, Y as E, Z as U temporarily to match output format
+                    "adjusted_e": point.coordinate[1],
+                    "adjusted_u": point.coordinate[2],
+                    "correction_n": point.correction[0],
+                    "correction_e": point.correction[1],
+                    "correction_u": point.correction[2],
+                    "std_n": point.standard_deviation[0],
+                    "std_e": point.standard_deviation[1],
+                    "std_u": point.standard_deviation[2],
+                    "raw_rover_llh": obs.rover_llh if obs else None,
+                    "raw_rover_ecef": obs.rover_ecef if obs else None,
+                }
+
+            for baseline in result.baselines:
+                final_adjusted_baselines.append({
+                    "from": baseline.from_point,
+                    "to": baseline.to_point,
+                    "observed_neu": baseline.observed,
+                    "adjusted_neu": baseline.adjusted,
+                    "residual_neu": baseline.residual,
+                    "standardized_residual": baseline.standardized_residual,
+                    "redundancy": baseline.redundancy,
+                })
+
+        if not final_adjusted_points:
+            return None
+
+        return {
+            "type": "gnss_adjusted",
+            "source": "AGRICA",
+            "adjustment_engine": "backend.processors.gnss_adjustment.adjust_network_ecef",
+            "project_id": key[0],
+            "epoch_ts": key[1],
+            "computed_at": now_ts,
+            "base": {
+                "name": "BASE",
+                "fixed": True,
+                "lat": global_base_llh[0] if global_base_llh else None,
+                "lon": global_base_llh[1] if global_base_llh else None,
+                "h": global_base_llh[2] if global_base_llh else None,
+            },
+            "rover_count": len(final_adjusted_points),
+            "points": final_adjusted_points,
+            "baselines": final_adjusted_baselines,
+            "quality": {
+                "degrees_of_freedom": result.degrees_of_freedom,
+                "variance_factor": result.variance_factor,
+                "weighted_residual_sum": result.weighted_residual_sum,
+                "rank": result.rank,
+                "condition_number": result.condition_number,
+                "max_standardized_residual": result.max_standardized_residual,
+                "global_test": (
+                    {
+                        "statistic": result.global_test.statistic,
+                        "lower_critical_value": result.global_test.lower_critical_value,
+                        "upper_critical_value": result.global_test.upper_critical_value,
+                        "p_value": result.global_test.p_value,
+                        "passed": result.global_test.passed,
+                    }
+                    if result.global_test else None
+                ),
+                "residual_flags": [
+                    {
+                        "from": flag.from_point,
+                        "to": flag.to_point,
+                        "component": flag.component,
+                        "normalized_residual": flag.normalized_residual,
+                        "p_value": flag.p_value,
+                        "critical_value": flag.critical_value,
+                    }
+                    for flag in result.residual_flags
+                ],
+                "note": (
+                    "No redundant check yet if this epoch only has one BASE->Rover baseline per rover"
+                    if result.degrees_of_freedom == 0 else "Redundant GNSS network adjusted"
+                ),
+            },
+        }

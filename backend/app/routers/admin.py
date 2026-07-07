@@ -6,30 +6,43 @@ import asyncio
 import csv
 import json
 import logging
+import re
 import time
 import zipfile
 from typing import Optional, Dict, List, Any
 
 import paho.mqtt.client as mqtt
+import io
 from io import BytesIO, StringIO
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, desc, text, func, and_
+from sqlalchemy import select, delete, desc, text, func, and_, or_
 from datetime import datetime, timedelta
+from openpyxl import Workbook
 from .. import schemas, auth, config
-from ..database import get_auth_db, get_config_db, get_data_db
+from ..database import get_auth_db, get_config_db, get_data_db, ConfigSessionLocal, DataSessionLocal
 from ..models import auth as model_auth
 from ..models import config as model_config
 from ..models import data as model_data
 import math
 import json
+import uuid
+import os
+
+EXPORT_TASKS: Dict[str, dict] = {}
+EXPORT_LOCK = asyncio.Lock()
+EXPORT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "temp_exports")
+os.makedirs(EXPORT_DIR, exist_ok=True)
 
 # Schema cho request
 class ExportExcelRequest(BaseModel):
     tables: List[str]  # Danh sách bảng cần export: ['projects', 'stations', 'devices', 'sensor_data', 'alerts']
+    project_ids: Optional[List[int]] = None
+    station_ids: Optional[List[int]] = None
+    sensor_types: Optional[List[str]] = None
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -55,6 +68,64 @@ def rows_to_csv(rows: List[Dict[str, Any]]) -> str:
     writer.writeheader()
     writer.writerows(rows)
     return out.getvalue()
+
+
+def _excel_sheet_name(base: str, used: set) -> str:
+    """Return a valid, unique Excel sheet name (maximum 31 characters)."""
+    cleaned = re.sub(r'[\\/*?:\[\]]', '_', str(base or 'Sheet')).strip(" '") or 'Sheet'
+    cleaned = cleaned[:31]
+    candidate = cleaned
+    suffix = 2
+    while candidate.lower() in used:
+        tail = f"_{suffix}"
+        candidate = f"{cleaned[:31 - len(tail)]}{tail}"
+        suffix += 1
+    used.add(candidate.lower())
+    return candidate
+
+
+def _zip_component(value: Any, fallback: str) -> str:
+    """Return a safe, readable folder/file component for exported ZIP paths."""
+    component = str(value or "").strip()
+    component = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", component)
+    component = re.sub(r"\s+", "_", component).strip(" ._")
+    if not component or component in {".", ".."}:
+        return fallback
+    return component[:120]
+
+
+def _station_export_path(
+    project_code: Any, station_code: Any, station_id: Any, filename: str
+) -> str:
+    project_folder = _zip_component(project_code, "UNKNOWN_PROJECT")
+    station_folder = _zip_component(station_code, f"station_{station_id}")
+    safe_filename = _zip_component(filename, "DATA.csv")
+    return f"{project_folder}/{station_folder}/{safe_filename}"
+
+
+def _excel_chunks(value: Any, chunk_count: int = 8) -> List[Optional[str]]:
+    """Preserve large JSON/payload text across cells without silent truncation."""
+    if value is None:
+        return [None] * chunk_count
+    text_value = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    chunk_size = 32760  # Excel cell limit is 32767 characters.
+    chunks = [text_value[i:i + chunk_size] for i in range(0, len(text_value), chunk_size)]
+    if len(chunks) > chunk_count:
+        raise ValueError(f"Export cell content is too large ({len(text_value)} characters)")
+    return chunks + [None] * (chunk_count - len(chunks))
+
+
+def _package_workbook_zip(workbook: Workbook, timestamp_suffix: int):
+    """Return one ZIP containing exactly one multi-sheet XLSX workbook."""
+    xlsx_output = BytesIO()
+    workbook.save(xlsx_output)
+    xlsx_output.seek(0)
+    xlsx_filename = f"landslide_full_export_{timestamp_suffix}.xlsx"
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(xlsx_filename, xlsx_output.getvalue())
+    output.seek(0)
+    return output, xlsx_filename
 
 
 # ------------------------------------------------------------------
@@ -153,35 +224,11 @@ async def reset_gnss_origin(
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
-    """Reset the GNSS origin for all GNSS devices assigned to a station."""
-    try:
-        # Find all GNSS devices for this station
-        res = await db.execute(
-            select(model_config.Device).where(
-                and_(
-                    model_config.Device.station_id == station_id,
-                    model_config.Device.device_type == 'gnss'
-                )
-            )
-        )
-        devices = res.scalars().all()
-        
-        if not devices:
-            raise HTTPException(status_code=404, detail="No GNSS devices found for this station")
-
-        from app.main import mqtt_service
-        reset_count = 0
-        for device in devices:
-            success = await mqtt_service.reset_gnss_origin(device.id)
-            if success:
-                reset_count += 1
-        
-        return {"status": "ok", "reset_count": reset_count}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error resetting GNSS origin for station {station_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Locked monitoring origins are immutable by design."""
+    raise HTTPException(
+        status_code=409,
+        detail="GNSS origin is permanently locked and cannot be reset",
+    )
 
 
 # -------------------------
@@ -406,6 +453,27 @@ def get_default_station_config():
                 "VdY": True,   # Vận tốc N (mm/phút)
                 "VdH": True    # Vận tốc U (mm/phút)
             }
+        },
+        "data_logging": {
+            "gnss": {
+                "interval": 1,
+                "enabled_fields": ["raw_gngga", "gga_utc", "gga_timestamp", "received_timestamp", "lat", "lon", "h", "pos_e", "pos_n", "pos_u", "total_displacement_mm", "vel_e", "vel_n", "vel_u", "speed_2d", "speed_2d_mm_s", "raw_vel_e_mm_s", "raw_vel_n_mm_s", "raw_vel_u_mm_s", "raw_speed_2d_mm_s", "velocity_method", "velocity_sample_count", "velocity_window_duration_s", "velocity_residual_rms_mm", "velocity_residual_mad_mm", "velocity_uncertainty_mm_s", "velocity_confidence_95_mm_s", "velocity_reliable", "velocity_significant", "velocity_out_of_range", "fix_quality", "fix_mode", "num_sats", "hdop"],
+                "save_rejected_raw": True,
+                "save_forward_payload": True,
+                "save_no_data_status": False
+            },
+            "imu": {
+                "interval": 300,
+                "enabled_fields": ["roll", "pitch", "yaw", "total_accel", "battery"]
+            },
+            "rain": {
+                "interval": 300,
+                "enabled_fields": ["intensity_mm_h", "accumulated_mm"]
+            },
+            "water": {
+                "interval": 300,
+                "enabled_fields": ["water_level", "intensity_mm_h"]
+            }
         }
     }
 
@@ -594,7 +662,22 @@ async def export_database_csv(
             if 'sensor_data' in request.tables:
                 try:
                     logger.info("⏳ CSV: Querying ALL sensor data (Please wait)...")
-                    # Query không dùng .limit()
+                    
+                    # Pre-fetch station mapping (project_code, station_code) for path hierarchy
+                    stations_res = await config_db.execute(select(model_config.Station))
+                    stations = stations_res.scalars().all()
+                    
+                    projects_res = await config_db.execute(select(model_config.Project))
+                    projects = {p.id: p.project_code for p in projects_res.scalars().all()}
+                    
+                    station_mapping = {}
+                    for s in stations:
+                        p_code = projects.get(s.project_id, "UNKNOWN_PROJECT")
+                        station_mapping[s.id] = {
+                            "project_code": p_code,
+                            "station_code": s.station_code
+                        }
+
                     res = await data_db.execute(
                         select(model_data.SensorData)
                         .order_by(desc(model_data.SensorData.timestamp))
@@ -602,11 +685,35 @@ async def export_database_csv(
                     data = res.scalars().all()
                     
                     if data:
-                        # Chia dữ liệu theo Trạm (station_id) và Loại cảm biến (sensor_type)
+                        # Group data by (project_code, station_code, sensor_type)
                         grouped_data = {}
                         
                         for d in data:
-                            group_key = f"station_{d.station_id}_{d.sensor_type}"
+                            mapping = station_mapping.get(d.station_id, {
+                                "project_code": "UNKNOWN_PROJECT",
+                                "station_code": f"station_{d.station_id}"
+                            })
+                            p_code = mapping["project_code"]
+                            s_code = mapping["station_code"]
+                            
+                            export_sensor_type = d.sensor_type
+                            if d.sensor_type == 'gnss_audit':
+                                data_dict = d.data if isinstance(d.data, dict) else {}
+                                is_abnormal = False
+                                suspicious = ["NON_MONOTONIC_GGA_TIME", "UNSTABLE_FIX", "PERSISTENT_OFFSET_QUARANTINED"]
+                                if data_dict.get("reason") in suspicious:
+                                    is_abnormal = True
+                                elif data_dict.get("record_kind") == "forward":
+                                    if data_dict.get("forward_action") != "published" or str(data_dict.get("forward_rc", "0")) != "0":
+                                        is_abnormal = True
+                                export_sensor_type = 'gnss_bat_thuong' if is_abnormal else 'gnss_raw_1hz'
+                            elif d.sensor_type == 'gnss':
+                                export_sensor_type = 'gnss'
+                            
+                            if export_sensor_type == 'gnss_raw_1hz':
+                                continue
+                                
+                            group_key = (p_code, s_code, export_sensor_type)
                             if group_key not in grouped_data:
                                 grouped_data[group_key] = []
                             
@@ -615,8 +722,11 @@ async def export_database_csv(
                                 'id': d.id,
                                 'time_str': datetime.fromtimestamp(d.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
                                 'timestamp': d.timestamp,
+                                'project_code': p_code,
+                                'station_code': s_code,
                                 'station_id': d.station_id,
                                 'type': d.sensor_type,
+                                'record_type': 'audit' if d.sensor_type == 'gnss_audit' else 'measurement',
                             }
                             
                             # Flatten các giá trị quan trọng từ raw JSON
@@ -628,9 +738,9 @@ async def export_database_csv(
                                 
                             grouped_data[group_key].append(row_dict)
                             
-                        # Ghi từng group ra từng file CSV trong file ZIP
-                        for group_name, items in grouped_data.items():
-                            file_name = f"sensor_data/{group_name}.csv"
+                        # Ghi từng group ra từng file CSV trong thư mục phân cấp tương ứng trong file ZIP
+                        for (p_code, s_code, s_type), items in grouped_data.items():
+                            file_name = f"sensor_data/{p_code}/{s_code}/{s_type}.csv"
                             zf.writestr(file_name, rows_to_csv(items))
                             has_data = True
                             
@@ -646,6 +756,22 @@ async def export_database_csv(
             # ============================================
             if 'alerts' in request.tables:
                 try:
+                    # Pre-fetch station mapping if it wasn't already queried
+                    if 'sensor_data' not in request.tables:
+                        stations_res = await config_db.execute(select(model_config.Station))
+                        stations = stations_res.scalars().all()
+                        
+                        projects_res = await config_db.execute(select(model_config.Project))
+                        projects = {p.id: p.project_code for p in projects_res.scalars().all()}
+                        
+                        station_mapping = {}
+                        for s in stations:
+                            p_code = projects.get(s.project_id, "UNKNOWN_PROJECT")
+                            station_mapping[s.id] = {
+                                "project_code": p_code,
+                                "station_code": s.station_code
+                            }
+
                     res = await data_db.execute(
                         select(model_data.Alert)
                         .order_by(desc(model_data.Alert.timestamp))
@@ -653,15 +779,27 @@ async def export_database_csv(
                     data = res.scalars().all()
                     
                     if data:
-                        rows = [{
-                            'id': a.id,
-                            'time_str': datetime.fromtimestamp(a.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
-                            'station_id': a.station_id,
-                            'level': a.level,
-                            'category': a.category,
-                            'message': a.message,
-                            'resolved': a.is_resolved
-                        } for a in data]
+                        rows = []
+                        for a in data:
+                            mapping = station_mapping.get(a.station_id, {
+                                "project_code": "UNKNOWN_PROJECT",
+                                "station_code": f"station_{a.station_id}"
+                            })
+                            p_code = mapping["project_code"]
+                            s_code = mapping["station_code"]
+                            
+                            rows.append({
+                                'id': a.id,
+                                'time_str': datetime.fromtimestamp(a.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                                'timestamp': a.timestamp,
+                                'project_code': p_code,
+                                'station_code': s_code,
+                                'station_id': a.station_id,
+                                'level': a.level,
+                                'category': a.category,
+                                'message': a.message,
+                                'resolved': a.is_resolved
+                            })
 
                         zf.writestr("alerts.csv", rows_to_csv(rows))
                         has_data = True
@@ -690,6 +828,423 @@ async def export_database_csv(
 # ============================================================================
 # CLEAR ALL DATABASE
 # ============================================================================
+
+@router.post("/db/export-excel/start")
+async def start_export_database_excel(
+    request: ExportExcelRequest,
+    background_tasks: BackgroundTasks,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Bắt đầu tác vụ xuất Excel chạy ngầm."""
+    allowed = {'projects', 'stations', 'devices', 'sensor_data', 'alerts'}
+    selected = [table for table in request.tables if table in allowed]
+    if not selected:
+        raise HTTPException(status_code=400, detail="No valid export table selected")
+
+    task_id = str(uuid.uuid4())
+    EXPORT_TASKS[task_id] = {
+        "status": "pending",
+        "percent": 0,
+        "message": "Đang chuẩn bị...",
+        "file_path": None,
+        "filename": None,
+        "error": None
+    }
+    
+    background_tasks.add_task(_export_excel_task, task_id, request, selected)
+    return {"task_id": task_id}
+
+@router.get("/db/export-excel/{task_id}/progress")
+async def get_export_progress(
+    task_id: str,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Lấy tiến độ của tác vụ xuất."""
+    if task_id not in EXPORT_TASKS:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return EXPORT_TASKS[task_id]
+
+@router.get("/db/export-excel/{task_id}/download")
+async def download_export_excel(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    """Tải file ZIP đã xuất xong."""
+    if task_id not in EXPORT_TASKS:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task = EXPORT_TASKS[task_id]
+    if task["status"] != "completed" or not task["file_path"]:
+        raise HTTPException(status_code=400, detail="Export not completed yet")
+    
+    filepath = task["file_path"]
+    filename = task["filename"]
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    def cleanup_file():
+        try:
+            os.remove(filepath)
+            del EXPORT_TASKS[task_id]
+        except Exception as e:
+            logger.error(f"Failed to delete temp export file {filepath}: {e}")
+            
+    background_tasks.add_task(cleanup_file)
+    
+    return FileResponse(
+        path=filepath, 
+        filename=filename, 
+        media_type="application/zip"
+    )
+
+async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected: List[str]):
+    filepath = None
+    lock_acquired = False
+    try:
+        EXPORT_TASKS[task_id]["message"] = "Đang chờ lượt xuất dữ liệu..."
+        await EXPORT_LOCK.acquire()
+        lock_acquired = True
+        EXPORT_TASKS[task_id]["status"] = "running"
+        EXPORT_TASKS[task_id]["message"] = "Đang phân tích phạm vi dữ liệu..."
+        
+        timestamp_suffix = int(time.time())
+        filename = f"landslide_backup_{timestamp_suffix}.zip"
+        filepath = os.path.join(EXPORT_DIR, f"{task_id}_{filename}")
+        
+        # Level 1 is dramatically lighter on the event loop while still shrinking
+        # repetitive CSV well. Only one export runs at once (EXPORT_LOCK).
+        with zipfile.ZipFile(
+            filepath, "w", zipfile.ZIP_DEFLATED, compresslevel=1
+        ) as archive:
+            
+            def add_csv(filename_in_zip: str, headers: List[str], rows: List[List[Any]]):
+                if not rows:
+                    return 0
+                with archive.open(filename_in_zip, "w") as bin_f:
+                    with io.TextIOWrapper(bin_f, encoding="utf-8-sig", newline='') as text_f:
+                        writer = csv.writer(text_f)
+                        writer.writerow(headers)
+                        for r in rows:
+                            writer.writerow(r)
+                return len(rows)
+
+            async with ConfigSessionLocal() as config_db:
+                async with DataSessionLocal() as data_db:
+                    exported_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    total_records = 0
+                    records_processed = 0
+                    summary_rows = []
+
+                    # 1. Fetch config boundaries
+                    projects_result = await config_db.execute(select(model_config.Project))
+                    all_project_rows = projects_result.scalars().all()
+                    project_filter = set(request.project_ids or [])
+                    project_rows = [p for p in all_project_rows if not project_filter or p.id in project_filter]
+                    project_codes = {project.id: project.project_code for project in all_project_rows}
+                    
+                    stations_result = await config_db.execute(select(model_config.Station))
+                    all_station_rows = stations_result.scalars().all()
+                    station_filter = set(request.station_ids or [])
+                    station_rows = [
+                        s for s in all_station_rows
+                        if (not project_filter or s.project_id in project_filter)
+                        and (not station_filter or s.id in station_filter)
+                    ]
+                    scope_station_ids = {station.id for station in station_rows}
+                    station_mapping = {
+                        station.id: {
+                            "project_code": project_codes.get(station.project_id, "UNKNOWN_PROJECT"),
+                            "station_code": station.station_code,
+                        }
+                        for station in station_rows
+                    }
+                    requested_sensor_types = set(request.sensor_types or [])
+
+                    # 2. Count data
+                    EXPORT_TASKS[task_id]["message"] = "Đang tính toán dung lượng dữ liệu..."
+                    total_expected_data = 0
+                    
+                    sensor_query = select(model_data.SensorData)
+                    if scope_station_ids:
+                        sensor_query = sensor_query.where(model_data.SensorData.station_id.in_(scope_station_ids))
+                    else:
+                        sensor_query = sensor_query.where(text("1=0"))
+
+                    # Historical builds stored every successful 1 Hz GNSS forward
+                    # as audit data. The filter that previously excluded routine noise
+                    # has been removed as per user request to export everything.
+                    pass
+
+                    
+                    sensor_type_filter = set(requested_sensor_types)
+                    if sensor_type_filter:
+                        db_sensor_types = set(sensor_type_filter)
+                        if 'gnss' in db_sensor_types:
+                            db_sensor_types.add('gnss_audit')
+                        sensor_query = sensor_query.where(model_data.SensorData.sensor_type.in_(db_sensor_types))
+
+                    if 'sensor_data' in selected:
+                        count_q = select(func.count()).select_from(sensor_query.subquery())
+                        total_expected_data += await data_db.scalar(count_q) or 0
+                    
+                    alert_query = select(model_data.Alert)
+                    if scope_station_ids:
+                        alert_query = alert_query.where(model_data.Alert.station_id.in_(scope_station_ids))
+                    else:
+                        alert_query = alert_query.where(text("1=0"))
+                    
+                    if 'alerts' in selected:
+                        count_q = select(func.count()).select_from(alert_query.subquery())
+                        total_expected_data += await data_db.scalar(count_q) or 0
+                    
+                    if total_expected_data == 0 and not any(t in selected for t in ['projects', 'stations', 'devices']):
+                        EXPORT_TASKS[task_id]["status"] = "error"
+                        EXPORT_TASKS[task_id]["error"] = "No data available for export"
+                        return
+
+                    EXPORT_TASKS[task_id]["message"] = "Đang trích xuất cấu hình (Projects, Stations, Devices)..."
+
+                    if 'projects' in selected:
+                        count = add_csv(
+                            "PROJECTS.csv", ["id", "code", "name", "description", "active"],
+                            [[p.id, p.project_code, p.name, p.description, p.is_active] for p in project_rows]
+                        )
+                        summary_rows.append(["PROJECTS", count, exported_at, "FULL"])
+                        total_records += count
+
+                    if 'stations' in selected:
+                        count = add_csv(
+                            "STATIONS.csv",
+                            ["id", "project_code", "code", "name", "status", "last_update", "location"],
+                            [[
+                                s.id, project_codes.get(s.project_id, "UNKNOWN_PROJECT"), s.station_code,
+                                s.name, s.status,
+                                datetime.fromtimestamp(s.last_update).strftime('%Y-%m-%d %H:%M:%S') if s.last_update else None,
+                                str(s.location) if s.location is not None else None,
+                            ] for s in station_rows]
+                        )
+                        summary_rows.append(["STATIONS", count, exported_at, "FULL"])
+                        total_records += count
+
+                    if 'devices' in selected:
+                        devices_result = await config_db.execute(select(model_config.Device))
+                        devices = [
+                            d for d in devices_result.scalars().all()
+                            if d.station_id in scope_station_ids
+                            and (not requested_sensor_types or d.device_type in requested_sensor_types)
+                        ]
+                        count = add_csv(
+                            "DEVICES.csv",
+                            ["id", "project_code", "station_code", "station_id", "code", "type", "topic"],
+                            [[
+                                d.id,
+                                station_mapping.get(d.station_id, {}).get("project_code", "UNKNOWN_PROJECT"),
+                                station_mapping.get(d.station_id, {}).get("station_code", f"station_{d.station_id}"),
+                                d.station_id, d.device_code, d.device_type, d.mqtt_topic,
+                            ] for d in devices]
+                        )
+                        summary_rows.append(["DEVICES", count, exported_at, "FULL"])
+                        total_records += count
+
+                    sensor_headers = [
+                        "id", "time", "timestamp", "project_code", "station_code", "station_id",
+                        "sensor_type", "record_type", "raw_gngga", "fix_quality", "fix_mode",
+                        "accepted", "reason", "message", "total_displacement_mm", "speed_2d_mm_s",
+                        "forward_action", "forward_topic", "forward_broker", "forward_rc",
+                        *[f"forward_payload_{i}" for i in range(1, 9)],
+                        "value_1", "value_2", "value_3", "value_4", "value_5",
+                        *[f"data_json_{i}" for i in range(1, 9)],
+                    ]
+
+                    if 'sensor_data' in selected:
+                        sensor_stream = await data_db.stream(
+                            sensor_query.order_by(
+                                model_data.SensorData.station_id,
+                                model_data.SensorData.sensor_type,
+                                model_data.SensorData.timestamp,
+                                model_data.SensorData.id,
+                            ).execution_options(yield_per=500)
+                        )
+                        
+                        current_key = None
+                        bin_f = None
+                        text_f = None
+                        writer = None
+                        sensor_counts = {}
+
+                        async for d in sensor_stream.scalars():
+                            mapping = station_mapping.get(d.station_id, {
+                                "project_code": "UNKNOWN_PROJECT",
+                                "station_code": f"station_{d.station_id}",
+                            })
+                            p_code, s_code = mapping["project_code"], mapping["station_code"]
+                            sheet_type = d.sensor_type
+                            if d.sensor_type == 'gnss_audit':
+                                data_dict = d.data if isinstance(d.data, dict) else {}
+                                is_abnormal = False
+                                suspicious = ["NON_MONOTONIC_GGA_TIME", "UNSTABLE_FIX", "PERSISTENT_OFFSET_QUARANTINED"]
+                                if data_dict.get("reason") in suspicious:
+                                    is_abnormal = True
+                                elif data_dict.get("record_kind") == "forward":
+                                    if data_dict.get("forward_action") != "published" or str(data_dict.get("forward_rc", "0")) != "0":
+                                        is_abnormal = True
+                                sheet_type = 'gnss_bat_thuong' if is_abnormal else 'gnss_raw_1hz'
+                            elif d.sensor_type == 'gnss':
+                                sheet_type = 'gnss'
+
+                            if sheet_type == 'gnss_raw_1hz':
+                                continue
+
+                            key = (p_code, s_code, sheet_type)
+                            
+                            if current_key != key:
+                                if text_f:
+                                    text_f.close()
+                                    bin_f.close()
+                                
+                                export_name = f"{_zip_component(sheet_type, 'sensor').upper()}.csv"
+                                base_sheet_title = _station_export_path(
+                                    p_code, s_code, d.station_id, export_name
+                                )
+                                bin_f = archive.open(base_sheet_title, "w")
+                                text_f = io.TextIOWrapper(bin_f, encoding="utf-8-sig", newline='')
+                                writer = csv.writer(text_f)
+                                writer.writerow(sensor_headers)
+                                current_key = key
+
+                            payload = d.data if isinstance(d.data, dict) else {"raw_value": d.data}
+                            writer.writerow([
+                                d.id, datetime.fromtimestamp(d.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                                d.timestamp, p_code, s_code, d.station_id, d.sensor_type,
+                                "audit" if d.sensor_type == "gnss_audit" else "measurement",
+                                payload.get("raw_gngga"), payload.get("fix_quality"), payload.get("fix_mode"),
+                                payload.get("accepted"), payload.get("reason"), payload.get("message"),
+                                payload.get("total_displacement_mm"), payload.get("speed_2d_mm_s"),
+                                payload.get("forward_action"), payload.get("forward_topic"),
+                                payload.get("forward_broker"), payload.get("forward_rc"),
+                                *_excel_chunks(payload.get("forward_payload"), 8),
+                                d.value_1, d.value_2, d.value_3, d.value_4, d.value_5,
+                                *_excel_chunks(payload, 8),
+                            ])
+                            
+                            count_key = f"{p_code}/{s_code}/{sheet_type}"
+                            sensor_counts[count_key] = sensor_counts.get(count_key, 0) + 1
+                            total_records += 1
+                            records_processed += 1
+                            
+                            if records_processed % 250 == 0:
+                                EXPORT_TASKS[task_id]["percent"] = min(99, int((records_processed / total_expected_data) * 99)) if total_expected_data else 50
+                                EXPORT_TASKS[task_id]["message"] = f"Đang xuất {records_processed}/{total_expected_data} dòng dữ liệu..."
+                                await asyncio.sleep(0) # yield control to avoid blocking event loop
+
+                        if text_f:
+                            text_f.close()
+                            bin_f.close()
+
+                        if sensor_counts:
+                            for dataset, count in sorted(sensor_counts.items()):
+                                summary_rows.append([dataset, count, exported_at, "FULL"])
+                        else:
+                            summary_rows.append(["SENSOR_DATA", 0, exported_at, "FULL"])
+
+                    if 'alerts' in selected:
+                        alert_headers = [
+                            "id", "time", "timestamp", "project_code", "station_code", "station_id",
+                            "level", "category", "message", "resolved",
+                        ]
+                        alert_count = 0
+                        alert_counts = {}
+                        current_alert_key = None
+                        bin_f = None
+                        text_f = None
+                        writer = None
+                        alert_stream = await data_db.stream(
+                            alert_query.order_by(
+                                model_data.Alert.station_id,
+                                model_data.Alert.timestamp,
+                                model_data.Alert.id,
+                            ).execution_options(yield_per=500)
+                        )
+                        async for alert in alert_stream.scalars():
+                            mapping = station_mapping.get(alert.station_id, {
+                                "project_code": "UNKNOWN_PROJECT",
+                                "station_code": f"station_{alert.station_id}",
+                            })
+                            alert_key = (
+                                mapping["project_code"], mapping["station_code"], alert.station_id
+                            )
+                            if current_alert_key != alert_key:
+                                if text_f:
+                                    text_f.close()
+                                bin_f = archive.open(
+                                    _station_export_path(
+                                        mapping["project_code"],
+                                        mapping["station_code"],
+                                        alert.station_id,
+                                        "ALERTS.csv",
+                                    ),
+                                    "w",
+                                )
+                                text_f = io.TextIOWrapper(
+                                    bin_f, encoding="utf-8-sig", newline=''
+                                )
+                                writer = csv.writer(text_f)
+                                writer.writerow(alert_headers)
+                                current_alert_key = alert_key
+
+                            writer.writerow([
+                                alert.id, datetime.fromtimestamp(alert.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                                alert.timestamp, mapping["project_code"], mapping["station_code"], alert.station_id,
+                                alert.level, alert.category, alert.message, alert.is_resolved,
+                            ])
+                            alert_count += 1
+                            alert_dataset = (
+                                f"{mapping['project_code']}/{mapping['station_code']}/alerts"
+                            )
+                            alert_counts[alert_dataset] = alert_counts.get(alert_dataset, 0) + 1
+                            total_records += 1
+                            records_processed += 1
+                            
+                            if records_processed % 250 == 0:
+                                EXPORT_TASKS[task_id]["percent"] = min(99, int((records_processed / total_expected_data) * 99)) if total_expected_data else 50
+                                EXPORT_TASKS[task_id]["message"] = f"Đang xuất {records_processed}/{total_expected_data} dòng dữ liệu..."
+                                await asyncio.sleep(0)
+                        
+                        if text_f:
+                            text_f.close()
+                        if alert_counts:
+                            for dataset, count in sorted(alert_counts.items()):
+                                summary_rows.append([dataset, count, exported_at, "FULL"])
+                        else:
+                            summary_rows.append(["ALERTS", 0, exported_at, "FULL"])
+
+                    summary_rows.append(["TOTAL", total_records, exported_at, "FULL"])
+                    add_csv("EXPORT_SUMMARY.csv", ["dataset", "record_count", "exported_at", "scope"], summary_rows)
+
+        # ZipFile is closed automatically by the context manager, finishing the compression.
+        
+        EXPORT_TASKS[task_id]["status"] = "completed"
+        EXPORT_TASKS[task_id]["percent"] = 100
+        EXPORT_TASKS[task_id]["message"] = "Hoàn thành!"
+        EXPORT_TASKS[task_id]["file_path"] = filepath
+        EXPORT_TASKS[task_id]["filename"] = filename
+
+    except Exception as e:
+        logger.error(f"Excel full export background task failed: {e}", exc_info=True)
+        EXPORT_TASKS[task_id]["status"] = "error"
+        EXPORT_TASKS[task_id]["error"] = str(e)
+        EXPORT_TASKS[task_id]["message"] = "Xuất dữ liệu thất bại"
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                logger.warning("Could not remove partial export file %s", filepath)
+    finally:
+        if lock_acquired:
+            EXPORT_LOCK.release()
+
 
 @router.post("/db/clear-all")
 async def clear_all_database(
@@ -1071,6 +1626,13 @@ async def update_station_config(
             
             current_config = copy.deepcopy(station.config) if station.config else get_default_station_config()
             new_config = config_data['config']
+
+            # The monitoring reference is immutable. A station edit may update all
+            # other settings, but it cannot blank or replace a locked origin.
+            locked_origin = copy.deepcopy(current_config.get('gnss_origin'))
+            if locked_origin and locked_origin.get('lat') is not None and locked_origin.get('lon') is not None:
+                new_config = copy.deepcopy(new_config)
+                new_config['gnss_origin'] = locked_origin
 
             # Backward compatibility for VN2000 config key:
             # normalize legacy `vn2000_params` into canonical `vn2000`.

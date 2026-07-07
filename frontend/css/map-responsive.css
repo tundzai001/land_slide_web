@@ -63,6 +63,10 @@
     max-height: calc(100svh - var(--map-navbar-h) - 32px);
 }
 
+.gnss-advanced-sidepanel.expanded {
+    width: clamp(600px, 65vw, 820px);
+}
+
 .sidebar-content {
     padding: clamp(14px, 1.5vw, 20px);
 }
@@ -119,6 +123,10 @@
     .gnss-advanced-sidepanel {
         right: min(50vw, 520px);
         width: min(42vw, 420px);
+    }
+    
+    .gnss-advanced-sidepanel.expanded {
+        width: min(80vw, 720px);
     }
 }
 

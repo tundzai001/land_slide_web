@@ -13,7 +13,7 @@ class AdminManager {
 
         // Wizard state
         this.currentStep = 1;
-        this.totalSteps = 3;
+        this.totalSteps = 4;
         this.stationModal = null;
         this.velocityModal = null;
         this.isEditMode = false;
@@ -646,13 +646,16 @@ class AdminManager {
                                     <span class="badge bg-primary bg-opacity-10 text-primary border border-primary">${p.station_count || 0} STATION</span>
                                 </div>
                                 ${p.description ? `<p class="text-muted small mb-0">${p.description}</p>` : ''}
-                                ${p.location ? `<p class="text-muted small mb-0 mt-2"><i class="bi bi-geo-alt"></i> ${p.location}</p>` : ''}
+                                ${p.location ? `<p class="text-muted small mb-0 mt-2"><i class="bi bi-geo-alt"></i> ${typeof p.location === 'string' ? p.location : (p.location.address || p.location.source || `${p.location.lat ?? ''}, ${p.location.lon ?? ''}`)}</p>` : ''}
 
                             </div>
                             <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-outline-primary flex-1" onclick="event.stopPropagation(); window.adminManager.loadStations(${p.id})">
                                         <i class="bi bi-box-arrow-in-right me-1"></i> ACCESS
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); window.adminManager.openProjectConfigModal(${p.id})" title="Cấu hình dự án">
+                                        <i class="bi bi-gear-fill"></i>
                                     </button>
                                     <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); window.adminManager.deleteProject(${p.id})">
                                         <i class="bi bi-trash"></i>
@@ -731,6 +734,265 @@ class AdminManager {
 
         } catch (e) {
             window.toast?.error('❌ Lỗi xóa dự án');
+        }
+    }
+
+    // =========================================================================
+    // PROJECT CONFIG (CORS Base & GNSS Clusters)
+    // =========================================================================
+
+    async openProjectConfigModal(projectId) {
+        const project = (this.projectsData || []).find(p => p.id === projectId);
+        if (!project) return;
+
+        this.currentProjectId = projectId;
+        this.projectStationsData = [];
+
+        // 1. Fetch stations belonging to this project
+        try {
+            const res = await fetch(`/api/admin/projects/${projectId}/stations`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (res.ok) {
+                this.projectStationsData = await res.json();
+            }
+        } catch (e) {
+            console.error('Error fetching project stations:', e);
+        }
+        
+        // Populate Clusters
+        const clusters = project.gnss_clusters || [];
+        const clustersContainer = document.getElementById('project-gnss-clusters-container');
+        clustersContainer.innerHTML = '';
+        
+        if (clusters.length === 0) {
+            this.addClusterRow(clustersContainer);
+        } else {
+            clusters.forEach(c => this.addClusterRow(clustersContainer, c.name, c.description, c.base_station, c.stations));
+        }
+
+        document.getElementById('projectConfigModalTitle').textContent = `Cấu hình dự án: ${project.name}`;
+        
+        if (!this.projectConfigModal) {
+            this.projectConfigModal = new bootstrap.Modal(document.getElementById('projectConfigModal'));
+        }
+        this.projectConfigModal.show();
+
+        // 2. Auto load CORS stations
+        this.fetchCorsStations();
+    }
+
+    addClusterRow(container, name = '', desc = '', base_station_code = '', stations = []) {
+        const row = document.createElement('div');
+        row.className = 'cluster-row row g-2 mb-2 align-items-center';
+        
+        const randomId = Math.random().toString(36).substring(2, 9);
+        const stationOptions = (this.projectStationsData || []).map((s, idx) => {
+            const isChecked = (stations || []).includes(s.station_code);
+            const inputId = `chk_${s.station_code}_${randomId}_${idx}`;
+            return `
+                <div class="px-2 py-1">
+                    <div class="form-check">
+                        <input class="form-check-input station-checkbox" type="checkbox" value="${s.station_code}" id="${inputId}" ${isChecked ? 'checked' : ''} onchange="window.adminManager.updateSelectedStationsLabel(this)">
+                        <label class="form-check-label text-slate-300 small" style="cursor: pointer;" for="${inputId}">
+                            ${s.station_name || s.name || s.station_code} (${s.station_code})
+                        </label>
+                    </div>
+                </div>
+            `;
+        }).join('') || '<div class="px-3 py-2 text-muted small">Không tìm thấy trạm nào</div>';
+
+        // Pre-populate base select if corsStationsData is already loaded
+        let baseOptionsHtml = '<option value="">-- Chọn Trạm Base --</option>';
+        if (this.corsStationsData) {
+            this.corsStationsData.forEach(st => {
+                const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
+                baseOptionsHtml += `<option value="${st.name || st.code}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" ${isSelected}>${st.name || st.code} (${st.lat}, ${st.lon})</option>`;
+            });
+        } else {
+            baseOptionsHtml = `<option value="${base_station_code}" selected>${base_station_code ? base_station_code + ' (Đang tải...)' : '-- Đang tải... --'}</option>`;
+        }
+
+        row.innerHTML = `
+            <div class="col-md-2">
+                <input type="text" class="form-control cluster-name" placeholder="Tên cụm (vd: Cụm 1)" value="${name}">
+            </div>
+            <div class="col-md-2">
+                <input type="text" class="form-control cluster-desc" placeholder="Mô tả" value="${desc}">
+            </div>
+            <div class="col-md-3">
+                <select class="form-select cluster-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
+                    ${baseOptionsHtml}
+                </select>
+                <div class="base-station-info mt-1" style="display: none; font-size: 0.68rem; background: rgba(14,165,233,0.08); border: 1px solid rgba(14,165,233,0.25); border-radius: 6px; padding: 6px 8px;">
+                    <div class="d-flex align-items-center gap-1 mb-1">
+                        <i class="bi bi-broadcast text-info" style="font-size: 0.75rem;"></i>
+                        <strong class="base-info-name text-info">--</strong>
+                    </div>
+                    <div class="text-muted" style="line-height: 1.4;">
+                        <span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="dropdown w-100">
+                    <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start overflow-hidden text-truncate selected-stations-label py-1.5" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" style="font-size:0.75rem;">
+                        Chọn trạm...
+                    </button>
+                    <div class="dropdown-menu p-2 station-checkbox-list w-100" style="min-width: 240px; max-height: 200px; overflow-y: auto;">
+                        ${stationOptions}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-1 text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.cluster-row').remove()">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+        `;
+        container.appendChild(row);
+
+        // Trigger base station info display if already selected
+        const baseSelect = row.querySelector('.cluster-base-select');
+        if (baseSelect && baseSelect.value) {
+            this.onBaseStationSelected(baseSelect);
+        }
+
+        // Update selected stations button label on render
+        const firstCheckbox = row.querySelector('.station-checkbox');
+        if (firstCheckbox) {
+            this.updateSelectedStationsLabel(firstCheckbox);
+        }
+    }
+
+    onBaseStationSelected(selectEl) {
+        const row = selectEl.closest('.cluster-row');
+        const infoPanel = row.querySelector('.base-station-info');
+        if (!infoPanel) return;
+
+        const selectedOption = selectEl.options[selectEl.selectedIndex];
+        if (!selectEl.value || !selectedOption) {
+            infoPanel.style.display = 'none';
+            return;
+        }
+
+        const lat = selectedOption.dataset.lat || '--';
+        const lon = selectedOption.dataset.lon || '--';
+        const alt = selectedOption.dataset.alt || '0';
+        const name = selectEl.value;
+
+        infoPanel.querySelector('.base-info-name').textContent = name;
+        infoPanel.querySelector('.base-info-lat').textContent = `Lat: ${lat}`;
+        infoPanel.querySelector('.base-info-lon').textContent = `Lon: ${lon}`;
+        infoPanel.querySelector('.base-info-alt').textContent = alt;
+        infoPanel.style.display = 'block';
+    }
+
+    updateSelectedStationsLabel(el) {
+        const row = el.closest('.cluster-row');
+        const checkedList = Array.from(row.querySelectorAll('.station-checkbox:checked')).map(c => c.value);
+        const btn = row.querySelector('.selected-stations-label');
+        if (!btn) return;
+        
+        if (checkedList.length === 0) {
+            btn.textContent = 'Chọn trạm...';
+            btn.classList.remove('btn-outline-primary');
+            btn.classList.add('btn-outline-secondary');
+        } else {
+            btn.textContent = `Đã chọn: ${checkedList.join(', ')}`;
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-outline-primary');
+        }
+    }
+
+    async fetchCorsStations() {
+        try {
+            const res = await fetch('/api/admin/projects/cors-stations', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Không thể lấy danh sách trạm CORS từ URL');
+            
+            const data = await res.json();
+            const stations = Array.isArray(data) ? data : (data.data || data.stations || []);
+            
+            this.corsStationsData = stations;
+
+            // Update all existing cluster base selects
+            document.querySelectorAll('.cluster-base-select').forEach(selectEl => {
+                const currentValue = selectEl.value; // Store the originally selected value (often the code)
+                
+                if (stations.length === 0) {
+                    selectEl.innerHTML = '<option value="">Không tìm thấy trạm nào</option>';
+                    return;
+                }
+                
+                let optionsHtml = '<option value="">-- Chọn Trạm Base --</option>';
+                stations.forEach(st => {
+                    const stNameOrCode = st.name || st.code;
+                    const isSelected = (stNameOrCode === currentValue) ? 'selected' : '';
+                    optionsHtml += `<option value="${stNameOrCode}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" ${isSelected}>${stNameOrCode} (${st.lat}, ${st.lon})</option>`;
+                });
+                
+                selectEl.innerHTML = optionsHtml;
+                // If the originally selected value isn't in the list, keep it as an option so data is not lost
+                if (currentValue && !stations.some(s => (s.name || s.code) === currentValue)) {
+                    selectEl.innerHTML += `<option value="${currentValue}" selected>${currentValue} (Không tồn tại trong ds)</option>`;
+                }
+                // Trigger info panel update
+                this.onBaseStationSelected(selectEl);
+            });
+            
+        } catch (e) {
+            console.error(e);
+            window.toast?.error('❌ ' + e.message);
+        }
+    }
+
+    async saveProjectConfig() {
+        const projectId = this.currentProjectId;
+        if (!projectId) return;
+
+        // Collect Clusters
+        const clusters = [];
+        document.querySelectorAll('#project-gnss-clusters-container .cluster-row').forEach(row => {
+            const name = row.querySelector('.cluster-name').value.trim();
+            if (name) {
+                const desc = row.querySelector('.cluster-desc').value.trim();
+                const baseSelect = row.querySelector('.cluster-base-select');
+                const baseStation = baseSelect?.value || '';
+                const selectedOpt = baseSelect?.options[baseSelect.selectedIndex];
+                const baseLat = selectedOpt?.dataset?.lat ? parseFloat(selectedOpt.dataset.lat) : null;
+                const baseLon = selectedOpt?.dataset?.lon ? parseFloat(selectedOpt.dataset.lon) : null;
+                const baseAlt = selectedOpt?.dataset?.alt ? parseFloat(selectedOpt.dataset.alt) : null;
+                const st = Array.from(row.querySelectorAll('.station-checkbox:checked')).map(c => c.value);
+                clusters.push({
+                    name, description: desc,
+                    base_station: baseStation,
+                    base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt,
+                    stations: st
+                });
+            }
+        });
+
+        try {
+            const res = await fetch(`/api/admin/projects/${projectId}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    gnss_clusters: clusters
+                })
+            });
+
+            if (!res.ok) throw new Error('Lỗi lưu cấu hình dự án');
+
+            window.toast?.success('✅ Đã lưu cấu hình dự án!');
+            this.projectConfigModal.hide();
+            await this.loadProjects();
+        } catch (e) {
+            window.toast?.error('❌ ' + e.message);
         }
     }
 
@@ -1272,6 +1534,17 @@ class AdminManager {
                 if (hEl) hEl.value = sOrigin.h !== undefined ? sOrigin.h : '';
             });
 
+            // ✅ STEP 4: LOAD PER-STATION SAVE INTERVALS
+            const stationSaveIntervals = cfg.save_intervals || {};
+            const saveGnssEl = document.getElementById('cfg-station-save-gnss');
+            const saveRainEl = document.getElementById('cfg-station-save-rain');
+            const saveWaterEl = document.getElementById('cfg-station-save-water');
+            const saveImuEl = document.getElementById('cfg-station-save-imu');
+            if (saveGnssEl) saveGnssEl.value = stationSaveIntervals.gnss || '';
+            if (saveRainEl) saveRainEl.value = stationSaveIntervals.rain || '';
+            if (saveWaterEl) saveWaterEl.value = stationSaveIntervals.water || '';
+            if (saveImuEl) saveImuEl.value = stationSaveIntervals.imu || '';
+
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
 
             this.highlightPreset(cfg.active_preset);
@@ -1329,6 +1602,7 @@ class AdminManager {
         }
 
         this.syncMqttSectionsForStep();
+        this.syncSaveIntervalsForStep();
     }
 
     goToWizardStep(nextStep) {
@@ -1381,6 +1655,44 @@ class AdminManager {
         });
 
         if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
+    }
+
+    syncSaveIntervalsForStep() {
+        if (this.currentStep !== 4) return;
+
+        const sensors = [
+            { type: 'gnss', elId: 'cfg-station-save-gnss' },
+            { type: 'rain', elId: 'cfg-station-save-rain' },
+            { type: 'water', elId: 'cfg-station-save-water' },
+            { type: 'imu', elId: 'cfg-station-save-imu' }
+        ];
+
+        let visibleCount = 0;
+        sensors.forEach(({ type, elId }) => {
+            const inputEl = document.getElementById(elId);
+            const checkboxEl = document.getElementById(`edit-${type}`);
+            if (inputEl && inputEl.closest('.col-md-6')) {
+                const isEnabled = checkboxEl && checkboxEl.checked;
+                inputEl.closest('.col-md-6').style.display = isEnabled ? 'block' : 'none';
+                if (isEnabled) visibleCount++;
+            }
+        });
+        
+        // Cập nhật thông báo nếu không có cảm biến nào
+        let emptyState = document.getElementById('save-interval-empty-state');
+        const container = document.querySelector('.sensor-config-body .row.g-3');
+        if (visibleCount === 0 && container) {
+            if (!emptyState) {
+                emptyState = document.createElement('div');
+                emptyState.id = 'save-interval-empty-state';
+                emptyState.className = 'col-12 text-center text-muted small py-3';
+                emptyState.innerHTML = '<i class="bi bi-x-circle me-1"></i> Không có cảm biến nào được bật cho trạm này.';
+                container.appendChild(emptyState);
+            }
+            emptyState.style.display = 'block';
+        } else if (emptyState) {
+            emptyState.style.display = 'none';
+        }
     }
 
     bindWizardButtons() {
@@ -1958,7 +2270,13 @@ class AdminManager {
             gnss_rtk_forwarding: rtkForwarding,
             vn2000: vn2000,
             vn2000_params: vn2000,
-            mqtt: stationMqtt
+            mqtt: stationMqtt,
+            save_intervals: {
+                gnss: (document.getElementById('edit-gnss')?.checked && document.getElementById('cfg-station-save-gnss')?.value) ? parseInt(document.getElementById('cfg-station-save-gnss').value) : null,
+                rain: (document.getElementById('edit-rain')?.checked && document.getElementById('cfg-station-save-rain')?.value) ? parseInt(document.getElementById('cfg-station-save-rain').value) : null,
+                water: (document.getElementById('edit-water')?.checked && document.getElementById('cfg-station-save-water')?.value) ? parseInt(document.getElementById('cfg-station-save-water').value) : null,
+                imu: (document.getElementById('edit-imu')?.checked && document.getElementById('cfg-station-save-imu')?.value) ? parseInt(document.getElementById('cfg-station-save-imu').value) : null
+            }
         };
 
 

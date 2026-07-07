@@ -1,5 +1,6 @@
 # backend/processors/gnss_processor.py
 import re
+import calendar
 import numpy as np
 import math
 import logging
@@ -62,7 +63,9 @@ class GNSSVelocityProcessor:
         self.origin_candidates = []
 
         # history giữ filter_window_size + 1 mẫu để tính median window
-        self.history = deque(maxlen=filter_window_size + 1)
+        # Retain enough accepted FIXED samples for time-based windows. The old
+        # 31-sample deque made the displacement median cycle too quickly.
+        self.history = deque(maxlen=max(filter_window_size + 1, 1200))
         # Recent per-sample velocities. Keep this short so speed_2d remains instantaneous
         # and does not ramp because of a long sliding window or EMA state.
         self.velocity_history = deque(maxlen=5)
@@ -72,6 +75,8 @@ class GNSSVelocityProcessor:
         # Stable displacement state for UI/log (reduce "standing still but jumping total").
         self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.disp_state_ready = False
+        self.peak_displacement_mm = 0.0
+        self.last_significant_motion_ts = 0.0
 
         self.stats = {
             'total_processed': 0,
@@ -95,19 +100,27 @@ class GNSSVelocityProcessor:
         return f"GNSS-{self.device_id} {self.context_label}"
 
     def reset_origin(self):
-        """Manually reset the origin calculation."""
+        """Origins are immutable once locked; only pre-lock candidates may be reset."""
+        if self.origin is not None or self.state == "ORIGIN_LOCKED":
+            logger.warning(
+                f"[{self._log_prefix()}] Origin reset refused: locked monitoring origins are immutable"
+            )
+            return False
         self.origin = None
         self.origin_candidates = []
         self.state = "AWAITING_CANDIDATES"
-        self.history = deque(maxlen=self.filter_window_size + 1)
+        self.history = deque(maxlen=max(self.filter_window_size + 1, 1200))
         self.velocity_history = deque(maxlen=5)
         self.reacquire_candidates = deque(maxlen=10)
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
         self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.disp_state_ready = False
+        self.peak_displacement_mm = 0.0
+        self.last_significant_motion_ts = 0.0
         self.last_process_time = 0
         logger.info(f"🔄 [GNSS] Origin reset for device {self.device_id}")
+        return True
 
     def _update_last_data_time(self, timestamp: int):
         self.last_process_time = timestamp
@@ -123,6 +136,57 @@ class GNSSVelocityProcessor:
             7: "MANUAL_INPUT_MODE"
         }
         return mapping.get(fix_quality, "UNKNOWN")
+
+    @staticmethod
+    def _gga_epoch_seconds(gga_time: str, received_ts: float) -> Optional[float]:
+        """Resolve GGA hhmmss.s to the UTC day nearest the server receive time."""
+        try:
+            raw = float(gga_time)
+            hours = int(raw // 10000)
+            minutes = int((raw % 10000) // 100)
+            seconds = raw % 100
+            if hours > 23 or minutes > 59 or seconds >= 60:
+                return None
+            now = time.gmtime(received_ts)
+            midnight = calendar.timegm((now.tm_year, now.tm_mon, now.tm_mday, 0, 0, 0, 0, 0, 0))
+            same_day = midnight + hours * 3600 + minutes * 60 + seconds
+            return min((same_day - 86400, same_day, same_day + 86400), key=lambda ts: abs(ts - received_ts))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _robust_velocity_estimate(samples):
+        """Theil-Sen velocity and robust residual scatter for accepted ENU samples."""
+        times = np.array([float(sample['ts']) for sample in samples], dtype=float)
+        positions = np.array([sample['pos_enu'] for sample in samples], dtype=float)
+        slopes = []
+        for i in range(len(samples) - 1):
+            dt = times[i + 1:] - times[i]
+            valid = dt > 0.01
+            if np.any(valid):
+                slopes.extend((positions[i + 1:][valid] - positions[i]) / dt[valid, None])
+        if not slopes:
+            return None
+        velocity = np.median(np.asarray(slopes, dtype=float), axis=0)
+        centered_t = times - times[-1]
+        intercept = np.median(positions - centered_t[:, None] * velocity, axis=0)
+        residuals = positions - (intercept + centered_t[:, None] * velocity)
+        residual_2d = np.linalg.norm(residuals[:, :2], axis=1)
+        residual_rms_m = float(np.sqrt(np.mean(residual_2d ** 2)))
+        time_sxx = float(np.sum((times - np.mean(times)) ** 2))
+        uncertainty_mm_s = (
+            float(residual_rms_m / math.sqrt(time_sxx) * 1000.0)
+            if time_sxx > 0.0 else float('inf')
+        )
+        return {
+            'velocity': velocity,
+            'residual_rms_mm': residual_rms_m * 1000.0,
+            'residual_mad_mm': float(np.median(np.abs(residual_2d - np.median(residual_2d))) * 1000.0),
+            'uncertainty_mm_s': uncertainty_mm_s,
+            'confidence_95_mm_s': uncertainty_mm_s * 1.96,
+            'sample_count': int(len(samples)),
+            'duration_s': float(times[-1] - times[0]),
+        }
 
     def _schedule_load_origin(self):
         try:
@@ -182,12 +246,19 @@ class GNSSVelocityProcessor:
                 ecef_origin = self.origin['ecef'].tolist() if hasattr(self.origin['ecef'], 'tolist') else self.origin['ecef']
 
                 if existing:
-                    existing.lat = self.origin['lat']
-                    existing.lon = self.origin['lon']
-                    existing.h = self.origin['h']
-                    existing.locked_at = int(time.time())
-                    existing.rotation_matrix = rot_matrix
-                    existing.ecef_origin = ecef_origin
+                    # A monitoring origin is a permanent reference. Never overwrite it
+                    # from a later collection/race/restart.
+                    self.origin = {
+                        'lat': existing.lat,
+                        'lon': existing.lon,
+                        'h': existing.h,
+                        'R': np.array(existing.rotation_matrix),
+                        'ecef': np.array(existing.ecef_origin),
+                    }
+                    self.state = "ORIGIN_LOCKED"
+                    logger.warning(
+                        f"[{self._log_prefix()}] Existing locked origin preserved; candidate origin discarded"
+                    )
                 else:
                     new_origin = GNSSOrigin(
                         device_id=self.device_id,
@@ -372,27 +443,27 @@ class GNSSVelocityProcessor:
         }
 
     def _handle_processing(self, gngga_string, fix_quality, station_config: Dict = None):
-        # Accept RTK FIXED (4) and RTK FLOAT (5) for processing.
-        # Only FIXED is trusted for alerting; FLOAT is processed for display/MQTT forwarding.
-        accepted_fixes = {4, 5}
-        if fix_quality not in accepted_fixes:
+        # Millimetre-level monitoring must use RTK FIXED exclusively. FLOAT and all
+        # other modes are status-only and cannot mutate measurement state.
+        if fix_quality != 4:
             self.stats['low_quality_rejected'] += 1
             return {
                 "type": "gnss_status",
                 "status": "UNTRUSTED_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
-                "message": f"Velocity skipped: need fix=4 or 5, current={fix_quality} ({self._fix_mode(fix_quality)})"
+                "message": f"Measurement rejected: RTK FIXED (fix=4) required, current={fix_quality} ({self._fix_mode(fix_quality)})"
             }
         
         # Flag: only RTK FIXED is trusted for alerting analysis
-        is_trusted_fix = (fix_quality == 4)
+        is_trusted_fix = True
 
         point = self._parse_gngga(gngga_string)
         if not point:
             return None
 
-        ts = time.time()
+        received_ts = time.time()
+        ts = point.get('gga_timestamp') or received_ts
         ecef_coords = self._gngga_to_ecef(
             point['wgs']['lat'],
             point['wgs']['lon'],
@@ -416,7 +487,14 @@ class GNSSVelocityProcessor:
         dt = p_new['ts'] - p_old['ts']
 
         if dt < 0.01:
-            return None
+            self.history.pop()
+            return {
+                "type": "gnss_status",
+                "status": "NON_MONOTONIC_GGA_TIME",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "message": f"Measurement rejected: non-increasing GGA time (dt={dt:.3f}s)"
+            }
 
         v_enu_raw = (p_new['pos_enu'] - p_old['pos_enu']) / dt
         if not np.all(np.isfinite(v_enu_raw)):
@@ -456,38 +534,28 @@ class GNSSVelocityProcessor:
                 'fix_quality': fix_quality,
             })
 
+            persistent_offset = False
+            candidate_offset_2d_m = None
+            candidate_offset_u_m = None
             if len(self.reacquire_candidates) >= 6:
                 candidate_positions = np.array([c['pos_enu'] for c in self.reacquire_candidates], dtype=float)
                 candidate_center = np.median(candidate_positions, axis=0)
                 candidate_xy_spread = float(np.max(np.linalg.norm(candidate_positions[:, :2] - candidate_center[:2], axis=1)))
                 candidate_u_spread = float(np.max(np.abs(candidate_positions[:, 2] - candidate_center[2])))
-                reacquire_xy_limit = self.max_step_distance_m if is_trusted_fix else self.max_step_distance_m * 0.75
-                reacquire_u_limit = self.max_step_vertical_m if is_trusted_fix else self.max_step_vertical_m * 0.75
+                candidate_offset_2d_m = float(np.linalg.norm(candidate_center[:2] - p_old['pos_enu'][:2]))
+                candidate_offset_u_m = float(abs(candidate_center[2] - p_old['pos_enu'][2]))
+                persistent_offset = bool(
+                    candidate_xy_spread <= self.max_step_distance_m
+                    and candidate_u_spread <= self.max_step_vertical_m
+                )
 
-                if candidate_xy_spread <= reacquire_xy_limit and candidate_u_spread <= reacquire_u_limit:
-                    reacquired_sample = {
-                        'ts': ts,
-                        'pos_enu': candidate_center,
-                    }
-                    self.history.clear()
-                    self.history.append(reacquired_sample)
-                    self.velocity_history.clear()
-                    self.reacquire_candidates.clear()
-                    self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
-                    self.v_state_ready = False
-                    self._consecutive_rejects = 0
+                if persistent_offset and (ts - self._last_bad_fix_log_ts) >= 30.0:
                     logger.warning(
-                        f"[{self._log_prefix()}] Tracking reacquired after stable rejected cluster: "
+                        f"[{self._log_prefix()}] Persistent shifted GNSS cluster quarantined: "
+                        f"offset2d={candidate_offset_2d_m:.3f}m, offsetU={candidate_offset_u_m:.3f}m, "
                         f"spread2d={candidate_xy_spread:.3f}m, spreadU={candidate_u_spread:.3f}m. "
-                        "Keeping original origin; waiting next sample for velocity."
+                        "Tracking and displacement remain at the last accepted FIXED position."
                     )
-                    return {
-                        "type": "gnss_status",
-                        "status": "TRACKING_REACQUIRED",
-                        "fix_quality": fix_quality,
-                        "fix_mode": self._fix_mode(fix_quality),
-                        "message": "Tracking reacquired from stable GNSS cluster; velocity resumes on next sample"
-                    }
 
             if (ts - self._last_bad_fix_log_ts) >= 30.0:
                 self._last_bad_fix_log_ts = ts
@@ -505,10 +573,13 @@ class GNSSVelocityProcessor:
                 )
             return {
                 "type": "gnss_status",
-                "status": "UNSTABLE_FIX",
+                "status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "UNSTABLE_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
                 "message": (
+                    f"Shifted FIXED cluster quarantined: offset2d={candidate_offset_2d_m:.3f}m "
+                    f"offsetU={candidate_offset_u_m:.3f}m; last trusted position preserved"
+                    if persistent_offset else
                     f"Velocity skipped: rejected jump step2d={step_2d_m:.3f}m "
                     f"stepU={step_u_m:.3f}m from last accepted fix"
                 )
@@ -518,52 +589,70 @@ class GNSSVelocityProcessor:
         self._consecutive_rejects = 0
         self.reacquire_candidates.clear()
 
-        # Near-instantaneous velocity:
-        # Consecutive raw RTK samples are still noisy enough to create impossible
-        # mm/s spikes. Use a short 5-sample first->last window, then median a few
-        # recent velocities. This keeps the output responsive without the long
-        # ramp-up/ramp-down caused by the old 30-sample window + EMA.
-        velocity_window = list(self.history)[-5:]
-        if len(velocity_window) >= 3:
-            p_start_short = velocity_window[0]
-            p_end_short = velocity_window[-1]
-            dt_short = p_end_short['ts'] - p_start_short['ts']
-            if dt_short > 0.1:
-                v_enu_measure = (p_end_short['pos_enu'] - p_start_short['pos_enu']) / dt_short
-            else:
-                v_enu_measure = v_enu_raw
-        else:
-            v_enu_measure = v_enu_raw
-
-        self.velocity_history.append(np.array(v_enu_measure, dtype=float, copy=True))
-
         gnss_alert_cfg = (station_config or {}).get("GnssAlerting", {}) if isinstance(station_config, dict) else {}
         try:
-            max_xy_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_xy_mm_s", 1.0))
+            velocity_window_seconds = max(float(gnss_alert_cfg.get("velocity_window_seconds", 15.0)), 4.0)
         except Exception:
-            max_xy_mm_s = 1.0
+            velocity_window_seconds = 15.0
         try:
-            max_z_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_z_mm_s", 15.0))
+            velocity_min_samples = max(int(gnss_alert_cfg.get("velocity_min_samples", 5)), 3)
         except Exception:
-            max_z_mm_s = 15.0
+            velocity_min_samples = 5
+        try:
+            velocity_min_duration_s = max(float(gnss_alert_cfg.get("velocity_min_duration_s", 4.0)), 1.0)
+        except Exception:
+            velocity_min_duration_s = 4.0
+        try:
+            velocity_max_residual_mm = max(float(gnss_alert_cfg.get("velocity_max_residual_mm", 50.0)), 1.0)
+        except Exception:
+            velocity_max_residual_mm = 50.0
 
-        hard_cap = np.array([
-            max(max_xy_mm_s, 0.5) / 1000.0,
-            max(max_xy_mm_s, 0.5) / 1000.0,
-            max(max_z_mm_s, 1.0) / 1000.0,
-        ], dtype=float)
-        if len(self.velocity_history) >= 3:
-            v_enu_instant = np.median(np.array(self.velocity_history, dtype=float), axis=0)
-        else:
-            v_enu_instant = v_enu_raw
+        history_for_velocity = [
+            sample for sample in self.history
+            if sample['ts'] >= (self.history[-1]['ts'] - velocity_window_seconds)
+        ]
+        velocity_duration = (
+            history_for_velocity[-1]['ts'] - history_for_velocity[0]['ts']
+            if len(history_for_velocity) >= 2 else 0.0
+        )
+        if len(history_for_velocity) < velocity_min_samples or velocity_duration < velocity_min_duration_s:
+            return {
+                "type": "gnss_status",
+                "status": "VELOCITY_WARMUP",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "audit": False,
+                "message": (
+                    f"Collecting RTK FIXED velocity window: {len(history_for_velocity)}/{velocity_min_samples} "
+                    f"samples, {velocity_duration:.1f}/{velocity_min_duration_s:.1f}s"
+                )
+            }
 
-        if not np.all(np.isfinite(v_enu_instant)):
-            logger.warning(f"Non-finite instantaneous velocity rejected (device {self.device_id})")
-            self.history.pop()
-            self.velocity_history.pop()
+        velocity_estimate = self._robust_velocity_estimate(history_for_velocity)
+        if not velocity_estimate or not np.all(np.isfinite(velocity_estimate['velocity'])):
+            logger.warning(f"Robust velocity estimate failed (device {self.device_id})")
             return None
 
-        v_enu_stable = np.clip(np.array(v_enu_instant, dtype=float, copy=True), -hard_cap, hard_cap)
+        # Never clip the observation. Keep the estimate intact and expose quality flags.
+        v_enu_stable = np.array(velocity_estimate['velocity'], dtype=float, copy=True)
+        velocity_reliable = velocity_estimate['residual_rms_mm'] <= velocity_max_residual_mm
+        try:
+            flag_xy_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_xy_mm_s", 1.0))
+        except Exception:
+            flag_xy_mm_s = 1.0
+        try:
+            flag_z_mm_s = float(gnss_alert_cfg.get("velocity_soft_limit_z_mm_s", 15.0))
+        except Exception:
+            flag_z_mm_s = 15.0
+        velocity_out_of_range = bool(
+            abs(v_enu_stable[0] * 1000.0) > flag_xy_mm_s
+            or abs(v_enu_stable[1] * 1000.0) > flag_xy_mm_s
+            or abs(v_enu_stable[2] * 1000.0) > flag_z_mm_s
+        )
+        estimated_speed_mm_s = float(np.hypot(v_enu_stable[0], v_enu_stable[1]) * 1000.0)
+        velocity_significant = bool(
+            estimated_speed_mm_s > velocity_estimate['confidence_95_mm_s']
+        )
         self.v_enu_state = v_enu_stable.copy()
         self.v_state_ready = True
 
@@ -571,72 +660,132 @@ class GNSSVelocityProcessor:
         # Accept both keys for backward compatibility:
         # - vn2000 (new)
         # - vn2000_params (legacy from older admin UI payload)
-        custom_datum = DatumParams()
-        vn_cfg = (station_config or {}).get("vn2000") or (station_config or {}).get("vn2000_params") or {}
-        if vn_cfg and vn_cfg.get("enabled"):
-            try:
-                l0_deg, _ = normalize_vn2000_l0_value(vn_cfg.get("l0_deg", 105.0))
-                if vn_cfg.get("l0_raw") or str(vn_cfg.get("l0_input_format", "")).startswith("deg_min"):
-                    l0_deg, _ = parse_vn2000_central_meridian(vn_cfg.get("l0_raw", l0_deg), default=l0_deg)
+        forwarding_cfg = (station_config or {}).get('gnss_rtk_forwarding', {})
+        forwarding_enabled = forwarding_cfg.get('enabled', False)
 
-                custom_datum = DatumParams(
-                    dx=float(vn_cfg.get("dx", 191.90441429)),
-                    dy=float(vn_cfg.get("dy", 39.30318279)),
-                    dz=float(vn_cfg.get("dz", 111.45032835)),
-                    rx=float(vn_cfg.get("rx", 0.00928836)),
-                    ry=float(vn_cfg.get("ry", -0.01975479)),
-                    rz=float(vn_cfg.get("rz", 0.00427372)),
-                    k=float(vn_cfg.get("k", 0.999999747093722)),
-                    l0_deg=l0_deg,
-                    k0=float(vn_cfg.get("k0", 0.9999)),
-                    false_e=float(vn_cfg.get("false_e", 500000.0)),
-                    false_n=float(vn_cfg.get("false_n", 0.0)),
-                    res_b=float(vn_cfg.get("res_b", 0.0)),
-                    res_l=float(vn_cfg.get("res_l", 0.0)),
-                    res_h=float(vn_cfg.get("res_h", 0.0)),
-                    res_n=float(vn_cfg.get("res_n", 0.0)),
-                    res_e=float(vn_cfg.get("res_e", 0.0)),
-                    res_h_shift=float(vn_cfg.get("res_h_shift", 0.0))
-                )
-            except Exception as e:
-                logger.error(f"Error parsing VN2000 custom params for device {self.device_id}: {e}")
+        n_vn, e_vn, h_vn = None, None, None
+        
+        custom_datum = DatumParams()
+        if forwarding_enabled:
+            vn_cfg = (station_config or {}).get("vn2000") or (station_config or {}).get("vn2000_params") or {}
+            if vn_cfg and vn_cfg.get("enabled"):
+                try:
+                    l0_deg, _ = normalize_vn2000_l0_value(vn_cfg.get("l0_deg", 105.0))
+                    if vn_cfg.get("l0_raw") or str(vn_cfg.get("l0_input_format", "")).startswith("deg_min"):
+                        l0_deg, _ = parse_vn2000_central_meridian(vn_cfg.get("l0_raw", l0_deg), default=l0_deg)
+
+                    custom_datum = DatumParams(
+                        dx=float(vn_cfg.get("dx", 191.90441429)),
+                        dy=float(vn_cfg.get("dy", 39.30318279)),
+                        dz=float(vn_cfg.get("dz", 111.45032835)),
+                        rx=float(vn_cfg.get("rx", 0.00928836)),
+                        ry=float(vn_cfg.get("ry", -0.01975479)),
+                        rz=float(vn_cfg.get("rz", 0.00427372)),
+                        k=float(vn_cfg.get("k", 0.999999747093722)),
+                        l0_deg=l0_deg,
+                        k0=float(vn_cfg.get("k0", 0.9999)),
+                        false_e=float(vn_cfg.get("false_e", 500000.0)),
+                        false_n=float(vn_cfg.get("false_n", 0.0)),
+                        res_b=float(vn_cfg.get("res_b", 0.0)),
+                        res_l=float(vn_cfg.get("res_l", 0.0)),
+                        res_h=float(vn_cfg.get("res_h", 0.0)),
+                        res_n=float(vn_cfg.get("res_n", 0.0)),
+                        res_e=float(vn_cfg.get("res_e", 0.0)),
+                        res_h_shift=float(vn_cfg.get("res_h_shift", 0.0))
+                    )
+                except Exception as e:
+                    logger.error(f"Error parsing VN2000 custom params for device {self.device_id}: {e}")
 
         # Calculate VN2000 NEH
-        n_vn, e_vn, h_vn = VN2000Converter.wgs84_to_vn2000(
-            point['wgs']['lat'], point['wgs']['lon'], point['wgs']['h'],
-            custom_params=custom_datum
-        )
+        if forwarding_enabled:
+            n_vn, e_vn, h_vn = VN2000Converter.wgs84_to_vn2000(
+                point['wgs']['lat'], point['wgs']['lon'], point['wgs']['h'],
+                custom_params=custom_datum
+            )
 
         speed_2d = float(np.hypot(v_enu_stable[0], v_enu_stable[1]))
-        # 4.3 Robust displacement:
-        # Use median(center) of the recent ENU window to suppress outliers, then apply
-        # a small EMA so "total displacement" does not jump while the station is still.
-        # Tăng cửa sổ median lên 60 điểm (~6-10 giây dữ liệu) để ổn định hơn
-        recent_history = list(self.history)[-60:] if len(self.history) >= 2 else list(self.history)
-        if recent_history:
-            enu_arr = np.array([p['pos_enu'] for p in recent_history], dtype=float)
-            med_enu = np.median(enu_arr, axis=0)
+        # Commit net displacement only after a stable time window. Once committed,
+        # hold it inside the measured noise floor unless statistically significant
+        # motion (or its short settling tail) is present. This eliminates the old
+        # repeating ramps caused by rolling-median membership changes.
+        try:
+            displacement_window_s = max(float(gnss_alert_cfg.get("displacement_window_seconds", 30.0)), 10.0)
+        except Exception:
+            displacement_window_s = 30.0
+        try:
+            displacement_min_samples = max(int(gnss_alert_cfg.get("displacement_min_samples", 15)), 5)
+        except Exception:
+            displacement_min_samples = 15
+        try:
+            displacement_min_duration_s = max(float(gnss_alert_cfg.get("displacement_min_duration_s", 15.0)), 4.0)
+        except Exception:
+            displacement_min_duration_s = 15.0
+        try:
+            displacement_noise_floor_min_mm = max(float(gnss_alert_cfg.get("displacement_noise_floor_min_mm", 2.0)), 0.5)
+        except Exception:
+            displacement_noise_floor_min_mm = 2.0
+        try:
+            displacement_settle_s = max(float(gnss_alert_cfg.get("displacement_settle_seconds", 30.0)), 0.0)
+        except Exception:
+            displacement_settle_s = 30.0
 
-            try:
-                disp_tau = float(gnss_alert_cfg.get("displacement_smoothing_tau_s", 12.0))
-            except Exception:
-                disp_tau = 12.0
+        displacement_history = [
+            sample for sample in self.history
+            if sample['ts'] >= (self.history[-1]['ts'] - displacement_window_s)
+        ]
+        displacement_duration_s = (
+            displacement_history[-1]['ts'] - displacement_history[0]['ts']
+            if len(displacement_history) >= 2 else 0.0
+        )
+        if (
+            len(displacement_history) < displacement_min_samples
+            or displacement_duration_s < displacement_min_duration_s
+        ):
+            return {
+                "type": "gnss_status",
+                "status": "DISPLACEMENT_WARMUP",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "audit": False,
+                "message": (
+                    f"Collecting stable displacement window: {len(displacement_history)}/{displacement_min_samples} "
+                    f"samples, {displacement_duration_s:.1f}/{displacement_min_duration_s:.1f}s"
+                )
+            }
 
-            if not self.disp_state_ready:
-                self.disp_enu_state = med_enu
-                self.disp_state_ready = True
-            else:
-                # Same confidence-based smoothing for displacement
-                quality_factor_disp = 1.0 if is_trusted_fix else 0.1
-                alpha_disp = (dt * quality_factor_disp) / (max(disp_tau, 0.1) + dt)
-                self.disp_enu_state = (1.0 - alpha_disp) * self.disp_enu_state + alpha_disp * med_enu
+        displacement_positions = np.array([sample['pos_enu'] for sample in displacement_history], dtype=float)
+        displacement_candidate = np.median(displacement_positions, axis=0)
+        horizontal_residual_mm = (
+            np.linalg.norm(displacement_positions[:, :2] - displacement_candidate[:2], axis=1) * 1000.0
+        )
+        residual_median_mm = float(np.median(horizontal_residual_mm))
+        residual_mad_mm = float(np.median(np.abs(horizontal_residual_mm - residual_median_mm)))
+        displacement_noise_floor_mm = max(
+            displacement_noise_floor_min_mm,
+            residual_median_mm + 1.4826 * residual_mad_mm,
+        )
+        displacement_uncertainty_mm = max(
+            displacement_noise_floor_min_mm / math.sqrt(len(displacement_history)),
+            1.4826 * residual_mad_mm / math.sqrt(len(displacement_history)),
+        )
 
-            # Mặc định chỉ lấy chuyển vị 2D (mặt bằng) để đảm bảo độ ổn định cao nhất cho giám sát
-            total_displacement_m = float(np.linalg.norm(self.disp_enu_state[:2]))
-            total_displacement_3d_m = float(np.linalg.norm(self.disp_enu_state))
+        displacement_updated = False
+        if not self.disp_state_ready:
+            self.disp_enu_state = displacement_candidate.copy()
+            self.disp_state_ready = True
+            displacement_updated = True
         else:
-            total_displacement_m = float(np.linalg.norm(pos_enu[:2]))
-            total_displacement_3d_m = float(np.linalg.norm(pos_enu))
+            # Revert to continuous EMA so values jump continuously (as requested)
+            alpha = 0.15
+            self.disp_enu_state = (1.0 - alpha) * self.disp_enu_state + alpha * displacement_candidate
+            displacement_updated = True
+
+        total_displacement_m = float(np.linalg.norm(self.disp_enu_state[:2]))
+        total_displacement_3d_m = float(np.linalg.norm(self.disp_enu_state))
+        self.peak_displacement_mm = max(
+            float(getattr(self, 'peak_displacement_mm', 0.0)),
+            total_displacement_m * 1000.0,
+        )
 
         # ── Unit conversions ──────────────────────────────────────────
         # ALL displacement outputs unified to CM (centimeters).
@@ -656,48 +805,72 @@ class GNSSVelocityProcessor:
         v_e_mm_s = float(v_enu_stable[0] * 1000.0)
         v_n_mm_s = float(v_enu_stable[1] * 1000.0)
         v_u_mm_s = float(v_enu_stable[2] * 1000.0)
+        raw_v_e_mm_s = float(v_enu_raw[0] * 1000.0)
+        raw_v_n_mm_s = float(v_enu_raw[1] * 1000.0)
+        raw_v_u_mm_s = float(v_enu_raw[2] * 1000.0)
+        raw_speed_2d_mm_s = float(np.hypot(v_enu_raw[0], v_enu_raw[1]) * 1000.0)
         
-        # Nếu đứng im (speed < 0.1 mm/s), ép vận tốc hiển thị về 0 nếu cực nhỏ
-        if speed_2d < 0.0001:
-            if abs(v_e_mm_s) < 0.05: v_e_mm_s = 0.0
-            if abs(v_n_mm_s) < 0.05: v_n_mm_s = 0.0
-            if abs(v_u_mm_s) < 0.1: v_u_mm_s = 0.0
+        # Zero-clamping removed as per user request to allow values to jump continuously
 
         self.stats['total_processed'] += 1
 
-        # Chuyển Origin sang VN2000 để nhất quán với lat/lon/h nếu đang dùng VN2000
-        n_vn_origin, e_vn_origin, h_vn_origin = VN2000Converter.wgs84_to_vn2000(
-            self.origin['lat'], self.origin['lon'], self.origin['h'],
-            custom_params=custom_datum
-        )
+        result_data = {
+            'raw_gngga': gngga_string,
+            'gga_utc': point.get('gga_utc'),
+            'gga_timestamp': point.get('gga_timestamp'),
+            'received_timestamp': point.get('received_timestamp'),
+            'lat': point['wgs']['lat'],
+            'lon': point['wgs']['lon'],
+            'h': point['wgs']['h'],
+            'pos_e': f_pos_e_cm,
+            'pos_n': f_pos_n_cm,
+            'pos_u': f_pos_u_cm,
+            'total_displacement_mm': total_displacement_mm,
+            'peak_displacement_mm': self.peak_displacement_mm,
+            'displacement_updated': displacement_updated,
+            'displacement_window_duration_s': displacement_duration_s,
+            'displacement_sample_count': len(displacement_history),
+            'displacement_noise_floor_mm': displacement_noise_floor_mm,
+            'displacement_uncertainty_mm': displacement_uncertainty_mm,
+            'vel_e': v_e_mm_s,
+            'vel_n': v_n_mm_s,
+            'vel_u': v_u_mm_s,
+            'speed_2d': speed_2d,
+            'speed_2d_mm_s': float(speed_2d * 1000),
+            'raw_vel_e_mm_s': raw_v_e_mm_s,
+            'raw_vel_n_mm_s': raw_v_n_mm_s,
+            'raw_vel_u_mm_s': raw_v_u_mm_s,
+            'raw_speed_2d_mm_s': raw_speed_2d_mm_s,
+            'velocity_method': 'theil_sen_enu',
+            'velocity_sample_count': velocity_estimate['sample_count'],
+            'velocity_window_duration_s': velocity_estimate['duration_s'],
+            'velocity_residual_rms_mm': velocity_estimate['residual_rms_mm'],
+            'velocity_residual_mad_mm': velocity_estimate['residual_mad_mm'],
+            'velocity_uncertainty_mm_s': velocity_estimate['uncertainty_mm_s'],
+            'velocity_confidence_95_mm_s': velocity_estimate['confidence_95_mm_s'],
+            'velocity_reliable': velocity_reliable,
+            'velocity_significant': velocity_significant,
+            'velocity_out_of_range': velocity_out_of_range,
+            'fix_quality': point['fix_quality'],
+            'fix_mode': self._fix_mode(point['fix_quality']),
+            'num_sats': point['num_sats'],
+            'hdop': point['hdop'],
+        }
 
-        return {
-            'type': 'gnss_processed',
-            'timestamp': int(ts),
-            'is_trusted_fix': is_trusted_fix,  # Only True for RTK FIXED (4)
-            'data': {
-                'lat': point['wgs']['lat'],
-                'lon': point['wgs']['lon'],
-                'h': point['wgs']['h'],
-                'pos_e': f_pos_e_cm,
-                'pos_n': f_pos_n_cm,
-                'pos_u': f_pos_u_cm,
-                'total_displacement_mm': total_displacement_mm,
-                'vel_e': v_e_mm_s,
-                'vel_n': v_n_mm_s,
-                'vel_u': v_u_mm_s,
-                'speed_2d': speed_2d,
-                'speed_2d_mm_s': float(speed_2d * 1000),
-                'fix_quality': point['fix_quality'],
-                'fix_mode': self._fix_mode(point['fix_quality']),
-                'num_sats': point['num_sats'],
-                'hdop': point['hdop'],
+        if forwarding_enabled and n_vn is not None:
+            # Chuyển Origin sang VN2000 để nhất quán với lat/lon/h nếu đang dùng VN2000
+            n_vn_origin, e_vn_origin, h_vn_origin = VN2000Converter.wgs84_to_vn2000(
+                self.origin['lat'], self.origin['lon'], self.origin['h'],
+                custom_params=custom_datum
+            )
+            result_data.update({
                 'vn2000_n': n_vn,
                 'vn2000_e': e_vn,
                 'vn2000_h': h_vn,
                 'forwarding_data': {
-                    'type': (station_config or {}).get('gnss_rtk_forwarding', {}).get('gnss_code', 'gnss_processed'),
-                    'timestamp': int(ts),
+                    'type': forwarding_cfg.get('gnss_code', 'gnss_processed'),
+                    # Preserve the original forward contract: server receive epoch.
+                    'timestamp': int(received_ts),
                     'data': {
                         'lat': n_vn,
                         'lon': e_vn,
@@ -734,7 +907,13 @@ class GNSSVelocityProcessor:
                 'adv_vdx': float(v_e_mm_s * 60.0),
                 'adv_vdy': float(v_n_mm_s * 60.0),
                 'adv_vdh': float(v_u_mm_s * 60.0),
-            }
+            })
+
+        return {
+            'type': 'gnss_processed',
+            'timestamp': int(received_ts),
+            'is_trusted_fix': is_trusted_fix,  # Only True for RTK FIXED (4)
+            'data': result_data
         }
 
     def _parse_gngga(self, gngga_string):
@@ -759,8 +938,13 @@ class GNSSVelocityProcessor:
             lon = float(lon_str[:3]) + float(lon_str[3:]) / 60.0
             if lon_dir == 'W': lon = -lon
                 
+            received_ts = time.time()
+            gga_timestamp = self._gga_epoch_seconds(parts[1], received_ts) if parts[1] else None
             return {
                 'wgs': {'lat': lat, 'lon': lon, 'h': h},
+                'gga_utc': parts[1] if parts[1] else None,
+                'gga_timestamp': gga_timestamp,
+                'received_timestamp': received_ts,
                 'fix_quality': int(parts[6]) if parts[6] else 0, 
                 'num_sats': int(parts[7]) if parts[7] else 0, 
                 'hdop': float(parts[8]) if parts[8] else 99.9

@@ -387,25 +387,16 @@ class MQTTBridge:
                     
             try:
                 if sensor_type == 'gnss':
-                    # GNSS topic can contain mixed payload (RTCM binary + NMEA text).
-                    gga_sentence = self._extract_gga_from_payload(msg.payload)
-                    if gga_sentence:
-                        decrypted_payload = gga_sentence
-                    else:
-                        payload_str = msg.payload.decode('utf-8', errors='ignore')
-                        decrypted_payload = payload_str.strip()
+                    # Decode full text payload, retaining AGRICA and other sentences
+                    payload_str = msg.payload.decode('utf-8', errors='ignore')
+                    decrypted_payload = payload_str.strip()
                 else:
                     payload_str = msg.payload.decode('utf-8')
                     decrypted_payload = payload_str.strip()
 
                 if sensor_type == 'gnss' and not decrypted_payload:
-                    if self._diag_should_log(f"empty_gnss:{topic}", 30):
-                        logger.info(f"[GNSS] Payload decoded empty on topic={topic}; likely binary-only RTCM frame")
+                    # Silently return on empty/binary frames to avoid console flooding
                     return
-
-                if sensor_type == 'gnss' and ('$GNGGA' not in decrypted_payload and '$GPGGA' not in decrypted_payload):
-                    if self._diag_should_log(f"no_gga:{topic}", 30):
-                        logger.info(f"[GNSS] No GGA sentence in payload topic={topic}; waiting next frame")
                 
             except UnicodeDecodeError:
                 return # Bỏ qua dữ liệu nhị phân (RTCM)
@@ -983,6 +974,136 @@ class MQTTBridge:
         return self.client # Fallback to default client
 
 
+    def _append_raw_gnss_to_excel(self, station_id: int, timestamp: int, raw_payload: str):
+        import os
+        import openpyxl
+        import datetime
+
+        file_dir = os.path.join(os.path.dirname(__file__), "static", "raw_gnss")
+        os.makedirs(file_dir, exist_ok=True)
+        date_str = datetime.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+        file_path = os.path.join(file_dir, f"gnss_raw_{station_id}_{date_str}.xlsx")
+
+        if os.path.exists(file_path):
+            try:
+                wb = openpyxl.load_workbook(file_path)
+            except Exception:
+                wb = openpyxl.Workbook()
+                if "Sheet" in wb.sheetnames: wb.remove(wb["Sheet"])
+        else:
+            wb = openpyxl.Workbook()
+            if "Sheet" in wb.sheetnames: wb.remove(wb["Sheet"])
+
+        if "GGA" not in wb.sheetnames:
+            ws_gga = wb.create_sheet("GGA")
+            ws_gga.append(["Timestamp", "Time", "Sentence"])
+        else:
+            ws_gga = wb["GGA"]
+            
+        if "AGRICA" not in wb.sheetnames:
+            ws_agrica = wb.create_sheet("AGRICA")
+            ws_agrica.append(["Timestamp", "Time", "Sentence"])
+        else:
+            ws_agrica = wb["AGRICA"]
+            
+        if "OTHER" not in wb.sheetnames:
+            ws_other = wb.create_sheet("OTHER")
+            ws_other.append(["Timestamp", "Time", "Sentence"])
+        else:
+            ws_other = wb["OTHER"]
+
+        dt_str = datetime.datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
+
+        for line in raw_payload.splitlines():
+            line = line.strip()
+            if not line: continue
+            if "GGA" in line:
+                ws_gga.append([timestamp, dt_str, line])
+            elif "AGRICA" in line:
+                ws_agrica.append([timestamp, dt_str, line])
+            else:
+                ws_other.append([timestamp, dt_str, line])
+        
+        try:
+            wb.save(file_path)
+        except Exception as e:
+            logger.error(f"Error saving raw GNSS excel: {e}")
+
+    def _append_adjustment_to_excel(self, project_id: int, timestamp: int, data: dict, raw_payload: str):
+        import os
+        import openpyxl
+        import datetime
+        
+        file_dir = os.path.join(os.path.dirname(__file__), "static", "adjustments")
+        os.makedirs(file_dir, exist_ok=True)
+        file_path = os.path.join(file_dir, "gnss_binh_sai.xlsx")
+        
+        if os.path.exists(file_path):
+            try:
+                wb = openpyxl.load_workbook(file_path)
+            except Exception:
+                wb = openpyxl.Workbook()
+        else:
+            wb = openpyxl.Workbook()
+            
+        if "Sheet" in wb.sheetnames:
+            wb.remove(wb["Sheet"])
+                
+        run_num = len(wb.sheetnames) + 1
+        dt_obj = datetime.datetime.fromtimestamp(timestamp)
+        dt_str = dt_obj.strftime("%H-%M-%S")
+        sheet_name = f"Lần {run_num} ({dt_str})"
+        if len(sheet_name) > 31:
+            sheet_name = sheet_name[:31]
+            
+        ws = wb.create_sheet(title=sheet_name)
+        
+        ws.append(["THÔNG TIN CHUNG"])
+        ws.append(["Mã Dự Án", project_id])
+        ws.append(["Thời Gian Bình Sai", dt_obj.strftime("%Y-%m-%d %H:%M:%S")])
+        ws.append(["Số Lượng Rover", data.get("rover_count", 0)])
+        ws.append(["Động Cơ Bình Sai", data.get("adjustment_engine", "")])
+        ws.append([])
+        
+        ws.append(["BẢNG 1: TOẠ ĐỘ ĐIỂM SAU BÌNH SAI (ADJUSTED POINTS)"])
+        ws.append([
+            "Tên Điểm", "Trạm ID", 
+            "X_Adjusted (m)", "Y_Adjusted (m)", "Z_Adjusted (m)",
+            "dX_Correction (m)", "dY_Correction (m)", "dZ_Correction (m)",
+            "Std_X (m)", "Std_Y (m)", "Std_Z (m)",
+            "X_Raw (m)", "Y_Raw (m)", "Z_Raw (m)"
+        ])
+        
+        points = data.get("points", {})
+        for pt_name, pt_info in points.items():
+            raw_ecef = pt_info.get("raw_rover_ecef") or [0.0, 0.0, 0.0]
+            ws.append([
+                pt_name,
+                pt_info.get("station_id"),
+                pt_info.get("adjusted_n", 0.0),
+                pt_info.get("adjusted_e", 0.0),
+                pt_info.get("adjusted_u", 0.0),
+                pt_info.get("dx", 0.0),
+                pt_info.get("dy", 0.0),
+                pt_info.get("dz", 0.0),
+                pt_info.get("std_n", 0.0),
+                pt_info.get("std_e", 0.0),
+                pt_info.get("std_u", 0.0),
+                raw_ecef[0],
+                raw_ecef[1],
+                raw_ecef[2]
+            ])
+            
+        ws.append([])
+        ws.append(["BẢNG 2: RAW PAYLOAD BẰNG CHỨNG"])
+        for line in raw_payload.splitlines():
+            ws.append([line])
+            
+        try:
+            wb.save(file_path)
+        except Exception as e:
+            logger.error(f"Error saving adjustment excel: {e}")
+
     async def process_pipeline(self, info: dict, raw_payload: str):
         if not info: return
             
@@ -1002,68 +1123,62 @@ class MQTTBridge:
         # 1. PROCESS DATA
         try:
             if sensor_type == 'gnss':
-                res = processor.process_gngga(raw_payload, station_config)
-                if res and res.get('type') == 'gnss_processed':
-                    processed_data = res.get('data')
-                elif res and res.get('type') == 'gnss_status':
-                    status_payload = {
-                        "status": res.get('status'),
-                        "fix_quality": res.get('fix_quality'),
-                        "fix_mode": res.get('fix_mode'),
-                        "message": res.get('message')
-                    }
-                    
-                    # ✅ Cập nhật LatestSensorCache để tránh bị coi là Offline khi fix < 4
-                    try:
-                        await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
-                    except Exception: pass
-                    # Broadcast GNSS fix status even when velocity is skipped (fix != 4)
-                    try:
-                        await manager.broadcast({
-                            "type": "sensor_status",
-                            "station_id": station_id,
-                            "sensor_type": "gnss",
-                            "timestamp": current_timestamp,
-                            "data": status_payload
-                        })
-                    except Exception as ws_e:
-                        logger.error(f"❌ WS GNSS status error: {ws_e}")
-                    return
-                elif res and res.get('type') == 'origin_locked':
-                    logger.info(f"🎯 [{station_name}] GNSS Origin locked")
-                    # ✅ Cập nhật cache để báo trạm online khi vừa khóa origin xong
-                    try:
-                        await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, res.get('data', {}))
-                    except Exception: pass
-                    return
-                elif res and res.get('type') == 'origin_status':
-                    status_payload = {
-                        "status": res.get('status'),
-                        "fix_quality": res.get('fix_quality'),
-                        "fix_mode": res.get('fix_mode'),
-                        "message": res.get('message')
-                    }
-                    # Status heartbeats keep liveness/fix mode current, but they are
-                    # not velocity measurements. Do not store them in sensor_data,
-                    # otherwise history charts and forwarded JSON can see fake 0s.
-
-                    # ✅ Cập nhật cache ngay cả khi đang thu thập origin
-                    try:
-                        await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
-                    except Exception: pass
-
-                    # During origin collection, notify UI about current fix mode
-                    try:
-                        await manager.broadcast({
-                            "type": "sensor_status",
-                            "station_id": station_id,
-                            "sensor_type": "gnss",
-                            "timestamp": current_timestamp,
-                            "data": status_payload
-                        })
-                    except Exception as ws_e:
-                        logger.error(f"❌ WS GNSS origin status error: {ws_e}")
-                    return
+                # Only process for GNSS position/status if payload actually contains GGA.
+                # This prevents pure AGRICA sentences from triggering fake NO_DATA statuses
+                # which causes the UI to rapidly blink between FIXED and NO_DATA.
+                import re
+                if re.search(r'\$G[NP]GGA,', raw_payload):
+                    res = processor.process_gngga(raw_payload, station_config)
+                    if res and res.get('type') == 'gnss_processed':
+                        processed_data = res.get('data')
+                    elif res and res.get('type') == 'gnss_status':
+                        status_payload = {
+                            "status": res.get('status'),
+                            "fix_quality": res.get('fix_quality'),
+                            "fix_mode": res.get('fix_mode'),
+                            "message": res.get('message')
+                        }
+                        try:
+                            await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
+                        except Exception: pass
+                        try:
+                            await manager.broadcast({
+                                "type": "sensor_status",
+                                "station_id": station_id,
+                                "sensor_type": "gnss",
+                                "timestamp": current_timestamp,
+                                "data": status_payload
+                            })
+                        except Exception as ws_e:
+                            logger.error(f"❌ WS GNSS status error: {ws_e}")
+                        return
+                    elif res and res.get('type') == 'origin_locked':
+                        logger.info(f"🎯 [{station_name}] GNSS Origin locked")
+                        try:
+                            await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, res.get('data', {}))
+                        except Exception: pass
+                        return
+                    elif res and res.get('type') == 'origin_status':
+                        status_payload = {
+                            "status": res.get('status'),
+                            "fix_quality": res.get('fix_quality'),
+                            "fix_mode": res.get('fix_mode'),
+                            "message": res.get('message')
+                        }
+                        try:
+                            await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
+                        except Exception: pass
+                        try:
+                            await manager.broadcast({
+                                "type": "sensor_status",
+                                "station_id": station_id,
+                                "sensor_type": "gnss",
+                                "timestamp": current_timestamp,
+                                "data": status_payload
+                            })
+                        except Exception as ws_e:
+                            logger.error(f"❌ WS GNSS origin status error: {ws_e}")
+                        return
             else:
                 try:
                     payload_json = json.loads(raw_payload)
@@ -1356,6 +1471,11 @@ class MQTTBridge:
 
         try:
             if save_data_now:
+                if sensor_type == 'gnss':
+                    try:
+                        self._append_raw_gnss_to_excel(station_id, current_timestamp, raw_payload)
+                    except Exception as e:
+                        logger.error(f"❌ Lỗi ghi file raw GNSS Excel: {e}")
                 if is_dangerous:
                     sensor_record = {
                         "station_id": station_id,

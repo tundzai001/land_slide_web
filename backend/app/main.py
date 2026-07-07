@@ -818,12 +818,10 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
             continue
 
         name = str(item.get("name") or "").strip()
-        if name not in CORS_BASE_STATION_NAMES:
-            continue
-
         try:
             lat = float(item.get("lat"))
             lon = float(item.get("lon"))
+            alt = float(item.get("alt")) if item.get("alt") is not None else 0.0
         except (TypeError, ValueError):
             continue
 
@@ -837,7 +835,8 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
             "status": item.get("status"),
             "lat": lat,
             "lon": lon,
-            "mountpoint": service_config.get("mountpoint1") or name,
+            "alt": alt,
+            "mountpoint": service_config.get("mountpoint1") or item.get("mountpoint") or name,
             "is_provisioned": bool(item.get("is_provisioned")),
             "server_host": service_config.get("serverhost1"),
             "stream_active": bool(service_config.get("stream_active")),
@@ -1207,7 +1206,8 @@ async def get_projects(
                 "location": p.location,
                 "is_active": p.is_active,
                 "created_at": p.created_at,
-                "station_count": count
+                "station_count": count,
+                "gnss_clusters": getattr(p, "gnss_clusters", None)
             } 
             for p, count in projects_with_counts
         ]
@@ -1241,13 +1241,100 @@ async def create_project(
             "id": new_project.id,
             "project_code": new_project.project_code,
             "name": new_project.name,
-            "description": new_project.description
+            "description": new_project.description,
+            "location": new_project.location
         }
         
     except Exception as e:
         await db.rollback()
         logger.error(f"Error creating project: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/projects/cors-stations")
+async def get_admin_cors_stations(
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    try:
+        return await asyncio.to_thread(_fetch_cors_base_stations_sync)
+    except requests.RequestException as e:
+        logger.warning(f"CORS base station fetch failed: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch CORS base stations")
+
+@app.put("/api/admin/projects/{project_id}")
+async def update_project(
+    project_id: int,
+    project_data: dict,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    try:
+        result = await db.execute(
+            select(model_config.Project).where(model_config.Project.id == project_id)
+        )
+        project = result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+            
+        if 'name' in project_data:
+            project.name = project_data['name']
+        if 'description' in project_data:
+            project.description = project_data['description']
+        if 'location' in project_data:
+            project.location = project_data['location']
+        if 'is_active' in project_data:
+            project.is_active = project_data['is_active']
+        if 'gnss_clusters' in project_data:
+            project.gnss_clusters = project_data['gnss_clusters']
+            
+        project.updated_at = int(time.time())
+        
+        await db.commit()
+        await db.refresh(project)
+        
+        return {
+            "id": project.id,
+            "project_code": project.project_code,
+            "name": project.name,
+            "description": project.description,
+            "location": project.location,
+            "gnss_clusters": project.gnss_clusters
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error updating project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/projects/{project_id}")
+async def get_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+):
+    try:
+        result = await db.execute(
+            select(model_config.Project).where(model_config.Project.id == project_id)
+        )
+        project = result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return {
+            "id": project.id,
+            "project_code": project.project_code,
+            "name": project.name,
+            "description": project.description,
+            "location": project.location,
+            "gnss_clusters": project.gnss_clusters
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/api/admin/projects/{project_id}")
 async def delete_project(
@@ -1644,7 +1731,87 @@ async def fetch_live_gnss_origin(
     except Exception as e:
         logger.error(f"GNSS Fetch Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
+
+# ============================================================================
+# ADMIN - GNSS ADJUSTMENT CONTROL API
+# ============================================================================
+
+class GnssAdjustmentStartRequest(BaseModel):
+    project_id: int
+    base_mountpoint: str
+    caster_address: Optional[str] = None
+    new_base_station_id: Optional[int] = None
+    selected_clusters: Optional[list[list[int]]] = None
+
+@app.post("/api/admin/gnss/adjustment/start")
+async def start_gnss_adjustment(
+    req: GnssAdjustmentStartRequest,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        # Store dynamic selected clusters in mqtt_service if provided
+        if req.selected_clusters is not None:
+            mqtt_service.active_adjustment_clusters[req.project_id] = req.selected_clusters
+            logger.info(f"Stored dynamic active adjustment clusters for project {req.project_id}: {req.selected_clusters}")
+
+        # 1. Gửi lệnh ngắt (sleep) luồng RTCM của Base gốc qua MQTT tới CORS Dashboard
+        topic = "ntrip/rtcm/stop"
+        payload = {
+            "mountpoint": req.base_mountpoint,
+            "client_instance_id": "landslide_system",
+            "force": True
+        }
+        if req.caster_address:
+            payload["caster_address"] = req.caster_address
+
+        # Sử dụng client MQTT có sẵn trong mqtt_service
+        if mqtt_service.client and mqtt_service.client.is_connected():
+            mqtt_service.client.publish(topic, json.dumps(payload), qos=1)
+            logger.info(f"Published adjustment start command (stop Base RTCM): {payload}")
+        else:
+            logger.warning(f"MQTT client not connected, failed to publish stop base command")
+            raise HTTPException(status_code=503, detail="MQTT broker connection unavailable")
+
+        return {"status": "success", "message": "Adjustment cycle started, Base stream put to sleep"}
+    except Exception as e:
+        logger.error(f"Failed to start GNSS adjustment cycle: {e}")
+        if isinstance(e, HTTPException): raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/gnss/adjustment/stop")
+async def stop_gnss_adjustment(
+    req: GnssAdjustmentStartRequest,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        # Clear dynamic active adjustment clusters
+        mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
+        logger.info(f"Cleared active adjustment clusters for project {req.project_id}")
+
+        # 1. Gửi lệnh mở lại (wake) luồng RTCM của Base gốc qua MQTT tới CORS Dashboard
+        topic = "ntrip/rtcm/start"
+        payload = {
+            "mountpoint": req.base_mountpoint,
+            "client_instance_id": "landslide_system",
+            "ttl_seconds": 300 # Đánh thức duy trì trong 5 phút hoặc lâu hơn
+        }
+        if req.caster_address:
+            payload["caster_address"] = req.caster_address
+
+        if mqtt_service.client and mqtt_service.client.is_connected():
+            mqtt_service.client.publish(topic, json.dumps(payload), qos=1)
+            logger.info(f"Published adjustment stop command (wake Base RTCM): {payload}")
+        else:
+            logger.warning(f"MQTT client not connected, failed to publish wake base command")
+            raise HTTPException(status_code=503, detail="MQTT broker connection unavailable")
+
+        return {"status": "success", "message": "Adjustment cycle stopped, Base stream woken up"}
+    except Exception as e:
+        logger.error(f"Failed to stop GNSS adjustment cycle: {e}")
+        if isinstance(e, HTTPException): raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ============================================================================
 # ADMIN - DEVICES API
 # ============================================================================
@@ -2009,6 +2176,28 @@ async def get_station_detail(
                 ]
             }
         
+        # 3.5. Fetch latest gnss_adjusted data from LatestSensorCache
+        try:
+            adj_cache_res = await db_data.execute(
+                select(model_data.LatestSensorCache)
+                .where(
+                    and_(
+                        model_data.LatestSensorCache.station_id == station_id,
+                        model_data.LatestSensorCache.sensor_type == 'gnss_adjusted'
+                    )
+                )
+            )
+            adj_cached = adj_cache_res.scalar_one_or_none()
+            if adj_cached:
+                sensor_data["gnss_adjusted"] = {
+                    "is_online": True,
+                    "latest": adj_cached.data,
+                    "latest_timestamp": adj_cached.timestamp,
+                    "history": []
+                }
+        except Exception as adj_load_e:
+            logger.error(f"Error loading cached gnss_adjusted for station {station_id}: {adj_load_e}")
+
         # ✅ Tính status dựa trên offline threshold tùy chỉnh
         offline_display_enabled = is_offline_display_enabled(station.config)
         computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
@@ -2054,6 +2243,7 @@ async def get_station_detail(
             "station_code": station.station_code,
             "name": station.name,
             "location": station.location,
+            "project_id": station.project_id,
             "status": computed_status,
             "offline_display_enabled": offline_display_enabled,
             "offline_display": {"enabled": offline_display_enabled},

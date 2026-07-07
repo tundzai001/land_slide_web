@@ -195,6 +195,7 @@ class NavManager {
 
     // ✅ NEW: Update admin button visibility
     updateAdminButton() {
+        const adjustBtn = document.getElementById('nav-btn-adjust');
         const adminBtn = document.getElementById('admin-nav-btn');
 
         if (!adminBtn) {
@@ -214,9 +215,11 @@ class NavManager {
 
         if (user && (user.role === 'admin' || user.role === 'operator')) {
             adminBtn.style.display = 'inline-flex'; // Use inline-flex for proper icon+text alignment
+            if (adjustBtn) adjustBtn.style.display = 'inline-flex';
             console.log('✅ [NAV] Admin button shown for:', user.sub);
         } else {
             adminBtn.style.display = 'none';
+            if (adjustBtn) adjustBtn.style.display = 'none';
             console.log('🔒 [NAV] Admin button hidden (viewer)');
         }
     }

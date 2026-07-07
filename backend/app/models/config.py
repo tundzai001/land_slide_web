@@ -14,6 +14,7 @@ class Project(BaseConfig):
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
     is_active = Column(Boolean, default=True)
+    gnss_clusters = Column(JSON, nullable=True) # Array of arrays of station IDs: [[1, 2], [3, 4]]
     
     stations = relationship("Station", back_populates="project", cascade="all, delete-orphan")
 

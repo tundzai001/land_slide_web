@@ -554,6 +554,63 @@ function handleRealtimeUpdate(message) {
 }
 
 function updateRealtimeSensorValues(message) {
+    if (message.sensor_type === 'gnss_adjusted' && message.data) {
+        const adjResultsSection = document.getElementById('adj-results-section');
+        const adjStatusEl = document.getElementById('adj-process-status');
+        const adjTimeEl = document.getElementById('adj-val-time');
+        const adjPointsList = document.getElementById('adj-points-list');
+        
+        if (adjStatusEl) {
+            adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>`;
+        }
+        if (adjTimeEl) {
+            adjTimeEl.textContent = new Date(message.timestamp * 1000).toLocaleString();
+        }
+        if (adjResultsSection) {
+            adjResultsSection.style.display = 'block';
+        }
+        if (adjPointsList) {
+            adjPointsList.innerHTML = '';
+            
+            // Add download Excel workbook button
+            if (message.data.excel_report_url) {
+                const downloadXlsBtn = document.createElement('a');
+                downloadXlsBtn.href = message.data.excel_report_url;
+                downloadXlsBtn.target = '_blank';
+                downloadXlsBtn.className = 'btn btn-sm btn-outline-success w-100 mb-2 py-1';
+                downloadXlsBtn.style.fontSize = '0.72rem';
+                downloadXlsBtn.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1"></i> Tải báo cáo bình sai (Excel)';
+                adjPointsList.appendChild(downloadXlsBtn);
+            }
+
+            // Add download report button
+            if (message.data.report_file_url) {
+                const downloadBtn = document.createElement('a');
+                downloadBtn.href = message.data.report_file_url;
+                downloadBtn.target = '_blank';
+                downloadBtn.className = 'btn btn-sm btn-outline-info w-100 mb-2 py-1';
+                downloadBtn.style.fontSize = '0.72rem';
+                downloadBtn.innerHTML = '<i class="bi bi-download me-1"></i> Tải báo cáo bình sai (JSON)';
+                adjPointsList.appendChild(downloadBtn);
+            }
+            
+            if (message.data.points) {
+                for (const [ptName, ptCoords] of Object.entries(message.data.points)) {
+                    const item = document.createElement('div');
+                    item.className = 'list-group-item bg-transparent text-slate-300 py-1.5 px-0 d-flex justify-content-between align-items-center border-bottom border-white/5';
+                    item.innerHTML = `
+                        <span class="fw-semibold text-teal-400 font-monospace">${ptName}</span>
+                        <span class="text-glow font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
+                            X: ${ptCoords[0]?.toFixed(4)}<br>
+                            Y: ${ptCoords[1]?.toFixed(4)}<br>
+                            Z: ${ptCoords[2]?.toFixed(4)}
+                        </span>
+                    `;
+                    adjPointsList.appendChild(item);
+                }
+            }
+        }
+    }
     const { sensor_type, data, timestamp, station_id } = message;
     const stationId = station_id || currentStationData?.id;
 
@@ -597,9 +654,44 @@ function updateRealtimeSensorValues(message) {
                      lat: data.lat, lon: data.lon, h: data.h,
                      adv_x: data.adv_x, adv_y: data.adv_y, adv_h: data.adv_h,
                      adv_dx: data.adv_dx, adv_dy: data.adv_dy, adv_dh: data.adv_dh,
-                     adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh
+                     adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh,
+                     velocity_method: data.velocity_method,
+                     velocity_sample_count: data.velocity_sample_count,
+                     velocity_window_duration_s: data.velocity_window_duration_s,
+                     velocity_residual_rms_mm: data.velocity_residual_rms_mm,
+                     velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s
                  });
              }
+        }
+
+        // Update Theil-Sen display in both Main Sidebar and Advanced Panel
+        if (data.velocity_method === 'theil_sen_enu') {
+            const sampleCount = data.velocity_sample_count || 0;
+            const durationS = data.velocity_window_duration_s ? data.velocity_window_duration_s.toFixed(1) : 0;
+            const rms = data.velocity_residual_rms_mm ? data.velocity_residual_rms_mm.toFixed(2) : 0;
+            const uncert = data.velocity_uncertainty_mm_s ? data.velocity_uncertainty_mm_s.toFixed(3) : 0;
+
+            // Advanced Panel fields
+            setText('adv-val-method', 'Theil-Sen Robust Estimator');
+            setText('adv-val-samples', sampleCount);
+            setText('adv-val-duration', durationS);
+            setText('adv-val-rms', rms);
+            setText('adv-val-uncert', `± ${uncert}`);
+
+            // Main sidebar summary text (Trend logic simplified based on velocity)
+            const evalSummaryEl = document.getElementById('gnss-eval-summary');
+            if (evalSummaryEl) {
+                evalSummaryEl.style.display = 'block';
+                let trendHtml = '';
+                if (velocityMmS > 0.5) {
+                    trendHtml = `<span class="text-danger"><i class="bi bi-arrow-up-right-circle-fill me-1"></i>Chuyển dịch nhanh</span>`;
+                } else if (velocityMmS > 0.1) {
+                    trendHtml = `<span class="text-warning"><i class="bi bi-arrow-right-circle-fill me-1"></i>Có chuyển dịch</span>`;
+                } else {
+                    trendHtml = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Đang ổn định</span>`;
+                }
+                evalSummaryEl.innerHTML = `${trendHtml} <span class="ms-2 text-muted fw-normal">Cửa sổ: ${sampleCount} mẫu (${durationS}s)</span>`;
+            }
         }
 
         if (charts['chart-gnss']) {
@@ -1328,9 +1420,9 @@ function normalizeCorsBaseStations(payload) {
         ? payload
         : (Array.isArray(payload?.value) ? payload.value : []);
 
-    const wanted = new Set(['SinQuyen1', 'SinQuyen2']);
+    // Base stations: show all valid ones from CORS API
     return rawStations
-        .filter(st => wanted.has(String(st?.name || '').trim()))
+        .filter(st => st && typeof st === "object" && String(st.name || '').trim())
         .map(st => ({
             ...st,
             name: String(st.name || '').trim(),
@@ -1740,6 +1832,8 @@ function setupEventListeners() {
         });
     }
 
+
+
     // ✅ NEW: Mở Digital Twin 3D
     const btnDigitalTwin = document.getElementById('btn-digital-twin');
     if (btnDigitalTwin) {
@@ -1767,13 +1861,16 @@ function setupEventListeners() {
         console.log('✅ [GNSS] Advanced sidepanel listener attached');
         gnssCard.addEventListener('click', (e) => {
             e.stopPropagation();
-            console.log('鼠标️ [GNSS] GNSS Velocity card clicked');
+            console.log('👆 [GNSS] GNSS Velocity card clicked');
+            // Remove expanded mode when just opening from card
+            advSidepanel.classList.remove('expanded');
             advSidepanel.classList.toggle('active');
             const isActive = advSidepanel.classList.contains('active');
 
             // ✅ ĐỒNG BỘ: Đóng Station Sidebar khi mở Advanced GNSS
             if (isActive && stationSidebar) {
                 stationSidebar.classList.add('hidden');
+                loadLongTermAnalysis(); // Tải Theil-Sen vào cột trái
             }
 
             console.log('✨ [GNSS] Sidepanel active:', isActive);
@@ -1786,6 +1883,9 @@ function setupEventListeners() {
         advCloseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             advSidepanel.classList.remove('active');
+            advSidepanel.classList.remove('expanded');
+            const advColRight = advSidepanel.querySelector('.adv-column-right');
+            if (advColRight) advColRight.style.display = 'none';
         });
     }
 
@@ -1835,18 +1935,15 @@ function setupEventListeners() {
         });
     }
 
-    // Phân tích dài hạn -> Mở fullscreen
+    // Analysis / Theil-Sen button -> Mở Advanced tab (Chỉ hiển thị Theil-sen, ẩn Bình sai)
     const btnLongTerm = document.getElementById('btn-long-term');
     const longtermOverlay = document.getElementById('longterm-overlay');
     const closeLongtermBtn = document.getElementById('close-longterm-btn');
 
-    if (btnLongTerm && longtermOverlay) {
+    if (btnLongTerm && advSidepanel) {
         btnLongTerm.addEventListener('click', () => {
-            longtermOverlay.classList.add('active');
-            isRainCorrelationAiEnabled = false;
-            rainCorrelationAiRunning = false;
-            resetRainfallCorrelationUi();
-            updateRainCorrelationAiControls();
+            advSidepanel.classList.remove('expanded');
+            advSidepanel.classList.add('active');
 
             // Đóng sidebar trái
             if (stationSidebar) {
@@ -1863,6 +1960,43 @@ function setupEventListeners() {
             console.log('📊 [LONGTERM] Analysis overlay opened');
 
             loadLongTermAnalysis();
+        });
+    }
+
+    const btnNetworkAdj = document.getElementById('btn-network-adj');
+    if (btnNetworkAdj && advSidepanel) {
+        btnNetworkAdj.addEventListener('click', () => {
+            // Check for offline rovers
+            let hasOffline = false;
+            if (typeof stationsData !== 'undefined' && Array.isArray(stationsData)) {
+                hasOffline = stationsData.some(st => st.status === 'offline' || st.is_offline);
+            }
+            
+            if (hasOffline) {
+                const proceed = confirm("Có trạm rover offline, bạn có muốn tiếp tục bình sai không? (Có/Không)");
+                if (!proceed) return;
+            }
+
+            // Open and Expand Advanced Sidepanel
+            advSidepanel.classList.add('active');
+            
+            // Expand to show right column
+            const advColRight = advSidepanel.querySelector('.adv-column-right');
+            if (advColRight) {
+                advColRight.style.display = 'flex';
+                advSidepanel.classList.add('expanded');
+            }
+
+            // Close left sidebar
+            if (stationSidebar) {
+                stationSidebar.classList.add('hidden');
+                stationSidebar.classList.add('force-hidden');
+            }
+            
+            // Trigger adjustment request
+            if (typeof requestGnssAdjustment === 'function') {
+                requestGnssAdjustment();
+            }
         });
     }
 
@@ -2723,6 +2857,70 @@ function updateSidebarUI(data) {
             setText('val-imu-delta-pitch', '-- mm');
             setText('val-imu-delta-yaw', '-- mm');
             updateImuDrift(null, null);
+        }
+
+        // ✅ GNSS Adjusted Cache Rendering
+        const adjResultsSection = document.getElementById('adj-results-section');
+        const adjStatusEl = document.getElementById('adj-process-status');
+        const adjTimeEl = document.getElementById('adj-val-time');
+        const adjPointsList = document.getElementById('adj-points-list');
+        
+        const adjCached = data.sensors?.gnss_adjusted;
+        if (adjCached && adjCached.latest) {
+            const cacheData = adjCached.latest;
+            if (adjStatusEl) {
+                adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
+            }
+            if (adjTimeEl && adjCached.latest_timestamp) {
+                adjTimeEl.textContent = new Date(adjCached.latest_timestamp * 1000).toLocaleString();
+            }
+            if (adjResultsSection) {
+                adjResultsSection.style.display = 'block';
+            }
+            if (adjPointsList) {
+                adjPointsList.innerHTML = '';
+                
+                // Add Excel workbook download button
+                if (cacheData.excel_report_url) {
+                    const downloadXlsBtn = document.createElement('a');
+                    downloadXlsBtn.href = cacheData.excel_report_url;
+                    downloadXlsBtn.target = '_blank';
+                    downloadXlsBtn.className = 'btn btn-sm btn-outline-success w-100 mb-2 py-1';
+                    downloadXlsBtn.style.fontSize = '0.72rem';
+                    downloadXlsBtn.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1"></i> Tải báo cáo bình sai (Excel)';
+                    adjPointsList.appendChild(downloadXlsBtn);
+                }
+
+                // Add download report button
+                if (cacheData.report_file_url) {
+                    const downloadBtn = document.createElement('a');
+                    downloadBtn.href = cacheData.report_file_url;
+                    downloadBtn.target = '_blank';
+                    downloadBtn.className = 'btn btn-sm btn-outline-info w-100 mb-2 py-1';
+                    downloadBtn.style.fontSize = '0.72rem';
+                    downloadBtn.innerHTML = '<i class="bi bi-download me-1"></i> Tải báo cáo bình sai (JSON)';
+                    adjPointsList.appendChild(downloadBtn);
+                }
+                
+                if (cacheData.points) {
+                    for (const [ptName, ptCoords] of Object.entries(cacheData.points)) {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item bg-transparent text-slate-300 py-1.5 px-0 d-flex justify-content-between align-items-center border-bottom border-white/5';
+                        item.innerHTML = `
+                            <span class="fw-semibold text-teal-400 font-monospace">${ptName}</span>
+                            <span class="text-glow font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
+                                X: ${ptCoords[0]?.toFixed(4)}<br>
+                                Y: ${ptCoords[1]?.toFixed(4)}<br>
+                                Z: ${ptCoords[2]?.toFixed(4)}
+                            </span>
+                        `;
+                        adjPointsList.appendChild(item);
+                    }
+                }
+            }
+        } else {
+            if (adjResultsSection) adjResultsSection.style.display = 'none';
+            if (adjPointsList) adjPointsList.innerHTML = '';
         }
 
         // ✅ Battery Voltage: chỉ hiển thị khi IMU online và có giá trị > 0

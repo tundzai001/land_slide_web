@@ -3054,8 +3054,8 @@ body {
     position: fixed;
     top: 64px;
     right: 420px;
-    /* SÃ¡t lá» trÃ¡i cá»§a detail-sidebar (420px) */
-    width: 320px;
+    /* Cách lề trái của detail-sidebar (420px) */
+    width: 360px; /* Ban đầu thu gọn */
     height: auto;
     max-height: calc(100vh - 100px);
     background: var(--glass-bg);
@@ -3078,6 +3078,10 @@ body {
     transform: translateX(0);
     opacity: 1;
     pointer-events: all;
+}
+
+.gnss-advanced-sidepanel.expanded {
+    width: 820px; /* Mở rộng thêm khi có bình sai */
 }
 
 .sidepanel-header {
@@ -3112,8 +3116,31 @@ body {
     padding: 24px;
     flex: 1;
     display: flex;
+    flex-direction: row;
+    gap: 24px;
+    overflow-x: hidden;
+}
+
+.gnss-advanced-sidepanel .adv-column-left {
+    flex: 1;
+    display: flex;
     flex-direction: column;
     gap: 20px;
+}
+
+.gnss-advanced-sidepanel .adv-column-right {
+    flex: 1.2;
+    display: none; /* Ẩn mặc định */
+    flex-direction: column;
+    gap: 15px;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    padding-left: 20px;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.gnss-advanced-sidepanel.expanded .adv-column-right {
+    display: flex; /* Hiện khi mở rộng */
 }
 
 /* Section Grouping */

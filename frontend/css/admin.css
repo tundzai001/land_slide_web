@@ -2226,6 +2226,7 @@ input[type="number"] {
 }
 
 .project-checkbox-list .form-check,
+.station-checkbox-list .form-check,
 #assignProjectModal .form-check {
     display: flex;
     align-items: center;
@@ -2235,6 +2236,7 @@ input[type="number"] {
 }
 
 .project-checkbox-list .form-check-input,
+.station-checkbox-list .form-check-input,
 #assignProjectModal .form-check-input {
     width: 16px !important;
     height: 16px !important;
@@ -2245,6 +2247,7 @@ input[type="number"] {
 }
 
 .project-checkbox-list .form-check-label,
+.station-checkbox-list .form-check-label,
 #assignProjectModal .form-check-label {
     margin: 0;
     line-height: 1.35;

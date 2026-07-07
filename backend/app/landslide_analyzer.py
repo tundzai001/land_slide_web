@@ -1628,6 +1628,8 @@ class LandslideAnalyzer:
                 return None
 
             latest = recent_data[-1]['data']
+            if latest.get('velocity_reliable') is False or latest.get('velocity_significant') is False:
+                return {'level': 'PENDING', 'category': 'gnss_velocity'}
             velocity_ms = latest.get('speed_2d', 0.0) 
             velocity_mms = velocity_ms * 1000.0
             

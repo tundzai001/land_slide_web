@@ -1,0 +1,54 @@
+GNSS BASELINE NETWORK ADJUSTMENT
+Coordinate order: North, East, Height (metres)
+
+SUMMARY
+Rank                     : 9
+Degrees of freedom       : 9
+Condition number         : 5.11717
+Weighted residual sum    : 14506.8389
+Reference std. deviation  : 40.148113
+C# legacy M (scale 0.001)  : 0.040148
+Max normalized residual   : 112.261
+
+GLOBAL CHI-SQUARE TEST
+Statistic                  : 14506.838889
+Acceptance interval        : [2.700389, 19.022768]
+Two-sided p-value          : 0
+Decision                   : FAIL
+
+COMPATIBILITY MODE
+Replicates Adj.cs weights: Pii = 0.001^2 / (std_i^2 + 1e-8).
+
+ADJUSTED POINTS
+Name       Fixed          North           East         Height      sN      sE      sH
+p2         True    2331091.3900    580178.1280        27.9230  0.0000  0.0000  0.0000
+p1         False   2331343.3187    580551.5633        17.4721  0.0095  0.0063  0.0164
+p3         False   2331089.3788    581271.5165        26.9294  0.0095  0.0063  0.0154
+p4         False   2331857.0142    579582.0563        26.9832  0.0110  0.0063  0.0169
+
+ADJUSTED BASELINES AND RESIDUALS
+From       To              dN            dE            dH          vN          vE          vH    max|w|
+p1         p2            -251.92872    -373.43525      10.45088     0.00028    -0.00325    -0.00312    20.555
+p1         p3            -253.93995     719.95325       9.45725     0.00005     0.01125    -0.00275    71.151
+p1         p4             513.69544    -969.50700       9.51104    -0.00056    -0.00800     0.00704    50.596
+p2         p3              -2.01123    1093.38850      -0.99363     0.00077     0.00650    -0.00863    41.110
+p2         p4             765.62416    -596.07175      -0.93984    -0.00084    -0.00975     0.00916    61.664
+p3         p4             767.63539   -1689.46025       0.05380     0.00139     0.01775    -0.01620   112.261
+
+DATA SNOOPING FLAGS (diagnostic only; observations were not removed)
+WARNING: global test failed; multiple flags can indicate an unrealistic stochastic model or systematic error, not independent blunders.
+No.  Baseline       Axis       w        p-value   critical  redundancy
+1    p1->p2          E     -20.555    6.971e-94     3.291       0.500
+1    p1->p2          H      -6.934    4.095e-12     3.291       0.548
+2    p1->p3          E      71.151            0     3.291       0.500
+2    p1->p3          H      -8.199    2.421e-16     3.291       0.434
+3    p1->p4          E     -50.596            0     3.291       0.500
+3    p1->p4          H      16.022     8.95e-58     3.291       0.522
+4    p2->p3          N       3.662      0.00025     3.291       0.443
+4    p2->p3          E      41.110            0     3.291       0.500
+4    p2->p3          H     -25.698   1.234e-145     3.291       0.434
+5    p2->p4          E     -61.664            0     3.291       0.500
+5    p2->p4          H      20.850    1.522e-96     3.291       0.522
+6    p3->p4          N       4.527    5.989e-06     3.291       0.557
+6    p3->p4          E     112.261            0     3.291       0.500
+6    p3->p4          H     -36.247   1.095e-287     3.291       0.540

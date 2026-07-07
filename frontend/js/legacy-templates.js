@@ -15,6 +15,10 @@ window.LegacyTemplates = {
                 <span>Landslide Monitor</span>
             </a>
 
+            <button id="nav-btn-adjust" class="btn btn-sm btn-outline-info" style="display: none; margin-left: 8px;">
+                <i class="bi bi-gear-wide-connected me-1"></i> Bình sai
+            </button>
+
             <a href="/management" id="admin-nav-btn" class="btn btn-sm btn-outline-primary"
                 style="display: none;">
                 <i class="bi bi-stars me-1"></i> Management
@@ -121,72 +125,166 @@ window.LegacyTemplates = {
 
     <div class="gnss-advanced-sidepanel" id="gnss-advanced-sidepanel">
         <div class="sidepanel-header">
-            <h6><i class="bi bi-gear-wide-connected me-2"></i>Advanced GNSS Info</h6>
+            <h6><i class="bi bi-gear-wide-connected me-2"></i>Advanced GNSS & Network Adjustment</h6>
             <button class="sidepanel-close" id="gnss-sidepanel-close"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="sidepanel-body">
-            <!-- Nhóm 1: Vị trí hiện tại (VN2000) -->
-            <div class="adv-section">
-                <div class="adv-section-title">Vị trí hiện tại (VN2000 NEH)</div>
-                <div class="adv-item">
-                    <span class="adv-label">VN2000 North (m)</span>
-                    <div class="adv-value-row"><span class="adv-value" id="adv-val-lat">--</span><span
-                            class="adv-unit">m</span></div>
+            <div class="adv-column-left">
+                <!-- Nhóm 1: Vị trí hiện tại (VN2000) -->
+                <div class="adv-section">
+                    <div class="adv-section-title">Vị trí hiện tại (VN2000 NEH)</div>
+                    <div class="adv-item">
+                        <span class="adv-label">VN2000 North (m)</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-lat">--</span><span
+                                class="adv-unit">m</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">VN2000 East (m)</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-lon">--</span><span
+                                class="adv-unit">m</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Elevation H (m)</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-alt">--</span><span
+                                class="adv-unit">m</span></div>
+                    </div>
                 </div>
-                <div class="adv-item">
-                    <span class="adv-label">VN2000 East (m)</span>
-                    <div class="adv-value-row"><span class="adv-value" id="adv-val-lon">--</span><span
-                            class="adv-unit">m</span></div>
+
+                <!-- Nhóm 2: Biến dạng lũy kế -->
+                <div class="adv-section">
+                    <div class="adv-section-title">Biến dạng lũy kế (cm)</div>
+                    <div class="adv-item">
+                        <span class="adv-label">Biến dạng &Delta;X (East)</span>
+                        <div class="adv-value-row"><span class="adv-value highlight-dx" id="adv-val-dx">--</span><span
+                                class="adv-unit">cm</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Biến dạng &Delta;Y (North)</span>
+                        <div class="adv-value-row"><span class="adv-value highlight-dy" id="adv-val-dy">--</span><span
+                                class="adv-unit">cm</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Biến dạng &Delta;H (Up)</span>
+                        <div class="adv-value-row"><span class="adv-value highlight-dh" id="adv-val-dh">--</span><span
+                                class="adv-unit">cm</span></div>
+                    </div>
                 </div>
-                <div class="adv-item">
-                    <span class="adv-label">Elevation H (m)</span>
-                    <div class="adv-value-row"><span class="adv-value" id="adv-val-alt">--</span><span
-                            class="adv-unit">m</span></div>
+
+                <!-- Nhóm 3: Vận tốc biến dạng -->
+                <div class="adv-section">
+                    <div class="adv-section-title">Vận tốc biến dạng</div>
+                    <div class="adv-item">
+                        <span class="adv-label">Vận tốc V<sub>&Delta;X</sub></span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span><span
+                                class="adv-unit">mm/phút</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Vận tốc V<sub>&Delta;Y</sub></span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span><span
+                                class="adv-unit">mm/phút</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Vận tốc V<sub>&Delta;H</sub></span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span><span
+                                class="adv-unit">mm/phút</span></div>
+                    </div>
                 </div>
+
+                <div class="mt-2 small text-muted text-center italic" style="font-size: 0.65rem;">
+                    * Hệ tọa độ VN2000.
+                </div>
+
+                <!-- ============================================ -->
+                <!-- MULTI-WINDOW ANALYSIS SECTION -->
+                <!-- ============================================ -->
+                <div id="multi-window-section" class="mt-4" style="display: none;">
+                    <h5 class="mb-3 text-success border-bottom pb-2" style="font-size: 0.9rem;">
+                        <i class="bi bi-window-stack me-2"></i>Phân tích xu hướng theo kỳ (Theil-Sen)
+                    </h5>
+                    <div id="multi-window-alert" class="alert alert-warning mb-3" style="display: none; padding: 8px; font-size: 0.8rem;">
+                        <i class="bi bi-lightning me-2"></i>
+                        <strong id="multi-window-alert-text"></strong>
+                    </div>
+                    <div class="row g-2 mb-3" id="multi-window-cards"></div>
+                </div>
+
+                <!-- ============================================ -->
+                <!-- CROSS-SENSOR CONSENSUS SECTION -->
+                <!-- ============================================ -->
+                <div id="cross-consensus-section" class="mt-4" style="display: none;">
+                    <h5 class="mb-3 border-bottom pb-2" style="color: var(--text-primary); font-size: 0.9rem;">
+                        <i class="bi bi-intersect me-2"></i>Đồng thuận đa cảm biến
+                    </h5>
+                    <div id="consensus-banner" class="consensus-banner mb-3" style="padding: 8px;">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span id="consensus-badge" class="consensus-badge" style="font-size: 0.7rem;">--</span>
+                            <span id="consensus-summary" class="fw-semibold" style="font-size: 0.8rem;"></span>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <div class="p-2 border border-secondary rounded" style="background: rgba(255,255,255,0.02);">
+                                <div class="text-muted" style="font-size: 0.65rem;">Mưa (7 ngày)</div>
+                                <div id="consensus-rain" class="fw-bold" style="font-size: 0.8rem;">--</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 border border-secondary rounded" style="background: rgba(255,255,255,0.02);">
+                                <div class="text-muted" style="font-size: 0.65rem;">Gia tốc GNSS</div>
+                                <div id="consensus-accel" class="fw-bold" style="font-size: 0.8rem;">--</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="small text-muted fst-italic" id="consensus-desc" style="font-size: 0.7rem;"></div>
+                </div>
+                
+                <!-- Nhóm 4: Đánh giá chuyên sâu (Theil-Sen) -->
+                <div class="adv-section mt-4">
+                    <div class="adv-section-title text-warning"><i class="bi bi-graph-up-arrow me-2"></i>Đánh giá Theil-Sen Robust</div>
+                    <div class="adv-item">
+                        <span class="adv-label">Thuật toán:</span>
+                        <div class="adv-value-row"><span class="adv-value" style="font-size: 0.75rem;" id="adv-val-method">Theil-Sen</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Cửa sổ phân tích:</span>
+                        <div class="adv-value-row">
+                            <span class="adv-value" style="font-size: 0.75rem;"><span id="adv-val-samples">--</span> mẫu (<span id="adv-val-duration">--</span>s)</span>
+                        </div>
+                    </div>
+                    <div class="adv-item mt-2">
+                        <span class="adv-label">Sai số dư (Residual RMS):</span>
+                        <div class="adv-value-row">
+                            <span class="adv-value text-info" id="adv-val-rms">--</span><span class="adv-unit">mm</span>
+                        </div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Độ KĐB đo (Uncertainty):</span>
+                        <div class="adv-value-row">
+                            <span class="adv-value text-danger fw-bold" id="adv-val-uncert">&plusmn; --</span><span class="adv-unit">mm/s</span>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
-            <!-- Nhóm 2: Biến dạng lÅ©y kế -->
-            <div class="adv-section">
-                <div class="adv-section-title">Biến dạng lÅ©y kế (cm)</div>
-                <div class="adv-item">
-                    <span class="adv-label">Biến dạng &Delta;X (East)</span>
-                    <div class="adv-value-row"><span class="adv-value highlight-dx" id="adv-val-dx">--</span><span
-                            class="adv-unit">cm</span></div>
+            <div class="adv-column-right">
+                <div class="adv-section-title">Bình sai mạng lưới GNSS</div>
+                <div id="adj-process-status" class="small text-muted mb-2">Đang chờ chu kỳ bình sai...</div>
+                
+                <div class="adv-section" id="adj-results-section" style="display:none;">
+                    <div class="small fw-semibold text-info mb-1"><i class="bi bi-info-circle me-1"></i>Kết quả bình sai mới nhất</div>
+                    <div class="adv-item">
+                        <span class="adv-label">Thời gian bình sai</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adj-val-time" style="font-size:0.85rem;">--</span></div>
+                    </div>
+                    
+                    <div class="mt-2">
+                        <div class="small text-muted mb-1 font-monospace">Toạ độ điều chỉnh (ECEF):</div>
+                        <div id="adj-points-list" class="list-group list-group-flush border-top border-bottom" style="max-height: 255px; overflow-y: auto; font-size: 0.72rem;">
+                            <!-- Sẽ được thêm bằng JS -->
+                        </div>
+                    </div>
                 </div>
-                <div class="adv-item">
-                    <span class="adv-label">Biến dạng &Delta;Y (North)</span>
-                    <div class="adv-value-row"><span class="adv-value highlight-dy" id="adv-val-dy">--</span><span
-                            class="adv-unit">cm</span></div>
-                </div>
-                <div class="adv-item">
-                    <span class="adv-label">Biến dạng &Delta;H (Up)</span>
-                    <div class="adv-value-row"><span class="adv-value highlight-dh" id="adv-val-dh">--</span><span
-                            class="adv-unit">cm</span></div>
-                </div>
-            </div>
-
-            <!-- Nhóm 3: Vận tốc biến dạng -->
-            <div class="adv-section">
-                <div class="adv-section-title">Vận tốc biến dạng</div>
-                <div class="adv-item">
-                    <span class="adv-label">Vận tốc V<sub>&Delta;X</sub></span>
-                    <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span><span
-                            class="adv-unit">mm/phút</span></div>
-                </div>
-                <div class="adv-item">
-                    <span class="adv-label">Vận tốc V<sub>&Delta;Y</sub></span>
-                    <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span><span
-                            class="adv-unit">mm/phút</span></div>
-                </div>
-                <div class="adv-item">
-                    <span class="adv-label">Vận tốc V<sub>&Delta;H</sub></span>
-                    <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span><span
-                            class="adv-unit">mm/phút</span></div>
-                </div>
-            </div>
-
-            <div class="mt-4 small text-muted text-center italic" style="font-size: 0.65rem;">
-                * Hệ tọa độ VN2000.
             </div>
         </div>
     </div>
@@ -237,6 +335,9 @@ window.LegacyTemplates = {
                                 style="display:none;">OFFLINE</span>
                         </div>
                         <div class="sensor-value-large" id="val-gnss-vel">--<span class="sensor-unit">mm/s</span></div>
+                        <div id="gnss-eval-summary" class="mt-1" style="display: none; font-size: 0.7rem; font-weight: 500;">
+                            <!-- Đánh giá Theil-Sen Summary -->
+                        </div>
                     </div>
 
                     <!-- Rain Intensity -->
@@ -331,9 +432,14 @@ window.LegacyTemplates = {
                     <button class="btn-action" id="btn-show-charts">
                         <i class="bi bi-graph-up me-2"></i>View Chart
                     </button>
-                    <button class="btn-action secondary d-none" id="btn-long-term">
-                        <i class="bi bi-calendar-range me-2"></i>Analysis
-                    </button>
+                    <div class="d-flex w-100 gap-2">
+                        <button class="btn-action w-100 secondary d-none" id="btn-long-term">
+                            <i class="bi bi-calendar-range me-2"></i>Analysis
+                        </button>
+                        <button class="btn-action w-100" id="btn-network-adj" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none;">
+                            <i class="bi bi-gear-wide-connected me-2"></i>Bình sai
+                        </button>
+                    </div>
                     <button class="btn-action" id="btn-digital-twin" style="background: linear-gradient(135deg, #f43f5e, #e11d48); color: white; border: none; text-decoration: none; text-align: center;">
                         <i class="bi bi-globe-americas me-2"></i>Mô phỏng 3D
                     </button>
@@ -852,51 +958,6 @@ window.LegacyTemplates = {
                             Tương quan mưa - dịch chuyển dùng model LS-RAPID và chỉ chạy khi bạn bấm
                             nút AI.
                         </div>
-                    </div>
-
-                    <!-- ============================================ -->
-                    <!-- MULTI-WINDOW ANALYSIS SECTION -->
-                    <!-- ============================================ -->
-                    <div id="multi-window-section" class="mt-4" style="display: none;">
-                        <h5 class="mb-3 text-success border-bottom pb-2">
-                            <i class="bi bi-window-stack me-2"></i>Phân tích xu hướng theo kỳ
-                        </h5>
-                        <div id="multi-window-alert" class="alert alert-warning mb-3" style="display: none;">
-                            <i class="bi bi-lightning me-2"></i>
-                            <strong id="multi-window-alert-text"></strong>
-                        </div>
-                        <div class="row g-3 mb-3" id="multi-window-cards"></div>
-                    </div>
-
-                    <!-- ============================================ -->
-                    <!-- CROSS-SENSOR CONSENSUS SECTION -->
-                    <!-- ============================================ -->
-                    <div id="cross-consensus-section" class="mt-4" style="display: none;">
-                        <h5 class="mb-3 border-bottom pb-2" style="color: var(--text-primary);">
-                            <i class="bi bi-intersect me-2"></i>Đồng thuận đa cảm biến
-                        </h5>
-                        <div id="consensus-banner" class="consensus-banner mb-3">
-                            <div class="d-flex align-items-center gap-3 flex-wrap">
-                                <span id="consensus-badge" class="consensus-badge">--</span>
-                                <span id="consensus-summary" class="fw-semibold"></span>
-                            </div>
-                        </div>
-                        <div class="row g-3 mb-3">
-                            <div class="col-md-6">
-                                <div class="longterm-metric-card">
-                                    <div class="text-muted small mb-2">Cảm biến có dữ liệu</div>
-                                    <div id="consensus-sensors-with-data"
-                                        class="d-flex flex-wrap gap-2 justify-content-center mt-1"></div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="longterm-metric-card">
-                                    <div class="text-muted small mb-2">Xu hướng GNSS vs IMU</div>
-                                    <div id="consensus-trend-agreement" class="fs-5 fw-bold mt-1">--</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="consensus-notes-list" id="consensus-notes"></div>
                     </div>
 
                 </div>
@@ -2161,6 +2222,47 @@ window.LegacyTemplates = {
          MODALS
     ============================================ -->
 
+    <!-- Project Config Modal -->
+    <div class="modal fade" id="projectConfigModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="projectConfigModalTitle">Cấu hình dự án</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- CORS BASE CONFIG -->
+
+
+                    <!-- GNSS CLUSTERS CONFIG -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-diagram-3-fill text-primary"></i>
+                            <h5>Quản lý Cụm Trạm (GNSS Clusters)</h5>
+                            <button type="button" class="btn btn-sm btn-outline-primary ms-auto" onclick="window.adminManager.addClusterRow(document.getElementById('project-gnss-clusters-container'))">
+                                <i class="bi bi-plus-lg"></i> Thêm Cụm
+                            </button>
+                        </div>
+                        <div class="sensor-config-body">
+                            <p class="text-muted small mb-3">
+                                Chọn các trạm sẽ đưa vào cùng 1 cụm để bình sai đồng thời. Một rover có thể nằm trong nhiều cụm.
+                            </p>
+                            <div id="project-gnss-clusters-container">
+                                <!-- Cluster rows will be appended here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-primary" onclick="window.adminManager.saveProjectConfig()">
+                        <i class="bi bi-save me-1"></i> Lưu cấu hình dự án
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 1. Add User Modal -->
     <div class="modal fade" id="addUserModal" tabindex="-1">
         <div class="modal-dialog">
@@ -2271,6 +2373,10 @@ window.LegacyTemplates = {
                         <div class="wizard-step" data-step="3">
                             <div class="step-circle">3</div>
                             <div class="step-label">Ngưỡng cảnh báo</div>
+                        </div>
+                        <div class="wizard-step" data-step="4">
+                            <div class="step-circle">4</div>
+                            <div class="step-label">Lưu dữ liệu</div>
                         </div>
                     </div>
                 </div>
@@ -3326,6 +3432,59 @@ window.LegacyTemplates = {
                                     onclick="window.adminManager.assignSelectedPiToStation()">
                                     <i class="bi bi-link-45deg me-2"></i>Gán Pi vào trạm này
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP 4: LƯU DỮ LIỆU -->
+                <div class="wizard-content" data-step="4">
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-database-fill-gear" style="color:#10b981"></i>
+                            <h5>Chu kỳ lưu dữ liệu vào Database</h5>
+                            <span class="badge ms-auto" style="background:#10b981">Per-Station</span>
+                        </div>
+                        <div class="sensor-config-body">
+                            <p class="text-muted small mb-3">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Thiết lập chu kỳ ghi dữ liệu cho từng loại sensor của trạm này.
+                                Nếu để trống, sẽ sử dụng giá trị mặc định từ cấu hình Hệ thống.
+                            </p>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-broadcast text-success me-1"></i> GNSS (giây)</label>
+                                    <input type="number" class="form-control" id="cfg-station-save-gnss" placeholder="Mặc định hệ thống" min="10">
+                                    <small class="text-muted">VD: 86400 = 1 ngày, 3600 = 1 giờ</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-cloud-rain text-info me-1"></i> Mưa (giây)</label>
+                                    <input type="number" class="form-control" id="cfg-station-save-rain" placeholder="Mặc định hệ thống" min="10">
+                                    <small class="text-muted">VD: 3600 = 1 giờ</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-water text-primary me-1"></i> Nước (giây)</label>
+                                    <input type="number" class="form-control" id="cfg-station-save-water" placeholder="Mặc định hệ thống" min="10">
+                                    <small class="text-muted">VD: 3600 = 1 giờ</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-arrow-repeat text-warning me-1"></i> IMU (giây)</label>
+                                    <input type="number" class="form-control" id="cfg-station-save-imu" placeholder="Mặc định hệ thống" min="10">
+                                    <small class="text-muted">VD: 2592000 = 30 ngày</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TỔNG KẾT CẤU HÌNH TRƯỚC KHI LƯU -->
+                    <div class="config-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-check2-all" style="color:#0ea5e9"></i>
+                            <h5>Xác nhận cấu hình</h5>
+                        </div>
+                        <div class="sensor-config-body">
+                            <div id="station-config-summary" class="text-muted small">
+                                <p><i class="bi bi-info-circle me-1"></i> Nhấn <strong>"Lưu cấu hình"</strong> để hoàn tất thiết lập trạm.</p>
                             </div>
                         </div>
                     </div>
