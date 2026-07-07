@@ -3632,168 +3632,138 @@ window.LegacyTemplates = {
 
     
 
-    <!-- MODAL CHỌN BẢNG EXPORT EXCEL -->
+    <!-- MODAL TẢI DỮ LIỆU NÂNG CAO -->
     <div class="modal fade" id="exportExcelModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header bg-success text-white">
                     <h5 class="modal-title">
-                        <i class="bi bi-file-earmark-excel me-2"></i>
-                        Export Excel
+                        <i class="bi bi-file-earmark-arrow-down me-2"></i>
+                        Tải Xuống Dữ Liệu
                     </h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
 
                 <div class="modal-body">
-                    <p class="text-muted mb-3">
-                        <i class="bi bi-info-circle me-1"></i>
-                        Chọn bảng dữ liệu muốn export ra file Excel:
-                    </p>
-
-                    <!-- CHECKLIST CÁC BẢNG -->
-                    <div class="export-options">
-
-                        <!-- Projects -->
-                        <div class="form-check export-item">
-                            <input class="form-check-input" type="checkbox" id="export-projects" checked>
-                            <label class="form-check-label" for="export-projects">
-                                <i class="bi bi-folder-fill text-primary me-2"></i>
-                                <strong>Projects</strong>
-                                <small class="text-muted d-block ms-4">Danh sách dự án</small>
-                            </label>
+                    <div class="row g-3">
+                        <!-- Cột Trái: Chọn Dự án & Trạm -->
+                        <div class="col-md-6 border-end">
+                            <h6 class="text-success mb-3"><i class="bi bi-geo-alt"></i> Khu Vực</h6>
+                            <div class="mb-3">
+                                <label class="form-label small text-muted">Dự Án</label>
+                                <select class="form-select" id="export-project-select" onchange="window.dbManager.onExportProjectChange()">
+                                    <option value="all">-- Tất cả Dự án --</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small text-muted">Trạm Quan Trắc</label>
+                                <select class="form-select" id="export-station-select">
+                                    <option value="all">-- Tất cả Trạm --</option>
+                                </select>
+                            </div>
+                            
+                            <h6 class="text-success mt-4 mb-3"><i class="bi bi-calendar-range"></i> Thời Gian</h6>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small text-muted">Từ Ngày</label>
+                                    <input type="date" class="form-control" id="export-start-date">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small text-muted">Đến Ngày</label>
+                                    <input type="date" class="form-control" id="export-end-date">
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Stations -->
-                        <div class="form-check export-item">
-                            <input class="form-check-input" type="checkbox" id="export-stations" checked>
-                            <label class="form-check-label" for="export-stations">
-                                <i class="bi bi-broadcast-pin text-success me-2"></i>
-                                <strong>Stations</strong>
-                                <small class="text-muted d-block ms-4">Thông tin trạm giám sát</small>
-                            </label>
-                        </div>
+                        <!-- Cột Phải: Chọn Loại Dữ Liệu -->
+                        <div class="col-md-6">
+                            <h6 class="text-success mb-3"><i class="bi bi-database"></i> Dữ Liệu Cần Tải</h6>
+                            
+                            <div class="export-options">
+                                <div class="form-check export-item p-2 mb-2 border rounded" style="cursor: pointer;">
+                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-projects" value="projects">
+                                    <label class="form-check-label stretched-link" for="export-projects">
+                                        <strong>Bảng Dự án & Trạm</strong> (Cấu hình)
+                                    </label>
+                                </div>
+                                
+                                <div class="form-check export-item p-2 mb-2 border rounded" style="cursor: pointer;">
+                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-devices" value="devices">
+                                    <label class="form-check-label stretched-link" for="export-devices">
+                                        <strong>Bảng Thiết bị</strong> (Cấu hình Pi, Sensor)
+                                    </label>
+                                </div>
 
-                        <!-- Devices -->
-                        <div class="form-check export-item">
-                            <input class="form-check-input" type="checkbox" id="export-devices" checked>
-                            <label class="form-check-label" for="export-devices">
-                                <i class="bi bi-cpu text-info me-2"></i>
-                                <strong>Devices</strong>
-                                <small class="text-muted d-block ms-4">Thiết bị cảm biến (GNSS, Rain, Water,
-                                    IMU)</small>
-                            </label>
-                        </div>
+                                <div class="form-check export-item p-2 mb-2 border rounded border-primary bg-light" style="cursor: pointer;">
+                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-sensor-data" value="sensor_data" checked onchange="document.getElementById('export-sensor-types').style.display = this.checked ? 'block' : 'none'">
+                                    <label class="form-check-label stretched-link" for="export-sensor-data">
+                                        <strong>Lịch sử Dữ liệu Cảm biến</strong>
+                                    </label>
+                                </div>
+                                
+                                <!-- Chi tiết Cảm biến -->
+                                <div id="export-sensor-types" class="ps-4 mb-3">
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" id="sensor-gnss" value="gnss" checked>
+                                        <label class="form-check-label small" for="sensor-gnss">GNSS (Chuyển vị)</label>
+                                    </div>
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" id="sensor-imu" value="imu" checked>
+                                        <label class="form-check-label small" for="sensor-imu">IMU (Độ nghiêng)</label>
+                                    </div>
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" id="sensor-rain" value="rain" checked>
+                                        <label class="form-check-label small" for="sensor-rain">Lượng mưa</label>
+                                    </div>
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" id="sensor-water" value="water" checked>
+                                        <label class="form-check-label small" for="sensor-water">Mực nước</label>
+                                    </div>
+                                </div>
 
-                        <!-- Sensor Data -->
-                        <div class="form-check export-item">
-                            <input class="form-check-input" type="checkbox" id="export-sensor-data" checked>
-                            <label class="form-check-label" for="export-sensor-data">
-                                <i class="bi bi-graph-up text-warning me-2"></i>
-                                <strong>Sensor Data</strong>
-                                <small class="text-muted d-block ms-4">Dữ liệu cảm biến (giới hạn 10,000 records gần
-                                    nhất)</small>
-                            </label>
+                                <div class="form-check export-item p-2 mb-2 border rounded" style="cursor: pointer;">
+                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-alerts" value="alerts">
+                                    <label class="form-check-label stretched-link" for="export-alerts">
+                                        <strong>Lịch sử Cảnh báo (Alerts)</strong>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
-
-                        <!-- Alerts -->
-                        <div class="form-check export-item">
-                            <input class="form-check-input" type="checkbox" id="export-alerts" checked>
-                            <label class="form-check-label" for="export-alerts">
-                                <i class="bi bi-exclamation-triangle text-danger me-2"></i>
-                                <strong>Alerts</strong>
-                                <small class="text-muted d-block ms-4">Cảnh báo hệ thống (giới hạn 5,000 records gần
-                                    nhất)</small>
-                            </label>
+                    </div>
+                    
+                    <!-- Vùng hiển thị Tiến trình (ẩn mặc định) -->
+                    <div id="export-progress-container" class="mt-4 pt-3 border-top" style="display: none;">
+                        <h6 class="text-primary mb-2" id="export-status-text">Đang chuẩn bị dữ liệu...</h6>
+                        <div class="progress" style="height: 20px;">
+                            <div id="export-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%;">0%</div>
                         </div>
-
+                        <small class="text-muted mt-1 d-block" id="export-progress-detail">Khởi tạo tác vụ...</small>
                     </div>
 
-                    <!-- QUICK SELECT -->
-                    <div class="mt-3 pt-3 border-top">
-                        <small class="text-muted">Chọn nhanh:</small>
-                        <div class="btn-group btn-group-sm mt-2 w-100">
-                            <button class="btn btn-outline-primary" onclick="window.dbManager.selectAllExport()">
-                                <i class="bi bi-check-all me-1"></i>Tất cả
-                            </button>
-                            <button class="btn btn-outline-secondary" onclick="window.dbManager.deselectAllExport()">
-                                <i class="bi bi-x me-1"></i>Bỏ chọn
-                            </button>
-                            <button class="btn btn-outline-info" onclick="window.dbManager.selectOnlyData()">
-                                <i class="bi bi-database me-1"></i>Chỉ dữ liệu
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- WARNING -->
-                    <div class="alert alert-info mt-3 mb-0">
-                        <small>
-                            <i class="bi bi-lightning-charge me-1"></i>
-                            <strong>Lưu ý:</strong> File Excel lớn có thể mất vài giây để tạo
-                        </small>
-                    </div>
                 </div>
 
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                        <i class="bi bi-x-circle me-1"></i> Hủy
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" id="btn-export-cancel" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle me-1"></i> Đóng
                     </button>
-                    <button type="button" class="btn btn-success" onclick="window.dbManager.confirmExportExcel()">
-                        <i class="bi bi-download me-1"></i> Tải xuống Excel
+                    <button type="button" class="btn btn-success" id="btn-export-start" onclick="window.dbManager.confirmExportExcel()">
+                        <i class="bi bi-download me-1"></i> Bắt đầu Tải
                     </button>
                 </div>
             </div>
         </div>
     </div>
-
+    
     <style>
-        /* Export Modal Styles */
-        .export-options {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .export-item {
-            padding: 12px;
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
-
-        .export-item:hover {
-            background: rgba(14, 165, 233, 0.05);
-            border-color: var(--accent-primary);
-        }
-
-        .export-item .form-check-input:checked~.form-check-label {
-            color: var(--accent-primary);
-        }
-
-        .export-item .form-check-input {
-            width: 20px;
-            height: 20px;
-            margin-top: 2px;
-            cursor: pointer;
-        }
-
-        .export-item .form-check-label {
-            cursor: pointer;
-            width: 100%;
-            margin-left: 8px;
-        }
-
-        .export-item small {
-            font-size: 0.8rem;
-            line-height: 1.3;
-        }
-
         #exportExcelModal .modal-header {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
         }
+        .export-item:hover {
+            background-color: rgba(16, 185, 129, 0.05);
+            border-color: #10b981 !important;
+        }
     </style>
-
-
+    
     <!-- ============================================
      MODAL XÓA DATABASE (BẢO MẬT CAO)
 ============================================ -->

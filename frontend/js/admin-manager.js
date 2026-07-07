@@ -768,7 +768,7 @@ class AdminManager {
         if (clusters.length === 0) {
             this.addClusterRow(clustersContainer);
         } else {
-            clusters.forEach(c => this.addClusterRow(clustersContainer, c.name, c.description, c.base_station, c.stations));
+            clusters.forEach(c => this.addClusterRow(clustersContainer, c.name, c.description, c.base_station, c.stations, c.base_stream));
         }
 
         document.getElementById('projectConfigModalTitle').textContent = `Cấu hình dự án: ${project.name}`;
@@ -782,7 +782,7 @@ class AdminManager {
         this.fetchCorsStations();
     }
 
-    addClusterRow(container, name = '', desc = '', base_station_code = '', stations = []) {
+    addClusterRow(container, name = '', desc = '', base_station_code = '', stations = [], base_stream = '') {
         const row = document.createElement('div');
         row.className = 'cluster-row row g-2 mb-2 align-items-center';
         
@@ -802,16 +802,25 @@ class AdminManager {
             `;
         }).join('') || '<div class="px-3 py-2 text-muted small">Không tìm thấy trạm nào</div>';
 
-        // Pre-populate base select if corsStationsData is already loaded
         let baseOptionsHtml = '<option value="">-- Chọn Trạm Base --</option>';
+        baseOptionsHtml += '<optgroup label="Trạm Dự Án">';
+        if (this.projectStationsData) {
+            this.projectStationsData.forEach(st => {
+                const isSelected = (st.station_code === base_station_code) ? 'selected' : '';
+                const devData = encodeURIComponent(JSON.stringify(st.devices || []));
+                baseOptionsHtml += `<option value="${st.station_code}" data-devices="${devData}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${isSelected}>${st.name || st.station_code}</option>`;
+            });
+        }
+        baseOptionsHtml += '</optgroup>';
+        
+        baseOptionsHtml += '<optgroup label="CORS Quốc Gia">';
         if (this.corsStationsData) {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
-                baseOptionsHtml += `<option value="${st.name || st.code}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" ${isSelected}>${st.name || st.code} (${st.lat}, ${st.lon})</option>`;
+                baseOptionsHtml += `<option value="${st.name || st.code}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" ${isSelected}>${st.name || st.code}</option>`;
             });
-        } else {
-            baseOptionsHtml = `<option value="${base_station_code}" selected>${base_station_code ? base_station_code + ' (Đang tải...)' : '-- Đang tải... --'}</option>`;
         }
+        baseOptionsHtml += '</optgroup>';
 
         row.innerHTML = `
             <div class="col-md-2">
@@ -823,6 +832,9 @@ class AdminManager {
             <div class="col-md-3">
                 <select class="form-select cluster-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
                     ${baseOptionsHtml}
+                </select>
+                <select class="form-select cluster-stream-select mt-1" style="font-size:0.75rem; display: ${base_stream ? 'block' : 'none'};" data-selected-stream="${base_stream}">
+                    <option value="">-- Chọn Luồng (S1/S2) --</option>
                 </select>
                 <div class="base-station-info mt-1" style="display: none; font-size: 0.68rem; background: rgba(14,165,233,0.08); border: 1px solid rgba(14,165,233,0.25); border-radius: 6px; padding: 6px 8px;">
                     <div class="d-flex align-items-center gap-1 mb-1">
@@ -852,13 +864,11 @@ class AdminManager {
         `;
         container.appendChild(row);
 
-        // Trigger base station info display if already selected
         const baseSelect = row.querySelector('.cluster-base-select');
         if (baseSelect && baseSelect.value) {
             this.onBaseStationSelected(baseSelect);
         }
 
-        // Update selected stations button label on render
         const firstCheckbox = row.querySelector('.station-checkbox');
         if (firstCheckbox) {
             this.updateSelectedStationsLabel(firstCheckbox);
@@ -867,25 +877,56 @@ class AdminManager {
 
     onBaseStationSelected(selectEl) {
         const row = selectEl.closest('.cluster-row');
-        const infoPanel = row.querySelector('.base-station-info');
-        if (!infoPanel) return;
+        const selectedOpt = selectEl.options[selectEl.selectedIndex];
+        
+        // --- 1. Stream Selection ---
+        const streamSelect = row.querySelector('.cluster-stream-select');
+        const selectedStreamVal = streamSelect.getAttribute('data-selected-stream');
+        
+        streamSelect.innerHTML = '<option value="">-- Chọn Luồng --</option>';
+        
+        if (selectedOpt && selectedOpt.dataset.devices) {
+            try {
+                const devices = JSON.parse(decodeURIComponent(selectedOpt.dataset.devices));
+                const gnssDevices = devices.filter(d => d.device_type === 'gnss' || d.device_code.toLowerCase().includes('gnss') || d.device_code.toLowerCase().includes('s1') || d.device_code.toLowerCase().includes('s2'));
+                
+                if (gnssDevices.length > 0) {
+                    gnssDevices.forEach(d => {
+                        const isSelected = (d.device_code === selectedStreamVal || d.mqtt_topic === selectedStreamVal) ? 'selected' : '';
+                        streamSelect.innerHTML += `<option value="${d.device_code}" ${isSelected}>${d.name || d.device_code} (${d.mqtt_topic || 'No topic'})</option>`;
+                    });
+                    streamSelect.style.display = 'block';
+                } else {
+                    streamSelect.style.display = 'none';
+                }
+            } catch(e) {
+                console.error("Error parsing devices config", e);
+                streamSelect.style.display = 'none';
+            }
+        } else {
+            // CORS station or no devices
+            streamSelect.style.display = 'none';
+        }
 
-        const selectedOption = selectEl.options[selectEl.selectedIndex];
-        if (!selectEl.value || !selectedOption) {
-            infoPanel.style.display = 'none';
+        // --- 2. Base Info Display ---
+        const infoPanel = row.querySelector('.base-station-info');
+        if (!selectEl.value) {
+            if (infoPanel) infoPanel.style.display = 'none';
             return;
         }
 
-        const lat = selectedOption.dataset.lat || '--';
-        const lon = selectedOption.dataset.lon || '--';
-        const alt = selectedOption.dataset.alt || '0';
+        const lat = selectedOpt.dataset.lat || '--';
+        const lon = selectedOpt.dataset.lon || '--';
+        const alt = selectedOpt.dataset.alt || '0';
         const name = selectEl.value;
 
-        infoPanel.querySelector('.base-info-name').textContent = name;
-        infoPanel.querySelector('.base-info-lat').textContent = `Lat: ${lat}`;
-        infoPanel.querySelector('.base-info-lon').textContent = `Lon: ${lon}`;
-        infoPanel.querySelector('.base-info-alt').textContent = alt;
-        infoPanel.style.display = 'block';
+        if (infoPanel) {
+            infoPanel.querySelector('.base-info-name').textContent = name;
+            infoPanel.querySelector('.base-info-lat').textContent = `Lat: ${lat}`;
+            infoPanel.querySelector('.base-info-lon').textContent = `Lon: ${lon}`;
+            infoPanel.querySelector('.base-info-alt').textContent = alt;
+            infoPanel.style.display = 'block';
+        }
     }
 
     updateSelectedStationsLabel(el) {
@@ -968,7 +1009,7 @@ class AdminManager {
                 clusters.push({
                     name, description: desc,
                     base_station: baseStation,
-                    base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt,
+                    base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt, base_stream: row.querySelector('.cluster-stream-select')?.value || '',
                     stations: st
                 });
             }

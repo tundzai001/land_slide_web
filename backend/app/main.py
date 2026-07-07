@@ -1500,13 +1500,24 @@ async def get_stations_by_project(
         offline_display_enabled = is_offline_display_enabled(station.config)
         computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
         
+        devices_list = []
+        for d in devices:
+            devices_list.append({
+                "id": d.id,
+                "device_code": d.device_code,
+                "name": d.name,
+                "device_type": d.device_type,
+                "mqtt_topic": d.mqtt_topic
+            })
+            
         stations_with_status.append({
             "id": station.id,
             "station_code": station.station_code,
             "name": station.name,
             "location": station.location,
             "status": computed_status, 
-            "config": station.config
+            "config": station.config,
+            "devices": devices_list
         })
     
     return stations_with_status

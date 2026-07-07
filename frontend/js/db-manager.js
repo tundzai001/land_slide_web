@@ -317,38 +317,57 @@ class DatabaseManager {
     }
 
     // =========================================================================
-    // EXPORT EXCEL/CSV & ZIP LOGIC (UPDATED)
+    // EXPORT EXCEL/CSV & ZIP LOGIC (ADVANCED FORM + PROGRESS BAR)
     // =========================================================================
 
-    // Hiện Modal Chọn Bảng
+    // Hiện Modal Chọn Bảng và nạp danh sách dự án
     exportToExcel() {
         const modal = new bootstrap.Modal(document.getElementById('exportExcelModal'));
+        
+        // Reset UI
+        document.getElementById('export-progress-container').style.display = 'none';
+        document.getElementById('btn-export-start').disabled = false;
+        document.getElementById('btn-export-cancel').disabled = false;
+        
+        // Nạp danh sách Project
+        this.populateExportProjects();
+        
         modal.show();
     }
 
-    // Quick Select Functions
-    selectAllExport() {
-        ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
-            const checkbox = document.getElementById(`export-${table}`);
-            if (checkbox) checkbox.checked = true;
+    populateExportProjects() {
+        const select = document.getElementById('export-project-select');
+        if (!select) return;
+        
+        // Giả sử window.adminManager.projects đã có dữ liệu
+        const projects = window.adminManager?.projects || [];
+        
+        let html = '<option value="all">-- Tất cả Dự án --</option>';
+        projects.forEach(p => {
+            html += `<option value="${p.id}">${p.project_code} - ${p.name || ''}</option>`;
         });
+        select.innerHTML = html;
+        
+        this.onExportProjectChange();
     }
-
-    deselectAllExport() {
-        ['projects', 'stations', 'devices', 'sensor-data', 'alerts'].forEach(table => {
-            const checkbox = document.getElementById(`export-${table}`);
-            if (checkbox) checkbox.checked = false;
+    
+    onExportProjectChange() {
+        const pSelect = document.getElementById('export-project-select');
+        const sSelect = document.getElementById('export-station-select');
+        if (!pSelect || !sSelect) return;
+        
+        const projectId = pSelect.value;
+        const stations = window.adminManager?.stations || [];
+        
+        let html = '<option value="all">-- Tất cả Trạm --</option>';
+        stations.forEach(s => {
+            if (projectId === 'all' || s.project_id == projectId) {
+                html += `<option value="${s.id}">${s.station_code} - ${s.name || ''}</option>`;
+            }
         });
+        sSelect.innerHTML = html;
     }
 
-    selectOnlyData() {
-        this.deselectAllExport();
-        // Chỉ chọn Sensor Data và Alerts
-        document.getElementById('export-sensor-data').checked = true;
-        document.getElementById('export-alerts').checked = true;
-    }
-
-    // ✅ HÀM NÀY ĐÃ ĐƯỢC SỬA ĐỂ GỌI API /export-csv VÀ TẢI FILE ZIP
     async confirmExportExcel() {
         try {
             // Lấy các bảng được chọn
@@ -361,47 +380,142 @@ class DatabaseManager {
 
             // Kiểm tra
             if (tables.length === 0) {
-                window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng!');
+                window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng dữ liệu!');
                 return;
             }
 
-            // Đóng modal
-            const modal = bootstrap.Modal.getInstance(document.getElementById('exportExcelModal'));
-            if (modal) modal.hide();
+            // Lấy các filters
+            const projectId = document.getElementById('export-project-select')?.value;
+            const stationId = document.getElementById('export-station-select')?.value;
+            const startDate = document.getElementById('export-start-date')?.value;
+            const endDate = document.getElementById('export-end-date')?.value;
+            
+            const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId)] : null;
+            const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId)] : null;
+            
+            // Lấy Sensor types nếu có chọn sensor_data
+            let sensorTypes = null;
+            if (document.getElementById('export-sensor-data')?.checked) {
+                sensorTypes = [];
+                if (document.getElementById('sensor-gnss')?.checked) sensorTypes.push('gnss');
+                if (document.getElementById('sensor-imu')?.checked) sensorTypes.push('imu');
+                if (document.getElementById('sensor-rain')?.checked) sensorTypes.push('rain');
+                if (document.getElementById('sensor-water')?.checked) sensorTypes.push('water');
+            }
+            
+            const payload = { 
+                tables: tables,
+                project_ids: projectIds,
+                station_ids: stationIds,
+                sensor_types: sensorTypes,
+                start_date: startDate || null,
+                end_date: endDate || null
+            };
 
-            window.toast?.info('⏳ Đang tạo file CSV & nén ZIP... Vui lòng chờ!', 0);
+            // Khóa UI
+            document.getElementById('btn-export-start').disabled = true;
+            document.getElementById('btn-export-cancel').disabled = true;
+            const progressContainer = document.getElementById('export-progress-container');
+            const progressBar = document.getElementById('export-progress-bar');
+            const progressText = document.getElementById('export-status-text');
+            const progressDetail = document.getElementById('export-progress-detail');
+            
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '5%';
+            progressBar.innerText = '5%';
+            progressText.innerText = 'Đang khởi tạo tác vụ...';
+            progressDetail.innerText = 'Vui lòng không đóng cửa sổ này';
 
-            // ✅ GỌI API MỚI: export-csv
-            const res = await fetch('/api/admin/db/export-csv', {
+            // Gọi API /start
+            const res = await fetch('/api/admin/db/export-excel/start', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ tables: tables })
+                body: JSON.stringify(payload)
             });
 
-            if (!res.ok) throw new Error('Export failed');
-
-            // ✅ XỬ LÝ DOWNLOAD FILE ZIP
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-
-            // Đặt tên file là .zip
-            link.download = `landslide_backup_${Date.now()}.zip`;
-
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-
-            window.toast?.success(`✅ Đã tải xuống file ZIP chứa ${tables.length} bảng CSV!`, 5000);
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Export start failed');
+            }
+            
+            const data = await res.json();
+            const taskId = data.task_id;
+            
+            // Start Polling
+            const pollInterval = setInterval(async () => {
+                try {
+                    const statusRes = await fetch(`/api/admin/db/export-excel/${taskId}/progress`, {
+                        headers: { 'Authorization': `Bearer ${this.token}` }
+                    });
+                    if (!statusRes.ok) throw new Error('Failed to check progress');
+                    
+                    const statusData = await statusRes.json();
+                    
+                    progressBar.style.width = `${statusData.percent}%`;
+                    progressBar.innerText = `${statusData.percent}%`;
+                    progressDetail.innerText = statusData.message || 'Đang xử lý...';
+                    
+                    if (statusData.status === 'completed') {
+                        clearInterval(pollInterval);
+                        progressText.innerText = '✅ Hoàn tất!';
+                        progressBar.classList.remove('progress-bar-animated');
+                        
+                        // Tự động tải file
+                        const downloadUrl = `/api/admin/db/export-excel/${taskId}/download`;
+                        const downloadRes = await fetch(downloadUrl, {
+                            headers: { 'Authorization': `Bearer ${this.token}` }
+                        });
+                        
+                        if (downloadRes.ok) {
+                            const blob = await downloadRes.blob();
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = statusData.filename || `landslide_backup_${Date.now()}.zip`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            URL.revokeObjectURL(url);
+                            
+                            window.toast?.success('✅ Đã tải xuống file xuất dữ liệu!', 5000);
+                        } else {
+                            throw new Error('Không thể tải file zip');
+                        }
+                        
+                        // Đóng modal
+                        setTimeout(() => {
+                            const modal = bootstrap.Modal.getInstance(document.getElementById('exportExcelModal'));
+                            if (modal) modal.hide();
+                            document.getElementById('btn-export-start').disabled = false;
+                            document.getElementById('btn-export-cancel').disabled = false;
+                        }, 1000);
+                        
+                    } else if (statusData.status === 'failed') {
+                        clearInterval(pollInterval);
+                        throw new Error(statusData.error || 'Task failed');
+                    }
+                    
+                } catch (pollErr) {
+                    clearInterval(pollInterval);
+                    console.error('Polling error:', pollErr);
+                    window.toast?.error('❌ Lỗi kiểm tra tiến trình: ' + pollErr.message);
+                    document.getElementById('btn-export-start').disabled = false;
+                    document.getElementById('btn-export-cancel').disabled = false;
+                    progressText.innerText = '❌ Lỗi xuất dữ liệu';
+                    progressText.classList.replace('text-primary', 'text-danger');
+                    progressBar.classList.replace('bg-success', 'bg-danger');
+                    progressBar.classList.remove('progress-bar-animated');
+                }
+            }, 1000);
 
         } catch (e) {
             console.error('❌ Export error:', e);
             window.toast?.error('❌ Lỗi export: ' + e.message);
+            document.getElementById('btn-export-start').disabled = false;
+            document.getElementById('btn-export-cancel').disabled = false;
         }
     }
 

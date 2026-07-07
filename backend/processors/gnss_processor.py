@@ -356,7 +356,7 @@ class GNSSVelocityProcessor:
             if self.state == "AWAITING_CANDIDATES":
                 return self._handle_origin_collection(payload, fix_quality)
             elif self.state == "ORIGIN_LOCKED":
-                return self._handle_processing(payload, fix_quality, station_config)
+                return self._handle_processing(payload, fix_quality, station_config, raw_payload)
             
             return None
 
@@ -442,7 +442,7 @@ class GNSSVelocityProcessor:
             "target": self.required_points
         }
 
-    def _handle_processing(self, gngga_string, fix_quality, station_config: Dict = None):
+    def _handle_processing(self, gngga_string, fix_quality, station_config: Dict = None, raw_payload: str = None):
         # Millimetre-level monitoring must use RTK FIXED exclusively. FLOAT and all
         # other modes are status-only and cannot mutate measurement state.
         if fix_quality != 4:
@@ -573,9 +573,11 @@ class GNSSVelocityProcessor:
                 )
             return {
                 "type": "gnss_status",
-                "status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "UNSTABLE_FIX",
+                "status": "INVALID_DATA", # Updated to INVALID_DATA for anomalies
+                "sub_status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "UNSTABLE_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": raw_payload or gngga_string,
                 "message": (
                     f"Shifted FIXED cluster quarantined: offset2d={candidate_offset_2d_m:.3f}m "
                     f"offsetU={candidate_offset_u_m:.3f}m; last trusted position preserved"
@@ -816,6 +818,7 @@ class GNSSVelocityProcessor:
 
         result_data = {
             'raw_gngga': gngga_string,
+            'raw_payload': raw_payload or gngga_string,
             'gga_utc': point.get('gga_utc'),
             'gga_timestamp': point.get('gga_timestamp'),
             'received_timestamp': point.get('received_timestamp'),

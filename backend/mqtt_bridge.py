@@ -1134,10 +1134,25 @@ class MQTTBridge:
                     elif res and res.get('type') == 'gnss_status':
                         status_payload = {
                             "status": res.get('status'),
+                            "sub_status": res.get('sub_status'),
                             "fix_quality": res.get('fix_quality'),
                             "fix_mode": res.get('fix_mode'),
-                            "message": res.get('message')
+                            "message": res.get('message'),
+                            "raw_payload": res.get('raw_payload', '')
                         }
+                        
+                        if res.get('status') == 'INVALID_DATA':
+                            # Immediate buffering for anomalies
+                            anomaly_record = {
+                                "station_id": station_id,
+                                "timestamp": current_timestamp,
+                                "sensor_type": "gnss_anomaly",
+                                "data": status_payload,
+                                "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None
+                            }
+                            async with self._buffer_lock:
+                                self._sensor_buffer.append(anomaly_record)
+                                
                         try:
                             await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)
                         except Exception: pass

@@ -43,6 +43,8 @@ class ExportExcelRequest(BaseModel):
     project_ids: Optional[List[int]] = None
     station_ids: Optional[List[int]] = None
     sensor_types: Optional[List[str]] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -984,6 +986,19 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                         if 'gnss' in db_sensor_types:
                             db_sensor_types.add('gnss_audit')
                         sensor_query = sensor_query.where(model_data.SensorData.sensor_type.in_(db_sensor_types))
+                        
+                    if request.start_date:
+                        try:
+                            start_ts = int(datetime.strptime(request.start_date, '%Y-%m-%d').timestamp())
+                            sensor_query = sensor_query.where(model_data.SensorData.timestamp >= start_ts)
+                        except ValueError:
+                            pass
+                    if request.end_date:
+                        try:
+                            end_ts = int(datetime.strptime(f"{request.end_date} 23:59:59", '%Y-%m-%d %H:%M:%S').timestamp())
+                            sensor_query = sensor_query.where(model_data.SensorData.timestamp <= end_ts)
+                        except ValueError:
+                            pass
 
                     if 'sensor_data' in selected:
                         count_q = select(func.count()).select_from(sensor_query.subquery())
@@ -994,6 +1009,19 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                         alert_query = alert_query.where(model_data.Alert.station_id.in_(scope_station_ids))
                     else:
                         alert_query = alert_query.where(text("1=0"))
+                        
+                    if request.start_date:
+                        try:
+                            start_ts = int(datetime.strptime(request.start_date, '%Y-%m-%d').timestamp())
+                            alert_query = alert_query.where(model_data.Alert.timestamp >= start_ts)
+                        except ValueError:
+                            pass
+                    if request.end_date:
+                        try:
+                            end_ts = int(datetime.strptime(f"{request.end_date} 23:59:59", '%Y-%m-%d %H:%M:%S').timestamp())
+                            alert_query = alert_query.where(model_data.Alert.timestamp <= end_ts)
+                        except ValueError:
+                            pass
                     
                     if 'alerts' in selected:
                         count_q = select(func.count()).select_from(alert_query.subquery())
