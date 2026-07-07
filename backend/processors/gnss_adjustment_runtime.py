@@ -10,6 +10,20 @@ from .gnss_adjustment.models import Baseline, Network, NetworkError, Point
 from .gnss_adjustment.solver import adjust_network
 
 
+def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, float, float]:
+    a = 6378137.0
+    f = 1 / 298.257223563
+    e2 = 2*f - f**2
+    lat, lon = math.radians(lat_deg), math.radians(lon_deg)
+    sin_lat = math.sin(lat)
+    cos_lat = math.cos(lat)
+    N = a / math.sqrt(1 - e2 * sin_lat**2)
+    x = (N + h_m) * cos_lat * math.cos(lon)
+    y = (N + h_m) * cos_lat * math.sin(lon)
+    z = (N * (1 - e2) + h_m) * sin_lat
+    return x, y, z
+
+
 @dataclass(frozen=True)
 class AgricaObservation:
     project_id: int
@@ -187,19 +201,6 @@ class AgricaAdjustmentRuntime:
         self._prune(now_ts)
         return latest
 
-def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, float, float]:
-    a = 6378137.0
-    f = 1 / 298.257223563
-    e2 = 2*f - f**2
-    lat, lon = math.radians(lat_deg), math.radians(lon_deg)
-    sin_lat = math.sin(lat)
-    cos_lat = math.cos(lat)
-    N = a / math.sqrt(1 - e2 * sin_lat**2)
-    x = (N + h_m) * cos_lat * math.cos(lon)
-    y = (N + h_m) * cos_lat * math.sin(lon)
-    z = (N * (1 - e2) + h_m) * sin_lat
-    return x, y, z
-
     def _prune(self, now_ts: int) -> None:
         stale = [key for key in self._buffers if abs(now_ts - key[1]) > self.max_epoch_age_s]
         for key in stale:
@@ -210,15 +211,41 @@ def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, flo
         observations = [obs for obs in observations if obs.position_type in (4, 7)]
         if not observations:
             return None
+            
+        global_base_llh = next((obs.base_llh for obs in observations if obs.base_llh), None)
 
         station_origins = station_origins or {}
 
         # Build clusters mapping
         clusters = []
+        cluster_bases = {}  # idx -> base ecef coordinates
+        cluster_base_info = {} # idx -> {"name": ..., "host": ...}
+        
         if gnss_clusters and isinstance(gnss_clusters, list):
-            for c in gnss_clusters:
+            for idx, c in enumerate(gnss_clusters):
                 if isinstance(c, list):
                     clusters.append(set(c))
+                elif isinstance(c, dict):
+                    stations_in_cluster = c.get("stations", [])
+                    if isinstance(stations_in_cluster, list):
+                        clusters.append(set(stations_in_cluster))
+                        c_idx = len(clusters) - 1
+                        
+                        b_lat = c.get("base_lat")
+                        b_lon = c.get("base_lon")
+                        b_alt = c.get("base_alt")
+                        if b_lat is not None and b_lon is not None:
+                            try:
+                                base_ecef = _llh_to_ecef(float(b_lat), float(b_lon), float(b_alt or 0))
+                                cluster_bases[c_idx] = base_ecef
+                                cluster_base_info[c_idx] = {
+                                    "name": c.get("base_station", "CORS_BASE"),
+                                    "host": c.get("base_stream_host", ""),
+                                    "port": c.get("base_stream_port", ""),
+                                    "mp": c.get("base_stream_mp", "")
+                                }
+                            except Exception:
+                                pass
         
         if not clusters:
             # Fallback to single cluster
@@ -232,56 +259,88 @@ def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, flo
         
         final_adjusted_points = {}
         final_adjusted_baselines = []
+        steps_list = []
+        
+        steps_list.append({
+            "step": 1,
+            "title": "Ghi nhận dữ liệu",
+            "message": f"Đã thu thập dữ liệu LLH và AGRIC từ {len(observations)} trạm Rover.",
+            "data": {obs.station_id: obs.rover_llh for obs in observations}
+        })
 
-        for cluster_stations in clusters:
+        for c_idx, cluster_stations in enumerate(clusters):
             cluster_obs = [obs for obs in observations if obs.station_id in cluster_stations]
             if not cluster_obs:
                 continue
             
             # --- PHÂN GIẢI BASE VÀ KHỚP VECTOR ---
-            resolved_base_ecef = None
-            best_base_match = None
-            min_diff = 5.0  # Dung sai 5 mét
+            resolved_base_ecef = cluster_bases.get(c_idx)
+            base_info = cluster_base_info.get(c_idx)
             
-            for obs in cluster_obs:
-                if obs.rover_ecef and obs.base_llh and station_origins.get(obs.station_id):
-                    # Toạ độ Base do Rover nhận (có thể bị lỗi bằng 0)
-                    rep_base_ecef = _llh_to_ecef(obs.base_llh[0], obs.base_llh[1], obs.base_llh[2])
-                    # Vector baseline thực tế Rover -> Base do Rover tự đo
-                    actual_baseline = (
-                        obs.rover_ecef[0] - rep_base_ecef[0],
-                        obs.rover_ecef[1] - rep_base_ecef[1],
-                        obs.rover_ecef[2] - rep_base_ecef[2],
-                    )
-                    
-                    rover_origin = station_origins[obs.station_id]
-                    
-                    # So sánh vector thực tế với sai lệch giữa các origin trong DB để tìm Base
-                    for cand_sid, cand_origin in station_origins.items():
-                        if cand_sid == obs.station_id:
-                            continue
-                        expected_baseline = (
-                            cand_origin[0] - rover_origin[0],
-                            cand_origin[1] - rover_origin[1],
-                            cand_origin[2] - rover_origin[2],
-                        )
-                        diff = math.sqrt(
-                            (actual_baseline[0] - expected_baseline[0])**2 +
-                            (actual_baseline[1] - expected_baseline[1])**2 +
-                            (actual_baseline[2] - expected_baseline[2])**2
-                        )
-                        if diff < min_diff:
-                            min_diff = diff
-                            best_base_match = cand_origin
-
-            if best_base_match:
-                resolved_base_ecef = best_base_match
+            if resolved_base_ecef:
+                # Trực tiếp ghi nhận Base cố định từ cấu hình của cụm
+                base_name = base_info.get("name") if base_info else "BASE"
+                base_host = base_info.get("host") if base_info else ""
+                base_mp = base_info.get("mp") if base_info else ""
+                base_port = base_info.get("port") if base_info else ""
+                host_str = f" ({base_host}:{base_port}/{base_mp})" if base_host else ""
+                
+                steps_list.append({
+                    "step": 3,
+                    "title": "Chốt điểm Base gốc",
+                    "message": f"Base chốt cố định từ cấu hình dự án: {base_name}{host_str} tại tọa độ ECEF: {[round(x,3) for x in resolved_base_ecef]}",
+                    "data": {"base_ecef": list(resolved_base_ecef), "base_info": base_info}
+                })
             else:
-                # Nếu không khớp được vector, fallback dùng LLH của Base do Rover gửi lên
-                base_llh = next((obs.base_llh for obs in cluster_obs if obs.base_llh), None)
-                if not base_llh:
-                    continue
-                resolved_base_ecef = _llh_to_ecef(base_llh[0], base_llh[1], base_llh[2])
+                best_base_match = None
+                min_diff = 5.0  # Dung sai 5 mét
+                
+                for obs in cluster_obs:
+                    if obs.rover_ecef and obs.base_llh and station_origins.get(obs.station_id):
+                        # Toạ độ Base do Rover nhận (có thể bị lỗi bằng 0)
+                        rep_base_ecef = _llh_to_ecef(obs.base_llh[0], obs.base_llh[1], obs.base_llh[2])
+                        # Vector baseline thực tế Rover -> Base do Rover tự đo
+                        actual_baseline = (
+                            obs.rover_ecef[0] - rep_base_ecef[0],
+                            obs.rover_ecef[1] - rep_base_ecef[1],
+                            obs.rover_ecef[2] - rep_base_ecef[2],
+                        )
+                        
+                        rover_origin = station_origins[obs.station_id]
+                        
+                        # So sánh vector thực tế với sai lệch giữa các origin trong DB để tìm Base
+                        for cand_sid, cand_origin in station_origins.items():
+                            if cand_sid == obs.station_id:
+                                continue
+                            expected_baseline = (
+                                cand_origin[0] - rover_origin[0],
+                                cand_origin[1] - rover_origin[1],
+                                cand_origin[2] - rover_origin[2],
+                            )
+                            diff = math.sqrt(
+                                (actual_baseline[0] - expected_baseline[0])**2 +
+                                (actual_baseline[1] - expected_baseline[1])**2 +
+                                (actual_baseline[2] - expected_baseline[2])**2
+                            )
+                            if diff < min_diff:
+                                min_diff = diff
+                                best_base_match = cand_origin
+
+                if best_base_match:
+                    resolved_base_ecef = best_base_match
+                else:
+                    # Nếu không khớp được vector, fallback dùng LLH của Base do Rover gửi lên
+                    base_llh = next((obs.base_llh for obs in cluster_obs if obs.base_llh), None)
+                    if not base_llh:
+                        continue
+                    resolved_base_ecef = _llh_to_ecef(base_llh[0], base_llh[1], base_llh[2])
+                    
+                steps_list.append({
+                    "step": 3,
+                    "title": "Chốt điểm Base gốc",
+                    "message": f"Base chốt cố định tại tọa độ ECEF: {[round(x,3) for x in resolved_base_ecef]}",
+                    "data": {"base_ecef": list(resolved_base_ecef)}
+                })
             
             points = [Point("BASE", resolved_base_ecef, fixed=True)]
             baselines = []
@@ -321,6 +380,11 @@ def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, flo
 
             try:
                 result = adjust_network(Network.from_items(points, baselines))
+                steps_list.append({
+                    "step": 4,
+                    "title": "Giải phương trình Mạng GNSS",
+                    "message": f"Ma trận thiết kế (A), Trọng số (P). Bậc tự do (DoF): {result.degrees_of_freedom}, Rank: {result.rank}. Giải thuật Least Squares thành công."
+                })
             except NetworkError:
                 continue
 
@@ -358,9 +422,16 @@ def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, flo
 
         if not final_adjusted_points:
             return None
+            
+        steps_list.append({
+            "step": 5,
+            "title": "Kết quả Bình sai",
+            "message": f"Hoàn tất tính toán! Cập nhật toạ độ chuẩn cho {len(final_adjusted_points)} Rovers."
+        })
 
         return {
             "type": "gnss_adjusted",
+            "steps": steps_list,
             "source": "AGRICA",
             "adjustment_engine": "backend.processors.gnss_adjustment.adjust_network_ecef",
             "project_id": key[0],

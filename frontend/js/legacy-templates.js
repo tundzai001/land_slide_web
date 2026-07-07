@@ -2222,6 +2222,27 @@ window.LegacyTemplates = {
          MODALS
     ============================================ -->
 
+    
+    <!-- MODAL GNSS ADJUSTMENT TERMINAL -->
+    <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-success">
+                <div class="modal-header border-bottom border-secondary">
+                    <h5 class="modal-title text-success font-monospace" style="font-size: 1rem;">
+                        <i class="bi bi-terminal me-2"></i>Tiến trình Bình sai Mạng GNSS
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body font-monospace p-3" style="height: 400px; overflow-y: auto; background-color: #0c0c0c; font-size: 0.85rem;" id="gnss-terminal-output">
+                    <div class="text-secondary mb-2">>> Đang chờ tín hiệu bình sai từ Server...</div>
+                </div>
+                <div class="modal-footer border-top border-secondary py-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('gnss-terminal-output').innerHTML='<div class=\'text-secondary mb-2\'>>> Đang chờ tín hiệu bình sai từ Server...</div>'">Clear Log</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Project Config Modal -->
     <div class="modal fade" id="projectConfigModal" tabindex="-1">
         <div class="modal-dialog modal-lg">

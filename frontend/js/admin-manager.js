@@ -116,6 +116,26 @@ class AdminManager {
                     }
 
                     window.toast?.success('Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+                } else if (message.type === 'gnss_adjustment_step') {
+                    const step = message.data;
+                    const terminal = document.getElementById('gnss-terminal-output');
+                    if (terminal) {
+                        const now = new Date().toLocaleTimeString('vi-VN');
+                        let colorClass = 'text-info';
+                        if (step.step === 5) colorClass = 'text-success fw-bold';
+                        if (step.error) colorClass = 'text-danger fw-bold';
+                        
+                        const div = document.createElement('div');
+                        div.className = 'mb-2';
+                        div.innerHTML = `<span class="text-secondary">[${now}]</span> <span class="${colorClass}">[Bước ${step.step}] ${step.title}:</span> ${step.message}`;
+                        
+                        terminal.appendChild(div);
+                        terminal.scrollTop = terminal.scrollHeight;
+                        
+                        if (step.step === 5 && !step.error && document.getElementById('gnssTerminalModal')?.classList.contains('show')) {
+                            window.toast?.success(step.message);
+                        }
+                    }
                 }
             };
 
@@ -817,7 +837,7 @@ class AdminManager {
         if (this.corsStationsData) {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
-                baseOptionsHtml += `<option value="${st.name || st.code}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" ${isSelected}>${st.name || st.code}</option>`;
+                baseOptionsHtml += `<option value="${st.name || st.code}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${st.name || st.code}</option>`;
             });
         }
         baseOptionsHtml += '</optgroup>';
@@ -903,8 +923,25 @@ class AdminManager {
                 console.error("Error parsing devices config", e);
                 streamSelect.style.display = 'none';
             }
+        } else if (selectedOpt && selectedOpt.dataset.streams) {
+            try {
+                const streams = JSON.parse(decodeURIComponent(selectedOpt.dataset.streams));
+                if (streams.length > 0) {
+                    streams.forEach(s => {
+                        const isSelected = (s.stream_id === selectedStreamVal || s.mountpoint === selectedStreamVal) ? 'selected' : '';
+                        const hostLabel = s.host ? ` [${s.host}:${s.port}]` : '';
+                        streamSelect.innerHTML += `<option value="${s.stream_id}" data-host="${s.host || ''}" data-port="${s.port || ''}" data-mp="${s.mountpoint || ''}" ${isSelected}>Luồng: ${s.stream_id.toUpperCase()} - ${s.mountpoint}${hostLabel}</option>`;
+                    });
+                    streamSelect.style.display = 'block';
+                } else {
+                    streamSelect.style.display = 'none';
+                }
+            } catch(e) {
+                console.error("Error parsing streams", e);
+                streamSelect.style.display = 'none';
+            }
         } else {
-            // CORS station or no devices
+            // No devices or mountpoints
             streamSelect.style.display = 'none';
         }
 
@@ -971,7 +1008,7 @@ class AdminManager {
                 stations.forEach(st => {
                     const stNameOrCode = st.name || st.code;
                     const isSelected = (stNameOrCode === currentValue) ? 'selected' : '';
-                    optionsHtml += `<option value="${stNameOrCode}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" ${isSelected}>${stNameOrCode} (${st.lat}, ${st.lon})</option>`;
+                    optionsHtml += `<option value="${stNameOrCode}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${stNameOrCode} (${st.lat}, ${st.lon})</option>`;
                 });
                 
                 selectEl.innerHTML = optionsHtml;
@@ -1009,7 +1046,12 @@ class AdminManager {
                 clusters.push({
                     name, description: desc,
                     base_station: baseStation,
-                    base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt, base_stream: row.querySelector('.cluster-stream-select')?.value || '',
+                    base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt,
+                    base_stream: row.querySelector('.cluster-stream-select')?.value || '',
+                    base_stream_host: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.host || '') : '',
+                    base_stream_port: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.port || '') : '',
+                    base_stream_mp: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.mp || '') : '',
+                    base_service_config: selectedOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(selectedOpt.dataset.serviceConfig)) : {},
                     stations: st
                 });
             }

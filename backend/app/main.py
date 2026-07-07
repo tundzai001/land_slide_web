@@ -837,6 +837,8 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
             "lon": lon,
             "alt": alt,
             "mountpoint": service_config.get("mountpoint1") or item.get("mountpoint") or name,
+            "streams": item.get("streams") or [],
+            "service_config": item.get("service_config") or {},
             "is_provisioned": bool(item.get("is_provisioned")),
             "server_host": service_config.get("serverhost1"),
             "stream_active": bool(service_config.get("stream_active")),

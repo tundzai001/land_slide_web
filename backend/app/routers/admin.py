@@ -4,6 +4,9 @@
 
 import asyncio
 import csv
+import io
+import openpyxl
+from openpyxl.utils import get_column_letter
 import json
 import logging
 import re
@@ -741,9 +744,74 @@ async def export_database_csv(
                             grouped_data[group_key].append(row_dict)
                             
                         # Ghi từng group ra từng file CSV trong thư mục phân cấp tương ứng trong file ZIP
+                        gnss_by_station = {}
                         for (p_code, s_code, s_type), items in grouped_data.items():
-                            file_name = f"sensor_data/{p_code}/{s_code}/{s_type}.csv"
-                            zf.writestr(file_name, rows_to_csv(items))
+                            if s_type in ['gnss', 'gnss_bat_thuong', 'gnss_anomaly']:
+                                key = (p_code, s_code)
+                                if key not in gnss_by_station:
+                                    gnss_by_station[key] = {'gnss': [], 'gnss_bat_thuong': [], 'gnss_anomaly': []}
+                                gnss_by_station[key][s_type] = items
+                            else:
+                                export_name = "binhsai.csv" if s_type == "gnss_adjustment_result" else f"{s_type}.csv"
+                                file_name = f"sensor_data/{p_code}/{s_code}/{export_name}"
+                                zf.writestr(file_name, rows_to_csv(items))
+                                has_data = True
+                        
+                        # Process GNSS data to XLSX
+                        for (p_code, s_code), data_types in gnss_by_station.items():
+                            wb = openpyxl.Workbook()
+                            ws_gngga = wb.active
+                            ws_gngga.title = "GNGGA"
+                            ws_agric = wb.create_sheet("AGRIC")
+                            ws_anomaly = wb.create_sheet("Ngoại lệ")
+                            
+                            # Helper to write rows
+                            def write_rows(ws, headers, data_list):
+                                ws.append(headers)
+                                for item in data_list:
+                                    row = [item.get(h, "") for h in headers]
+                                    ws.append(row)
+                                    
+                            # GNGGA & AGRIC
+                            gngga_data = []
+                            agric_data = []
+                            gnss_items = data_types.get('gnss', [])
+                            
+                            # Also collect from gnss_anomaly
+                            anomaly_items = data_types.get('gnss_anomaly', []) + data_types.get('gnss_bat_thuong', [])
+                            
+                            for item in gnss_items:
+                                payload = item.get('raw_payload') or ""
+                                lines = payload.split('\n')
+                                for line in lines:
+                                    line = line.strip()
+                                    if '$GNGGA' in line or '$GPGGA' in line:
+                                        row_data = item.copy()
+                                        row_data['GNGGA'] = line
+                                        gngga_data.append(row_data)
+                                    elif '$AGRIC' in line:
+                                        row_data = item.copy()
+                                        row_data['AGRIC'] = line
+                                        agric_data.append(row_data)
+                                        
+                            gngga_headers = ['time_str', 'GNGGA']
+                            agric_headers = ['time_str', 'AGRIC']
+                            anomaly_headers = ['time_str', 'reason', 'type', 'raw_payload', 'raw_json']
+                            
+                            write_rows(ws_gngga, gngga_headers, gngga_data)
+                            write_rows(ws_agric, agric_headers, agric_data)
+                            write_rows(ws_anomaly, anomaly_headers, anomaly_items)
+                            
+                            # Auto-adjust column width
+                            for ws in [ws_gngga, ws_agric, ws_anomaly]:
+                                for column_cells in ws.columns:
+                                    length = max(len(str(cell.value)) for cell in column_cells)
+                                    ws.column_dimensions[get_column_letter(column_cells[0].column)].width = min(length + 2, 100)
+                                    
+                            mem_file = io.BytesIO()
+                            wb.save(mem_file)
+                            file_name = f"sensor_data/{p_code}/{s_code}/gnss.xlsx"
+                            zf.writestr(file_name, mem_file.getvalue())
                             has_data = True
                             
                         logger.info(f"✅ CSV: Exported {len(data)} sensor records into {len(grouped_data)} files")
