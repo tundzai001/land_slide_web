@@ -2347,19 +2347,20 @@ function setupEventListeners() {
         }
     }
 
-    window.requestGnssAdjustment = async function(projectId, stationIds) {
+        window.requestGnssAdjustment = async function(projectId, stationIds) {
         if (!projectId) {
             showAdjustmentError('Loi', 'Khong xac dinh duoc du an de binh sai');
             return;
         }
         
+        let terminalModal;
         try {
             // Mở modal tiến trình
             const terminalModalEl = ensureGnssTerminalModal();
             if (!window.bootstrap?.Modal) {
                 throw new Error('Bootstrap Modal chua san sang');
             }
-            const terminalModal = bootstrap.Modal.getOrCreateInstance(terminalModalEl);
+            terminalModal = bootstrap.Modal.getOrCreateInstance(terminalModalEl);
             terminalModal.show();
             
             // Initialize board after modal is shown to get correct dimensions
@@ -2392,6 +2393,9 @@ function setupEventListeners() {
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);
+            if (terminalModal) {
+                terminalModal.hide();
+            }
             Swal.fire({
                 icon: 'error',
                 title: 'Lỗi khởi chạy Bình sai',
@@ -2529,22 +2533,12 @@ function switchMapTiles(theme) {
 }
 
 function createStationClusterGroup() {
-    if (typeof L.markerClusterGroup === 'function') {
-        return L.markerClusterGroup({
-            chunkedLoading: true,
-            maxClusterRadius: 50,
-            spiderfyOnMaxZoom: true,
-            showCoverageOnHover: false
-        });
-    }
-
-    console.warn('[MAP] leaflet.markercluster is not loaded; using plain marker layer');
     return L.layerGroup();
 }
 
 function initMap() {
     try {
-        map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.047079, 108.206230], 6);
+        map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 18 }).setView([16.047079, 108.206230], 6);
         window.map = map;
 
         stationClusterGroup = createStationClusterGroup();
@@ -2620,10 +2614,7 @@ async function loadProjectsAndClusters() {
                 });
                 
                 if (latlngs.length >= 2) {
-                    if (latlngs.length >= 3) {
-                        latlngs.push(latlngs[0]); // close loop
-                    }
-                    const polyline = L.polyline(latlngs, {
+                    const multiLatLngs = []; for (let i = 0; i < latlngs.length; i++) { for (let j = i + 1; j < latlngs.length; j++) { multiLatLngs.push([latlngs[i], latlngs[j]]); } } const polyline = L.polyline(multiLatLngs, {
                         color: colors[colorIdx % colors.length],
                         weight: 3,
                         opacity: 0.7,
@@ -6507,3 +6498,4 @@ window.showTimelineSlider = function () {
 };
 
 console.log('[MAP] Script fully loaded');
+
