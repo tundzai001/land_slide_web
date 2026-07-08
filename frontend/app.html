@@ -47,12 +47,12 @@
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="/js/theme-manager.js" charset="utf-8"></script>
-    <script src="/js/auth.js" charset="utf-8"></script>
-    <script src="/js/legacy-templates.js?v=react-spa-12" charset="utf-8"></script>
+    <script src="/js/auth.js?v=react-spa-13" charset="utf-8"></script>
+    <script src="/js/legacy-templates.js?v=react-spa-13" charset="utf-8"></script>
     <script>
         (async function() {
             try {
-                const response = await fetch('/js/react-app.js?v=react-spa-12');
+                const response = await fetch('/js/react-app.js?v=react-spa-14');
                 if (!response.ok) throw new Error('Cannot load react-app.js');
                 const source = await response.text();
                 const compiled = Babel.transform(source, {

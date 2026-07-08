@@ -507,16 +507,19 @@
             await ensureScript('https://unpkg.com/react@18/umd/react.production.min.js');
             await ensureScript('https://unpkg.com/react-dom@18/umd/react-dom.production.min.js');
             await ensureScript('https://unpkg.com/@babel/standalone/babel.min.js');
+            await ensureStylesheet('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css').catch(error => console.warn(error));
+            await ensureStylesheet('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css').catch(error => console.warn(error));
             await ensureScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+            await ensureScript('https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js').catch(error => console.warn(error));
             await ensureScript('https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js');
             await ensureScript('https://cdn.jsdelivr.net/npm/chart.js');
             await ensureScript('https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js');
             await ensureScript('https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js');
             await ensureScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js');
             await ensureScript('/js/theme-manager.js?v=react-spa-12');
-            await ensureScript('/js/auth.js');
-            await ensureScript('/js/legacy-templates.js?v=react-spa-11');
-            await loadBabelScript('/js/react-app.js?v=react-spa-11');
+            await ensureScript('/js/auth.js?v=react-spa-13');
+            await ensureScript('/js/legacy-templates.js?v=react-spa-13');
+            await loadBabelScript('/js/react-app.js?v=react-spa-14');
         }
 
         document.querySelectorAll('[data-map-trigger]').forEach(trigger => {

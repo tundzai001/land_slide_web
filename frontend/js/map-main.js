@@ -2252,22 +2252,122 @@ function setupEventListeners() {
     };
 
     // Lệnh Bình sai - Trigger API start gnss adjustment
+    function ensureGnssTerminalModal() {
+        let modal = document.getElementById('gnssTerminalModal');
+        if (modal) return modal;
+
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
+                <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 95vw;">
+                    <div class="modal-content bg-dark text-light border-primary" style="height: 85vh;">
+                        <div class="modal-header border-bottom border-secondary py-2">
+                            <h5 class="modal-title text-primary font-monospace" style="font-size: 1.1rem;">
+                                <i class="bi bi-cpu me-2"></i>GNSS Agent Calculation Board (Real-time)
+                            </h5>
+                            <div id="gnss-phase-indicator" class="ms-4 text-warning fw-bold font-monospace">Phase: WAITING</div>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body p-0 d-flex flex-row" style="height: calc(100% - 60px);">
+                            <div class="flex-grow-1 position-relative" style="background-color: #f8f9fa; border-right: 1px solid #444; overflow: hidden;" id="gnss-board-container">
+                                <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                                <div id="gnss-board-tooltips" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                            </div>
+                            <div class="d-flex flex-column" style="width: 450px; background-color: #1e1e1e;">
+                                <div class="p-2 border-bottom border-secondary bg-black">
+                                    <h6 class="mb-0 text-info font-monospace"><i class="bi bi-table me-1"></i>Baseline Vectors</h6>
+                                </div>
+                                <div class="flex-grow-1" style="overflow-y: auto;" id="gnss-data-panel">
+                                    <table class="table table-dark table-sm table-hover font-monospace mb-0" style="font-size: 0.75rem;">
+                                        <thead>
+                                            <tr class="text-secondary">
+                                                <th>#</th>
+                                                <th>From</th>
+                                                <th>To</th>
+                                                <th>dN(m)</th>
+                                                <th>dE(m)</th>
+                                                <th>dH(m)</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="gnss-baseline-table-body"></tbody>
+                                    </table>
+                                </div>
+                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-black" style="display: none;">
+                                    <h6 id="adj-process-status" class="mb-2"></h6>
+                                    <div class="text-secondary font-monospace" style="font-size: 0.7rem;">Time: <span id="adj-val-time"></span></div>
+                                    <div id="adj-points-list" class="mt-2"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `.trim();
+        modal = wrapper.firstElementChild;
+        document.body.appendChild(modal);
+        return modal;
+    }
+
+    function showAdjustmentError(title, message) {
+        if (window.Swal?.fire) {
+            window.Swal.fire({ icon: 'error', title, text: message });
+            return;
+        }
+        window.toast?.error?.(message);
+        alert(`${title}: ${message}`);
+    }
+
+    if (!window.Swal?.fire) {
+        window.Swal = {
+            fire(...args) {
+                const config = typeof args[0] === 'object'
+                    ? args[0]
+                    : { title: args[0], text: args[1] };
+                const title = config.title || 'Thong bao';
+                const text = config.text || config.html || '';
+                window.toast?.error?.(text || title);
+                alert(text ? `${title}: ${text}` : title);
+            }
+        };
+    }
+
+    async function readApiError(response) {
+        if (!response) return 'Khong nhan duoc phan hoi tu may chu';
+        try {
+            const data = await response.clone().json();
+            return data.detail || data.message || data.error || `HTTP ${response.status}`;
+        } catch (_) {
+            try {
+                const text = await response.text();
+                return text || `HTTP ${response.status}`;
+            } catch (__) {
+                return `HTTP ${response.status}`;
+            }
+        }
+    }
+
     window.requestGnssAdjustment = async function(projectId, stationIds) {
         if (!projectId) {
-            Swal.fire('Lỗi', 'Không xác định được dự án để bình sai', 'error');
+            showAdjustmentError('Loi', 'Khong xac dinh duoc du an de binh sai');
             return;
         }
         
         try {
             // Mở modal tiến trình
-            const terminalModal = new bootstrap.Modal(document.getElementById('gnssTerminalModal'));
+            const terminalModalEl = ensureGnssTerminalModal();
+            if (!window.bootstrap?.Modal) {
+                throw new Error('Bootstrap Modal chua san sang');
+            }
+            const terminalModal = bootstrap.Modal.getOrCreateInstance(terminalModalEl);
             terminalModal.show();
             
             // Initialize board after modal is shown to get correct dimensions
-            setTimeout(() => { window.gnssBoardState.init(); }, 300);
+            setTimeout(() => { window.gnssBoardState?.init?.(); }, 300);
 
             const payload = {
                 project_id: projectId,
+                base_mountpoint: '',
                 selected_clusters: stationIds ? [stationIds] : null
             };
             
@@ -2287,6 +2387,7 @@ function setupEventListeners() {
                 if (!res.ok) throw new Error('Bạn cần đăng nhập với quyền Quản trị viên để thực hiện tính năng này');
             }
 
+            if (res && !res.ok) throw new Error(await readApiError(res));
             if (!res || res.error) throw new Error(res.error || 'Lỗi không xác định');
             
         } catch (error) {
@@ -2427,17 +2528,26 @@ function switchMapTiles(theme) {
     currentTileLayer = L.tileLayer(TILE_URLS[key], TILE_OPTIONS[key]).addTo(map);
 }
 
-function initMap() {
-    try {
-        map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.047079, 108.206230], 6);
-        window.map = map;
-
-        stationClusterGroup = L.markerClusterGroup({
+function createStationClusterGroup() {
+    if (typeof L.markerClusterGroup === 'function') {
+        return L.markerClusterGroup({
             chunkedLoading: true,
             maxClusterRadius: 50,
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false
         });
+    }
+
+    console.warn('[MAP] leaflet.markercluster is not loaded; using plain marker layer');
+    return L.layerGroup();
+}
+
+function initMap() {
+    try {
+        map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.047079, 108.206230], 6);
+        window.map = map;
+
+        stationClusterGroup = createStationClusterGroup();
         map.addLayer(stationClusterGroup);
 
         const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -2452,6 +2562,25 @@ function initMap() {
     } catch (error) {
         console.error('❌ [MAP] Failed to initialize map:', error);
     }
+}
+
+function getClusterStationTokens(clusterConfig) {
+    if (Array.isArray(clusterConfig)) return clusterConfig;
+    if (clusterConfig && Array.isArray(clusterConfig.stations)) return clusterConfig.stations;
+    return [];
+}
+
+function findStationByClusterToken(token) {
+    const tokenText = String(token).trim();
+    return allStations.find(station => (
+        String(station.id) === tokenText ||
+        String(station.station_code || '').trim() === tokenText ||
+        String(station.name || '').trim() === tokenText
+    ));
+}
+
+function hasValidLatLon(location) {
+    return Number.isFinite(Number(location?.lat)) && Number.isFinite(Number(location?.lon));
 }
 
 async function loadProjectsAndClusters() {
@@ -2475,23 +2604,19 @@ async function loadProjectsAndClusters() {
             if (!proj.gnss_clusters || !Array.isArray(proj.gnss_clusters)) return;
             
             proj.gnss_clusters.forEach(c => {
-                let stationIds = [];
-                if (Array.isArray(c)) {
-                    stationIds = c;
-                } else if (c && c.stations) {
-                    stationIds = c.stations;
-                }
+                const stationTokens = getClusterStationTokens(c);
+                const clusterMembers = stationTokens
+                    .map(findStationByClusterToken)
+                    .filter(station => station && hasValidLatLon(station.location));
+                const stationIds = clusterMembers.map(station => station.id);
                 
-                if (stationIds.length < 2) return;
+                if (clusterMembers.length < 2) return;
                 
                 const latlngs = [];
                 const clusterStations = [];
-                stationIds.forEach(id => {
-                    const st = allStations.find(s => s.id === id);
-                    if (st && st.location && st.location.lat) {
-                        latlngs.push([st.location.lat, st.location.lon]);
-                        clusterStations.push(st.name);
-                    }
+                clusterMembers.forEach(st => {
+                    latlngs.push([Number(st.location.lat), Number(st.location.lon)]);
+                    clusterStations.push(st.name || st.station_code || String(st.id));
                 });
                 
                 if (latlngs.length >= 2) {

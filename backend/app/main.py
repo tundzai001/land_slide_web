@@ -1212,6 +1212,52 @@ async def delete_user(
 # ============================================================================
 # ADMIN - PROJECTS API
 # ============================================================================
+@app.get("/api/projects")
+async def get_public_projects(
+    request: Request,
+    db: AsyncSession = Depends(get_config_db),
+    db_auth: AsyncSession = Depends(get_auth_db)
+):
+    try:
+        current_user = await get_optional_current_user_from_request(request, db_auth)
+        project_filter_ids = user_project_filter_ids(current_user)
+
+        stmt = (
+            select(
+                model_config.Project,
+                func.count(model_config.Station.id).label('station_count')
+            )
+            .outerjoin(model_config.Station, model_config.Station.project_id == model_config.Project.id)
+            .group_by(model_config.Project.id)
+            .order_by(model_config.Project.created_at.desc())
+        )
+
+        if project_filter_ids is not None:
+            if not project_filter_ids:
+                return []
+            stmt = stmt.where(model_config.Project.id.in_(project_filter_ids))
+
+        result = await db.execute(stmt)
+
+        return [
+            {
+                "id": p.id,
+                "project_code": p.project_code,
+                "name": p.name,
+                "description": p.description,
+                "location": p.location,
+                "is_active": p.is_active,
+                "created_at": p.created_at,
+                "station_count": count,
+                "gnss_clusters": getattr(p, "gnss_clusters", None)
+            }
+            for p, count in result.all()
+        ]
+
+    except Exception as e:
+        logger.error(f"Error loading public projects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/admin/projects")
 async def get_projects(
     db: AsyncSession = Depends(get_config_db),
@@ -1787,7 +1833,7 @@ async def fetch_live_gnss_origin(
 
 class GnssAdjustmentStartRequest(BaseModel):
     project_id: int
-    base_mountpoint: str
+    base_mountpoint: Optional[str] = None
     caster_address: Optional[str] = None
     new_base_station_id: Optional[int] = None
     selected_clusters: Optional[list[list[int]]] = None
@@ -1798,6 +1844,9 @@ async def start_gnss_adjustment(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
+        if not hasattr(mqtt_service, "active_adjustment_clusters"):
+            mqtt_service.active_adjustment_clusters = {}
+
         # Store dynamic selected clusters in mqtt_service if provided
         if req.selected_clusters is not None:
             mqtt_service.active_adjustment_clusters[req.project_id] = req.selected_clusters
@@ -1822,6 +1871,9 @@ async def stop_gnss_adjustment(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
+        if not hasattr(mqtt_service, "active_adjustment_clusters"):
+            mqtt_service.active_adjustment_clusters = {}
+
         # Clear dynamic active adjustment clusters and phase
         mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
         mqtt_service.adjustment_phase.pop(req.project_id, None)

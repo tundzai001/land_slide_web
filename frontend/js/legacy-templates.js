@@ -15,10 +15,6 @@ window.LegacyTemplates = {
                 <span>Landslide Monitor</span>
             </a>
 
-            <button id="nav-btn-adjust" class="btn btn-sm btn-outline-info" style="display: none; margin-left: 8px;">
-                <i class="bi bi-gear-wide-connected me-1"></i> Bình sai
-            </button>
-
             <a href="/management" id="admin-nav-btn" class="btn btn-sm btn-outline-primary"
                 style="display: none;">
                 <i class="bi bi-stars me-1"></i> Management

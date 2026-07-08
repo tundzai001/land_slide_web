@@ -11,8 +11,8 @@ const scriptPromises = new Map();
 const loadedStylesheets = new Set();
 const legacyBootedViews = new Set();
 const ROUTE_STYLES = {
-    map: ['/css/map.css?v=react-spa-11', '/css/digital-twin.css?v=react-spa-11', '/css/rescue-markers.css?v=react-spa-11', '/css/map-responsive.css?v=react-spa-11'],
-    admin: ['/css/admin.css?v=react-spa-11', '/css/admin-responsive.css?v=react-spa-11'],
+    map: ['/css/map.css?v=react-spa-12', '/css/digital-twin.css?v=react-spa-12', '/css/rescue-markers.css?v=react-spa-12', '/css/map-responsive.css?v=react-spa-12'],
+    admin: ['/css/admin.css?v=react-spa-12', '/css/admin-responsive.css?v=react-spa-12'],
     login: ['/css/login.css'],
 };
 
@@ -170,7 +170,7 @@ async function bootLegacyPage(view) {
     }
 
     if (view === 'map') {
-        await loadScript('/js/map-main.js?v=react-spa-11');
+        await loadScript('/js/map-main.js?v=react-spa-14');
         await loadScript('/js/engine/simulation-controller.js', { type: 'module' });
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });
@@ -188,7 +188,7 @@ async function bootLegacyPage(view) {
         };
 
         await loadScript('/js/toast-notifications.js');
-        await loadScript('/js/admin-manager.js?v=react-spa-11');
+        await loadScript('/js/admin-manager.js?v=react-spa-12');
         await loadScript('/js/db-manager.js');
         await loadScript('/js/system-manager.js');
         await window.bootstrapAdminManager?.();

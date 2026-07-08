@@ -88,6 +88,7 @@ class MQTTBridge:
         self.processors_cache: Dict[str, Any] = {}
         self.agrica_runtime = AgricaAdjustmentRuntime()
         self.adjustment_phase: Dict[int, str] = {}  # {project_id: "IDLE" | "COLLECTING_BASELINE" | "FREE_NETWORK"}
+        self.active_adjustment_clusters: Dict[int, list] = {}  # {project_id: [[station_id, ...], ...]}
         # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
         self.round_robin_manager = RoundRobinAdjustmentManager(
             self.client, 
@@ -1129,6 +1130,9 @@ class MQTTBridge:
 
     async def process_pipeline(self, info: dict, raw_payload: str):
         if not info: return
+        active_clusters = self.active_adjustment_clusters.get(info.get("project_id"))
+        if active_clusters is not None:
+            info = {**info, "project_gnss_clusters": active_clusters}
             
         device_id = info['device_id']
         station_id = info['station_id']
