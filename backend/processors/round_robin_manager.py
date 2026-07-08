@@ -20,7 +20,7 @@ class RoundRobinAdjustmentManager:
     def update_rover_llh(self, station_code: str, lat: float, lon: float, alt: float):
         self.rover_llh_cache[station_code] = {"lat": lat, "lon": lon, "alt": alt}
 
-    def add_agrica_payload(self, raw_payload: str, info: Dict[str, Any]):
+    def add_agrica_payload(self, raw_payload: str, info: Dict[str, Any]) -> List[Any]:
         from processors.gnss_adjustment_runtime import parse_agrica
         
         if not hasattr(self, 'observations_cache'):
@@ -35,11 +35,19 @@ class RoundRobinAdjustmentManager:
             if project_id not in self.observations_cache:
                 self.observations_cache[project_id] = []
             
-            # Chỉ lưu các obs có position_type = 4 (Fixed) hoặc 7 (Float)
-            valid_obs = [obs for obs in obs_list if obs.position_type in (4, 7)]
+            valid_obs = []
+            for obs in obs_list:
+                if obs.position_type in (4, 7):
+                    valid_obs.append(obs)
+                    # Update rover LLH cache using high precision AGRICA rover_llh
+                    if obs.rover_llh:
+                        self.update_rover_llh(rover_name, obs.rover_llh[0], obs.rover_llh[1], obs.rover_llh[2])
+                        
             self.observations_cache[project_id].extend(valid_obs)
+            return valid_obs
         except Exception as e:
             logger.error(f"Error parsing AGRICA in RoundRobin: {e}")
+            return []
 
     async def start_cycle(self, project_id: int, rovers: List[str]):
         """Bắt đầu chu trình xoay vòng trạm Base"""

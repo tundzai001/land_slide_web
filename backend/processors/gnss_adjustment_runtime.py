@@ -2,7 +2,7 @@ import math
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -38,6 +38,7 @@ class AgricaObservation:
     rover_ecef: Optional[tuple[float, float, float]]
     base_llh: Optional[tuple[float, float, float]]
     raw: str
+    full_data: Dict[str, Any]
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -160,6 +161,13 @@ def parse_agrica(
             rover_ecef=rover_ecef,
             base_llh=base_llh,
             raw=sentence,
+            full_data={
+                "parts": parts,
+                "num_satellites": _safe_int(parts[10]),
+                "pdop": _safe_float(parts[11]),
+                "age_of_diff": _safe_float(parts[12]),
+                "ratio": _safe_float(parts[28])
+            }
         ))
     return observations
 

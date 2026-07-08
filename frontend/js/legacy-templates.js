@@ -363,26 +363,6 @@ window.LegacyTemplates = {
                 </div>
 
             </div>
-
-            <div class="adv-column-right">
-                <div class="adv-section-title">Bình sai mạng lưới GNSS</div>
-                <div id="adj-process-status" class="small text-muted mb-2">Đang chờ chu kỳ bình sai...</div>
-                
-                <div class="adv-section" id="adj-results-section" style="display:none;">
-                    <div class="small fw-semibold text-info mb-1"><i class="bi bi-info-circle me-1"></i>Kết quả bình sai mới nhất</div>
-                    <div class="adv-item">
-                        <span class="adv-label">Thời gian bình sai</span>
-                        <div class="adv-value-row"><span class="adv-value" id="adj-val-time" style="font-size:0.85rem;">--</span></div>
-                    </div>
-                    
-                    <div class="mt-2">
-                        <div class="small text-muted mb-1 font-monospace">Toạ độ điều chỉnh (ECEF):</div>
-                        <div id="adj-points-list" class="list-group list-group-flush border-top border-bottom" style="max-height: 255px; overflow-y: auto; font-size: 0.72rem;">
-                            <!-- Sẽ được thêm bằng JS -->
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -529,14 +509,9 @@ window.LegacyTemplates = {
                     <button class="btn-action" id="btn-show-charts">
                         <i class="bi bi-graph-up me-2"></i>View Chart
                     </button>
-                    <div class="d-flex w-100 gap-2">
-                        <button class="btn-action w-100 secondary d-none" id="btn-long-term">
-                            <i class="bi bi-calendar-range me-2"></i>Analysis
-                        </button>
-                        <button class="btn-action w-100" id="btn-network-adj" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none;">
-                            <i class="bi bi-gear-wide-connected me-2"></i>Bình sai
-                        </button>
-                    </div>
+                    <button class="btn-action w-100 secondary d-none" id="btn-long-term">
+                        <i class="bi bi-calendar-range me-2"></i>Analysis
+                    </button>
                     <button class="btn-action" id="btn-digital-twin" style="background: linear-gradient(135deg, #f43f5e, #e11d48); color: white; border: none; text-decoration: none; text-align: center;">
                         <i class="bi bi-globe-americas me-2"></i>Mô phỏng 3D
                     </button>
@@ -2354,21 +2329,71 @@ window.LegacyTemplates = {
     ============================================ -->
 
     
-    <!-- MODAL GNSS ADJUSTMENT TERMINAL -->
+    <!-- MODAL GNSS VISUAL CALCULATION BOARD -->
     <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content bg-dark text-light border-success">
-                <div class="modal-header border-bottom border-secondary">
-                    <h5 class="modal-title text-success font-monospace" style="font-size: 1rem;">
-                        <i class="bi bi-terminal me-2"></i>Tiến trình Bình sai Mạng GNSS
+        <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 95vw;">
+            <div class="modal-content bg-dark text-light border-primary" style="height: 85vh;">
+                <div class="modal-header border-bottom border-secondary py-2">
+                    <h5 class="modal-title text-primary font-monospace" style="font-size: 1.1rem;">
+                        <i class="bi bi-cpu me-2"></i>GNSS Agent Calculation Board (Real-time)
                     </h5>
+                    <div id="gnss-phase-indicator" class="ms-4 text-warning fw-bold font-monospace">Phase: WAITING</div>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body font-monospace p-3" style="height: 400px; overflow-y: auto; background-color: #0c0c0c; font-size: 0.85rem;" id="gnss-terminal-output">
-                    <div class="text-secondary mb-2">>> Đang chờ tín hiệu bình sai từ Server...</div>
+                <div class="modal-body p-0 d-flex flex-row" style="height: calc(100% - 60px);">
+                    <!-- Cột Trái: Canvas Bản Vẽ (70%) -->
+                    <div class="flex-grow-1 position-relative" style="background-color: #f8f9fa; border-right: 1px solid #444; overflow: hidden;" id="gnss-board-container">
+                        <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                        
+                        <!-- Overlay Tooltips Container -->
+                        <div id="gnss-board-tooltips" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                    </div>
+                    
+                    <!-- Cột Phải: Dữ liệu (30%) -->
+                    <div class="d-flex flex-column" style="width: 450px; background-color: #1e1e1e;">
+                        <div class="p-2 border-bottom border-secondary bg-black">
+                            <h6 class="mb-0 text-info font-monospace"><i class="bi bi-table me-1"></i>Baseline Vectors</h6>
+                        </div>
+                        <div class="flex-grow-1" style="overflow-y: auto;" id="gnss-data-panel">
+                            <table class="table table-dark table-sm table-hover font-monospace mb-0" style="font-size: 0.75rem;">
+                                <thead>
+                                    <tr class="text-secondary">
+                                        <th>#</th>
+                                        <th>From</th>
+                                        <th>To</th>
+                                        <th>dN(m)</th>
+                                        <th>dE(m)</th>
+                                        <th>dH(m)</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="gnss-baseline-table-body">
+                                    <!-- Rows appended dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <!-- Báo cáo Kết Quả -->
+                        <div id="adj-results-section" class="p-3 border-top border-secondary bg-black" style="display: none;">
+                            <h6 id="adj-process-status" class="mb-2"></h6>
+                            <div class="text-secondary font-monospace" style="font-size: 0.7rem;">Time: <span id="adj-val-time"></span></div>
+                            <div id="adj-points-list" class="mt-2"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="modal-footer border-top border-secondary py-1">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('gnss-terminal-output').innerHTML='<div class=\'text-secondary mb-2\'>>> Đang chờ tín hiệu bình sai từ Server...</div>'">Clear Log</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal chi tiết Advanced Data -->
+    <div class="modal fade" id="gnssAdvancedDataModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-info font-monospace">AGRICA Advanced Fields</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body font-monospace" style="font-size: 0.8rem; height: 500px; overflow-y: auto;">
+                    <pre id="gnss-advanced-data-json" style="color: #a6e22e;"></pre>
                 </div>
             </div>
         </div>

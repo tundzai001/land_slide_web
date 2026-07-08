@@ -1152,7 +1152,22 @@ class MQTTBridge:
                     # Cập nhật dữ liệu cho Round Robin nếu đang trong phase FREE_NETWORK
                     proj_id = int(info.get("project_id") or info.get("station_id") or 0)
                     if self.adjustment_phase.get(proj_id) == "FREE_NETWORK":
-                        self.round_robin_manager.add_agrica_payload(raw_payload, info)
+                        valid_obs = self.round_robin_manager.add_agrica_payload(raw_payload, info)
+                        if valid_obs:
+                            for obs in valid_obs:
+                                try:
+                                    asyncio.create_task(manager.broadcast({
+                                        "type": "gnss_baseline_collected",
+                                        "project_id": proj_id,
+                                        "station_id": station_id,
+                                        "rover_name": obs.rover_name,
+                                        "baseline_neu": obs.baseline_neu,
+                                        "std_neu": obs.std_neu,
+                                        "rover_llh": obs.rover_llh,
+                                        "base_llh": obs.base_llh,
+                                        "full_data": obs.full_data
+                                    }))
+                                except Exception: pass
                         
                     if adj_res:
                         adj_payload = {
@@ -1185,6 +1200,14 @@ class MQTTBridge:
                         if proj_id and self.adjustment_phase.get(proj_id) == "COLLECTING_BASELINE":
                             logger.info(f"🎯 [ADJUSTMENT] Baseline collected for project {proj_id}! Stopping base to enter Free-Network phase.")
                             self.adjustment_phase[proj_id] = "FREE_NETWORK"
+                            try:
+                                asyncio.create_task(manager.broadcast({
+                                    "type": "gnss_adjustment_progress",
+                                    "project_id": proj_id,
+                                    "phase": "FREE_NETWORK",
+                                    "message": "Đã thu thập đủ Baseline tĩnh. Đang chuyển sang chế độ Free-Network (Round-Robin)..."
+                                }))
+                            except Exception: pass
                             
                             base_mp = None
                             gnss_clusters = info.get("project_gnss_clusters")

@@ -32,6 +32,8 @@ let rescueMarkers = {}; // key: rescue_request_id -> marker
 let rescueRequestsData = []; // Store rescue data for popup reference
 let corsBaseMarkers = {}; // key: station name -> marker
 let showStationMarkers = true;
+let stationClusterGroup = null;
+let clusterPolylines = [];
 let showRescueMarkers = true;
 let currentMapMode = 'station';
 
@@ -551,6 +553,35 @@ function handleRealtimeUpdate(message) {
     if (message.type === 'rescue_request') {
         updateRescueMarkerFromWebSocket(message);
     }
+    
+    // ✅ Handle gnss adjustment progress
+    if (message.type === 'gnss_adjustment_progress') {
+        const ind = document.getElementById('gnss-phase-indicator');
+        if (ind) {
+            ind.textContent = `Phase: ${message.phase}`;
+            if (message.phase === 'COLLECTING_BASELINE') ind.className = 'ms-4 text-info fw-bold font-monospace';
+            else if (message.phase === 'FREE_NETWORK') ind.className = 'ms-4 text-warning fw-bold font-monospace';
+        }
+    }
+
+    // ✅ Handle gnss baseline collected (Draw board)
+    if (message.type === 'gnss_baseline_collected') {
+        if (window.gnssBoardState && window.gnssBoardState.ctx) {
+            // Add Base Point at 0,0 for relative visualization
+            window.gnssBoardState.addPoint("BASE", 0, 0, true);
+            
+            const relX = message.baseline_neu[1]; // dE
+            const relY = message.baseline_neu[0]; // dN
+            window.gnssBoardState.addPoint(message.rover_name, relX, relY, false);
+            
+            window.gnssBoardState.addBaseline("BASE", message.rover_name, {
+                dn: message.baseline_neu[0],
+                de: message.baseline_neu[1],
+                dh: message.baseline_neu[2],
+                full_data: message.full_data
+            });
+        }
+    }
 }
 
 function updateRealtimeSensorValues(message) {
@@ -560,6 +591,12 @@ function updateRealtimeSensorValues(message) {
         const adjTimeEl = document.getElementById('adj-val-time');
         const adjPointsList = document.getElementById('adj-points-list');
         
+        const ind = document.getElementById('gnss-phase-indicator');
+        if (ind) {
+            ind.textContent = `Phase: COMPLETED`;
+            ind.className = 'ms-4 text-success fw-bold font-monospace';
+        }
+
         if (adjStatusEl) {
             adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>`;
         }
@@ -597,10 +634,10 @@ function updateRealtimeSensorValues(message) {
             if (message.data.points) {
                 for (const [ptName, ptCoords] of Object.entries(message.data.points)) {
                     const item = document.createElement('div');
-                    item.className = 'list-group-item bg-transparent text-slate-300 py-1.5 px-0 d-flex justify-content-between align-items-center border-bottom border-white/5';
+                    item.className = 'list-group-item bg-transparent text-slate-300 py-1 px-0 d-flex justify-content-between align-items-center border-bottom border-secondary';
                     item.innerHTML = `
-                        <span class="fw-semibold text-teal-400 font-monospace">${ptName}</span>
-                        <span class="text-glow font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
+                        <span class="fw-semibold text-info font-monospace" style="font-size:0.75rem;">${ptName}</span>
+                        <span class="text-light font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
                             X: ${ptCoords[0]?.toFixed(4)}<br>
                             Y: ${ptCoords[1]?.toFixed(4)}<br>
                             Z: ${ptCoords[2]?.toFixed(4)}
@@ -2075,45 +2112,165 @@ function setupEventListeners() {
         });
     }
 
+    // Quản lý trạng thái vẽ Canvas
+    window.gnssBoardState = {
+        canvas: null,
+        ctx: null,
+        points: {},
+        baselines: [],
+        basePoint: null,
+        init() {
+            this.canvas = document.getElementById('gnss-board-canvas');
+            if (!this.canvas) return;
+            const container = document.getElementById('gnss-board-container');
+            this.canvas.width = container.clientWidth;
+            this.canvas.height = container.clientHeight;
+            this.ctx = this.canvas.getContext('2d');
+            this.points = {};
+            this.baselines = [];
+            this.basePoint = null;
+            document.getElementById('gnss-baseline-table-body').innerHTML = '';
+            document.getElementById('gnss-phase-indicator').textContent = 'Phase: WAITING';
+            document.getElementById('gnss-phase-indicator').className = 'ms-4 text-warning fw-bold font-monospace';
+            document.getElementById('adj-results-section').style.display = 'none';
+            document.getElementById('gnss-board-tooltips').innerHTML = '';
+            this.draw();
+        },
+        addPoint(name, relX, relY, isBase = false) {
+            if (!this.points[name]) {
+                this.points[name] = { name, x: relX, y: relY, isBase };
+                if (isBase) this.basePoint = this.points[name];
+                this.draw();
+            }
+        },
+        addBaseline(from, to, data) {
+            this.baselines.push({ from, to, data });
+            this.draw();
+            
+            // Add row to table
+            const tbody = document.getElementById('gnss-baseline-table-body');
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${this.baselines.length}</td>
+                <td class="text-info">${from}</td>
+                <td class="text-warning">${to}</td>
+                <td>${data.dn.toFixed(4)}</td>
+                <td>${data.de.toFixed(4)}</td>
+                <td>${data.dh.toFixed(4)}</td>
+                <td><button class="btn btn-xs btn-outline-secondary py-0 view-adv-btn" data-json='${JSON.stringify(data.full_data || {}).replace(/'/g, "&#39;")}'>Chi tiết</button></td>
+            `;
+            tbody.appendChild(row);
+            
+            // Rebind advanced view buttons
+            document.querySelectorAll('.view-adv-btn').forEach(btn => {
+                btn.onclick = function() {
+                    const jsonStr = this.getAttribute('data-json');
+                    try {
+                        const jsonObj = JSON.parse(jsonStr);
+                        document.getElementById('gnss-advanced-data-json').textContent = JSON.stringify(jsonObj, null, 2);
+                        new bootstrap.Modal(document.getElementById('gnssAdvancedDataModal')).show();
+                    } catch(e) {}
+                };
+            });
+            
+            // Add tooltip
+            if (this.points[from] && this.points[to]) {
+                const pt1 = this.getScreenCoords(this.points[from]);
+                const pt2 = this.getScreenCoords(this.points[to]);
+                const midX = (pt1.x + pt2.x) / 2;
+                const midY = (pt1.y + pt2.y) / 2;
+                const tooltipsContainer = document.getElementById('gnss-board-tooltips');
+                const t = document.createElement('div');
+                t.style.position = 'absolute';
+                t.style.left = (midX + 5) + 'px';
+                t.style.top = (midY - 10) + 'px';
+                t.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                t.style.color = '#fff';
+                t.style.padding = '2px 6px';
+                t.style.fontSize = '10px';
+                t.style.borderRadius = '3px';
+                t.style.fontFamily = 'monospace';
+                t.innerHTML = `dN:${data.dn.toFixed(3)}<br>dE:${data.de.toFixed(3)}`;
+                tooltipsContainer.appendChild(t);
+            }
+        },
+        getScreenCoords(pt) {
+            const centerX = this.canvas.width / 2;
+            const centerY = this.canvas.height / 2;
+            const scale = 30; // 30 pixels per meter roughly for visualization
+            return {
+                x: centerX + (pt.x * scale),
+                y: centerY - (pt.y * scale) // Y is up in NEU, but down in canvas
+            };
+        },
+        draw() {
+            if (!this.ctx) return;
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Draw grid
+            this.ctx.strokeStyle = '#e0e0e0';
+            this.ctx.lineWidth = 1;
+            for(let i=0; i<this.canvas.width; i+=50) {
+                this.ctx.beginPath(); this.ctx.moveTo(i, 0); this.ctx.lineTo(i, this.canvas.height); this.ctx.stroke();
+            }
+            for(let i=0; i<this.canvas.height; i+=50) {
+                this.ctx.beginPath(); this.ctx.moveTo(0, i); this.ctx.lineTo(this.canvas.width, i); this.ctx.stroke();
+            }
+
+            // Draw baselines
+            this.baselines.forEach(b => {
+                const p1 = this.points[b.from];
+                const p2 = this.points[b.to];
+                if (p1 && p2) {
+                    const sp1 = this.getScreenCoords(p1);
+                    const sp2 = this.getScreenCoords(p2);
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(sp1.x, sp1.y);
+                    this.ctx.lineTo(sp2.x, sp2.y);
+                    this.ctx.strokeStyle = '#0d6efd';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.stroke();
+                }
+            });
+
+            // Draw points
+            Object.values(this.points).forEach(pt => {
+                const sp = this.getScreenCoords(pt);
+                this.ctx.beginPath();
+                this.ctx.arc(sp.x, sp.y, pt.isBase ? 8 : 6, 0, 2 * Math.PI);
+                this.ctx.fillStyle = pt.isBase ? '#dc3545' : '#198754';
+                this.ctx.fill();
+                this.ctx.strokeStyle = '#fff';
+                this.ctx.lineWidth = 2;
+                this.ctx.stroke();
+                
+                this.ctx.fillStyle = '#000';
+                this.ctx.font = 'bold 12px Arial';
+                this.ctx.fillText(pt.name, sp.x + 10, sp.y - 10);
+            });
+        }
+    };
+
     // Lệnh Bình sai - Trigger API start gnss adjustment
-    window.requestGnssAdjustment = async function() {
-        if (!currentStationData || !currentStationData.project_id) {
-            Swal.fire('Lỗi', 'Không xác định được dự án của trạm hiện tại', 'error');
+    window.requestGnssAdjustment = async function(projectId, stationIds) {
+        if (!projectId) {
+            Swal.fire('Lỗi', 'Không xác định được dự án để bình sai', 'error');
             return;
         }
         
         try {
-            // Hiển thị thông báo đang xử lý
-            const toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timerProgressBar: true,
-                didOpen: () => {
-                    Swal.showLoading();
-                }
-            });
-            toast.fire({ title: 'Đang khởi chạy quá trình bình sai...' });
-
-            // 1. Lấy thông tin trạm CORS Base của dự án
-            const corsRes = await fetch('/api/public/cors-base-stations', { cache: 'no-store' });
-            if (!corsRes.ok) throw new Error('Không thể tải danh sách trạm Base CORS');
-            const corsList = await corsRes.json();
+            // Mở modal tiến trình
+            const terminalModal = new bootstrap.Modal(document.getElementById('gnssTerminalModal'));
+            terminalModal.show();
             
-            if (!corsList || corsList.length === 0) {
-                throw new Error('Không tìm thấy trạm Base CORS nào được gán cho dự án này');
-            }
-            
-            // Lấy mountpoint của trạm Base đầu tiên
-            const baseMountpoint = corsList[0].mountpoint || corsList[0].name;
+            // Initialize board after modal is shown to get correct dimensions
+            setTimeout(() => { window.gnssBoardState.init(); }, 300);
 
-            // 2. Gửi lệnh bắt đầu bình sai
             const payload = {
-                project_id: currentStationData.project_id,
-                base_mountpoint: baseMountpoint
+                project_id: projectId,
+                selected_clusters: stationIds ? [stationIds] : null
             };
             
-            // Note: Call as admin API (requires login)
             let res;
             if (window.authManager && window.authManager.token) {
                 res = await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
@@ -2122,7 +2279,6 @@ function setupEventListeners() {
                     body: JSON.stringify(payload)
                 });
             } else {
-                // If not logged in, it will fail, but we try anyway
                 res = await fetch('/api/admin/gnss/adjustment/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2132,13 +2288,6 @@ function setupEventListeners() {
             }
 
             if (!res || res.error) throw new Error(res.error || 'Lỗi không xác định');
-
-            Swal.fire({
-                icon: 'success',
-                title: 'Thành công',
-                text: 'Đã gửi lệnh Bình sai. Trạm Base đã được ngắt luồng.',
-                timer: 3000
-            });
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);
@@ -2283,6 +2432,14 @@ function initMap() {
         map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.047079, 108.206230], 6);
         window.map = map;
 
+        stationClusterGroup = L.markerClusterGroup({
+            chunkedLoading: true,
+            maxClusterRadius: 50,
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false
+        });
+        map.addLayer(stationClusterGroup);
+
         const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
         switchMapTiles(currentTheme);
 
@@ -2295,6 +2452,102 @@ function initMap() {
     } catch (error) {
         console.error('❌ [MAP] Failed to initialize map:', error);
     }
+}
+
+async function loadProjectsAndClusters() {
+    try {
+        const res = window.authManager?.isAuthenticated?.()
+            ? await window.authManager.apiFetch('/api/projects')
+            : await fetch('/api/projects');
+        if (!res.ok) return;
+        const projects = await res.json();
+        
+        const leafletMap = getLeafletMap();
+        if (leafletMap) {
+            clusterPolylines.forEach(p => leafletMap.removeLayer(p));
+        }
+        clusterPolylines = [];
+        
+        const colors = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];
+        let colorIdx = 0;
+
+        projects.forEach(proj => {
+            if (!proj.gnss_clusters || !Array.isArray(proj.gnss_clusters)) return;
+            
+            proj.gnss_clusters.forEach(c => {
+                let stationIds = [];
+                if (Array.isArray(c)) {
+                    stationIds = c;
+                } else if (c && c.stations) {
+                    stationIds = c.stations;
+                }
+                
+                if (stationIds.length < 2) return;
+                
+                const latlngs = [];
+                const clusterStations = [];
+                stationIds.forEach(id => {
+                    const st = allStations.find(s => s.id === id);
+                    if (st && st.location && st.location.lat) {
+                        latlngs.push([st.location.lat, st.location.lon]);
+                        clusterStations.push(st.name);
+                    }
+                });
+                
+                if (latlngs.length >= 2) {
+                    if (latlngs.length >= 3) {
+                        latlngs.push(latlngs[0]); // close loop
+                    }
+                    const polyline = L.polyline(latlngs, {
+                        color: colors[colorIdx % colors.length],
+                        weight: 3,
+                        opacity: 0.7,
+                        dashArray: '5, 10'
+                    });
+                    
+                    polyline.on('click', (e) => {
+                        showAdjustmentPopup(proj.id, proj.name, stationIds, clusterStations, e.latlng);
+                    });
+                    
+                    if (leafletMap) polyline.addTo(leafletMap);
+                    clusterPolylines.push(polyline);
+                    colorIdx++;
+                }
+            });
+        });
+    } catch (e) {
+        console.error('Error loading projects and clusters:', e);
+    }
+}
+
+function showAdjustmentPopup(projectId, projectName, stationIds, clusterStations, latlng) {
+    const leafletMap = getLeafletMap();
+    if (!leafletMap) return;
+    
+    const popupContent = document.createElement('div');
+    popupContent.className = 'text-center p-2';
+    popupContent.innerHTML = `
+        <h6 class="mb-2 fw-bold" style="color: #10b981;">${projectName}</h6>
+        <div class="small mb-3 text-secondary">Cụm: ${clusterStations.join(', ')}</div>
+        <button class="btn btn-sm btn-success w-100" id="btn-start-adjustment-${projectId}">
+            <i class="bi bi-play-fill"></i> Bắt đầu Bình sai
+        </button>
+    `;
+    
+    const popup = L.popup()
+        .setLatLng(latlng)
+        .setContent(popupContent)
+        .openOn(leafletMap);
+        
+    setTimeout(() => {
+        const btn = document.getElementById(`btn-start-adjustment-${projectId}`);
+        if (btn) {
+            btn.addEventListener('click', () => {
+                leafletMap.closePopup(popup);
+                requestGnssAdjustment(projectId, stationIds);
+            });
+        }
+    }, 100);
 }
 
 async function loadStations() {
@@ -2337,6 +2590,7 @@ async function loadStations() {
 
         renderStationList(stations);
         ensureGlobalAlertBannerFromStations(stations);
+        loadProjectsAndClusters();
 
     } catch (e) {
         console.error('❌ [MAP] Error loading stations:', e);
@@ -2417,34 +2671,54 @@ function renderStationList(stations) {
         return;
     }
 
-    container.innerHTML = '';
+    const currentIds = new Set(stations.map(st => st.id.toString()));
+    
+    Array.from(container.children).forEach(child => {
+        if (child.dataset && child.dataset.stationId && !currentIds.has(child.dataset.stationId)) {
+            container.removeChild(child);
+        }
+    });
+
+    const emptyPlaceholder = container.querySelector('.text-center.text-muted');
+    if (emptyPlaceholder) emptyPlaceholder.remove();
 
     stations.forEach(st => {
         const riskUi = getRiskPresentation(st.risk_level, st.status);
-
-        const div = document.createElement('div');
-        div.className = 'station-item';
-        div.innerHTML = `
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
-                            <small style="color: var(--text-secondary)">${st.station_code}</small>
-                        </div>
-                        <span id="list-badge-${st.id}" class="badge ${getRiskBadgeClass(riskUi.className)}">
-                            ${riskUi.display}
-                        </span>
-                    </div>
-                `;
-
-        div.addEventListener('click', () => {
-            selectStation(st.id);
-            if (window.innerWidth < 768) {
-                const sidebar = document.getElementById('station-list-sidebar');
-                if (sidebar) sidebar.classList.add('hidden');
+        const badgeClass = getRiskBadgeClass(riskUi.className);
+        
+        let div = container.querySelector(`div[data-station-id="${st.id}"]`);
+        
+        if (div) {
+            const badge = div.querySelector('.badge');
+            if (badge) {
+                const targetClass = `badge ${badgeClass}`;
+                if (badge.className !== targetClass) badge.className = targetClass;
+                if (badge.textContent.trim() !== riskUi.display) badge.textContent = riskUi.display;
             }
-        });
-
-        container.appendChild(div);
+        } else {
+            div = document.createElement('div');
+            div.className = 'station-item';
+            div.dataset.stationId = st.id;
+            div.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
+                        <small style="color: var(--text-secondary)">${st.station_code}</small>
+                    </div>
+                    <span id="list-badge-${st.id}" class="badge ${badgeClass}">
+                        ${riskUi.display}
+                    </span>
+                </div>
+            `;
+            div.addEventListener('click', () => {
+                selectStation(st.id);
+                if (window.innerWidth < 768) {
+                    const sidebar = document.getElementById('station-list-sidebar');
+                    if (sidebar) sidebar.classList.add('hidden');
+                }
+            });
+            container.appendChild(div);
+        }
     });
 }
 
@@ -2520,9 +2794,8 @@ function updateMarker(station) {
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
             .bindTooltip(station.name, { direction: 'top', offset: [0, -10] });
 
-        const leafletMap = getLeafletMap();
-        if (showStationMarkers && leafletMap) {
-            marker.addTo(leafletMap);
+        if (stationClusterGroup) {
+            stationClusterGroup.addLayer(marker);
         }
 
         marker.on('click', () => selectStation(station.id));
