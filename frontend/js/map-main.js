@@ -659,7 +659,24 @@ function updateRealtimeSensorValues(message) {
                      velocity_sample_count: data.velocity_sample_count,
                      velocity_window_duration_s: data.velocity_window_duration_s,
                      velocity_residual_rms_mm: data.velocity_residual_rms_mm,
-                     velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s
+                     velocity_residual_mad_mm: data.velocity_residual_mad_mm,
+                     velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s,
+                     velocity_confidence_95_mm_s: data.velocity_confidence_95_mm_s,
+                     velocity_significant: data.velocity_significant,
+                     velocity_reliable: data.velocity_reliable,
+                     vel_e: data.vel_e, vel_n: data.vel_n, vel_u: data.vel_u,
+                     raw_vel_e_mm_s: data.raw_vel_e_mm_s,
+                     raw_vel_n_mm_s: data.raw_vel_n_mm_s,
+                     raw_vel_u_mm_s: data.raw_vel_u_mm_s,
+                     raw_speed_2d_mm_s: data.raw_speed_2d_mm_s,
+                     speed_2d_mm_s: data.speed_2d_mm_s,
+                     total_displacement_mm: data.total_displacement_mm,
+                     peak_displacement_mm: data.peak_displacement_mm,
+                     displacement_noise_floor_mm: data.displacement_noise_floor_mm,
+                     displacement_uncertainty_mm: data.displacement_uncertainty_mm,
+                     displacement_sample_count: data.displacement_sample_count,
+                     displacement_window_duration_s: data.displacement_window_duration_s,
+                     num_sats: data.num_sats, hdop: data.hdop
                  });
              }
         }
@@ -669,28 +686,85 @@ function updateRealtimeSensorValues(message) {
             const sampleCount = data.velocity_sample_count || 0;
             const durationS = data.velocity_window_duration_s ? data.velocity_window_duration_s.toFixed(1) : 0;
             const rms = data.velocity_residual_rms_mm ? data.velocity_residual_rms_mm.toFixed(2) : 0;
-            const uncert = data.velocity_uncertainty_mm_s ? data.velocity_uncertainty_mm_s.toFixed(3) : 0;
+            const mad = data.velocity_residual_mad_mm ? data.velocity_residual_mad_mm.toFixed(2) : '--';
+            const uncert = data.velocity_uncertainty_mm_s ? data.velocity_uncertainty_mm_s.toFixed(4) : 0;
+            const ci95 = data.velocity_confidence_95_mm_s ? data.velocity_confidence_95_mm_s.toFixed(4) : '--';
 
-            // Advanced Panel fields
+            // Advanced Panel - Theil-Sen section
             setText('adv-val-method', 'Theil-Sen Robust Estimator');
             setText('adv-val-samples', sampleCount);
             setText('adv-val-duration', durationS);
             setText('adv-val-rms', rms);
+            setText('adv-val-mad', mad);
             setText('adv-val-uncert', `± ${uncert}`);
+            setText('adv-val-ci95', `± ${ci95}`);
 
-            // Main sidebar summary text (Trend logic simplified based on velocity)
+            // Advanced Panel - Raw velocity (trước lọc)
+            setText('adv-val-raw-ve', (data.raw_vel_e_mm_s || 0).toFixed(4));
+            setText('adv-val-raw-vn', (data.raw_vel_n_mm_s || 0).toFixed(4));
+            setText('adv-val-raw-vu', (data.raw_vel_u_mm_s || 0).toFixed(4));
+            setText('adv-val-raw-2d', (data.raw_speed_2d_mm_s || 0).toFixed(4));
+
+            // Advanced Panel - Filtered velocity (sau Theil-Sen)
+            setText('adv-val-filt-ve', (data.vel_e || 0).toFixed(4));
+            setText('adv-val-filt-vn', (data.vel_n || 0).toFixed(4));
+            setText('adv-val-filt-vu', (data.vel_u || 0).toFixed(4));
+            setText('adv-val-filt-2d', velocityMmS !== null ? velocityMmS.toFixed(4) : '--');
+
+            // Advanced Panel - Displacement
+            setText('adv-val-disp-total', (data.total_displacement_mm || 0).toFixed(2));
+            setText('adv-val-disp-peak', (data.peak_displacement_mm || 0).toFixed(2));
+            setText('adv-val-disp-noise', (data.displacement_noise_floor_mm || 0).toFixed(3));
+            setText('adv-val-disp-uncert', (data.displacement_uncertainty_mm || 0).toFixed(3));
+            setText('adv-val-disp-window', data.displacement_sample_count || '--');
+            setText('adv-val-disp-dur', (data.displacement_window_duration_s || 0).toFixed(1));
+
+            // Advanced Panel - GNSS quality
+            setText('adv-val-sats', data.num_sats || '--');
+            setText('adv-val-hdop', data.hdop ? data.hdop.toFixed(1) : '--');
+
+            // Advanced Panel - Timestamps
+            if (data.gga_utc) {
+                const utcStr = data.gga_utc.toString();
+                if (utcStr.length >= 6) {
+                    setText('adv-val-ts-gga', `${utcStr.substring(0,2)}:${utcStr.substring(2,4)}:${utcStr.substring(4,6)} UTC`);
+                } else {
+                    setText('adv-val-ts-gga', data.gga_utc);
+                }
+            } else {
+                setText('adv-val-ts-gga', '--');
+            }
+            if (data.timestamp) {
+                const recvDate = new Date(data.timestamp * 1000);
+                setText('adv-val-ts-recv', recvDate.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + recvDate.getMilliseconds());
+            } else {
+                setText('adv-val-ts-recv', '--');
+            }
+            const now = new Date();
+            setText('adv-val-ts-calc', now.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + now.getMilliseconds());
+
+            // Main sidebar eval summary — use backend flag, no UI-side filtering
             const evalSummaryEl = document.getElementById('gnss-eval-summary');
             if (evalSummaryEl) {
                 evalSummaryEl.style.display = 'block';
                 let trendHtml = '';
-                if (velocityMmS > 0.5) {
-                    trendHtml = `<span class="text-danger"><i class="bi bi-arrow-up-right-circle-fill me-1"></i>Chuyển dịch nhanh</span>`;
-                } else if (velocityMmS > 0.1) {
+                if (data.velocity_significant === true) {
                     trendHtml = `<span class="text-warning"><i class="bi bi-arrow-right-circle-fill me-1"></i>Có chuyển dịch</span>`;
                 } else {
-                    trendHtml = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Đang ổn định</span>`;
+                    trendHtml = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Ổn định</span>`;
                 }
-                evalSummaryEl.innerHTML = `${trendHtml} <span class="ms-2 text-muted fw-normal">Cửa sổ: ${sampleCount} mẫu (${durationS}s)</span>`;
+                const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '0.00';
+                evalSummaryEl.innerHTML = `
+                    <div class="d-flex flex-column gap-1">
+                        <div>${trendHtml}</div>
+                        <div class="text-muted fw-normal" style="font-size: 0.75rem;">
+                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc: <strong>${velStr} mm/s</strong>
+                        </div>
+                        <div class="text-muted fw-normal" style="font-size: 0.75rem;">
+                            <i class="bi bi-funnel me-1"></i>Cửa sổ trượt: ${sampleCount} mẫu (${durationS}s)
+                        </div>
+                    </div>
+                `;
             }
         }
 
@@ -1987,6 +2061,7 @@ function setupEventListeners() {
                 advSidepanel.classList.add('expanded');
             }
 
+            
             // Close left sidebar
             if (stationSidebar) {
                 stationSidebar.classList.add('hidden');
@@ -1999,6 +2074,81 @@ function setupEventListeners() {
             }
         });
     }
+
+    // Lệnh Bình sai - Trigger API start gnss adjustment
+    window.requestGnssAdjustment = async function() {
+        if (!currentStationData || !currentStationData.project_id) {
+            Swal.fire('Lỗi', 'Không xác định được dự án của trạm hiện tại', 'error');
+            return;
+        }
+        
+        try {
+            // Hiển thị thông báo đang xử lý
+            const toast = Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timerProgressBar: true,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+            toast.fire({ title: 'Đang khởi chạy quá trình bình sai...' });
+
+            // 1. Lấy thông tin trạm CORS Base của dự án
+            const corsRes = await fetch('/api/public/cors-base-stations', { cache: 'no-store' });
+            if (!corsRes.ok) throw new Error('Không thể tải danh sách trạm Base CORS');
+            const corsList = await corsRes.json();
+            
+            if (!corsList || corsList.length === 0) {
+                throw new Error('Không tìm thấy trạm Base CORS nào được gán cho dự án này');
+            }
+            
+            // Lấy mountpoint của trạm Base đầu tiên
+            const baseMountpoint = corsList[0].mountpoint || corsList[0].name;
+
+            // 2. Gửi lệnh bắt đầu bình sai
+            const payload = {
+                project_id: currentStationData.project_id,
+                base_mountpoint: baseMountpoint
+            };
+            
+            // Note: Call as admin API (requires login)
+            let res;
+            if (window.authManager && window.authManager.token) {
+                res = await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                // If not logged in, it will fail, but we try anyway
+                res = await fetch('/api/admin/gnss/adjustment/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Bạn cần đăng nhập với quyền Quản trị viên để thực hiện tính năng này');
+            }
+
+            if (!res || res.error) throw new Error(res.error || 'Lỗi không xác định');
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Thành công',
+                text: 'Đã gửi lệnh Bình sai. Trạm Base đã được ngắt luồng.',
+                timer: 3000
+            });
+            
+        } catch (error) {
+            console.error('Adjustment trigger error:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Lỗi khởi chạy Bình sai',
+                text: error.message
+            });
+        }
+    };
 
     if (closeLongtermBtn && longtermOverlay) {
         closeLongtermBtn.addEventListener('click', () => {
@@ -3383,8 +3533,7 @@ function renderLongTermAnalysis(data) {
     // === NEW: Rainfall-Displacement Correlation ===
     renderRainfallCorrelationSection(data);
 
-    // === NEW: Multi-Window Analysis ===
-    renderMultiWindowSection(data);
+    // Multi-Window section removed per user request
 
     // === Cross-Sensor Consensus ===
     renderCrossConsensusSection(data);

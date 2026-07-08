@@ -22,8 +22,19 @@ from app.landslide_analyzer import LandslideAnalyzer
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
 from processors.imu_processor import IMUEngine
+from processors.gnss_adjustment_runtime import AgricaAdjustmentRuntime
+from processors.round_robin_manager import RoundRobinAdjustmentManager
 
 # from aes128decrypt import aes128_decrypt_base64  # tạm vô hiệu hoá
+
+def clean_null_bytes(data):
+    if isinstance(data, str):
+        return data.replace('\x00', '')
+    elif isinstance(data, dict):
+        return {k: clean_null_bytes(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_null_bytes(item) for item in data]
+    return data
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +86,14 @@ class MQTTBridge:
         # Topic management
         self.topic_map: Dict[tuple, Dict[str, Any]] = {}  # Key: (broker_key, topic)
         self.processors_cache: Dict[str, Any] = {}
+        self.agrica_runtime = AgricaAdjustmentRuntime()
+        self.adjustment_phase: Dict[int, str] = {}  # {project_id: "IDLE" | "COLLECTING_BASELINE" | "FREE_NETWORK"}
+        # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
+        self.round_robin_manager = RoundRobinAdjustmentManager(
+            self.client, 
+            caster_host=settings.MQTT_BROKER, 
+            caster_port=7054
+        )
         self._fwd_clients: Dict[tuple, mqtt.Client] = {}  # Cache for external brokers
         self._sub_clients: Dict[tuple, mqtt.Client] = {}  # Dynamic clients for subscriptions
         self._client_topics: Dict[tuple, set] = defaultdict(set)  # Broker key -> set of subscribed topics
@@ -571,6 +590,9 @@ class MQTTBridge:
                         "station_id": station.id,
                         "station_name": station.name,
                         "station_code": getattr(station, "station_code", None),
+                        "project_id": project.id,
+                        "project_gnss_clusters": project.gnss_clusters,
+                        "station_origins": {},
                         "type": device.device_type,
                         "processor": self.processors_cache[proc_key],
                         "config": self._apply_runtime_defaults_to_station_config(station.config or {}),
@@ -661,7 +683,7 @@ class MQTTBridge:
         async with self._buffer_lock:
             if not self._sensor_buffer and not self._station_update_buffer:
                 return
-            sensor_batch = list(self._sensor_buffer)
+            sensor_batch = [clean_null_bytes(r) for r in self._sensor_buffer]
             station_batch = dict(self._station_update_buffer)
             device_batch = dict(self._device_update_buffer)
             self._sensor_buffer.clear()
@@ -718,7 +740,7 @@ class MQTTBridge:
 
         try:
             async with DataSessionLocal() as db_data:
-                db_data.add(model_data.SensorData(**sensor_record))
+                db_data.add(model_data.SensorData(**clean_null_bytes(sensor_record)))
                 # Tìm alert chưa resolve cùng category, cập nhật hoặc tạo mới.
                 # Với IMU, gom cả alert legacy `tilt_warning` vào cùng luồng `tilt_critical`.
                 alert_query = and_(
@@ -881,16 +903,17 @@ class MQTTBridge:
     async def _upsert_latest_sensor_cache(self, station_id: int, sensor_type: str, timestamp: int, data: dict):
         """Luôn cập nhật giá trị mới nhất vào bảng cache riêng, bất kể chu kỳ lưu sensor_data."""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+        cleaned_data = clean_null_bytes(data)
         try:
             async with DataSessionLocal() as db:
                 stmt = pg_insert(model_data.LatestSensorCache).values(
                     station_id=station_id,
                     sensor_type=sensor_type,
                     timestamp=timestamp,
-                    data=data,
+                    data=cleaned_data,
                 ).on_conflict_do_update(
                     index_elements=['station_id', 'sensor_type'],
-                    set_=dict(timestamp=timestamp, data=data),
+                    set_=dict(timestamp=timestamp, data=cleaned_data),
                 )
                 await db.execute(stmt)
                 await db.commit()
@@ -1123,6 +1146,71 @@ class MQTTBridge:
         # 1. PROCESS DATA
         try:
             if sensor_type == 'gnss':
+                if "#AGRICA" in raw_payload:
+                    adj_res = self.agrica_runtime.add_payload(raw_payload, info)
+                    
+                    # Cập nhật dữ liệu cho Round Robin nếu đang trong phase FREE_NETWORK
+                    proj_id = int(info.get("project_id") or info.get("station_id") or 0)
+                    if self.adjustment_phase.get(proj_id) == "FREE_NETWORK":
+                        self.round_robin_manager.add_agrica_payload(raw_payload, info)
+                        
+                    if adj_res:
+                        adj_payload = {
+                            "station_id": station_id,
+                            "timestamp": current_timestamp,
+                            "sensor_type": "gnss_adjusted",
+                            "data": adj_res,
+                            "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None
+                        }
+                        async with self._buffer_lock:
+                            self._sensor_buffer.append(adj_payload)
+                        
+                        try:
+                            await self._upsert_latest_sensor_cache(station_id, 'gnss_adjusted', current_timestamp, adj_res)
+                        except Exception: pass
+                        
+                        try:
+                            await manager.broadcast({
+                                "type": "sensor_status",
+                                "station_id": station_id,
+                                "sensor_type": "gnss_adjusted",
+                                "timestamp": current_timestamp,
+                                "data": adj_res
+                            })
+                        except Exception as ws_e:
+                            logger.error(f"❌ WS GNSS adjustment error: {ws_e}")
+                            
+                        # Phân tích chuyển phase
+                        proj_id = info.get("project_id")
+                        if proj_id and self.adjustment_phase.get(proj_id) == "COLLECTING_BASELINE":
+                            logger.info(f"🎯 [ADJUSTMENT] Baseline collected for project {proj_id}! Stopping base to enter Free-Network phase.")
+                            self.adjustment_phase[proj_id] = "FREE_NETWORK"
+                            
+                            base_mp = None
+                            gnss_clusters = info.get("project_gnss_clusters")
+                            if gnss_clusters and isinstance(gnss_clusters, list) and len(gnss_clusters) > 0:
+                                first_cluster = gnss_clusters[0]
+                                if isinstance(first_cluster, dict):
+                                    base_mp = first_cluster.get("base_stream_mp") or first_cluster.get("base_station")
+                            
+                            if base_mp:
+                                stop_payload = {"station_code": base_mp}
+                                self.client.publish("command/ntrip/route/stop", json.dumps(stop_payload))
+                                logger.info(f"Published stop command for base {base_mp}")
+
+                            # Lấy danh sách các rovers trong cluster để truyền vào round robin
+                            rovers_list = []
+                            if gnss_clusters and isinstance(gnss_clusters, list) and len(gnss_clusters) > 0:
+                                first_cluster = gnss_clusters[0]
+                                if isinstance(first_cluster, dict):
+                                    rovers_list = first_cluster.get("rovers", [])
+                            
+                            # Kích hoạt chu trình Round-Robin
+                            if rovers_list:
+                                asyncio.create_task(self.round_robin_manager.start_cycle(proj_id, rovers_list))
+                            else:
+                                logger.warning(f"No rovers found for Round-Robin in project {proj_id}")
+
                 # Only process for GNSS position/status if payload actually contains GGA.
                 # This prevents pure AGRICA sentences from triggering fake NO_DATA statuses
                 # which causes the UI to rapidly blink between FIXED and NO_DATA.
@@ -1131,6 +1219,14 @@ class MQTTBridge:
                     res = processor.process_gngga(raw_payload, station_config)
                     if res and res.get('type') == 'gnss_processed':
                         processed_data = res.get('data')
+                        
+                        # Cập nhật LLH cache cho RoundRobin
+                        station_code = info.get("station_code")
+                        lat = processed_data.get('latitude')
+                        lon = processed_data.get('longitude')
+                        alt = processed_data.get('altitude', 0.0)
+                        if lat is not None and lon is not None:
+                            self.round_robin_manager.update_rover_llh(station_code, lat, lon, alt)
                     elif res and res.get('type') == 'gnss_status':
                         status_payload = {
                             "status": res.get('status'),

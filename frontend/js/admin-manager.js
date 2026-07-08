@@ -779,8 +779,10 @@ class AdminManager {
         } catch (e) {
             console.error('Error fetching project stations:', e);
         }
-        
-        // Populate Clusters
+        // 2. Auto load CORS stations
+        await this.fetchCorsStations();
+
+        // 3. Populate Clusters
         const clusters = project.gnss_clusters || [];
         const clustersContainer = document.getElementById('project-gnss-clusters-container');
         clustersContainer.innerHTML = '';
@@ -797,9 +799,6 @@ class AdminManager {
             this.projectConfigModal = new bootstrap.Modal(document.getElementById('projectConfigModal'));
         }
         this.projectConfigModal.show();
-
-        // 2. Auto load CORS stations
-        this.fetchCorsStations();
     }
 
     addClusterRow(container, name = '', desc = '', base_station_code = '', stations = [], base_stream = '') {
@@ -984,6 +983,8 @@ class AdminManager {
     }
 
     async fetchCorsStations() {
+        if (this.corsStationsData && this.corsStationsData.length > 0) return; // Cache check
+
         try {
             const res = await fetch('/api/admin/projects/cors-stations', {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -994,31 +995,6 @@ class AdminManager {
             const stations = Array.isArray(data) ? data : (data.data || data.stations || []);
             
             this.corsStationsData = stations;
-
-            // Update all existing cluster base selects
-            document.querySelectorAll('.cluster-base-select').forEach(selectEl => {
-                const currentValue = selectEl.value; // Store the originally selected value (often the code)
-                
-                if (stations.length === 0) {
-                    selectEl.innerHTML = '<option value="">Không tìm thấy trạm nào</option>';
-                    return;
-                }
-                
-                let optionsHtml = '<option value="">-- Chọn Trạm Base --</option>';
-                stations.forEach(st => {
-                    const stNameOrCode = st.name || st.code;
-                    const isSelected = (stNameOrCode === currentValue) ? 'selected' : '';
-                    optionsHtml += `<option value="${stNameOrCode}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${stNameOrCode} (${st.lat}, ${st.lon})</option>`;
-                });
-                
-                selectEl.innerHTML = optionsHtml;
-                // If the originally selected value isn't in the list, keep it as an option so data is not lost
-                if (currentValue && !stations.some(s => (s.name || s.code) === currentValue)) {
-                    selectEl.innerHTML += `<option value="${currentValue}" selected>${currentValue} (Không tồn tại trong ds)</option>`;
-                }
-                // Trigger info panel update
-                this.onBaseStationSelected(selectEl);
-            });
             
         } catch (e) {
             console.error(e);

@@ -170,77 +170,145 @@ window.LegacyTemplates = {
                     </div>
                 </div>
 
-                <!-- Nhóm 3: Vận tốc biến dạng -->
+                <!-- Nhóm 3: Vận tốc THÔ (Raw - trước lọc) -->
                 <div class="adv-section">
-                    <div class="adv-section-title">Vận tốc biến dạng</div>
-                    <div class="adv-item">
-                        <span class="adv-label">Vận tốc V<sub>&Delta;X</sub></span>
-                        <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span><span
-                                class="adv-unit">mm/phút</span></div>
-                    </div>
-                    <div class="adv-item">
-                        <span class="adv-label">Vận tốc V<sub>&Delta;Y</sub></span>
-                        <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span><span
-                                class="adv-unit">mm/phút</span></div>
-                    </div>
-                    <div class="adv-item">
-                        <span class="adv-label">Vận tốc V<sub>&Delta;H</sub></span>
-                        <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span><span
-                                class="adv-unit">mm/phút</span></div>
-                    </div>
-                </div>
-
-                <div class="mt-2 small text-muted text-center italic" style="font-size: 0.65rem;">
-                    * Hệ tọa độ VN2000.
-                </div>
-
-                <!-- ============================================ -->
-                <!-- MULTI-WINDOW ANALYSIS SECTION -->
-                <!-- ============================================ -->
-                <div id="multi-window-section" class="mt-4" style="display: none;">
-                    <h5 class="mb-3 text-success border-bottom pb-2" style="font-size: 0.9rem;">
-                        <i class="bi bi-window-stack me-2"></i>Phân tích xu hướng theo kỳ (Theil-Sen)
-                    </h5>
-                    <div id="multi-window-alert" class="alert alert-warning mb-3" style="display: none; padding: 8px; font-size: 0.8rem;">
-                        <i class="bi bi-lightning me-2"></i>
-                        <strong id="multi-window-alert-text"></strong>
-                    </div>
-                    <div class="row g-2 mb-3" id="multi-window-cards"></div>
-                </div>
-
-                <!-- ============================================ -->
-                <!-- CROSS-SENSOR CONSENSUS SECTION -->
-                <!-- ============================================ -->
-                <div id="cross-consensus-section" class="mt-4" style="display: none;">
-                    <h5 class="mb-3 border-bottom pb-2" style="color: var(--text-primary); font-size: 0.9rem;">
-                        <i class="bi bi-intersect me-2"></i>Đồng thuận đa cảm biến
-                    </h5>
-                    <div id="consensus-banner" class="consensus-banner mb-3" style="padding: 8px;">
-                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                            <span id="consensus-badge" class="consensus-badge" style="font-size: 0.7rem;">--</span>
-                            <span id="consensus-summary" class="fw-semibold" style="font-size: 0.8rem;"></span>
-                        </div>
-                    </div>
-                    <div class="row g-2 mb-3">
+                    <div class="adv-section-title text-secondary"><i class="bi bi-speedometer me-1"></i>Vận tốc thô (Raw)</div>
+                    <div class="row g-2">
                         <div class="col-6">
-                            <div class="p-2 border border-secondary rounded" style="background: rgba(255,255,255,0.02);">
-                                <div class="text-muted" style="font-size: 0.65rem;">Mưa (7 ngày)</div>
-                                <div id="consensus-rain" class="fw-bold" style="font-size: 0.8rem;">--</div>
+                            <div class="adv-item">
+                                <span class="adv-label">East</span>
+                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-ve">--</span></div>
                             </div>
                         </div>
                         <div class="col-6">
-                            <div class="p-2 border border-secondary rounded" style="background: rgba(255,255,255,0.02);">
-                                <div class="text-muted" style="font-size: 0.65rem;">Gia tốc GNSS</div>
-                                <div id="consensus-accel" class="fw-bold" style="font-size: 0.8rem;">--</div>
+                            <div class="adv-item">
+                                <span class="adv-label">North</span>
+                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-vn">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">Up</span>
+                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-vu">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">Speed 2D</span>
+                                <div class="adv-value-row"><span class="adv-value text-secondary fw-bold" id="adv-val-raw-2d">--</span></div>
                             </div>
                         </div>
                     </div>
-                    <div class="small text-muted fst-italic" id="consensus-desc" style="font-size: 0.7rem;"></div>
                 </div>
-                
-                <!-- Nhóm 4: Đánh giá chuyên sâu (Theil-Sen) -->
-                <div class="adv-section mt-4">
-                    <div class="adv-section-title text-warning"><i class="bi bi-graph-up-arrow me-2"></i>Đánh giá Theil-Sen Robust</div>
+
+                <!-- Nhóm 4: Vận tốc SAU LỌC (Theil-Sen) -->
+                <div class="adv-section">
+                    <div class="adv-section-title text-info"><i class="bi bi-funnel-fill me-1"></i>Vận tốc sau lọc (Theil-Sen)</div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">East</span>
+                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-ve">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">North</span>
+                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-vn">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">Up</span>
+                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-vu">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">Speed 2D</span>
+                                <div class="adv-value-row"><span class="adv-value text-info fw-bold" id="adv-val-filt-2d">--</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nhóm 5: Vận tốc biến dạng VN2000 -->
+                <div class="adv-section">
+                    <div class="adv-section-title">Vận tốc biến dạng (VN2000)</div>
+                    <div class="row g-2">
+                        <div class="col-4">
+                            <div class="adv-item">
+                                <span class="adv-label">&Delta;X (E)</span>
+                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="adv-item">
+                                <span class="adv-label">&Delta;Y (N)</span>
+                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span></div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="adv-item">
+                                <span class="adv-label">&Delta;H (U)</span>
+                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nhóm 6: Dịch chuyển (Displacement) -->
+                <div class="adv-section">
+                    <div class="adv-section-title text-teal-400"><i class="bi bi-arrows-move me-1"></i>Dịch chuyển (Displacement)</div>
+                    <div class="adv-item">
+                        <span class="adv-label">Tổng dịch chuyển</span>
+                        <div class="adv-value-row"><span class="adv-value text-warning fw-bold" id="adv-val-disp-total">--</span><span class="adv-unit">mm</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Dịch chuyển đỉnh (Peak)</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-disp-peak">--</span><span class="adv-unit">mm</span></div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">Noise Floor</span>
+                                <div class="adv-value-row"><span class="adv-value text-muted" id="adv-val-disp-noise">--</span><span class="adv-unit">mm</span></div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="adv-item">
+                                <span class="adv-label">Uncertainty</span>
+                                <div class="adv-value-row"><span class="adv-value text-muted" id="adv-val-disp-uncert">--</span><span class="adv-unit">mm</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="adv-item mt-1">
+                        <span class="adv-label">Cửa sổ / Thời lượng</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-disp-window">--</span><span class="adv-unit"> mẫu</span> · <span class="adv-value" id="adv-val-disp-dur">--</span><span class="adv-unit">s</span></div>
+                    </div>
+                </div>
+
+                <!-- Nhóm 9: Timestamps -->
+                <div class="adv-section">
+                    <div class="adv-section-title"><i class="bi bi-clock-history me-1"></i>Dấu thời gian (Timestamps)</div>
+                    <div class="adv-item">
+                        <span class="adv-label">GGA UTC</span>
+                        <div class="adv-value-row"><span class="adv-value font-monospace" id="adv-val-ts-gga">--</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Nhận GNSS (Server)</span>
+                        <div class="adv-value-row"><span class="adv-value font-monospace" id="adv-val-ts-recv">--</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Lọc Theil-Sen xong</span>
+                        <div class="adv-value-row"><span class="adv-value font-monospace" id="adv-val-ts-calc">--</span></div>
+                    </div>
+                </div>
+
+
+                <!-- Nhóm 7: Đánh giá chuyên sâu (Theil-Sen Quality) -->
+                <div class="adv-section mt-3">
+                    <div class="adv-section-title text-warning"><i class="bi bi-graph-up-arrow me-2"></i>Chất lượng Theil-Sen</div>
                     <div class="adv-item">
                         <span class="adv-label">Thuật toán:</span>
                         <div class="adv-value-row"><span class="adv-value" style="font-size: 0.75rem;" id="adv-val-method">Theil-Sen</span></div>
@@ -252,17 +320,46 @@ window.LegacyTemplates = {
                         </div>
                     </div>
                     <div class="adv-item mt-2">
-                        <span class="adv-label">Sai số dư (Residual RMS):</span>
+                        <span class="adv-label">Sai số dư RMS:</span>
                         <div class="adv-value-row">
                             <span class="adv-value text-info" id="adv-val-rms">--</span><span class="adv-unit">mm</span>
                         </div>
                     </div>
                     <div class="adv-item">
-                        <span class="adv-label">Độ KĐB đo (Uncertainty):</span>
+                        <span class="adv-label">Sai số dư MAD:</span>
+                        <div class="adv-value-row">
+                            <span class="adv-value text-info" id="adv-val-mad">--</span><span class="adv-unit">mm</span>
+                        </div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">Uncertainty:</span>
                         <div class="adv-value-row">
                             <span class="adv-value text-danger fw-bold" id="adv-val-uncert">&plusmn; --</span><span class="adv-unit">mm/s</span>
                         </div>
                     </div>
+                    <div class="adv-item">
+                        <span class="adv-label">CI 95%:</span>
+                        <div class="adv-value-row">
+                            <span class="adv-value text-danger" id="adv-val-ci95">&plusmn; --</span><span class="adv-unit">mm/s</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nhóm 8: Chất lượng tín hiệu GNSS -->
+                <div class="adv-section">
+                    <div class="adv-section-title"><i class="bi bi-broadcast me-1"></i>Tín hiệu GNSS</div>
+                    <div class="adv-item">
+                        <span class="adv-label">Số vệ tinh (Sats)</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-sats">--</span></div>
+                    </div>
+                    <div class="adv-item">
+                        <span class="adv-label">HDOP</span>
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-hdop">--</span></div>
+                    </div>
+                </div>
+
+                <div class="mt-2 small text-muted text-center italic" style="font-size: 0.65rem;">
+                    * Hệ tọa độ VN2000. Giá trị hiển thị nguyên bản từ backend, không lọc/ép UI.
                 </div>
 
             </div>
@@ -961,6 +1058,40 @@ window.LegacyTemplates = {
                     </div>
 
                 </div>
+
+                <!-- ============================================ -->
+                <!-- CROSS-SENSOR CONSENSUS SECTION -->
+                <!-- ============================================ -->
+                <div id="cross-consensus-section" class="mt-4" style="display: none;">
+                    <h5 class="mb-3 border-bottom pb-2" style="color: var(--text-primary); font-size: 0.9rem;">
+                        <i class="bi bi-intersect me-2"></i>Đồng thuận đa cảm biến
+                    </h5>
+                    <div id="consensus-banner" class="consensus-banner mb-3" style="padding: 10px; border-radius: 8px;">
+                        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                            <span id="consensus-badge" class="consensus-badge" style="font-size: 0.7rem;">--</span>
+                            <span id="consensus-summary" class="fw-semibold" style="font-size: 0.8rem;"></span>
+                        </div>
+                        <div id="consensus-sensors-with-data" class="d-flex flex-wrap gap-1 mt-1"></div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <div class="p-2 border border-secondary rounded" style="background: rgba(255,255,255,0.02);">
+                                <div class="text-muted" style="font-size: 0.65rem;">Mưa (7 ngày)</div>
+                                <div id="consensus-rain" class="fw-bold" style="font-size: 0.8rem;">--</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 border border-secondary rounded" style="background: rgba(255,255,255,0.02);">
+                                <div class="text-muted" style="font-size: 0.65rem;">Gia tốc GNSS</div>
+                                <div id="consensus-accel" class="fw-bold" style="font-size: 0.8rem;">--</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="consensus-trend-agreement" class="fw-bold mt-1 mb-2 text-muted" style="font-size: 0.8rem;"></div>
+                    <div id="consensus-notes" class="small text-muted" style="font-size: 0.72rem;"></div>
+                    <div class="small text-muted fst-italic mt-1" id="consensus-desc" style="font-size: 0.7rem;"></div>
+                </div>
+
             </div>
         </div>
 
@@ -3701,50 +3832,50 @@ window.LegacyTemplates = {
                             <h6 class="text-success mb-3"><i class="bi bi-database"></i> Dữ Liệu Cần Tải</h6>
                             
                             <div class="export-options">
-                                <div class="form-check export-item p-2 mb-2 border rounded" style="cursor: pointer;">
-                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-projects" value="projects">
-                                    <label class="form-check-label stretched-link" for="export-projects">
+                                <div class="export-item p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
+                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-projects" value="projects" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
+                                    <label class="form-check-label stretched-link mb-0" for="export-projects" style="z-index: 1;">
                                         <strong>Bảng Dự án & Trạm</strong> (Cấu hình)
                                     </label>
                                 </div>
                                 
-                                <div class="form-check export-item p-2 mb-2 border rounded" style="cursor: pointer;">
-                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-devices" value="devices">
-                                    <label class="form-check-label stretched-link" for="export-devices">
+                                <div class="export-item p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
+                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-devices" value="devices" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
+                                    <label class="form-check-label stretched-link mb-0" for="export-devices" style="z-index: 1;">
                                         <strong>Bảng Thiết bị</strong> (Cấu hình Pi, Sensor)
                                     </label>
                                 </div>
 
-                                <div class="form-check export-item p-2 mb-2 border rounded border-primary bg-light" style="cursor: pointer;">
-                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-sensor-data" value="sensor_data" checked onchange="document.getElementById('export-sensor-types').style.display = this.checked ? 'block' : 'none'">
-                                    <label class="form-check-label stretched-link" for="export-sensor-data">
+                                <div class="export-item p-2 mb-2 border rounded border-primary bg-light d-flex align-items-center position-relative" style="cursor: pointer;">
+                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-sensor-data" value="sensor_data" checked onchange="document.getElementById('export-sensor-types').style.display = this.checked ? 'block' : 'none'" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
+                                    <label class="form-check-label stretched-link mb-0" for="export-sensor-data" style="z-index: 1;">
                                         <strong>Lịch sử Dữ liệu Cảm biến</strong>
                                     </label>
                                 </div>
                                 
                                 <!-- Chi tiết Cảm biến -->
                                 <div id="export-sensor-types" class="ps-4 mb-3">
-                                    <div class="form-check mb-1">
-                                        <input class="form-check-input" type="checkbox" id="sensor-gnss" value="gnss" checked>
-                                        <label class="form-check-label small" for="sensor-gnss">GNSS (Chuyển vị)</label>
+                                    <div class="d-flex align-items-center mb-2">
+                                        <input class="form-check-input m-0 me-2" type="checkbox" id="sensor-gnss" value="gnss" checked style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; float: none; cursor: pointer;">
+                                        <label class="form-check-label small mb-0" for="sensor-gnss" style="cursor: pointer;">GNSS (Chuyển vị)</label>
                                     </div>
-                                    <div class="form-check mb-1">
-                                        <input class="form-check-input" type="checkbox" id="sensor-imu" value="imu" checked>
-                                        <label class="form-check-label small" for="sensor-imu">IMU (Độ nghiêng)</label>
+                                    <div class="d-flex align-items-center mb-2">
+                                        <input class="form-check-input m-0 me-2" type="checkbox" id="sensor-imu" value="imu" checked style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; float: none; cursor: pointer;">
+                                        <label class="form-check-label small mb-0" for="sensor-imu" style="cursor: pointer;">IMU (Độ nghiêng)</label>
                                     </div>
-                                    <div class="form-check mb-1">
-                                        <input class="form-check-input" type="checkbox" id="sensor-rain" value="rain" checked>
-                                        <label class="form-check-label small" for="sensor-rain">Lượng mưa</label>
+                                    <div class="d-flex align-items-center mb-2">
+                                        <input class="form-check-input m-0 me-2" type="checkbox" id="sensor-rain" value="rain" checked style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; float: none; cursor: pointer;">
+                                        <label class="form-check-label small mb-0" for="sensor-rain" style="cursor: pointer;">Lượng mưa</label>
                                     </div>
-                                    <div class="form-check mb-1">
-                                        <input class="form-check-input" type="checkbox" id="sensor-water" value="water" checked>
-                                        <label class="form-check-label small" for="sensor-water">Mực nước</label>
+                                    <div class="d-flex align-items-center mb-2">
+                                        <input class="form-check-input m-0 me-2" type="checkbox" id="sensor-water" value="water" checked style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; float: none; cursor: pointer;">
+                                        <label class="form-check-label small mb-0" for="sensor-water" style="cursor: pointer;">Mực nước</label>
                                     </div>
                                 </div>
 
-                                <div class="form-check export-item p-2 mb-2 border rounded" style="cursor: pointer;">
-                                    <input class="form-check-input ms-1 me-2" type="checkbox" id="export-alerts" value="alerts">
-                                    <label class="form-check-label stretched-link" for="export-alerts">
+                                <div class="export-item p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
+                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-alerts" value="alerts" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
+                                    <label class="form-check-label stretched-link mb-0" for="export-alerts" style="z-index: 1;">
                                         <strong>Lịch sử Cảnh báo (Alerts)</strong>
                                     </label>
                                 </div>

@@ -851,9 +851,45 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
 
 
 @app.get("/api/public/cors-base-stations")
-async def get_cors_base_stations():
+async def get_cors_base_stations(
+    request: Request,
+    db_config: AsyncSession = Depends(get_config_db),
+    db_auth: AsyncSession = Depends(get_auth_db)
+):
     try:
-        return await asyncio.to_thread(_fetch_cors_base_stations_sync)
+        all_cors = await asyncio.to_thread(_fetch_cors_base_stations_sync)
+        if not all_cors:
+            return []
+
+        # Find which CORS stations are used by projects the user can see
+        current_user = await get_optional_current_user_from_request(request, db_auth)
+        project_filter_ids = user_project_filter_ids(current_user)
+
+        stmt = select(model_config.Project).where(model_config.Project.is_active == True)
+        if project_filter_ids is not None:
+            if not project_filter_ids:
+                return []
+            stmt = stmt.where(model_config.Project.id.in_(project_filter_ids))
+
+        result = await db_config.execute(stmt)
+        projects = result.scalars().all()
+
+        used_bases = set()
+        for p in projects:
+            clusters = p.gnss_clusters or []
+            if isinstance(clusters, list):
+                for c in clusters:
+                    if isinstance(c, dict):
+                        base_station = c.get("base_station")
+                        if base_station:
+                            used_bases.add(base_station)
+
+        filtered_cors = [
+            st for st in all_cors 
+            if st["name"] in used_bases or st.get("mountpoint") in used_bases or st.get("code") in used_bases
+        ]
+
+        return filtered_cors
     except requests.RequestException as e:
         logger.warning(f"CORS base station fetch failed: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch CORS base stations")
@@ -1767,25 +1803,13 @@ async def start_gnss_adjustment(
             mqtt_service.active_adjustment_clusters[req.project_id] = req.selected_clusters
             logger.info(f"Stored dynamic active adjustment clusters for project {req.project_id}: {req.selected_clusters}")
 
-        # 1. Gửi lệnh ngắt (sleep) luồng RTCM của Base gốc qua MQTT tới CORS Dashboard
-        topic = "ntrip/rtcm/stop"
-        payload = {
-            "mountpoint": req.base_mountpoint,
-            "client_instance_id": "landslide_system",
-            "force": True
-        }
-        if req.caster_address:
-            payload["caster_address"] = req.caster_address
+        # 1. Bật chế độ chờ thu thập Baseline (COLLECTING_BASELINE)
+        mqtt_service.adjustment_phase[req.project_id] = "COLLECTING_BASELINE"
+        logger.info(f"🎯 Started GNSS Adjustment for project {req.project_id}. Phase: COLLECTING_BASELINE.")
 
-        # Sử dụng client MQTT có sẵn trong mqtt_service
-        if mqtt_service.client and mqtt_service.client.is_connected():
-            mqtt_service.client.publish(topic, json.dumps(payload), qos=1)
-            logger.info(f"Published adjustment start command (stop Base RTCM): {payload}")
-        else:
-            logger.warning(f"MQTT client not connected, failed to publish stop base command")
-            raise HTTPException(status_code=503, detail="MQTT broker connection unavailable")
-
-        return {"status": "success", "message": "Adjustment cycle started, Base stream put to sleep"}
+        # MQTT Bridge sẽ tự động gửi lệnh ngắt Base khi thu thập đủ baseline chuẩn.
+        
+        return {"status": "success", "message": "Adjustment cycle started, waiting for baseline before stopping Base"}
     except Exception as e:
         logger.error(f"Failed to start GNSS adjustment cycle: {e}")
         if isinstance(e, HTTPException): raise e
@@ -1798,9 +1822,10 @@ async def stop_gnss_adjustment(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
-        # Clear dynamic active adjustment clusters
+        # Clear dynamic active adjustment clusters and phase
         mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
-        logger.info(f"Cleared active adjustment clusters for project {req.project_id}")
+        mqtt_service.adjustment_phase.pop(req.project_id, None)
+        logger.info(f"Cleared active adjustment clusters and phase for project {req.project_id}")
 
         # 1. Gửi lệnh mở lại (wake) luồng RTCM của Base gốc qua MQTT tới CORS Dashboard
         topic = "ntrip/rtcm/start"
