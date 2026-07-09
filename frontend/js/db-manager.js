@@ -8,6 +8,9 @@ class DatabaseManager {
         this.allData = [];
         this.filteredData = [];
         this.currentEditModal = null;
+        this.exportProjects = [];
+        this.exportStations = [];
+        this.exportStationRequestSeq = 0;
 
         if (!this.token) {
             window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
@@ -321,8 +324,11 @@ class DatabaseManager {
     // =========================================================================
 
     // Hiện Modal Chọn Bảng và nạp danh sách dự án
-    exportToExcel() {
-        const modal = new bootstrap.Modal(document.getElementById('exportExcelModal'));
+    async exportToExcel() {
+        const modalEl = document.getElementById('exportExcelModal');
+        if (!modalEl) return;
+
+        const modal = new bootstrap.Modal(modalEl);
         
         // Reset UI
         document.getElementById('export-progress-container').style.display = 'none';
@@ -330,12 +336,45 @@ class DatabaseManager {
         document.getElementById('btn-export-cancel').disabled = false;
         
         // Nạp danh sách Project
-        this.populateExportProjects();
+        this.setExportSelectLoading('export-project-select', 'Dang tai danh sach du an...');
+        this.setExportSelectLoading('export-station-select', 'Chon du an de tai tram...');
         
         modal.show();
+
+        await this.populateExportProjects();
     }
 
-    populateExportProjects() {
+    escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    setExportSelectLoading(selectId, message) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        select.disabled = true;
+        select.innerHTML = `<option value="all">${this.escapeHtml(message)}</option>`;
+    }
+
+    async fetchJson(url) {
+        const res = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${this.token}` }
+        });
+
+        if (!res.ok) {
+            const message = await res.text().catch(() => '');
+            throw new Error(message || `HTTP ${res.status}`);
+        }
+
+        return await res.json();
+    }
+
+    populateExportProjectsLegacyUnused() {
         const select = document.getElementById('export-project-select');
         if (!select) return;
         
@@ -351,7 +390,7 @@ class DatabaseManager {
         this.onExportProjectChange();
     }
     
-    onExportProjectChange() {
+    onExportProjectChangeLegacyUnused() {
         const pSelect = document.getElementById('export-project-select');
         const sSelect = document.getElementById('export-station-select');
         if (!pSelect || !sSelect) return;
@@ -368,18 +407,82 @@ class DatabaseManager {
         sSelect.innerHTML = html;
     }
 
+    async populateExportProjects() {
+        const select = document.getElementById('export-project-select');
+        if (!select) return;
+
+        try {
+            const cachedProjects = window.adminManager?.projectsData;
+            const projects = Array.isArray(cachedProjects)
+                ? cachedProjects
+                : await this.fetchJson('/api/admin/projects');
+            this.exportProjects = Array.isArray(projects) ? projects : [];
+
+            let html = '<option value="all">-- Tat ca Du an --</option>';
+            this.exportProjects.forEach(p => {
+                html += `<option value="${p.id}">${this.escapeHtml(p.project_code)} - ${this.escapeHtml(p.name || '')}</option>`;
+            });
+            select.innerHTML = html;
+            select.disabled = false;
+
+            await this.onExportProjectChange();
+        } catch (e) {
+            console.error('Error loading export projects:', e);
+            select.innerHTML = '<option value="all">Khong tai duoc danh sach du an</option>';
+            select.disabled = true;
+            this.setExportSelectLoading('export-station-select', 'Khong tai duoc danh sach tram');
+            window.toast?.error('Khong the tai danh sach du an/tram de export');
+        }
+    }
+
+    async onExportProjectChange() {
+        const pSelect = document.getElementById('export-project-select');
+        const sSelect = document.getElementById('export-station-select');
+        if (!pSelect || !sSelect) return;
+
+        const projectId = pSelect.value;
+        const requestSeq = ++this.exportStationRequestSeq;
+        this.setExportSelectLoading('export-station-select', 'Dang tai danh sach tram...');
+
+        try {
+            const stations = projectId && projectId !== 'all'
+                ? await this.fetchJson(`/api/admin/projects/${projectId}/stations`)
+                : await this.fetchJson('/api/admin/db/stations');
+
+            if (requestSeq !== this.exportStationRequestSeq) return;
+
+            this.exportStations = Array.isArray(stations) ? stations : [];
+            let html = '<option value="all">-- Tat ca Tram --</option>';
+            this.exportStations.forEach(s => {
+                html += `<option value="${s.id}">${this.escapeHtml(s.station_code)} - ${this.escapeHtml(s.name || s.station_name || '')}</option>`;
+            });
+            sSelect.innerHTML = html;
+            sSelect.disabled = false;
+        } catch (e) {
+            console.error('Error loading export stations:', e);
+            if (requestSeq !== this.exportStationRequestSeq) return;
+            sSelect.innerHTML = '<option value="all">Khong tai duoc danh sach tram</option>';
+            sSelect.disabled = true;
+            window.toast?.error('Khong the tai danh sach tram cho export');
+        }
+    }
+
     async confirmExportExcel() {
         try {
             // Lấy các bảng được chọn
             const tables = [];
-            if (document.getElementById('export-projects')?.checked) tables.push('projects');
+            if (document.getElementById('export-projects')?.checked) {
+                tables.push('projects');
+                tables.push('stations');
+            }
             if (document.getElementById('export-stations')?.checked) tables.push('stations');
             if (document.getElementById('export-devices')?.checked) tables.push('devices');
             if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
             if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
+            const uniqueTables = [...new Set(tables)];
 
             // Kiểm tra
-            if (tables.length === 0) {
+            if (uniqueTables.length === 0) {
                 window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng dữ liệu!');
                 return;
             }
@@ -392,6 +495,11 @@ class DatabaseManager {
             
             const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId)] : null;
             const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId)] : null;
+            const selectedStation = stationIds
+                ? this.exportStations.find(s => String(s.id) === String(stationIds[0]))
+                : null;
+            const effectiveProjectIds = projectIds
+                || (selectedStation?.project_id ? [parseInt(selectedStation.project_id)] : null);
             
             // Lấy Sensor types nếu có chọn sensor_data
             let sensorTypes = null;
@@ -404,8 +512,8 @@ class DatabaseManager {
             }
             
             const payload = { 
-                tables: tables,
-                project_ids: projectIds,
+                tables: uniqueTables,
+                project_ids: effectiveProjectIds,
                 station_ids: stationIds,
                 sensor_types: sensorTypes,
                 start_date: startDate || null,
