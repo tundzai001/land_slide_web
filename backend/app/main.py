@@ -1958,9 +1958,25 @@ async def start_gnss_adjustment(
         mqtt_service.adjustment_phase[req.project_id] = "COLLECTING_BASELINE"
         logger.info(f"🎯 Started GNSS Adjustment for project {req.project_id}. Phase: COLLECTING_BASELINE.")
 
-        # MQTT Bridge sẽ tự động gửi lệnh ngắt Base khi thu thập đủ baseline chuẩn.
-        
-        return {"status": "success", "message": "Adjustment cycle started, waiting for baseline before stopping Base"}
+        expected_station_ids = sorted({
+            station_id
+            for cluster in active_clusters
+            for station_id in cluster["stations"]
+        })
+        await ws_manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": req.project_id,
+            "phase": "COLLECTING_BASELINE",
+            "message": "Adjustment started; waiting for a valid #AGRICA baseline from every selected rover.",
+            "expected_station_ids": expected_station_ids,
+        })
+
+        return {
+            "status": "success",
+            "phase": "COLLECTING_BASELINE",
+            "expected_station_ids": expected_station_ids,
+            "message": "Adjustment cycle started, waiting for baseline before stopping Base",
+        }
     except Exception as e:
         logger.error(f"Failed to start GNSS adjustment cycle: {e}")
         if isinstance(e, HTTPException): raise e

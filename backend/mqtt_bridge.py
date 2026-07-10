@@ -22,7 +22,13 @@ from app.landslide_analyzer import LandslideAnalyzer
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
 from processors.imu_processor import IMUEngine
-from processors.round_robin_manager import RoundRobinAdjustmentManager
+try:
+    # Prefer the backend package when Uvicorn is launched from repository root;
+    # this avoids importing the legacy top-level processors/ copy.
+    from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
+except ModuleNotFoundError:
+    # backend/server.py runs with backend/ itself as sys.path[0].
+    from processors.round_robin_manager import RoundRobinAdjustmentManager
 
 # from aes128decrypt import aes128_decrypt_base64  # tạm vô hiệu hoá
 
@@ -88,10 +94,18 @@ class MQTTBridge:
         self.adjustment_phase: Dict[int, str] = {}  # {project_id: "IDLE" | "COLLECTING_BASELINE" | "FREE_NETWORK"}
         self.active_adjustment_clusters: Dict[int, list] = {}  # {project_id: [[station_id, ...], ...]}
         # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
+        control_host = settings.NTRIP_CONTROL_HOST or settings.MQTT_BROKER
+        source_host = settings.NTRIP_SOURCE_HOST or control_host
         self.round_robin_manager = RoundRobinAdjustmentManager(
             self.client,
-            caster_host=settings.MQTT_BROKER,
-            caster_port=7054,
+            caster_host=control_host,
+            caster_port=settings.NTRIP_CONTROL_PORT,
+            source_host=source_host,
+            source_port=settings.NTRIP_SOURCE_PORT,
+            control_password=settings.NTRIP_CONTROL_PASSWORD,
+            source_password=settings.NTRIP_SOURCE_PASSWORD,
+            route_start_callback=self._start_round_robin_ntrip_route,
+            route_stop_callback=self._stop_round_robin_ntrip_route,
             result_callback=self._handle_round_robin_adjustment_result,
             error_callback=self._handle_round_robin_adjustment_error,
         )
@@ -439,17 +453,22 @@ class MQTTBridge:
             from app.modules.ntrip_pusher import ntrip_manager
             import asyncio
             if msg.topic == "command/ntrip/route/start":
-                station_code = payload.get("station_code")
-                host = payload.get("host", "127.0.0.1")
-                port = int(payload.get("port", 2101))
-                mountpoint = payload.get("mountpoint")
-                password = payload.get("password", "")
+                route_payload = payload.get("ntrip_route") if isinstance(payload.get("ntrip_route"), dict) else payload
+                station_code = route_payload.get("station_code")
+                mountpoint = route_payload.get("mountpoint")
+                if not station_code and isinstance(mountpoint, str) and mountpoint.endswith("_BASE"):
+                    station_code = mountpoint[:-5]
+                host = route_payload.get("host") or route_payload.get("target_host") or "127.0.0.1"
+                port = int(route_payload.get("port") or route_payload.get("target_port") or 2101)
+                password = route_payload.get("password", "")
                 if station_code and mountpoint:
                     if self.loop and self.loop.is_running():
                         asyncio.run_coroutine_threadsafe(
                             ntrip_manager.start_pusher(station_code, host, port, mountpoint, password),
                             self.loop
                         )
+                else:
+                    logger.warning("[NTRIP COMMAND] Ignored start route missing station_code or mountpoint: %s", payload)
             elif msg.topic == "command/ntrip/route/stop":
                 station_code = payload.get("station_code")
                 if station_code:
@@ -460,6 +479,31 @@ class MQTTBridge:
                         )
         except Exception as e:
             logger.error(f"[NTRIP COMMAND] Error processing command: {e}")
+
+    async def _start_round_robin_ntrip_route(
+        self,
+        station_code: str,
+        host: str,
+        port: int,
+        mountpoint: str,
+        password: str,
+    ) -> bool:
+        """Start SOURCE in-process and wait until the caster accepts it."""
+
+        from app.modules.ntrip_pusher import ntrip_manager
+
+        try:
+            await ntrip_manager.start_pusher(station_code, host, port, mountpoint, password)
+            await ntrip_manager.wait_for_rtcm(station_code, timeout=10.0)
+        except Exception:
+            await ntrip_manager.stop_pusher(station_code)
+            raise
+        return True
+
+    async def _stop_round_robin_ntrip_route(self, station_code: str) -> None:
+        from app.modules.ntrip_pusher import ntrip_manager
+
+        await ntrip_manager.stop_pusher(station_code)
 
     def start(self):
         logger.info("🚀 Starting MQTT Bridge inside FastAPI...")
@@ -1227,15 +1271,43 @@ class MQTTBridge:
         # 1. PROCESS DATA
         try:
             if sensor_type == 'gnss':
-                if "#AGRICA" in raw_payload:
+                # AGRICA may arrive as multiple MQTT payloads.  Once a station
+                # has sent the #AGRICA prefix, keep feeding its subsequent
+                # fragments even though those fragments do not repeat the prefix.
+                proj_id = int(info.get("project_id") or info.get("station_id") or 0)
+                phase = self.adjustment_phase.get(proj_id)
+                has_pending_agrica = self.round_robin_manager.has_pending_agrica_fragment(
+                    proj_id,
+                    station_id,
+                )
+                if "#AGRICA" in raw_payload or has_pending_agrica:
                     # AGRICA is collected only while an operator has started an
                     # adjustment session.  A single BASE->Rover observation is
                     # not a completed network adjustment.
-                    proj_id = int(info.get("project_id") or info.get("station_id") or 0)
-                    phase = self.adjustment_phase.get(proj_id)
                     valid_obs = []
                     if phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
                         valid_obs = self.round_robin_manager.add_agrica_payload(raw_payload, info)
+                        seed_status = None
+                        if phase == "COLLECTING_BASELINE":
+                            seed_status = self.round_robin_manager.get_seed_collection_status(proj_id)
+                            if seed_status["fallback_ready"]:
+                                seed_status = self.round_robin_manager.skip_missing_seed_stations(proj_id)
+                        diagnostic = self.round_robin_manager.get_last_ingest_diagnostic(proj_id)
+                        if diagnostic:
+                            if seed_status and seed_status["missing_station_ids"]:
+                                diagnostic = {
+                                    **diagnostic,
+                                    "message": (
+                                        f"{diagnostic['message']} "
+                                        f"Seed step {seed_status['step_count']}/{seed_status['max_steps']}; "
+                                        f"waiting for station IDs {seed_status['missing_station_ids']}."
+                                    ),
+                                }
+                            await manager.broadcast({
+                                "type": "gnss_adjustment_debug",
+                                "project_id": proj_id,
+                                **diagnostic,
+                            })
                         for obs in valid_obs:
                             try:
                                 await manager.broadcast({
@@ -1256,12 +1328,19 @@ class MQTTBridge:
                             phase == "COLLECTING_BASELINE"
                             and self.round_robin_manager.has_complete_seed_observations(proj_id)
                         ):
+                            skipped_station_ids = (seed_status or {}).get("skipped_station_ids", [])
                             self.adjustment_phase[proj_id] = "FREE_NETWORK"
                             await manager.broadcast({
                                 "type": "gnss_adjustment_progress",
                                 "project_id": proj_id,
                                 "phase": "FREE_NETWORK",
-                                "message": "All selected rovers have a fixed-base baseline. Starting Round-Robin.",
+                                "message": (
+                                    "Skipped offline/no-data station IDs "
+                                    f"{skipped_station_ids} after {self.round_robin_manager.SEED_COLLECTION_MAX_STEPS} seed steps. "
+                                    "Starting Round-Robin with the remaining rovers."
+                                    if skipped_station_ids
+                                    else "All selected rovers have a fixed-base baseline. Starting Round-Robin."
+                                ),
                             })
                             for cluster in info.get("project_gnss_clusters") or []:
                                 if not isinstance(cluster, dict):

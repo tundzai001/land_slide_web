@@ -37,6 +37,119 @@ let clusterPolylines = [];
 let showRescueMarkers = true;
 let currentMapMode = 'station';
 
+const gnssAdjustmentDebugState = {
+    active: false,
+    projectId: null,
+    phase: 'WAITING',
+    expectedStationIds: [],
+    baselineCount: 0,
+    startedAt: null,
+    wsStatus: 'CONNECTING',
+    entries: [],
+    lastGnssStatusAtByStation: {},
+    watchdogId: null,
+};
+
+function formatGnssDebugTime(date = new Date()) {
+    return date.toLocaleTimeString('vi-VN', { hour12: false });
+}
+
+function phaseClassForGnssAdjustment(phase) {
+    switch (String(phase || '').toUpperCase()) {
+        case 'COLLECTING_BASELINE': return 'ms-4 text-info fw-bold font-monospace';
+        case 'FREE_NETWORK': return 'ms-4 text-warning fw-bold font-monospace';
+        case 'COMPLETED': return 'ms-4 text-success fw-bold font-monospace';
+        case 'ERROR': return 'ms-4 text-danger fw-bold font-monospace';
+        default: return 'ms-4 text-warning fw-bold font-monospace';
+    }
+}
+
+function refreshGnssAdjustmentDebugUi() {
+    const indicator = document.getElementById('gnss-phase-indicator');
+    if (indicator) {
+        indicator.textContent = `Phase: ${gnssAdjustmentDebugState.phase}`;
+        indicator.className = phaseClassForGnssAdjustment(gnssAdjustmentDebugState.phase);
+    }
+
+    const summary = document.getElementById('gnss-debug-summary');
+    if (summary) {
+        const elapsed = gnssAdjustmentDebugState.startedAt
+            ? Math.floor((Date.now() - gnssAdjustmentDebugState.startedAt) / 1000)
+            : 0;
+        const expected = gnssAdjustmentDebugState.expectedStationIds.length
+            ? gnssAdjustmentDebugState.expectedStationIds.join(', ')
+            : 'chưa xác định';
+        summary.textContent = `WS: ${gnssAdjustmentDebugState.wsStatus} | Baseline: ${gnssAdjustmentDebugState.baselineCount} | Chờ trạm: ${expected} | ${elapsed}s`;
+    }
+
+    const log = document.getElementById('gnss-debug-log');
+    if (log) {
+        log.innerHTML = '';
+        gnssAdjustmentDebugState.entries.forEach(entry => {
+            const row = document.createElement('div');
+            const color = entry.level === 'error'
+                ? '#ff6b6b'
+                : entry.level === 'warning'
+                    ? '#ffd166'
+                    : entry.level === 'success'
+                        ? '#5eead4'
+                        : '#93c5fd';
+            row.style.color = color;
+            row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
+            log.appendChild(row);
+        });
+        log.scrollTop = log.scrollHeight;
+    }
+}
+
+function addGnssAdjustmentDebug(label, message, level = 'info') {
+    if (!gnssAdjustmentDebugState.active) return;
+    gnssAdjustmentDebugState.entries.push({
+        time: formatGnssDebugTime(),
+        label,
+        message: String(message || '-'),
+        level,
+    });
+    if (gnssAdjustmentDebugState.entries.length > 60) {
+        gnssAdjustmentDebugState.entries.splice(0, gnssAdjustmentDebugState.entries.length - 60);
+    }
+    refreshGnssAdjustmentDebugUi();
+}
+
+function setGnssAdjustmentPhase(phase, message = '') {
+    gnssAdjustmentDebugState.phase = String(phase || 'WAITING').toUpperCase();
+    refreshGnssAdjustmentDebugUi();
+    if (message) addGnssAdjustmentDebug('PHASE', message, gnssAdjustmentDebugState.phase === 'ERROR' ? 'error' : 'info');
+}
+
+function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
+    if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
+    Object.assign(gnssAdjustmentDebugState, {
+        active: true,
+        projectId: Number(projectId) || null,
+        phase: 'WAITING',
+        expectedStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
+        baselineCount: 0,
+        startedAt: Date.now(),
+        wsStatus: wsConnection?.readyState === WebSocket.OPEN ? 'CONNECTED' : 'DISCONNECTED',
+        entries: [],
+        lastGnssStatusAtByStation: {},
+    });
+    addGnssAdjustmentDebug('UI', 'Đã mở phiên debug Bình sai.', 'info');
+    gnssAdjustmentDebugState.watchdogId = setInterval(() => {
+        if (!gnssAdjustmentDebugState.active) return;
+        const elapsed = Math.floor((Date.now() - gnssAdjustmentDebugState.startedAt) / 1000);
+        if (elapsed >= 10 && gnssAdjustmentDebugState.baselineCount === 0 && gnssAdjustmentDebugState.phase === 'COLLECTING_BASELINE') {
+            const last = gnssAdjustmentDebugState.entries.at(-1);
+            if (!last || last.label !== 'WAIT') {
+                addGnssAdjustmentDebug('WAIT', 'Chưa nhận baseline hợp lệ. Kiểm tra #AGRICA, RTK Fixed và WebSocket.', 'warning');
+            }
+        } else {
+            refreshGnssAdjustmentDebugUi();
+        }
+    }, 1000);
+}
+
 const TILE_URLS = {
     light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
     dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -271,6 +384,9 @@ function setupWebSocket() {
 
     wsConnection.onopen = () => {
         console.log('✅ [WS] Connected');
+        gnssAdjustmentDebugState.wsStatus = 'CONNECTED';
+        if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket đã kết nối.', 'success');
+        else refreshGnssAdjustmentDebugUi();
     };
 
     wsConnection.onmessage = (event) => {
@@ -284,10 +400,16 @@ function setupWebSocket() {
 
     wsConnection.onerror = (error) => {
         console.error('❌ [WS] Error:', error);
+        gnssAdjustmentDebugState.wsStatus = 'ERROR';
+        if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket gặp lỗi kết nối.', 'error');
+        else refreshGnssAdjustmentDebugUi();
     };
 
     wsConnection.onclose = () => {
         console.warn('⚠️ [WS] Disconnected, reconnecting in 5s...');
+        gnssAdjustmentDebugState.wsStatus = 'DISCONNECTED';
+        if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket bị ngắt; tự kết nối lại sau 5 giây.', 'warning');
+        else refreshGnssAdjustmentDebugUi();
         setTimeout(setupWebSocket, 5000);
     };
 
@@ -309,9 +431,34 @@ function handleRealtimeUpdate(message) {
     }
 
     if (message.type === 'sensor_status') {
+        if (
+            currentStationData
+            && message.station_id === currentStationData.id
+            && message.sensor_type === 'gnss_adjusted'
+        ) {
+            updateRealtimeSensorValues(message);
+            if (gnssAdjustmentDebugState.active) {
+                addGnssAdjustmentDebug('RESULT', 'Đã nhận kết quả bình sai từ server.', 'success');
+            }
+        }
         if (currentStationData && message.station_id === currentStationData.id && message.sensor_type === 'gnss') {
             const fixMode = message.data?.fix_mode;
             const fixQuality = Number(message.data?.fix_quality);
+            if (
+                gnssAdjustmentDebugState.active
+                && gnssAdjustmentDebugState.expectedStationIds.includes(Number(message.station_id))
+            ) {
+                const now = Date.now();
+                const lastAt = Number(gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] || 0);
+                if (now - lastAt >= 5000) {
+                    gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] = now;
+                    addGnssAdjustmentDebug(
+                        'GNSS',
+                        `Trạm #${message.station_id} có GGA: ${fixMode || 'UNKNOWN'} (quality=${fixQuality || 0}). Đang chờ #AGRICA.`,
+                        fixQuality >= 4 ? 'info' : 'warning',
+                    );
+                }
+            }
             updateGnssFixBadge(fixMode, fixQuality);
 
             const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
@@ -556,18 +703,44 @@ function handleRealtimeUpdate(message) {
     
     // ✅ Handle gnss adjustment progress
     if (message.type === 'gnss_adjustment_progress') {
-        const ind = document.getElementById('gnss-phase-indicator');
-        if (ind) {
-            ind.textContent = `Phase: ${message.phase}`;
-            if (message.phase === 'COLLECTING_BASELINE') ind.className = 'ms-4 text-info fw-bold font-monospace';
-            else if (message.phase === 'FREE_NETWORK') ind.className = 'ms-4 text-warning fw-bold font-monospace';
-            else if (message.phase === 'ERROR') ind.className = 'ms-4 text-danger fw-bold font-monospace';
+        const belongsToActiveRun = (
+            !gnssAdjustmentDebugState.projectId
+            || Number(message.project_id) === gnssAdjustmentDebugState.projectId
+        );
+        if (belongsToActiveRun) {
+            if (Array.isArray(message.expected_station_ids)) {
+                gnssAdjustmentDebugState.expectedStationIds = message.expected_station_ids;
+            }
+            setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
+        }
+    }
+
+    if (message.type === 'gnss_adjustment_debug') {
+        const belongsToActiveRun = (
+            gnssAdjustmentDebugState.active
+            && Number(message.project_id) === gnssAdjustmentDebugState.projectId
+        );
+        if (belongsToActiveRun) {
+            const station = message.station_id ? `Trạm #${message.station_id}: ` : '';
+            addGnssAdjustmentDebug('AGRICA', `${station}${message.message || '-'}`, message.level || 'info');
         }
     }
 
     // ✅ Handle gnss baseline collected (Draw board)
     if (message.type === 'gnss_baseline_collected') {
-        if (window.gnssBoardState && window.gnssBoardState.ctx) {
+        const belongsToActiveRun = (
+            gnssAdjustmentDebugState.active
+            && Number(message.project_id) === gnssAdjustmentDebugState.projectId
+        );
+        if (belongsToActiveRun) {
+            gnssAdjustmentDebugState.baselineCount += 1;
+            addGnssAdjustmentDebug(
+                'BASELINE',
+                `${message.rover_name}: dN=${Number(message.baseline_neu?.[0]).toFixed(4)}, dE=${Number(message.baseline_neu?.[1]).toFixed(4)}, dH=${Number(message.baseline_neu?.[2]).toFixed(4)}`,
+                'success',
+            );
+        }
+        if (belongsToActiveRun && window.gnssBoardState && window.gnssBoardState.ctx) {
             // Add Base Point at 0,0 for relative visualization
             window.gnssBoardState.addPoint("BASE", 0, 0, true);
             
@@ -2145,8 +2318,10 @@ function setupEventListeners() {
             this.baselines = [];
             this.basePoint = null;
             document.getElementById('gnss-baseline-table-body').innerHTML = '';
-            document.getElementById('gnss-phase-indicator').textContent = 'Phase: WAITING';
-            document.getElementById('gnss-phase-indicator').className = 'ms-4 text-warning fw-bold font-monospace';
+            if (!gnssAdjustmentDebugState.active) {
+                gnssAdjustmentDebugState.phase = 'WAITING';
+            }
+            refreshGnssAdjustmentDebugUi();
             document.getElementById('adj-results-section').style.display = 'none';
             document.getElementById('gnss-board-tooltips').innerHTML = '';
             this.draw();
@@ -2292,7 +2467,7 @@ function setupEventListeners() {
                                 <div class="p-2 border-bottom border-secondary bg-black">
                                     <h6 class="mb-0 text-info font-monospace"><i class="bi bi-table me-1"></i>Baseline Vectors</h6>
                                 </div>
-                                <div class="flex-grow-1" style="overflow-y: auto;" id="gnss-data-panel">
+                                 <div class="flex-grow-1" style="overflow-y: auto;" id="gnss-data-panel">
                                     <table class="table table-dark table-sm table-hover font-monospace mb-0" style="font-size: 0.75rem;">
                                         <thead>
                                             <tr class="text-secondary">
@@ -2306,7 +2481,15 @@ function setupEventListeners() {
                                             </tr>
                                         </thead>
                                         <tbody id="gnss-baseline-table-body"></tbody>
-                                    </table>
+                                     </table>
+                                 </div>
+                                <div id="gnss-debug-section" class="border-top border-secondary bg-black" style="height: 205px; flex: 0 0 205px;">
+                                    <div class="d-flex justify-content-between align-items-center px-2 py-1 border-bottom border-secondary">
+                                        <h6 class="mb-0 text-warning font-monospace" style="font-size: 0.75rem;"><i class="bi bi-bug me-1"></i>Live Debug</h6>
+                                        <button id="gnss-debug-clear" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;">Xóa log</button>
+                                    </div>
+                                    <div id="gnss-debug-summary" class="px-2 py-1 text-secondary font-monospace border-bottom border-secondary" style="font-size: 0.64rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">WS: CONNECTING</div>
+                                    <div id="gnss-debug-log" class="p-2 font-monospace" style="height: 148px; overflow-y: auto; font-size: 0.66rem; line-height: 1.35;"></div>
                                 </div>
                                 <div id="adj-results-section" class="p-3 border-top border-secondary bg-black" style="display: none;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
@@ -2321,6 +2504,11 @@ function setupEventListeners() {
         `.trim();
         modal = wrapper.firstElementChild;
         document.body.appendChild(modal);
+        modal.querySelector('#gnss-debug-clear')?.addEventListener('click', () => {
+            gnssAdjustmentDebugState.entries = [];
+            addGnssAdjustmentDebug('UI', 'Đã xóa nhật ký debug.', 'info');
+        });
+        refreshGnssAdjustmentDebugUi();
         return modal;
     }
 
@@ -2380,9 +2568,13 @@ function setupEventListeners() {
             }
             terminalModal = bootstrap.Modal.getOrCreateInstance(terminalModalEl);
             terminalModal.show();
+            resetGnssAdjustmentDebug({ projectId, stationIds });
+            addGnssAdjustmentDebug('API', `Đang gọi API khởi động cho dự án #${projectId}.`, 'info');
             
-            // Initialize board after modal is shown to get correct dimensions
-            setTimeout(() => { window.gnssBoardState?.init?.(); }, 300);
+            // Initialize before calling the API, otherwise a very fast WebSocket
+            // baseline can arrive before the canvas has a rendering context.
+            await new Promise(resolve => setTimeout(resolve, 300));
+            window.gnssBoardState?.init?.();
 
             const payload = {
                 project_id: projectId,
@@ -2407,13 +2599,28 @@ function setupEventListeners() {
             }
 
             if (res && !res.ok) throw new Error(await readApiError(res));
-            if (!res || res.error) throw new Error(res.error || 'Lỗi không xác định');
+            if (!res) throw new Error('Không nhận được phản hồi từ API khởi động Bình sai');
+
+            let startResult = {};
+            try {
+                startResult = await res.json();
+            } catch (_) {
+                startResult = {};
+            }
+            if (Array.isArray(startResult.expected_station_ids)) {
+                gnssAdjustmentDebugState.expectedStationIds = startResult.expected_station_ids;
+            }
+            setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
+            addGnssAdjustmentDebug(
+                'API',
+                `HTTP ${res.status}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
+                'success',
+            );
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);
-            if (terminalModal) {
-                terminalModal.hide();
-            }
+            setGnssAdjustmentPhase('ERROR', error.message || 'Không thể khởi động Bình sai.');
+            addGnssAdjustmentDebug('API', error.message || 'Không thể khởi động Bình sai.', 'error');
             Swal.fire({
                 icon: 'error',
                 title: 'Lỗi khởi chạy Bình sai',

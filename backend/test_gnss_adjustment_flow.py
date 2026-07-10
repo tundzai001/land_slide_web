@@ -1,6 +1,9 @@
 import unittest
 
-from processors.round_robin_manager import RoundRobinAdjustmentManager
+try:
+    from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
+except ModuleNotFoundError:
+    from processors.round_robin_manager import RoundRobinAdjustmentManager
 
 
 def _agrica_sentence(*, baseline_neu, rover_llh):
@@ -19,7 +22,7 @@ def _agrica_sentence(*, baseline_neu, rover_llh):
     # Deliberately use the receiver's zero base fields. The collector must use
     # the configured fixed base / point approximation instead.
     parts[41:44] = ["0", "0", "0"]
-    return "#AGRICA,0;" + ",".join(parts) + "*00"
+    return "#AGRICA,0;" + ",".join(parts) + "*00000000"
 
 
 class _FakeMqttClient:
@@ -68,6 +71,56 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertEqual(len(result["baselines"]), 3)
         self.assertGreater(result["quality"]["degrees_of_freedom"], 0)
         self.assertEqual(result["source"], "AGRICA_ROUND_ROBIN")
+
+    def test_agrica_fragment_is_buffered_until_crc_arrives(self):
+        sentence = _agrica_sentence(
+            baseline_neu=(1.0, 2.0, 0.0),
+            rover_llh=(21.0, 105.0, 10.0),
+        )
+        split_at = sentence.index("81.3350") if "81.3350" in sentence else len(sentence) // 2
+        first_fragment, second_fragment = sentence[:split_at], sentence[split_at:]
+
+        first_result = self.manager.add_agrica_payload(first_fragment, {
+            "project_id": 17, "station_id": 101, "station_code": "S1",
+        })
+        self.assertEqual(first_result, [])
+        self.assertTrue(self.manager.has_pending_agrica_fragment(17, 101))
+        self.assertIn(
+            "Buffered AGRICA fragment",
+            self.manager.get_last_ingest_diagnostic(17)["message"],
+        )
+
+        second_result = self.manager.add_agrica_payload(second_fragment, {
+            "project_id": 17, "station_id": 101, "station_code": "S1",
+        })
+        self.assertEqual(len(second_result), 1)
+        self.assertFalse(self.manager.has_pending_agrica_fragment(17, 101))
+
+    def test_missing_rover_is_excluded_after_ten_seed_steps(self):
+        self.manager.configure_project(18, [{
+            "name": "cluster-with-offline-rover",
+            "stations": [201, 202, 203],
+            "rovers": ["A", "B", "C"],
+            "base_station": "CORS-A",
+            "base_lat": 21.0,
+            "base_lon": 105.0,
+            "base_alt": 10.0,
+        }])
+        for station_id, station_code, baseline in ((201, "A", (1.0, 0.0, 0.0)), (202, "B", (2.0, 0.0, 0.0))):
+            self.manager.add_agrica_payload(
+                _agrica_sentence(baseline_neu=baseline, rover_llh=(21.0, 105.0, 10.0)),
+                {"project_id": 18, "station_id": station_id, "station_code": station_code},
+            )
+
+        self.manager._sessions[18]["seed_collection_steps"] = set(range(10))
+        before_skip = self.manager.get_seed_collection_status(18)
+        self.assertTrue(before_skip["fallback_ready"])
+        self.assertEqual(before_skip["missing_station_ids"], [203])
+
+        after_skip = self.manager.skip_missing_seed_stations(18)
+        self.assertTrue(after_skip["complete"])
+        self.assertEqual(after_skip["skipped_station_ids"], [203])
+        self.assertEqual(self.manager._sessions[18]["clusters"][0]["stations"], [201, 202])
 
 
 if __name__ == "__main__":
