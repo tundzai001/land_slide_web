@@ -22,7 +22,6 @@ from app.landslide_analyzer import LandslideAnalyzer
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
 from processors.imu_processor import IMUEngine
-from processors.gnss_adjustment_runtime import AgricaAdjustmentRuntime
 from processors.round_robin_manager import RoundRobinAdjustmentManager
 
 # from aes128decrypt import aes128_decrypt_base64  # tạm vô hiệu hoá
@@ -86,14 +85,15 @@ class MQTTBridge:
         # Topic management
         self.topic_map: Dict[tuple, Dict[str, Any]] = {}  # Key: (broker_key, topic)
         self.processors_cache: Dict[str, Any] = {}
-        self.agrica_runtime = AgricaAdjustmentRuntime()
         self.adjustment_phase: Dict[int, str] = {}  # {project_id: "IDLE" | "COLLECTING_BASELINE" | "FREE_NETWORK"}
         self.active_adjustment_clusters: Dict[int, list] = {}  # {project_id: [[station_id, ...], ...]}
         # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
         self.round_robin_manager = RoundRobinAdjustmentManager(
-            self.client, 
-            caster_host=settings.MQTT_BROKER, 
-            caster_port=7054
+            self.client,
+            caster_host=settings.MQTT_BROKER,
+            caster_port=7054,
+            result_callback=self._handle_round_robin_adjustment_result,
+            error_callback=self._handle_round_robin_adjustment_error,
         )
         self._fwd_clients: Dict[tuple, mqtt.Client] = {}  # Cache for external brokers
         self._sub_clients: Dict[tuple, mqtt.Client] = {}  # Dynamic clients for subscriptions
@@ -1128,6 +1128,83 @@ class MQTTBridge:
         except Exception as e:
             logger.error(f"Error saving adjustment excel: {e}")
 
+    def _write_adjustment_reports(self, project_id: int, timestamp: int, data: dict) -> dict:
+        """Write the report files referenced by the GNSS adjustment interface."""
+        import os
+
+        report_dir = os.path.join(os.path.dirname(__file__), "static", "adjustments")
+        os.makedirs(report_dir, exist_ok=True)
+        report_name = f"gnss_adjustment_{project_id}_{timestamp}.json"
+        report_path = os.path.join(report_dir, report_name)
+        try:
+            with open(report_path, "w", encoding="utf-8") as report_file:
+                json.dump(data, report_file, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.error("Error saving GNSS adjustment JSON report: %s", exc)
+            report_name = ""
+
+        self._append_adjustment_to_excel(project_id, timestamp, data, "")
+        return {
+            "report_file_url": f"/static/adjustments/{report_name}" if report_name else None,
+            "excel_report_url": "/static/adjustments/gnss_binh_sai.xlsx",
+        }
+
+    async def _handle_round_robin_adjustment_result(self, project_id: int, adjustment: dict):
+        """Persist and publish one completed, connected GNSS network adjustment."""
+        current_timestamp = int(time.time())
+        adjustment.update(self._write_adjustment_reports(project_id, current_timestamp, adjustment))
+        self.adjustment_phase[project_id] = "COMPLETED"
+
+        for point in adjustment.get("points", {}).values():
+            station_id = point.get("station_id")
+            if not station_id:
+                continue
+            payload = {
+                "station_id": station_id,
+                "timestamp": current_timestamp,
+                "sensor_type": "gnss_adjusted",
+                "data": adjustment,
+                "value_1": None,
+                "value_2": None,
+                "value_3": None,
+                "value_4": None,
+                "value_5": None,
+            }
+            async with self._buffer_lock:
+                self._sensor_buffer.append(payload)
+            try:
+                await self._upsert_latest_sensor_cache(
+                    station_id,
+                    "gnss_adjusted",
+                    current_timestamp,
+                    adjustment,
+                )
+                await manager.broadcast({
+                    "type": "sensor_status",
+                    "station_id": station_id,
+                    "sensor_type": "gnss_adjusted",
+                    "timestamp": current_timestamp,
+                    "data": adjustment,
+                })
+            except Exception as exc:
+                logger.error("Could not publish GNSS adjustment for station %s: %s", station_id, exc)
+
+        await manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": project_id,
+            "phase": "COMPLETED",
+            "message": "Connected GNSS network adjustment completed.",
+        })
+
+    async def _handle_round_robin_adjustment_error(self, project_id: int, message: str):
+        self.adjustment_phase[project_id] = "ERROR"
+        await manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": project_id,
+            "phase": "ERROR",
+            "message": message,
+        })
+
     async def process_pipeline(self, info: dict, raw_payload: str):
         if not info: return
         active_clusters = self.active_adjustment_clusters.get(info.get("project_id"))
@@ -1151,92 +1228,55 @@ class MQTTBridge:
         try:
             if sensor_type == 'gnss':
                 if "#AGRICA" in raw_payload:
-                    adj_res = self.agrica_runtime.add_payload(raw_payload, info)
-                    
-                    # Cập nhật dữ liệu cho Round Robin nếu đang trong phase FREE_NETWORK
+                    # AGRICA is collected only while an operator has started an
+                    # adjustment session.  A single BASE->Rover observation is
+                    # not a completed network adjustment.
                     proj_id = int(info.get("project_id") or info.get("station_id") or 0)
-                    if self.adjustment_phase.get(proj_id) == "FREE_NETWORK":
+                    phase = self.adjustment_phase.get(proj_id)
+                    valid_obs = []
+                    if phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
                         valid_obs = self.round_robin_manager.add_agrica_payload(raw_payload, info)
-                        if valid_obs:
-                            for obs in valid_obs:
-                                try:
-                                    asyncio.create_task(manager.broadcast({
-                                        "type": "gnss_baseline_collected",
-                                        "project_id": proj_id,
-                                        "station_id": station_id,
-                                        "rover_name": obs.rover_name,
-                                        "baseline_neu": obs.baseline_neu,
-                                        "std_neu": obs.std_neu,
-                                        "rover_llh": obs.rover_llh,
-                                        "base_llh": obs.base_llh,
-                                        "full_data": obs.full_data
-                                    }))
-                                except Exception: pass
-                        
-                    if adj_res:
-                        adj_payload = {
-                            "station_id": station_id,
-                            "timestamp": current_timestamp,
-                            "sensor_type": "gnss_adjusted",
-                            "data": adj_res,
-                            "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None
-                        }
-                        async with self._buffer_lock:
-                            self._sensor_buffer.append(adj_payload)
-                        
-                        try:
-                            await self._upsert_latest_sensor_cache(station_id, 'gnss_adjusted', current_timestamp, adj_res)
-                        except Exception: pass
-                        
-                        try:
-                            await manager.broadcast({
-                                "type": "sensor_status",
-                                "station_id": station_id,
-                                "sensor_type": "gnss_adjusted",
-                                "timestamp": current_timestamp,
-                                "data": adj_res
-                            })
-                        except Exception as ws_e:
-                            logger.error(f"❌ WS GNSS adjustment error: {ws_e}")
-                            
-                        # Phân tích chuyển phase
-                        proj_id = info.get("project_id")
-                        if proj_id and self.adjustment_phase.get(proj_id) == "COLLECTING_BASELINE":
-                            logger.info(f"🎯 [ADJUSTMENT] Baseline collected for project {proj_id}! Stopping base to enter Free-Network phase.")
-                            self.adjustment_phase[proj_id] = "FREE_NETWORK"
+                        for obs in valid_obs:
                             try:
-                                asyncio.create_task(manager.broadcast({
-                                    "type": "gnss_adjustment_progress",
+                                await manager.broadcast({
+                                    "type": "gnss_baseline_collected",
                                     "project_id": proj_id,
-                                    "phase": "FREE_NETWORK",
-                                    "message": "Đã thu thập đủ Baseline tĩnh. Đang chuyển sang chế độ Free-Network (Round-Robin)..."
-                                }))
-                            except Exception: pass
-                            
-                            base_mp = None
-                            gnss_clusters = info.get("project_gnss_clusters")
-                            if gnss_clusters and isinstance(gnss_clusters, list) and len(gnss_clusters) > 0:
-                                first_cluster = gnss_clusters[0]
-                                if isinstance(first_cluster, dict):
-                                    base_mp = first_cluster.get("base_stream_mp") or first_cluster.get("base_station")
-                            
-                            if base_mp:
-                                stop_payload = {"station_code": base_mp}
-                                self.client.publish("command/ntrip/route/stop", json.dumps(stop_payload))
-                                logger.info(f"Published stop command for base {base_mp}")
+                                    "station_id": station_id,
+                                    "rover_name": obs.rover_name,
+                                    "baseline_neu": obs.baseline_neu,
+                                    "std_neu": obs.std_neu,
+                                    "rover_llh": obs.rover_llh,
+                                    "base_llh": obs.base_llh,
+                                    "full_data": obs.full_data,
+                                })
+                            except Exception as exc:
+                                logger.error("Could not broadcast GNSS baseline: %s", exc)
 
-                            # Lấy danh sách các rovers trong cluster để truyền vào round robin
-                            rovers_list = []
-                            if gnss_clusters and isinstance(gnss_clusters, list) and len(gnss_clusters) > 0:
-                                first_cluster = gnss_clusters[0]
-                                if isinstance(first_cluster, dict):
-                                    rovers_list = first_cluster.get("rovers", [])
-                            
-                            # Kích hoạt chu trình Round-Robin
-                            if rovers_list:
-                                asyncio.create_task(self.round_robin_manager.start_cycle(proj_id, rovers_list))
-                            else:
-                                logger.warning(f"No rovers found for Round-Robin in project {proj_id}")
+                        if (
+                            phase == "COLLECTING_BASELINE"
+                            and self.round_robin_manager.has_complete_seed_observations(proj_id)
+                        ):
+                            self.adjustment_phase[proj_id] = "FREE_NETWORK"
+                            await manager.broadcast({
+                                "type": "gnss_adjustment_progress",
+                                "project_id": proj_id,
+                                "phase": "FREE_NETWORK",
+                                "message": "All selected rovers have a fixed-base baseline. Starting Round-Robin.",
+                            })
+                            for cluster in info.get("project_gnss_clusters") or []:
+                                if not isinstance(cluster, dict):
+                                    continue
+                                base_mountpoint = (
+                                    cluster.get("base_stream_mp")
+                                    or cluster.get("base_stream")
+                                    or cluster.get("base_station")
+                                )
+                                if base_mountpoint:
+                                    self.client.publish(
+                                        "command/ntrip/route/stop",
+                                        json.dumps({"station_code": base_mountpoint}),
+                                    )
+                            await self.round_robin_manager.start_cycle(proj_id)
 
                 # Only process for GNSS position/status if payload actually contains GGA.
                 # This prevents pure AGRICA sentences from triggering fake NO_DATA statuses

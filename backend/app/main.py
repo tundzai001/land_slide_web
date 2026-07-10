@@ -1838,19 +1838,121 @@ class GnssAdjustmentStartRequest(BaseModel):
     new_base_station_id: Optional[int] = None
     selected_clusters: Optional[list[list[int]]] = None
 
+
+def _normalize_active_adjustment_clusters(
+    raw_clusters: Any,
+    stations: list[Any],
+    selected_clusters: Optional[list[list[int]]],
+) -> list[dict]:
+    """Resolve persisted station codes to IDs without losing base metadata."""
+
+    stations_by_id = {int(station.id): station for station in stations}
+    stations_by_code = {
+        str(station.station_code).strip(): station
+        for station in stations
+        if getattr(station, "station_code", None)
+    }
+
+    def resolve_station_ids(tokens: Any) -> list[int]:
+        resolved = []
+        for token in tokens if isinstance(tokens, list) else []:
+            station = None
+            try:
+                station = stations_by_id.get(int(token))
+            except (TypeError, ValueError):
+                station = stations_by_code.get(str(token).strip())
+            if station and station.id not in resolved:
+                resolved.append(int(station.id))
+        return resolved
+
+    configured = []
+    for index, raw_cluster in enumerate(raw_clusters or []):
+        cluster = dict(raw_cluster) if isinstance(raw_cluster, dict) else {"stations": raw_cluster}
+        station_ids = resolve_station_ids(cluster.get("stations", []))
+        if len(station_ids) < 2:
+            continue
+        try:
+            base_lat = float(cluster.get("base_lat"))
+            base_lon = float(cluster.get("base_lon"))
+            base_alt = float(cluster.get("base_alt") or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"GNSS cluster #{index + 1} is missing a valid fixed-base coordinate"
+            ) from exc
+        if (
+            not all(math.isfinite(value) for value in (base_lat, base_lon, base_alt))
+            or not -90.0 <= base_lat <= 90.0
+            or not -180.0 <= base_lon <= 180.0
+            or (abs(base_lat) < 1e-12 and abs(base_lon) < 1e-12 and abs(base_alt) < 1e-12)
+        ):
+            raise ValueError(f"GNSS cluster #{index + 1} has an invalid fixed-base coordinate")
+
+        cluster["stations"] = station_ids
+        cluster["rovers"] = [stations_by_id[station_id].station_code for station_id in station_ids]
+        cluster["base_lat"] = base_lat
+        cluster["base_lon"] = base_lon
+        cluster["base_alt"] = base_alt
+        configured.append(cluster)
+
+    if not configured:
+        raise ValueError("project has no valid GNSS cluster with two rovers and a fixed base")
+    if selected_clusters is None:
+        return configured
+
+    selected = [resolve_station_ids(cluster) for cluster in selected_clusters]
+    if not selected or any(len(cluster) < 2 for cluster in selected):
+        raise ValueError("the selected GNSS cluster must contain at least two project stations")
+
+    active = []
+    for selected_station_ids in selected:
+        target = set(selected_station_ids)
+        match = next((cluster for cluster in configured if set(cluster["stations"]) == target), None)
+        if match is None:
+            raise ValueError(
+                "the selected stations do not match a configured GNSS cluster; select the cluster connection on the map"
+            )
+        active.append(match)
+    return active
+
 @app.post("/api/admin/gnss/adjustment/start")
 async def start_gnss_adjustment(
     req: GnssAdjustmentStartRequest,
+    db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
         if not hasattr(mqtt_service, "active_adjustment_clusters"):
             mqtt_service.active_adjustment_clusters = {}
 
-        # Store dynamic selected clusters in mqtt_service if provided
-        if req.selected_clusters is not None:
-            mqtt_service.active_adjustment_clusters[req.project_id] = req.selected_clusters
-            logger.info(f"Stored dynamic active adjustment clusters for project {req.project_id}: {req.selected_clusters}")
+        project_result = await db.execute(
+            select(model_config.Project).where(model_config.Project.id == req.project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        check_operator_project_access(current_user, project.id)
+
+        stations_result = await db.execute(
+            select(model_config.Station).where(model_config.Station.project_id == project.id)
+        )
+        stations = stations_result.scalars().all()
+        try:
+            active_clusters = _normalize_active_adjustment_clusters(
+                project.gnss_clusters,
+                stations,
+                req.selected_clusters,
+            )
+            mqtt_service.round_robin_manager.configure_project(req.project_id, active_clusters)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # Preserve coordinates and stream settings from project configuration.
+        mqtt_service.active_adjustment_clusters[req.project_id] = active_clusters
+        logger.info(
+            "Configured GNSS adjustment project=%s clusters=%s",
+            req.project_id,
+            [cluster.get("name") or cluster["stations"] for cluster in active_clusters],
+        )
 
         # 1. Bật chế độ chờ thu thập Baseline (COLLECTING_BASELINE)
         mqtt_service.adjustment_phase[req.project_id] = "COLLECTING_BASELINE"
@@ -1877,6 +1979,7 @@ async def stop_gnss_adjustment(
         # Clear dynamic active adjustment clusters and phase
         mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
         mqtt_service.adjustment_phase.pop(req.project_id, None)
+        mqtt_service.round_robin_manager.clear_project(req.project_id)
         logger.info(f"Cleared active adjustment clusters and phase for project {req.project_id}")
 
         # 1. Gửi lệnh mở lại (wake) luồng RTCM của Base gốc qua MQTT tới CORS Dashboard

@@ -561,6 +561,7 @@ function handleRealtimeUpdate(message) {
             ind.textContent = `Phase: ${message.phase}`;
             if (message.phase === 'COLLECTING_BASELINE') ind.className = 'ms-4 text-info fw-bold font-monospace';
             else if (message.phase === 'FREE_NETWORK') ind.className = 'ms-4 text-warning fw-bold font-monospace';
+            else if (message.phase === 'ERROR') ind.className = 'ms-4 text-danger fw-bold font-monospace';
         }
     }
 
@@ -582,6 +583,19 @@ function handleRealtimeUpdate(message) {
             });
         }
     }
+}
+
+function getAdjustedPointCoordinates(point) {
+    if (Array.isArray(point)) return point;
+    if (point && typeof point === 'object') {
+        return [point.adjusted_n, point.adjusted_e, point.adjusted_u];
+    }
+    return [];
+}
+
+function formatAdjustedCoordinate(value) {
+    const coordinate = Number(value);
+    return Number.isFinite(coordinate) ? coordinate.toFixed(4) : '--';
 }
 
 function updateRealtimeSensorValues(message) {
@@ -633,14 +647,15 @@ function updateRealtimeSensorValues(message) {
             
             if (message.data.points) {
                 for (const [ptName, ptCoords] of Object.entries(message.data.points)) {
+                    const coordinates = getAdjustedPointCoordinates(ptCoords);
                     const item = document.createElement('div');
                     item.className = 'list-group-item bg-transparent text-slate-300 py-1 px-0 d-flex justify-content-between align-items-center border-bottom border-secondary';
                     item.innerHTML = `
                         <span class="fw-semibold text-info font-monospace" style="font-size:0.75rem;">${ptName}</span>
                         <span class="text-light font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
-                            X: ${ptCoords[0]?.toFixed(4)}<br>
-                            Y: ${ptCoords[1]?.toFixed(4)}<br>
-                            Z: ${ptCoords[2]?.toFixed(4)}
+                            X: ${formatAdjustedCoordinate(coordinates[0])}<br>
+                            Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
+                            Z: ${formatAdjustedCoordinate(coordinates[2])}
                         </span>
                     `;
                     adjPointsList.appendChild(item);
@@ -2107,7 +2122,7 @@ function setupEventListeners() {
             
             // Trigger adjustment request
             if (typeof requestGnssAdjustment === 'function') {
-                requestGnssAdjustment();
+                requestGnssAdjustment(currentStationData?.project_id);
             }
         });
     }
@@ -2348,6 +2363,9 @@ function setupEventListeners() {
     }
 
         window.requestGnssAdjustment = async function(projectId, stationIds) {
+        // The advanced-panel action operates on the currently selected station,
+        // while the map-cluster action passes the project explicitly.
+        projectId = projectId || currentStationData?.project_id;
         if (!projectId) {
             showAdjustmentError('Loi', 'Khong xac dinh duoc du an de binh sai');
             return;
@@ -3443,14 +3461,15 @@ function updateSidebarUI(data) {
                 
                 if (cacheData.points) {
                     for (const [ptName, ptCoords] of Object.entries(cacheData.points)) {
+                        const coordinates = getAdjustedPointCoordinates(ptCoords);
                         const item = document.createElement('div');
                         item.className = 'list-group-item bg-transparent text-slate-300 py-1.5 px-0 d-flex justify-content-between align-items-center border-bottom border-white/5';
                         item.innerHTML = `
                             <span class="fw-semibold text-teal-400 font-monospace">${ptName}</span>
                             <span class="text-glow font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
-                                X: ${ptCoords[0]?.toFixed(4)}<br>
-                                Y: ${ptCoords[1]?.toFixed(4)}<br>
-                                Z: ${ptCoords[2]?.toFixed(4)}
+                                X: ${formatAdjustedCoordinate(coordinates[0])}<br>
+                                Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
+                                Z: ${formatAdjustedCoordinate(coordinates[2])}
                             </span>
                         `;
                         adjPointsList.appendChild(item);
