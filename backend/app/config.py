@@ -27,8 +27,9 @@ class Settings(BaseSettings):
     # two endpoints separate prevents Round-Robin from sending SOURCE requests
     # to the SET control socket.
     NTRIP_CONTROL_HOST: str = ""
+    NTRIP_CONTROL_HOSTS: str = "aitogy.com.vn,aitogy.click"
     NTRIP_CONTROL_PORT: int = 7054
-    NTRIP_CONTROL_PASSWORD: str = "123"
+    NTRIP_CONTROL_PASSWORD: str = "12345"
     NTRIP_SOURCE_HOST: str = "aitogy.click"
     NTRIP_SOURCE_PORT: int = 2101
     NTRIP_SOURCE_PASSWORD: str = "12345"

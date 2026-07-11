@@ -33,6 +33,27 @@ def _is_usable_llh(llh: Optional[tuple[float, float, float]]) -> bool:
     return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
 
 
+def _llh_horizontal_distance_m(
+    first: tuple[float, float, float],
+    second: tuple[float, float, float],
+) -> float:
+    """Horizontal separation used to identify a correction BASE.
+
+    AGRICA and GGA heights may use ellipsoidal and MSL datums respectively;
+    their geoid-sized height difference must not make the same BASE look like a
+    different station.
+    """
+
+    mean_latitude = math.radians((float(first[0]) + float(second[0])) / 2.0)
+    north = math.radians(float(first[0]) - float(second[0])) * 6378137.0
+    east = (
+        math.radians(float(first[1]) - float(second[1]))
+        * 6378137.0
+        * math.cos(mean_latitude)
+    )
+    return math.hypot(north, east)
+
+
 def _ecef_to_llh(x: float, y: float, z: float) -> tuple[float, float, float]:
     """Convert WGS84 ECEF metres to latitude, longitude and ellipsoidal height."""
 
@@ -75,6 +96,106 @@ def _neu_to_ecef_delta(
     )
 
 
+def _vector_length(vector: Any) -> float:
+    """Return a 3-D vector length without involving the adjustment engine."""
+
+    return math.sqrt(sum(float(value) ** 2 for value in vector))
+
+
+def _sum_cycle_vectors(
+    steps: List[tuple[int, int]], baselines: List[dict], vector_key: str
+) -> tuple[float, float, float]:
+    total = [0.0, 0.0, 0.0]
+    for edge_index, direction in steps:
+        vector = baselines[edge_index][vector_key]
+        for component in range(3):
+            total[component] += direction * float(vector[component])
+    return total[0], total[1], total[2]
+
+
+def _build_fundamental_loops(baselines: List[dict]) -> List[dict]:
+    """Find a deterministic independent cycle basis for a baseline multigraph.
+
+    This is report-only graph post-processing.  Each non-tree edge closes one
+    fundamental loop; parallel observations therefore correctly create a
+    two-edge loop.  Stored vectors are signed according to traversal direction.
+    """
+
+    parent: Dict[str, str] = {}
+    tree: Dict[str, List[tuple[str, int, int]]] = {}
+    chords: List[int] = []
+
+    def find(name: str) -> str:
+        parent.setdefault(name, name)
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    for edge_index, baseline in enumerate(baselines):
+        start, end = str(baseline["from"]), str(baseline["to"])
+        root_start, root_end = find(start), find(end)
+        tree.setdefault(start, [])
+        tree.setdefault(end, [])
+        if root_start == root_end:
+            chords.append(edge_index)
+            continue
+        parent[root_end] = root_start
+        tree[start].append((end, edge_index, 1))
+        tree[end].append((start, edge_index, -1))
+
+    loops: List[dict] = []
+    for loop_number, chord_index in enumerate(chords, start=1):
+        chord = baselines[chord_index]
+        start, end = str(chord["from"]), str(chord["to"])
+        # Close the chord start->end by finding the unique tree path end->start.
+        pending = [(end, [end], [])]
+        visited = set()
+        path_points: List[str] = []
+        path_steps: List[tuple[int, int]] = []
+        while pending:
+            node, points, steps = pending.pop()
+            if node == start:
+                path_points, path_steps = points, steps
+                break
+            if node in visited:
+                continue
+            visited.add(node)
+            for neighbor, edge_index, direction in reversed(tree.get(node, [])):
+                if neighbor not in visited:
+                    pending.append(
+                        (neighbor, points + [neighbor], steps + [(edge_index, direction)])
+                    )
+        if not path_points:
+            continue
+
+        cycle_steps = [(chord_index, 1)] + path_steps
+        observed = _sum_cycle_vectors(cycle_steps, baselines, "observed_xyz")
+        adjusted = _sum_cycle_vectors(cycle_steps, baselines, "adjusted_xyz")
+        total_length = sum(
+            float(baselines[index]["observed_length"]) for index, _ in cycle_steps
+        )
+        observed_closure = _vector_length(observed)
+        adjusted_closure = _vector_length(adjusted)
+        loops.append({
+            "loop": loop_number,
+            "points": [start, end] + path_points[1:],
+            "baseline_indices": [index for index, _ in cycle_steps],
+            "observed_misclosure_xyz": observed,
+            "observed_closure": observed_closure,
+            "adjusted_misclosure_xyz": adjusted,
+            "adjusted_closure": adjusted_closure,
+            "total_length": total_length,
+            "observed_relative_precision": (
+                total_length / observed_closure if observed_closure > 1e-15 else None
+            ),
+            "adjusted_relative_precision": (
+                total_length / adjusted_closure if adjusted_closure > 1e-15 else None
+            ),
+        })
+    return loops
+
+
 class RoundRobinAdjustmentManager:
     """Collect base-to-rover and rover-to-rover baselines for the existing solver.
 
@@ -84,23 +205,32 @@ class RoundRobinAdjustmentManager:
     """
 
     SEED_COLLECTION_MAX_STEPS = 10
+    BASE_IDENTITY_TOLERANCE_M = 20.0
+    CROSS_BASE_SETTLE_SECONDS = 5
 
     def __init__(
         self,
         mqtt_client,
         caster_host: str = "127.0.0.1",
+        caster_hosts: Optional[List[str]] = None,
         caster_port: int = 7054,
         source_host: Optional[str] = None,
         source_port: int = 2101,
-        control_password: str = "123",
+        control_password: str = "12345",
         source_password: str = "12345",
         route_start_callback: Optional[Callable[[str, str, int, str, str], Any]] = None,
         route_stop_callback: Optional[Callable[[str], Any]] = None,
         result_callback: Optional[Callable[[int, dict], Any]] = None,
         error_callback: Optional[Callable[[int, str], Any]] = None,
+        progress_callback: Optional[Callable[[int, str], Any]] = None,
     ):
         self.mqtt_client = mqtt_client
         self.caster_host = caster_host
+        self.caster_hosts = list(dict.fromkeys(
+            str(host).strip()
+            for host in (caster_hosts or [caster_host])
+            if str(host).strip()
+        ))
         self.caster_port = caster_port
         self.source_host = source_host or caster_host
         self.source_port = source_port
@@ -110,6 +240,9 @@ class RoundRobinAdjustmentManager:
         self.route_stop_callback = route_stop_callback
         self.result_callback = result_callback
         self.error_callback = error_callback
+        self.progress_callback = progress_callback
+        self._last_set_error: Optional[str] = None
+        self._last_set_response: Optional[str] = None
         self.running_tasks: Dict[int, asyncio.Task] = {}
         self.rover_llh_cache: Dict[str, Dict[str, float]] = {}
         self._sessions: Dict[int, dict] = {}
@@ -299,6 +432,22 @@ class RoundRobinAdjustmentManager:
             if active_base == observation.rover_name:
                 ignored_reasons.append("ignored self-observation while this rover is the temporary base")
                 continue
+            cluster = session["clusters"][cluster_index]
+            base_matches, base_diagnostic = self._observation_matches_active_base(
+                cluster,
+                active_base,
+                observation,
+            )
+            if not base_matches:
+                ignored_reasons.append(base_diagnostic)
+                logger.warning(
+                    "Round-Robin project=%s cluster=%s station=%s: %s",
+                    project_id,
+                    cluster_index,
+                    station_id,
+                    base_diagnostic,
+                )
+                continue
             session["clusters"][cluster_index]["observations"].append(
                 _CollectedObservation(active_base, observation)
             )
@@ -313,9 +462,17 @@ class RoundRobinAdjustmentManager:
                     observation.rover_llh[2],
                 )
         if valid_observations:
+            rejection_note = (
+                f" Rejected: {'; '.join(dict.fromkeys(ignored_reasons))}."
+                if ignored_reasons
+                else ""
+            )
             self._last_ingest_diagnostics[project_id] = {
                 "level": "success",
-                "message": f"Accepted {len(valid_observations)} valid AGRICA baseline(s).",
+                "message": (
+                    f"Accepted {len(valid_observations)} valid AGRICA baseline(s)."
+                    f"{rejection_note}"
+                ),
                 "station_id": station_id,
                 "position_types": [obs.position_type for obs in valid_observations],
             }
@@ -427,16 +584,55 @@ class RoundRobinAdjustmentManager:
                     len(rovers),
                     rovers,
                 )
+                route_host = (
+                    cluster.get("round_robin_route_host")
+                    or cluster.get("base_stream_host")
+                    or self.source_host
+                )
+                route_port_value = (
+                    cluster.get("round_robin_route_port")
+                    or cluster.get("base_stream_port")
+                    or self.source_port
+                )
+                try:
+                    route_port = int(route_port_value)
+                except (TypeError, ValueError):
+                    route_port = self.source_port
+                configured_mountpoint = (
+                    cluster.get("round_robin_route_mountpoint")
+                    or cluster.get("base_stream_mp")
+                )
+                route_password = cluster.get("round_robin_route_password")
+                if route_password is None:
+                    route_password = self.source_password
                 for rover_code in rovers:
+                    def mark_collection_started(
+                        *,
+                        current_cluster_index: int = cluster_index,
+                        current_cluster: dict = cluster,
+                        current_rover: str = rover_code,
+                    ) -> None:
+                        self._clear_cluster_fragment_buffers(project_id, current_cluster)
+                        session["active_bases"][current_cluster_index] = current_rover
+
+                    def mark_collection_stopped(
+                        *,
+                        current_cluster_index: int = cluster_index,
+                        current_cluster: dict = cluster,
+                    ) -> None:
+                        session["active_bases"].pop(current_cluster_index, None)
+                        self._clear_cluster_fragment_buffers(project_id, current_cluster)
+
                     try:
                         await self._set_rover_as_temporary_base(
                             rover_code,
-                            on_collection_started=lambda: session["active_bases"].__setitem__(
-                                cluster_index, rover_code
-                            ),
-                            on_collection_stopped=lambda: session["active_bases"].pop(
-                                cluster_index, None
-                            ),
+                            project_id=project_id,
+                            route_host=route_host,
+                            route_port=route_port,
+                            route_mountpoint=configured_mountpoint,
+                            route_password=str(route_password),
+                            on_collection_started=mark_collection_started,
+                            on_collection_stopped=mark_collection_stopped,
                         )
                     finally:
                         session["active_bases"].pop(cluster_index, None)
@@ -465,13 +661,33 @@ class RoundRobinAdjustmentManager:
         finally:
             self.running_tasks.pop(project_id, None)
 
+    async def _emit_progress(self, project_id: Optional[int], message: str) -> None:
+        logger.info("[Round-Robin PHASE] %s", message)
+        if project_id is None or not self.progress_callback:
+            return
+        try:
+            callback_result = self.progress_callback(project_id, message)
+            if inspect.isawaitable(callback_result):
+                await callback_result
+        except Exception as exc:
+            logger.warning("Could not broadcast Round-Robin PHASE: %s", exc)
+
     async def _set_rover_as_temporary_base(
         self,
         rover_code: str,
+        project_id: Optional[int] = None,
+        route_host: Optional[str] = None,
+        route_port: Optional[int] = None,
+        route_mountpoint: Optional[str] = None,
+        route_password: Optional[str] = None,
         on_collection_started: Optional[Callable[[], None]] = None,
         on_collection_stopped: Optional[Callable[[], None]] = None,
     ) -> None:
         logger.info("[Round-Robin] Setting %s as temporary base", rover_code)
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: querying {self.caster_hosts} for an active AICaster client session.",
+        )
         llh = self.rover_llh_cache.get(rover_code)
         if not llh:
             raise RuntimeError(f"No LLH cache found for {rover_code}; cannot start base rotation")
@@ -482,6 +698,15 @@ class RoundRobinAdjustmentManager:
         mountpoint = client_info.get("Mountpoint", "")
         if not mountpoint:
             raise RuntimeError(f"AICaster client session for {rover_code} has no mountpoint")
+        await self._emit_progress(
+            project_id,
+            (
+                f"{rover_code}: matched AICaster "
+                f"{client_info.get('CasterHost')}:{client_info.get('CasterPort')} "
+                f"username={client_info.get('Username')} "
+                f"receiverID={client_info.get('receiverID')} mountpoint={mountpoint}."
+            ),
+        )
 
         commands = self._build_geotek_lte_unicore_config(
             setup_method="FIXED",
@@ -489,33 +714,86 @@ class RoundRobinAdjustmentManager:
             lon=llh["lon"],
             alt=llh["alt"],
         )
+        await self._emit_progress(
+            project_id,
+            (
+                f"{rover_code}: sending SET BASE to {client_info.get('CasterHost')}:"
+                f"{client_info.get('CasterPort')} (HTTP Basic auth "
+                f"{'enabled' if self.control_password else 'disabled'})."
+            ),
+        )
         if not await self._send_set_command(
             mountpoint,
             client_info.get("Username", rover_code),
             client_info.get("receiverID", ""),
             commands,
             password=self.control_password,
+            caster_host=client_info.get("CasterHost"),
+            caster_port=client_info.get("CasterPort"),
         ):
-            raise RuntimeError(f"AICaster rejected the SET command for {rover_code}")
+            detail = self._last_set_error or "AICaster returned no rejection detail"
+            raise RuntimeError(
+                f"AICaster rejected the SET command for {rover_code}: {detail}"
+            )
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: SET BASE accepted; response={self._last_set_response or '200 OK'}.",
+        )
 
         route_started = False
         collection_started = False
         restore_error: Optional[str] = None
+        target_route_host = route_host or self.source_host
+        target_route_port = int(route_port or self.source_port)
+        target_route_mountpoint = route_mountpoint or f"{rover_code}_BASE"
+        target_route_password = self.source_password if route_password is None else route_password
         try:
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: waiting 10s for UM980 to enter BASE mode and emit RTCM.",
+            )
             await asyncio.sleep(10)
+            await self._emit_progress(
+                project_id,
+                (
+                    f"{rover_code}: starting MQTT-to-NTRIP route "
+                    f"{target_route_host}:{target_route_port}/{target_route_mountpoint}."
+                ),
+            )
             await self._start_ntrip_route(
                 rover_code,
-                f"{rover_code}_BASE",
+                target_route_mountpoint,
+                host=target_route_host,
+                port=target_route_port,
+                password=target_route_password,
             )
             route_started = True
             if on_collection_started:
                 on_collection_started()
             collection_started = True
+            await self._emit_progress(
+                project_id,
+                (
+                    f"{rover_code}: RTCM route is live; waiting "
+                    f"{self.CROSS_BASE_SETTLE_SECONDS}s for rover correction sources "
+                    "to report the temporary base_llh. Transition observations are rejected."
+                ),
+            )
+            await asyncio.sleep(self.CROSS_BASE_SETTLE_SECONDS)
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: NTRIP SOURCE accepted and first RTCM frame forwarded; collecting cross-baselines for 15s.",
+            )
             logger.info("Waiting 15s for cross-baselines referenced to %s", rover_code)
             await asyncio.sleep(15)
         finally:
             if collection_started and on_collection_stopped:
                 on_collection_stopped()
+            if collection_started:
+                await self._emit_progress(
+                    project_id,
+                    f"{rover_code}: cross-baseline collection window closed.",
+                )
             if route_started:
                 try:
                     await self._stop_ntrip_route(rover_code)
@@ -525,28 +803,50 @@ class RoundRobinAdjustmentManager:
             # A temporary base must never be left in BASE mode.  Restore the
             # receiver without FRESET/SAVECONFIG so its persistent NTRIP setup
             # and baud rate remain intact.
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: sending SET ROVER to restore normal AGRICA operation.",
+            )
             restored = await self._send_set_command(
                 mountpoint,
                 client_info.get("Username", rover_code),
                 client_info.get("receiverID", ""),
                 self._build_geotek_lte_unicore_rover_config(),
                 password=self.control_password,
+                caster_host=client_info.get("CasterHost"),
+                caster_port=client_info.get("CasterPort"),
             )
             if not restored:
-                restore_error = f"Could not restore {rover_code} to ROVER mode"
+                detail = self._last_set_error or "AICaster returned no rejection detail"
+                restore_error = f"Could not restore {rover_code} to ROVER mode: {detail}"
                 logger.error(restore_error)
+            else:
+                await self._emit_progress(
+                    project_id,
+                    f"{rover_code}: SET ROVER accepted; receiver restored.",
+                )
             await asyncio.sleep(5)
         if restore_error:
             raise RuntimeError(restore_error)
 
-    async def _start_ntrip_route(self, station_code: str, mountpoint: str) -> None:
+    async def _start_ntrip_route(
+        self,
+        station_code: str,
+        mountpoint: str,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        password: Optional[str] = None,
+    ) -> None:
+        target_host = host or self.source_host
+        target_port = int(port or self.source_port)
+        target_password = self.source_password if password is None else password
         if self.route_start_callback:
             result = self.route_start_callback(
                 station_code,
-                self.source_host,
-                self.source_port,
+                target_host,
+                target_port,
                 mountpoint,
-                self.source_password,
+                target_password,
             )
             if inspect.isawaitable(result):
                 result = await result
@@ -559,10 +859,10 @@ class RoundRobinAdjustmentManager:
         # callback and wait for the SOURCE handshake before collecting.
         route_payload = {
             "station_code": station_code,
-            "host": self.source_host,
-            "port": self.source_port,
+            "host": target_host,
+            "port": target_port,
             "mountpoint": mountpoint,
-            "password": self.source_password,
+            "password": target_password,
         }
         self.mqtt_client.publish("command/ntrip/route/start", json.dumps(route_payload))
 
@@ -638,6 +938,8 @@ class RoundRobinAdjustmentManager:
             raw_ecef_by_name[name] = seed.rover_ecef
 
         baselines: List[Baseline] = []
+        baseline_ratios: List[Optional[float]] = []
+        baseline_sources: List[dict] = []
         cross_baseline_count = 0
         for record in records:
             observation = record.observation
@@ -664,6 +966,13 @@ class RoundRobinAdjustmentManager:
                     identifier=observation.station_id,
                 )
             )
+            baseline_ratios.append(observation.full_data.get("ratio"))
+            baseline_sources.append({
+                "assigned_base": from_name,
+                "reported_base_llh": observation.base_llh,
+                "observation_epoch": observation.epoch_ts,
+                "station_id": observation.station_id,
+            })
 
         if cross_baseline_count == 0:
             raise ValueError("no rover-to-rover baseline was collected during Round-Robin")
@@ -691,18 +1000,37 @@ class RoundRobinAdjustmentManager:
                 "raw_rover_ecef": raw_ecef_by_name.get(point.name),
             }
 
-        adjusted_baselines = [
-            {
+        adjusted_baselines = []
+        for index, baseline in enumerate(result.baselines):
+            source = baselines[index]
+            standard_deviation = source.standard_deviation
+            if standard_deviation is None:
+                assert source.covariance is not None
+                standard_deviation = tuple(
+                    math.sqrt(source.covariance[component][component]) for component in range(3)
+                )
+            ratio = baseline_ratios[index] if index < len(baseline_ratios) else None
+            source_metadata = baseline_sources[index] if index < len(baseline_sources) else {}
+            item = {
                 "from": baseline.from_point,
                 "to": baseline.to_point,
+                "observed_xyz": baseline.observed,
+                "adjusted_xyz": baseline.adjusted,
+                "residual_xyz": baseline.residual,
+                "standard_deviation_xyz": standard_deviation,
+                "observed_length": _vector_length(baseline.observed),
+                "adjusted_length": _vector_length(baseline.adjusted),
+                "ratio": ratio,
+                **source_metadata,
+                # Legacy keys retained for existing API/UI consumers.
                 "observed_neu": baseline.observed,
                 "adjusted_neu": baseline.adjusted,
                 "residual_neu": baseline.residual,
                 "standardized_residual": baseline.standardized_residual,
                 "redundancy": baseline.redundancy,
             }
-            for baseline in result.baselines
-        ]
+            adjusted_baselines.append(item)
+        loops = _build_fundamental_loops(adjusted_baselines)
         return {
             "type": "gnss_adjusted",
             "source": "AGRICA_ROUND_ROBIN",
@@ -717,13 +1045,20 @@ class RoundRobinAdjustmentManager:
                 "lat": fixed_base_llh[0],
                 "lon": fixed_base_llh[1],
                 "h": fixed_base_llh[2],
+                "ecef_xyz": fixed_base_ecef,
             },
             "rover_count": len(adjusted_points),
             "points": adjusted_points,
             "baselines": adjusted_baselines,
+            "loops": loops,
             "quality": {
                 "degrees_of_freedom": result.degrees_of_freedom,
                 "variance_factor": result.variance_factor,
+                "reference_standard_deviation": (
+                    math.sqrt(result.variance_factor)
+                    if result.variance_factor is not None and result.variance_factor >= 0.0
+                    else None
+                ),
                 "weighted_residual_sum": result.weighted_residual_sum,
                 "rank": result.rank,
                 "condition_number": result.condition_number,
@@ -754,39 +1089,118 @@ class RoundRobinAdjustmentManager:
         }
 
     async def _find_client_info(self, station_code: str) -> Optional[Dict[str, Any]]:
-        """Read the AICaster client table to find a rover's active session."""
+        """Find a rover across every configured AICaster client table."""
+
+        results = await asyncio.gather(
+            *(self._query_client_table(host) for host in self.caster_hosts),
+            return_exceptions=True,
+        )
+        candidates = []
+        query_errors = []
+        successful_hosts = []
+        for host, result in zip(self.caster_hosts, results):
+            if isinstance(result, BaseException):
+                detail = str(result).strip() or result.__class__.__name__
+                query_errors.append(f"{host}:{self.caster_port} ({detail})")
+                continue
+            successful_hosts.append(host)
+            candidates.extend(
+                self._parse_client_table(result, caster_host=host, caster_port=self.caster_port)
+            )
+
+        selected = self._select_client_candidate(candidates, station_code)
+        if selected:
+            logger.info(
+                "Matched station %s to AICaster %s:%s (username=%s receiverID=%s mountpoint=%s)",
+                station_code,
+                selected["CasterHost"],
+                selected["CasterPort"],
+                selected["Username"],
+                selected["receiverID"],
+                selected["Mountpoint"],
+            )
+            return selected
+
+        if not successful_hosts:
+            raise RuntimeError(
+                "Could not query any configured AICaster client table: "
+                + "; ".join(query_errors)
+            )
+        logger.error(
+            "No AICaster client session matched station %s. Queried=%s errors=%s available=%s",
+            station_code,
+            successful_hosts,
+            query_errors,
+            [
+                {
+                    "host": item["CasterHost"],
+                    "username": item["Username"],
+                    "receiver_id": item["receiverID"],
+                    "mountpoint": item["Mountpoint"],
+                }
+                for item in candidates
+            ],
+        )
+        return None
+
+    def _observation_matches_active_base(
+        self,
+        cluster: dict,
+        active_base: str,
+        observation: Any,
+    ) -> tuple[bool, str]:
+        """Verify AGRICA's reported base coordinate before assigning an edge."""
+
+        reported = observation.base_llh
+        if not _is_usable_llh(reported):
+            return False, (
+                f"rejected {observation.rover_name}: AGRICA has no usable base_llh; "
+                f"cannot verify expected base {active_base}"
+            )
+
+        if active_base == "BASE":
+            try:
+                expected = self._cluster_base_llh(cluster)
+            except ValueError as exc:
+                return False, f"cannot verify fixed BASE: {exc}"
+        else:
+            cached = self.rover_llh_cache.get(active_base)
+            if not cached:
+                return False, f"cannot verify temporary base {active_base}: LLH cache is unavailable"
+            expected = (
+                float(cached["lat"]),
+                float(cached["lon"]),
+                float(cached["alt"]),
+            )
+
+        separation = _llh_horizontal_distance_m(reported, expected)
+        height_delta = abs(float(reported[2]) - float(expected[2]))
+        if separation > self.BASE_IDENTITY_TOLERANCE_M:
+            return False, (
+                f"rejected {observation.rover_name}: AGRICA base_llh is {separation:.2f} m horizontally "
+                f"from expected {active_base} (limit {self.BASE_IDENTITY_TOLERANCE_M:.1f} m); "
+                "correction source has not switched yet or this is a transition fragment"
+            )
+        return True, (
+            f"verified base {active_base} (horizontal delta {separation:.2f} m, "
+            f"height delta {height_delta:.2f} m)"
+        )
+
+    def _clear_cluster_fragment_buffers(self, project_id: int, cluster: dict) -> None:
+        for station_id in cluster.get("stations", []):
+            self._agrica_fragment_buffers.pop((int(project_id), int(station_id)), None)
+
+    async def _query_client_table(self, caster_host: str) -> str:
         writer = None
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.caster_host, self.caster_port),
+                asyncio.open_connection(caster_host, self.caster_port),
                 timeout=10.0,
             )
             writer.write(b"GET /clienttable HTTP/1.0\r\n\r\n")
             await writer.drain()
             data = await asyncio.wait_for(reader.read(), timeout=10.0)
-            client_table = data.decode(errors="ignore")
-            selected = self._select_client_info(client_table, station_code)
-            if selected is None:
-                available_sessions = []
-                for line in client_table.strip().splitlines():
-                    parts = [part.strip() for part in line.split(";")]
-                    if len(parts) > 4 and parts[0] == "STR":
-                        available_sessions.append({
-                            "username": parts[1],
-                            "receiver_id": parts[2],
-                            "mountpoint": parts[3],
-                        })
-                logger.error(
-                    "No AICaster client session matched station %s. Available STR sessions: %s",
-                    station_code,
-                    available_sessions,
-                )
-            return selected
-        except Exception as exc:
-            logger.error("Error fetching /clienttable: %s", exc)
-            raise RuntimeError(
-                f"Could not query AICaster client table at {self.caster_host}:{self.caster_port}: {exc}"
-            ) from exc
+            return data.decode(errors="ignore")
         finally:
             if writer:
                 writer.close()
@@ -794,23 +1208,39 @@ class RoundRobinAdjustmentManager:
                     await writer.wait_closed()
                 except Exception:
                     pass
-        return None
 
     @staticmethod
-    def _select_client_info(client_table: str, station_code: str) -> Optional[Dict[str, Any]]:
-        target = station_code.strip().lower()
-        exact_matches = []
-        fuzzy_matches = []
+    def _parse_client_table(
+        client_table: str,
+        caster_host: Optional[str] = None,
+        caster_port: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        candidates = []
         for line in client_table.strip().splitlines():
             parts = [part.strip() for part in line.split(";")]
             if len(parts) <= 4 or parts[0] != "STR":
                 continue
-            username, receiver_id, mountpoint = parts[1], parts[2], parts[3]
-            candidate = {
-                "Username": username,
-                "receiverID": receiver_id,
-                "Mountpoint": mountpoint,
-            }
+            candidates.append({
+                "Username": parts[1],
+                "receiverID": parts[2],
+                "Mountpoint": parts[3],
+                "CasterHost": caster_host,
+                "CasterPort": caster_port,
+            })
+        return candidates
+
+    @staticmethod
+    def _select_client_candidate(
+        candidates: List[Dict[str, Any]],
+        station_code: str,
+    ) -> Optional[Dict[str, Any]]:
+        target = station_code.strip().lower()
+        exact_matches = []
+        fuzzy_matches = []
+        for candidate in candidates:
+            username = candidate["Username"]
+            receiver_id = candidate["receiverID"]
+            mountpoint = candidate["Mountpoint"]
             # Depending on the AICaster build, the station code can be exposed
             # as Username, receiverID, or Mountpoint.
             fields = {username.lower(), receiver_id.lower(), mountpoint.lower()}
@@ -831,27 +1261,54 @@ class RoundRobinAdjustmentManager:
             )
         return None
 
-    async def _send_set_command(self, mountpoint: str, username: str, receiver_id: str, commands: List[bytes], password: str = "123") -> bool:
+    @classmethod
+    def _select_client_info(cls, client_table: str, station_code: str) -> Optional[Dict[str, Any]]:
+        """Compatibility helper used by focused parser tests."""
+
+        return cls._select_client_candidate(cls._parse_client_table(client_table), station_code)
+
+    async def _send_set_command(
+        self,
+        mountpoint: str,
+        username: str,
+        receiver_id: str,
+        commands: List[bytes],
+        password: str = "12345",
+        caster_host: Optional[str] = None,
+        caster_port: Optional[int] = None,
+    ) -> bool:
         """Send a Caster SET request and Unicore commands to the selected rover."""
+        target_host = caster_host or self.caster_host
+        target_port = int(caster_port or self.caster_port)
+        self._last_set_error = None
+        self._last_set_response = None
         writer = None
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.caster_host, self.caster_port),
+                asyncio.open_connection(target_host, target_port),
                 timeout=10.0,
             )
             auth_str = base64.b64encode(f"{username}:{password}".encode()).decode()
             headers = (
-                f"SET /{mountpoint} HTTP/1.0\r\n"
-                f"User-Agent: NTRIP SetBaseCmd/{receiver_id}\r\n"
-                f"Authorization: Basic {auth_str}\r\n\r\n"
+                f"SET /{mountpoint} HTTP/1.1\r\n"
+                f"Authorization: Basic {auth_str}\r\n"
+                f"User-Agent: NTRIP Client/1.0/{receiver_id}\r\n"
+                f"Host: {target_host}:{target_port}\r\n"
+                f"\r\n"
             )
             writer.write(headers.encode("ascii"))
             await writer.drain()
             response = (
                 await asyncio.wait_for(reader.read(1024), timeout=10.0)
             ).decode("ascii", errors="ignore")
+            self._last_set_response = " ".join(response.strip().split()) or "empty response"
             if "200 OK" not in response:
-                logger.error("SET request rejected by Caster: %s", response)
+                self._last_set_error = (
+                    f"{target_host}:{target_port} mountpoint={mountpoint} "
+                    f"username={username} auth={'enabled' if password else 'disabled'} "
+                    f"response={self._last_set_response[:500]}"
+                )
+                logger.error("SET request rejected by Caster: %s", self._last_set_error)
                 return False
             for command in commands:
                 writer.write(command)
@@ -859,7 +1316,19 @@ class RoundRobinAdjustmentManager:
                 await asyncio.sleep(0.1)
             return True
         except Exception as exc:
-            logger.error("Error sending SET command to %s: %s", mountpoint, exc)
+            detail = str(exc).strip() or exc.__class__.__name__
+            self._last_set_error = (
+                f"{target_host}:{target_port} mountpoint={mountpoint} "
+                f"username={username} auth={'enabled' if password else 'disabled'} "
+                f"error={detail}"
+            )
+            logger.error(
+                "Error sending SET command to %s via %s:%s: %s",
+                mountpoint,
+                target_host,
+                target_port,
+                detail,
+            )
             return False
         finally:
             if writer:

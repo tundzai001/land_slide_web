@@ -46,6 +46,8 @@ const gnssAdjustmentDebugState = {
     startedAt: null,
     wsStatus: 'CONNECTING',
     entries: [],
+    entriesRevision: 0,
+    autoScroll: true,
     lastGnssStatusAtByStation: {},
     watchdogId: null,
 };
@@ -84,22 +86,84 @@ function refreshGnssAdjustmentDebugUi() {
 
     const log = document.getElementById('gnss-debug-log');
     if (log) {
-        log.innerHTML = '';
-        gnssAdjustmentDebugState.entries.forEach(entry => {
-            const row = document.createElement('div');
-            const color = entry.level === 'error'
-                ? '#ff6b6b'
-                : entry.level === 'warning'
-                    ? '#ffd166'
-                    : entry.level === 'success'
-                        ? '#5eead4'
-                        : '#93c5fd';
-            row.style.color = color;
-            row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
-            log.appendChild(row);
-        });
-        log.scrollTop = log.scrollHeight;
+        const revision = String(gnssAdjustmentDebugState.entriesRevision);
+        if (log.dataset.entriesRevision !== revision) {
+            const previousScrollTop = log.scrollTop;
+            const shouldAutoScroll = gnssAdjustmentDebugState.autoScroll;
+            log.innerHTML = '';
+            gnssAdjustmentDebugState.entries.forEach(entry => {
+                const row = document.createElement('div');
+                const color = entry.level === 'error'
+                    ? '#ff6b6b'
+                    : entry.level === 'warning'
+                        ? '#ffd166'
+                        : entry.level === 'success'
+                            ? '#5eead4'
+                            : '#93c5fd';
+                row.style.color = color;
+                row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
+                log.appendChild(row);
+            });
+            log.dataset.entriesRevision = revision;
+            if (shouldAutoScroll) {
+                log.scrollTop = log.scrollHeight;
+            } else {
+                log.scrollTop = Math.min(
+                    previousScrollTop,
+                    Math.max(0, log.scrollHeight - log.clientHeight),
+                );
+            }
+        }
+        const followButton = document.getElementById('gnss-debug-follow');
+        if (followButton) {
+            followButton.classList.toggle('btn-warning', !gnssAdjustmentDebugState.autoScroll);
+            followButton.classList.toggle('btn-outline-secondary', gnssAdjustmentDebugState.autoScroll);
+            followButton.title = gnssAdjustmentDebugState.autoScroll
+                ? 'Đang tự cuộn theo log mới'
+                : 'Đã tạm dừng tự cuộn; bấm để xuống cuối';
+        }
     }
+}
+
+function formatGnssAdjustmentDebugOutput() {
+    return gnssAdjustmentDebugState.entries
+        .map(entry => `[${entry.time}] ${entry.label}: ${entry.message}`)
+        .join('\n');
+}
+
+async function copyGnssAdjustmentDebugOutput(button = null) {
+    const output = formatGnssAdjustmentDebugOutput();
+    if (!output) return;
+    try {
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+            await navigator.clipboard.writeText(output);
+        } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = output;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
+        }
+        if (button) {
+            const originalText = button.innerHTML;
+            button.textContent = 'Đã chép';
+            setTimeout(() => { button.innerHTML = originalText; }, 1200);
+        }
+    } catch (error) {
+        console.error('Could not copy GNSS debug output:', error);
+        window.toast?.error?.('Không thể sao chép Live Debug');
+    }
+}
+
+function scrollGnssAdjustmentDebugToBottom() {
+    gnssAdjustmentDebugState.autoScroll = true;
+    const log = document.getElementById('gnss-debug-log');
+    if (log) log.scrollTop = log.scrollHeight;
+    refreshGnssAdjustmentDebugUi();
 }
 
 function addGnssAdjustmentDebug(label, message, level = 'info') {
@@ -110,8 +174,9 @@ function addGnssAdjustmentDebug(label, message, level = 'info') {
         message: String(message || '-'),
         level,
     });
-    if (gnssAdjustmentDebugState.entries.length > 60) {
-        gnssAdjustmentDebugState.entries.splice(0, gnssAdjustmentDebugState.entries.length - 60);
+    gnssAdjustmentDebugState.entriesRevision += 1;
+    if (gnssAdjustmentDebugState.entries.length > 500) {
+        gnssAdjustmentDebugState.entries.splice(0, gnssAdjustmentDebugState.entries.length - 500);
     }
     refreshGnssAdjustmentDebugUi();
 }
@@ -133,8 +198,14 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         startedAt: Date.now(),
         wsStatus: wsConnection?.readyState === WebSocket.OPEN ? 'CONNECTED' : 'DISCONNECTED',
         entries: [],
+        entriesRevision: gnssAdjustmentDebugState.entriesRevision + 1,
+        autoScroll: true,
         lastGnssStatusAtByStation: {},
     });
+    const resultsSection = document.getElementById('adj-results-section');
+    const pointsList = document.getElementById('adj-points-list');
+    if (resultsSection) resultsSection.style.display = 'none';
+    if (pointsList) pointsList.innerHTML = '';
     addGnssAdjustmentDebug('UI', 'Đã mở phiên debug Bình sai.', 'info');
     gnssAdjustmentDebugState.watchdogId = setInterval(() => {
         if (!gnssAdjustmentDebugState.active) return;
@@ -712,6 +783,14 @@ function handleRealtimeUpdate(message) {
                 gnssAdjustmentDebugState.expectedStationIds = message.expected_station_ids;
             }
             setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
+            if (String(message.phase || '').toUpperCase() === 'COMPLETED' && message.data) {
+                updateRealtimeSensorValues({
+                    sensor_type: 'gnss_adjusted',
+                    timestamp: message.timestamp || message.data.computed_at || Math.floor(Date.now() / 1000),
+                    data: message.data,
+                });
+                addGnssAdjustmentDebug('REPORT', 'Đã nhận liên kết tải JSON và XLSX.', 'success');
+            }
         }
     }
 
@@ -771,14 +850,39 @@ function formatAdjustedCoordinate(value) {
     return Number.isFinite(coordinate) ? coordinate.toFixed(4) : '--';
 }
 
+function isGnssAdjustmentResultRelevant(result, timestamp = null) {
+    if (!result || typeof result !== 'object') return false;
+    const expectedProjectId = Number(
+        gnssAdjustmentDebugState.projectId || currentStationData?.project_id || 0
+    );
+    const resultProjectId = Number(result.project_id || 0);
+    if (expectedProjectId && resultProjectId && expectedProjectId !== resultProjectId) {
+        return false;
+    }
+    if (gnssAdjustmentDebugState.active) {
+        // While a new run is collecting/networking, never show an old cached
+        // success panel.  The project-level COMPLETED event will render it.
+        if (gnssAdjustmentDebugState.phase !== 'COMPLETED') return false;
+        const resultTimestamp = Number(timestamp || result.computed_at || result.epoch_ts || 0);
+        const runStartedAt = Math.floor(Number(gnssAdjustmentDebugState.startedAt || 0) / 1000);
+        if (runStartedAt && (!resultTimestamp || resultTimestamp < runStartedAt - 2)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function updateRealtimeSensorValues(message) {
     if (message.sensor_type === 'gnss_adjusted' && message.data) {
+        if (!isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return;
+        window.gnssBoardState?.loadAdjustmentResult?.(message.data);
         const adjResultsSection = document.getElementById('adj-results-section');
         const adjStatusEl = document.getElementById('adj-process-status');
         const adjTimeEl = document.getElementById('adj-val-time');
         const adjPointsList = document.getElementById('adj-points-list');
         
         const ind = document.getElementById('gnss-phase-indicator');
+        gnssAdjustmentDebugState.phase = 'COMPLETED';
         if (ind) {
             ind.textContent = `Phase: COMPLETED`;
             ind.className = 'ms-4 text-success fw-bold font-monospace';
@@ -806,7 +910,6 @@ function updateRealtimeSensorValues(message) {
                 downloadXlsBtn.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1"></i> Tải báo cáo bình sai (Excel)';
                 adjPointsList.appendChild(downloadXlsBtn);
             }
-
             // Add download report button
             if (message.data.report_file_url) {
                 const downloadBtn = document.createElement('a');
@@ -2385,13 +2488,67 @@ function setupEventListeners() {
             }
         },
         getScreenCoords(pt) {
-            const centerX = this.canvas.width / 2;
-            const centerY = this.canvas.height / 2;
-            const scale = 30; // 30 pixels per meter roughly for visualization
+            const values = Object.values(this.points);
+            const minX = Math.min(...values.map(item => item.x), 0);
+            const maxX = Math.max(...values.map(item => item.x), 0);
+            const minY = Math.min(...values.map(item => item.y), 0);
+            const maxY = Math.max(...values.map(item => item.y), 0);
+            const padding = 70;
+            const rangeX = Math.max(maxX - minX, 1);
+            const rangeY = Math.max(maxY - minY, 1);
+            const scale = Math.max(0.01, Math.min(
+                (this.canvas.width - padding * 2) / rangeX,
+                (this.canvas.height - padding * 2) / rangeY,
+            ));
+            const centerX = this.canvas.width / 2 - ((minX + maxX) / 2) * scale;
+            const centerY = this.canvas.height / 2 + ((minY + maxY) / 2) * scale;
             return {
                 x: centerX + (pt.x * scale),
-                y: centerY - (pt.y * scale) // Y is up in NEU, but down in canvas
+                y: centerY - (pt.y * scale),
             };
+        },
+        loadAdjustmentResult(result) {
+            if (!this.ctx || !result?.points) return;
+            this.points = {};
+            this.baselines = [];
+            this.basePoint = null;
+            const tbody = document.getElementById('gnss-baseline-table-body');
+            const tooltips = document.getElementById('gnss-board-tooltips');
+            if (tbody) tbody.innerHTML = '';
+            if (tooltips) tooltips.innerHTML = '';
+
+            const resultBaselines = Array.isArray(result.baselines) ? result.baselines : [];
+            let baseXYZ = result.base?.ecef_xyz;
+            if (!Array.isArray(baseXYZ)) {
+                const seed = resultBaselines.find(item => item.from === 'BASE' && result.points[item.to]);
+                const target = seed ? getAdjustedPointCoordinates(result.points[seed.to]) : null;
+                const vector = seed?.adjusted_xyz || seed?.adjusted_neu || seed?.observed_xyz || seed?.observed_neu;
+                if (target?.length >= 3 && Array.isArray(vector)) {
+                    baseXYZ = target.map((value, index) => Number(value) - Number(vector[index] || 0));
+                }
+            }
+            if (!Array.isArray(baseXYZ)) {
+                baseXYZ = getAdjustedPointCoordinates(Object.values(result.points)[0]);
+            }
+            baseXYZ = Array.isArray(baseXYZ) ? baseXYZ.map(Number) : [0, 0, 0];
+            this.addPoint('BASE', 0, 0, true);
+            Object.entries(result.points).forEach(([name, point]) => {
+                const coordinate = getAdjustedPointCoordinates(point).map(Number);
+                if (coordinate.length >= 2 && coordinate.every(Number.isFinite)) {
+                    this.addPoint(name, coordinate[1] - baseXYZ[1], coordinate[0] - baseXYZ[0], false);
+                }
+            });
+            resultBaselines.forEach(item => {
+                const vector = item.adjusted_xyz || item.adjusted_neu || item.observed_xyz || item.observed_neu;
+                if (!Array.isArray(vector) || vector.length < 3) return;
+                this.addBaseline(item.from, item.to, {
+                    dn: Number(vector[0]) || 0,
+                    de: Number(vector[1]) || 0,
+                    dh: Number(vector[2]) || 0,
+                    full_data: item,
+                });
+            });
+            this.draw();
         },
         draw() {
             if (!this.ctx) return;
@@ -2405,6 +2562,15 @@ function setupEventListeners() {
             }
             for(let i=0; i<this.canvas.height; i+=50) {
                 this.ctx.beginPath(); this.ctx.moveTo(0, i); this.ctx.lineTo(this.canvas.width, i); this.ctx.stroke();
+            }
+
+            if (Object.keys(this.points).length === 0) {
+                this.ctx.fillStyle = '#64748b';
+                this.ctx.font = '16px monospace';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('Đang chờ dữ liệu baseline để dựng mạng GNSS…', this.canvas.width / 2, this.canvas.height / 2);
+                this.ctx.textAlign = 'start';
+                return;
             }
 
             // Draw baselines
@@ -2458,17 +2624,18 @@ function setupEventListeners() {
                             <div id="gnss-phase-indicator" class="ms-4 text-warning fw-bold font-monospace">Phase: WAITING</div>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body p-0 d-flex flex-row" style="height: calc(100% - 60px);">
-                            <div class="flex-grow-1 position-relative" style="background-color: #f8f9fa; border-right: 1px solid #444; overflow: hidden;" id="gnss-board-container">
+                        <div class="modal-body p-0 d-flex flex-row" style="height: calc(100% - 60px); overflow: hidden;">
+                            <div class="position-relative" style="background-color: #f8f9fa; overflow: hidden; min-width: 280px; width: 0; flex: 1 1 0;" id="gnss-board-container">
                                 <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
                                 <div id="gnss-board-tooltips" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
                             </div>
-                            <div class="d-flex flex-column" style="width: 450px; background-color: #1e1e1e;">
+                            <div id="gnss-column-resizer" title="Kéo để đổi chiều rộng bảng dữ liệu" style="flex: 0 0 7px; cursor: col-resize; background: #374151; border-left: 1px solid #111827; border-right: 1px solid #64748b; touch-action: none;"></div>
+                            <div id="gnss-data-column" class="d-flex flex-column" style="width: 520px; flex: 0 0 520px; min-width: 380px; max-width: 75vw; background-color: #1e1e1e; overflow: hidden;">
                                 <div class="p-2 border-bottom border-secondary bg-black">
                                     <h6 class="mb-0 text-info font-monospace"><i class="bi bi-table me-1"></i>Baseline Vectors</h6>
                                 </div>
-                                 <div class="flex-grow-1" style="overflow-y: auto;" id="gnss-data-panel">
-                                    <table class="table table-dark table-sm table-hover font-monospace mb-0" style="font-size: 0.75rem;">
+                                 <div class="flex-grow-1" style="overflow: auto; min-height: 100px;" id="gnss-data-panel">
+                                    <table class="table table-dark table-sm table-hover font-monospace mb-0" style="font-size: 0.75rem; white-space: nowrap;">
                                         <thead>
                                             <tr class="text-secondary">
                                                 <th>#</th>
@@ -2483,13 +2650,18 @@ function setupEventListeners() {
                                         <tbody id="gnss-baseline-table-body"></tbody>
                                      </table>
                                  </div>
-                                <div id="gnss-debug-section" class="border-top border-secondary bg-black" style="height: 205px; flex: 0 0 205px;">
+                                <div id="gnss-debug-resizer" title="Kéo để đổi chiều cao Live Debug" style="height: 7px; flex: 0 0 7px; cursor: row-resize; background: #374151; border-top: 1px solid #64748b; border-bottom: 1px solid #111827; touch-action: none;"></div>
+                                <div id="gnss-debug-section" class="bg-black d-flex flex-column" style="height: 280px; flex: 0 0 280px; min-height: 160px; overflow: hidden;">
                                     <div class="d-flex justify-content-between align-items-center px-2 py-1 border-bottom border-secondary">
                                         <h6 class="mb-0 text-warning font-monospace" style="font-size: 0.75rem;"><i class="bi bi-bug me-1"></i>Live Debug</h6>
-                                        <button id="gnss-debug-clear" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;">Xóa log</button>
+                                        <div class="d-flex gap-1">
+                                            <button id="gnss-debug-copy" type="button" class="btn btn-sm btn-outline-info py-0 px-1" style="font-size: 0.65rem;" title="Sao chép toàn bộ log">Sao chép</button>
+                                            <button id="gnss-debug-follow" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;" title="Xuống cuối và tiếp tục tự cuộn">↓ Cuối</button>
+                                            <button id="gnss-debug-clear" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;">Xóa log</button>
+                                        </div>
                                     </div>
-                                    <div id="gnss-debug-summary" class="px-2 py-1 text-secondary font-monospace border-bottom border-secondary" style="font-size: 0.64rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">WS: CONNECTING</div>
-                                    <div id="gnss-debug-log" class="p-2 font-monospace" style="height: 148px; overflow-y: auto; font-size: 0.66rem; line-height: 1.35;"></div>
+                                    <div id="gnss-debug-summary" class="px-2 py-1 text-secondary font-monospace border-bottom border-secondary" style="font-size: 0.72rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto;">WS: CONNECTING</div>
+                                    <div id="gnss-debug-log" class="p-2 font-monospace flex-grow-1" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.76rem; line-height: 1.45;"></div>
                                 </div>
                                 <div id="adj-results-section" class="p-3 border-top border-secondary bg-black" style="display: none;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
@@ -2504,8 +2676,77 @@ function setupEventListeners() {
         `.trim();
         modal = wrapper.firstElementChild;
         document.body.appendChild(modal);
+        const dataColumn = modal.querySelector('#gnss-data-column');
+        const debugSection = modal.querySelector('#gnss-debug-section');
+        const savedColumnWidth = Number(localStorage.getItem('gnssDataColumnWidth'));
+        const savedDebugHeight = Number(localStorage.getItem('gnssDebugHeight'));
+        if (savedColumnWidth >= 380) {
+            dataColumn.style.width = `${savedColumnWidth}px`;
+            dataColumn.style.flexBasis = `${savedColumnWidth}px`;
+        }
+        if (savedDebugHeight >= 160) {
+            debugSection.style.height = `${savedDebugHeight}px`;
+            debugSection.style.flexBasis = `${savedDebugHeight}px`;
+        }
+
+        const redrawGnssBoard = () => {
+            const board = window.gnssBoardState;
+            const container = modal.querySelector('#gnss-board-container');
+            if (!board?.canvas || !container) return;
+            board.canvas.width = container.clientWidth;
+            board.canvas.height = container.clientHeight;
+            board.draw?.();
+        };
+        const installResizer = (handle, onMove, onEnd) => {
+            handle?.addEventListener('pointerdown', event => {
+                event.preventDefault();
+                handle.setPointerCapture?.(event.pointerId);
+                document.body.style.userSelect = 'none';
+                const move = moveEvent => onMove(moveEvent);
+                const end = () => {
+                    handle.removeEventListener('pointermove', move);
+                    handle.removeEventListener('pointerup', end);
+                    handle.removeEventListener('pointercancel', end);
+                    document.body.style.userSelect = '';
+                    onEnd?.();
+                };
+                handle.addEventListener('pointermove', move);
+                handle.addEventListener('pointerup', end);
+                handle.addEventListener('pointercancel', end);
+            });
+        };
+        installResizer(modal.querySelector('#gnss-column-resizer'), event => {
+            const bodyRect = modal.querySelector('.modal-body').getBoundingClientRect();
+            const width = Math.max(380, Math.min(bodyRect.right - event.clientX, bodyRect.width * 0.75));
+            dataColumn.style.width = `${width}px`;
+            dataColumn.style.flexBasis = `${width}px`;
+            redrawGnssBoard();
+        }, () => localStorage.setItem('gnssDataColumnWidth', String(Math.round(dataColumn.getBoundingClientRect().width))));
+        installResizer(modal.querySelector('#gnss-debug-resizer'), event => {
+            const columnRect = dataColumn.getBoundingClientRect();
+            const resultsHeight = modal.querySelector('#adj-results-section')?.offsetHeight || 0;
+            const height = Math.max(160, Math.min(columnRect.bottom - event.clientY - resultsHeight, columnRect.height - 150));
+            debugSection.style.height = `${height}px`;
+            debugSection.style.flexBasis = `${height}px`;
+        }, () => localStorage.setItem('gnssDebugHeight', String(Math.round(debugSection.getBoundingClientRect().height))));
+        const debugLog = modal.querySelector('#gnss-debug-log');
+        debugLog?.addEventListener('scroll', () => {
+            const distanceFromBottom = debugLog.scrollHeight - debugLog.scrollTop - debugLog.clientHeight;
+            gnssAdjustmentDebugState.autoScroll = distanceFromBottom <= 24;
+            const followButton = modal.querySelector('#gnss-debug-follow');
+            followButton?.classList.toggle('btn-warning', !gnssAdjustmentDebugState.autoScroll);
+            followButton?.classList.toggle('btn-outline-secondary', gnssAdjustmentDebugState.autoScroll);
+        }, { passive: true });
+        modal.querySelector('#gnss-debug-copy')?.addEventListener('click', event => {
+            copyGnssAdjustmentDebugOutput(event.currentTarget);
+        });
+        modal.querySelector('#gnss-debug-follow')?.addEventListener('click', () => {
+            scrollGnssAdjustmentDebugToBottom();
+        });
         modal.querySelector('#gnss-debug-clear')?.addEventListener('click', () => {
             gnssAdjustmentDebugState.entries = [];
+            gnssAdjustmentDebugState.entriesRevision += 1;
+            gnssAdjustmentDebugState.autoScroll = true;
             addGnssAdjustmentDebug('UI', 'Đã xóa nhật ký debug.', 'info');
         });
         refreshGnssAdjustmentDebugUi();
@@ -3630,8 +3871,13 @@ function updateSidebarUI(data) {
         const adjPointsList = document.getElementById('adj-points-list');
         
         const adjCached = data.sensors?.gnss_adjusted;
-        if (adjCached && adjCached.latest) {
+        if (
+            adjCached
+            && adjCached.latest
+            && isGnssAdjustmentResultRelevant(adjCached.latest, adjCached.latest_timestamp)
+        ) {
             const cacheData = adjCached.latest;
+            window.gnssBoardState?.loadAdjustmentResult?.(cacheData);
             if (adjStatusEl) {
                 adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
             }
@@ -3654,7 +3900,6 @@ function updateSidebarUI(data) {
                     downloadXlsBtn.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1"></i> Tải báo cáo bình sai (Excel)';
                     adjPointsList.appendChild(downloadXlsBtn);
                 }
-
                 // Add download report button
                 if (cacheData.report_file_url) {
                     const downloadBtn = document.createElement('a');

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -93,6 +94,37 @@ class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_set_rejection_preserves_caster_response_detail(self):
+        received_request = bytearray()
+
+        async def handle(reader, writer):
+            received_request.extend(await reader.readuntil(b"\r\n\r\n"))
+            writer.write(b"HTTP/1.0 401 Unauthorized\r\n\r\nBad SET credentials")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), caster_host="127.0.0.1", caster_port=port
+        )
+        try:
+            accepted = await manager._send_set_command(
+                "CORS_A", "Dap1_2", "receiver-2", [b"mode rover survey\r\n"]
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertFalse(accepted)
+        expected_auth = base64.b64encode(b"Dap1_2:12345")
+        self.assertIn(b"SET /CORS_A HTTP/1.1\r\n", received_request)
+        self.assertIn(b"Authorization: Basic " + expected_auth, received_request)
+        self.assertIn(b"User-Agent: NTRIP Client/1.0/receiver-2", received_request)
+        self.assertIn(b"Host: 127.0.0.1:", received_request)
+        self.assertIn("401 Unauthorized", manager._last_set_error)
+        self.assertIn("mountpoint=CORS_A", manager._last_set_error)
+
     def test_client_table_prefers_exact_station_over_prefix_collision(self):
         client_table = (
             "STR;Dap1_10;110;Dap1_10;0;\r\n"
@@ -109,6 +141,24 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(selected["Username"], "generic-user")
         self.assertEqual(selected["receiverID"], "Dap1_2")
+
+    async def test_client_lookup_searches_all_configured_aicasters(self):
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            caster_host="aitogy.com.vn",
+            caster_hosts=["aitogy.com.vn", "aitogy.click"],
+        )
+
+        async def query(host):
+            if host == "aitogy.com.vn":
+                return "STR;other;other;CORS_A;0;\r\n"
+            return "STR;generic;Dap1_2;CORS_B;0;\r\n"
+
+        manager._query_client_table = query
+        selected = await manager._find_client_info("Dap1_2")
+
+        self.assertEqual(selected["CasterHost"], "aitogy.click")
+        self.assertEqual(selected["Mountpoint"], "CORS_B")
 
     def test_temporary_base_commands_do_not_reset_or_persist_base_mode(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
@@ -151,7 +201,9 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "Mountpoint": "CORS_A",
         })
 
-        async def send_set(_mountpoint, _username, _receiver_id, commands, password="123"):
+        async def send_set(
+            _mountpoint, _username, _receiver_id, commands, password="123", **_kwargs
+        ):
             mode = "rover" if any(b"mode rover" in command.lower() for command in commands) else "base"
             events.append((f"set_{mode}", password))
             return True
@@ -161,6 +213,10 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
             await manager._set_rover_as_temporary_base(
                 "S1",
+                route_host="aitogy.click",
+                route_port=2101,
+                route_mountpoint="QN.CP",
+                route_password="12345",
                 on_collection_started=lambda: events.append(("collection_started",)),
                 on_collection_stopped=lambda: events.append(("collection_stopped",)),
             )
@@ -176,6 +232,10 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 "route_stopped",
                 "set_rover",
             ],
+        )
+        self.assertEqual(
+            events[1],
+            ("route_started", "S1", "aitogy.click", 2101, "QN.CP", "12345"),
         )
 
     async def test_route_rejection_still_restores_rover_without_collecting(self):
@@ -196,7 +256,9 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "Mountpoint": "CORS_A",
         })
 
-        async def send_set(_mountpoint, _username, _receiver_id, commands, password="123"):
+        async def send_set(
+            _mountpoint, _username, _receiver_id, commands, password="123", **_kwargs
+        ):
             events.append("set_rover" if any(b"mode rover" in c.lower() for c in commands) else "set_base")
             return True
 

@@ -94,11 +94,22 @@ class MQTTBridge:
         self.adjustment_phase: Dict[int, str] = {}  # {project_id: "IDLE" | "COLLECTING_BASELINE" | "FREE_NETWORK"}
         self.active_adjustment_clusters: Dict[int, list] = {}  # {project_id: [[station_id, ...], ...]}
         # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
-        control_host = settings.NTRIP_CONTROL_HOST or settings.MQTT_BROKER
+        control_hosts = [
+            host.strip()
+            for host in settings.NTRIP_CONTROL_HOSTS.split(",")
+            if host.strip()
+        ]
+        if settings.NTRIP_CONTROL_HOST:
+            control_hosts.insert(0, settings.NTRIP_CONTROL_HOST.strip())
+        control_hosts = list(dict.fromkeys(control_hosts))
+        if not control_hosts:
+            control_hosts = [settings.MQTT_BROKER]
+        control_host = control_hosts[0]
         source_host = settings.NTRIP_SOURCE_HOST or control_host
         self.round_robin_manager = RoundRobinAdjustmentManager(
             self.client,
             caster_host=control_host,
+            caster_hosts=control_hosts,
             caster_port=settings.NTRIP_CONTROL_PORT,
             source_host=source_host,
             source_port=settings.NTRIP_SOURCE_PORT,
@@ -108,6 +119,7 @@ class MQTTBridge:
             route_stop_callback=self._stop_round_robin_ntrip_route,
             result_callback=self._handle_round_robin_adjustment_result,
             error_callback=self._handle_round_robin_adjustment_error,
+            progress_callback=self._handle_round_robin_progress,
         )
         self._fwd_clients: Dict[tuple, mqtt.Client] = {}  # Cache for external brokers
         self._sub_clients: Dict[tuple, mqtt.Client] = {}  # Dynamic clients for subscriptions
@@ -1098,79 +1110,146 @@ class MQTTBridge:
             logger.error(f"Error saving raw GNSS excel: {e}")
 
     def _append_adjustment_to_excel(self, project_id: int, timestamp: int, data: dict, raw_payload: str):
-        import os
-        import openpyxl
+        """Append a human-readable XYZ adjustment report to the project workbook."""
         import datetime
-        
+        import os
+
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill
+
         file_dir = os.path.join(os.path.dirname(__file__), "static", "adjustments")
         os.makedirs(file_dir, exist_ok=True)
-        file_path = os.path.join(file_dir, "gnss_binh_sai.xlsx")
-        
-        if os.path.exists(file_path):
-            try:
-                wb = openpyxl.load_workbook(file_path)
-            except Exception:
-                wb = openpyxl.Workbook()
-        else:
+        # One immutable workbook per project/run.  A shared workbook caused
+        # sheets from unrelated projects to be appended to the same file.
+        file_path = os.path.join(
+            file_dir,
+            f"gnss_binh_sai_{project_id}_{timestamp}.xlsx",
+        )
+        try:
+            wb = openpyxl.load_workbook(file_path) if os.path.exists(file_path) else openpyxl.Workbook()
+        except Exception:
             wb = openpyxl.Workbook()
-            
         if "Sheet" in wb.sheetnames:
             wb.remove(wb["Sheet"])
-                
-        run_num = len(wb.sheetnames) + 1
+
         dt_obj = datetime.datetime.fromtimestamp(timestamp)
-        dt_str = dt_obj.strftime("%H-%M-%S")
-        sheet_name = f"Lần {run_num} ({dt_str})"
-        if len(sheet_name) > 31:
-            sheet_name = sheet_name[:31]
-            
+        sheet_name = f"Lan {len(wb.sheetnames) + 1} ({dt_obj:%H-%M-%S})"[:31]
         ws = wb.create_sheet(title=sheet_name)
-        
-        ws.append(["THÔNG TIN CHUNG"])
-        ws.append(["Mã Dự Án", project_id])
-        ws.append(["Thời Gian Bình Sai", dt_obj.strftime("%Y-%m-%d %H:%M:%S")])
-        ws.append(["Số Lượng Rover", data.get("rover_count", 0)])
-        ws.append(["Động Cơ Bình Sai", data.get("adjustment_engine", "")])
-        ws.append([])
-        
-        ws.append(["BẢNG 1: TOẠ ĐỘ ĐIỂM SAU BÌNH SAI (ADJUSTED POINTS)"])
-        ws.append([
-            "Tên Điểm", "Trạm ID", 
-            "X_Adjusted (m)", "Y_Adjusted (m)", "Z_Adjusted (m)",
-            "dX_Correction (m)", "dY_Correction (m)", "dZ_Correction (m)",
-            "Std_X (m)", "Std_Y (m)", "Std_Z (m)",
-            "X_Raw (m)", "Y_Raw (m)", "Z_Raw (m)"
-        ])
-        
-        points = data.get("points", {})
-        for pt_name, pt_info in points.items():
-            raw_ecef = pt_info.get("raw_rover_ecef") or [0.0, 0.0, 0.0]
-            ws.append([
-                pt_name,
-                pt_info.get("station_id"),
-                pt_info.get("adjusted_n", 0.0),
-                pt_info.get("adjusted_e", 0.0),
-                pt_info.get("adjusted_u", 0.0),
-                pt_info.get("dx", 0.0),
-                pt_info.get("dy", 0.0),
-                pt_info.get("dz", 0.0),
-                pt_info.get("std_n", 0.0),
-                pt_info.get("std_e", 0.0),
-                pt_info.get("std_u", 0.0),
-                raw_ecef[0],
-                raw_ecef[1],
-                raw_ecef[2]
-            ])
-            
-        ws.append([])
-        ws.append(["BẢNG 2: RAW PAYLOAD BẰNG CHỨNG"])
+
+        def section(title):
+            ws.append([])
+            ws.append([title])
+            cell = ws.cell(ws.max_row, 1)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1F4E78")
+
+        def header(values):
+            ws.append(values)
+            for cell in ws[ws.max_row]:
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill("solid", fgColor="D9EAF7")
+
+        def vector_row(prefix, *values):
+            row = list(prefix)
+            for value in values:
+                row.extend(value) if isinstance(value, (list, tuple)) else row.append(value)
+            ws.append(row)
+
+        ws.append(["BÁO CÁO BÌNH SAI MẠNG GNSS (HỆ TỌA ĐỘ ECEF XYZ)"])
+        ws.cell(1, 1).font = Font(bold=True, size=14)
+        ws.append(["Mã dự án", project_id])
+        ws.append(["Thời gian bình sai", dt_obj.strftime("%Y-%m-%d %H:%M:%S")])
+        ws.append(["Số lượng Rover", data.get("rover_count", 0)])
+        ws.append(["Động cơ bình sai", data.get("adjustment_engine", "")])
+
+        baselines = data.get("baselines", [])
+        loops = data.get("loops", [])
+        section("BẢNG 1: BASELINE TÍNH TOÁN (CALCULATED BASELINES)")
+        header(["STT", "Từ điểm", "Đến điểm", "dX (m)", "dY (m)", "dZ (m)",
+                "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "Chiều dài (m)", "Ratio"])
+        for index, baseline in enumerate(baselines, 1):
+            vector_row([index, baseline.get("from"), baseline.get("to")],
+                       baseline.get("observed_xyz") or baseline.get("observed_neu") or (0, 0, 0),
+                       baseline.get("standard_deviation_xyz") or (None, None, None),
+                       baseline.get("observed_length"), baseline.get("ratio"))
+
+        section("BẢNG 2: VÒNG KHÉP TRƯỚC BÌNH SAI (FOUND LOOPS)")
+        header(["Vòng", "Các điểm", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
+                "Tổng chiều dài (m)", "Độ chính xác tương đối"])
+        for loop in loops:
+            ratio = loop.get("observed_relative_precision")
+            vector_row([loop.get("loop"), " - ".join(loop.get("points", []))],
+                       loop.get("observed_misclosure_xyz") or (0, 0, 0),
+                       loop.get("observed_closure"), loop.get("total_length"),
+                       f"1/{ratio:.0f}" if ratio else "Khép kín")
+
+        section("BẢNG 3: BASELINE SAU BÌNH SAI (ADJUSTED BASELINES)")
+        header(["STT", "Từ điểm", "Đến điểm", "vX (m)", "vY (m)", "vZ (m)",
+                "dX_Adjusted (m)", "dY_Adjusted (m)", "dZ_Adjusted (m)", "Chiều dài (m)"])
+        for index, baseline in enumerate(baselines, 1):
+            vector_row([index, baseline.get("from"), baseline.get("to")],
+                       baseline.get("residual_xyz") or baseline.get("residual_neu") or (0, 0, 0),
+                       baseline.get("adjusted_xyz") or baseline.get("adjusted_neu") or (0, 0, 0),
+                       baseline.get("adjusted_length"))
+
+        section("BẢNG 4: VÒNG KHÉP SAU BÌNH SAI (ADJUSTED LOOPS)")
+        header(["Vòng", "Các điểm", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
+                "Tổng chiều dài (m)", "Độ chính xác tương đối"])
+        for loop in loops:
+            ratio = loop.get("adjusted_relative_precision")
+            vector_row([loop.get("loop"), " - ".join(loop.get("points", []))],
+                       loop.get("adjusted_misclosure_xyz") or (0, 0, 0),
+                       loop.get("adjusted_closure"), loop.get("total_length"),
+                       f"1/{ratio:.0f}" if ratio else "Khép kín")
+
+        section("BẢNG 5: ĐIỂM KHỐNG CHẾ (CONTROL POINT)")
+        header(["Tên điểm", "X (m)", "Y (m)", "Z (m)", "Cố định"])
+        base = data.get("base", {})
+        vector_row([base.get("name", "BASE")], base.get("ecef_xyz") or (None, None, None),
+                   bool(base.get("fixed", True)))
+
+        section("BẢNG 6: TỌA ĐỘ ĐIỂM SAU BÌNH SAI (ADJUSTED POINTS)")
+        header(["Tên Điểm", "Trạm ID", "X_Adjusted (m)", "Y_Adjusted (m)", "Z_Adjusted (m)",
+                "dX_Correction (m)", "dY_Correction (m)", "dZ_Correction (m)",
+                "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "X_Raw (m)", "Y_Raw (m)", "Z_Raw (m)"])
+        for point_name, point in data.get("points", {}).items():
+            raw = point.get("raw_rover_ecef") or (None, None, None)
+            ws.append([point_name, point.get("station_id"), point.get("adjusted_n"),
+                       point.get("adjusted_e"), point.get("adjusted_u"), point.get("dx"),
+                       point.get("dy"), point.get("dz"), point.get("std_n"), point.get("std_e"),
+                       point.get("std_u"), raw[0], raw[1], raw[2]])
+
+        section("BẢNG 7: CHỈ TIÊU CHẤT LƯỢNG")
+        header(["Chỉ tiêu", "Giá trị"])
+        quality = data.get("quality", {})
+        for label, key in (("Bậc tự do", "degrees_of_freedom"),
+                           ("Hệ số phương sai", "variance_factor"),
+                           ("Sai số trung phương trọng số đơn vị M0", "reference_standard_deviation"),
+                           ("Tổng bình phương số dư có trọng số", "weighted_residual_sum"),
+                           ("Rank", "rank"), ("Condition number", "condition_number"),
+                           ("Số dư chuẩn hóa lớn nhất", "max_standardized_residual")):
+            ws.append([label, quality.get(key)])
+
+        section("BẢNG 8: RAW PAYLOAD BẰNG CHỨNG")
         for line in raw_payload.splitlines():
             ws.append([line])
-            
+        ws.freeze_panes = "A2"
+        for column in ws.columns:
+            width = min(max(len(str(cell.value or "")) for cell in column) + 2, 42)
+            ws.column_dimensions[column[0].column_letter].width = max(width, 12)
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, float):
+                    cell.number_format = "0.000000"
         try:
             wb.save(file_path)
-        except Exception as e:
-            logger.error(f"Error saving adjustment excel: {e}")
+        except Exception as exc:
+            logger.error("Error saving adjustment Excel %s: %s", file_path, exc, exc_info=True)
+            raise
+        if not os.path.isfile(file_path) or os.path.getsize(file_path) == 0:
+            raise OSError(f"Adjustment Excel was not created correctly: {file_path}")
+        logger.info("GNSS adjustment Excel written: %s (%s bytes)", file_path, os.path.getsize(file_path))
+        return file_path
 
     def _write_adjustment_reports(self, project_id: int, timestamp: int, data: dict) -> dict:
         """Write the report files referenced by the GNSS adjustment interface."""
@@ -1184,19 +1263,31 @@ class MQTTBridge:
             with open(report_path, "w", encoding="utf-8") as report_file:
                 json.dump(data, report_file, ensure_ascii=False, indent=2)
         except Exception as exc:
-            logger.error("Error saving GNSS adjustment JSON report: %s", exc)
-            report_name = ""
+            logger.error("Error saving GNSS adjustment JSON %s: %s", report_path, exc, exc_info=True)
+            raise
+        if not os.path.isfile(report_path) or os.path.getsize(report_path) == 0:
+            raise OSError(f"Adjustment JSON was not created correctly: {report_path}")
+        logger.info("GNSS adjustment JSON written: %s (%s bytes)", report_path, os.path.getsize(report_path))
 
-        self._append_adjustment_to_excel(project_id, timestamp, data, "")
+        excel_path = self._append_adjustment_to_excel(project_id, timestamp, data, "")
+        if not excel_path:
+            raise OSError("Adjustment Excel exporter did not return an output path")
         return {
-            "report_file_url": f"/static/adjustments/{report_name}" if report_name else None,
-            "excel_report_url": "/static/adjustments/gnss_binh_sai.xlsx",
+            "report_file_url": f"/static/adjustments/{report_name}",
+            "excel_report_url": f"/static/adjustments/{os.path.basename(excel_path)}",
         }
 
     async def _handle_round_robin_adjustment_result(self, project_id: int, adjustment: dict):
         """Persist and publish one completed, connected GNSS network adjustment."""
         current_timestamp = int(time.time())
-        adjustment.update(self._write_adjustment_reports(project_id, current_timestamp, adjustment))
+        try:
+            report_urls = self._write_adjustment_reports(project_id, current_timestamp, adjustment)
+        except Exception as exc:
+            message = f"Bình sai đã tính xong nhưng không thể xuất JSON/XLSX: {exc}"
+            logger.error("Project %s: %s", project_id, message, exc_info=True)
+            await self._handle_round_robin_adjustment_error(project_id, message)
+            return
+        adjustment.update(report_urls)
         self.adjustment_phase[project_id] = "COMPLETED"
 
         for point in adjustment.get("points", {}).values():
@@ -1238,6 +1329,10 @@ class MQTTBridge:
             "project_id": project_id,
             "phase": "COMPLETED",
             "message": "Connected GNSS network adjustment completed.",
+            "timestamp": current_timestamp,
+            # The UI may not currently be viewing one of the adjusted stations,
+            # so publish the downloadable result on the project-level event too.
+            "data": adjustment,
         })
 
     async def _handle_round_robin_adjustment_error(self, project_id: int, message: str):
@@ -1246,6 +1341,14 @@ class MQTTBridge:
             "type": "gnss_adjustment_progress",
             "project_id": project_id,
             "phase": "ERROR",
+            "message": message,
+        })
+
+    async def _handle_round_robin_progress(self, project_id: int, message: str):
+        await manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": project_id,
+            "phase": "FREE_NETWORK",
             "message": message,
         })
 

@@ -108,7 +108,15 @@ class NtripPusher:
                 or first_line == "OK"
             )
             if not accepted:
-                raise ConnectionError(f"Caster rejected SOURCE connection: {resp_text or '<empty response>'}")
+                if first_line.startswith("SOURCETABLE 200"):
+                    raise ConnectionError(
+                        "Caster returned SOURCETABLE instead of accepting SOURCE "
+                        f"/{self.mountpoint}; verify the configured mountpoint, source password, and upload protocol"
+                    )
+                response_preview = " ".join(resp_text.split())[:500] or "<empty response>"
+                raise ConnectionError(
+                    f"Caster rejected SOURCE /{self.mountpoint}: {response_preview}"
+                )
             
             logger.info(f"[NTRIP Pusher] {self.station_code}: Successfully connected to caster. Starting push...")
             self._ready.set()
