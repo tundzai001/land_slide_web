@@ -11,6 +11,10 @@ class DatabaseManager {
         this.exportProjects = [];
         this.exportStations = [];
         this.exportStationRequestSeq = 0;
+        this.exportTaskId = localStorage.getItem('activeDatabaseExportTaskId');
+        this.exportTaskState = null;
+        this.exportPollTimer = null;
+        this.exportDownloadStarted = false;
 
         if (!this.token) {
             window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
@@ -46,6 +50,7 @@ class DatabaseManager {
         }
 
         console.log('✅ [DB MANAGER] Initialized');
+        if (this.exportTaskId) this.startExportPolling(this.exportTaskId);
     }
 
     async loadAllData() {
@@ -328,12 +333,26 @@ class DatabaseManager {
         const modalEl = document.getElementById('exportExcelModal');
         if (!modalEl) return;
 
-        const modal = new bootstrap.Modal(modalEl);
-        
-        // Reset UI
-        document.getElementById('export-progress-container').style.display = 'none';
-        document.getElementById('btn-export-start').disabled = false;
-        document.getElementById('btn-export-cancel').disabled = false;
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        if (!modalEl.dataset.exportLifecycleBound) {
+            modalEl.dataset.exportLifecycleBound = 'true';
+            modalEl.addEventListener('shown.bs.modal', () => this.renderExportTaskState());
+            modalEl.addEventListener('hidden.bs.modal', () => this.renderExportTaskState());
+        }
+
+        if (this.exportTaskId) {
+            modal.show();
+            this.renderExportTaskState();
+            this.startExportPolling(this.exportTaskId);
+            return;
+        }
+
+        const progressContainer = document.getElementById('export-progress-container');
+        if (progressContainer) progressContainer.style.display = 'none';
+        const startButton = document.getElementById('btn-export-start');
+        const closeButton = document.getElementById('btn-export-cancel');
+        if (startButton) startButton.disabled = false;
+        if (closeButton) closeButton.disabled = false;
         
         // Nạp danh sách Project
         this.setExportSelectLoading('export-project-select', 'Dang tai danh sach du an...');
@@ -478,6 +497,7 @@ class DatabaseManager {
             if (document.getElementById('export-stations')?.checked) tables.push('stations');
             if (document.getElementById('export-devices')?.checked) tables.push('devices');
             if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
+            if (document.getElementById('export-gnss-adjustments')?.checked) tables.push('gnss_adjustments');
             if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
             const uniqueTables = [...new Set(tables)];
 
@@ -522,7 +542,7 @@ class DatabaseManager {
 
             // Khóa UI
             document.getElementById('btn-export-start').disabled = true;
-            document.getElementById('btn-export-cancel').disabled = true;
+            document.getElementById('btn-export-cancel').disabled = false;
             const progressContainer = document.getElementById('export-progress-container');
             const progressBar = document.getElementById('export-progress-bar');
             const progressText = document.getElementById('export-status-text');
@@ -530,9 +550,8 @@ class DatabaseManager {
             
             progressContainer.style.display = 'block';
             progressBar.style.width = '5%';
-            progressBar.innerText = '5%';
             progressText.innerText = 'Đang khởi tạo tác vụ...';
-            progressDetail.innerText = 'Vui lòng không đóng cửa sổ này';
+            progressDetail.innerText = 'Có thể thu nhỏ cửa sổ; tác vụ vẫn chạy trên server.';
 
             // Gọi API /start
             const res = await fetch('/api/admin/db/export-excel/start', {
@@ -551,79 +570,146 @@ class DatabaseManager {
             
             const data = await res.json();
             const taskId = data.task_id;
-            
-            // Start Polling
-            const pollInterval = setInterval(async () => {
-                try {
-                    const statusRes = await fetch(`/api/admin/db/export-excel/${taskId}/progress`, {
-                        headers: { 'Authorization': `Bearer ${this.token}` }
-                    });
-                    if (!statusRes.ok) throw new Error('Failed to check progress');
-                    
-                    const statusData = await statusRes.json();
-                    
-                    progressBar.style.width = `${statusData.percent}%`;
-                    progressBar.innerText = `${statusData.percent}%`;
-                    progressDetail.innerText = statusData.message || 'Đang xử lý...';
-                    
-                    if (statusData.status === 'completed') {
-                        clearInterval(pollInterval);
-                        progressText.innerText = '✅ Hoàn tất!';
-                        progressBar.classList.remove('progress-bar-animated');
-                        
-                        // Tự động tải file
-                        const downloadUrl = `/api/admin/db/export-excel/${taskId}/download`;
-                        const downloadRes = await fetch(downloadUrl, {
-                            headers: { 'Authorization': `Bearer ${this.token}` }
-                        });
-                        
-                        if (downloadRes.ok) {
-                            const blob = await downloadRes.blob();
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = statusData.filename || `landslide_backup_${Date.now()}.zip`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                            URL.revokeObjectURL(url);
-                            
-                            window.toast?.success('✅ Đã tải xuống file xuất dữ liệu!', 5000);
-                        } else {
-                            throw new Error('Không thể tải file zip');
-                        }
-                        
-                        // Đóng modal
-                        setTimeout(() => {
-                            const modal = bootstrap.Modal.getInstance(document.getElementById('exportExcelModal'));
-                            if (modal) modal.hide();
-                            document.getElementById('btn-export-start').disabled = false;
-                            document.getElementById('btn-export-cancel').disabled = false;
-                        }, 1000);
-                        
-                    } else if (statusData.status === 'failed') {
-                        clearInterval(pollInterval);
-                        throw new Error(statusData.error || 'Task failed');
-                    }
-                    
-                } catch (pollErr) {
-                    clearInterval(pollInterval);
-                    console.error('Polling error:', pollErr);
-                    window.toast?.error('❌ Lỗi kiểm tra tiến trình: ' + pollErr.message);
-                    document.getElementById('btn-export-start').disabled = false;
-                    document.getElementById('btn-export-cancel').disabled = false;
-                    progressText.innerText = '❌ Lỗi xuất dữ liệu';
-                    progressText.classList.replace('text-primary', 'text-danger');
-                    progressBar.classList.replace('bg-success', 'bg-danger');
-                    progressBar.classList.remove('progress-bar-animated');
-                }
-            }, 1000);
+            this.exportTaskId = taskId;
+            this.exportTaskState = { status: 'pending', percent: 5, message: 'Đang khởi tạo tác vụ...' };
+            this.exportDownloadStarted = false;
+            localStorage.setItem('activeDatabaseExportTaskId', taskId);
+            this.renderExportTaskState();
+            this.startExportPolling(taskId);
 
         } catch (e) {
             console.error('❌ Export error:', e);
             window.toast?.error('❌ Lỗi export: ' + e.message);
-            document.getElementById('btn-export-start').disabled = false;
-            document.getElementById('btn-export-cancel').disabled = false;
+            const startButton = document.getElementById('btn-export-start');
+            const closeButton = document.getElementById('btn-export-cancel');
+            if (startButton) startButton.disabled = false;
+            if (closeButton) closeButton.disabled = false;
+        }
+    }
+
+    ensureExportTaskPill() {
+        let pill = document.getElementById('database-export-task-pill');
+        if (pill) return pill;
+        pill = document.createElement('button');
+        pill.id = 'database-export-task-pill';
+        pill.type = 'button';
+        pill.style.cssText = [
+            'position:fixed', 'right:22px', 'bottom:76px', 'z-index:1090',
+            'display:none', 'align-items:center', 'gap:10px', 'min-width:245px',
+            'padding:11px 14px', 'border:1px solid rgba(66,201,155,.58)',
+            'border-radius:13px', 'background:linear-gradient(135deg,#0b3028,#0d5b46)',
+            'color:#effff9', 'box-shadow:0 16px 38px rgba(9,52,40,.32)',
+            'font:600 12px monospace', 'cursor:pointer', 'text-align:left'
+        ].join(';');
+        pill.innerHTML = '<span class="export-pill-spinner" style="width:17px;height:17px;border:2px solid rgba(255,255,255,.28);border-top-color:#6ee7b7;border-radius:50%;animation:export-pill-spin .8s linear infinite"></span><span><strong class="export-pill-title" style="display:block">Đang export database</strong><small class="export-pill-detail" style="display:block;opacity:.72;margin-top:2px">Mở chi tiết</small></span>';
+        if (!document.getElementById('database-export-pill-style')) {
+            const style = document.createElement('style');
+            style.id = 'database-export-pill-style';
+            style.textContent = '@keyframes export-pill-spin{to{transform:rotate(360deg)}}';
+            document.head.appendChild(style);
+        }
+        pill.addEventListener('click', () => this.exportToExcel());
+        document.body.appendChild(pill);
+        return pill;
+    }
+
+    renderExportTaskState() {
+        const state = this.exportTaskState;
+        const active = Boolean(this.exportTaskId && state);
+        const modalEl = document.getElementById('exportExcelModal');
+        const modalVisible = Boolean(modalEl?.classList.contains('show'));
+        const pill = this.ensureExportTaskPill();
+        pill.style.display = active && !modalVisible ? 'flex' : 'none';
+        if (!active) return;
+
+        const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
+        const progressContainer = document.getElementById('export-progress-container');
+        const progressBar = document.getElementById('export-progress-bar');
+        const progressPercent = document.getElementById('export-progress-percent');
+        const progressText = document.getElementById('export-status-text');
+        const progressDetail = document.getElementById('export-progress-detail');
+        const startButton = document.getElementById('btn-export-start');
+        const failed = state.status === 'error' || state.status === 'failed';
+        const completed = state.status === 'completed';
+        if (progressContainer) progressContainer.style.display = 'block';
+        if (progressBar) {
+            progressBar.style.width = `${percent}%`;
+            progressBar.classList.toggle('progress-bar-animated', !failed && !completed);
+            progressBar.style.background = failed ? '#dc5a5a' : '';
+        }
+        if (progressPercent) progressPercent.textContent = `${percent}%`;
+        if (progressText) progressText.textContent = failed ? 'Export thất bại' : completed ? 'Export hoàn tất' : 'Đang export dữ liệu';
+        if (progressDetail) progressDetail.textContent = state.error || state.message || 'Đang xử lý...';
+        if (startButton) startButton.disabled = !failed && !completed;
+        const pillTitle = pill.querySelector('.export-pill-title');
+        const pillDetail = pill.querySelector('.export-pill-detail');
+        const spinner = pill.querySelector('.export-pill-spinner');
+        if (pillTitle) pillTitle.textContent = failed ? 'Export gặp lỗi' : completed ? 'Export hoàn tất' : `Đang export · ${percent}%`;
+        if (pillDetail) pillDetail.textContent = state.error || state.message || 'Nhấn để mở chi tiết';
+        if (spinner) spinner.style.animationPlayState = failed || completed ? 'paused' : 'running';
+    }
+
+    startExportPolling(taskId) {
+        if (!taskId) return;
+        if (this.exportPollTimer) clearInterval(this.exportPollTimer);
+        const poll = async () => {
+            try {
+                const response = await fetch(`/api/admin/db/export-excel/${taskId}/progress`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                if (!response.ok) throw new Error(`Không đọc được tiến trình (HTTP ${response.status})`);
+                this.exportTaskState = await response.json();
+                this.renderExportTaskState();
+                if (this.exportTaskState.status === 'completed') {
+                    clearInterval(this.exportPollTimer);
+                    this.exportPollTimer = null;
+                    await this.downloadCompletedExport(taskId, this.exportTaskState);
+                } else if (['error', 'failed'].includes(this.exportTaskState.status)) {
+                    clearInterval(this.exportPollTimer);
+                    this.exportPollTimer = null;
+                    window.toast?.error('Export thất bại: ' + (this.exportTaskState.error || 'Không rõ lỗi'));
+                }
+            } catch (error) {
+                console.error('Export polling error:', error);
+                this.exportTaskState = { status: 'error', percent: 0, error: error.message };
+                this.renderExportTaskState();
+                clearInterval(this.exportPollTimer);
+                this.exportPollTimer = null;
+            }
+        };
+        poll();
+        this.exportPollTimer = setInterval(poll, 1000);
+    }
+
+    async downloadCompletedExport(taskId, state) {
+        if (this.exportDownloadStarted) return;
+        this.exportDownloadStarted = true;
+        try {
+            const response = await fetch(`/api/admin/db/export-excel/${taskId}/download`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!response.ok) throw new Error('Không thể tải file ZIP');
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = state.filename || `landslide_backup_${Date.now()}.zip`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            window.toast?.success('Đã hoàn tất và tải file export.', 5000);
+            this.exportTaskId = null;
+            this.exportTaskState = null;
+            localStorage.removeItem('activeDatabaseExportTaskId');
+            this.renderExportTaskState();
+            const startButton = document.getElementById('btn-export-start');
+            if (startButton) startButton.disabled = false;
+        } catch (error) {
+            this.exportDownloadStarted = false;
+            this.exportTaskState = { ...state, status: 'error', error: error.message };
+            this.renderExportTaskState();
+            window.toast?.error(error.message);
         }
     }
 

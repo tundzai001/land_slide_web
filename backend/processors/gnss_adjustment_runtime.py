@@ -8,6 +8,11 @@ import numpy as np
 
 from .gnss_adjustment.models import Baseline, Network, NetworkError, Point
 from .gnss_adjustment.solver import adjust_network
+from .gnss_adjustment.transforms import (
+    covariance_standard_deviation,
+    ecef_point_covariance_to_enu,
+    neu_standard_deviation_to_ecef_covariance,
+)
 
 
 def _llh_to_ecef(lat_deg: float, lon_deg: float, h_m: float) -> tuple[float, float, float]:
@@ -33,7 +38,7 @@ class AgricaObservation:
     position_type: Optional[int]
     baseline_neu: tuple[float, float, float]
     std_neu: tuple[float, float, float]
-    std_ecef: Optional[tuple[float, float, float]]
+    rover_position_std_ecef: Optional[tuple[float, float, float]]
     rover_llh: Optional[tuple[float, float, float]]
     rover_ecef: Optional[tuple[float, float, float]]
     base_llh: Optional[tuple[float, float, float]]
@@ -139,10 +144,14 @@ def parse_agrica(
         if base_lat is not None and base_lon is not None and base_alt is not None:
             base_llh = (base_lat, base_lon, base_alt)
             
-        std_ecef = None
+        rover_position_std_ecef = None
         std_x, std_y, std_z = _safe_float(parts[38]), _safe_float(parts[39]), _safe_float(parts[40])
         if std_x is not None and std_y is not None and std_z is not None:
-            std_ecef = (_positive_std(std_x), _positive_std(std_y), _positive_std(std_z))
+            rover_position_std_ecef = (
+                _positive_std(std_x),
+                _positive_std(std_y),
+                _positive_std(std_z),
+            )
 
         observations.append(AgricaObservation(
             project_id=int(project_id),
@@ -156,17 +165,22 @@ def parse_agrica(
                 _positive_std(_safe_float(parts[17])),
                 _positive_std(_safe_float(parts[18])),
             ),
-            std_ecef=std_ecef,
+            rover_position_std_ecef=rover_position_std_ecef,
             rover_llh=rover_llh,
             rover_ecef=rover_ecef,
             base_llh=base_llh,
             raw=sentence,
             full_data={
                 "parts": parts,
-                "num_satellites": _safe_int(parts[10]),
-                "pdop": _safe_float(parts[11]),
-                "age_of_diff": _safe_float(parts[12]),
-                "ratio": _safe_float(parts[28])
+                "gps_satellites": _safe_int(parts[10]),
+                "bds_satellites": _safe_int(parts[11]),
+                "glonass_satellites": _safe_int(parts[12]),
+                "galileo_satellites": _safe_int(parts[53]) if len(parts) > 53 else None,
+                # Xigema_Vz is the Up velocity standard deviation, not ratio.
+                "velocity_up_std": _safe_float(parts[28]),
+                "diff_age": _safe_float(parts[48]) if len(parts) > 48 else None,
+                "undulation": _safe_float(parts[50]) if len(parts) > 50 else None,
+                "rover_position_std_ecef": rover_position_std_ecef,
             }
         ))
     return observations
@@ -354,15 +368,21 @@ class AgricaAdjustmentRuntime:
             baselines = []
             
             for obs in cluster_obs:
-                if obs.rover_ecef is None or not obs.base_llh:
+                if not obs.base_llh:
                     continue
                 
                 # Toạ độ Base do Rover nhận
-                rep_base_ecef = _llh_to_ecef(obs.base_llh[0], obs.base_llh[1], obs.base_llh[2])
+                north, east, up = obs.baseline_neu
+                lat = math.radians(obs.base_llh[0])
+                lon = math.radians(obs.base_llh[1])
                 baseline_ecef = (
-                    obs.rover_ecef[0] - rep_base_ecef[0],
-                    obs.rover_ecef[1] - rep_base_ecef[1],
-                    obs.rover_ecef[2] - rep_base_ecef[2]
+                    -math.sin(lat) * math.cos(lon) * north
+                    - math.sin(lon) * east
+                    + math.cos(lat) * math.cos(lon) * up,
+                    -math.sin(lat) * math.sin(lon) * north
+                    + math.cos(lon) * east
+                    + math.cos(lat) * math.sin(lon) * up,
+                    math.cos(lat) * north + math.sin(lat) * up,
                 )
                 
                 # Override toạ độ đầu vào của Rover = Base chuẩn + Baseline ECEF
@@ -372,15 +392,17 @@ class AgricaAdjustmentRuntime:
                     resolved_base_ecef[2] + baseline_ecef[2]
                 )
                 
-                std = obs.std_ecef if obs.std_ecef else obs.std_neu
-                
                 points.append(Point(obs.rover_name, rover_ecef_adjusted_input, fixed=False, identifier=obs.station_id))
                 baselines.append(Baseline(
                     "BASE",
                     obs.rover_name,
                     baseline_ecef,
-                    standard_deviation=std,
                     identifier=obs.station_id,
+                    covariance=neu_standard_deviation_to_ecef_covariance(
+                        obs.std_neu,
+                        obs.base_llh[0],
+                        obs.base_llh[1],
+                    ),
                 ))
 
             if len(points) < 2:
@@ -401,18 +423,43 @@ class AgricaAdjustmentRuntime:
                 if point.name == "BASE":
                     continue
                 obs = obs_by_name.get(point.name)
+                covariance_ecef = point.covariance
+                covariance_enu = ecef_point_covariance_to_enu(
+                    covariance_ecef,
+                    tuple(point.coordinate),
+                )
+                posterior_covariance_ecef = point.posterior_covariance
+                posterior_covariance_enu = ecef_point_covariance_to_enu(
+                    posterior_covariance_ecef,
+                    tuple(point.coordinate),
+                )
                 final_adjusted_points[point.name] = {
                     "station_id": obs.station_id if obs else None,
                     "position_type": obs.position_type if obs else None,
-                    "adjusted_n": point.coordinate[0], # Using ECEF X as N, Y as E, Z as U temporarily to match output format
+                    "adjusted_x": point.coordinate[0],
+                    "adjusted_y": point.coordinate[1],
+                    "adjusted_z": point.coordinate[2],
+                    "adjusted_n": point.coordinate[0],
                     "adjusted_e": point.coordinate[1],
                     "adjusted_u": point.coordinate[2],
                     "correction_n": point.correction[0],
                     "correction_e": point.correction[1],
                     "correction_u": point.correction[2],
+                    "std_x": point.standard_deviation[0],
+                    "std_y": point.standard_deviation[1],
+                    "std_z": point.standard_deviation[2],
                     "std_n": point.standard_deviation[0],
                     "std_e": point.standard_deviation[1],
                     "std_u": point.standard_deviation[2],
+                    "standard_deviation_enu": covariance_standard_deviation(covariance_enu),
+                    "covariance_ecef": [list(row) for row in covariance_ecef],
+                    "covariance_enu": [list(row) for row in covariance_enu],
+                    "posterior_standard_deviation_ecef": point.posterior_standard_deviation,
+                    "posterior_standard_deviation_enu": covariance_standard_deviation(
+                        posterior_covariance_enu
+                    ),
+                    "posterior_covariance_ecef": [list(row) for row in posterior_covariance_ecef],
+                    "posterior_covariance_enu": [list(row) for row in posterior_covariance_enu],
                     "raw_rover_llh": obs.rover_llh if obs else None,
                     "raw_rover_ecef": obs.rover_ecef if obs else None,
                 }
@@ -456,8 +503,15 @@ class AgricaAdjustmentRuntime:
             "points": final_adjusted_points,
             "baselines": final_adjusted_baselines,
             "quality": {
+                "published_point_std_scale": "a_priori",
+                "normalized_residual_scale": "a_priori",
                 "degrees_of_freedom": result.degrees_of_freedom,
                 "variance_factor": result.variance_factor,
+                "reference_standard_deviation": (
+                    math.sqrt(result.variance_factor)
+                    if result.variance_factor is not None and result.variance_factor >= 0.0
+                    else None
+                ),
                 "weighted_residual_sum": result.weighted_residual_sum,
                 "rank": result.rank,
                 "condition_number": result.condition_number,

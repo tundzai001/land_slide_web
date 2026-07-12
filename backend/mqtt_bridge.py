@@ -504,12 +504,36 @@ class MQTTBridge:
 
         from app.modules.ntrip_pusher import ntrip_manager
 
+        mapped_topics = sorted({
+            topic
+            for (_broker_key, topic), info in self.topic_map.items()
+            if str((info or {}).get("station_code") or "").casefold() == str(station_code).casefold()
+            and (info or {}).get("type") == "gnss"
+        })
+        logger.info(
+            "[Round-Robin RTCM] station=%s source_target=%s:%s/%s mqtt_topics=%s",
+            station_code,
+            host,
+            port,
+            mountpoint,
+            mapped_topics,
+        )
         try:
             await ntrip_manager.start_pusher(station_code, host, port, mountpoint, password)
-            await ntrip_manager.wait_for_rtcm(station_code, timeout=10.0)
-        except Exception:
+            await ntrip_manager.wait_for_rtcm(station_code, timeout=25.0)
+        except Exception as exc:
+            diagnostics = ntrip_manager.get_diagnostics(station_code)
+            diagnostics["mapped_mqtt_topics"] = mapped_topics
+            logger.error(
+                "[Round-Robin RTCM] station=%s failed: %s diagnostics=%s",
+                station_code,
+                exc,
+                diagnostics,
+            )
             await ntrip_manager.stop_pusher(station_code)
-            raise
+            raise RuntimeError(
+                f"{exc}; mapped_mqtt_topics={mapped_topics}"
+            ) from exc
         return True
 
     async def _stop_round_robin_ntrip_route(self, station_code: str) -> None:
@@ -1155,6 +1179,13 @@ class MQTTBridge:
                 row.extend(value) if isinstance(value, (list, tuple)) else row.append(value)
             ws.append(row)
 
+        def relative_precision_text(loop, prefix):
+            closure = loop.get(f"{prefix}_closure")
+            if closure is not None and abs(float(closure)) < 1e-9:
+                return "Khép kín"
+            ratio = loop.get(f"{prefix}_relative_precision")
+            return f"1/{ratio:.0f}" if ratio else "Không xác định"
+
         ws.append(["BÁO CÁO BÌNH SAI MẠNG GNSS (HỆ TỌA ĐỘ ECEF XYZ)"])
         ws.cell(1, 1).font = Font(bold=True, size=14)
         ws.append(["Mã dự án", project_id])
@@ -1164,75 +1195,187 @@ class MQTTBridge:
 
         baselines = data.get("baselines", [])
         loops = data.get("loops", [])
-        section("BẢNG 1: BASELINE TÍNH TOÁN (CALCULATED BASELINES)")
+        section("BẢNG 1: BASELINE TRUNG BÌNH THEO CẶP ĐIỂM")
         header(["STT", "Từ điểm", "Đến điểm", "dX (m)", "dY (m)", "dZ (m)",
-                "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "Chiều dài (m)", "Ratio"])
+                "Std_X TB (m)", "Std_Y TB (m)", "Std_Z TB (m)", "Chiều dài TB (m)",
+                "Std vận tốc Up TB (m/s)", "Số trị đo"])
         for index, baseline in enumerate(baselines, 1):
             vector_row([index, baseline.get("from"), baseline.get("to")],
                        baseline.get("observed_xyz") or baseline.get("observed_neu") or (0, 0, 0),
                        baseline.get("standard_deviation_xyz") or (None, None, None),
-                       baseline.get("observed_length"), baseline.get("ratio"))
+                       baseline.get("observed_length"), baseline.get("velocity_up_std"),
+                       baseline.get("observation_count", 1))
 
-        section("BẢNG 2: VÒNG KHÉP TRƯỚC BÌNH SAI (FOUND LOOPS)")
+        section("BẢNG 2: VÒNG KHÉP TỪ BASELINE TRUNG BÌNH")
         header(["Vòng", "Các điểm", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
                 "Tổng chiều dài (m)", "Độ chính xác tương đối"])
         for loop in loops:
-            ratio = loop.get("observed_relative_precision")
             vector_row([loop.get("loop"), " - ".join(loop.get("points", []))],
                        loop.get("observed_misclosure_xyz") or (0, 0, 0),
                        loop.get("observed_closure"), loop.get("total_length"),
-                       f"1/{ratio:.0f}" if ratio else "Khép kín")
+                       relative_precision_text(loop, "observed"))
 
-        section("BẢNG 3: BASELINE SAU BÌNH SAI (ADJUSTED BASELINES)")
+        section("BẢNG 3: BASELINE TRUNG BÌNH SAU BÌNH SAI")
         header(["STT", "Từ điểm", "Đến điểm", "vX (m)", "vY (m)", "vZ (m)",
-                "dX_Adjusted (m)", "dY_Adjusted (m)", "dZ_Adjusted (m)", "Chiều dài (m)"])
+                "dX_Adjusted (m)", "dY_Adjusted (m)", "dZ_Adjusted (m)", "Chiều dài (m)",
+                "Số trị đo"])
         for index, baseline in enumerate(baselines, 1):
             vector_row([index, baseline.get("from"), baseline.get("to")],
                        baseline.get("residual_xyz") or baseline.get("residual_neu") or (0, 0, 0),
                        baseline.get("adjusted_xyz") or baseline.get("adjusted_neu") or (0, 0, 0),
-                       baseline.get("adjusted_length"))
+                       baseline.get("adjusted_length"), baseline.get("observation_count", 1))
 
         section("BẢNG 4: VÒNG KHÉP SAU BÌNH SAI (ADJUSTED LOOPS)")
+        ws.append(["Ghi chú", "Khép bằng 0 là hệ quả của mô hình bình sai, không phải kiểm tra độc lập dữ liệu gốc."])
         header(["Vòng", "Các điểm", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
                 "Tổng chiều dài (m)", "Độ chính xác tương đối"])
         for loop in loops:
-            ratio = loop.get("adjusted_relative_precision")
             vector_row([loop.get("loop"), " - ".join(loop.get("points", []))],
                        loop.get("adjusted_misclosure_xyz") or (0, 0, 0),
                        loop.get("adjusted_closure"), loop.get("total_length"),
-                       f"1/{ratio:.0f}" if ratio else "Khép kín")
+                       relative_precision_text(loop, "adjusted"))
 
         section("BẢNG 5: ĐIỂM KHỐNG CHẾ (CONTROL POINT)")
         header(["Tên điểm", "X (m)", "Y (m)", "Z (m)", "Cố định"])
         base = data.get("base", {})
-        vector_row([base.get("name", "BASE")], base.get("ecef_xyz") or (None, None, None),
+        base_name = base.get("name") or "BASE"
+        base_label = base_name if base_name == "BASE" else f"{base_name} (alias: BASE)"
+        vector_row([base_label], base.get("ecef_xyz") or (None, None, None),
                    bool(base.get("fixed", True)))
 
         section("BẢNG 6: TỌA ĐỘ ĐIỂM SAU BÌNH SAI (ADJUSTED POINTS)")
         header(["Tên Điểm", "Trạm ID", "X_Adjusted (m)", "Y_Adjusted (m)", "Z_Adjusted (m)",
-                "dX_Correction (m)", "dY_Correction (m)", "dZ_Correction (m)",
-                "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "X_Raw (m)", "Y_Raw (m)", "Z_Raw (m)"])
+                "dX: Adjusted - baseline mean from control (m)",
+                "dY: Adjusted - baseline mean from control (m)",
+                "dZ: Adjusted - baseline mean from control (m)",
+                "Std_X ECEF tiên nghiệm (m)", "Std_Y ECEF tiên nghiệm (m)",
+                "Std_Z ECEF tiên nghiệm (m)", "Std_E ENU tiên nghiệm (m)",
+                "Std_N ENU tiên nghiệm (m)", "Std_U ENU tiên nghiệm (m)",
+                "X_Raw TB hợp lệ (m)", "Y_Raw TB hợp lệ (m)",
+                "Z_Raw TB hợp lệ (m)", "Số Raw dùng", "Số Raw bị loại"])
         for point_name, point in data.get("points", {}).items():
             raw = point.get("raw_rover_ecef") or (None, None, None)
-            ws.append([point_name, point.get("station_id"), point.get("adjusted_n"),
-                       point.get("adjusted_e"), point.get("adjusted_u"), point.get("dx"),
-                       point.get("dy"), point.get("dz"), point.get("std_n"), point.get("std_e"),
-                       point.get("std_u"), raw[0], raw[1], raw[2]])
+            std_enu = point.get("standard_deviation_enu") or (None, None, None)
+            ws.append([point_name, point.get("station_id"),
+                       point.get("adjusted_x", point.get("adjusted_n")),
+                       point.get("adjusted_y", point.get("adjusted_e")),
+                       point.get("adjusted_z", point.get("adjusted_u")), point.get("dx"),
+                       point.get("dy"), point.get("dz"), point.get("std_x"),
+                       point.get("std_y"), point.get("std_z"), std_enu[0], std_enu[1],
+                       std_enu[2], raw[0], raw[1], raw[2],
+                       point.get("raw_rover_ecef_observation_count"),
+                       point.get("raw_rover_ecef_rejected_count", 0)])
 
         section("BẢNG 7: CHỈ TIÊU CHẤT LƯỢNG")
         header(["Chỉ tiêu", "Giá trị"])
         quality = data.get("quality", {})
-        for label, key in (("Bậc tự do", "degrees_of_freedom"),
+        for label, key in (("Số baseline quan sát dùng bình sai", "observation_baseline_count"),
+                           ("Số baseline trung bình hiển thị", "averaged_baseline_count"),
+                           ("Số phiên quan sát liên tục", "observation_session_count"),
+                           ("Số baseline có STD vượt ngưỡng cảnh báo", "baseline_std_warning_count"),
+                           ("Số ECEF rover không nhất quán với baseline", "raw_ecef_inconsistent_count"),
+                           ("Bậc tự do", "degrees_of_freedom"),
                            ("Hệ số phương sai", "variance_factor"),
-                           ("Sai số trung phương trọng số đơn vị M0", "reference_standard_deviation"),
+                           ("M0 hậu nghiệm (không dùng thu nhỏ STD công bố)", "reference_standard_deviation"),
                            ("Tổng bình phương số dư có trọng số", "weighted_residual_sum"),
                            ("Rank", "rank"), ("Condition number", "condition_number"),
-                           ("Số dư chuẩn hóa lớn nhất", "max_standardized_residual")):
+                           ("Số dư chuẩn hóa tiên nghiệm lớn nhất", "max_standardized_residual")):
             ws.append([label, quality.get(key)])
+        if quality.get("global_test"):
+            global_test = quality["global_test"]
+            ws.append(["Kiểm định phương sai tổng thể", "Đạt" if global_test.get("passed") else "Không đạt"])
+            ws.append(["Chi-square statistic", global_test.get("statistic")])
+            ws.append(["Chi-square lower critical", global_test.get("lower_critical_value")])
+            ws.append(["Chi-square upper critical", global_test.get("upper_critical_value")])
+            ws.append(["Chi-square p-value", global_test.get("p_value")])
+            if not global_test.get("passed"):
+                ws.append(["Cảnh báo", "Mô hình phương sai bị bác bỏ; không công bố STD hậu nghiệm đã thu nhỏ"])
+        trusted_subset = quality.get("trusted_subset") or {}
+        if trusted_subset:
+            ws.append(["Trusted subset: số baseline đạt ngưỡng STD", trusted_subset.get("observation_baseline_count")])
+            ws.append(["Trusted subset: bậc tự do", trusted_subset.get("degrees_of_freedom")])
+            ws.append(["Trusted subset: vTPv", trusted_subset.get("weighted_residual_sum")])
+            ws.append(["Trusted subset: M0", trusted_subset.get("reference_standard_deviation")])
+            trusted_test = trusted_subset.get("global_test") or {}
+            if trusted_test:
+                ws.append(["Trusted subset: kiểm định phương sai", "Đạt" if trusted_test.get("passed") else "Không đạt"])
+                ws.append(["Trusted subset: chi-square lower", trusted_test.get("lower_critical_value")])
+                ws.append(["Trusted subset: chi-square upper", trusted_test.get("upper_critical_value")])
+                ws.append(["Trusted subset: p-value", trusted_test.get("p_value")])
+        ws.append(["Scale STD điểm công bố", quality.get("published_point_std_scale", "a_priori")])
+        ws.append(["Scale số dư chuẩn hóa", quality.get("normalized_residual_scale", "a_priori")])
+        ws.append(["Mô hình covariance baseline", quality.get("baseline_covariance_model")])
+        ws.append(["Ngưỡng cảnh báo STD baseline (m)", quality.get("baseline_std_warning_threshold_m")])
+        ws.append(["Dung sai nhất quán ECEF rover/baseline (m)", quality.get("raw_ecef_consistency_tolerance_m")])
+        ws.append(["Ngưỡng tách phiên liên tục (s)", quality.get("observation_session_gap_seconds")])
+        ws.append(["Đã lập block covariance ECEF 3x3 sau phép quay", bool(quality.get("full_covariance_available"))])
+        ws.append(["AGRICA có covariance chéo gốc NE/EU/NU", bool(quality.get("source_cross_covariance_available"))])
+        ws.append(["Đã chứng minh trị đo lặp độc lập", bool(quality.get("repeated_observations_independence_verified"))])
+        ws.append(["Đã cộng sai số điểm khống chế", bool(quality.get("control_point_uncertainty_included"))])
+        if not quality.get("repeated_observations_independence_verified"):
+            ws.append(["Cảnh báo", "Bậc tự do và kiểm định chi-square đang giả định các baseline quan sát độc lập."])
+        if not quality.get("control_point_uncertainty_included"):
+            ws.append(["Cảnh báo", "STD điểm chỉ là độ chính xác tương đối so với BASE cố định."])
+        if quality.get("baseline_std_warning_count"):
+            ws.append(["Cảnh báo", (
+                "Baseline vượt ngưỡng STD vẫn được giữ trong solver với covariance gốc; "
+                "trọng số của chúng tự giảm và cờ chi tiết nằm ở Bảng 8."
+            )])
+        if quality.get("raw_ecef_inconsistent_count"):
+            ws.append(["Cảnh báo", (
+                "ECEF rover không nhất quán đã bị loại khỏi Raw TB, nhưng vector baseline "
+                "vẫn được giữ để bình sai nếu đạt các điều kiện chất lượng khác."
+            )])
 
         section("BẢNG 8: RAW PAYLOAD BẰNG CHỨNG")
-        for line in raw_payload.splitlines():
-            ws.append([line])
+        evidence = data.get("baseline_observations") or []
+        if evidence:
+            header(["STT", "Từ điểm", "Đến điểm", "Session", "Epoch",
+                    "Position type", "GPS", "BDS", "GLONASS", "GAL", "Diff age (s)",
+                    "Baseline_NStd (m)",
+                    "Baseline_EStd (m)", "Baseline_UStd (m)", "Std vận tốc Up (m/s)",
+                    "Xigema_ECEF_X rover (không dùng trọng số)",
+                    "Xigema_ECEF_Y rover (không dùng trọng số)",
+                    "Xigema_ECEF_Z rover (không dùng trọng số)",
+                    "Sai lệch ECEF rover/baseline (m)", "Cờ chất lượng", "vX (m)",
+                    "vY (m)", "vZ (m)", "Max |normalized residual|", "Raw AGRICA"])
+            for index, observation in enumerate(evidence, 1):
+                residual = observation.get("residual_xyz") or (None, None, None)
+                normalized = observation.get("standardized_residual") or ()
+                max_normalized = max((abs(float(value)) for value in normalized), default=None)
+                baseline_std = observation.get("baseline_std_neu") or (None, None, None)
+                rover_position_std = observation.get("rover_position_std_ecef") or (None, None, None)
+                ws.append([index, observation.get("from"), observation.get("to"),
+                           observation.get("session_id"), observation.get("observation_epoch"),
+                           observation.get("position_type"), observation.get("gps_satellites"),
+                           observation.get("bds_satellites"), observation.get("glonass_satellites"),
+                           observation.get("galileo_satellites"), observation.get("diff_age"),
+                           baseline_std[0], baseline_std[1], baseline_std[2],
+                           observation.get("velocity_up_std"),
+                           rover_position_std[0], rover_position_std[1], rover_position_std[2],
+                           observation.get("raw_ecef_consistency_error_m"),
+                           ", ".join(observation.get("quality_flags") or []),
+                           residual[0], residual[1], residual[2],
+                           max_normalized, observation.get("raw_payload")])
+        else:
+            for line in raw_payload.splitlines():
+                ws.append([line])
+            if not raw_payload.strip():
+                ws.append(["Không có raw payload trong kết quả đầu vào"])
+
+        sessions = quality.get("observation_sessions") or []
+        section("BẢNG 9: NHÓM PHIÊN QUAN SÁT LIÊN TỤC")
+        ws.append(["Ghi chú", (
+            "Nhóm phiên chỉ mô tả tương quan thời gian; solver vẫn giữ từng epoch và "
+            "không coi số phiên là bậc tự do hiệu dụng."
+        )])
+        header(["Session", "Từ điểm", "Đến điểm", "Epoch đầu", "Epoch cuối", "Số observation"])
+        for session in sessions:
+            ws.append([
+                session.get("session_id"), session.get("from"), session.get("to"),
+                session.get("start_epoch"), session.get("end_epoch"),
+                session.get("observation_count"),
+            ])
         ws.freeze_panes = "A2"
         for column in ws.columns:
             width = min(max(len(str(cell.value or "")) for cell in column) + 2, 42)
@@ -1406,17 +1549,32 @@ class MQTTBridge:
                                         f"waiting for station IDs {seed_status['missing_station_ids']}."
                                     ),
                                 }
-                            await manager.broadcast({
-                                "type": "gnss_adjustment_debug",
-                                "project_id": proj_id,
-                                **diagnostic,
-                            })
+                            diagnostic_message = str(diagnostic.get("message") or "")
+                            is_fragment_update = diagnostic_message.startswith("Buffered AGRICA fragment")
+                            should_broadcast_diagnostic = (
+                                not is_fragment_update
+                                or self._diag_should_log(
+                                    f"gnss_adjustment_fragment:{proj_id}:{station_id}",
+                                    2,
+                                )
+                            )
+                            if should_broadcast_diagnostic:
+                                await manager.broadcast({
+                                    "type": "gnss_adjustment_debug",
+                                    "project_id": proj_id,
+                                    **diagnostic,
+                                })
                         for obs in valid_obs:
                             try:
+                                baseline_from = self.round_robin_manager.get_active_base_for_station(
+                                    proj_id,
+                                    station_id,
+                                )
                                 await manager.broadcast({
                                     "type": "gnss_baseline_collected",
                                     "project_id": proj_id,
                                     "station_id": station_id,
+                                    "from": baseline_from,
                                     "rover_name": obs.rover_name,
                                     "baseline_neu": obs.baseline_neu,
                                     "std_neu": obs.std_neu,

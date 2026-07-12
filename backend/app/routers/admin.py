@@ -42,7 +42,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 # Schema cho request
 class ExportExcelRequest(BaseModel):
-    tables: List[str]  # Danh sách bảng cần export: ['projects', 'stations', 'devices', 'sensor_data', 'alerts']
+    tables: List[str]  # projects, stations, devices, sensor_data, gnss_adjustments, alerts
     project_ids: Optional[List[int]] = None
     station_ids: Optional[List[int]] = None
     sensor_types: Optional[List[str]] = None
@@ -906,7 +906,7 @@ async def start_export_database_excel(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Bắt đầu tác vụ xuất Excel chạy ngầm."""
-    allowed = {'projects', 'stations', 'devices', 'sensor_data', 'alerts'}
+    allowed = {'projects', 'stations', 'devices', 'sensor_data', 'gnss_adjustments', 'alerts'}
     selected = [table for table in request.tables if table in allowed]
     if not selected:
         raise HTTPException(status_code=400, detail="No valid export table selected")
@@ -1030,6 +1030,13 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                         }
                         for station in station_rows
                     }
+                    all_station_mapping = {
+                        station.id: {
+                            "project_code": project_codes.get(station.project_id, "UNKNOWN_PROJECT"),
+                            "station_code": station.station_code,
+                        }
+                        for station in all_station_rows
+                    }
                     requested_sensor_types = set(request.sensor_types or [])
 
                     # 2. Count data
@@ -1054,6 +1061,10 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                         if 'gnss' in db_sensor_types:
                             db_sensor_types.add('gnss_audit')
                         sensor_query = sensor_query.where(model_data.SensorData.sensor_type.in_(db_sensor_types))
+                    # Network-adjustment payloads have their own project-level export.
+                    sensor_query = sensor_query.where(
+                        model_data.SensorData.sensor_type != 'gnss_adjusted'
+                    )
                         
                     if request.start_date:
                         try:
@@ -1070,6 +1081,37 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
 
                     if 'sensor_data' in selected:
                         count_q = select(func.count()).select_from(sensor_query.subquery())
+                        total_expected_data += await data_db.scalar(count_q) or 0
+
+                    adjustment_query = select(model_data.SensorData).where(
+                        model_data.SensorData.sensor_type == 'gnss_adjusted'
+                    )
+                    if scope_station_ids:
+                        adjustment_query = adjustment_query.where(
+                            model_data.SensorData.station_id.in_(scope_station_ids)
+                        )
+                    else:
+                        adjustment_query = adjustment_query.where(text("1=0"))
+                    if request.start_date:
+                        try:
+                            start_ts = int(datetime.strptime(request.start_date, '%Y-%m-%d').timestamp())
+                            adjustment_query = adjustment_query.where(
+                                model_data.SensorData.timestamp >= start_ts
+                            )
+                        except ValueError:
+                            pass
+                    if request.end_date:
+                        try:
+                            end_ts = int(datetime.strptime(
+                                f"{request.end_date} 23:59:59", '%Y-%m-%d %H:%M:%S'
+                            ).timestamp())
+                            adjustment_query = adjustment_query.where(
+                                model_data.SensorData.timestamp <= end_ts
+                            )
+                        except ValueError:
+                            pass
+                    if 'gnss_adjustments' in selected:
+                        count_q = select(func.count()).select_from(adjustment_query.subquery())
                         total_expected_data += await data_db.scalar(count_q) or 0
                     
                     alert_query = select(model_data.Alert)
@@ -1143,6 +1185,116 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                         )
                         summary_rows.append(["DEVICES", count, exported_at, "FULL"])
                         total_records += count
+
+                    if 'gnss_adjustments' in selected:
+                        EXPORT_TASKS[task_id]["message"] = "Đang đóng gói kết quả bình sai GNSS theo dự án/cụm..."
+                        adjustment_result = await data_db.execute(
+                            adjustment_query.order_by(
+                                model_data.SensorData.timestamp,
+                                model_data.SensorData.id,
+                            )
+                        )
+                        unique_adjustments: Dict[tuple, dict] = {}
+                        for record in adjustment_result.scalars().all():
+                            payload = record.data if isinstance(record.data, dict) else {}
+                            payload_project_id = int(payload.get("project_id") or 0)
+                            key = (
+                                payload_project_id,
+                                payload.get("cluster_index"),
+                                int(payload.get("computed_at") or record.timestamp or 0),
+                            )
+                            item = unique_adjustments.setdefault(key, {
+                                "payload": payload,
+                                "timestamp": int(record.timestamp or 0),
+                                "record_ids": [],
+                            })
+                            item["record_ids"].append(int(record.id))
+
+                        adjustment_rows_by_project: Dict[str, List[List[Any]]] = {}
+                        adjustment_headers = [
+                            "database_record_ids", "time", "computed_at", "project_id",
+                            "project_code", "cluster_index", "cluster_name", "source",
+                            "station_ids", "station_codes", "rover_count", "base_name",
+                            "base_lat", "base_lon", "base_h", "observation_baselines",
+                            "averaged_baselines", "independent_loops", "degrees_of_freedom",
+                            "variance_factor", "reference_std_m0", "weighted_residual_sum",
+                            "max_normalized_residual", "global_variance_test_passed",
+                            "json_report_url", "excel_report_url", "payload_json",
+                        ]
+                        for key, item in unique_adjustments.items():
+                            payload = item["payload"]
+                            project_id = int(payload.get("project_id") or key[0] or 0)
+                            project_code = project_codes.get(project_id, f"PROJECT_{project_id or 'UNKNOWN'}")
+                            points = payload.get("points") if isinstance(payload.get("points"), dict) else {}
+                            station_ids = sorted({
+                                int(point.get("station_id"))
+                                for point in points.values()
+                                if isinstance(point, dict) and point.get("station_id") is not None
+                            })
+                            station_codes = [
+                                all_station_mapping.get(station_id, {}).get(
+                                    "station_code", f"station_{station_id}"
+                                )
+                                for station_id in station_ids
+                            ]
+                            quality = payload.get("quality") if isinstance(payload.get("quality"), dict) else {}
+                            global_test = quality.get("global_test") if isinstance(quality.get("global_test"), dict) else {}
+                            base = payload.get("base") if isinstance(payload.get("base"), dict) else {}
+                            computed_at = int(payload.get("computed_at") or item["timestamp"] or 0)
+                            safe_project = _zip_component(project_code, f"project_{project_id}")
+                            cluster_label = _zip_component(
+                                payload.get("cluster_name") or f"cluster_{payload.get('cluster_index', 0)}",
+                                "cluster",
+                            )
+                            run_stem = f"{computed_at}_{cluster_label}"
+                            folder = f"gnss_adjustments/{safe_project}"
+                            archive.writestr(
+                                f"{folder}/{run_stem}.json",
+                                json.dumps(payload, ensure_ascii=False, indent=2),
+                            )
+                            excel_url = payload.get("excel_report_url")
+                            if isinstance(excel_url, str) and excel_url:
+                                excel_name = os.path.basename(excel_url.split("?", 1)[0])
+                                excel_path = os.path.abspath(os.path.join(
+                                    os.path.dirname(__file__), "..", "..", "static", "adjustments", excel_name
+                                ))
+                                if os.path.isfile(excel_path):
+                                    archive.write(excel_path, f"{folder}/{run_stem}.xlsx")
+
+                            adjustment_rows_by_project.setdefault(safe_project, []).append([
+                                ";".join(map(str, sorted(item["record_ids"]))),
+                                datetime.fromtimestamp(computed_at).strftime('%Y-%m-%d %H:%M:%S') if computed_at else None,
+                                computed_at, project_id, project_code,
+                                payload.get("cluster_index"), payload.get("cluster_name"), payload.get("source"),
+                                ";".join(map(str, station_ids)), ";".join(station_codes),
+                                payload.get("rover_count"), base.get("name"), base.get("lat"),
+                                base.get("lon"), base.get("h"),
+                                quality.get("observation_baseline_count", len(payload.get("baseline_observations") or [])),
+                                quality.get("averaged_baseline_count", len(payload.get("baselines") or [])),
+                                len(payload.get("loops") or []), quality.get("degrees_of_freedom"),
+                                quality.get("variance_factor"), quality.get("reference_standard_deviation"),
+                                quality.get("weighted_residual_sum"), quality.get("max_standardized_residual"),
+                                global_test.get("passed"), payload.get("report_file_url"), excel_url,
+                                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                            ])
+
+                        adjustment_count = 0
+                        for project_code, rows in sorted(adjustment_rows_by_project.items()):
+                            count = add_csv(
+                                f"gnss_adjustments/{project_code}/ADJUSTMENTS.csv",
+                                adjustment_headers,
+                                rows,
+                            )
+                            adjustment_count += count
+                            summary_rows.append([
+                                f"{project_code}/gnss_adjustments", count, exported_at, "PROJECT/CLUSTER/STATIONS"
+                            ])
+                        if not adjustment_rows_by_project:
+                            summary_rows.append(["GNSS_ADJUSTMENTS", 0, exported_at, "FILTERED"])
+                        total_records += adjustment_count
+                        records_processed += sum(
+                            len(item["record_ids"]) for item in unique_adjustments.values()
+                        )
 
                     sensor_headers = [
                         "id", "time", "timestamp", "project_code", "station_code", "station_id",

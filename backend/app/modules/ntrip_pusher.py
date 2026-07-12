@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Dict
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,19 @@ class Rtcm3FrameFilter:
 
     def __init__(self):
         self._buffer = bytearray()
+        self.chunk_count = 0
+        self.byte_count = 0
+        self.preamble_count = 0
+        self.invalid_header_count = 0
+        self.crc_failure_count = 0
+        self.valid_frame_count = 0
+        self.valid_frame_bytes = 0
 
     def feed(self, data: bytes) -> bytes:
         if data:
+            self.chunk_count += 1
+            self.byte_count += len(data)
+            self.preamble_count += data.count(b"\xd3")
             self._buffer.extend(data)
 
         frames = bytearray()
@@ -41,6 +52,7 @@ class Rtcm3FrameFilter:
 
             # RTCM3 reserves the upper six bits of the second header byte.
             if self._buffer[1] & 0xFC:
+                self.invalid_header_count += 1
                 del self._buffer[0]
                 continue
             payload_length = ((self._buffer[1] & 0x03) << 8) | self._buffer[2]
@@ -51,12 +63,27 @@ class Rtcm3FrameFilter:
             frame = bytes(self._buffer[:frame_length])
             expected_crc = int.from_bytes(frame[-3:], "big")
             if _crc24q(frame[:-3]) != expected_crc:
+                self.crc_failure_count += 1
                 del self._buffer[0]
                 continue
+            self.valid_frame_count += 1
+            self.valid_frame_bytes += len(frame)
             frames.extend(frame)
             del self._buffer[:frame_length]
 
         return bytes(frames)
+
+    def diagnostics(self) -> dict:
+        return {
+            "mqtt_chunks": self.chunk_count,
+            "mqtt_bytes": self.byte_count,
+            "d3_preambles": self.preamble_count,
+            "invalid_headers": self.invalid_header_count,
+            "crc_failures": self.crc_failure_count,
+            "valid_frames": self.valid_frame_count,
+            "valid_frame_bytes": self.valid_frame_bytes,
+            "partial_buffer_bytes": len(self._buffer),
+        }
 
 class NtripPusher:
     def __init__(self, station_code: str, host: str, port: int, mountpoint: str, password: str):
@@ -74,6 +101,14 @@ class NtripPusher:
         self._rtcm_filter = Rtcm3FrameFilter()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._first_rtcm_sent = asyncio.Event()
+        self._created_at = time.monotonic()
+        self._last_chunk_at: float | None = None
+        self._first_chunk_hex: str | None = None
+        self._last_chunk_hex: str | None = None
+        self._queued_frame_batches = 0
+        self._sent_frame_batches = 0
+        self._sent_bytes = 0
+        self._caster_response = None
 
     async def _push_loop(self):
         reader = None
@@ -89,7 +124,7 @@ class NtripPusher:
             # NTRIP version 1 or 2 server/source connection
             request = (
                 f"SOURCE {self.password} /{self.mountpoint}\r\n"
-                f"Source-Agent: NTRIP landslide_backend/1.0\r\n"
+                f"Source-Agent: NTRIP NtripServerCMD/1.0\r\n"
                 f"\r\n"
             )
             
@@ -101,6 +136,7 @@ class NtripPusher:
             resp_text = response.decode('utf-8', errors='ignore').strip()
             
             first_line = resp_text.splitlines()[0] if resp_text else ""
+            self._caster_response = first_line or "<empty response>"
             accepted = (
                 "ICY 200" in first_line
                 or first_line.startswith("HTTP/1.0 200")
@@ -126,6 +162,8 @@ class NtripPusher:
                 data = await self.queue.get()
                 writer.write(data)
                 await writer.drain()
+                self._sent_frame_batches += 1
+                self._sent_bytes += len(data)
                 self._first_rtcm_sent.set()
 
         except asyncio.CancelledError:
@@ -171,9 +209,43 @@ class NtripPusher:
         try:
             await asyncio.wait_for(self._first_rtcm_sent.wait(), timeout=timeout)
         except asyncio.TimeoutError as exc:
+            diagnostics = self.diagnostics()
             raise TimeoutError(
-                f"No valid RTCM3 frame was forwarded for station {self.station_code} within {timeout:g}s"
+                f"No valid RTCM3 frame was forwarded for station {self.station_code} "
+                f"within {timeout:g}s; diagnostics={diagnostics}"
             ) from exc
+
+    def diagnostics(self) -> dict:
+        result = self._rtcm_filter.diagnostics()
+        result.update({
+            "station": self.station_code,
+            "source_target": f"{self.host}:{self.port}/{self.mountpoint}",
+            "caster_response": self._caster_response,
+            "pusher_running": self.is_running,
+            "queue_size": self.queue.qsize(),
+            "queued_frame_batches": self._queued_frame_batches,
+            "sent_frame_batches": self._sent_frame_batches,
+            "sent_bytes": self._sent_bytes,
+            "first_chunk_hex": self._first_chunk_hex,
+            "last_chunk_hex": self._last_chunk_hex,
+            "last_chunk_age_s": (
+                round(time.monotonic() - self._last_chunk_at, 3)
+                if self._last_chunk_at is not None
+                else None
+            ),
+            "elapsed_s": round(time.monotonic() - self._created_at, 3),
+        })
+        if result["mqtt_chunks"] == 0:
+            result["likely_cause"] = "no MQTT payload reached the pusher for this station"
+        elif result["d3_preambles"] == 0:
+            result["likely_cause"] = "MQTT payloads arrived but contained no RTCM3 0xD3 preamble"
+        elif result["valid_frames"] == 0 and result["crc_failures"]:
+            result["likely_cause"] = "RTCM-like data arrived but failed CRC-24Q validation"
+        elif result["valid_frames"] == 0 and result["partial_buffer_bytes"]:
+            result["likely_cause"] = "only an incomplete RTCM3 frame arrived before timeout"
+        else:
+            result["likely_cause"] = "valid RTCM was queued but not confirmed written to the caster"
+        return result
 
     async def stop(self):
         self.is_running = False
@@ -224,6 +296,11 @@ class NtripPusherManager:
             pusher = cls._instances[station_code]
             if pusher.is_running:
                 try:
+                    pusher._last_chunk_at = time.monotonic()
+                    sample_hex = bytes(data[:24]).hex()
+                    if pusher._first_chunk_hex is None:
+                        pusher._first_chunk_hex = sample_hex
+                    pusher._last_chunk_hex = sample_hex
                     # GNSS MQTT payloads also contain GGA/AGRICA text.  An
                     # NTRIP source must forward only complete RTCM3 frames.
                     rtcm_data = pusher._rtcm_filter.feed(data)
@@ -231,6 +308,7 @@ class NtripPusherManager:
                         def enqueue() -> None:
                             try:
                                 pusher.queue.put_nowait(rtcm_data)
+                                pusher._queued_frame_batches += 1
                             except asyncio.QueueFull:
                                 logger.warning(
                                     f"[NTRIP Pusher] {station_code}: Queue full, dropping data."
@@ -241,5 +319,12 @@ class NtripPusherManager:
                         pusher._loop.call_soon_threadsafe(enqueue)
                 except Exception as exc:
                     logger.error(f"[NTRIP Pusher] {station_code}: Could not queue RTCM data: {exc}")
+
+    @classmethod
+    def get_diagnostics(cls, station_code: str) -> dict:
+        pusher = cls._instances.get(station_code)
+        if not pusher:
+            return {"station": station_code, "likely_cause": "pusher instance is not running"}
+        return pusher.diagnostics()
 
 ntrip_manager = NtripPusherManager()

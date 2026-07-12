@@ -170,7 +170,7 @@ async function bootLegacyPage(view) {
     }
 
     if (view === 'map') {
-        await loadScript('/js/map-main.js?v=react-spa-14');
+        await loadScript('/js/map-main.js?v=react-spa-15');
         await loadScript('/js/engine/simulation-controller.js', { type: 'module' });
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });
@@ -189,7 +189,7 @@ async function bootLegacyPage(view) {
 
         await loadScript('/js/toast-notifications.js');
         await loadScript('/js/admin-manager.js?v=react-spa-12');
-        await loadScript('/js/db-manager.js');
+        await loadScript('/js/db-manager.js?v=export-bg-2');
         await loadScript('/js/system-manager.js');
         await window.bootstrapAdminManager?.();
         window.bootstrapDatabaseManager?.();

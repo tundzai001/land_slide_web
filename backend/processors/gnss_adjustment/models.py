@@ -148,6 +148,9 @@ class AdjustedPoint:
     coordinate: Vector3
     correction: Vector3
     standard_deviation: Vector3
+    covariance: Matrix3
+    posterior_standard_deviation: Vector3
+    posterior_covariance: Matrix3
     fixed: bool
 
 

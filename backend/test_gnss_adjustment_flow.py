@@ -2,11 +2,21 @@ import unittest
 
 try:
     from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
+    from backend.processors.gnss_adjustment_runtime import _llh_to_ecef, parse_agrica
 except ModuleNotFoundError:
     from processors.round_robin_manager import RoundRobinAdjustmentManager
+    from processors.gnss_adjustment_runtime import _llh_to_ecef, parse_agrica
 
 
-def _agrica_sentence(*, baseline_neu, rover_llh, base_llh=(21.0, 105.0, 10.0)):
+def _agrica_sentence(
+    *,
+    baseline_neu,
+    rover_llh,
+    base_llh=(21.0, 105.0, 10.0),
+    baseline_std_neu=(0.01, 0.01, 0.01),
+    rover_ecef=(-1560000.0, 5000000.0, 2200000.0),
+    rover_position_std_ecef=(0.02, 0.03, 0.04),
+):
     """Create the subset of a valid UM980 AGRICA sentence needed by the parser."""
 
     parts = ["0"] * 57
@@ -14,12 +24,16 @@ def _agrica_sentence(*, baseline_neu, rover_llh, base_llh=(21.0, 105.0, 10.0)):
     parts[1] = "232"
     parts[2:8] = ["24", "1", "1", "0", "0", "0"]
     parts[8] = "4"
+    parts[10:13] = ["8", "16", "8"]
     parts[13:16] = [str(value) for value in baseline_neu]
-    parts[16:19] = ["0.01", "0.01", "0.01"]
+    parts[16:19] = [str(value) for value in baseline_std_neu]
+    parts[28] = "0.0107"
     parts[29:32] = [str(value) for value in rover_llh]
-    parts[32:35] = ["-1560000", "5000000", "2200000"]
-    parts[38:41] = ["0.01", "0.01", "0.01"]
+    parts[32:35] = [str(value) for value in rover_ecef]
+    parts[38:41] = [str(value) for value in rover_position_std_ecef]
     parts[41:44] = [str(value) for value in base_llh]
+    parts[48] = "0.999"
+    parts[53] = "11"
     return "#AGRICA,0;" + ",".join(parts) + "*00000000"
 
 
@@ -41,12 +55,21 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
             "base_alt": 10.0,
         }])
 
-    def _add(self, station_id, station_code, baseline_neu, rover_llh, base_llh=(21.0, 105.0, 10.0)):
+    def _add(
+        self,
+        station_id,
+        station_code,
+        baseline_neu,
+        rover_llh,
+        base_llh=(21.0, 105.0, 10.0),
+        **sentence_options,
+    ):
         return self.manager.add_agrica_payload(
             _agrica_sentence(
                 baseline_neu=baseline_neu,
                 rover_llh=rover_llh,
                 base_llh=base_llh,
+                **sentence_options,
             ),
             {
                 "project_id": 17,
@@ -161,6 +184,97 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertTrue(after_skip["complete"])
         self.assertEqual(after_skip["skipped_station_ids"], [203])
         self.assertEqual(self.manager._sessions[18]["clusters"][0]["stations"], [201, 202])
+
+    def test_seed_step_display_is_capped_at_configured_maximum(self):
+        self.manager._sessions[17]["seed_collection_steps"] = set(range(127))
+
+        status = self.manager.get_seed_collection_status(17)
+
+        self.assertEqual(status["step_count"], self.manager.SEED_COLLECTION_MAX_STEPS)
+
+    def test_seed_baseline_accepts_missing_reported_base_when_cluster_base_is_configured(self):
+        accepted = self._add(
+            101,
+            "S1",
+            (1.0, 2.0, 0.0),
+            (21.0001, 105.0, 10.0),
+            base_llh=(0.0, 0.0, 0.0),
+        )
+
+        self.assertEqual(len(accepted), 1)
+        self.assertIn(
+            "using configured fixed BASE",
+            self.manager.get_last_ingest_diagnostic(17)["message"],
+        )
+
+    def test_parser_keeps_baseline_and_rover_position_uncertainty_separate(self):
+        observation = parse_agrica(
+            _agrica_sentence(
+                baseline_neu=(1.0, 2.0, 3.0),
+                baseline_std_neu=(0.004, 0.005, 0.011),
+                rover_llh=(21.0, 105.0, 10.0),
+                rover_position_std_ecef=(0.1, 0.2, 0.3),
+            ),
+            project_id=17,
+            station_id=101,
+            rover_name="S1",
+        )[0]
+
+        self.assertEqual(observation.std_neu, (0.004, 0.005, 0.011))
+        self.assertEqual(observation.rover_position_std_ecef, (0.1, 0.2, 0.3))
+        self.assertEqual(observation.full_data["gps_satellites"], 8)
+        self.assertEqual(observation.full_data["bds_satellites"], 16)
+        self.assertEqual(observation.full_data["glonass_satellites"], 8)
+        self.assertEqual(observation.full_data["galileo_satellites"], 11)
+        self.assertAlmostEqual(observation.full_data["diff_age"], 0.999)
+        self.assertAlmostEqual(observation.full_data["velocity_up_std"], 0.0107)
+
+    def test_inconsistent_rover_ecef_is_excluded_from_raw_mean_but_baseline_is_kept(self):
+        base_llh = (21.0, 105.0, 10.0)
+        base_ecef = _llh_to_ecef(*base_llh)
+
+        def expected_rover(baseline):
+            delta = self.manager._baseline_ecef(
+                type("Observation", (), {"baseline_neu": baseline})(),
+                base_llh,
+            )
+            return tuple(base_ecef[index] + delta[index] for index in range(3))
+
+        self._add(
+            101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0),
+            rover_ecef=expected_rover((1.0, 2.0, 0.0)),
+        )
+        self._add(
+            102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0),
+            baseline_std_neu=(0.2, 0.01, 0.01),
+            rover_ecef=expected_rover((4.0, 5.0, 0.0)),
+        )
+        session = self.manager._sessions[17]
+        session["active_bases"][0] = "S1"
+        inconsistent = tuple(value + 272.0 for value in expected_rover((4.0, 5.0, 0.0)))
+        self._add(
+            102, "S2", (3.0, 3.0, 0.0), (21.0002, 105.0, 10.0),
+            base_llh=(21.0001, 105.0, 10.0),
+            rover_ecef=inconsistent,
+        )
+        session["active_bases"].clear()
+
+        result = self.manager._build_cluster_result(17, 0, session["clusters"][0])
+
+        self.assertEqual(result["quality"]["observation_baseline_count"], 3)
+        self.assertEqual(result["quality"]["baseline_std_warning_count"], 1)
+        self.assertEqual(result["quality"]["raw_ecef_inconsistent_count"], 1)
+        self.assertEqual(
+            result["quality"]["trusted_subset"]["observation_baseline_count"],
+            2,
+        )
+        self.assertEqual(result["points"]["S2"]["raw_rover_ecef_observation_count"], 1)
+        self.assertEqual(result["points"]["S2"]["raw_rover_ecef_rejected_count"], 1)
+        flagged = [
+            item for item in result["baseline_observations"]
+            if "BASELINE_POSITION_INCONSISTENT" in item["quality_flags"]
+        ]
+        self.assertEqual(len(flagged), 1)
 
 
 if __name__ == "__main__":

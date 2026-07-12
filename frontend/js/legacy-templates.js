@@ -3807,21 +3807,23 @@ window.LegacyTemplates = {
 
     <!-- MODAL TẢI DỮ LIỆU NÂNG CAO -->
     <div class="modal fade" id="exportExcelModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-            <div class="modal-content">
-                <div class="modal-header bg-success text-white">
-                    <h5 class="modal-title">
-                        <i class="bi bi-file-earmark-arrow-down me-2"></i>
-                        Tải Xuống Dữ Liệu
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <div class="modal-dialog modal-dialog-centered modal-xl export-dialog">
+            <div class="modal-content export-shell">
+                <div class="modal-header export-header text-white">
+                    <div>
+                        <div class="export-eyebrow">DATABASE ARCHIVE</div>
+                        <h5 class="modal-title mb-1"><i class="bi bi-box-arrow-down me-2"></i>Xuất dữ liệu hệ thống</h5>
+                        <div class="export-header-copy">Chọn phạm vi, dataset và theo dõi tác vụ chạy nền.</div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" title="Thu nhỏ; tác vụ export vẫn tiếp tục"></button>
                 </div>
 
-                <div class="modal-body">
+                <div class="modal-body export-body">
                     <div class="row g-3">
                         <!-- Cột Trái: Chọn Dự án & Trạm -->
-                        <div class="col-md-6 border-end">
-                            <h6 class="text-success mb-3"><i class="bi bi-geo-alt"></i> Khu Vực</h6>
+                        <div class="col-lg-5">
+                            <section class="export-panel h-100">
+                            <h6 class="export-section-title"><span>01</span> Phạm vi dữ liệu</h6>
                             <div class="mb-3">
                                 <label class="form-label small text-muted">Dự Án</label>
                                 <select class="form-select" id="export-project-select" onchange="window.dbManager.onExportProjectChange()">
@@ -3835,7 +3837,7 @@ window.LegacyTemplates = {
                                 </select>
                             </div>
                             
-                            <h6 class="text-success mt-4 mb-3"><i class="bi bi-calendar-range"></i> Thời Gian</h6>
+                            <h6 class="export-section-title mt-4"><span>02</span> Khoảng thời gian</h6>
                             <div class="row g-2">
                                 <div class="col-6">
                                     <label class="form-label small text-muted">Từ Ngày</label>
@@ -3846,31 +3848,41 @@ window.LegacyTemplates = {
                                     <input type="date" class="form-control" id="export-end-date">
                                 </div>
                             </div>
+                            <div id="export-scope-summary" class="export-scope-note mt-3">Toàn bộ thời gian trong phạm vi đã chọn.</div>
+                            </section>
                         </div>
 
                         <!-- Cột Phải: Chọn Loại Dữ Liệu -->
-                        <div class="col-md-6">
-                            <h6 class="text-success mb-3"><i class="bi bi-database"></i> Dữ Liệu Cần Tải</h6>
+                        <div class="col-lg-7">
+                            <section class="export-panel h-100">
+                            <h6 class="export-section-title"><span>03</span> Dataset cần đóng gói</h6>
                             
                             <div class="export-options">
                                 <div class="export-item p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
                                     <input class="form-check-input m-0 me-2" type="checkbox" id="export-projects" value="projects" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
                                     <label class="form-check-label stretched-link mb-0" for="export-projects" style="z-index: 1;">
-                                        <strong>Bảng Dự án & Trạm</strong> (Cấu hình)
+                                        <strong>Dự án và trạm</strong><small>Cấu hình, tọa độ và trạng thái</small>
                                     </label>
                                 </div>
                                 
                                 <div class="export-item p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
                                     <input class="form-check-input m-0 me-2" type="checkbox" id="export-devices" value="devices" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
                                     <label class="form-check-label stretched-link mb-0" for="export-devices" style="z-index: 1;">
-                                        <strong>Bảng Thiết bị</strong> (Cấu hình Pi, Sensor)
+                                        <strong>Thiết bị</strong><small>Pi, sensor, topic và loại thiết bị</small>
                                     </label>
                                 </div>
 
                                 <div class="export-item p-2 mb-2 border rounded border-primary bg-light d-flex align-items-center position-relative" style="cursor: pointer;">
-                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-sensor-data" value="sensor_data" checked onchange="document.getElementById('export-sensor-types').style.display = this.checked ? 'block' : 'none'" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
+                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-sensor-data" value="sensor_data" checked onchange="document.getElementById('export-sensor-types').style.display = this.checked ? 'grid' : 'none'" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
                                     <label class="form-check-label stretched-link mb-0" for="export-sensor-data" style="z-index: 1;">
-                                        <strong>Lịch sử Dữ liệu Cảm biến</strong>
+                                        <strong>Lịch sử cảm biến</strong><small>GNSS, IMU, mưa và mực nước</small>
+                                    </label>
+                                </div>
+
+                                <div class="export-item export-item-accent p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
+                                    <input class="form-check-input m-0 me-2" type="checkbox" id="export-gnss-adjustments" value="gnss_adjustments" checked>
+                                    <label class="form-check-label stretched-link mb-0" for="export-gnss-adjustments">
+                                        <strong>Kết quả bình sai GNSS</strong><small>Theo dự án, cụm, trạm; kèm JSON và báo cáo XLSX</small>
                                     </label>
                                 </div>
                                 
@@ -3897,30 +3909,34 @@ window.LegacyTemplates = {
                                 <div class="export-item p-2 mb-2 border rounded d-flex align-items-center position-relative" style="cursor: pointer;">
                                     <input class="form-check-input m-0 me-2" type="checkbox" id="export-alerts" value="alerts" style="width: 16px; height: 16px; min-width: 16px; flex-shrink: 0; position: relative; z-index: 2; float: none;">
                                     <label class="form-check-label stretched-link mb-0" for="export-alerts" style="z-index: 1;">
-                                        <strong>Lịch sử Cảnh báo (Alerts)</strong>
+                                        <strong>Lịch sử cảnh báo</strong><small>Cấp độ, nội dung và trạng thái xử lý</small>
                                     </label>
                                 </div>
                             </div>
+                            </section>
                         </div>
                     </div>
                     
                     <!-- Vùng hiển thị Tiến trình (ẩn mặc định) -->
-                    <div id="export-progress-container" class="mt-4 pt-3 border-top" style="display: none;">
-                        <h6 class="text-primary mb-2" id="export-status-text">Đang chuẩn bị dữ liệu...</h6>
-                        <div class="progress" style="height: 20px;">
-                            <div id="export-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%;">0%</div>
+                    <div id="export-progress-container" class="export-progress-card mt-3" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                            <div><div class="export-eyebrow text-success">BACKGROUND TASK</div><h6 class="mb-0" id="export-status-text">Đang chuẩn bị dữ liệu...</h6></div>
+                            <div id="export-progress-percent" class="export-percent">0%</div>
                         </div>
-                        <small class="text-muted mt-1 d-block" id="export-progress-detail">Khởi tạo tác vụ...</small>
+                        <div class="progress export-progress-track">
+                            <div id="export-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;"></div>
+                        </div>
+                        <small class="text-muted mt-2 d-block" id="export-progress-detail">Khởi tạo tác vụ chạy nền...</small>
                     </div>
 
                 </div>
 
-                <div class="modal-footer bg-light">
-                    <button type="button" class="btn btn-secondary" id="btn-export-cancel" data-bs-dismiss="modal">
-                        <i class="bi bi-x-circle me-1"></i> Đóng
+                <div class="modal-footer export-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="btn-export-cancel" data-bs-dismiss="modal">
+                        <i class="bi bi-dash-circle me-1"></i> Thu nhỏ
                     </button>
                     <button type="button" class="btn btn-success" id="btn-export-start" onclick="window.dbManager.confirmExportExcel()">
-                        <i class="bi bi-download me-1"></i> Bắt đầu Tải
+                        <i class="bi bi-play-fill me-1"></i> Bắt đầu export
                     </button>
                 </div>
             </div>
@@ -3928,13 +3944,33 @@ window.LegacyTemplates = {
     </div>
     
     <style>
-        #exportExcelModal .modal-header {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        }
-        .export-item:hover {
-            background-color: rgba(16, 185, 129, 0.05);
-            border-color: #10b981 !important;
-        }
+        #exportExcelModal { --export-ink:#17332c; --export-green:#0d8f68; --export-line:#d9e5df; }
+        #exportExcelModal .export-dialog { max-width: 980px; }
+        #exportExcelModal .export-shell { border:0; border-radius:18px; overflow:hidden; box-shadow:0 26px 80px rgba(17,47,38,.28); }
+        #exportExcelModal .export-header { padding:18px 22px; border:0; background:linear-gradient(120deg,#0b3b32 0%,#0d6b53 58%,#12906c 100%); }
+        #exportExcelModal .export-header-copy { color:rgba(232,255,247,.72); font-size:.78rem; }
+        #exportExcelModal .export-eyebrow { font:700 .62rem/1.2 monospace; letter-spacing:.16em; opacity:.76; }
+        #exportExcelModal .export-body { padding:18px; background:linear-gradient(145deg,#f4f8f6,#edf4f0); }
+        #exportExcelModal .export-panel { padding:16px; border:1px solid var(--export-line); border-radius:14px; background:rgba(255,255,255,.9); }
+        #exportExcelModal .export-section-title { display:flex; align-items:center; gap:8px; margin-bottom:12px; color:var(--export-ink); font-size:.82rem; font-weight:750; text-transform:uppercase; letter-spacing:.04em; }
+        #exportExcelModal .export-section-title span { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; color:#fff; background:var(--export-green); font:700 .66rem monospace; }
+        #exportExcelModal .form-label { margin-bottom:5px; font-size:.72rem; font-weight:700; color:#557168!important; text-transform:uppercase; letter-spacing:.04em; }
+        #exportExcelModal .form-select, #exportExcelModal .form-control { min-height:38px; border-color:#ceddd6; border-radius:9px; font-size:.82rem; }
+        #exportExcelModal .export-item { min-height:48px; border-color:#dce8e2!important; background:#fff; transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease; }
+        #exportExcelModal .export-item:hover { transform:translateY(-1px); border-color:#41a786!important; box-shadow:0 7px 18px rgba(17,95,71,.08); }
+        #exportExcelModal .export-item-accent { background:linear-gradient(100deg,#edfdf6,#f8fffc); border-color:#8fd6bc!important; }
+        #exportExcelModal .export-item label { display:flex; flex-direction:column; line-height:1.15; color:#203b33; }
+        #exportExcelModal .export-item label strong { font-size:.8rem; }
+        #exportExcelModal .export-item label small { margin-top:4px; color:#789087; font-size:.68rem; }
+        #exportExcelModal #export-sensor-types { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; padding:8px 10px!important; margin:0 0 8px 26px!important; border-left:2px solid #b6ddce; background:#f8fbf9; border-radius:0 8px 8px 0; }
+        #exportExcelModal #export-sensor-types>div { margin:0!important; }
+        #exportExcelModal .export-scope-note { padding:9px 11px; border-radius:9px; background:#edf5f1; color:#597269; font-size:.72rem; }
+        #exportExcelModal .export-progress-card { padding:14px 16px; border:1px solid #b9ddcf; border-radius:13px; background:#fff; box-shadow:0 8px 22px rgba(18,99,73,.08); }
+        #exportExcelModal .export-percent { color:var(--export-green); font:800 1.25rem monospace; }
+        #exportExcelModal .export-progress-track { height:9px; border-radius:999px; background:#dfeae5; }
+        #exportExcelModal .export-progress-track .progress-bar { border-radius:999px; background:linear-gradient(90deg,#0d8f68,#42c99b); }
+        #exportExcelModal .export-footer { padding:12px 18px; border-color:#dce7e1; background:#f8fbf9; }
+        @media (max-width:767px) { #exportExcelModal .export-body{padding:12px} #exportExcelModal #export-sensor-types{grid-template-columns:1fr} }
     </style>
     
     <!-- ============================================

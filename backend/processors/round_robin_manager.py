@@ -213,7 +213,7 @@ class RoundRobinAdjustmentManager:
         mqtt_client,
         caster_host: str = "127.0.0.1",
         caster_hosts: Optional[List[str]] = None,
-        caster_port: int = 7054,
+        caster_port: int = 2101,
         source_host: Optional[str] = None,
         source_port: int = 2101,
         control_password: str = "12345",
@@ -336,9 +336,10 @@ class RoundRobinAdjustmentManager:
             return [], 0
 
         # A valid UM980 message ends in * followed by eight hexadecimal CRC
-        # characters.  Multiple complete messages in one MQTT payload are also
-        # accepted.
-        complete_matches = list(re.finditer(r"#AGRICA[^*]*\*[0-9A-Fa-f]{8}", pending, re.DOTALL))
+        # characters. However, if the payload is truncated by hardware buffers,
+        # we still process it as long as the * is reached, since all GNSS data
+        # is before the asterisk.
+        complete_matches = list(re.finditer(r"#AGRICA[^*]*\*[0-9A-Fa-f]*", pending, re.DOTALL))
         if complete_matches:
             completed = [match.group(0) for match in complete_matches]
             tail = pending[complete_matches[-1].end():]
@@ -504,6 +505,15 @@ class RoundRobinAdjustmentManager:
 
         return bool(self.get_seed_collection_status(project_id)["complete"])
 
+    def get_active_base_for_station(self, project_id: int, station_id: int) -> str:
+        session = self._sessions.get(project_id)
+        if not session:
+            return "BASE"
+        cluster_index = self._cluster_index_for_station(session, station_id)
+        if cluster_index is None:
+            return "BASE"
+        return session.get("active_bases", {}).get(cluster_index, "BASE")
+
     def get_seed_collection_status(self, project_id: int) -> dict:
         """Return initial baseline coverage and 10-step fallback eligibility."""
         session = self._sessions.get(project_id)
@@ -572,7 +582,34 @@ class RoundRobinAdjustmentManager:
             raise ValueError(f"project {project_id} has no configured adjustment session")
         self.running_tasks[project_id] = asyncio.create_task(self._run_cycle(project_id))
 
+    async def _toggle_cors_fixed_base(self, mountpoint: str, sleep: bool) -> None:
+        if not mountpoint:
+            return
+        action = "stop" if sleep else "wake"
+        # API của CORS Dashboard nằm trên https://cors.aitogy.com và yêu cầu method POST
+        url = f"https://cors.aitogy.com/api/ntrip/{action}-station"
+        
+        def do_req():
+            import urllib.request
+            import json
+            payload = {"mountpoint": mountpoint}
+            if action == "stop":
+                payload["force"] = True
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    body = response.read().decode('utf-8')
+                    logger.info(f"API {action}-station response for {mountpoint}: {response.status} {body.strip()}")
+                    return response.status
+            except Exception as e:
+                logger.error("Failed to %s fixed base %s: %s", action, mountpoint, e)
+                return None
+                
+        await asyncio.to_thread(do_req)
+
     async def _run_cycle(self, project_id: int) -> None:
+        suspended_bases = set()
         try:
             session = self._sessions[project_id]
             for cluster_index, cluster in enumerate(session["clusters"]):
@@ -605,6 +642,15 @@ class RoundRobinAdjustmentManager:
                 route_password = cluster.get("round_robin_route_password")
                 if route_password is None:
                     route_password = self.source_password
+                
+                # Ngắt luồng base cố định trước khi thu thập baseline rovers
+                if configured_mountpoint and configured_mountpoint not in suspended_bases:
+                    await self._emit_progress(project_id, f"Ngắt kết nối trạm Base cố định ({configured_mountpoint}) để tránh nhiễu tín hiệu.")
+                    await self._toggle_cors_fixed_base(configured_mountpoint, sleep=True)
+                    suspended_bases.add(configured_mountpoint)
+                    # Chờ 2s để đảm bảo caster đã xử lý ngắt
+                    await asyncio.sleep(2.0)
+                    
                 for rover_code in rovers:
                     def mark_collection_started(
                         *,
@@ -659,6 +705,12 @@ class RoundRobinAdjustmentManager:
                 if inspect.isawaitable(callback_result):
                     await callback_result
         finally:
+            for mp in suspended_bases:
+                try:
+                    await self._emit_progress(project_id, f"Khôi phục kết nối trạm Base cố định ({mp}).")
+                    await self._toggle_cors_fixed_base(mp, sleep=False)
+                except Exception as e:
+                    logger.error("Failed to wake base %s in finally block: %s", mp, e)
             self.running_tasks.pop(project_id, None)
 
     async def _emit_progress(self, project_id: Optional[int], message: str) -> None:
@@ -708,7 +760,7 @@ class RoundRobinAdjustmentManager:
             ),
         )
 
-        commands = self._build_geotek_lte_unicore_config(
+        commands = self._build_unicore_base_config(
             setup_method="FIXED",
             lat=llh["lat"],
             lon=llh["lon"],
@@ -811,7 +863,7 @@ class RoundRobinAdjustmentManager:
                 mountpoint,
                 client_info.get("Username", rover_code),
                 client_info.get("receiverID", ""),
-                self._build_geotek_lte_unicore_rover_config(),
+                self._build_unicore_rover_config(),
                 password=self.control_password,
                 caster_host=client_info.get("CasterHost"),
                 caster_port=client_info.get("CasterPort"),
@@ -940,6 +992,7 @@ class RoundRobinAdjustmentManager:
         baselines: List[Baseline] = []
         baseline_ratios: List[Optional[float]] = []
         baseline_sources: List[dict] = []
+        raw_baseline_observations: List[dict] = []
         cross_baseline_count = 0
         for record in records:
             observation = record.observation
@@ -956,7 +1009,67 @@ class RoundRobinAdjustmentManager:
                 base_llh = _ecef_to_llh(*points[from_name].approximate)
                 cross_baseline_count += 1
             delta = self._baseline_ecef(observation, base_llh)
-            standard_deviation = observation.std_ecef or observation.std_neu
+
+            baseline_length = math.sqrt(delta[0]**2 + delta[1]**2 + delta[2]**2)
+            consistency_error = None
+            quality_flags = []
+
+            if baseline_length < 1.0:
+                logger.warning(
+                    "RoundRobin cluster rejected baseline %s->%s: too short (%.2f m)",
+                    from_name,
+                    rover_name,
+                    baseline_length,
+                )
+                quality_flags.append("REJECTED_TOO_SHORT")
+
+            if observation.rover_ecef:
+                base_ecef_temp = _llh_to_ecef(*base_llh)
+                expected_rover_ecef = (
+                    base_ecef_temp[0] + delta[0],
+                    base_ecef_temp[1] + delta[1],
+                    base_ecef_temp[2] + delta[2],
+                )
+                consistency_error = math.sqrt(
+                    (observation.rover_ecef[0] - expected_rover_ecef[0])**2 +
+                    (observation.rover_ecef[1] - expected_rover_ecef[1])**2 +
+                    (observation.rover_ecef[2] - expected_rover_ecef[2])**2
+                )
+                if consistency_error > 50.0:
+                    logger.warning(
+                        "RoundRobin cluster rejected baseline %s->%s: ECEF consistency error (%.2f m) > 50m",
+                        from_name,
+                        rover_name,
+                        consistency_error,
+                    )
+                    quality_flags.append("REJECTED_INCONSISTENT_ECEF")
+
+            base_obs_data = {
+                "from": from_name,
+                "to": rover_name,
+                "session_id": str(cluster_index),
+                "observation_epoch": observation.epoch_ts,
+                "position_type": observation.position_type,
+                "gps_satellites": observation.full_data.get("gps_satellites"),
+                "bds_satellites": observation.full_data.get("bds_satellites"),
+                "glonass_satellites": observation.full_data.get("glonass_satellites"),
+                "galileo_satellites": observation.full_data.get("galileo_satellites"),
+                "diff_age": observation.full_data.get("diff_age"),
+                "baseline_std_neu": observation.std_neu,
+                "velocity_up_std": observation.full_data.get("velocity_up_std"),
+                "rover_position_std_ecef": observation.rover_position_std_ecef,
+                "raw_ecef_consistency_error_m": consistency_error,
+                "quality_flags": quality_flags,
+                "raw_payload": observation.raw,
+                "residual_xyz": None,
+                "standardized_residual": None
+            }
+            raw_baseline_observations.append(base_obs_data)
+
+            if quality_flags:
+                continue
+
+            standard_deviation = observation.rover_position_std_ecef or observation.std_neu
             baselines.append(
                 Baseline(
                     from_name,
@@ -1030,6 +1143,14 @@ class RoundRobinAdjustmentManager:
                 "redundancy": baseline.redundancy,
             }
             adjusted_baselines.append(item)
+            
+            # Update the corresponding raw observation with residuals
+            # We match by from_name and to_name (assuming 1 per pair for now)
+            for raw_obs in raw_baseline_observations:
+                if raw_obs["from"] == baseline.from_point and raw_obs["to"] == baseline.to_point:
+                    raw_obs["residual_xyz"] = baseline.residual
+                    raw_obs["standardized_residual"] = baseline.standardized_residual
+            
         loops = _build_fundamental_loops(adjusted_baselines)
         return {
             "type": "gnss_adjusted",
@@ -1050,6 +1171,7 @@ class RoundRobinAdjustmentManager:
             "rover_count": len(adjusted_points),
             "points": adjusted_points,
             "baselines": adjusted_baselines,
+            "baseline_observations": raw_baseline_observations,
             "loops": loops,
             "quality": {
                 "degrees_of_freedom": result.degrees_of_freedom,
@@ -1151,13 +1273,6 @@ class RoundRobinAdjustmentManager:
     ) -> tuple[bool, str]:
         """Verify AGRICA's reported base coordinate before assigning an edge."""
 
-        reported = observation.base_llh
-        if not _is_usable_llh(reported):
-            return False, (
-                f"rejected {observation.rover_name}: AGRICA has no usable base_llh; "
-                f"cannot verify expected base {active_base}"
-            )
-
         if active_base == "BASE":
             try:
                 expected = self._cluster_base_llh(cluster)
@@ -1173,8 +1288,58 @@ class RoundRobinAdjustmentManager:
                 float(cached["alt"]),
             )
 
+        reported = observation.base_llh
+        if not _is_usable_llh(reported):
+            if not observation.rover_llh or not observation.baseline_neu:
+                return False, (
+                    f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
+                    f"and missing rover_llh or baseline_neu to verify expected base"
+                )
+            
+            rover_to_expected_dist = _llh_horizontal_distance_m(observation.rover_llh, expected)
+            baseline_horiz_len = math.hypot(observation.baseline_neu[0], observation.baseline_neu[1])
+            
+            if abs(rover_to_expected_dist - baseline_horiz_len) > self.BASE_IDENTITY_TOLERANCE_M:
+                return False, (
+                    f"rejected {observation.rover_name}: missing base_llh, and baseline length "
+                    f"({baseline_horiz_len:.1f} m) does not match distance to expected base {active_base} "
+                    f"({rover_to_expected_dist:.1f} m)"
+                )
+
+            # Extra check for transition: make sure it's not actually closer to the fixed BASE's distance
+            if active_base != "BASE":
+                try:
+                    fixed_base = self._cluster_base_llh(cluster)
+                except ValueError:
+                    fixed_base = None
+                if fixed_base is not None:
+                    rover_to_fixed_dist = _llh_horizontal_distance_m(observation.rover_llh, fixed_base)
+                    if abs(rover_to_fixed_dist - baseline_horiz_len) + 1.0 < abs(rover_to_expected_dist - baseline_horiz_len):
+                        return False, (
+                            f"rejected {observation.rover_name}: AGRICA baseline length "
+                            f"matches fixed BASE more closely than temporary base {active_base}"
+                        )
+
+            return True, (
+                f"verified base {active_base} via baseline length matching "
+                f"(delta {abs(rover_to_expected_dist - baseline_horiz_len):.2f} m)"
+            )
+
         separation = _llh_horizontal_distance_m(reported, expected)
         height_delta = abs(float(reported[2]) - float(expected[2]))
+        if active_base != "BASE":
+            try:
+                fixed_base = self._cluster_base_llh(cluster)
+            except ValueError:
+                fixed_base = None
+            if fixed_base is not None:
+                fixed_base_separation = _llh_horizontal_distance_m(reported, fixed_base)
+                if fixed_base_separation + 1.0 < separation:
+                    return False, (
+                        f"rejected {observation.rover_name}: AGRICA base_llh matches fixed BASE "
+                        f"({fixed_base_separation:.2f} m) more closely than temporary base "
+                        f"{active_base} ({separation:.2f} m); correction source has not switched yet"
+                    )
         if separation > self.BASE_IDENTITY_TOLERANCE_M:
             return False, (
                 f"rejected {observation.rover_name}: AGRICA base_llh is {separation:.2f} m horizontally "
@@ -1276,6 +1441,8 @@ class RoundRobinAdjustmentManager:
         password: str = "12345",
         caster_host: Optional[str] = None,
         caster_port: Optional[int] = None,
+        wait_for_command_response: bool = True,
+        command_response_timeout: float = 8.0,
     ) -> bool:
         """Send a Caster SET request and Unicore commands to the selected rover."""
         target_host = caster_host or self.caster_host
@@ -1296,12 +1463,28 @@ class RoundRobinAdjustmentManager:
                 f"Host: {target_host}:{target_port}\r\n"
                 f"\r\n"
             )
+            logger.info(
+                "SET request target=%s:%s/%s username=%s receiverID=%s command_count=%s",
+                target_host,
+                target_port,
+                mountpoint,
+                username,
+                receiver_id,
+                len(commands),
+            )
             writer.write(headers.encode("ascii"))
             await writer.drain()
             response = (
                 await asyncio.wait_for(reader.read(1024), timeout=10.0)
             ).decode("ascii", errors="ignore")
             self._last_set_response = " ".join(response.strip().split()) or "empty response"
+            logger.info(
+                "SET response target=%s:%s/%s response=%s",
+                target_host,
+                target_port,
+                mountpoint,
+                self._last_set_response[:500],
+            )
             if "200 OK" not in response:
                 self._last_set_error = (
                     f"{target_host}:{target_port} mountpoint={mountpoint} "
@@ -1311,9 +1494,79 @@ class RoundRobinAdjustmentManager:
                 logger.error("SET request rejected by Caster: %s", self._last_set_error)
                 return False
             for command in commands:
-                writer.write(command)
-                await writer.drain()
-                await asyncio.sleep(0.1)
+                command_str = command.decode("ascii", errors="replace").strip()
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    logger.info("SET Unicore command mountpoint=%s command=%s (Attempt %d/%d)", mountpoint, command_str, attempt, max_retries)
+                    writer.write(command)
+                    await writer.drain()
+                    if wait_for_command_response:
+                        try:
+                            end_time = asyncio.get_event_loop().time() + command_response_timeout
+                            accumulated = ""
+                            success = False
+                            rejected = False
+                            
+                            while asyncio.get_event_loop().time() < end_time:
+                                timeout_left = max(0.1, end_time - asyncio.get_event_loop().time())
+                                try:
+                                    chunk = await asyncio.wait_for(reader.read(1024), timeout=timeout_left)
+                                    if not chunk:
+                                        break
+                                    accumulated += chunk.decode("ascii", errors="ignore")
+                                except asyncio.TimeoutError:
+                                    break
+                                
+                                upper_acc = accumulated.upper()
+                                if any(marker in upper_acc for marker in ("ERROR", "FAILED", "INVALID", "NO FUNCTION")):
+                                    rejected = True
+                                    break
+                                if "OK" in upper_acc:
+                                    success = True
+                                    break
+                                    
+                            compact_response = " ".join(accumulated.split())
+                            self._last_set_response = compact_response
+                            
+                            if success:
+                                logger.info(
+                                    "SET receiver response mountpoint=%s command=%s response=%s",
+                                    mountpoint,
+                                    command_str,
+                                    compact_response[:500],
+                                )
+                                break  # Break retry loop and proceed to next command
+                                
+                            if rejected:
+                                logger.warning(
+                                    "Command rejected mountpoint=%s command=%s response=%s",
+                                    mountpoint,
+                                    command_str,
+                                    compact_response[:500],
+                                )
+                            else:
+                                logger.warning(
+                                    "No OK response for mountpoint=%s command=%s (attempt %d). Got: %s",
+                                    mountpoint,
+                                    command_str,
+                                    attempt,
+                                    compact_response[:500] or "empty",
+                                )
+                                
+                            if attempt == max_retries:
+                                self._last_set_error = (
+                                    f"receiver rejected or ignored command {command_str}: "
+                                    f"{compact_response[:500]}"
+                                )
+                                return False
+                            await asyncio.sleep(1.0)
+                        except Exception as loop_err:
+                            logger.error("Error reading command response: %s", loop_err)
+                            if attempt == max_retries:
+                                return False
+                    else:
+                        await asyncio.sleep(0.1)
+                        break  # No need to retry if we don't wait for response
             return True
         except Exception as exc:
             detail = str(exc).strip() or exc.__class__.__name__
@@ -1338,7 +1591,60 @@ class RoundRobinAdjustmentManager:
                 except Exception:
                     pass
 
-    def _build_geotek_lte_unicore_config(self, setup_method: str, duration: int = 60, lat: float = 0, lon: float = 0, alt: float = 0) -> list[bytes]:
+    async def _restore_rover_output_sequence(
+        self,
+        *,
+        rover_code: str,
+        mountpoint: str,
+        client_info: Dict[str, Any],
+        commands: List[bytes],
+        project_id: Optional[int],
+    ) -> None:
+        """Send one restore command at a time and retry until its ACK arrives."""
+
+        for command_index, command in enumerate(commands, start=1):
+            command_text = command.decode("ascii", errors="replace").strip()
+            attempt = 0
+            while True:
+                attempt += 1
+                await self._emit_progress(
+                    project_id,
+                    (
+                        f"{rover_code}: restore step {command_index}/{len(commands)} "
+                        f"{command_text} (attempt {attempt}); waiting for receiver response."
+                    ),
+                )
+                acknowledged = await self._send_set_command(
+                    mountpoint,
+                    client_info.get("Username", rover_code),
+                    client_info.get("receiverID", ""),
+                    [command],
+                    password=self.control_password,
+                    caster_host=client_info.get("CasterHost"),
+                    caster_port=client_info.get("CasterPort"),
+                    wait_for_command_response=True,
+                )
+                if acknowledged:
+                    await self._emit_progress(
+                        project_id,
+                        f"{rover_code}: ACK received for {command_text}.",
+                    )
+                    break
+                detail = self._last_set_error or "no receiver response"
+                logger.warning(
+                    "Rover restore retry rover=%s command=%s attempt=%s detail=%s",
+                    rover_code,
+                    command_text,
+                    attempt,
+                    detail,
+                )
+                await self._emit_progress(
+                    project_id,
+                    f"{rover_code}: no ACK for {command_text}; retrying in 2s ({detail}).",
+                )
+                await asyncio.sleep(2)
+
+    def _build_unicore_base_config(self, setup_method: str, duration: int = 60, lat: float = 0, lon: float = 0, alt: float = 0) -> list[bytes]:
         """Build the Unicore command sequence for a fixed or survey-in base."""
         commands = []
         port = "com2"
@@ -1352,11 +1658,11 @@ class RoundRobinAdjustmentManager:
         return commands
 
     @staticmethod
-    def _build_geotek_lte_unicore_rover_config() -> list[bytes]:
+    def _build_unicore_rover_config() -> list[bytes]:
         """Restore UM980 rover output after one temporary-base collection."""
 
         return [
-            b"mode rover survey\r\n",
-            b"gpgga com2 1\r\n",
-            b"agrica com2 1\r\n",
+            b"unlogall\r\n",
+            b"AGRICA COM2 1\r\n",
+            b"saveconfig\r\n",
         ]

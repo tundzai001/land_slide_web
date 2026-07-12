@@ -4,9 +4,9 @@ import re
 # ==========================================
 # CẤU HÌNH MQTT (Bạn thay đổi thông tin tại đây)
 # ==========================================
-MQTT_BROKER = "aitogy.click"  # Thay bằng địa chỉ broker của bạn
+MQTT_BROKER = "aitogy.asia"  # Thay bằng địa chỉ broker của bạn
 MQTT_PORT = 1883                   # Cổng MQTT (thường là 1883, nếu có TLS/SSL thì là 8883)
-MQTT_TOPIC = "device/860549070374074/upload"     # Topic bạn cần subscribe
+MQTT_TOPIC = "device/DEMO_DEVICE_2/upload"     # Topic bạn cần subscribe
 MQTT_USERNAME = "mqttUser"                 # Để trống nếu không có user
 MQTT_PASSWORD = ""                 # Để trống nếu không có pass
 
@@ -137,15 +137,15 @@ def on_message(client, userdata, msg):
                 agrica_buffer = ""
             elif "AGRICA" in sentence:
                 agrica_buffer = sentence
-                # Nếu chuỗi AGRICA này đã đầy đủ (có dấu *) thì xử lý luôn
-                if "*" in agrica_buffer:
+                # Nếu chuỗi AGRICA này đã đầy đủ (có dấu * và 8 ký tự hex sau *) thì xử lý luôn
+                if re.search(r'\*[0-9a-fA-F]{8}', agrica_buffer):
                     parse_agrica(agrica_buffer)
                     agrica_buffer = ""
             elif agrica_buffer:
                 # Nếu buffer đang có dữ liệu dang dở, nối trực tiếp phần vừa nhận vào
                 agrica_buffer += sentence
-                # Kiểm tra xem đã nhận được ký tự kết thúc (*) chưa
-                if "*" in agrica_buffer:
+                # Kiểm tra xem đã nhận được ký tự kết thúc (*) và 8 mã hex chưa
+                if re.search(r'\*[0-9a-fA-F]{8}', agrica_buffer):
                     print(f"\n  => [ĐÃ GHÉP CHUỖI] Độ dài tổng: {len(agrica_buffer)} ký tự")
                     parse_agrica(agrica_buffer)
                     agrica_buffer = ""

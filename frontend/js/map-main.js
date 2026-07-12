@@ -52,6 +52,52 @@ const gnssAdjustmentDebugState = {
     watchdogId: null,
 };
 
+const GNSS_ADJUSTMENT_RUNNING_PHASES = new Set(['WAITING', 'COLLECTING_BASELINE', 'FREE_NETWORK']);
+
+function isGnssAdjustmentRunning(projectId = null) {
+    if (!gnssAdjustmentDebugState.active) return false;
+    if (projectId && Number(projectId) !== Number(gnssAdjustmentDebugState.projectId)) return false;
+    return GNSS_ADJUSTMENT_RUNNING_PHASES.has(gnssAdjustmentDebugState.phase);
+}
+
+function ensureGnssAdjustmentRunningPill() {
+    let pill = document.getElementById('gnss-adjustment-running-pill');
+    if (pill) return pill;
+    pill = document.createElement('button');
+    pill.id = 'gnss-adjustment-running-pill';
+    pill.type = 'button';
+    pill.style.cssText = [
+        'position:fixed', 'right:22px', 'bottom:22px', 'z-index:1085',
+        'display:none', 'align-items:center', 'gap:10px', 'padding:10px 16px',
+        'border:1px solid rgba(45,212,191,.65)', 'border-radius:999px',
+        'background:linear-gradient(135deg,#071a22,#0d3037)', 'color:#d5fffb',
+        'box-shadow:0 12px 36px rgba(0,0,0,.38),0 0 24px rgba(45,212,191,.2)',
+        'font:600 12px monospace', 'cursor:pointer'
+    ].join(';');
+    pill.innerHTML = '<span style="width:9px;height:9px;border-radius:50%;background:#2dd4bf;box-shadow:0 0 12px #2dd4bf"></span><span class="gnss-pill-label">Bình sai đang chạy</span>';
+    pill.addEventListener('click', () => {
+        const modal = window.ensureGnssTerminalModal?.();
+        if (!modal || !window.bootstrap?.Modal) {
+            console.error('[GNSS] Terminal modal is not initialized yet.');
+            window.toast?.error?.('Cửa sổ Bình sai chưa khởi tạo xong, vui lòng thử lại.');
+            return;
+        }
+        window.bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+    document.body.appendChild(pill);
+    return pill;
+}
+
+function refreshGnssAdjustmentRunningPill() {
+    const pill = ensureGnssAdjustmentRunningPill();
+    const modal = document.getElementById('gnssTerminalModal');
+    const modalVisible = Boolean(modal?.classList.contains('show'));
+    const shouldShow = isGnssAdjustmentRunning() && !modalVisible;
+    pill.style.display = shouldShow ? 'flex' : 'none';
+    const label = pill.querySelector('.gnss-pill-label');
+    if (label) label.textContent = `Bình sai đang chạy · ${gnssAdjustmentDebugState.phase} · Mở lại`;
+}
+
 function formatGnssDebugTime(date = new Date()) {
     return date.toLocaleTimeString('vi-VN', { hour12: false });
 }
@@ -69,8 +115,14 @@ function phaseClassForGnssAdjustment(phase) {
 function refreshGnssAdjustmentDebugUi() {
     const indicator = document.getElementById('gnss-phase-indicator');
     if (indicator) {
-        indicator.textContent = `Phase: ${gnssAdjustmentDebugState.phase}`;
-        indicator.className = phaseClassForGnssAdjustment(gnssAdjustmentDebugState.phase);
+        const phaseName = gnssAdjustmentDebugState.phase;
+        let phaseMsg = '';
+        if (gnssAdjustmentDebugState.entries) {
+            const lastPhaseEntry = [...gnssAdjustmentDebugState.entries].reverse().find(e => e.label === 'PHASE');
+            if (lastPhaseEntry && lastPhaseEntry.message) phaseMsg = lastPhaseEntry.message;
+        }
+        indicator.innerHTML = `<span class="opacity-75">Phase:</span> ${phaseName}${phaseMsg ? ` <span class="text-light ms-2 px-2 py-1 bg-dark rounded border border-secondary" style="font-size: 0.8em;">${phaseMsg}</span>` : ''}`;
+        indicator.className = phaseClassForGnssAdjustment(phaseName);
     }
 
     const summary = document.getElementById('gnss-debug-summary');
@@ -123,6 +175,7 @@ function refreshGnssAdjustmentDebugUi() {
                 : 'Đã tạm dừng tự cuộn; bấm để xuống cuối';
         }
     }
+    refreshGnssAdjustmentRunningPill();
 }
 
 function formatGnssAdjustmentDebugOutput() {
@@ -185,6 +238,7 @@ function setGnssAdjustmentPhase(phase, message = '') {
     gnssAdjustmentDebugState.phase = String(phase || 'WAITING').toUpperCase();
     refreshGnssAdjustmentDebugUi();
     if (message) addGnssAdjustmentDebug('PHASE', message, gnssAdjustmentDebugState.phase === 'ERROR' ? 'error' : 'info');
+    window.gnssBoardState?.draw?.(performance.now());
 }
 
 function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
@@ -820,14 +874,13 @@ function handleRealtimeUpdate(message) {
             );
         }
         if (belongsToActiveRun && window.gnssBoardState && window.gnssBoardState.ctx) {
-            // Add Base Point at 0,0 for relative visualization
-            window.gnssBoardState.addPoint("BASE", 0, 0, true);
-            
-            const relX = message.baseline_neu[1]; // dE
-            const relY = message.baseline_neu[0]; // dN
+            const fromPoint = String(message.from || 'BASE');
+            window.gnssBoardState.addPoint('BASE', 0, 0, true);
+            const origin = window.gnssBoardState.points[fromPoint] || window.gnssBoardState.points.BASE;
+            const relX = origin.x + Number(message.baseline_neu?.[1] || 0);
+            const relY = origin.y + Number(message.baseline_neu?.[0] || 0);
             window.gnssBoardState.addPoint(message.rover_name, relX, relY, false);
-            
-            window.gnssBoardState.addBaseline("BASE", message.rover_name, {
+            window.gnssBoardState.addBaseline(fromPoint, message.rover_name, {
                 dn: message.baseline_neu[0],
                 de: message.baseline_neu[1],
                 dh: message.baseline_neu[2],
@@ -2410,82 +2463,131 @@ function setupEventListeners() {
         points: {},
         baselines: [],
         basePoint: null,
-        init() {
+        animationId: null,
+        viewWidth: 0,
+        viewHeight: 0,
+        init({ preserve = false } = {}) {
             this.canvas = document.getElementById('gnss-board-canvas');
             if (!this.canvas) return;
-            const container = document.getElementById('gnss-board-container');
-            this.canvas.width = container.clientWidth;
-            this.canvas.height = container.clientHeight;
             this.ctx = this.canvas.getContext('2d');
-            this.points = {};
-            this.baselines = [];
-            this.basePoint = null;
-            document.getElementById('gnss-baseline-table-body').innerHTML = '';
+            if (!preserve) {
+                this.points = {};
+                this.baselines = [];
+                this.basePoint = null;
+                const tableBody = document.getElementById('gnss-baseline-table-body');
+                const tooltips = document.getElementById('gnss-board-tooltips');
+                if (tableBody) tableBody.innerHTML = '';
+                if (tooltips) tooltips.innerHTML = '';
+            }
             if (!gnssAdjustmentDebugState.active) {
                 gnssAdjustmentDebugState.phase = 'WAITING';
             }
+            this.resize();
+            this.startAnimation();
             refreshGnssAdjustmentDebugUi();
-            document.getElementById('adj-results-section').style.display = 'none';
-            document.getElementById('gnss-board-tooltips').innerHTML = '';
-            this.draw();
+            if (!preserve) {
+                const results = document.getElementById('adj-results-section');
+                if (results) results.style.display = 'none';
+            }
+        },
+        resize() {
+            if (!this.canvas) return;
+            const container = document.getElementById('gnss-board-container');
+            const bounds = container?.getBoundingClientRect();
+            const width = Math.max(320, Math.floor(bounds?.width || container?.clientWidth || 720));
+            const height = Math.max(300, Math.floor(bounds?.height || container?.clientHeight || 520));
+            if (this.canvas.width !== width || this.canvas.height !== height) {
+                this.canvas.width = width;
+                this.canvas.height = height;
+            }
+            this.viewWidth = width;
+            this.viewHeight = height;
+        },
+        startAnimation() {
+            this.stopAnimation();
+            const animate = timestamp => {
+                this.resize();
+                this.draw(timestamp);
+                this.animationId = requestAnimationFrame(animate);
+            };
+            this.animationId = requestAnimationFrame(animate);
+        },
+        stopAnimation() {
+            if (this.animationId) cancelAnimationFrame(this.animationId);
+            this.animationId = null;
         },
         addPoint(name, relX, relY, isBase = false) {
             if (!this.points[name]) {
-                this.points[name] = { name, x: relX, y: relY, isBase };
+                this.points[name] = { name, x: Number(relX) || 0, y: Number(relY) || 0, isBase, samples: 1 };
                 if (isBase) this.basePoint = this.points[name];
-                this.draw();
+            } else if (!isBase) {
+                const point = this.points[name];
+                point.samples = Number(point.samples || 1) + 1;
+                point.x += ((Number(relX) || 0) - point.x) / point.samples;
+                point.y += ((Number(relY) || 0) - point.y) / point.samples;
             }
         },
         addBaseline(from, to, data) {
-            this.baselines.push({ from, to, data });
-            this.draw();
-            
-            // Add row to table
-            const tbody = document.getElementById('gnss-baseline-table-body');
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${this.baselines.length}</td>
-                <td class="text-info">${from}</td>
-                <td class="text-warning">${to}</td>
-                <td>${data.dn.toFixed(4)}</td>
-                <td>${data.de.toFixed(4)}</td>
-                <td>${data.dh.toFixed(4)}</td>
-                <td><button class="btn btn-xs btn-outline-secondary py-0 view-adv-btn" data-json='${JSON.stringify(data.full_data || {}).replace(/'/g, "&#39;")}'>Chi tiết</button></td>
-            `;
-            tbody.appendChild(row);
-            
-            // Rebind advanced view buttons
-            document.querySelectorAll('.view-adv-btn').forEach(btn => {
-                btn.onclick = function() {
-                    const jsonStr = this.getAttribute('data-json');
-                    try {
-                        const jsonObj = JSON.parse(jsonStr);
-                        document.getElementById('gnss-advanced-data-json').textContent = JSON.stringify(jsonObj, null, 2);
-                        new bootstrap.Modal(document.getElementById('gnssAdvancedDataModal')).show();
-                    } catch(e) {}
+            const orderedPair = from === 'BASE'
+                ? ['BASE', to]
+                : to === 'BASE'
+                    ? ['BASE', from]
+                    : [from, to].sort();
+            const direction = from === orderedPair[0] && to === orderedPair[1] ? 1 : -1;
+            from = orderedPair[0];
+            to = orderedPair[1];
+            data = {
+                ...data,
+                dn: direction * Number(data.dn || 0),
+                de: direction * Number(data.de || 0),
+                dh: direction * Number(data.dh || 0),
+            };
+            const key = `${from}\u0000${to}`;
+            let edge = this.baselines.find(item => item.key === key);
+            if (edge) {
+                edge.samples += 1;
+                edge.data.dn += (Number(data.dn) - edge.data.dn) / edge.samples;
+                edge.data.de += (Number(data.de) - edge.data.de) / edge.samples;
+                edge.data.dh += (Number(data.dh) - edge.data.dh) / edge.samples;
+                edge.data.full_data = data.full_data;
+            } else {
+                edge = {
+                    key,
+                    from,
+                    to,
+                    samples: 1,
+                    data: {
+                        ...data,
+                        dn: Number(data.dn) || 0,
+                        de: Number(data.de) || 0,
+                        dh: Number(data.dh) || 0,
+                    },
                 };
-            });
-            
-            // Add tooltip
-            if (this.points[from] && this.points[to]) {
-                const pt1 = this.getScreenCoords(this.points[from]);
-                const pt2 = this.getScreenCoords(this.points[to]);
-                const midX = (pt1.x + pt2.x) / 2;
-                const midY = (pt1.y + pt2.y) / 2;
-                const tooltipsContainer = document.getElementById('gnss-board-tooltips');
-                const t = document.createElement('div');
-                t.style.position = 'absolute';
-                t.style.left = (midX + 5) + 'px';
-                t.style.top = (midY - 10) + 'px';
-                t.style.backgroundColor = 'rgba(0,0,0,0.7)';
-                t.style.color = '#fff';
-                t.style.padding = '2px 6px';
-                t.style.fontSize = '10px';
-                t.style.borderRadius = '3px';
-                t.style.fontFamily = 'monospace';
-                t.innerHTML = `dN:${data.dn.toFixed(3)}<br>dE:${data.de.toFixed(3)}`;
-                tooltipsContainer.appendChild(t);
+                this.baselines.push(edge);
             }
+
+            const tbody = document.getElementById('gnss-baseline-table-body');
+            if (!tbody) return;
+            let row = Array.from(tbody.rows).find(item => item.dataset.edgeKey === key);
+            if (!row) {
+                row = document.createElement('tr');
+                row.dataset.edgeKey = key;
+                tbody.appendChild(row);
+            }
+            row.innerHTML = `
+                <td class="ps-3 text-muted">${this.baselines.indexOf(edge) + 1} <span class="badge bg-secondary ms-1" style="font-size: 0.6rem;">n=${edge.samples}</span></td>
+                <td class="text-info fw-bold">${from}</td>
+                <td class="text-warning fw-bold">${to}</td>
+                <td class="text-end font-monospace" style="color: #a7f3d0;">${edge.data.dn.toFixed(4)}</td>
+                <td class="text-end font-monospace" style="color: #a7f3d0;">${edge.data.de.toFixed(4)}</td>
+                <td class="text-end font-monospace" style="color: #a7f3d0;">${edge.data.dh.toFixed(4)}</td>
+                <td class="pe-3 text-end"><button class="btn btn-sm btn-outline-info py-0 px-2 view-adv-btn" style="font-size: 0.7rem; border-radius: 4px;">Chi tiết</button></td>
+            `;
+            row.querySelector('.view-adv-btn').onclick = () => {
+                const output = document.getElementById('gnss-advanced-data-json');
+                if (output) output.textContent = JSON.stringify(edge.data.full_data || {}, null, 2);
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('gnssAdvancedDataModal')).show();
+            };
         },
         getScreenCoords(pt) {
             const values = Object.values(this.points);
@@ -2493,15 +2595,15 @@ function setupEventListeners() {
             const maxX = Math.max(...values.map(item => item.x), 0);
             const minY = Math.min(...values.map(item => item.y), 0);
             const maxY = Math.max(...values.map(item => item.y), 0);
-            const padding = 70;
+            const padding = 90;
             const rangeX = Math.max(maxX - minX, 1);
             const rangeY = Math.max(maxY - minY, 1);
             const scale = Math.max(0.01, Math.min(
-                (this.canvas.width - padding * 2) / rangeX,
-                (this.canvas.height - padding * 2) / rangeY,
+                (this.viewWidth - padding * 2) / rangeX,
+                (this.viewHeight - padding * 2) / rangeY,
             ));
-            const centerX = this.canvas.width / 2 - ((minX + maxX) / 2) * scale;
-            const centerY = this.canvas.height / 2 + ((minY + maxY) / 2) * scale;
+            const centerX = this.viewWidth / 2 - ((minX + maxX) / 2) * scale;
+            const centerY = this.viewHeight / 2 + ((minY + maxY) / 2) * scale;
             return {
                 x: centerX + (pt.x * scale),
                 y: centerY - (pt.y * scale),
@@ -2549,60 +2651,151 @@ function setupEventListeners() {
                 });
             });
             this.draw();
-        },
-        draw() {
-            if (!this.ctx) return;
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            
-            // Draw grid
-            this.ctx.strokeStyle = '#e0e0e0';
-            this.ctx.lineWidth = 1;
-            for(let i=0; i<this.canvas.width; i+=50) {
-                this.ctx.beginPath(); this.ctx.moveTo(i, 0); this.ctx.lineTo(i, this.canvas.height); this.ctx.stroke();
+
+            // Set up download button
+            const downloadBtn = document.getElementById('gnss-download-results-btn');
+            if (downloadBtn) {
+                downloadBtn.onclick = () => {
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(result, null, 2));
+                    const downloadAnchorNode = document.createElement('a');
+                    downloadAnchorNode.setAttribute("href", dataStr);
+                    downloadAnchorNode.setAttribute("download", `gnss_adjustment_result_${new Date().getTime()}.json`);
+                    document.body.appendChild(downloadAnchorNode); // required for firefox
+                    downloadAnchorNode.click();
+                    downloadAnchorNode.remove();
+                };
             }
-            for(let i=0; i<this.canvas.height; i+=50) {
-                this.ctx.beginPath(); this.ctx.moveTo(0, i); this.ctx.lineTo(this.canvas.width, i); this.ctx.stroke();
+        },
+        draw(timestamp = performance.now()) {
+            if (!this.ctx) return;
+            const ctx = this.ctx;
+            const width = this.viewWidth || this.canvas.width;
+            const height = this.viewHeight || this.canvas.height;
+            const time = Number(timestamp || 0) / 1000;
+            ctx.clearRect(0, 0, width, height);
+            const background = ctx.createLinearGradient(0, 0, width, height);
+            background.addColorStop(0, '#06141b');
+            background.addColorStop(0.55, '#0a2229');
+            background.addColorStop(1, '#071117');
+            ctx.fillStyle = background;
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.strokeStyle = 'rgba(91,192,190,.12)';
+            this.ctx.lineWidth = 1;
+            const gridOffset = (time * 8) % 48;
+            for (let x = gridOffset; x < width; x += 48) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+            }
+            for (let y = gridOffset; y < height; y += 48) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
             }
 
+            ctx.fillStyle = '#7dd3c7';
+            ctx.font = "600 13px 'IBM Plex Mono', monospace";
+            ctx.fillText('GNSS NETWORK SOLVER', 24, 30);
+            ctx.fillStyle = 'rgba(203,255,248,.55)';
+            ctx.font = "11px 'IBM Plex Mono', monospace";
+            ctx.fillText(`${gnssAdjustmentDebugState.phase}  ·  ${this.baselines.length} cạnh  ·  ${gnssAdjustmentDebugState.baselineCount} trị đo`, 24, 49);
+
             if (Object.keys(this.points).length === 0) {
-                this.ctx.fillStyle = '#64748b';
-                this.ctx.font = '16px monospace';
-                this.ctx.textAlign = 'center';
-                this.ctx.fillText('Đang chờ dữ liệu baseline để dựng mạng GNSS…', this.canvas.width / 2, this.canvas.height / 2);
-                this.ctx.textAlign = 'start';
+                const centerX = width / 2;
+                const centerY = height / 2 - 10;
+                const maxRadius = Math.min(width, height) * 0.27;
+                for (let ring = 1; ring <= 4; ring += 1) {
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, maxRadius * ring / 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(45,212,191,${0.08 + ring * 0.025})`;
+                    ctx.stroke();
+                }
+                const angle = time * 1.15;
+                const sweep = ctx.createLinearGradient(
+                    centerX, centerY,
+                    centerX + Math.cos(angle) * maxRadius,
+                    centerY + Math.sin(angle) * maxRadius,
+                );
+                sweep.addColorStop(0, 'rgba(45,212,191,0)');
+                sweep.addColorStop(1, 'rgba(45,212,191,.85)');
+                ctx.strokeStyle = sweep;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(centerX + Math.cos(angle) * maxRadius, centerY + Math.sin(angle) * maxRadius);
+                ctx.stroke();
+                const expectedCount = Math.max(gnssAdjustmentDebugState.expectedStationIds.length, 5);
+                for (let index = 0; index < expectedCount; index += 1) {
+                    const dotAngle = (Math.PI * 2 * index / expectedCount) + 0.35;
+                    const radius = maxRadius * (0.48 + (index % 3) * 0.17);
+                    const pulse = 2.5 + 1.8 * (1 + Math.sin(time * 3 + index)) / 2;
+                    ctx.beginPath();
+                    ctx.arc(centerX + Math.cos(dotAngle) * radius, centerY + Math.sin(dotAngle) * radius, pulse, 0, Math.PI * 2);
+                    ctx.fillStyle = index < gnssAdjustmentDebugState.baselineCount ? '#2dd4bf' : 'rgba(148,163,184,.55)';
+                    ctx.fill();
+                }
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#d5fffb';
+                ctx.font = "600 16px 'IBM Plex Mono', monospace";
+                ctx.fillText('ĐANG QUÉT BASELINE', centerX, centerY + maxRadius + 42);
+                ctx.fillStyle = 'rgba(203,255,248,.55)';
+                ctx.font = "12px 'IBM Plex Mono', monospace";
+                ctx.fillText('Chờ các rover gửi nghiệm RTK Fixed', centerX, centerY + maxRadius + 64);
+                ctx.textAlign = 'start';
                 return;
             }
 
-            // Draw baselines
-            this.baselines.forEach(b => {
-                const p1 = this.points[b.from];
-                const p2 = this.points[b.to];
+            this.baselines.forEach((baseline, index) => {
+                const p1 = this.points[baseline.from];
+                const p2 = this.points[baseline.to];
                 if (p1 && p2) {
                     const sp1 = this.getScreenCoords(p1);
                     const sp2 = this.getScreenCoords(p2);
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(sp1.x, sp1.y);
-                    this.ctx.lineTo(sp2.x, sp2.y);
-                    this.ctx.strokeStyle = '#0d6efd';
-                    this.ctx.lineWidth = 2;
-                    this.ctx.stroke();
+                    ctx.save();
+                    ctx.setLineDash([12, 8]);
+                    ctx.lineDashOffset = -time * 28 - index * 5;
+                    ctx.beginPath();
+                    ctx.moveTo(sp1.x, sp1.y);
+                    ctx.lineTo(sp2.x, sp2.y);
+                    ctx.strokeStyle = 'rgba(45,212,191,.9)';
+                    ctx.lineWidth = 2.5;
+                    ctx.shadowColor = '#2dd4bf';
+                    ctx.shadowBlur = 12;
+                    ctx.stroke();
+                    ctx.restore();
+                    const progress = (time * 0.35 + index * 0.15) % 1;
+                    ctx.beginPath();
+                    ctx.arc(sp1.x + (sp2.x - sp1.x) * progress, sp1.y + (sp2.y - sp1.y) * progress, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.shadowColor = '#f59e0b';
+                    ctx.shadowBlur = 8;
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                    const midX = (sp1.x + sp2.x) / 2;
+                    const midY = (sp1.y + sp2.y) / 2;
+                    ctx.fillStyle = 'rgba(213,255,251,.82)';
+                    ctx.font = "10px 'IBM Plex Mono', monospace";
+                    ctx.fillText(`n=${baseline.samples}`, midX + 7, midY - 7);
                 }
             });
 
-            // Draw points
-            Object.values(this.points).forEach(pt => {
+            Object.values(this.points).forEach((pt, index) => {
                 const sp = this.getScreenCoords(pt);
-                this.ctx.beginPath();
-                this.ctx.arc(sp.x, sp.y, pt.isBase ? 8 : 6, 0, 2 * Math.PI);
-                this.ctx.fillStyle = pt.isBase ? '#dc3545' : '#198754';
-                this.ctx.fill();
-                this.ctx.strokeStyle = '#fff';
-                this.ctx.lineWidth = 2;
-                this.ctx.stroke();
-                
-                this.ctx.fillStyle = '#000';
-                this.ctx.font = 'bold 12px Arial';
-                this.ctx.fillText(pt.name, sp.x + 10, sp.y - 10);
+                const pulse = 12 + 3 * Math.sin(time * 2.7 + index);
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, pulse, 0, Math.PI * 2);
+                ctx.fillStyle = pt.isBase ? 'rgba(251,113,133,.13)' : 'rgba(45,212,191,.12)';
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, pt.isBase ? 8 : 6, 0, Math.PI * 2);
+                ctx.fillStyle = pt.isBase ? '#fb7185' : '#2dd4bf';
+                ctx.shadowColor = ctx.fillStyle;
+                ctx.shadowBlur = 14;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#d5fffb';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.fillStyle = '#e6fffb';
+                ctx.font = "600 12px 'IBM Plex Mono', monospace";
+                ctx.fillText(pt.name, sp.x + 12, sp.y - 11);
             });
         }
     };
@@ -2622,51 +2815,57 @@ function setupEventListeners() {
                                 <i class="bi bi-cpu me-2"></i>GNSS Agent Calculation Board (Real-time)
                             </h5>
                             <div id="gnss-phase-indicator" class="ms-4 text-warning fw-bold font-monospace">Phase: WAITING</div>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" title="Thu nhỏ cửa sổ; tiến trình bình sai vẫn tiếp tục"></button>
                         </div>
                         <div class="modal-body p-0 d-flex flex-row" style="height: calc(100% - 60px); overflow: hidden;">
-                            <div class="position-relative" style="background-color: #f8f9fa; overflow: hidden; min-width: 280px; width: 0; flex: 1 1 0;" id="gnss-board-container">
-                                <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                            <div class="position-relative" style="background: radial-gradient(circle at 50% 45%, #0d3037 0%, #06141b 70%); overflow: hidden; min-width: 280px; width: 0; flex: 1 1 0;" id="gnss-board-container">
+                                <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block; background: #06141b;"></canvas>
                                 <div id="gnss-board-tooltips" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
                             </div>
                             <div id="gnss-column-resizer" title="Kéo để đổi chiều rộng bảng dữ liệu" style="flex: 0 0 7px; cursor: col-resize; background: #374151; border-left: 1px solid #111827; border-right: 1px solid #64748b; touch-action: none;"></div>
-                            <div id="gnss-data-column" class="d-flex flex-column" style="width: 520px; flex: 0 0 520px; min-width: 380px; max-width: 75vw; background-color: #1e1e1e; overflow: hidden;">
-                                <div class="p-2 border-bottom border-secondary bg-black">
-                                    <h6 class="mb-0 text-info font-monospace"><i class="bi bi-table me-1"></i>Baseline Vectors</h6>
+                            <div id="gnss-data-column" class="d-flex flex-column" style="width: 520px; flex: 0 0 520px; min-width: 380px; max-width: 75vw; background-color: var(--bs-dark); overflow: hidden; box-shadow: -5px 0 15px rgba(0,0,0,0.5);">
+                                <div class="p-2 bg-gradient-premium border-bottom border-secondary d-flex align-items-center justify-content-between">
+                                    <h6 class="mb-0 text-white font-monospace fw-bold"><i class="bi bi-table me-2 text-info"></i>Baseline Vectors</h6>
+                                    <span class="badge bg-primary text-uppercase" style="font-size: 0.65rem; letter-spacing: 1px;">Live Data</span>
                                 </div>
-                                 <div class="flex-grow-1" style="overflow: auto; min-height: 100px;" id="gnss-data-panel">
-                                    <table class="table table-dark table-sm table-hover font-monospace mb-0" style="font-size: 0.75rem; white-space: nowrap;">
+                                 <div class="flex-grow-1 baseline-vectors-panel" style="overflow: auto; min-height: 100px;" id="gnss-data-panel">
+                                    <table class="table table-dark table-sm table-hover font-monospace mb-0 custom-premium-table" style="font-size: 0.75rem; white-space: nowrap;">
                                         <thead>
-                                            <tr class="text-secondary">
-                                                <th>#</th>
-                                                <th>From</th>
-                                                <th>To</th>
-                                                <th>dN(m)</th>
-                                                <th>dE(m)</th>
-                                                <th>dH(m)</th>
-                                                <th></th>
+                                            <tr class="text-secondary align-middle">
+                                                <th class="ps-3 border-0">#</th>
+                                                <th class="border-0">From</th>
+                                                <th class="border-0">To</th>
+                                                <th class="border-0 text-end">dN(m)</th>
+                                                <th class="border-0 text-end">dE(m)</th>
+                                                <th class="border-0 text-end">dH(m)</th>
+                                                <th class="pe-3 border-0 text-end">Action</th>
                                             </tr>
                                         </thead>
-                                        <tbody id="gnss-baseline-table-body"></tbody>
+                                        <tbody id="gnss-baseline-table-body" class="border-top-0"></tbody>
                                      </table>
                                  </div>
-                                <div id="gnss-debug-resizer" title="Kéo để đổi chiều cao Live Debug" style="height: 7px; flex: 0 0 7px; cursor: row-resize; background: #374151; border-top: 1px solid #64748b; border-bottom: 1px solid #111827; touch-action: none;"></div>
-                                <div id="gnss-debug-section" class="bg-black d-flex flex-column" style="height: 280px; flex: 0 0 280px; min-height: 160px; overflow: hidden;">
-                                    <div class="d-flex justify-content-between align-items-center px-2 py-1 border-bottom border-secondary">
-                                        <h6 class="mb-0 text-warning font-monospace" style="font-size: 0.75rem;"><i class="bi bi-bug me-1"></i>Live Debug</h6>
+                                <div id="gnss-debug-resizer" title="Kéo để đổi chiều cao Live Debug" style="height: 7px; flex: 0 0 7px; cursor: row-resize; background: #2c3440; border-top: 1px solid #4a5568; border-bottom: 1px solid #1a202c; touch-action: none; transition: background 0.2s;"></div>
+                                <div id="gnss-debug-section" class="bg-darker d-flex flex-column live-debug-panel" style="height: 280px; flex: 0 0 280px; min-height: 160px; overflow: hidden; position: relative;">
+                                    <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-gradient-debug border-bottom border-secondary">
+                                        <h6 class="mb-0 text-warning font-monospace fw-bold" style="font-size: 0.8rem; letter-spacing: 0.5px;"><i class="bi bi-terminal-fill me-2"></i>Live Debug</h6>
                                         <div class="d-flex gap-1">
                                             <button id="gnss-debug-copy" type="button" class="btn btn-sm btn-outline-info py-0 px-1" style="font-size: 0.65rem;" title="Sao chép toàn bộ log">Sao chép</button>
                                             <button id="gnss-debug-follow" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;" title="Xuống cuối và tiếp tục tự cuộn">↓ Cuối</button>
                                             <button id="gnss-debug-clear" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;">Xóa log</button>
                                         </div>
                                     </div>
-                                    <div id="gnss-debug-summary" class="px-2 py-1 text-secondary font-monospace border-bottom border-secondary" style="font-size: 0.72rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto;">WS: CONNECTING</div>
-                                    <div id="gnss-debug-log" class="p-2 font-monospace flex-grow-1" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.76rem; line-height: 1.45;"></div>
+                                    <div id="gnss-debug-summary" class="px-3 py-1 text-muted font-monospace border-bottom border-secondary" style="font-size: 0.72rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto; background: rgba(0,0,0,0.3);">WS: CONNECTING</div>
+                                    <div id="gnss-debug-log" class="p-3 font-monospace flex-grow-1 text-light" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.8rem; line-height: 1.6;"></div>
                                 </div>
-                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-black" style="display: none;">
+                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium" style="display: none; position: relative;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
-                                    <div class="text-secondary font-monospace" style="font-size: 0.7rem;">Time: <span id="adj-val-time"></span></div>
-                                    <div id="adj-points-list" class="mt-2"></div>
+                                    <div class="text-light opacity-75 font-monospace mb-2" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>Time: <span id="adj-val-time"></span></div>
+                                    <div id="adj-points-list" class="mt-2 mb-3" style="max-height: 120px; overflow-y: auto;"></div>
+                                    <div class="text-end">
+                                        <button id="gnss-download-results-btn" class="btn btn-sm btn-success px-3 py-1 shadow-sm fw-bold" style="border-radius: 6px; letter-spacing: 0.5px;">
+                                            <i class="bi bi-cloud-arrow-down-fill me-2"></i>Tải dữ liệu
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2676,6 +2875,15 @@ function setupEventListeners() {
         `.trim();
         modal = wrapper.firstElementChild;
         document.body.appendChild(modal);
+        modal.addEventListener('shown.bs.modal', () => {
+            window.gnssBoardState?.init?.({ preserve: gnssAdjustmentDebugState.active });
+            refreshGnssAdjustmentRunningPill();
+        });
+        modal.addEventListener('hidden.bs.modal', () => {
+            window.gnssBoardState?.stopAnimation?.();
+            refreshGnssAdjustmentRunningPill();
+        });
+        window.addEventListener('resize', () => window.gnssBoardState?.resize?.());
         const dataColumn = modal.querySelector('#gnss-data-column');
         const debugSection = modal.querySelector('#gnss-debug-section');
         const savedColumnWidth = Number(localStorage.getItem('gnssDataColumnWidth'));
@@ -2752,6 +2960,7 @@ function setupEventListeners() {
         refreshGnssAdjustmentDebugUi();
         return modal;
     }
+    window.ensureGnssTerminalModal = ensureGnssTerminalModal;
 
     function showAdjustmentError(title, message) {
         if (window.Swal?.fire) {
@@ -2797,6 +3006,13 @@ function setupEventListeners() {
         projectId = projectId || currentStationData?.project_id;
         if (!projectId) {
             showAdjustmentError('Loi', 'Khong xac dinh duoc du an de binh sai');
+            return;
+        }
+
+        if (isGnssAdjustmentRunning(projectId)) {
+            const existingModal = ensureGnssTerminalModal();
+            bootstrap.Modal.getOrCreateInstance(existingModal).show();
+            addGnssAdjustmentDebug('UI', 'Đã mở lại phiên Bình sai đang chạy; tiến trình không bị khởi động lại.', 'success');
             return;
         }
         
@@ -2851,10 +3067,19 @@ function setupEventListeners() {
             if (Array.isArray(startResult.expected_station_ids)) {
                 gnssAdjustmentDebugState.expectedStationIds = startResult.expected_station_ids;
             }
+            if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
+                addGnssAdjustmentDebug(
+                    'ONLINE',
+                    `Đã loại các trạm GNSS offline: ${startResult.skipped_offline_station_ids.join(', ')}.`,
+                    'warning',
+                );
+            }
             setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
             addGnssAdjustmentDebug(
                 'API',
-                `HTTP ${res.status}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
+                startResult.existing
+                    ? `HTTP ${res.status}: đã nối lại phiên đang chạy, không reset dữ liệu server.`
+                    : `HTTP ${res.status}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
                 'success',
             );
             

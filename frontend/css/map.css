@@ -3255,3 +3255,63 @@ body {
 .sensor-clickable:active {
     transform: scale(0.98);
 }
+
+/* Premium Styles for GNSS Adjustment UI */
+.bg-gradient-premium {
+    background: linear-gradient(135deg, #0d3037 0%, #082128 100%);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.bg-gradient-debug {
+    background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
+}
+
+.bg-darker {
+    background-color: #0b0f19;
+}
+
+.custom-premium-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+}
+.custom-premium-table thead tr {
+    background: rgba(255, 255, 255, 0.05);
+}
+.custom-premium-table th {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px;
+}
+.custom-premium-table td {
+    padding: 8px 12px;
+    border-color: rgba(255, 255, 255, 0.05);
+    vertical-align: middle;
+}
+.custom-premium-table tbody tr {
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+.custom-premium-table tbody tr:hover {
+    background-color: rgba(13, 202, 240, 0.08) !important;
+}
+
+.baseline-vectors-panel::-webkit-scrollbar,
+.live-debug-panel #gnss-debug-log::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.baseline-vectors-panel::-webkit-scrollbar-track,
+.live-debug-panel #gnss-debug-log::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+}
+.baseline-vectors-panel::-webkit-scrollbar-thumb,
+.live-debug-panel #gnss-debug-log::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+.baseline-vectors-panel::-webkit-scrollbar-thumb:hover,
+.live-debug-panel #gnss-debug-log::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.4);
+}
+

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from backend.processors.round_robin_manager import (
     RoundRobinAdjustmentManager,
+    _aggregate_parallel_baselines,
     _build_fundamental_loops,
 )
 
@@ -57,6 +58,54 @@ class FundamentalLoopReportTests(unittest.TestCase):
         )
 
 
+class AveragedBaselineReportTests(unittest.TestCase):
+    def test_repeated_and_reverse_edges_become_one_arithmetic_mean(self):
+        rows = [
+            {
+                **baseline("BASE", "A", (2.0, 4.0, 6.0)),
+                "residual_xyz": (0.1, 0.2, 0.3),
+                "standard_deviation_xyz": (0.01, 0.02, 0.03),
+                "velocity_up_std": 2.0,
+            },
+            {
+                **baseline("A", "BASE", (-4.0, -6.0, -8.0)),
+                "residual_xyz": (-0.3, -0.4, -0.5),
+                "standard_deviation_xyz": (0.03, 0.04, 0.05),
+                "velocity_up_std": 4.0,
+            },
+        ]
+
+        averaged = _aggregate_parallel_baselines(rows)
+
+        self.assertEqual(len(averaged), 1)
+        self.assertEqual((averaged[0]["from"], averaged[0]["to"]), ("BASE", "A"))
+        self.assertEqual(averaged[0]["observation_count"], 2)
+        self.assertEqual(averaged[0]["observed_xyz"], (3.0, 5.0, 7.0))
+        for actual, expected in zip(averaged[0]["residual_xyz"], (0.2, 0.3, 0.4)):
+            self.assertAlmostEqual(actual, expected)
+        self.assertEqual(averaged[0]["standard_deviation_xyz"], (0.02, 0.03, 0.04))
+        self.assertEqual(averaged[0]["velocity_up_std"], 3.0)
+
+    def test_repeated_triangle_produces_three_edges_and_one_loop(self):
+        rows = []
+        for offset in (0.0, 0.01, -0.01):
+            rows.extend([
+                baseline("BASE", "A", (1.0 + offset, 0.0, 0.0)),
+                baseline("BASE", "B", (1.0, 1.0 + offset, 0.0)),
+                baseline("A", "B", (-offset, 1.0, 0.0)),
+            ])
+        for row in rows:
+            row["residual_xyz"] = (0.0, 0.0, 0.0)
+            row["standard_deviation_xyz"] = (0.01, 0.01, 0.01)
+
+        averaged = _aggregate_parallel_baselines(rows)
+        loops = _build_fundamental_loops(averaged)
+
+        self.assertEqual(len(averaged), 3)
+        self.assertTrue(all(row["observation_count"] == 3 for row in averaged))
+        self.assertEqual(len(loops), 1)
+
+
 class BaseIdentityValidationTests(unittest.TestCase):
     def setUp(self):
         self.manager = RoundRobinAdjustmentManager(SimpleNamespace(publish=lambda *_args: None))
@@ -98,6 +147,66 @@ class BaseIdentityValidationTests(unittest.TestCase):
         )
         self.assertTrue(accepted)
         self.assertIn("height delta 31.65 m", diagnostic)
+
+    def test_fixed_base_uses_config_when_agrica_base_coordinate_is_missing(self):
+        observation = SimpleNamespace(rover_name="S2", base_llh=(0.0, 0.0, 0.0))
+
+        accepted, diagnostic = self.manager._observation_matches_active_base(
+            self.cluster, "BASE", observation
+        )
+
+        self.assertTrue(accepted)
+        self.assertIn("using configured fixed BASE", diagnostic)
+
+    def test_temporary_base_still_rejects_missing_base_coordinate(self):
+        observation = SimpleNamespace(rover_name="S2", base_llh=(0.0, 0.0, 0.0))
+
+        accepted, diagnostic = self.manager._observation_matches_active_base(
+            self.cluster, "S1", observation
+        )
+
+        self.assertFalse(accepted)
+        self.assertIn("no usable base_llh", diagnostic)
+
+    def test_temporary_base_accepts_missing_base_coordinate_when_vector_matches(self):
+        self.manager.rover_llh_cache["S1"] = {
+            "lat": 21.001,
+            "lon": 105.0,
+            "alt": 10.0,
+        }
+        observation = SimpleNamespace(
+            rover_name="S2",
+            base_llh=(0.0, 0.0, 0.0),
+            rover_llh=(21.002, 105.0, 10.0),
+            baseline_neu=(111.3195, 0.0, 0.0),
+        )
+
+        accepted, diagnostic = self.manager._observation_matches_active_base(
+            self.cluster, "S1", observation
+        )
+
+        self.assertTrue(accepted)
+        self.assertIn("baseline vector matches temporary base S1", diagnostic)
+
+    def test_temporary_base_rejects_vector_that_still_matches_fixed_base(self):
+        self.manager.rover_llh_cache["S1"] = {
+            "lat": 21.001,
+            "lon": 105.0,
+            "alt": 10.0,
+        }
+        observation = SimpleNamespace(
+            rover_name="S2",
+            base_llh=(0.0, 0.0, 0.0),
+            rover_llh=(21.002, 105.0, 10.0),
+            baseline_neu=(222.639, 0.0, 0.0),
+        )
+
+        accepted, diagnostic = self.manager._observation_matches_active_base(
+            self.cluster, "S1", observation
+        )
+
+        self.assertFalse(accepted)
+        self.assertIn("fixed-BASE error=", diagnostic)
 
     def test_fragment_buffers_are_cleared_at_base_transition(self):
         self.manager._agrica_fragment_buffers[(9, 1)] = "partial-a"

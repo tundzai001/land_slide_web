@@ -26,6 +26,17 @@ class ExcelExportHelpersTests(unittest.TestCase):
         self.assertEqual(request.station_ids, [7])
         self.assertEqual(request.sensor_types, ["gnss"])
 
+    def test_export_request_accepts_dedicated_gnss_adjustment_dataset(self):
+        request = ExportExcelRequest(
+            tables=["gnss_adjustments"],
+            project_ids=[3],
+            station_ids=[9],
+        )
+
+        self.assertEqual(request.tables, ["gnss_adjustments"])
+        self.assertEqual(request.project_ids, [3])
+        self.assertEqual(request.station_ids, [9])
+
     def test_sheet_names_are_valid_unique_and_within_excel_limit(self):
         used = set()
         first = _excel_sheet_name("PROJECT/VERY:LONG*STATION?GNSS_AUDIT", used)

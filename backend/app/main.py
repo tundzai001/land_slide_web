@@ -1914,6 +1914,38 @@ def _normalize_active_adjustment_clusters(
         active.append(match)
     return active
 
+
+def _restrict_adjustment_clusters_to_online_stations(
+    clusters: list[dict],
+    online_station_ids: set[int],
+) -> tuple[list[dict], list[int]]:
+    """Remove offline rovers while preserving station/code ordering per cluster."""
+
+    active_clusters = []
+    excluded_station_ids = []
+    for source in clusters:
+        station_rover_pairs = list(zip(source["stations"], source["rovers"], strict=True))
+        included = [
+            (station_id, rover)
+            for station_id, rover in station_rover_pairs
+            if int(station_id) in online_station_ids
+        ]
+        excluded_station_ids.extend(
+            int(station_id)
+            for station_id, _ in station_rover_pairs
+            if int(station_id) not in online_station_ids
+        )
+        if len(included) < 2:
+            continue
+        cluster = dict(source)
+        cluster["stations"] = [int(station_id) for station_id, _ in included]
+        cluster["rovers"] = [str(rover) for _, rover in included]
+        active_clusters.append(cluster)
+
+    if not active_clusters:
+        raise ValueError("fewer than two online GNSS rovers are available in the selected cluster")
+    return active_clusters, sorted(set(excluded_station_ids))
+
 @app.post("/api/admin/gnss/adjustment/start")
 async def start_gnss_adjustment(
     req: GnssAdjustmentStartRequest,
@@ -1932,6 +1964,24 @@ async def start_gnss_adjustment(
             raise HTTPException(status_code=404, detail="Project not found")
         check_operator_project_access(current_user, project.id)
 
+        existing_phase = str(mqtt_service.adjustment_phase.get(req.project_id) or "").upper()
+        if existing_phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+            existing_clusters = mqtt_service.active_adjustment_clusters.get(req.project_id) or []
+            expected_station_ids = sorted({
+                int(station_id)
+                for cluster in existing_clusters
+                for station_id in cluster.get("stations", [])
+            })
+            seed_status = mqtt_service.round_robin_manager.get_seed_collection_status(req.project_id)
+            return {
+                "status": "success",
+                "existing": True,
+                "phase": existing_phase,
+                "expected_station_ids": expected_station_ids,
+                "seed_status": seed_status,
+                "message": "Adjustment is already running; reopened the existing session.",
+            }
+
         stations_result = await db.execute(
             select(model_config.Station).where(model_config.Station.project_id == project.id)
         )
@@ -1941,6 +1991,42 @@ async def start_gnss_adjustment(
                 project.gnss_clusters,
                 stations,
                 req.selected_clusters,
+            )
+            selected_station_ids = {
+                int(station_id)
+                for cluster in active_clusters
+                for station_id in cluster["stations"]
+            }
+            devices_result = await db.execute(
+                select(model_config.Device).where(
+                    and_(
+                        model_config.Device.station_id.in_(selected_station_ids),
+                        func.lower(model_config.Device.device_type) == "gnss",
+                        model_config.Device.is_active == True,
+                    )
+                )
+            )
+            gnss_devices = devices_result.scalars().all()
+            stations_by_id = {int(station.id): station for station in stations}
+            pending_device_updates = getattr(mqtt_service, "_device_update_buffer", {})
+            now_ts = int(time.time())
+            online_station_ids = set()
+            for device in gnss_devices:
+                station = stations_by_id.get(int(device.station_id))
+                if station is None:
+                    continue
+                last_seen = max(
+                    int(device.last_data_time or 0),
+                    int(pending_device_updates.get(int(device.id), 0) or 0),
+                )
+                threshold = get_offline_threshold(station.config, "gnss")
+                if last_seen and now_ts - last_seen < threshold:
+                    online_station_ids.add(int(device.station_id))
+            active_clusters, skipped_offline_station_ids = (
+                _restrict_adjustment_clusters_to_online_stations(
+                    active_clusters,
+                    online_station_ids,
+                )
             )
             mqtt_service.round_robin_manager.configure_project(req.project_id, active_clusters)
         except ValueError as exc:
@@ -1969,12 +2055,14 @@ async def start_gnss_adjustment(
             "phase": "COLLECTING_BASELINE",
             "message": "Adjustment started; waiting for a valid #AGRICA baseline from every selected rover.",
             "expected_station_ids": expected_station_ids,
+            "skipped_offline_station_ids": skipped_offline_station_ids,
         })
 
         return {
             "status": "success",
             "phase": "COLLECTING_BASELINE",
             "expected_station_ids": expected_station_ids,
+            "skipped_offline_station_ids": skipped_offline_station_ids,
             "message": "Adjustment cycle started, waiting for baseline before stopping Base",
         }
     except Exception as e:

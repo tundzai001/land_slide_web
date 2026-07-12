@@ -17,6 +17,7 @@ from .models import (
     NetworkError,
     ResidualFlag,
 )
+from .transforms import covariance_standard_deviation
 
 
 def _block_diagonal(blocks: list[NDArray[np.float64]]) -> NDArray[np.float64]:
@@ -41,7 +42,7 @@ def adjust_network(
 ) -> AdjustmentResult:
     """Adjust a 3D baseline network using full-covariance weighted least squares.
 
-    Coordinates and observations must use the same N/E/H metric frame. Fixed points
+    Coordinates and observations must use the same three-axis Cartesian metric frame. Fixed points
     are treated as exact. The implementation whitens observations and uses SVD-based
     ``lstsq``; it never explicitly inverts the normal matrix to estimate corrections.
     """
@@ -128,8 +129,9 @@ def adjust_network(
     # the correction solution itself.
     _, singular_values_full, vt = np.linalg.svd(whitened_design, full_matrices=False)
     cofactor_parameters = (vt.T / np.square(singular_values_full)) @ vt
+    covariance_parameters = a_priori_variance_factor * cofactor_parameters
     posterior_scale = variance_factor if variance_factor is not None else a_priori_variance_factor
-    covariance_parameters = posterior_scale * cofactor_parameters
+    posterior_covariance_parameters = posterior_scale * cofactor_parameters
 
     covariance_observations = _block_diagonal(covariance_blocks)
     covariance_residual = covariance_observations - design @ cofactor_parameters @ design.T
@@ -164,11 +166,23 @@ def adjust_network(
         if point.fixed:
             point_correction = np.zeros(3)
             point_std = np.zeros(3)
+            point_covariance = np.zeros((3, 3), dtype=float)
+            posterior_point_std = np.zeros(3)
+            posterior_point_covariance = np.zeros((3, 3), dtype=float)
         else:
             offset = 3 * unknown_index[name]
             point_correction = correction[offset : offset + 3]
-            point_std = np.sqrt(
-                np.maximum(np.diag(covariance_parameters)[offset : offset + 3], 0.0)
+            point_covariance = covariance_parameters[offset : offset + 3, offset : offset + 3]
+            point_covariance = (point_covariance + point_covariance.T) / 2.0
+            point_std = np.asarray(covariance_standard_deviation(point_covariance), dtype=float)
+            posterior_point_covariance = posterior_covariance_parameters[
+                offset : offset + 3, offset : offset + 3
+            ]
+            posterior_point_covariance = (
+                posterior_point_covariance + posterior_point_covariance.T
+            ) / 2.0
+            posterior_point_std = np.asarray(
+                covariance_standard_deviation(posterior_point_covariance), dtype=float
             )
         coordinate = np.asarray(point.approximate) + point_correction
         adjusted_points.append(
@@ -177,6 +191,17 @@ def adjust_network(
                 coordinate=tuple(float(value) for value in coordinate),
                 correction=tuple(float(value) for value in point_correction),
                 standard_deviation=tuple(float(value) for value in point_std),
+                covariance=tuple(
+                    tuple(float(value) for value in row)
+                    for row in point_covariance
+                ),
+                posterior_standard_deviation=tuple(
+                    float(value) for value in posterior_point_std
+                ),
+                posterior_covariance=tuple(
+                    tuple(float(value) for value in row)
+                    for row in posterior_point_covariance
+                ),
                 fixed=point.fixed,
             )
         )
@@ -225,7 +250,7 @@ def adjust_network(
 
     local_critical = float(norm.isf(local_significance / 2.0))
     residual_flags: list[ResidualFlag] = []
-    component_names = ("N", "E", "H")
+    component_names = ("X", "Y", "Z")
     for flat_index, normalized_residual in enumerate(standardized):
         if residual_std[flat_index] <= np.finfo(float).eps:
             continue

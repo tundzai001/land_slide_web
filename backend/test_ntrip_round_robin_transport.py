@@ -39,6 +39,22 @@ class RtcmFilterTests(unittest.TestCase):
             stream_filter.feed(frame_a[4:] + b"#AGRICA,text" + invalid + frame_b),
             frame_a + frame_b,
         )
+        diagnostics = stream_filter.diagnostics()
+        self.assertEqual(diagnostics["valid_frames"], 2)
+        self.assertGreaterEqual(diagnostics["crc_failures"], 1)
+
+    def test_text_only_payload_has_actionable_diagnostics(self):
+        pusher = NtripPusher("S1", "caster", 2101, "S1_BASE", "secret")
+        pusher._last_chunk_at = 1.0
+        pusher._first_chunk_hex = b"#AGRICA".hex()
+        pusher._last_chunk_hex = b"#AGRICA".hex()
+        pusher._rtcm_filter.feed(b"#AGRICA,text-only")
+
+        diagnostics = pusher.diagnostics()
+
+        self.assertEqual(diagnostics["mqtt_chunks"], 1)
+        self.assertEqual(diagnostics["d3_preambles"], 0)
+        self.assertIn("no RTCM3 0xD3", diagnostics["likely_cause"])
 
 
 class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
@@ -94,6 +110,39 @@ class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_restore_command_waits_for_receiver_response(self):
+        received_command = bytearray()
+
+        async def handle(reader, writer):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\n\r\n")
+            await writer.drain()
+            received_command.extend(await reader.readline())
+            writer.write(b"OK\r\n")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), caster_host="127.0.0.1", caster_port=port
+        )
+        try:
+            accepted = await manager._send_set_command(
+                "CORS_A",
+                "Dap1_2",
+                "receiver-2",
+                [b"unlogall\r\n"],
+                wait_for_command_response=True,
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertTrue(accepted)
+        self.assertEqual(received_command, b"unlogall\r\n")
+        self.assertEqual(manager._last_set_response, "OK")
+
     async def test_set_rejection_preserves_caster_response_detail(self):
         received_request = bytearray()
 
@@ -110,7 +159,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         try:
             accepted = await manager._send_set_command(
-                "CORS_A", "Dap1_2", "receiver-2", [b"mode rover survey\r\n"]
+                "CORS_A", "Dap1_2", "receiver-2", [b"unlogall\r\n"]
             )
         finally:
             server.close()
@@ -173,8 +222,10 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"rtcm1074 com2 1", command_text)
 
         rover_text = b"".join(manager._build_geotek_lte_unicore_rover_config()).lower()
-        self.assertIn(b"mode rover survey", rover_text)
-        self.assertIn(b"agrica com2 1", rover_text)
+        self.assertEqual(
+            rover_text,
+            b"unlogall\r\nagrica com2 1\r\n",
+        )
 
     async def test_collection_starts_only_after_route_handshake_and_restores_rover(self):
         events = []
@@ -204,8 +255,9 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         async def send_set(
             _mountpoint, _username, _receiver_id, commands, password="123", **_kwargs
         ):
-            mode = "rover" if any(b"mode rover" in command.lower() for command in commands) else "base"
-            events.append((f"set_{mode}", password))
+            command_name = commands[0].decode("ascii").strip().split()[0].lower()
+            event_name = "set_base" if command_name == "mode" else f"restore_{command_name}"
+            events.append((event_name, password))
             return True
 
         manager._send_set_command = send_set
@@ -230,7 +282,10 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 "collection_started",
                 "collection_stopped",
                 "route_stopped",
-                "set_rover",
+                "restore_unlogall",
+                "restore_gpgga",
+                "restore_agrica",
+                "restore_saveconfig",
             ],
         )
         self.assertEqual(
@@ -259,7 +314,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         async def send_set(
             _mountpoint, _username, _receiver_id, commands, password="123", **_kwargs
         ):
-            events.append("set_rover" if any(b"mode rover" in c.lower() for c in commands) else "set_base")
+            command_name = commands[0].decode("ascii").strip().split()[0].lower()
+            events.append("set_base" if command_name == "mode" else f"restore_{command_name}")
             return True
 
         manager._send_set_command = send_set
@@ -270,7 +326,45 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                     on_collection_started=lambda: events.append("collection_started"),
                 )
 
-        self.assertEqual(events, ["set_base", "route_rejected", "set_rover"])
+        self.assertEqual(events, [
+            "set_base",
+            "route_rejected",
+            "restore_unlogall",
+            "restore_gpgga",
+            "restore_agrica",
+            "restore_saveconfig",
+        ])
+
+    async def test_rover_restore_retries_each_command_until_ack_before_advancing(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        commands_seen = []
+        responses = iter([False, True, True, True, True])
+
+        async def send_set(_mountpoint, _username, _receiver_id, commands, **kwargs):
+            commands_seen.append((commands[0], kwargs.get("wait_for_command_response")))
+            return next(responses)
+
+        manager._send_set_command = send_set
+        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+            await manager._restore_rover_output_sequence(
+                rover_code="S1",
+                mountpoint="CORS_A",
+                client_info={"Username": "S1", "receiverID": "101"},
+                commands=manager._build_geotek_lte_unicore_rover_config(),
+                project_id=17,
+            )
+
+        self.assertEqual(
+            [command for command, _ in commands_seen],
+            [
+                b"unlogall\r\n",
+                b"unlogall\r\n",
+                b"gpgga com2 1\r\n",
+                b"agrica com2 1\r\n",
+                b"saveconfig\r\n",
+            ],
+        )
+        self.assertTrue(all(wait_for_response for _, wait_for_response in commands_seen))
 
 
 if __name__ == "__main__":
