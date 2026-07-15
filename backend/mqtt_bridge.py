@@ -1614,6 +1614,22 @@ class MQTTBridge:
             ])
 
         append_section("ADJUSTED LOOPS")
+        sheet.append([
+            None,
+            "Ghi chú",
+            (
+                "Chỉ liệt kê fundamental cycle basis độc lập theo topology; "
+                "các vòng phụ thuộc đã được loại. Closure sau bình sai gần 0 "
+                "là hệ quả của mô hình, không phải phép kiểm tra độc lập dữ liệu gốc."
+            ),
+        ])
+        loop_note_row = sheet.max_row
+        sheet.merge_cells(
+            start_row=loop_note_row,
+            start_column=3,
+            end_row=loop_note_row,
+            end_column=11,
+        )
         append_header([
             "STT", "List of Point", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
             "Length (m)", "Kết quả",
@@ -1661,8 +1677,15 @@ class MQTTBridge:
             ("Raw bị loại", quality.get("raw_rejected_count")),
             ("Raw vector sai thô", quality.get("vector_outlier_count")),
             ("Raw loại do STD", quality.get("baseline_std_rejected_count")),
+            (
+                "Raw STD cao giữ bảo thủ nhờ lặp ổn định",
+                quality.get("baseline_std_repeatability_fallback_count"),
+            ),
             ("Raw loại Type 7", quality.get("position_type_rejected_count")),
             ("Số cạnh trung bình", quality.get("averaged_baseline_count", len(baselines))),
+            ("Số vòng cơ sở", quality.get("fundamental_loop_count")),
+            ("Chiều không gian vòng", quality.get("cycle_space_dimension")),
+            ("Rank ma trận vòng", quality.get("fundamental_loop_basis_rank")),
             ("Bậc tự do", quality.get("degrees_of_freedom")),
             ("vTPv (covariance n_eff)", quality.get("weighted_residual_sum")),
             ("M0 (covariance n_eff)", quality.get("reference_standard_deviation")),
@@ -1737,6 +1760,21 @@ class MQTTBridge:
         if global_test and not global_test.get("passed"):
             quality_notes.append(
                 "vTPv vượt ngưỡng trên một phía 95%: số dư mạng lớn hơn mức covariance cho phép."
+            )
+        for fallback_edge in (
+            quality.get("baseline_std_repeatability_fallback_edges") or []
+        ):
+            quality_notes.append(
+                (
+                    f"Giữ bảo thủ cạnh {fallback_edge.get('from')} - "
+                    f"{fallback_edge.get('to')}: "
+                    f"{fallback_edge.get('observation_count')} epoch RTK Fixed, "
+                    f"độ lặp vector lớn nhất "
+                    f"{float(fallback_edge.get('max_vector_deviation_m') or 0.0):.4f} m, "
+                    f"sai số nhất quán ECEF lớn nhất "
+                    f"{float(fallback_edge.get('max_ecef_consistency_error_m') or 0.0):.4f} m; "
+                    "vẫn giữ covariance STD cao gốc để không tăng trọng số."
+                )
             )
         for quality_note in quality_notes:
             sheet.append([

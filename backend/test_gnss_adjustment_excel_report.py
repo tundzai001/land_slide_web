@@ -64,8 +64,19 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
                 "observation_baseline_count": 251,
                 "vector_outlier_count": 2,
                 "baseline_std_rejected_count": 1,
+                "baseline_std_repeatability_fallback_count": 3,
+                "baseline_std_repeatability_fallback_edges": [{
+                    "from": "Dap1_1",
+                    "to": "Dap1_2",
+                    "observation_count": 3,
+                    "max_vector_deviation_m": 0.0113,
+                    "max_ecef_consistency_error_m": 0.0137,
+                }],
                 "position_type_rejected_count": 1,
                 "averaged_baseline_count": 1,
+                "fundamental_loop_count": 1,
+                "cycle_space_dimension": 1,
+                "fundamental_loop_basis_rank": 1,
                 "degrees_of_freedom": 3,
                 "weighted_residual_sum": 0.9,
                 "reference_standard_deviation": 0.5,
@@ -158,6 +169,18 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         self.assertIn("ADJUSTED POINTS", values)
         self.assertIn("REFERENCE STANDARD DEVIATION / QUALITY", values)
         self.assertIn("Khép kín", values)
+        self.assertIn("Raw STD cao giữ bảo thủ nhờ lặp ổn định", values)
+        self.assertIn("Rank ma trận vòng", values)
+        self.assertTrue(any(
+            isinstance(value, str)
+            and "fundamental cycle basis" in value
+            for value in values
+        ))
+        self.assertTrue(any(
+            isinstance(value, str)
+            and "Giữ bảo thủ cạnh Dap1_1 - Dap1_2" in value
+            for value in values
+        ))
         self.assertIn("Raw bị loại", values)
         self.assertIn("Kiểm định chất lượng mạng", values)
         self.assertIn("Chẩn đoán mô hình trọng số", values)

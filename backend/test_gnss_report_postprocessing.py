@@ -54,6 +54,30 @@ class FundamentalLoopReportTests(unittest.TestCase):
             [],
         )
 
+    def test_twelve_rover_loop_count_scales_with_actual_cross_edges(self):
+        rover_names = [f"Rover_{index}" for index in range(1, 13)]
+        base_edges = [
+            baseline("BASE", rover_name, (float(index), 0.0, 0.0))
+            for index, rover_name in enumerate(rover_names, start=1)
+        ]
+        minimum_connected_cross_edges = [
+            baseline(rover_names[index], rover_names[index + 1], (1.0, 0.0, 0.0))
+            for index in range(len(rover_names) - 1)
+        ]
+
+        baselines = base_edges + minimum_connected_cross_edges
+        self.assertEqual(len(_build_fundamental_loops(baselines)), 11)
+
+        baselines.append(baseline("Rover_1", "Rover_3", (2.0, 0.0, 0.0)))
+        self.assertEqual(len(_build_fundamental_loops(baselines)), 12)
+
+        complete_cross_edges = [
+            baseline(rover_names[left], rover_names[right], (float(right - left), 0.0, 0.0))
+            for left in range(len(rover_names))
+            for right in range(left + 1, len(rover_names))
+        ]
+        self.assertEqual(len(_build_fundamental_loops(base_edges + complete_cross_edges)), 66)
+
 
 class AveragedBaselineReportTests(unittest.TestCase):
     def test_repeated_and_reverse_edges_become_one_arithmetic_mean(self):

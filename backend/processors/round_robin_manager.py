@@ -12,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import numpy as np
 from scipy.stats import chi2
@@ -341,6 +341,39 @@ def _canonical_baseline(
     return (end, start), tuple(-value for value in values), -1
 
 
+def _graph_components(
+    nodes: Iterable[str],
+    edges: Iterable[tuple[str, str]],
+) -> list[set[str]]:
+    """Return case-insensitive connected components using configured node names."""
+
+    name_by_key = {str(node).casefold(): str(node) for node in nodes}
+    adjacency = {key: set() for key in name_by_key}
+    for start, end in edges:
+        start_key = str(start).casefold()
+        end_key = str(end).casefold()
+        if start_key not in adjacency or end_key not in adjacency or start_key == end_key:
+            continue
+        adjacency[start_key].add(end_key)
+        adjacency[end_key].add(start_key)
+
+    components: list[set[str]] = []
+    remaining = set(adjacency)
+    while remaining:
+        seed = next(iter(remaining))
+        pending = [seed]
+        component_keys: set[str] = set()
+        while pending:
+            key = pending.pop()
+            if key in component_keys:
+                continue
+            component_keys.add(key)
+            pending.extend(adjacency[key] - component_keys)
+        remaining -= component_keys
+        components.append({name_by_key[key] for key in component_keys})
+    return components
+
+
 def _aggregate_parallel_baselines(baselines: List[dict]) -> List[dict]:
     """Collapse repeated/reverse report rows to one arithmetic mean per edge.
 
@@ -498,6 +531,9 @@ class RoundRobinAdjustmentManager:
     CROSS_BASE_STATUS_POLL_SECONDS = 1
     CROSS_BASE_COLLECTION_ATTEMPTS = 2
     MODE_COMMAND_BURST_COUNT = 6
+    UNLOGALL_COMMAND_BURST_COUNT = 3
+    GPGGA_COMMAND_BURST_COUNT = 6
+    AGRICA_COMMAND_BURST_COUNT = 6
     RTCM_COMMAND_BURST_COUNT = 3
     COMMAND_BURST_INTERVAL_SECONDS = 0.25
     PREFLIGHT_CONNECTION_ATTEMPTS = 2
@@ -1405,13 +1441,75 @@ class RoundRobinAdjustmentManager:
                         participants.update(edge)
                     return edges, participants
 
-                cluster_coverage_complete = False
-                for rover_code in rovers:
-                    expected_cross_rovers = {
+                def productive_temporary_bases() -> list[str]:
+                    """Bases that have already produced a solver-eligible cross sample."""
+
+                    productive: list[str] = []
+                    for candidate in rovers:
+                        candidate_key = str(candidate).casefold()
+                        for record in cluster["observations"]:
+                            observation = getattr(record, "observation", None)
+                            if (
+                                observation is None
+                                or str(getattr(record, "base_name", "") or "").casefold()
+                                != candidate_key
+                                or max(float(value) for value in observation.std_neu)
+                                > _BASELINE_STD_REJECTION_THRESHOLD_M
+                                or _vector_length(observation.baseline_neu) < 1.0
+                            ):
+                                continue
+                            productive.append(str(candidate))
+                            break
+                    return productive
+
+                def recovery_targets(
+                    rover_code: str,
+                    cross_edges: set[tuple[str, str]],
+                ) -> set[str]:
+                    """Target rovers outside the temporary base's current component."""
+
+                    components = _graph_components(rovers, cross_edges)
+                    rover_key = str(rover_code).casefold()
+                    current_component = next(
+                        (
+                            component
+                            for component in components
+                            if rover_key in {name.casefold() for name in component}
+                        ),
+                        {str(rover_code)},
+                    )
+                    current_keys = {name.casefold() for name in current_component}
+                    return {
                         str(candidate)
                         for candidate in rovers
-                        if str(candidate).casefold() != str(rover_code).casefold()
+                        if str(candidate).casefold() not in current_keys
                     }
+
+                cluster_coverage_complete = False
+                rotation_queue = list(rovers)
+                initial_rotation_count = len(rotation_queue)
+                graph_recovery_scheduled = False
+                for rotation_index, rover_code in enumerate(rotation_queue):
+                    is_graph_recovery = rotation_index >= initial_rotation_count
+                    if is_graph_recovery:
+                        existing_edges, _ = current_solver_eligible_cross_coverage()
+                        expected_cross_rovers = recovery_targets(rover_code, existing_edges)
+                        if not expected_cross_rovers:
+                            continue
+                        await self._emit_progress(
+                            project_id,
+                            (
+                                f"{rover_code}: targeted graph recovery for missing "
+                                f"cross-baseline participant(s) "
+                                f"{', '.join(sorted(expected_cross_rovers))}."
+                            ),
+                        )
+                    else:
+                        expected_cross_rovers = {
+                            str(candidate)
+                            for candidate in rovers
+                            if str(candidate).casefold() != str(rover_code).casefold()
+                        }
 
                     def mark_collection_started(
                         *,
@@ -1481,6 +1579,17 @@ class RoundRobinAdjustmentManager:
                             )
                         except _SafeRoverRotationSkip as exc:
                             warning = str(exc) or f"{rover_code}: temporary-base rotation skipped"
+                            if collection_attempt < self.CROSS_BASE_COLLECTION_ATTEMPTS:
+                                await self._emit_progress(
+                                    project_id,
+                                    (
+                                        f"{rover_code}: rotation ended after safe ROVER "
+                                        "recovery; retrying the full temporary-BASE rotation "
+                                        f"({collection_attempt + 1}/"
+                                        f"{self.CROSS_BASE_COLLECTION_ATTEMPTS}). {warning}"
+                                    ),
+                                )
+                                continue
                             logger.warning(
                                 "Round-Robin project=%s rover=%s skipped safely: %s",
                                 project_id,
@@ -1510,13 +1619,10 @@ class RoundRobinAdjustmentManager:
                         missing_rovers = sorted(expected_cross_rovers - collected_rovers)
                         cross_edges, cross_participants = current_solver_eligible_cross_coverage()
                         required_cross_edges = max(len(rovers) - 1, 1)
+                        components = _graph_components(rovers, cross_edges)
                         cluster_coverage_complete = (
                             len(cross_edges) >= required_cross_edges
-                            and {
-                                str(candidate).casefold() for candidate in rovers
-                            }.issubset({
-                                participant.casefold() for participant in cross_participants
-                            })
+                            and len(components) == 1
                         )
                         if cluster_coverage_complete:
                             await self._emit_progress(
@@ -1578,6 +1684,29 @@ class RoundRobinAdjustmentManager:
                     session["active_bases"].pop(cluster_index, None)
                     if cluster_coverage_complete:
                         break
+                    if (
+                        not graph_recovery_scheduled
+                        and rotation_index + 1 == initial_rotation_count
+                    ):
+                        existing_edges, _ = current_solver_eligible_cross_coverage()
+                        productive_bases = productive_temporary_bases()
+                        if productive_bases and len(_graph_components(rovers, existing_edges)) > 1:
+                            graph_recovery_scheduled = True
+                            rotation_queue.extend(productive_bases)
+                            missing_components = [
+                                ", ".join(sorted(component))
+                                for component in _graph_components(rovers, existing_edges)
+                            ]
+                            await self._emit_progress(
+                                project_id,
+                                (
+                                    "Cross-baseline graph is still disconnected "
+                                    f"(components: {' | '.join(missing_components)}); "
+                                    "retrying proven temporary bases "
+                                    f"{', '.join(productive_bases)} against only the "
+                                    "missing component(s)."
+                                ),
+                            )
 
         except asyncio.CancelledError:
             logger.info("RoundRobin cycle cancelled for project %s", project_id)
@@ -1833,9 +1962,11 @@ class RoundRobinAdjustmentManager:
         try:
             await self._emit_progress(
                 project_id,
-                f"{rover_code}: waiting 10s for UM980 to enter BASE mode and emit RTCM.",
+                (
+                    f"{rover_code}: BASE profile acknowledged; starting the MQTT-to-NTRIP "
+                    "route and waiting adaptively for the first verified RTCM3 frame."
+                ),
             )
-            await asyncio.sleep(10)
             await self._emit_progress(
                 project_id,
                 (
@@ -1896,7 +2027,13 @@ class RoundRobinAdjustmentManager:
                             f"{rover_code}: RTCM recovery profile was not verified: "
                             f"{self._last_set_error or 'no receiver ACK'}"
                         ) from route_exc
-                    await asyncio.sleep(10)
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{rover_code}: recovered BASE profile acknowledged; retrying "
+                            "the route immediately."
+                        ),
+                    )
             if on_collection_started:
                 on_collection_started()
             collection_started = True
@@ -1987,9 +2124,9 @@ class RoundRobinAdjustmentManager:
                 except Exception as exc:
                     logger.error("Could not stop temporary NTRIP route for %s: %s", rover_code, exc)
 
-            # A temporary base must never be left in BASE mode.  Restore the
-            # receiver without FRESET/SAVECONFIG so its persistent NTRIP setup
-            # and baud rate remain intact.
+            # A temporary base must never be left in BASE mode. Restore the
+            # receiver without FRESET so its persistent NTRIP setup and baud
+            # rate remain intact.
             await self._emit_progress(
                 project_id,
                 f"{rover_code}: sending SET ROVER to restore normal AGRICA operation.",
@@ -2119,6 +2256,8 @@ class RoundRobinAdjustmentManager:
 
         std_warning_threshold = _BASELINE_STD_REJECTION_THRESHOLD_M
         raw_ecef_tolerance = 0.05
+        high_std_fallback_min_samples = 3
+        high_std_fallback_max_repeatability_m = 0.05
         vector_outlier_min_samples = 5
         vector_outlier_absolute_floor_m = 0.25
         vector_outlier_sigma_multiplier = 8.0
@@ -2379,6 +2518,7 @@ class RoundRobinAdjustmentManager:
 
         raw_rows: List[dict] = []
         solver_samples: List[dict] = []
+        high_std_cross_candidates: List[dict] = []
         raw_ecef_candidates: Dict[str, list[tuple[int, tuple[float, float, float]]]] = {
             name: [] for name in station_names.values()
         }
@@ -2456,19 +2596,111 @@ class RoundRobinAdjustmentManager:
             })
             if observation.rover_ecef:
                 raw_ecef_candidates[rover_name].append((raw_index, observation.rover_ecef))
-            if not any(str(flag).startswith("REJECTED_") for flag in flags):
-                solver_samples.append({
-                    "from": from_name,
-                    "to": rover_name,
-                    "delta": delta,
-                    "covariance": covariance,
-                    "raw_index": raw_index,
-                    "session_id": str(cluster_index),
-                    "observation_epoch": observation.epoch_ts,
-                    "position_type": observation.position_type,
-                    "ratio": observation.full_data.get("ratio"),
-                    "velocity_up_std": observation.full_data.get("velocity_up_std"),
-                })
+            solver_sample = {
+                "from": from_name,
+                "to": rover_name,
+                "delta": delta,
+                "covariance": covariance,
+                "raw_index": raw_index,
+                "session_id": str(cluster_index),
+                "observation_epoch": observation.epoch_ts,
+                "position_type": observation.position_type,
+                "ratio": observation.full_data.get("ratio"),
+                "velocity_up_std": observation.full_data.get("velocity_up_std"),
+            }
+            rejected_flags = {
+                str(flag)
+                for flag in flags
+                if str(flag).startswith("REJECTED_")
+            }
+            if not rejected_flags:
+                solver_samples.append(solver_sample)
+            elif (
+                from_name != "BASE"
+                and rejected_flags == {"REJECTED_BASELINE_STD"}
+            ):
+                # Some UM980 field sessions report metre-level baseline STD
+                # while the RTK-Fixed ECEF vectors themselves repeat at the
+                # centimetre level. Keep these rows quarantined until the whole
+                # edge can prove repeatability; an isolated high-STD epoch must
+                # never create a network edge by itself.
+                high_std_cross_candidates.append(solver_sample)
+
+        baseline_std_repeatability_fallback_edges: List[dict] = []
+        accepted_cross_edge_keys = {
+            _canonical_baseline(sample["from"], sample["to"], sample["delta"])[0]
+            for sample in solver_samples
+            if sample["from"] != "BASE" and sample["to"] != "BASE"
+        }
+        candidate_groups: Dict[tuple[str, str], List[dict]] = {}
+        for sample in high_std_cross_candidates:
+            edge_key, _vector, _direction = _canonical_baseline(
+                sample["from"], sample["to"], sample["delta"]
+            )
+            candidate_groups.setdefault(edge_key, []).append(sample)
+
+        for edge_key, candidates in candidate_groups.items():
+            if edge_key in accepted_cross_edge_keys:
+                continue
+            epochs = {
+                int(sample["observation_epoch"])
+                for sample in candidates
+                if sample.get("observation_epoch") is not None
+            }
+            if (
+                len(candidates) < high_std_fallback_min_samples
+                or len(epochs) < high_std_fallback_min_samples
+                or any(int(sample.get("position_type") or 0) != 4 for sample in candidates)
+            ):
+                continue
+
+            canonical_vectors = []
+            consistency_errors = []
+            for sample in candidates:
+                _key, vector, _direction = _canonical_baseline(
+                    sample["from"], sample["to"], sample["delta"]
+                )
+                canonical_vectors.append(np.asarray(vector, dtype=float))
+                consistency_error = raw_rows[sample["raw_index"]].get(
+                    "raw_ecef_consistency_error_m"
+                )
+                if consistency_error is None:
+                    consistency_errors = []
+                    break
+                consistency_errors.append(float(consistency_error))
+            if (
+                len(consistency_errors) != len(candidates)
+                or max(consistency_errors) > raw_ecef_tolerance
+            ):
+                continue
+
+            vector_matrix = np.vstack(canonical_vectors)
+            vector_center = np.median(vector_matrix, axis=0)
+            deviations = np.linalg.norm(vector_matrix - vector_center, axis=1)
+            max_deviation = float(np.max(deviations))
+            if max_deviation > high_std_fallback_max_repeatability_m:
+                continue
+
+            for sample in candidates:
+                flags = raw_rows[sample["raw_index"]]["quality_flags"]
+                if "REJECTED_BASELINE_STD" in flags:
+                    flags.remove("REJECTED_BASELINE_STD")
+                if "BASELINE_STD_REPEATABILITY_FALLBACK" not in flags:
+                    flags.append("BASELINE_STD_REPEATABILITY_FALLBACK")
+                solver_samples.append(sample)
+            accepted_cross_edge_keys.add(edge_key)
+            baseline_std_repeatability_fallback_edges.append({
+                "from": edge_key[0],
+                "to": edge_key[1],
+                "observation_count": len(candidates),
+                "distinct_epoch_count": len(epochs),
+                "max_vector_deviation_m": max_deviation,
+                "max_ecef_consistency_error_m": max(consistency_errors),
+                "covariance_policy": (
+                    "Retain the receiver-reported high covariance; repeatability "
+                    "restores topology but does not increase this edge's weight"
+                ),
+            })
 
         solver_samples, position_type_filter_diagnostics = (
             filter_position_type_mixes(solver_samples)
@@ -2534,7 +2766,21 @@ class RoundRobinAdjustmentManager:
             if point_name in rover_names
         }
         missing_cross_participants = sorted(rover_names - cross_participants)
-        if len(cross_edges) < required_cross_edges or missing_cross_participants:
+        cross_components = _graph_components(
+            rover_names,
+            ((edge["from"], edge["to"]) for edge in cross_edges),
+        )
+        disconnected_detail = (
+            "; disconnected rover components: "
+            + " | ".join(", ".join(sorted(component)) for component in cross_components)
+            if len(cross_components) > 1
+            else ""
+        )
+        if (
+            len(cross_edges) < required_cross_edges
+            or missing_cross_participants
+            or len(cross_components) > 1
+        ):
             missing_detail = (
                 f"; rovers absent from cross-baselines: {', '.join(missing_cross_participants)}"
                 if missing_cross_participants else ""
@@ -2543,7 +2789,8 @@ class RoundRobinAdjustmentManager:
                 "insufficient rover-to-rover network coverage: "
                 f"need at least {required_cross_edges} distinct cross-edge(s) for "
                 f"{len(rover_names)} rovers, collected {len(cross_edges)}"
-                f"{missing_detail}. Adjustment was not published; collect the missing rotations again"
+                f"{missing_detail}{disconnected_detail}. Adjustment was not published; "
+                "collect the missing rotations again"
             )
 
         baselines = [
@@ -2636,6 +2883,30 @@ class RoundRobinAdjustmentManager:
         loops = _build_fundamental_loops(adjusted_baselines)
         if not loops:
             raise ValueError("adjusted graph contains no geometric closed loop")
+        network_components = _graph_components(
+            points.keys(),
+            ((edge["from"], edge["to"]) for edge in adjusted_baselines),
+        )
+        cycle_space_dimension = (
+            len(adjusted_baselines) - len(points) + len(network_components)
+        )
+        cycle_edge_matrix = np.zeros(
+            (len(loops), len(adjusted_baselines)),
+            dtype=float,
+        )
+        for loop_index, loop in enumerate(loops):
+            for baseline_index in loop.get("baseline_indices") or []:
+                cycle_edge_matrix[loop_index, int(baseline_index)] = 1.0
+        cycle_basis_rank = int(np.linalg.matrix_rank(cycle_edge_matrix))
+        if (
+            len(loops) != cycle_space_dimension
+            or cycle_basis_rank != cycle_space_dimension
+        ):
+            raise RuntimeError(
+                "fundamental loop basis verification failed: "
+                f"dimension={cycle_space_dimension}, loops={len(loops)}, "
+                f"rank={cycle_basis_rank}"
+            )
 
         observation_sessions = []
         for edge in averaged_edges:
@@ -2770,6 +3041,20 @@ class RoundRobinAdjustmentManager:
                     "REJECTED_BASELINE_STD" in row["quality_flags"]
                     for row in raw_rows
                 ),
+                "baseline_std_repeatability_fallback_count": sum(
+                    "BASELINE_STD_REPEATABILITY_FALLBACK" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "baseline_std_repeatability_fallback_edges": (
+                    baseline_std_repeatability_fallback_edges
+                ),
+                "baseline_std_repeatability_fallback_policy": (
+                    "Only when an edge has no normal-STD observation: require at least "
+                    f"{high_std_fallback_min_samples} distinct RTK-Fixed epochs, maximum "
+                    f"vector deviation <= {high_std_fallback_max_repeatability_m:.3f} m, "
+                    f"and ECEF consistency error <= {raw_ecef_tolerance:.3f} m; retain "
+                    "the original high covariance"
+                ),
                 "raw_observation_count": len(raw_rows),
                 "raw_rejected_count": len(raw_rows) - len(accepted_raw),
                 "vector_outlier_count": len(vector_outlier_diagnostics),
@@ -2839,6 +3124,14 @@ class RoundRobinAdjustmentManager:
                 "reference_standard_deviation": math.sqrt(result.variance_factor) if result.variance_factor is not None and result.variance_factor >= 0 else None,
                 "weighted_residual_sum": result.weighted_residual_sum,
                 "rank": result.rank, "condition_number": result.condition_number,
+                "cycle_space_dimension": cycle_space_dimension,
+                "fundamental_loop_count": len(loops),
+                "fundamental_loop_basis_rank": cycle_basis_rank,
+                "loop_basis_independence_verified": True,
+                "loop_basis_method": (
+                    "Spanning forest plus one fundamental cycle per chord; "
+                    "dependent cycles are intentionally omitted"
+                ),
                 "max_standardized_residual": result.max_standardized_residual,
                 "global_test": global_test,
                 "stochastic_model_test": stochastic_model_test,
@@ -3161,9 +3454,32 @@ class RoundRobinAdjustmentManager:
                     is_optional_command = normalized_command in optional_commands
                     if normalized_command.startswith("mode "):
                         burst_count = self.MODE_COMMAND_BURST_COUNT
+                    elif normalized_command == "unlogall":
+                        # UNLOGALL is idempotent, and field links occasionally
+                        # lose its first command/ACK. A bounded burst avoids an
+                        # otherwise unnecessary full response-timeout delay.
+                        burst_count = self.UNLOGALL_COMMAND_BURST_COUNT
+                    elif normalized_command.startswith("gpgga "):
+                        # A field rotation showed that the first GPGGA enable can
+                        # be dropped immediately after UNLOGALL.  Use the same
+                        # bounded, ACK-aware recovery pattern as AGRICA so rover
+                        # telemetry is restored without waiting through several
+                        # full command retries.
+                        burst_count = self.GPGGA_COMMAND_BURST_COUNT
+                    elif normalized_command.startswith("agrica "):
+                        # Field UM980 units can ignore an isolated AGRICA enable
+                        # immediately after UNLOGALL/mode changes. A short burst
+                        # matches the reliable manual recovery procedure and is
+                        # stopped as soon as the MQTT command ACK arrives.
+                        burst_count = self.AGRICA_COMMAND_BURST_COUNT
                     elif normalized_command.startswith("rtcm"):
                         burst_count = self.RTCM_COMMAND_BURST_COUNT
                     else:
+                        burst_count = 1
+                    # Bursts are an MQTT-ACK recovery mechanism.  Legacy/socket
+                    # response callers have no asynchronous ACK signal that can
+                    # stop a burst, so preserve their one-command exchange.
+                    if mqtt_waiter is None:
                         burst_count = 1
 
                     for burst_index in range(1, burst_count + 1):
@@ -3337,7 +3653,13 @@ class RoundRobinAdjustmentManager:
         project_id: Optional[int],
         max_attempts: int = 3,
     ) -> None:
-        """Send one restore command at a time and retry until its ACK arrives."""
+        """Restore ROVER mode/output, requiring ACKs for every state-changing step.
+
+        Some UM980 units apply ``saveconfig`` but emit no command response while
+        writing flash.  Once all preceding ROVER/output commands were verified,
+        a missing ACK for that final persistence-only command must not falsely
+        report that the receiver is still in BASE mode.
+        """
 
         safe_max_attempts = max(1, int(max_attempts))
         for command_index, command in enumerate(commands, start=1):
@@ -3384,6 +3706,30 @@ class RoundRobinAdjustmentManager:
                 if attempt < safe_max_attempts:
                     await asyncio.sleep(2)
             else:
+                is_final_saveconfig = (
+                    command_index == len(commands)
+                    and command_index > 1
+                    and command_text.lower() == "saveconfig"
+                )
+                if is_final_saveconfig:
+                    detail = self._last_set_error or "no receiver response"
+                    logger.warning(
+                        "ROVER mode/output verified for %s, but saveconfig ACK was not "
+                        "received after %s attempt(s); continuing because saveconfig "
+                        "does not change receiver mode. detail=%s",
+                        rover_code,
+                        safe_max_attempts,
+                        detail,
+                    )
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{rover_code}: ROVER mode and AGRICA output restored; "
+                            "saveconfig was sent but its ACK was not observed. "
+                            "Continuing with the verified ROVER state."
+                        ),
+                    )
+                    return
                 raise RuntimeError(
                     f"{command_text} was not acknowledged after {safe_max_attempts} attempt(s): "
                     f"{self._last_set_error or 'no receiver response'}"
@@ -3393,21 +3739,20 @@ class RoundRobinAdjustmentManager:
         """Build a deterministic UM980 base profile for the COM2 MQTT bridge.
 
         Temporary bases start from a persisted rover profile which normally has
-        GPGGA and AGRICA enabled.  Merely adding RTCM logs leaves receiver state
-        dependent on whatever was saved previously and, on some field units,
-        produces only ASCII rover output despite successful command ACKs.
-        Clear every old log before enabling the minimal MSM4 profile documented
-        by Unicore.  MSM7 and ephemeris logs are intentionally omitted here: the
-        four MSM4 streams are sufficient for the short cross-baseline rotation
-        and fit comfortably on every supported COM2 baud rate.
+        GPGGA and AGRICA enabled.  Clear those rover logs *before* entering BASE
+        mode, then keep the documented MODE BASE -> RTCM -> SAVECONFIG sequence
+        contiguous.  Some field units continued to emit no-fix GGA only when
+        UNLOGALL was inserted after MODE BASE, despite ACKing every RTCM command.
+        MSM7 and ephemeris logs are intentionally omitted here: the four MSM4
+        streams are sufficient for the short cross-baseline rotation and fit
+        comfortably on every supported COM2 baud rate.
         """
-        commands = []
+        commands = [b"unlogall\r\n"]
         port = "com2"
         if setup_method.upper() == "SURVEY_IN":
             commands.append(f"mode base time {duration}\r\n".encode("ascii"))
         else:
             commands.append(f"mode base {lat} {lon} {alt}\r\n".encode("ascii"))
-        commands.append(b"unlogall\r\n")
         for message, interval in (
             ("1006", 10),
             ("1033", 10),

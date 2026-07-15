@@ -6,6 +6,7 @@ try:
     from backend.processors.round_robin_manager import (
         RoundRobinAdjustmentManager,
         _SafeRoverRotationSkip,
+        _graph_components,
         _initial_positive_sequence_ess,
     )
     from backend.processors.gnss_adjustment_runtime import _llh_to_ecef, parse_agrica
@@ -13,6 +14,7 @@ except ModuleNotFoundError:
     from processors.round_robin_manager import (
         RoundRobinAdjustmentManager,
         _SafeRoverRotationSkip,
+        _graph_components,
         _initial_positive_sequence_ess,
     )
     from processors.gnss_adjustment_runtime import _llh_to_ecef, parse_agrica
@@ -247,6 +249,22 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertEqual(len(result["baselines"]), 7)
         self.assertEqual(len(result["loops"]), 3)
         self.assertTrue(all(len(set(loop["points"])) >= 3 for loop in result["loops"]))
+
+    def test_edge_count_and_participation_do_not_hide_disconnected_graph(self):
+        components = _graph_components(
+            ["R1", "R2", "R3", "R4", "R5"],
+            [
+                ("R1", "R2"),
+                ("R2", "R3"),
+                ("R1", "R3"),
+                ("R4", "R5"),
+            ],
+        )
+
+        self.assertEqual(
+            {frozenset(component) for component in components},
+            {frozenset({"R1", "R2", "R3"}), frozenset({"R4", "R5"})},
+        )
 
     def test_vector_jump_is_rejected_even_when_receiver_reports_small_std(self):
         # Eight stable epochs define each fixed-base edge. Two S2 epochs then
@@ -573,6 +591,144 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         ]
         self.assertEqual(len(std_rejected), 1)
 
+    def test_repeated_stable_high_std_cross_edge_is_kept_conservatively(self):
+        fixed_base_llh = (21.0, 105.0, 10.0)
+        temporary_base_llh = (21.0001, 105.0, 10.0)
+
+        def expected_rover(base_llh, baseline):
+            base_ecef = _llh_to_ecef(*base_llh)
+            delta = self.manager._baseline_ecef(
+                type("Observation", (), {"baseline_neu": baseline})(),
+                base_llh,
+            )
+            return tuple(base_ecef[index] + delta[index] for index in range(3))
+
+        self._add(
+            101, "S1", (1.0, 2.0, 0.0), temporary_base_llh,
+            rover_ecef=expected_rover(fixed_base_llh, (1.0, 2.0, 0.0)),
+        )
+        self._add(
+            102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0),
+            rover_ecef=expected_rover(fixed_base_llh, (4.0, 5.0, 0.0)),
+        )
+        fixed_base_ecef = _llh_to_ecef(*fixed_base_llh)
+        temporary_base_seed_delta = self.manager._baseline_ecef(
+            type("Observation", (), {"baseline_neu": (1.0, 2.0, 0.0)})(),
+            fixed_base_llh,
+        )
+        temporary_base_ecef = tuple(
+            fixed_base_ecef[index] + temporary_base_seed_delta[index]
+            for index in range(3)
+        )
+
+        def expected_cross_rover(baseline):
+            delta = self.manager._baseline_ecef(
+                type("Observation", (), {"baseline_neu": baseline})(),
+                temporary_base_llh,
+            )
+            return tuple(
+                temporary_base_ecef[index] + delta[index]
+                for index in range(3)
+            )
+
+        session = self.manager._sessions[17]
+        session["active_bases"][0] = "S1"
+        for second, baseline in enumerate(
+            ((3.000, 3.000, 0.000), (3.006, 2.996, 0.004), (2.995, 3.004, -0.003)),
+            start=1,
+        ):
+            self._add(
+                102,
+                "S2",
+                baseline,
+                (21.0002, 105.0, 10.0),
+                base_llh=temporary_base_llh,
+                baseline_std_neu=(4.0, 5.0, 8.0),
+                rover_ecef=expected_cross_rover(baseline),
+                second=second,
+            )
+        session["active_bases"].clear()
+
+        result = self.manager._build_cluster_result(17, 0, session["clusters"][0])
+
+        cross_edge = next(
+            edge for edge in result["baselines"] if edge["from"] != "BASE"
+        )
+        self.assertEqual(cross_edge["observation_count"], 3)
+        self.assertEqual(len(result["loops"]), 1)
+        self.assertEqual(result["quality"]["cycle_space_dimension"], 1)
+        self.assertEqual(result["quality"]["fundamental_loop_basis_rank"], 1)
+        self.assertTrue(result["quality"]["loop_basis_independence_verified"])
+        self.assertEqual(
+            result["quality"]["baseline_std_repeatability_fallback_count"],
+            3,
+        )
+        self.assertEqual(result["quality"]["baseline_std_rejected_count"], 0)
+        fallback = result["quality"]["baseline_std_repeatability_fallback_edges"]
+        self.assertEqual(len(fallback), 1)
+        self.assertLess(fallback[0]["max_vector_deviation_m"], 0.05)
+
+    def test_single_high_std_cross_epoch_cannot_create_fallback_edge(self):
+        fixed_base_llh = (21.0, 105.0, 10.0)
+        temporary_base_llh = (21.0001, 105.0, 10.0)
+
+        def expected_rover(base_llh, baseline):
+            base_ecef = _llh_to_ecef(*base_llh)
+            delta = self.manager._baseline_ecef(
+                type("Observation", (), {"baseline_neu": baseline})(),
+                base_llh,
+            )
+            return tuple(base_ecef[index] + delta[index] for index in range(3))
+
+        self._add(
+            101, "S1", (1.0, 2.0, 0.0), temporary_base_llh,
+            rover_ecef=expected_rover(fixed_base_llh, (1.0, 2.0, 0.0)),
+        )
+        self._add(
+            102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0),
+            rover_ecef=expected_rover(fixed_base_llh, (4.0, 5.0, 0.0)),
+        )
+        fixed_base_ecef = _llh_to_ecef(*fixed_base_llh)
+        temporary_base_seed_delta = self.manager._baseline_ecef(
+            type("Observation", (), {"baseline_neu": (1.0, 2.0, 0.0)})(),
+            fixed_base_llh,
+        )
+        temporary_base_ecef = tuple(
+            fixed_base_ecef[index] + temporary_base_seed_delta[index]
+            for index in range(3)
+        )
+
+        def expected_cross_rover(baseline):
+            delta = self.manager._baseline_ecef(
+                type("Observation", (), {"baseline_neu": baseline})(),
+                temporary_base_llh,
+            )
+            return tuple(
+                temporary_base_ecef[index] + delta[index]
+                for index in range(3)
+            )
+
+        session = self.manager._sessions[17]
+        session["active_bases"][0] = "S1"
+        baseline = (3.0, 3.0, 0.0)
+        self._add(
+            102,
+            "S2",
+            baseline,
+            (21.0002, 105.0, 10.0),
+            base_llh=temporary_base_llh,
+            baseline_std_neu=(4.0, 5.0, 8.0),
+            rover_ecef=expected_cross_rover(baseline),
+            second=1,
+        )
+        session["active_bases"].clear()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "no solver-eligible rover-to-rover baseline",
+        ):
+            self.manager._build_cluster_result(17, 0, session["clusters"][0])
+
 
 class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
     async def test_safely_recovered_rover_is_skipped_and_next_rotation_continues(self):
@@ -617,10 +773,58 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(70)
 
-        self.assertEqual(attempted_rovers, ["R1", "R2"])
+        self.assertEqual(attempted_rovers, ["R1", "R1", "R2"])
         self.assertEqual(len(published_results), 1)
         self.assertEqual(published_results[0]["quality"]["rotation_warning_count"], 1)
         self.assertTrue(any("continuing with the next rover" in item for item in progress_messages))
+
+    async def test_disconnected_graph_retries_productive_base_for_missing_rover(self):
+        attempted_rovers = []
+        expected_targets = []
+        published_results = []
+
+        async def result_callback(_project_id, result):
+            published_results.append(result)
+
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            result_callback=result_callback,
+        )
+        manager.configure_project(71, [{
+            "name": "targeted-recovery-cluster",
+            "stations": [701, 702, 703],
+            "rovers": ["R1", "R2", "R3"],
+        }])
+
+        async def rotate(rover_code, **kwargs):
+            targets = set(kwargs.get("expected_cross_rovers") or ())
+            attempted_rovers.append(rover_code)
+            expected_targets.append(targets)
+            if rover_code != "R1":
+                return
+            target = "R3" if targets == {"R3"} else "R2"
+            manager._sessions[71]["clusters"][0]["observations"].append(
+                SimpleNamespace(
+                    base_name="R1",
+                    observation=SimpleNamespace(
+                        rover_name=target,
+                        std_neu=(0.01, 0.01, 0.01),
+                        baseline_neu=(10.0, 0.0, 0.0),
+                    ),
+                )
+            )
+
+        manager._set_rover_as_temporary_base = rotate
+        manager._build_cluster_result = Mock(return_value={"rover_count": 3, "quality": {}})
+
+        await manager._run_cycle(71)
+
+        self.assertEqual(
+            attempted_rovers,
+            ["R1", "R1", "R2", "R2", "R3", "R3", "R1"],
+        )
+        self.assertEqual(expected_targets[-1], {"R3"})
+        self.assertEqual(len(published_results), 1)
 
     async def test_high_std_cross_samples_do_not_stop_rotation_retry(self):
         attempted_rovers = []

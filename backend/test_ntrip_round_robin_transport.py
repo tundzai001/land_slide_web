@@ -496,6 +496,141 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(accepted)
         self.assertEqual(received_commands, [command, command, command])
 
+    async def test_agrica_command_uses_short_burst_until_mqtt_ack_arrives(self):
+        command = b"AGRICA COM2 1\r\n"
+        five_commands_received = asyncio.Event()
+        received_commands = []
+
+        async def handle(reader, writer):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"ICY 200 OK\r\n")
+            await writer.drain()
+            while len(received_commands) < 5:
+                received_commands.append(await reader.readline())
+            five_commands_received.set()
+            await asyncio.sleep(0.5)
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), caster_host="127.0.0.1", caster_port=port
+        )
+        try:
+            send_task = asyncio.create_task(
+                manager._send_set_command(
+                    "CORS_A",
+                    "Dap1_3",
+                    "receiver-3",
+                    [command],
+                    ack_station_code="Dap1_3",
+                    command_response_timeout=2.0,
+                )
+            )
+            await asyncio.wait_for(five_commands_received.wait(), timeout=2.0)
+            manager.add_receiver_command_payload(
+                "$command,AGRICA COM2 1,response: OK*03",
+                {"station_code": "Dap1_3"},
+                "devices/dap1_3/gnss",
+            )
+            accepted = await asyncio.wait_for(send_task, timeout=1.0)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertTrue(accepted)
+        self.assertEqual(received_commands, [command] * 5)
+
+    async def test_gpgga_command_uses_short_burst_until_mqtt_ack_arrives(self):
+        command = b"gpgga com2 1\r\n"
+        four_commands_received = asyncio.Event()
+        received_commands = []
+
+        async def handle(reader, writer):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"ICY 200 OK\r\n")
+            await writer.drain()
+            while len(received_commands) < 4:
+                received_commands.append(await reader.readline())
+            four_commands_received.set()
+            await asyncio.sleep(0.5)
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), caster_host="127.0.0.1", caster_port=port
+        )
+        try:
+            send_task = asyncio.create_task(
+                manager._send_set_command(
+                    "CORS_A",
+                    "Dap1_1",
+                    "receiver-1",
+                    [command],
+                    ack_station_code="Dap1_1",
+                    command_response_timeout=2.0,
+                )
+            )
+            await asyncio.wait_for(four_commands_received.wait(), timeout=1.5)
+            manager.add_receiver_command_payload(
+                "$command,gpgga com2 1,response: OK*20",
+                {"station_code": "Dap1_1"},
+                "devices/dap1_1/gnss",
+            )
+            accepted = await asyncio.wait_for(send_task, timeout=1.0)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertTrue(accepted)
+        self.assertEqual(received_commands, [command] * 4)
+
+    async def test_unlogall_uses_bounded_burst_until_mqtt_ack_arrives(self):
+        command = b"unlogall\r\n"
+        two_commands_received = asyncio.Event()
+        received_commands = []
+
+        async def handle(reader, writer):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"ICY 200 OK\r\n")
+            await writer.drain()
+            while len(received_commands) < 2:
+                received_commands.append(await reader.readline())
+            two_commands_received.set()
+            await asyncio.sleep(0.5)
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), caster_host="127.0.0.1", caster_port=port
+        )
+        try:
+            send_task = asyncio.create_task(
+                manager._send_set_command(
+                    "CORS_A",
+                    "Dap1_1",
+                    "receiver-1",
+                    [command],
+                    ack_station_code="Dap1_1",
+                    command_response_timeout=2.0,
+                )
+            )
+            await asyncio.wait_for(two_commands_received.wait(), timeout=1.0)
+            manager.add_receiver_command_payload(
+                "$command,unlogall,response: OK*40",
+                {"station_code": "Dap1_1"},
+                "devices/dap1_1/gnss",
+            )
+            accepted = await asyncio.wait_for(send_task, timeout=1.0)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertTrue(accepted)
+        self.assertEqual(received_commands, [command] * 2)
+
     async def test_single_restore_command_waits_for_receiver_response(self):
         received_command = bytearray()
 
@@ -603,8 +738,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         command_text = b"".join(commands).lower()
 
         self.assertEqual(commands, [
-            b"mode base 21.0 105.0 10.0\r\n",
             b"unlogall\r\n",
+            b"mode base 21.0 105.0 10.0\r\n",
             b"rtcm1006 com2 10\r\n",
             b"rtcm1033 com2 10\r\n",
             b"rtcm1074 com2 1\r\n",
@@ -620,6 +755,17 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             b"mode rover survey\r\nunlogall\r\ngpgga com2 1\r\n"
             b"agrica com2 1\r\nsaveconfig\r\n",
         )
+
+    def test_survey_base_profile_clears_logs_before_entering_base_mode(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+
+        commands = manager._build_unicore_base_config("SURVEY_IN", duration=75)
+
+        self.assertEqual(commands[:2], [
+            b"unlogall\r\n",
+            b"mode base time 75\r\n",
+        ])
+        self.assertEqual(commands[-1], b"saveconfig\r\n")
 
     async def test_optional_msm7_timeout_keeps_msm4_fallback_and_reaches_saveconfig(self):
         received_commands = []
@@ -700,7 +846,11 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         ):
             command_text = commands[0].decode("ascii").strip().lower()
             command_name = command_text.split()[0]
-            if command_text.startswith("mode base"):
+            is_base_profile = any(
+                command.decode("ascii").strip().lower().startswith("mode base")
+                for command in commands
+            )
+            if is_base_profile:
                 event_name = "set_base"
             elif command_text.startswith("mode rover"):
                 event_name = "set_rover"
@@ -767,7 +917,11 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         ):
             command_text = commands[0].decode("ascii").strip().lower()
             command_name = command_text.split()[0]
-            if command_text.startswith("mode base"):
+            is_base_profile = any(
+                command.decode("ascii").strip().lower().startswith("mode base")
+                for command in commands
+            )
+            if is_base_profile:
                 event_name = "set_base"
             elif command_text.startswith("mode rover"):
                 event_name = "set_rover"
@@ -922,6 +1076,29 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertTrue(all(wait_for_response for _, wait_for_response in commands_seen))
+
+    async def test_rover_restore_does_not_fail_when_only_saveconfig_ack_is_missing(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        commands_seen = []
+        responses = iter([True, True, True, True, False, False, False])
+
+        async def send_set(_mountpoint, _username, _receiver_id, commands, **_kwargs):
+            commands_seen.append(commands[0])
+            manager._last_set_error = "no verified MQTT ACK"
+            return next(responses)
+
+        manager._send_set_command = send_set
+        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+            await manager._restore_rover_output_sequence(
+                rover_code="Dap1_2",
+                mountpoint="SinQuyen1",
+                client_info={"Username": "Dap1_2", "receiverID": "1.4.10"},
+                commands=manager._build_unicore_rover_config(),
+                project_id=3,
+            )
+
+        self.assertEqual(commands_seen[-3:], [b"saveconfig\r\n"] * 3)
+        self.assertEqual(commands_seen.count(b"mode rover survey\r\n"), 1)
 
 
 if __name__ == "__main__":
