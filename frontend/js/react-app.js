@@ -11,7 +11,7 @@ const scriptPromises = new Map();
 const loadedStylesheets = new Set();
 const legacyBootedViews = new Set();
 const ROUTE_STYLES = {
-    map: ['/css/map.css?v=react-spa-12', '/css/digital-twin.css?v=react-spa-12', '/css/rescue-markers.css?v=react-spa-12', '/css/map-responsive.css?v=react-spa-12'],
+    map: ['/css/map.css?v=react-spa-13', '/css/digital-twin.css?v=react-spa-12', '/css/rescue-markers.css?v=react-spa-12', '/css/map-responsive.css?v=react-spa-12'],
     admin: ['/css/admin.css?v=react-spa-12', '/css/admin-responsive.css?v=react-spa-12'],
     login: ['/css/login.css'],
 };
@@ -170,7 +170,7 @@ async function bootLegacyPage(view) {
     }
 
     if (view === 'map') {
-        await loadScript('/js/map-main.js?v=react-spa-15');
+        await loadScript('/js/map-main.js?v=react-spa-20');
         await loadScript('/js/engine/simulation-controller.js', { type: 'module' });
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });

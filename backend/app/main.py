@@ -2009,6 +2009,7 @@ async def start_gnss_adjustment(
             gnss_devices = devices_result.scalars().all()
             stations_by_id = {int(station.id): station for station in stations}
             pending_device_updates = getattr(mqtt_service, "_device_update_buffer", {})
+            pending_station_updates = getattr(mqtt_service, "_station_update_buffer", {})
             now_ts = int(time.time())
             online_station_ids = set()
             for device in gnss_devices:
@@ -2018,6 +2019,8 @@ async def start_gnss_adjustment(
                 last_seen = max(
                     int(device.last_data_time or 0),
                     int(pending_device_updates.get(int(device.id), 0) or 0),
+                    int(station.last_update or 0),
+                    int((pending_station_updates.get(int(station.id)) or {}).get("last_update", 0) or 0),
                 )
                 threshold = get_offline_threshold(station.config, "gnss")
                 if last_seen and now_ts - last_seen < threshold:
@@ -2042,6 +2045,10 @@ async def start_gnss_adjustment(
 
         # 1. Bật chế độ chờ thu thập Baseline (COLLECTING_BASELINE)
         mqtt_service.adjustment_phase[req.project_id] = "COLLECTING_BASELINE"
+        mqtt_service.adjustment_message[req.project_id] = (
+            "Adjustment started; waiting for a valid #AGRICA baseline from every selected rover."
+        )
+        mqtt_service.adjustment_results.pop(req.project_id, None)
         logger.info(f"🎯 Started GNSS Adjustment for project {req.project_id}. Phase: COLLECTING_BASELINE.")
 
         expected_station_ids = sorted({
@@ -2071,6 +2078,32 @@ async def start_gnss_adjustment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/gnss/adjustment/status")
+async def get_gnss_adjustment_status(
+    project_id: int,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+):
+    """Return the authoritative terminal state when a WebSocket event is missed."""
+
+    phase = str(mqtt_service.adjustment_phase.get(project_id) or "IDLE").upper()
+    message = str(mqtt_service.adjustment_message.get(project_id) or "")
+    result = mqtt_service.adjustment_results.get(project_id) if phase == "COMPLETED" else None
+    seed_status = None
+    if phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+        try:
+            seed_status = mqtt_service.round_robin_manager.get_seed_collection_status(project_id)
+        except (KeyError, ValueError):
+            seed_status = None
+    return {
+        "project_id": project_id,
+        "phase": phase,
+        "message": message,
+        "running": phase in {"COLLECTING_BASELINE", "FREE_NETWORK"},
+        "seed_status": seed_status,
+        "data": result,
+    }
+
+
 @app.post("/api/admin/gnss/adjustment/stop")
 async def stop_gnss_adjustment(
     req: GnssAdjustmentStartRequest,
@@ -2083,6 +2116,8 @@ async def stop_gnss_adjustment(
         # Clear dynamic active adjustment clusters and phase
         mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
         mqtt_service.adjustment_phase.pop(req.project_id, None)
+        mqtt_service.adjustment_message.pop(req.project_id, None)
+        mqtt_service.adjustment_results.pop(req.project_id, None)
         mqtt_service.round_robin_manager.clear_project(req.project_id)
         logger.info(f"Cleared active adjustment clusters and phase for project {req.project_id}")
 
@@ -3527,6 +3562,11 @@ async def websocket_endpoint(websocket: WebSocket):
             if data == "ping": 
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        detail = str(exc).strip() or exc.__class__.__name__
+        logger.info("WebSocket receive loop ended: %s", detail)
+    finally:
         ws_manager.disconnect(websocket)
 
 @app.get("/api/health")

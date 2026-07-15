@@ -12,6 +12,9 @@ let currentStationData = null;
 let allStations = [];
 let currentView = 'realtime';
 let wsConnection = null;
+let wsHeartbeatId = null;
+let wsReconnectId = null;
+let wsReconnectAttempt = 0;
 let latestRealtimeSensorTs = {}; // key: `${stationId}_${sensorType}` -> unix timestamp
 let isRainCorrelationAiEnabled = false;
 let rainCorrelationAiRunning = false;
@@ -49,6 +52,13 @@ const gnssAdjustmentDebugState = {
     entriesRevision: 0,
     autoScroll: true,
     lastGnssStatusAtByStation: {},
+    workflowNodes: [],
+    workflowRevision: 0,
+    workflowSeedStations: [],
+    workflowSampleCounts: {},
+    workflowCurrentRover: null,
+    statusPollId: null,
+    serverMessage: '',
     watchdogId: null,
 };
 
@@ -109,6 +119,332 @@ function phaseClassForGnssAdjustment(phase) {
         case 'COMPLETED': return 'ms-4 text-success fw-bold font-monospace';
         case 'ERROR': return 'ms-4 text-danger fw-bold font-monospace';
         default: return 'ms-4 text-warning fw-bold font-monospace';
+    }
+}
+
+const GNSS_WORKFLOW_STATUS_LABELS = {
+    running: 'Đang chạy',
+    success: 'Hoàn tất',
+    warning: 'Cần chú ý',
+    error: 'Lỗi',
+};
+
+function upsertGnssWorkflowNode(key, options = {}) {
+    if (!key) return null;
+    let node = gnssAdjustmentDebugState.workflowNodes.find(item => item.key === key);
+    if (!node) {
+        node = {
+            key,
+            title: options.title || key,
+            detail: options.detail || '',
+            status: options.status || 'running',
+            group: options.group || '',
+            icon: options.icon || 'bi-circle',
+            time: formatGnssDebugTime(),
+        };
+        gnssAdjustmentDebugState.workflowNodes.push(node);
+    } else {
+        ['title', 'detail', 'status', 'group', 'icon'].forEach(field => {
+            if (options[field] !== undefined) node[field] = options[field];
+        });
+    }
+    gnssAdjustmentDebugState.workflowRevision += 1;
+    renderGnssAdjustmentWorkflow();
+    return node;
+}
+
+function finishGnssWorkflowNode(key, detail = undefined) {
+    const node = gnssAdjustmentDebugState.workflowNodes.find(item => item.key === key);
+    if (!node) return;
+    if (node.status !== 'warning') node.status = 'success';
+    if (detail !== undefined) node.detail = detail;
+    gnssAdjustmentDebugState.workflowRevision += 1;
+    renderGnssAdjustmentWorkflow();
+}
+
+function finishRunningGnssWorkflowNodes(group = null) {
+    let changed = false;
+    gnssAdjustmentDebugState.workflowNodes.forEach(node => {
+        if (node.status === 'running' && (!group || node.group === group)) {
+            node.status = 'success';
+            changed = true;
+        }
+    });
+    if (changed) {
+        gnssAdjustmentDebugState.workflowRevision += 1;
+        renderGnssAdjustmentWorkflow();
+    }
+}
+
+function renderGnssAdjustmentWorkflow() {
+    const map = document.getElementById('gnss-workflow-map');
+    if (!map) return;
+    const revision = String(gnssAdjustmentDebugState.workflowRevision);
+    if (map.dataset.workflowRevision === revision) return;
+
+    map.innerHTML = '';
+    gnssAdjustmentDebugState.workflowNodes.forEach((node, index) => {
+        const item = document.createElement('article');
+        item.className = `gnss-flow-node status-${node.status}${node.group ? ' is-branch' : ''}`;
+        item.dataset.workflowKey = node.key;
+
+        const rail = document.createElement('div');
+        rail.className = 'gnss-flow-rail';
+        const marker = document.createElement('span');
+        marker.className = 'gnss-flow-marker';
+        const markerIcon = document.createElement('i');
+        markerIcon.className = `bi ${node.status === 'success' ? 'bi-check-lg' : node.status === 'error' ? 'bi-x-lg' : node.icon}`;
+        marker.appendChild(markerIcon);
+        rail.appendChild(marker);
+
+        const card = document.createElement('div');
+        card.className = 'gnss-flow-card';
+        const meta = document.createElement('div');
+        meta.className = 'gnss-flow-meta';
+        const step = document.createElement('span');
+        step.className = 'gnss-flow-step';
+        step.textContent = node.group || `BƯỚC ${String(index + 1).padStart(2, '0')}`;
+        const status = document.createElement('span');
+        status.className = 'gnss-flow-status';
+        status.textContent = GNSS_WORKFLOW_STATUS_LABELS[node.status] || node.status;
+        meta.append(step, status);
+
+        const title = document.createElement('h6');
+        title.textContent = node.title;
+        const detail = document.createElement('p');
+        detail.textContent = node.detail || 'Đang chờ phản hồi từ hệ thống…';
+        const time = document.createElement('time');
+        time.textContent = node.time;
+        card.append(meta, title, detail, time);
+        item.append(rail, card);
+        map.appendChild(item);
+    });
+    map.dataset.workflowRevision = revision;
+
+    const nodes = gnssAdjustmentDebugState.workflowNodes;
+    const completed = nodes.filter(node => node.status === 'success' || node.status === 'warning').length;
+    const percent = nodes.length ? Math.round((completed / nodes.length) * 100) : 0;
+    const bar = document.getElementById('gnss-workflow-progress-bar');
+    const value = document.getElementById('gnss-workflow-progress-value');
+    const current = [...nodes].reverse().find(node => node.status === 'running' || node.status === 'error') || nodes.at(-1);
+    if (bar) bar.style.width = `${percent}%`;
+    if (value) value.textContent = `${completed}/${nodes.length} mốc`;
+    const currentLabel = document.getElementById('gnss-workflow-current');
+    if (currentLabel) currentLabel.textContent = current?.title || 'Chưa bắt đầu';
+
+    const scroller = document.getElementById('gnss-workflow-scroll');
+    if (scroller && nodes.some(node => node.status === 'running')) {
+        requestAnimationFrame(() => { scroller.scrollTop = scroller.scrollHeight; });
+    }
+}
+
+function gnssWorkflowRoverFromMessage(message) {
+    const match = String(message || '').match(/^([^:]{1,80}):\s*/);
+    return match ? match[1].trim() : '';
+}
+
+function syncGnssWorkflowProgress(phase, rawMessage = '') {
+    const normalizedPhase = String(phase || 'WAITING').toUpperCase();
+    const message = String(rawMessage || '');
+    const rover = gnssWorkflowRoverFromMessage(message);
+    const group = rover ? `ROVER · ${rover}` : '';
+
+    if (normalizedPhase === 'WAITING') {
+        upsertGnssWorkflowNode('session', {
+            title: 'Khởi tạo phiên bình sai', detail: message || 'Chuẩn bị kết nối API và WebSocket.',
+            status: 'running', icon: 'bi-power',
+        });
+        return;
+    }
+
+    if (normalizedPhase === 'COLLECTING_BASELINE') {
+        finishGnssWorkflowNode('session', 'API và kênh thời gian thực đã sẵn sàng.');
+        upsertGnssWorkflowNode('seed', {
+            title: 'Thu baseline từ Base cố định',
+            detail: message || 'Chờ mỗi rover online gửi ít nhất một #AGRICA RTK Fixed hợp lệ.',
+            status: 'running', icon: 'bi-broadcast-pin',
+        });
+        return;
+    }
+
+    if (normalizedPhase === 'ERROR') {
+        const current = [...gnssAdjustmentDebugState.workflowNodes].reverse().find(node => node.status === 'running');
+        if (current) {
+            current.status = 'error';
+            current.detail = message || current.detail;
+            gnssAdjustmentDebugState.workflowRevision += 1;
+        } else {
+            upsertGnssWorkflowNode('error', {
+                title: 'Quy trình bị dừng', detail: message || 'Máy chủ báo lỗi.', status: 'error', icon: 'bi-exclamation-triangle',
+            });
+        }
+        renderGnssAdjustmentWorkflow();
+        return;
+    }
+
+    if (normalizedPhase === 'COMPLETED') {
+        finishRunningGnssWorkflowNodes();
+        finishGnssWorkflowNode('solve');
+        upsertGnssWorkflowNode('completed', {
+            title: 'Hoàn tất bình sai mạng',
+            detail: message || 'Đã lưu kết quả và tạo báo cáo XLSX cùng hồ sơ audit JSON.',
+            status: 'success', icon: 'bi-flag-fill',
+        });
+        return;
+    }
+
+    if (normalizedPhase !== 'FREE_NETWORK') return;
+    if (/starting round-robin|all selected rovers|remaining rovers/i.test(message)) {
+        if (/skipped offline|no-data station/i.test(message)) {
+            upsertGnssWorkflowNode('seed', {
+                title: 'Thu baseline từ Base cố định', detail: message,
+                status: 'warning', icon: 'bi-exclamation-diamond',
+            });
+        } else {
+            finishGnssWorkflowNode('seed', 'Đã có baseline Base cố định cho toàn bộ rover tham gia.');
+        }
+    }
+    if (/on-demand\/sleep|ngắt luồng ntrip/i.test(message)) {
+        upsertGnssWorkflowNode('fixed-base-sleep', {
+            title: 'Đưa Base cố định về chế độ ngủ', detail: message,
+            status: 'running', icon: 'bi-moon-stars',
+        });
+        return;
+    }
+    if (/khôi phục.*base cố định|restor.*fixed base/i.test(message)) {
+        finishRunningGnssWorkflowNodes(gnssAdjustmentDebugState.workflowCurrentRover ? `ROVER · ${gnssAdjustmentDebugState.workflowCurrentRover}` : null);
+        upsertGnssWorkflowNode('fixed-base-restore', {
+            title: 'Khôi phục stream Base cố định', detail: message,
+            status: /success|thành công/i.test(message) ? 'success' : 'running', icon: 'bi-broadcast',
+        });
+        return;
+    }
+    if (/aggregating repeated baselines|gom.*baseline|giải bình sai/i.test(message)) {
+        finishGnssWorkflowNode('fixed-base-restore');
+        upsertGnssWorkflowNode('solve', {
+            title: 'Gom trị đo và giải bình sai', detail: message,
+            status: 'running', icon: 'bi-calculator',
+        });
+        return;
+    }
+    if (!rover) return;
+    gnssAdjustmentDebugState.workflowCurrentRover = rover;
+    const key = suffix => `rover:${rover}:${suffix}`;
+
+    if (/querying .*active aicaster/i.test(message)) {
+        finishGnssWorkflowNode('fixed-base-sleep', 'Base cố định đã ngắt luồng NTRIP để tránh xung đột nguồn hiệu chỉnh.');
+        upsertGnssWorkflowNode(key('session'), {
+            title: 'Tìm phiên điều khiển AICaster', detail: message, status: 'running', group, icon: 'bi-search',
+        });
+    } else if (/matched aicaster/i.test(message)) {
+        finishGnssWorkflowNode(key('session'), message);
+    } else if (/preflight .*mode rover/i.test(message)) {
+        finishGnssWorkflowNode(key('session'));
+        upsertGnssWorkflowNode(key('preflight'), {
+            title: 'Kiểm tra đường lệnh và MQTT ACK', detail: message, status: 'running', group, icon: 'bi-shield-check',
+        });
+    } else if (/sending set base/i.test(message)) {
+        finishGnssWorkflowNode(key('preflight'), 'MQTT đã xác nhận preflight ROVER; cho phép chuyển BASE tạm.');
+        upsertGnssWorkflowNode(key('base'), {
+            title: 'Cấu hình BASE tạm và RTCM', detail: message, status: 'running', group, icon: 'bi-antenna',
+        });
+    } else if (/set base accepted/i.test(message)) {
+        upsertGnssWorkflowNode(key('base'), {
+            title: 'Cấu hình BASE tạm và RTCM', detail: message,
+            status: /optional rtcm fallback/i.test(message) ? 'warning' : 'success',
+            group, icon: /optional rtcm fallback/i.test(message) ? 'bi-exclamation-diamond' : 'bi-check-lg',
+        });
+    } else if (/set base was not fully verified/i.test(message)) {
+        upsertGnssWorkflowNode(key('base'), {
+            title: 'Cấu hình BASE tạm và RTCM', detail: message,
+            status: 'error', group, icon: 'bi-x-lg',
+        });
+        upsertGnssWorkflowNode(key('restore'), {
+            title: 'Phục hồi ROVER an toàn',
+            detail: 'Đang hoàn tác cấu hình BASE trước khi dừng chu kỳ.',
+            status: 'running', group, icon: 'bi-life-preserver',
+        });
+    } else if (/restore step \d+\/\d+/i.test(message)) {
+        upsertGnssWorkflowNode(key('restore'), {
+            title: 'Phục hồi ROVER an toàn', detail: message,
+            status: 'running', group, icon: 'bi-arrow-counterclockwise',
+        });
+    } else if (/ack received for/i.test(message)) {
+        upsertGnssWorkflowNode(key('restore'), {
+            title: 'Phục hồi ROVER an toàn', detail: message,
+            status: /saveconfig/i.test(message) ? 'success' : 'running',
+            group, icon: 'bi-arrow-counterclockwise',
+        });
+    } else if (/no ack for .*retrying/i.test(message)) {
+        upsertGnssWorkflowNode(key('restore'), {
+            title: 'Phục hồi ROVER an toàn', detail: message,
+            status: 'running', group, icon: 'bi-exclamation-triangle',
+        });
+    } else if (/rotation skipped after safe rover recovery/i.test(message)) {
+        upsertGnssWorkflowNode(key('restore'), {
+            title: 'Bỏ lượt BASE, tiếp tục rover kế tiếp', detail: message,
+            status: 'warning', group, icon: 'bi-skip-forward',
+        });
+    } else if (/waiting 10s .*emit rtcm/i.test(message)) {
+        finishGnssWorkflowNode(key('base'));
+        upsertGnssWorkflowNode(key('warmup'), {
+            title: 'Chờ bộ thu phát RTCM', detail: message, status: 'running', group, icon: 'bi-hourglass-split',
+        });
+    } else if (/starting mqtt-to-ntrip route/i.test(message)) {
+        finishGnssWorkflowNode(key('warmup'));
+        upsertGnssWorkflowNode(key('route'), {
+            title: 'Mở tuyến MQTT → NTRIP', detail: message, status: 'running', group, icon: 'bi-diagram-3',
+        });
+    } else if (/rtcm route is live/i.test(message)) {
+        finishGnssWorkflowNode(key('route'), message);
+        upsertGnssWorkflowNode(key('settle'), {
+            title: 'Xác minh nguồn Base tạm', detail: message, status: 'running', group, icon: 'bi-crosshair',
+        });
+    } else if (/ntrip source accepted.*collecting cross-baselines/i.test(message)) {
+        finishGnssWorkflowNode(key('settle'));
+        upsertGnssWorkflowNode(key('collect'), {
+            title: 'Thu baseline chéo', detail: message, status: 'running', group, icon: 'bi-bezier2',
+        });
+    } else if (/collection window closed/i.test(message)) {
+        finishGnssWorkflowNode(key('collect'), message);
+    } else if (/sending set rover/i.test(message)) {
+        finishGnssWorkflowNode(key('collect'));
+        upsertGnssWorkflowNode(key('restore'), {
+            title: 'Trả thiết bị về ROVER', detail: message, status: 'running', group, icon: 'bi-arrow-counterclockwise',
+        });
+    } else if (/set rover accepted/i.test(message)) {
+        finishGnssWorkflowNode(key('restore'), message);
+    }
+}
+
+function syncGnssWorkflowBaseline(message) {
+    const roverName = String(message.rover_name || '').trim();
+    const fromPoint = String(message.from || 'BASE').trim();
+    if (!roverName) return;
+    if (gnssAdjustmentDebugState.phase === 'COLLECTING_BASELINE' && fromPoint.toUpperCase() === 'BASE') {
+        if (!gnssAdjustmentDebugState.workflowSeedStations.includes(roverName)) {
+            gnssAdjustmentDebugState.workflowSeedStations.push(roverName);
+        }
+        const expected = gnssAdjustmentDebugState.expectedStationIds.length || '?';
+        upsertGnssWorkflowNode('seed', {
+            title: 'Thu baseline từ Base cố định',
+            detail: `Đã nhận ${gnssAdjustmentDebugState.workflowSeedStations.length}/${expected} rover: ${gnssAdjustmentDebugState.workflowSeedStations.join(', ')}.`,
+            status: 'running', icon: 'bi-broadcast-pin',
+        });
+        return;
+    }
+    if (fromPoint.toUpperCase() !== 'BASE') {
+        const sampleKey = `${fromPoint}->${roverName}`;
+        gnssAdjustmentDebugState.workflowSampleCounts[sampleKey] = (gnssAdjustmentDebugState.workflowSampleCounts[sampleKey] || 0) + 1;
+        const collectKey = `rover:${fromPoint}:collect`;
+        const related = Object.entries(gnssAdjustmentDebugState.workflowSampleCounts)
+            .filter(([key]) => key.startsWith(`${fromPoint}->`));
+        const total = related.reduce((sum, [, count]) => sum + count, 0);
+        upsertGnssWorkflowNode(collectKey, {
+            title: 'Thu baseline chéo',
+            detail: `Đã nhận ${total} mẫu hợp lệ trên ${related.length} cạnh từ Base tạm ${fromPoint}; solver sẽ chỉ dùng một trị trung bình có trọng số cho mỗi cạnh.`,
+            status: 'running', group: `ROVER · ${fromPoint}`, icon: 'bi-bezier2',
+        });
     }
 }
 
@@ -175,6 +511,7 @@ function refreshGnssAdjustmentDebugUi() {
                 : 'Đã tạm dừng tự cuộn; bấm để xuống cuối';
         }
     }
+    renderGnssAdjustmentWorkflow();
     refreshGnssAdjustmentRunningPill();
 }
 
@@ -235,14 +572,65 @@ function addGnssAdjustmentDebug(label, message, level = 'info') {
 }
 
 function setGnssAdjustmentPhase(phase, message = '') {
+    const previousPhase = gnssAdjustmentDebugState.phase;
     gnssAdjustmentDebugState.phase = String(phase || 'WAITING').toUpperCase();
+    if (message) gnssAdjustmentDebugState.serverMessage = String(message);
+    syncGnssWorkflowProgress(gnssAdjustmentDebugState.phase, message);
     refreshGnssAdjustmentDebugUi();
     if (message) addGnssAdjustmentDebug('PHASE', message, gnssAdjustmentDebugState.phase === 'ERROR' ? 'error' : 'info');
+    if (gnssAdjustmentDebugState.phase === 'ERROR' && previousPhase !== 'ERROR') {
+        window.toast?.error?.(message || 'Quy trình bình sai đã dừng do lỗi.');
+    }
     window.gnssBoardState?.draw?.(performance.now());
+    if (['COMPLETED', 'ERROR', 'IDLE'].includes(gnssAdjustmentDebugState.phase)) {
+        if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
+        gnssAdjustmentDebugState.statusPollId = null;
+        if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
+        gnssAdjustmentDebugState.watchdogId = null;
+    }
+}
+
+async function syncGnssAdjustmentStatus() {
+    const projectId = Number(gnssAdjustmentDebugState.projectId || 0);
+    if (!gnssAdjustmentDebugState.active || !projectId) return;
+    try {
+        const url = `/api/admin/gnss/adjustment/status?project_id=${encodeURIComponent(projectId)}`;
+        const response = window.authManager?.apiFetch
+            ? await window.authManager.apiFetch(url)
+            : await fetch(url);
+        if (!response?.ok) return;
+        const status = await response.json();
+        if (Number(status.project_id) !== projectId) return;
+        let phase = String(status.phase || 'IDLE').toUpperCase();
+        let message = String(status.message || '');
+        if (phase === 'IDLE' && GNSS_ADJUSTMENT_RUNNING_PHASES.has(gnssAdjustmentDebugState.phase)) {
+            phase = 'ERROR';
+            message = message || 'Phiên bình sai không còn tồn tại trên máy chủ; quy trình đã dừng.';
+        }
+        if (phase !== gnssAdjustmentDebugState.phase || (message && message !== gnssAdjustmentDebugState.serverMessage)) {
+            setGnssAdjustmentPhase(phase, message || 'Đã đồng bộ trạng thái từ máy chủ.');
+            addGnssAdjustmentDebug('SYNC', 'Đã khôi phục trạng thái qua API sau khi có thể bỏ lỡ WebSocket.', 'success');
+        }
+        if (phase === 'COMPLETED' && status.data) {
+            updateRealtimeSensorValues({
+                sensor_type: 'gnss_adjusted',
+                timestamp: status.data.computed_at || Math.floor(Date.now() / 1000),
+                data: status.data,
+            });
+        }
+    } catch (error) {
+        console.warn('[GNSS] Could not synchronize adjustment status:', error);
+    }
+}
+
+function startGnssAdjustmentStatusPolling() {
+    if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
+    gnssAdjustmentDebugState.statusPollId = setInterval(syncGnssAdjustmentStatus, 4000);
 }
 
 function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
     if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
+    if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
     Object.assign(gnssAdjustmentDebugState, {
         active: true,
         projectId: Number(projectId) || null,
@@ -255,11 +643,19 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         entriesRevision: gnssAdjustmentDebugState.entriesRevision + 1,
         autoScroll: true,
         lastGnssStatusAtByStation: {},
+        workflowNodes: [],
+        workflowRevision: gnssAdjustmentDebugState.workflowRevision + 1,
+        workflowSeedStations: [],
+        workflowSampleCounts: {},
+        workflowCurrentRover: null,
+        statusPollId: null,
+        serverMessage: '',
     });
     const resultsSection = document.getElementById('adj-results-section');
     const pointsList = document.getElementById('adj-points-list');
     if (resultsSection) resultsSection.style.display = 'none';
     if (pointsList) pointsList.innerHTML = '';
+    syncGnssWorkflowProgress('WAITING', 'Đang mở API và kênh WebSocket cho phiên mới.');
     addGnssAdjustmentDebug('UI', 'Đã mở phiên debug Bình sai.', 'info');
     gnssAdjustmentDebugState.watchdogId = setInterval(() => {
         if (!gnssAdjustmentDebugState.active) return;
@@ -500,51 +896,91 @@ function initialize() {
 // =====================================================
 
 function setupWebSocket() {
+    if (wsConnection && [WebSocket.OPEN, WebSocket.CONNECTING].includes(wsConnection.readyState)) {
+        return;
+    }
+    if (wsReconnectId) {
+        clearTimeout(wsReconnectId);
+        wsReconnectId = null;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/updates`;
 
     console.log('🔌 [WS] Connecting to:', wsUrl);
 
-    wsConnection = new WebSocket(wsUrl);
+    const socket = new WebSocket(wsUrl);
+    wsConnection = socket;
 
-    wsConnection.onopen = () => {
+    socket.onopen = () => {
+        if (wsConnection !== socket) return;
         console.log('✅ [WS] Connected');
+        wsReconnectAttempt = 0;
         gnssAdjustmentDebugState.wsStatus = 'CONNECTED';
-        if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket đã kết nối.', 'success');
+        if (gnssAdjustmentDebugState.active) {
+            addGnssAdjustmentDebug('WS', 'WebSocket đã kết nối.', 'success');
+            syncGnssAdjustmentStatus();
+        }
         else refreshGnssAdjustmentDebugUi();
+        if (wsHeartbeatId) clearInterval(wsHeartbeatId);
+        wsHeartbeatId = setInterval(() => {
+            if (wsConnection === socket && socket.readyState === WebSocket.OPEN) {
+                try {
+                    socket.send('ping');
+                } catch (error) {
+                    console.warn('[WS] Keepalive send failed:', error);
+                }
+            }
+        }, 20000);
     };
 
-    wsConnection.onmessage = (event) => {
+    socket.onmessage = (event) => {
+        if (wsConnection !== socket) return;
         try {
             const message = JSON.parse(event.data);
+            if (message.type === 'pong') return;
             handleRealtimeUpdate(message);
         } catch (e) {
             console.error('❌ [WS] Parse error:', e);
         }
     };
 
-    wsConnection.onerror = (error) => {
+    socket.onerror = (error) => {
+        if (wsConnection !== socket) return;
         console.error('❌ [WS] Error:', error);
         gnssAdjustmentDebugState.wsStatus = 'ERROR';
         if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket gặp lỗi kết nối.', 'error');
         else refreshGnssAdjustmentDebugUi();
     };
 
-    wsConnection.onclose = () => {
-        console.warn('⚠️ [WS] Disconnected, reconnecting in 5s...');
+    socket.onclose = () => {
+        if (wsConnection !== socket) return;
+        console.warn('⚠️ [WS] Disconnected; scheduling reconnect...');
+        wsConnection = null;
+        if (wsHeartbeatId) clearInterval(wsHeartbeatId);
+        wsHeartbeatId = null;
         gnssAdjustmentDebugState.wsStatus = 'DISCONNECTED';
-        if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket bị ngắt; tự kết nối lại sau 5 giây.', 'warning');
-        else refreshGnssAdjustmentDebugUi();
-        setTimeout(setupWebSocket, 5000);
-    };
-
-    // Keepalive ping
-    setInterval(() => {
-        if (wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send('ping');
+        if (gnssAdjustmentDebugState.active) {
+            addGnssAdjustmentDebug('WS', 'WebSocket bị ngắt; đang tự kết nối lại và vẫn theo dõi tiến trình qua API.', 'warning');
+            syncGnssAdjustmentStatus();
         }
-    }, 30000);
+        else refreshGnssAdjustmentDebugUi();
+        const reconnectDelay = Math.min(15000, 1000 * (2 ** Math.min(wsReconnectAttempt, 4)));
+        wsReconnectAttempt += 1;
+        wsReconnectId = setTimeout(() => {
+            wsReconnectId = null;
+            setupWebSocket();
+        }, reconnectDelay);
+    };
 }
+
+window.addEventListener('online', () => {
+    if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) setupWebSocket();
+});
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && (!wsConnection || wsConnection.readyState === WebSocket.CLOSED)) {
+        setupWebSocket();
+    }
+});
 
 function handleRealtimeUpdate(message) {
     //console.log('📡 [WS] Received:', message);
@@ -867,6 +1303,7 @@ function handleRealtimeUpdate(message) {
         );
         if (belongsToActiveRun) {
             gnssAdjustmentDebugState.baselineCount += 1;
+            syncGnssWorkflowBaseline(message);
             addGnssAdjustmentDebug(
                 'BASELINE',
                 `${message.rover_name}: dN=${Number(message.baseline_neu?.[0]).toFixed(4)}, dE=${Number(message.baseline_neu?.[1]).toFixed(4)}, dH=${Number(message.baseline_neu?.[2]).toFixed(4)}`,
@@ -952,27 +1389,6 @@ function updateRealtimeSensorValues(message) {
         }
         if (adjPointsList) {
             adjPointsList.innerHTML = '';
-            
-            // Add download Excel workbook button
-            if (message.data.excel_report_url) {
-                const downloadXlsBtn = document.createElement('a');
-                downloadXlsBtn.href = message.data.excel_report_url;
-                downloadXlsBtn.target = '_blank';
-                downloadXlsBtn.className = 'btn btn-sm btn-outline-success w-100 mb-2 py-1';
-                downloadXlsBtn.style.fontSize = '0.72rem';
-                downloadXlsBtn.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1"></i> Tải báo cáo bình sai (Excel)';
-                adjPointsList.appendChild(downloadXlsBtn);
-            }
-            // Add download report button
-            if (message.data.report_file_url) {
-                const downloadBtn = document.createElement('a');
-                downloadBtn.href = message.data.report_file_url;
-                downloadBtn.target = '_blank';
-                downloadBtn.className = 'btn btn-sm btn-outline-info w-100 mb-2 py-1';
-                downloadBtn.style.fontSize = '0.72rem';
-                downloadBtn.innerHTML = '<i class="bi bi-download me-1"></i> Tải báo cáo bình sai (JSON)';
-                adjPointsList.appendChild(downloadBtn);
-            }
             
             if (message.data.points) {
                 for (const [ptName, ptCoords] of Object.entries(message.data.points)) {
@@ -2609,8 +3025,38 @@ function setupEventListeners() {
                 y: centerY - (pt.y * scale),
             };
         },
+        fitToResult() {
+            const fit = () => {
+                this.resize();
+                this.draw();
+            };
+            requestAnimationFrame(() => {
+                fit();
+                requestAnimationFrame(fit);
+            });
+        },
         loadAdjustmentResult(result) {
-            if (!this.ctx || !result?.points) return;
+            if (!result?.points) return;
+            const downloadBtn = document.getElementById('gnss-download-results-btn');
+            const reportUrl = String(result.report_file_url || '');
+            const excelUrl = result.excel_report_url
+                || (reportUrl.toLowerCase().split('?', 1)[0].endsWith('.xlsx') ? reportUrl : '');
+            if (downloadBtn) {
+                downloadBtn.disabled = !excelUrl;
+                downloadBtn.classList.toggle('disabled', !excelUrl);
+                downloadBtn.innerHTML = excelUrl
+                    ? '<i class="bi bi-file-earmark-spreadsheet-fill me-2"></i>Tải kết quả Excel (.xlsx)'
+                    : '<i class="bi bi-hourglass-split me-2"></i>Đang tạo file Excel...';
+                downloadBtn.onclick = excelUrl ? () => {
+                    const excelAnchor = document.createElement('a');
+                    excelAnchor.href = excelUrl;
+                    excelAnchor.download = excelUrl.split('/').pop() || 'gnss_binh_sai.xlsx';
+                    document.body.appendChild(excelAnchor);
+                    excelAnchor.click();
+                    excelAnchor.remove();
+                } : null;
+            }
+            if (!this.ctx) return;
             this.points = {};
             this.baselines = [];
             this.basePoint = null;
@@ -2650,21 +3096,7 @@ function setupEventListeners() {
                     full_data: item,
                 });
             });
-            this.draw();
-
-            // Set up download button
-            const downloadBtn = document.getElementById('gnss-download-results-btn');
-            if (downloadBtn) {
-                downloadBtn.onclick = () => {
-                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(result, null, 2));
-                    const downloadAnchorNode = document.createElement('a');
-                    downloadAnchorNode.setAttribute("href", dataStr);
-                    downloadAnchorNode.setAttribute("download", `gnss_adjustment_result_${new Date().getTime()}.json`);
-                    document.body.appendChild(downloadAnchorNode); // required for firefox
-                    downloadAnchorNode.click();
-                    downloadAnchorNode.remove();
-                };
-            }
+            this.fitToResult();
         },
         draw(timestamp = performance.now()) {
             if (!this.ctx) return;
@@ -2803,6 +3235,14 @@ function setupEventListeners() {
     // Lệnh Bình sai - Trigger API start gnss adjustment
     function ensureGnssTerminalModal() {
         let modal = document.getElementById('gnssTerminalModal');
+        if (modal && !modal.querySelector('#gnss-workflow-map')) {
+            // legacy-templates.js may have inserted the former Baseline Vectors
+            // modal before this script loads. Replace it once so every entry
+            // point gets the same live workflow UI.
+            window.bootstrap?.Modal?.getInstance(modal)?.dispose();
+            modal.remove();
+            modal = null;
+        }
         if (modal) return modal;
 
         const wrapper = document.createElement('div');
@@ -2824,26 +3264,26 @@ function setupEventListeners() {
                             </div>
                             <div id="gnss-column-resizer" title="Kéo để đổi chiều rộng bảng dữ liệu" style="flex: 0 0 7px; cursor: col-resize; background: #374151; border-left: 1px solid #111827; border-right: 1px solid #64748b; touch-action: none;"></div>
                             <div id="gnss-data-column" class="d-flex flex-column" style="width: 520px; flex: 0 0 520px; min-width: 380px; max-width: 75vw; background-color: var(--bs-dark); overflow: hidden; box-shadow: -5px 0 15px rgba(0,0,0,0.5);">
-                                <div class="p-2 bg-gradient-premium border-bottom border-secondary d-flex align-items-center justify-content-between">
-                                    <h6 class="mb-0 text-white font-monospace fw-bold"><i class="bi bi-table me-2 text-info"></i>Baseline Vectors</h6>
-                                    <span class="badge bg-primary text-uppercase" style="font-size: 0.65rem; letter-spacing: 1px;">Live Data</span>
-                                </div>
-                                 <div class="flex-grow-1 baseline-vectors-panel" style="overflow: auto; min-height: 100px;" id="gnss-data-panel">
-                                    <table class="table table-dark table-sm table-hover font-monospace mb-0 custom-premium-table" style="font-size: 0.75rem; white-space: nowrap;">
-                                        <thead>
-                                            <tr class="text-secondary align-middle">
-                                                <th class="ps-3 border-0">#</th>
-                                                <th class="border-0">From</th>
-                                                <th class="border-0">To</th>
-                                                <th class="border-0 text-end">dN(m)</th>
-                                                <th class="border-0 text-end">dE(m)</th>
-                                                <th class="border-0 text-end">dH(m)</th>
-                                                <th class="pe-3 border-0 text-end">Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="gnss-baseline-table-body" class="border-top-0"></tbody>
-                                     </table>
-                                 </div>
+                                <section class="gnss-workflow-panel flex-grow-1" id="gnss-data-panel" aria-label="Sơ đồ tiến trình bình sai">
+                                    <header class="gnss-workflow-header">
+                                        <div>
+                                            <span class="gnss-workflow-kicker"><i class="bi bi-stars me-1"></i> LIVE WORKFLOW</span>
+                                            <h6><i class="bi bi-diagram-3-fill"></i> Sơ đồ quy trình bình sai</h6>
+                                            <p id="gnss-workflow-current">Chưa bắt đầu</p>
+                                        </div>
+                                        <span class="gnss-workflow-live"><i></i> REAL-TIME</span>
+                                    </header>
+                                    <div class="gnss-workflow-progress" aria-hidden="true">
+                                        <span id="gnss-workflow-progress-bar"></span>
+                                    </div>
+                                    <div class="gnss-workflow-progress-meta">
+                                        <span>Tiến trình đã vẽ</span>
+                                        <strong id="gnss-workflow-progress-value">0/0 mốc</strong>
+                                    </div>
+                                    <div id="gnss-workflow-scroll" class="gnss-workflow-scroll">
+                                        <div id="gnss-workflow-map" class="gnss-workflow-map"></div>
+                                    </div>
+                                </section>
                                 <div id="gnss-debug-resizer" title="Kéo để đổi chiều cao Live Debug" style="height: 7px; flex: 0 0 7px; cursor: row-resize; background: #2c3440; border-top: 1px solid #4a5568; border-bottom: 1px solid #1a202c; touch-action: none; transition: background 0.2s;"></div>
                                 <div id="gnss-debug-section" class="bg-darker d-flex flex-column live-debug-panel" style="height: 280px; flex: 0 0 280px; min-height: 160px; overflow: hidden; position: relative;">
                                     <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-gradient-debug border-bottom border-secondary">
@@ -2857,15 +3297,15 @@ function setupEventListeners() {
                                     <div id="gnss-debug-summary" class="px-3 py-1 text-muted font-monospace border-bottom border-secondary" style="font-size: 0.72rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto; background: rgba(0,0,0,0.3);">WS: CONNECTING</div>
                                     <div id="gnss-debug-log" class="p-3 font-monospace flex-grow-1 text-light" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.8rem; line-height: 1.6;"></div>
                                 </div>
-                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium" style="display: none; position: relative;">
+                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium" style="display: none; position: relative; flex: 0 0 auto; max-height: min(34vh, 300px); overflow-y: auto;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
                                     <div class="text-light opacity-75 font-monospace mb-2" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>Time: <span id="adj-val-time"></span></div>
-                                    <div id="adj-points-list" class="mt-2 mb-3" style="max-height: 120px; overflow-y: auto;"></div>
-                                    <div class="text-end">
-                                        <button id="gnss-download-results-btn" class="btn btn-sm btn-success px-3 py-1 shadow-sm fw-bold" style="border-radius: 6px; letter-spacing: 0.5px;">
-                                            <i class="bi bi-cloud-arrow-down-fill me-2"></i>Tải dữ liệu
+                                    <div class="text-end mb-2">
+                                        <button id="gnss-download-results-btn" class="btn btn-sm btn-success w-100 px-3 py-2 shadow-sm fw-bold" style="border-radius: 7px; letter-spacing: 0.4px;">
+                                            <i class="bi bi-hourglass-split me-2"></i>Đang tạo file Excel...
                                         </button>
                                     </div>
+                                    <div id="adj-points-list" class="mt-2" style="max-height: 120px; overflow-y: auto;"></div>
                                 </div>
                             </div>
                         </div>
@@ -2998,6 +3438,7 @@ function setupEventListeners() {
                 return `HTTP ${response.status}`;
             }
         }
+        window.gnssBoardState?.fitToResult?.();
     }
 
         window.requestGnssAdjustment = async function(projectId, stationIds) {
@@ -3073,6 +3514,12 @@ function setupEventListeners() {
                     `Đã loại các trạm GNSS offline: ${startResult.skipped_offline_station_ids.join(', ')}.`,
                     'warning',
                 );
+                upsertGnssWorkflowNode('online-filter', {
+                    title: 'Lọc cụm GNSS đang hoạt động',
+                    detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm offline (ID ${startResult.skipped_offline_station_ids.join(', ')}); tiếp tục với ${gnssAdjustmentDebugState.expectedStationIds.length} rover online.`,
+                    status: 'warning',
+                    icon: 'bi-funnel',
+                });
             }
             setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
             addGnssAdjustmentDebug(
@@ -3082,6 +3529,8 @@ function setupEventListeners() {
                     : `HTTP ${res.status}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
                 'success',
             );
+            startGnssAdjustmentStatusPolling();
+            syncGnssAdjustmentStatus();
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);
@@ -4115,27 +4564,6 @@ function updateSidebarUI(data) {
             if (adjPointsList) {
                 adjPointsList.innerHTML = '';
                 
-                // Add Excel workbook download button
-                if (cacheData.excel_report_url) {
-                    const downloadXlsBtn = document.createElement('a');
-                    downloadXlsBtn.href = cacheData.excel_report_url;
-                    downloadXlsBtn.target = '_blank';
-                    downloadXlsBtn.className = 'btn btn-sm btn-outline-success w-100 mb-2 py-1';
-                    downloadXlsBtn.style.fontSize = '0.72rem';
-                    downloadXlsBtn.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1"></i> Tải báo cáo bình sai (Excel)';
-                    adjPointsList.appendChild(downloadXlsBtn);
-                }
-                // Add download report button
-                if (cacheData.report_file_url) {
-                    const downloadBtn = document.createElement('a');
-                    downloadBtn.href = cacheData.report_file_url;
-                    downloadBtn.target = '_blank';
-                    downloadBtn.className = 'btn btn-sm btn-outline-info w-100 mb-2 py-1';
-                    downloadBtn.style.fontSize = '0.72rem';
-                    downloadBtn.innerHTML = '<i class="bi bi-download me-1"></i> Tải báo cáo bình sai (JSON)';
-                    adjPointsList.appendChild(downloadBtn);
-                }
-                
                 if (cacheData.points) {
                     for (const [ptName, ptCoords] of Object.entries(cacheData.points)) {
                         const coordinates = getAdjustedPointCoordinates(ptCoords);
@@ -4153,6 +4581,7 @@ function updateSidebarUI(data) {
                     }
                 }
             }
+            window.gnssBoardState?.fitToResult?.();
         } else {
             if (adjResultsSection) adjResultsSection.style.display = 'none';
             if (adjPointsList) adjPointsList.innerHTML = '';

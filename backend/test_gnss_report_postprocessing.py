@@ -35,7 +35,7 @@ class FundamentalLoopReportTests(unittest.TestCase):
         self.assertAlmostEqual(loops[0]["observed_closure"], 0.01, places=12)
         self.assertAlmostEqual(loops[0]["adjusted_closure"], 0.0, places=12)
 
-    def test_parallel_baselines_form_two_edge_loop(self):
+    def test_parallel_baselines_do_not_form_a_geometric_loop(self):
         baselines = [
             baseline("BASE", "A", (2.0, 3.0, 4.0)),
             baseline("BASE", "A", (2.1, 3.0, 4.0), (2.0, 3.0, 4.0)),
@@ -43,10 +43,7 @@ class FundamentalLoopReportTests(unittest.TestCase):
 
         loops = _build_fundamental_loops(baselines)
 
-        self.assertEqual(len(loops), 1)
-        self.assertEqual(loops[0]["baseline_indices"], [1, 0])
-        self.assertAlmostEqual(loops[0]["observed_closure"], 0.1, places=12)
-        self.assertAlmostEqual(loops[0]["adjusted_closure"], 0.0, places=12)
+        self.assertEqual(loops, [])
 
     def test_tree_network_has_no_loop(self):
         self.assertEqual(

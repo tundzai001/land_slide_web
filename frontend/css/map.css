@@ -3270,6 +3270,272 @@ body {
     background-color: #0b0f19;
 }
 
+.gnss-workflow-panel {
+    --flow-accent: #53e0c1;
+    --flow-blue: #67b8ff;
+    min-height: 190px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: #e8f3f7;
+    background:
+        radial-gradient(circle at 88% 0%, rgba(55, 205, 185, 0.14), transparent 33%),
+        linear-gradient(155deg, #0d2029 0%, #09131b 62%, #080f17 100%);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.gnss-workflow-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px 12px;
+    flex: 0 0 auto;
+}
+
+.gnss-workflow-kicker {
+    display: block;
+    color: #73dbc9;
+    font: 700 0.62rem/1.2 var(--bs-font-monospace, monospace);
+    letter-spacing: 0.18em;
+    margin-bottom: 6px;
+}
+
+.gnss-workflow-header h6 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+    color: #f4fbff;
+}
+
+.gnss-workflow-header h6 i {
+    color: var(--flow-accent);
+    margin-right: 7px;
+}
+
+.gnss-workflow-header p {
+    max-width: 330px;
+    margin: 6px 0 0;
+    color: #91a9b6;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gnss-workflow-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: 0 0 auto;
+    border: 1px solid rgba(83, 224, 193, 0.28);
+    border-radius: 999px;
+    padding: 6px 9px;
+    color: #9debdc;
+    background: rgba(8, 27, 33, 0.74);
+    font: 700 0.58rem/1 var(--bs-font-monospace, monospace);
+    letter-spacing: 0.1em;
+}
+
+.gnss-workflow-live i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--flow-accent);
+    box-shadow: 0 0 0 4px rgba(83, 224, 193, 0.1), 0 0 12px rgba(83, 224, 193, 0.85);
+    animation: gnss-flow-pulse 1.8s ease-in-out infinite;
+}
+
+.gnss-workflow-progress {
+    height: 3px;
+    margin: 0 20px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.14);
+}
+
+.gnss-workflow-progress > span {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #3db8ff, var(--flow-accent));
+    box-shadow: 0 0 12px rgba(83, 224, 193, 0.55);
+    transition: width 0.45s cubic-bezier(.2, .8, .2, 1);
+}
+
+.gnss-workflow-progress-meta {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 20px 9px;
+    color: #6f8896;
+    font: 600 0.62rem/1.2 var(--bs-font-monospace, monospace);
+    letter-spacing: 0.04em;
+}
+
+.gnss-workflow-progress-meta strong {
+    color: #b7cbd4;
+    font-weight: 700;
+}
+
+.gnss-workflow-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 3px 18px 24px 16px;
+    scrollbar-gutter: stable;
+}
+
+.gnss-workflow-map {
+    max-width: 560px;
+    margin: 0 auto;
+}
+
+.gnss-flow-node {
+    --node-color: #67b8ff;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    position: relative;
+    animation: gnss-flow-enter 0.35s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.gnss-flow-node.is-branch {
+    margin-left: 18px;
+}
+
+.gnss-flow-node.status-success { --node-color: #53e0c1; }
+.gnss-flow-node.status-warning { --node-color: #f6c85f; }
+.gnss-flow-node.status-error { --node-color: #ff6b7a; }
+
+.gnss-flow-rail {
+    position: relative;
+    display: flex;
+    justify-content: center;
+}
+
+.gnss-flow-node:not(:last-child) .gnss-flow-rail::after {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    top: 31px;
+    bottom: -12px;
+    width: 2px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--node-color) 64%, transparent), rgba(89, 118, 132, 0.22));
+}
+
+.gnss-flow-marker {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    margin-top: 8px;
+    border: 1px solid color-mix(in srgb, var(--node-color) 55%, transparent);
+    border-radius: 10px;
+    color: var(--node-color);
+    background: #0a171f;
+    box-shadow: 0 0 0 5px rgba(8, 20, 27, 0.88), 0 0 18px color-mix(in srgb, var(--node-color) 18%, transparent);
+    font-size: 0.78rem;
+}
+
+.gnss-flow-node.status-running .gnss-flow-marker::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border: 1px solid color-mix(in srgb, var(--node-color) 50%, transparent);
+    border-radius: 13px;
+    animation: gnss-flow-ring 1.65s ease-out infinite;
+}
+
+.gnss-flow-card {
+    position: relative;
+    min-width: 0;
+    margin: 0 0 12px;
+    padding: 11px 13px 10px;
+    border: 1px solid rgba(125, 157, 171, 0.14);
+    border-radius: 12px;
+    background: linear-gradient(145deg, rgba(24, 45, 55, 0.82), rgba(11, 25, 34, 0.9));
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.15);
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gnss-flow-node.status-running .gnss-flow-card {
+    border-color: color-mix(in srgb, var(--node-color) 42%, transparent);
+    box-shadow: 0 9px 28px rgba(0, 0, 0, 0.22), inset 3px 0 0 color-mix(in srgb, var(--node-color) 75%, transparent);
+}
+
+.gnss-flow-node.status-error .gnss-flow-card {
+    border-color: rgba(255, 107, 122, 0.42);
+    background: linear-gradient(145deg, rgba(72, 28, 39, 0.72), rgba(28, 17, 25, 0.92));
+}
+
+.gnss-flow-card:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--node-color) 46%, transparent);
+}
+
+.gnss-flow-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 5px;
+}
+
+.gnss-flow-step,
+.gnss-flow-status {
+    font: 700 0.57rem/1.2 var(--bs-font-monospace, monospace);
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.gnss-flow-step { color: #748f9c; }
+.gnss-flow-status { color: var(--node-color); }
+
+.gnss-flow-card h6 {
+    margin: 0;
+    color: #ecf7fa;
+    font-size: 0.82rem;
+    font-weight: 720;
+    line-height: 1.3;
+}
+
+.gnss-flow-card p {
+    margin: 5px 44px 0 0;
+    color: #8fa8b4;
+    font-size: 0.68rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.gnss-flow-card time {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    color: #59717e;
+    font: 600 0.57rem/1 var(--bs-font-monospace, monospace);
+}
+
+@keyframes gnss-flow-enter {
+    from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes gnss-flow-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.48; transform: scale(0.76); }
+}
+
+@keyframes gnss-flow-ring {
+    0% { opacity: 0.7; transform: scale(0.8); }
+    75%, 100% { opacity: 0; transform: scale(1.2); }
+}
+
 .custom-premium-table {
     border-collapse: separate;
     border-spacing: 0;
@@ -3296,22 +3562,57 @@ body {
     background-color: rgba(13, 202, 240, 0.08) !important;
 }
 
-.baseline-vectors-panel::-webkit-scrollbar,
+.gnss-workflow-scroll::-webkit-scrollbar,
 .live-debug-panel #gnss-debug-log::-webkit-scrollbar {
     width: 6px;
     height: 6px;
 }
-.baseline-vectors-panel::-webkit-scrollbar-track,
+.gnss-workflow-scroll::-webkit-scrollbar-track,
 .live-debug-panel #gnss-debug-log::-webkit-scrollbar-track {
     background: rgba(0, 0, 0, 0.2);
 }
-.baseline-vectors-panel::-webkit-scrollbar-thumb,
+.gnss-workflow-scroll::-webkit-scrollbar-thumb,
 .live-debug-panel #gnss-debug-log::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
     border-radius: 4px;
 }
-.baseline-vectors-panel::-webkit-scrollbar-thumb:hover,
+.gnss-workflow-scroll::-webkit-scrollbar-thumb:hover,
 .live-debug-panel #gnss-debug-log::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.4);
+}
+
+@media (max-width: 900px) {
+    #gnssTerminalModal .modal-dialog {
+        max-width: calc(100vw - 12px) !important;
+        margin: 6px auto;
+    }
+
+    #gnssTerminalModal .modal-content {
+        height: calc(100vh - 12px) !important;
+    }
+
+    #gnssTerminalModal .modal-body {
+        flex-direction: column !important;
+        overflow-y: auto !important;
+    }
+
+    #gnss-board-container {
+        width: 100% !important;
+        min-height: 38vh;
+        flex: 0 0 38vh !important;
+    }
+
+    #gnss-column-resizer {
+        display: none;
+    }
+
+    #gnss-data-column {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        flex: 1 0 60vh !important;
+    }
+
+    .gnss-flow-node.is-branch { margin-left: 7px; }
 }
 

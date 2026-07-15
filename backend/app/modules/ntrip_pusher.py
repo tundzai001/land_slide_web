@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from typing import Dict
 
@@ -109,6 +110,30 @@ class NtripPusher:
         self._sent_frame_batches = 0
         self._sent_bytes = 0
         self._caster_response = None
+        self._last_gga_fix_quality: int | None = None
+        self._last_gga_satellites: int | None = None
+        self._last_gga_preview: str | None = None
+
+    def observe_gnss_chunk(self, data: bytes) -> None:
+        """Capture actionable receiver health from mixed GNSS MQTT payloads."""
+
+        text = bytes(data).decode("ascii", errors="ignore")
+        matches = re.findall(r"\$(?:GN|GP|GA|GB)GGA,[^\r\n*]*", text, flags=re.IGNORECASE)
+        if not matches:
+            return
+        sentence = matches[-1]
+        fields = sentence.split(",")
+        if len(fields) < 8:
+            return
+        try:
+            self._last_gga_fix_quality = int(fields[6]) if fields[6] else None
+        except ValueError:
+            self._last_gga_fix_quality = None
+        try:
+            self._last_gga_satellites = int(fields[7]) if fields[7] else None
+        except ValueError:
+            self._last_gga_satellites = None
+        self._last_gga_preview = sentence[:160]
 
     async def _push_loop(self):
         reader = None
@@ -226,6 +251,9 @@ class NtripPusher:
             "queued_frame_batches": self._queued_frame_batches,
             "sent_frame_batches": self._sent_frame_batches,
             "sent_bytes": self._sent_bytes,
+            "last_gga_fix_quality": self._last_gga_fix_quality,
+            "last_gga_satellites": self._last_gga_satellites,
+            "last_gga_preview": self._last_gga_preview,
             "first_chunk_hex": self._first_chunk_hex,
             "last_chunk_hex": self._last_chunk_hex,
             "last_chunk_age_s": (
@@ -237,6 +265,17 @@ class NtripPusher:
         })
         if result["mqtt_chunks"] == 0:
             result["likely_cause"] = "no MQTT payload reached the pusher for this station"
+        elif result["d3_preambles"] == 0 and result["last_gga_fix_quality"] == 0:
+            satellite_detail = (
+                f", satellites={result['last_gga_satellites']}"
+                if result["last_gga_satellites"] is not None
+                else ""
+            )
+            result["likely_cause"] = (
+                "receiver emitted GGA with no GNSS fix (quality=0"
+                f"{satellite_detail}) and no RTCM3; verify antenna/satellite "
+                "visibility plus the station COM2-to-MQTT binary mapping"
+            )
         elif result["d3_preambles"] == 0:
             result["likely_cause"] = "MQTT payloads arrived but contained no RTCM3 0xD3 preamble"
         elif result["valid_frames"] == 0 and result["crc_failures"]:
@@ -301,6 +340,7 @@ class NtripPusherManager:
                     if pusher._first_chunk_hex is None:
                         pusher._first_chunk_hex = sample_hex
                     pusher._last_chunk_hex = sample_hex
+                    pusher.observe_gnss_chunk(data)
                     # GNSS MQTT payloads also contain GGA/AGRICA text.  An
                     # NTRIP source must forward only complete RTCM3 frames.
                     rtcm_data = pusher._rtcm_filter.feed(data)

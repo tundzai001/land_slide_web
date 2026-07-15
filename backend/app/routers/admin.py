@@ -1219,7 +1219,8 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             "averaged_baselines", "independent_loops", "degrees_of_freedom",
                             "variance_factor", "reference_std_m0", "weighted_residual_sum",
                             "max_normalized_residual", "global_variance_test_passed",
-                            "json_report_url", "excel_report_url", "payload_json",
+                            "excel_report_url", "audit_json_url",
+                            "payload_json",
                         ]
                         for key, item in unique_adjustments.items():
                             payload = item["payload"]
@@ -1274,7 +1275,8 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                 len(payload.get("loops") or []), quality.get("degrees_of_freedom"),
                                 quality.get("variance_factor"), quality.get("reference_standard_deviation"),
                                 quality.get("weighted_residual_sum"), quality.get("max_standardized_residual"),
-                                global_test.get("passed"), payload.get("report_file_url"), excel_url,
+                                global_test.get("passed"), excel_url,
+                                payload.get("audit_json_url"),
                                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                             ])
 

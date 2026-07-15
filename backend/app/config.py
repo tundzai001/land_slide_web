@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     NTRIP_SOURCE_HOST: str = "aitogy.click"
     NTRIP_SOURCE_PORT: int = 2101
     NTRIP_SOURCE_PASSWORD: str = "12345"
+    # Login/API credentials of the WEB CORS dashboard (cors.aitogy.com).
+    # These are not NTRIP/Caster usernames or mountpoint passwords.
+    WEB_CORS_API_BASE_URL: str = "https://cors.aitogy.com"
+    WEB_CORS_API_TOKEN: str = ""
+    WEB_CORS_API_USERNAME: str = ""
+    WEB_CORS_API_PASSWORD: str = ""
 
     SAVE_INTERVAL_DEFAULT: int = 60
     SAVE_INTERVAL_GNSS: int = 1

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+from scipy.stats import chi2
 
 from .gnss_adjustment.models import Baseline, Network, NetworkError, Point
 from .gnss_adjustment.solver import adjust_network
@@ -37,7 +38,9 @@ class AgricaObservation:
     epoch_ts: int
     position_type: Optional[int]
     baseline_neu: tuple[float, float, float]
+    std_neu_raw: tuple[Optional[float], Optional[float], Optional[float]]
     std_neu: tuple[float, float, float]
+    rover_position_std_ecef_raw: Optional[tuple[float, float, float]]
     rover_position_std_ecef: Optional[tuple[float, float, float]]
     rover_llh: Optional[tuple[float, float, float]]
     rover_ecef: Optional[tuple[float, float, float]]
@@ -144,14 +147,22 @@ def parse_agrica(
         if base_lat is not None and base_lon is not None and base_alt is not None:
             base_llh = (base_lat, base_lon, base_alt)
             
+        rover_position_std_ecef_raw = None
         rover_position_std_ecef = None
         std_x, std_y, std_z = _safe_float(parts[38]), _safe_float(parts[39]), _safe_float(parts[40])
         if std_x is not None and std_y is not None and std_z is not None:
+            rover_position_std_ecef_raw = (float(std_x), float(std_y), float(std_z))
             rover_position_std_ecef = (
                 _positive_std(std_x),
                 _positive_std(std_y),
                 _positive_std(std_z),
             )
+
+        std_neu_raw = (
+            _safe_float(parts[16]),
+            _safe_float(parts[17]),
+            _safe_float(parts[18]),
+        )
 
         observations.append(AgricaObservation(
             project_id=int(project_id),
@@ -160,11 +171,13 @@ def parse_agrica(
             epoch_ts=epoch_ts,
             position_type=_safe_int(parts[8]),
             baseline_neu=(float(baseline_n), float(baseline_e), float(baseline_u)),
+            std_neu_raw=std_neu_raw,
             std_neu=(
-                _positive_std(_safe_float(parts[16])),
-                _positive_std(_safe_float(parts[17])),
-                _positive_std(_safe_float(parts[18])),
+                _positive_std(std_neu_raw[0]),
+                _positive_std(std_neu_raw[1]),
+                _positive_std(std_neu_raw[2]),
             ),
+            rover_position_std_ecef_raw=rover_position_std_ecef_raw,
             rover_position_std_ecef=rover_position_std_ecef,
             rover_llh=rover_llh,
             rover_ecef=rover_ecef,
@@ -180,7 +193,9 @@ def parse_agrica(
                 "velocity_up_std": _safe_float(parts[28]),
                 "diff_age": _safe_float(parts[48]) if len(parts) > 48 else None,
                 "undulation": _safe_float(parts[50]) if len(parts) > 50 else None,
-                "rover_position_std_ecef": rover_position_std_ecef,
+                "baseline_std_neu_raw": std_neu_raw,
+                "rover_position_std_ecef_raw": rover_position_std_ecef_raw,
+                "rover_position_std_ecef_used": rover_position_std_ecef,
             }
         ))
     return observations
@@ -484,6 +499,47 @@ class AgricaAdjustmentRuntime:
             "message": f"Hoàn tất tính toán! Cập nhật toạ độ chuẩn cho {len(final_adjusted_points)} Rovers."
         })
 
+        network_quality_test = None
+        stochastic_model_test = None
+        if result.global_test:
+            statistic = float(result.global_test.statistic)
+            significance = float(result.global_test.significance_level)
+            upper_critical = float(
+                chi2.ppf(1.0 - significance, result.degrees_of_freedom)
+            )
+            network_passed = statistic <= upper_critical
+            network_quality_test = {
+                "method": "UPPER_TAIL_NETWORK_QUALITY",
+                "statistic": statistic,
+                "upper_critical_value": upper_critical,
+                "p_value": float(chi2.sf(statistic, result.degrees_of_freedom)),
+                "p_value_tail": "UPPER",
+                "significance_level": significance,
+                "passed": network_passed,
+                "applicable": True,
+                "approximate": False,
+                "conclusion": (
+                    "PASSED" if network_passed else "FAILED_HIGH_RESIDUAL"
+                ),
+            }
+            if statistic < result.global_test.lower_critical_value:
+                stochastic_status = "CONSERVATIVE_WEIGHTS"
+            elif statistic > result.global_test.upper_critical_value:
+                stochastic_status = "OPTIMISTIC_WEIGHTS_OR_MODEL_ERROR"
+            else:
+                stochastic_status = "CONSISTENT"
+            stochastic_model_test = {
+                "method": "TWO_SIDED_MODEL_CALIBRATION",
+                "statistic": statistic,
+                "lower_critical_value": result.global_test.lower_critical_value,
+                "upper_critical_value": result.global_test.upper_critical_value,
+                "p_value": result.global_test.p_value,
+                "significance_level": significance,
+                "within_expected_range": result.global_test.passed,
+                "status": stochastic_status,
+                "approximate": False,
+            }
+
         return {
             "type": "gnss_adjusted",
             "steps": steps_list,
@@ -516,16 +572,8 @@ class AgricaAdjustmentRuntime:
                 "rank": result.rank,
                 "condition_number": result.condition_number,
                 "max_standardized_residual": result.max_standardized_residual,
-                "global_test": (
-                    {
-                        "statistic": result.global_test.statistic,
-                        "lower_critical_value": result.global_test.lower_critical_value,
-                        "upper_critical_value": result.global_test.upper_critical_value,
-                        "p_value": result.global_test.p_value,
-                        "passed": result.global_test.passed,
-                    }
-                    if result.global_test else None
-                ),
+                "global_test": network_quality_test,
+                "stochastic_model_test": stochastic_model_test,
                 "residual_flags": [
                     {
                         "from": flag.from_point,

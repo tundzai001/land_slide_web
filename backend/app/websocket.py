@@ -10,6 +10,8 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 class ConnectionManager:
+    SEND_TIMEOUT_SECONDS = 2.0
+
     def __init__(self):
         self.active_connections: List[WebSocket] = []
         
@@ -126,17 +128,27 @@ class ConnectionManager:
         await self._send_to_all(batch_payload)
 
     async def _send_to_all(self, message: dict):
-        """Gửi message tới tất cả client"""
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"❌ WS send error: {e}")
-                disconnected.append(connection)
-        
-        for conn in disconnected:
-            self.disconnect(conn)
+        """Fan out concurrently; one dead browser must never block server work."""
+        connections = tuple(self.active_connections)
+        if not connections:
+            return
+
+        async def send_one(connection: WebSocket):
+            await asyncio.wait_for(
+                connection.send_json(message),
+                timeout=self.SEND_TIMEOUT_SECONDS,
+            )
+
+        results = await asyncio.gather(
+            *(send_one(connection) for connection in connections),
+            return_exceptions=True,
+        )
+        for connection, result in zip(connections, results):
+            if not isinstance(result, BaseException):
+                continue
+            detail = str(result).strip() or result.__class__.__name__
+            logger.warning("WebSocket client removed after send failure: %s", detail)
+            self.disconnect(connection)
 
 # Khởi tạo instance global
 manager = ConnectionManager()
