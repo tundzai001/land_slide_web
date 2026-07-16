@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import numpy as np
@@ -25,6 +25,29 @@ _ESS_MAX_CONTIGUOUS_GAP_SECONDS = 5
 _BASELINE_STD_REJECTION_THRESHOLD_M = 0.1
 
 
+def _spd_solve(matrix: Any, right_hand_side: Any) -> np.ndarray:
+    """Solve a symmetric positive-definite system without forming an inverse."""
+
+    covariance = np.asarray(matrix, dtype=float)
+    covariance = 0.5 * (covariance + covariance.T)
+    if covariance.shape != (3, 3) or not np.all(np.isfinite(covariance)):
+        raise ValueError("covariance must be a finite 3x3 matrix")
+    minimum_eigenvalue = float(np.min(np.linalg.eigvalsh(covariance)))
+    if minimum_eigenvalue <= np.finfo(float).eps:
+        raise ValueError(
+            "covariance is not positive definite; "
+            f"minimum eigenvalue={minimum_eigenvalue:.3e}"
+        )
+    cholesky = np.linalg.cholesky(covariance)
+    intermediate = np.linalg.solve(cholesky, np.asarray(right_hand_side, dtype=float))
+    return np.linalg.solve(cholesky.T, intermediate)
+
+
+def _formal_covariance_from_precision(precision_sum: Any) -> np.ndarray:
+    covariance = _spd_solve(precision_sum, np.eye(3, dtype=float))
+    return 0.5 * (covariance + covariance.T)
+
+
 def _rolling_mean_stability(
     samples: Iterable[tuple[int, Iterable[float]]],
     *,
@@ -33,6 +56,14 @@ def _rolling_mean_stability(
     max_sample_gap_seconds: int = 5,
     horizontal_component_limit_m: float = 0.003,
     up_component_limit_m: float = 0.005,
+    horizontal_std_limit_m: float = 0.010,
+    up_std_limit_m: float = 0.015,
+    horizontal_slope_limit_mps: float = 0.001,
+    up_slope_limit_mps: float = 0.002,
+    ewma_fast_tau_seconds: float = 3.0,
+    ewma_slow_tau_seconds: float = 30.0,
+    ewma_horizontal_limit_m: float = 0.008,
+    ewma_up_limit_m: float = 0.015,
 ) -> dict:
     """Compare two consecutive time-based baseline-mean windows.
 
@@ -67,14 +98,38 @@ def _rolling_mean_stability(
         "max_sample_gap_seconds": max_sample_gap_seconds,
         "horizontal_component_limit_m": float(horizontal_component_limit_m),
         "up_component_limit_m": float(up_component_limit_m),
+        "horizontal_std_limit_m": float(horizontal_std_limit_m),
+        "up_std_limit_m": float(up_std_limit_m),
+        "horizontal_slope_limit_mps": float(horizontal_slope_limit_mps),
+        "up_slope_limit_mps": float(up_slope_limit_mps),
         "delta_neu_m": None,
         "delta_3d_m": None,
+        "previous_window_std_neu_m": None,
+        "recent_window_std_neu_m": None,
+        "previous_window_slope_neu_mps": None,
+        "recent_window_slope_neu_mps": None,
+        "ewma_delta_neu_m": None,
+        "ewma_transition_detected": False,
         "latest_epoch": ordered[-1][0] if ordered else None,
         "stable_run_start_epoch": None,
         "stable_run_seconds": 0,
     }
     if len(ordered) < min_samples_per_window * 2:
         return result
+
+    def window_statistics(rows: list[tuple[int, np.ndarray]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        epochs = np.asarray([epoch for epoch, _vector in rows], dtype=float)
+        vectors = np.vstack([vector for _epoch, vector in rows])
+        mean = np.mean(vectors, axis=0)
+        std = np.std(vectors, axis=0, ddof=1) if len(rows) > 1 else np.zeros(3)
+        centered_time = epochs - float(np.mean(epochs))
+        denominator = float(centered_time @ centered_time)
+        slope = (
+            centered_time @ (vectors - mean) / denominator
+            if denominator > np.finfo(float).eps
+            else np.zeros(3)
+        )
+        return mean, std, np.asarray(slope, dtype=float)
 
     def diagnostic_at(end_index: int) -> Optional[dict]:
         end_epoch = int(ordered[end_index][0])
@@ -96,18 +151,41 @@ def _rolling_mean_stability(
             or len(recent) < min_samples_per_window
         ):
             return None
-        previous_mean = np.mean(np.vstack([vector for _epoch, vector in previous]), axis=0)
-        recent_mean = np.mean(np.vstack([vector for _epoch, vector in recent]), axis=0)
+        previous_mean, previous_std, previous_slope = window_statistics(previous)
+        recent_mean, recent_std, recent_slope = window_statistics(recent)
         delta = recent_mean - previous_mean
-        stable = bool(
+        mean_stable = bool(
             abs(float(delta[0])) <= horizontal_component_limit_m
             and abs(float(delta[1])) <= horizontal_component_limit_m
             and abs(float(delta[2])) <= up_component_limit_m
         )
+        scatter_stable = bool(
+            max(abs(float(previous_std[0])), abs(float(recent_std[0])))
+            <= horizontal_std_limit_m
+            and max(abs(float(previous_std[1])), abs(float(recent_std[1])))
+            <= horizontal_std_limit_m
+            and max(abs(float(previous_std[2])), abs(float(recent_std[2])))
+            <= up_std_limit_m
+        )
+        slope_stable = bool(
+            max(abs(float(previous_slope[0])), abs(float(recent_slope[0])))
+            <= horizontal_slope_limit_mps
+            and max(abs(float(previous_slope[1])), abs(float(recent_slope[1])))
+            <= horizontal_slope_limit_mps
+            and max(abs(float(previous_slope[2])), abs(float(recent_slope[2])))
+            <= up_slope_limit_mps
+        )
         return {
-            "stable": stable,
+            "stable": mean_stable and scatter_stable and slope_stable,
+            "mean_stable": mean_stable,
+            "scatter_stable": scatter_stable,
+            "slope_stable": slope_stable,
             "delta_neu_m": tuple(float(value) for value in delta),
             "delta_3d_m": float(np.linalg.norm(delta)),
+            "previous_window_std_neu_m": tuple(float(value) for value in previous_std),
+            "recent_window_std_neu_m": tuple(float(value) for value in recent_std),
+            "previous_window_slope_neu_mps": tuple(float(value) for value in previous_slope),
+            "recent_window_slope_neu_mps": tuple(float(value) for value in recent_slope),
             "previous_window_start_epoch": previous[0][0],
             "previous_window_end_epoch": previous[-1][0],
             "previous_window_sample_count": len(previous),
@@ -143,7 +221,28 @@ def _rolling_mean_stability(
 
     if latest_diagnostic is None:
         return result
+
+    fast_mean = ordered[0][1].astype(float, copy=True)
+    slow_mean = ordered[0][1].astype(float, copy=True)
+    previous_epoch = int(ordered[0][0])
+    for epoch, vector in ordered[1:]:
+        dt = max(0.0, float(int(epoch) - previous_epoch))
+        alpha_fast = 1.0 - math.exp(-dt / max(float(ewma_fast_tau_seconds), 1e-6))
+        alpha_slow = 1.0 - math.exp(-dt / max(float(ewma_slow_tau_seconds), 1e-6))
+        fast_mean += alpha_fast * (vector - fast_mean)
+        slow_mean += alpha_slow * (vector - slow_mean)
+        previous_epoch = int(epoch)
+    ewma_delta = fast_mean - slow_mean
+    ewma_transition = bool(
+        abs(float(ewma_delta[0])) > ewma_horizontal_limit_m
+        or abs(float(ewma_delta[1])) > ewma_horizontal_limit_m
+        or abs(float(ewma_delta[2])) > ewma_up_limit_m
+    )
     result.update(latest_diagnostic)
+    result["ewma_delta_neu_m"] = tuple(float(value) for value in ewma_delta)
+    result["ewma_transition_detected"] = ewma_transition
+    result["ewma_fast_tau_seconds"] = float(ewma_fast_tau_seconds)
+    result["ewma_slow_tau_seconds"] = float(ewma_slow_tau_seconds)
     result["latest_epoch"] = latest_diagnostic_epoch
     result["enough_samples"] = True
     if result["stable"] and stable_run_start_epoch is not None:
@@ -165,11 +264,12 @@ def _rolling_drift_exceeds_abort_limits(
     delta = diagnostic.get("delta_neu_m")
     if not diagnostic.get("enough_samples") or not delta or len(delta) != 3:
         return False
-    return bool(
+    rolling_exceeded = bool(
         abs(float(delta[0])) > horizontal_component_limit_m
         or abs(float(delta[1])) > horizontal_component_limit_m
         or abs(float(delta[2])) > up_component_limit_m
     )
+    return rolling_exceeded or bool(diagnostic.get("ewma_transition_detected"))
 
 
 def _ar1_effective_sample_size(sample_count: int, lag_one_correlation: float) -> float:
@@ -343,6 +443,123 @@ class _CollectedObservation:
     solver_eligible: bool = True
     quality_flags: tuple[str, ...] = ()
     source_diagnostic: Optional[str] = None
+
+
+@dataclass
+class _InformationAccumulator:
+    """Mergeable online baseline state; formal covariance is never published directly."""
+
+    count: int = 0
+    first_epoch: Optional[int] = None
+    last_epoch: Optional[int] = None
+    precision_sum: np.ndarray = field(
+        default_factory=lambda: np.zeros((3, 3), dtype=float)
+    )
+    information_sum: np.ndarray = field(
+        default_factory=lambda: np.zeros(3, dtype=float)
+    )
+    recent_blocks: Dict[int, dict] = field(default_factory=dict)
+    fast_ewma: Optional[np.ndarray] = None
+    slow_ewma: Optional[np.ndarray] = None
+
+    def add(
+        self,
+        epoch: int,
+        vector: Iterable[float],
+        covariance: Any,
+        *,
+        fast_tau_seconds: float,
+        slow_tau_seconds: float,
+        retention_seconds: int,
+    ) -> None:
+        epoch = int(epoch)
+        value = np.asarray(tuple(vector), dtype=float)
+        if value.shape != (3,) or not np.all(np.isfinite(value)):
+            raise ValueError("baseline vector must contain three finite values")
+        precision = _spd_solve(covariance, np.eye(3, dtype=float))
+        self.precision_sum += precision
+        self.information_sum += precision @ value
+        previous_epoch = self.last_epoch
+        self.count += 1
+        self.first_epoch = epoch if self.first_epoch is None else min(self.first_epoch, epoch)
+        self.last_epoch = epoch if self.last_epoch is None else max(self.last_epoch, epoch)
+
+        if self.fast_ewma is None:
+            self.fast_ewma = value.copy()
+            self.slow_ewma = value.copy()
+        else:
+            dt = max(0.0, float(epoch - int(previous_epoch or epoch)))
+            alpha_fast = 1.0 - math.exp(-dt / max(float(fast_tau_seconds), 1e-6))
+            alpha_slow = 1.0 - math.exp(-dt / max(float(slow_tau_seconds), 1e-6))
+            self.fast_ewma += alpha_fast * (value - self.fast_ewma)
+            self.slow_ewma += alpha_slow * (value - self.slow_ewma)
+
+        block = self.recent_blocks.setdefault(epoch, {
+            "count": 0,
+            "sum": np.zeros(3, dtype=float),
+            "sum_outer": np.zeros((3, 3), dtype=float),
+            "precision_sum": np.zeros((3, 3), dtype=float),
+            "information_sum": np.zeros(3, dtype=float),
+        })
+        block["count"] += 1
+        block["sum"] += value
+        block["sum_outer"] += np.outer(value, value)
+        block["precision_sum"] += precision
+        block["information_sum"] += precision @ value
+        cutoff = epoch - max(1, int(retention_seconds))
+        for expired_epoch in [item for item in self.recent_blocks if item < cutoff]:
+            self.recent_blocks.pop(expired_epoch, None)
+
+    @property
+    def mean(self) -> Optional[np.ndarray]:
+        if self.count <= 0:
+            return None
+        return np.linalg.solve(self.precision_sum, self.information_sum)
+
+    @property
+    def formal_covariance(self) -> Optional[np.ndarray]:
+        if self.count <= 0:
+            return None
+        return _formal_covariance_from_precision(self.precision_sum)
+
+    def recent_samples(self) -> list[tuple[int, tuple[float, float, float]]]:
+        return [
+            (
+                epoch,
+                tuple(float(value) for value in block["sum"] / block["count"]),
+            )
+            for epoch, block in sorted(self.recent_blocks.items())
+            if int(block["count"]) > 0
+        ]
+
+    def audit_snapshot(self) -> dict:
+        mean = self.mean
+        formal_covariance = self.formal_covariance
+        return {
+            "count": self.count,
+            "first_epoch": self.first_epoch,
+            "last_epoch": self.last_epoch,
+            "duration_seconds": (
+                int(self.last_epoch) - int(self.first_epoch)
+                if self.first_epoch is not None and self.last_epoch is not None else 0
+            ),
+            "weighted_mean_neu": (
+                tuple(float(value) for value in mean) if mean is not None else None
+            ),
+            "formal_covariance_neu": (
+                tuple(tuple(float(value) for value in row) for row in formal_covariance)
+                if formal_covariance is not None else None
+            ),
+            "fast_ewma_neu": (
+                tuple(float(value) for value in self.fast_ewma)
+                if self.fast_ewma is not None else None
+            ),
+            "slow_ewma_neu": (
+                tuple(float(value) for value in self.slow_ewma)
+                if self.slow_ewma is not None else None
+            ),
+            "recent_second_block_count": len(self.recent_blocks),
+        }
 
 
 @dataclass
@@ -692,6 +909,12 @@ class RoundRobinAdjustmentManager:
     STABILITY_MAX_SAMPLE_GAP_SECONDS = 5
     STABILITY_HORIZONTAL_COMPONENT_LIMIT_M = 0.003
     STABILITY_UP_COMPONENT_LIMIT_M = 0.005
+    STABILITY_HORIZONTAL_STD_LIMIT_M = 0.010
+    STABILITY_UP_STD_LIMIT_M = 0.015
+    STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS = 0.001
+    STABILITY_UP_SLOPE_LIMIT_MPS = 0.002
+    STABILITY_EWMA_FAST_TAU_SECONDS = 3.0
+    STABILITY_EWMA_SLOW_TAU_SECONDS = 30.0
     STABILITY_HOLD_SECONDS = 10
     # Once a solver window is open, use a wider abort envelope and require
     # repeated receiver epochs outside it. This prevents a 0.1 mm boundary
@@ -770,7 +993,8 @@ class RoundRobinAdjustmentManager:
         self._web_cors_access_token = str(web_cors_api_token or "").strip()
         self.web_cors_api_username = str(web_cors_api_username or "").strip()
         self.web_cors_api_password = str(web_cors_api_password or "")
-        self._cors_fixed_base_snapshots: Dict[tuple[str, str], Dict[str, Any]] = {}
+        self._cors_fixed_base_snapshots: Dict[tuple[Any, ...], Dict[str, Any]] = {}
+        self._cors_failover_last_state: Dict[tuple[Any, ...], str] = {}
         self.route_start_callback = route_start_callback
         self.route_stop_callback = route_stop_callback
         self.result_callback = result_callback
@@ -983,6 +1207,7 @@ class RoundRobinAdjustmentManager:
             "active_bases": {},
             "seed_collection_steps": set(),
             "seed_window_states": {},
+            "online_baseline_states": {},
             "seed_started_monotonic": time.monotonic(),
         }
 
@@ -998,6 +1223,63 @@ class RoundRobinAdjustmentManager:
     def update_rover_llh(self, station_code: str, lat: float, lon: float, alt: float) -> None:
         if station_code:
             self.rover_llh_cache[station_code] = {"lat": lat, "lon": lon, "alt": alt}
+
+    @staticmethod
+    def _online_baseline_key(
+        cluster_index: int,
+        base_name: str,
+        rover_name: str,
+    ) -> tuple[int, str, str]:
+        return (
+            int(cluster_index),
+            str(base_name).casefold(),
+            str(rover_name).casefold(),
+        )
+
+    def _reset_online_baseline_states(
+        self,
+        session: dict,
+        cluster_index: int,
+        base_name: str,
+    ) -> None:
+        prefix = (int(cluster_index), str(base_name).casefold())
+        states = session.setdefault("online_baseline_states", {})
+        for key in [key for key in states if key[:2] == prefix]:
+            states.pop(key, None)
+
+    def _update_online_baseline_state(
+        self,
+        session: dict,
+        cluster_index: int,
+        base_name: str,
+        observation: Any,
+    ) -> None:
+        key = self._online_baseline_key(
+            cluster_index,
+            base_name,
+            observation.rover_name,
+        )
+        state = session.setdefault("online_baseline_states", {}).setdefault(
+            key,
+            _InformationAccumulator(),
+        )
+        standard_deviation = np.asarray(observation.std_neu, dtype=float)
+        covariance = np.diag(np.maximum(
+            standard_deviation * standard_deviation,
+            np.finfo(float).eps,
+        ))
+        state.add(
+            int(observation.epoch_ts),
+            observation.baseline_neu,
+            covariance,
+            fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+            slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+            retention_seconds=(
+                2 * self.STABILITY_WINDOW_SECONDS
+                + self.STABILITY_HOLD_SECONDS
+                + self.STABILITY_MAX_SAMPLE_GAP_SECONDS
+            ),
+        )
 
     def _update_rover_llh_from_observation(self, observation: Any) -> None:
         """Cache an ellipsoidal temporary-base coordinate from AGRICA.
@@ -1219,6 +1501,12 @@ class RoundRobinAdjustmentManager:
                     self._update_rover_llh_from_observation(observation)
                 continue
             valid_observations.append(observation)
+            self._update_online_baseline_state(
+                session,
+                cluster_index,
+                active_base,
+                observation,
+            )
             accepted_diagnostics.append(base_diagnostic)
             if active_base == "BASE":
                 # Count GNSS epochs, not server wall-clock seconds. MQTT can
@@ -1322,6 +1610,15 @@ class RoundRobinAdjustmentManager:
                     epoch,
                     tuple(float(value) for value in record.observation.baseline_neu),
                 ))
+            online_states = session.setdefault("online_baseline_states", {})
+            for station_id, rover_code in zip(
+                cluster["stations"], cluster["rovers"], strict=True
+            ):
+                online_state = online_states.get(self._online_baseline_key(
+                    index, "BASE", rover_code
+                ))
+                if online_state is not None:
+                    vectors_by_station[int(station_id)] = online_state.recent_samples()
 
             expected = set(cluster["stations"])
             observed = set(epochs_by_station)
@@ -1360,6 +1657,18 @@ class RoundRobinAdjustmentManager:
                         self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
                     ),
                     up_component_limit_m=self.STABILITY_UP_COMPONENT_LIMIT_M,
+                    horizontal_std_limit_m=self.STABILITY_HORIZONTAL_STD_LIMIT_M,
+                    up_std_limit_m=self.STABILITY_UP_STD_LIMIT_M,
+                    horizontal_slope_limit_mps=(
+                        self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
+                    ),
+                    up_slope_limit_mps=self.STABILITY_UP_SLOPE_LIMIT_MPS,
+                    ewma_fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                    ewma_slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                    ewma_horizontal_limit_m=(
+                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                    ),
+                    ewma_up_limit_m=self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
                 )
                 for station_id in expected
             }
@@ -1429,6 +1738,23 @@ class RoundRobinAdjustmentManager:
                         int(state.get("drift_failure_count") or 0) + 1
                         if abort_exceeded else 0
                     )
+                if (
+                    state["open"]
+                    and int(state.get("drift_failure_count") or 0)
+                    >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
+                ):
+                    quarantine_seed_window(
+                        station_id,
+                        int(state.get("solver_start_index") or 0),
+                        "EXCLUDE_STABILITY_LOST",
+                        "Fixed-BASE solver session lost stationarity according to "
+                        "the rolling-window/EWMA abort envelope; the complete "
+                        "60-second session was reset.",
+                    )
+                    state["solver_start_index"] = len(cluster["observations"])
+                    state["reset_count"] = int(state.get("reset_count") or 0) + 1
+                    state["drift_failure_count"] = 0
+                    state["last_drift_evaluation_epoch"] = latest_epoch
                 # There is no correction-source handover during fixed-base
                 # collection: source identity and gross geometry were already
                 # verified when each AGRICA record was accepted. Natural RTK
@@ -1725,12 +2051,21 @@ class RoundRobinAdjustmentManager:
         self,
         mountpoint: str,
         selected_host: str,
+        selected_serial: str = "",
+        selected_server_id: Optional[int] = None,
     ) -> tuple[str, int, dict]:
         stations = self._cors_api_request_sync("GET", "/api/public/map-stations")
         if isinstance(stations, dict):
             stations = stations.get("value") or stations.get("items") or []
         target = str(mountpoint or "").strip().casefold()
         target_host = self._normalize_stream_host(selected_host)
+        target_serial = str(selected_serial or "").strip().casefold()
+        try:
+            target_server_id = (
+                int(selected_server_id) if selected_server_id not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            target_server_id = None
         matches = []
         for station in stations or []:
             if not isinstance(station, dict):
@@ -1738,7 +2073,12 @@ class RoundRobinAdjustmentManager:
             cfg = station.get("service_config")
             if not isinstance(cfg, dict):
                 continue
+            station_serial = str(station.get("serial") or "").strip()
+            if target_serial and station_serial.casefold() != target_serial:
+                continue
             for sid in (1, 2):
+                if target_server_id is not None and sid != target_server_id:
+                    continue
                 candidate = str(cfg.get(f"mountpoint{sid}") or "").strip().casefold()
                 candidate_host = self._normalize_stream_host(
                     cfg.get(f"serverhost{sid}") or cfg.get(f"server{sid}_host")
@@ -1748,10 +2088,11 @@ class RoundRobinAdjustmentManager:
                     and candidate == target
                     and (not target_host or candidate_host == target_host)
                 ):
-                    matches.append((str(station.get("serial") or "").strip(), sid, cfg))
+                    matches.append((station_serial, sid, cfg))
         if len(matches) != 1 or not matches[0][0]:
             raise RuntimeError(
-                f"WEB CORS host={selected_host!r} mountpoint={mountpoint!r} matched "
+                f"WEB CORS host={selected_host!r} mountpoint={mountpoint!r} "
+                f"serial={selected_serial!r} S{selected_server_id or '*'} matched "
                 f"{len(matches)} streams; expected exactly one"
             )
         return matches[0]
@@ -1761,12 +2102,16 @@ class RoundRobinAdjustmentManager:
         mountpoint: str,
         sleep: bool,
         selected_host: str = "",
+        selected_serial: str = "",
+        selected_server_id: Optional[int] = None,
     ) -> None:
         if not mountpoint:
             return
         snapshot_key = (
             self._normalize_stream_host(selected_host),
             str(mountpoint).strip().casefold(),
+            str(selected_serial or "").strip().casefold(),
+            int(selected_server_id) if selected_server_id not in (None, "") else 0,
         )
         if sleep:
             if snapshot_key in self._cors_fixed_base_snapshots:
@@ -1775,6 +2120,8 @@ class RoundRobinAdjustmentManager:
                 self._find_cors_station_sync,
                 mountpoint,
                 selected_host,
+                selected_serial,
+                selected_server_id,
             )
             self._cors_fixed_base_snapshots[snapshot_key] = {
                 "serial": serial,
@@ -1822,6 +2169,247 @@ class RoundRobinAdjustmentManager:
             snapshot["server_id"],
         )
 
+    @staticmethod
+    def _cors_station_is_online(station: dict) -> bool:
+        """Interpret physical receiver availability from WEB CORS map data."""
+
+        for key in ("is_online", "online", "device_online"):
+            if isinstance(station.get(key), bool):
+                return bool(station[key])
+        status = str(station.get("status") or "").strip().casefold()
+        if status:
+            return status in {"online", "active", "connected", "streaming"}
+        return bool(station.get("ntrip_connected"))
+
+    def _cors_stream_is_managed_by_adjustment(
+        self,
+        serial: str,
+        server_id: int,
+    ) -> bool:
+        target_serial = str(serial or "").strip().casefold()
+        return any(
+            str(key[2] or "").strip().casefold() == target_serial
+            and int(key[3] or 0) == int(server_id)
+            for key in self._cors_fixed_base_snapshots
+        )
+
+    @staticmethod
+    def _cors_stream_mode(service_config: dict, server_id: int) -> tuple[bool, bool]:
+        on_demand = bool(
+            service_config.get(
+                f"server{server_id}_stream_on_demand",
+                service_config.get("stream_on_demand", False),
+            )
+        )
+        active = bool(
+            service_config.get(
+                f"server{server_id}_stream_active",
+                service_config.get("stream_active", False),
+            )
+        )
+        return on_demand, active
+
+    @staticmethod
+    def _cors_failover_stream(
+        stations: list[dict],
+        *,
+        station_name: str,
+        serial: str,
+        server_id: Any,
+        host: str,
+        mountpoint: str,
+    ) -> Optional[tuple[dict, int]]:
+        target_name = str(station_name or "").strip().casefold()
+        target_serial = str(serial or "").strip().casefold()
+        target_host = RoundRobinAdjustmentManager._normalize_stream_host(host)
+        target_mountpoint = str(mountpoint or "").strip().casefold()
+        try:
+            target_server_id = int(server_id)
+        except (TypeError, ValueError):
+            target_server_id = 0
+        matches: list[tuple[dict, int]] = []
+        for station in stations:
+            if not isinstance(station, dict):
+                continue
+            candidate_serial = str(station.get("serial") or "").strip().casefold()
+            candidate_name = str(
+                station.get("name") or station.get("code") or ""
+            ).strip().casefold()
+            if target_serial:
+                if candidate_serial != target_serial:
+                    continue
+            elif target_name and candidate_name != target_name:
+                continue
+            config = station.get("service_config")
+            if not isinstance(config, dict):
+                continue
+            for candidate_server_id in (1, 2):
+                if target_server_id and candidate_server_id != target_server_id:
+                    continue
+                candidate_host = RoundRobinAdjustmentManager._normalize_stream_host(
+                    config.get(f"serverhost{candidate_server_id}")
+                    or config.get(f"server{candidate_server_id}_host")
+                )
+                candidate_mountpoint = str(
+                    config.get(f"mountpoint{candidate_server_id}") or ""
+                ).strip().casefold()
+                if target_host and candidate_host != target_host:
+                    continue
+                if target_mountpoint and candidate_mountpoint != target_mountpoint:
+                    continue
+                matches.append((station, candidate_server_id))
+        return matches[0] if len(matches) == 1 else None
+
+    async def reconcile_cors_failover_pairs(
+        self,
+        clusters: list[dict],
+        *,
+        stations: Optional[list[dict]] = None,
+    ) -> list[dict]:
+        """Keep each primary S1 / cross-station backup S2 pair mutually exclusive.
+
+        Example: SinQuyen1/S1 normally owns mountpoint SinQuyen1.  If its
+        receiver is offline, SinQuyen2/S2 is switched from On-Demand/Sleep to
+        Always and feeds that same mountpoint.  Once SinQuyen1 is online again,
+        the backup is stopped before S1 is restored.
+        """
+
+        if stations is None:
+            stations = await asyncio.to_thread(
+                self._cors_api_request_sync,
+                "GET",
+                "/api/public/map-stations",
+            )
+        if isinstance(stations, dict):
+            stations = stations.get("value") or stations.get("items") or []
+        stations = [item for item in (stations or []) if isinstance(item, dict)]
+        outcomes: list[dict] = []
+        for cluster in clusters or []:
+            if not isinstance(cluster, dict) or not cluster.get("backup_base_station"):
+                continue
+            primary = self._cors_failover_stream(
+                stations,
+                station_name=cluster.get("base_station"),
+                serial=cluster.get("base_serial"),
+                server_id=cluster.get("base_server_id"),
+                host=cluster.get("base_stream_host"),
+                mountpoint=cluster.get("base_stream_mp"),
+            )
+            backup = self._cors_failover_stream(
+                stations,
+                station_name=cluster.get("backup_base_station"),
+                serial=cluster.get("backup_base_serial"),
+                server_id=cluster.get("backup_base_server_id"),
+                host=cluster.get("backup_base_stream_host"),
+                mountpoint=cluster.get("backup_base_stream_mp"),
+            )
+            name = str(cluster.get("name") or "GNSS cluster")
+            if primary is None or backup is None:
+                outcomes.append({"cluster": name, "state": "INVALID_STREAM_IDENTITY"})
+                continue
+            primary_station, primary_server_id = primary
+            backup_station, backup_server_id = backup
+            primary_serial = str(primary_station.get("serial") or "").strip()
+            backup_serial = str(backup_station.get("serial") or "").strip()
+            primary_mp = str(cluster.get("base_stream_mp") or "").strip()
+            backup_mp = str(cluster.get("backup_base_stream_mp") or "").strip()
+            if not primary_mp or primary_mp.casefold() != backup_mp.casefold():
+                outcomes.append({"cluster": name, "state": "MOUNTPOINT_MISMATCH"})
+                continue
+            if (
+                self._cors_stream_is_managed_by_adjustment(primary_serial, primary_server_id)
+                or self._cors_stream_is_managed_by_adjustment(backup_serial, backup_server_id)
+            ):
+                outcomes.append({"cluster": name, "state": "PAUSED_FOR_ADJUSTMENT"})
+                continue
+
+            primary_online = self._cors_station_is_online(primary_station)
+            backup_online = self._cors_station_is_online(backup_station)
+            pair_key = (
+                primary_serial.casefold(),
+                primary_server_id,
+                backup_serial.casefold(),
+                backup_server_id,
+                primary_mp.casefold(),
+            )
+
+            if not primary_online and not backup_online:
+                desired_state = "NO_SOURCE_BOTH_OFFLINE"
+                self._cors_failover_last_state[pair_key] = desired_state
+                outcomes.append({"cluster": name, "state": desired_state})
+                continue
+
+            if not primary_online:
+                desired_state = "BACKUP_ACTIVE"
+                backup_config = backup_station.get("service_config") or {}
+                if self._cors_stream_mode(backup_config, backup_server_id) != (False, True):
+                    enabled_config = self._cors_service_config_with_server_mode(
+                        backup_config,
+                        backup_server_id,
+                        on_demand=False,
+                    )
+                    await asyncio.to_thread(
+                        self._cors_configure_service_sync,
+                        backup_serial,
+                        enabled_config,
+                    )
+                    backup_station["service_config"] = enabled_config
+                    logger.warning(
+                        "CORS automatic failover: %s offline; enabled %s/S%s -> %s",
+                        cluster.get("base_station"),
+                        cluster.get("backup_base_station"),
+                        backup_server_id,
+                        primary_mp,
+                    )
+            else:
+                desired_state = "PRIMARY_ACTIVE"
+                # Break-before-make on failback: never leave S1 and backup S2
+                # publishing the same mountpoint concurrently.
+                backup_config = backup_station.get("service_config") or {}
+                if self._cors_stream_mode(backup_config, backup_server_id) != (True, False):
+                    disabled_config = self._cors_service_config_with_server_mode(
+                        backup_config,
+                        backup_server_id,
+                        on_demand=True,
+                    )
+                    await asyncio.to_thread(
+                        self._cors_configure_service_sync,
+                        backup_serial,
+                        disabled_config,
+                    )
+                    backup_station["service_config"] = disabled_config
+                primary_config = primary_station.get("service_config") or {}
+                if self._cors_stream_mode(primary_config, primary_server_id) != (False, True):
+                    enabled_config = self._cors_service_config_with_server_mode(
+                        primary_config,
+                        primary_server_id,
+                        on_demand=False,
+                    )
+                    await asyncio.to_thread(
+                        self._cors_configure_service_sync,
+                        primary_serial,
+                        enabled_config,
+                    )
+                    primary_station["service_config"] = enabled_config
+                    logger.info(
+                        "CORS automatic failback: restored %s/S%s -> %s and stopped %s/S%s",
+                        cluster.get("base_station"),
+                        primary_server_id,
+                        primary_mp,
+                        cluster.get("backup_base_station"),
+                        backup_server_id,
+                    )
+
+            self._cors_failover_last_state[pair_key] = desired_state
+            outcomes.append({
+                "cluster": name,
+                "state": desired_state,
+                "primary_online": primary_online,
+                "backup_online": backup_online,
+                "mountpoint": primary_mp,
+            })
+        return outcomes
+
     async def _reacquire_fixed_base_between_rotations(
         self,
         project_id: int,
@@ -1830,6 +2418,8 @@ class RoundRobinAdjustmentManager:
         next_rover: str,
         mountpoint: str,
         selected_host: str,
+        selected_serial: str = "",
+        selected_server_id: Optional[int] = None,
     ) -> None:
         """Reconnect every rover to the fixed BASE before the next rotation.
 
@@ -1841,6 +2431,11 @@ class RoundRobinAdjustmentManager:
         """
 
         start_index = len(cluster["observations"])
+        identity_kwargs = {}
+        if selected_serial:
+            identity_kwargs["selected_serial"] = selected_serial
+        if selected_server_id is not None:
+            identity_kwargs["selected_server_id"] = selected_server_id
         await self._emit_progress(
             project_id,
             (
@@ -1853,6 +2448,7 @@ class RoundRobinAdjustmentManager:
             mountpoint,
             sleep=False,
             selected_host=selected_host,
+            **identity_kwargs,
         )
 
         expected_rovers = {str(name) for name in cluster.get("rovers", ())}
@@ -1914,6 +2510,7 @@ class RoundRobinAdjustmentManager:
             mountpoint,
             sleep=True,
             selected_host=selected_host,
+            **identity_kwargs,
         )
         await asyncio.sleep(2.0)
 
@@ -2029,7 +2626,7 @@ class RoundRobinAdjustmentManager:
             precision_sum = np.zeros((3, 3), dtype=float)
             weighted_sum = np.zeros(3, dtype=float)
             for delta, covariance, _epoch in retained:
-                precision = np.linalg.inv(covariance)
+                precision = _spd_solve(covariance, np.eye(3, dtype=float))
                 precision_sum += precision
                 weighted_sum += precision @ delta
             endpoint = fixed_ecef + np.linalg.solve(precision_sum, weighted_sum)
@@ -2050,7 +2647,7 @@ class RoundRobinAdjustmentManager:
         return frozen
 
     async def _run_cycle(self, project_id: int) -> None:
-        suspended_bases: set[tuple[str, str]] = set()
+        suspended_bases: set[tuple[str, str, str, int]] = set()
         cycle_error: Optional[Exception] = None
         try:
             session = self._sessions[project_id]
@@ -2064,6 +2661,35 @@ class RoundRobinAdjustmentManager:
                     cluster.get("name", cluster_index + 1),
                     len(rovers),
                     rovers,
+                )
+                selected_fixed_base = cluster.get("selected_fixed_base_candidate")
+                if not isinstance(selected_fixed_base, dict):
+                    configured_candidates = self._fixed_base_candidates(cluster)
+                    if len(configured_candidates) == 1:
+                        selected_fixed_base = configured_candidates[0]
+                        self._lock_fixed_base_candidate(
+                            cluster,
+                            selected_fixed_base,
+                            "legacy single fixed-base configuration",
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"{cluster.get('name', cluster_index + 1)}: fixed-base "
+                            "primary/backup candidate was not confirmed by AGRICA before "
+                            "the round-robin cycle"
+                        )
+                await self._emit_progress(
+                    project_id,
+                    (
+                        f"{cluster.get('name', cluster_index + 1)}: locked "
+                        f"{selected_fixed_base.get('role', 'fixed')} fixed base "
+                        f"{selected_fixed_base.get('base_station')} at "
+                        f"{selected_fixed_base.get('base_stream_host')}:"
+                        f"{selected_fixed_base.get('base_stream_port')}/"
+                        f"{selected_fixed_base.get('base_stream_mp')}. "
+                        "This identity, ECEF control coordinate and CORS service are "
+                        "immutable for the complete job."
+                    ),
                 )
                 frozen_base_coordinates = self._freeze_temporary_base_coordinates(cluster)
                 await self._emit_progress(
@@ -2099,13 +2725,36 @@ class RoundRobinAdjustmentManager:
                 configured_base_host = str(
                     cluster.get("base_stream_host") or route_host or ""
                 ).strip()
+                configured_base_serial = str(
+                    cluster.get("base_serial") or ""
+                ).strip()
+                try:
+                    configured_base_server_id = int(
+                        cluster.get("base_server_id") or 0
+                    )
+                except (TypeError, ValueError):
+                    configured_base_server_id = 0
+                fixed_base_identity_kwargs = {}
+                if configured_base_serial:
+                    fixed_base_identity_kwargs["selected_serial"] = (
+                        configured_base_serial
+                    )
+                if configured_base_server_id:
+                    fixed_base_identity_kwargs["selected_server_id"] = (
+                        configured_base_server_id
+                    )
                 route_password = cluster.get("round_robin_route_password")
                 if route_password is None:
                     route_password = self.source_password
                 
                 # Tạm chuyển Base cố định sang On-Demand/Sleep trước khi quay
                 # vòng các rover. Trạng thái gốc được phục hồi ở finally.
-                base_stream_key = (configured_base_host, str(configured_mountpoint or ""))
+                base_stream_key = (
+                    configured_base_host,
+                    str(configured_mountpoint or ""),
+                    configured_base_serial,
+                    configured_base_server_id,
+                )
                 if configured_mountpoint and base_stream_key not in suspended_bases:
                     await self._emit_progress(
                         project_id,
@@ -2119,6 +2768,7 @@ class RoundRobinAdjustmentManager:
                         configured_mountpoint,
                         sleep=True,
                         selected_host=configured_base_host,
+                        **fixed_base_identity_kwargs,
                     )
                     # Chờ 2s để đảm bảo caster đã xử lý ngắt
                     await asyncio.sleep(2.0)
@@ -2240,6 +2890,11 @@ class RoundRobinAdjustmentManager:
                         current_rover: str = rover_code,
                     ) -> None:
                         self._clear_cluster_fragment_buffers(project_id, current_cluster)
+                        self._reset_online_baseline_states(
+                            session,
+                            current_cluster_index,
+                            current_rover,
+                        )
                         session["active_bases"][current_cluster_index] = current_rover
 
                     def mark_collection_stopped(
@@ -2329,7 +2984,7 @@ class RoundRobinAdjustmentManager:
                             self._clear_cluster_fragment_buffers(project_id, current_cluster)
 
                         def mark_stable_collection_invalid(
-                            reason: str = "insufficient",
+                            reason: str = "stability",
                             *,
                             current_rover: str = rover_code,
                             current_cluster: dict = cluster,
@@ -2337,11 +2992,12 @@ class RoundRobinAdjustmentManager:
                             """Quarantine a solver window that drifted or timed out."""
 
                             nonlocal solver_start_index
-                            drifted = str(reason).casefold() == "drift"
-                            flag = (
-                                "EXCLUDE_UNSTABLE_SOLVER_WINDOW"
-                                if drifted else "EXCLUDE_INSUFFICIENT_STABLE_WINDOW"
-                            )
+                            reason_key = str(reason).casefold()
+                            flag = {
+                                "drift": "EXCLUDE_STABILITY_LOST",
+                                "duration": "EXCLUDE_INSUFFICIENT_DURATION",
+                                "source": "EXCLUDE_SOURCE_NOT_CONFIRMED",
+                            }.get(reason_key, "EXCLUDE_STABILITY_NOT_REACHED")
                             records = current_cluster["observations"]
                             for record_index in range(solver_start_index, len(records)):
                                 record = records[record_index]
@@ -2360,11 +3016,16 @@ class RoundRobinAdjustmentManager:
                                     solver_eligible=False,
                                     quality_flags=flags,
                                     source_diagnostic=(
-                                        "Rolling baseline means drifted after the solver window "
-                                        "opened; the complete window was reset."
-                                        if drifted else
-                                        "Temporary-base solver window did not reach the minimum "
-                                        "epoch/duration coverage before timeout."
+                                        "Stationarity was lost after the solver window opened; "
+                                        "the complete window was reset."
+                                        if reason_key == "drift" else
+                                        "Temporary-base source identity was not confirmed."
+                                        if reason_key == "source" else
+                                        "Stationarity was confirmed but minimum solver duration "
+                                        "was not reached before timeout."
+                                        if reason_key == "duration" else
+                                        "Collection duration was sufficient, but the non-overlapping "
+                                        "windows never satisfied mean/scatter/slope stationarity."
                                     ),
                                 )
                             solver_start_index = len(records)
@@ -2397,6 +3058,21 @@ class RoundRobinAdjustmentManager:
                                         for value in record.observation.baseline_neu
                                     ),
                                 ))
+                            online_states = session.setdefault(
+                                "online_baseline_states", {}
+                            )
+                            for rover_name in tuple(samples_by_rover):
+                                online_state = online_states.get(
+                                    self._online_baseline_key(
+                                        cluster_index,
+                                        rover_code,
+                                        rover_name,
+                                    )
+                                )
+                                if online_state is not None:
+                                    samples_by_rover[rover_name] = (
+                                        online_state.recent_samples()
+                                    )
                             return {
                                 "sample_count": len(monitoring),
                                 "rover_names": set(epochs_by_rover),
@@ -2429,8 +3105,45 @@ class RoundRobinAdjustmentManager:
                                         up_component_limit_m=(
                                             self.STABILITY_UP_COMPONENT_LIMIT_M
                                         ),
+                                        horizontal_std_limit_m=(
+                                            self.STABILITY_HORIZONTAL_STD_LIMIT_M
+                                        ),
+                                        up_std_limit_m=self.STABILITY_UP_STD_LIMIT_M,
+                                        horizontal_slope_limit_mps=(
+                                            self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
+                                        ),
+                                        up_slope_limit_mps=(
+                                            self.STABILITY_UP_SLOPE_LIMIT_MPS
+                                        ),
+                                        ewma_fast_tau_seconds=(
+                                            self.STABILITY_EWMA_FAST_TAU_SECONDS
+                                        ),
+                                        ewma_slow_tau_seconds=(
+                                            self.STABILITY_EWMA_SLOW_TAU_SECONDS
+                                        ),
+                                        ewma_horizontal_limit_m=(
+                                            self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                                        ),
+                                        ewma_up_limit_m=(
+                                            self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
+                                        ),
                                     )
                                     for rover_name, samples in samples_by_rover.items()
+                                },
+                                "online_information_by_rover": {
+                                    rover_name: online_states[
+                                        self._online_baseline_key(
+                                            cluster_index,
+                                            rover_code,
+                                            rover_name,
+                                        )
+                                    ].audit_snapshot()
+                                    for rover_name in samples_by_rover
+                                    if self._online_baseline_key(
+                                        cluster_index,
+                                        rover_code,
+                                        rover_name,
+                                    ) in online_states
                                 },
                             }
 
@@ -2582,6 +3295,8 @@ class RoundRobinAdjustmentManager:
                             next_rover=str(rotation_queue[rotation_index + 1]),
                             mountpoint=str(configured_mountpoint),
                             selected_host=configured_base_host,
+                            selected_serial=configured_base_serial,
+                            selected_server_id=(configured_base_server_id or None),
                         )
                     if (
                         not graph_recovery_scheduled
@@ -2637,16 +3352,22 @@ class RoundRobinAdjustmentManager:
             cycle_error = exc
         finally:
             restore_errors: List[str] = []
-            for selected_host, mp in suspended_bases:
+            for selected_host, mp, selected_serial, selected_server_id in suspended_bases:
                 try:
                     await self._emit_progress(
                         project_id,
                         f"Khôi phục đúng chế độ stream ban đầu của Base cố định {mp}.",
                     )
+                    restore_identity_kwargs = {}
+                    if selected_serial:
+                        restore_identity_kwargs["selected_serial"] = selected_serial
+                    if selected_server_id:
+                        restore_identity_kwargs["selected_server_id"] = selected_server_id
                     await self._toggle_cors_fixed_base(
                         mp,
                         sleep=False,
                         selected_host=selected_host,
+                        **restore_identity_kwargs,
                     )
                     await self._emit_progress(
                         project_id,
@@ -2787,6 +3508,7 @@ class RoundRobinAdjustmentManager:
             lat=llh["lat"],
             lon=llh["lon"],
             alt=llh["alt"],
+            ecef_xyz=llh.get("ecef_xyz"),
         )
         rover_commands = self._build_unicore_rover_config(
             restore_undulation=restore_llh.get("undulation")
@@ -3057,11 +3779,14 @@ class RoundRobinAdjustmentManager:
                     await self._emit_progress(
                         project_id,
                         (
-                            f"{rover_code}: monitoring rolling baseline means in two "
+                            f"{rover_code}: monitoring baseline mean, scatter and slope in two "
                             f"{self.STABILITY_WINDOW_SECONDS}-second windows "
                             f"(at least {self.STABILITY_MIN_SAMPLES_PER_WINDOW} epochs each); require "
                             f"|dN|/|dE| <= {self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M * 1000:.1f} mm, "
                             f"|dU| <= {self.STABILITY_UP_COMPONENT_LIMIT_M * 1000:.1f} mm "
+                            f"with STD <= {self.STABILITY_HORIZONTAL_STD_LIMIT_M * 1000:.0f}/"
+                            f"{self.STABILITY_UP_STD_LIMIT_M * 1000:.0f} mm (horizontal/up); "
+                            "fast/slow EWMA is an early transition detector only; "
                             f"continuously for {self.STABILITY_HOLD_SECONDS}s before opening "
                             "the solver window."
                         ),
@@ -3089,6 +3814,9 @@ class RoundRobinAdjustmentManager:
                         now = loop.time()
                         stable_held = bool(stability_targets) and all(
                             rolling.get(name, {}).get("stable") is True
+                            and not rolling.get(name, {}).get(
+                                "ewma_transition_detected", False
+                            )
                             and int(
                                 rolling.get(name, {}).get("stable_run_seconds") or 0
                             ) >= self.STABILITY_HOLD_SECONDS
@@ -3147,7 +3875,7 @@ class RoundRobinAdjustmentManager:
                                 await self._emit_progress(
                                     project_id,
                                     (
-                                        f"{rover_code}: rolling mean exceeded the "
+                                        f"{rover_code}: rolling-window or EWMA transition diagnostic exceeded the "
                                         f"{self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M * 1000:.0f}/"
                                         f"{self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M * 1000:.0f} mm "
                                         f"abort envelope for {self.STABILITY_ABORT_CONSECUTIVE_EPOCHS} "
@@ -3211,7 +3939,7 @@ class RoundRobinAdjustmentManager:
                             await self._emit_progress(
                                 project_id,
                                 (
-                                    f"{rover_code}: rolling means remained stationary for "
+                                    f"{rover_code}: rolling mean/scatter/slope remained stationary for "
                                     f"{self.STABILITY_HOLD_SECONDS}s; solver window opened. "
                                     f"Collecting at least {self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS}s."
                                 ),
@@ -3219,12 +3947,16 @@ class RoundRobinAdjustmentManager:
 
                         if now >= stability_deadline:
                             if on_stable_collection_invalid:
-                                on_stable_collection_invalid("timeout")
+                                on_stable_collection_invalid(
+                                    "duration" if solver_window_open else "stability"
+                                )
                             raise RuntimeError(
                                 f"{rover_code}: no complete stationary solver window within "
                                 f"{self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS}s; "
                                 f"rolling threshold N/E={self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M * 1000:.1f} mm, "
-                                f"U={self.STABILITY_UP_COMPONENT_LIMIT_M * 1000:.1f} mm"
+                                f"U={self.STABILITY_UP_COMPONENT_LIMIT_M * 1000:.1f} mm; "
+                                f"STD horizontal/up={self.STABILITY_HORIZONTAL_STD_LIMIT_M * 1000:.0f}/"
+                                f"{self.STABILITY_UP_STD_LIMIT_M * 1000:.0f} mm"
                             )
                         await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
                 else:
@@ -3240,7 +3972,7 @@ class RoundRobinAdjustmentManager:
                         ),
                     )
                     if on_stable_collection_invalid:
-                        on_stable_collection_invalid("timeout")
+                        on_stable_collection_invalid("source")
                     raise RuntimeError(
                         f"{rover_code}: temporary-base handover was not verified"
                     )
@@ -3346,17 +4078,127 @@ class RoundRobinAdjustmentManager:
 
     @staticmethod
     def _cluster_base_llh(cluster: dict) -> tuple[float, float, float]:
+        selected = cluster.get("selected_fixed_base_candidate")
+        source = selected if isinstance(selected, dict) else cluster
         try:
             llh = (
-                float(cluster["base_lat"]),
-                float(cluster["base_lon"]),
-                float(cluster.get("base_alt") or 0.0),
+                float(source["base_lat"]),
+                float(source["base_lon"]),
+                float(source.get("base_alt") or 0.0),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("cluster is missing a valid fixed-base coordinate") from exc
         if not _is_usable_llh(llh):
             raise ValueError("cluster fixed-base coordinate is invalid")
         return llh
+
+    @staticmethod
+    def _fixed_base_candidates(cluster: dict) -> list[dict]:
+        configured = [
+            dict(candidate)
+            for candidate in cluster.get("fixed_base_candidates", ())
+            if isinstance(candidate, dict)
+        ]
+        if configured:
+            return configured
+        return [{
+            "role": "primary",
+            "base_station": cluster.get("base_station") or "BASE",
+            "base_lat": cluster.get("base_lat"),
+            "base_lon": cluster.get("base_lon"),
+            "base_alt": cluster.get("base_alt") or 0.0,
+            "base_stream": cluster.get("base_stream"),
+            "base_stream_host": cluster.get("base_stream_host"),
+            "base_stream_port": cluster.get("base_stream_port"),
+            "base_stream_mp": cluster.get("base_stream_mp"),
+            "base_service_config": cluster.get("base_service_config") or {},
+            "base_serial": cluster.get("base_serial") or "",
+            "base_server_id": cluster.get("base_server_id"),
+        }]
+
+    @staticmethod
+    def _lock_fixed_base_candidate(
+        cluster: dict,
+        candidate: dict,
+        diagnostic: str,
+    ) -> None:
+        locked = copy.deepcopy(candidate)
+        cluster["selected_fixed_base_candidate"] = locked
+        cluster["fixed_base_selection_diagnostic"] = str(diagnostic)
+        for key in (
+            "base_station",
+            "base_lat",
+            "base_lon",
+            "base_alt",
+            "base_stream",
+            "base_stream_host",
+            "base_stream_port",
+            "base_stream_mp",
+            "base_service_config",
+            "base_serial",
+            "base_server_id",
+        ):
+            if key in locked:
+                cluster[key] = copy.deepcopy(locked[key])
+
+    def _identify_fixed_base_candidate(
+        self,
+        cluster: dict,
+        observation: Any,
+    ) -> tuple[Optional[dict], str]:
+        candidates = self._fixed_base_candidates(cluster)
+        if len(candidates) == 1:
+            return candidates[0], "only one fixed-base candidate is configured"
+
+        reported = getattr(observation, "base_llh", None)
+        ranked: list[tuple[float, dict, str]] = []
+        if _is_usable_llh(reported):
+            for candidate in candidates:
+                candidate_llh = (
+                    float(candidate["base_lat"]),
+                    float(candidate["base_lon"]),
+                    float(candidate.get("base_alt") or 0.0),
+                )
+                separation = _llh_horizontal_distance_m(reported, candidate_llh)
+                ranked.append((separation, candidate, "AGRICA base_llh"))
+        else:
+            rover_llh = getattr(observation, "rover_llh", None)
+            baseline_neu = getattr(observation, "baseline_neu", None)
+            if not rover_llh or not baseline_neu:
+                return None, (
+                    "cannot choose primary/backup fixed base: AGRICA base_llh is missing "
+                    "and rover geometry is unavailable"
+                )
+            baseline_length = math.hypot(baseline_neu[0], baseline_neu[1])
+            for candidate in candidates:
+                candidate_llh = (
+                    float(candidate["base_lat"]),
+                    float(candidate["base_lon"]),
+                    float(candidate.get("base_alt") or 0.0),
+                )
+                expected_length = _llh_horizontal_distance_m(rover_llh, candidate_llh)
+                ranked.append((
+                    abs(expected_length - baseline_length),
+                    candidate,
+                    "baseline geometry",
+                ))
+
+        ranked.sort(key=lambda item: item[0])
+        best_error, best, evidence = ranked[0]
+        if best_error > self.BASE_IDENTITY_TOLERANCE_M:
+            return None, (
+                f"no configured fixed-base candidate matches {evidence}; "
+                f"best={best.get('base_station')} error={best_error:.2f} m"
+            )
+        if len(ranked) > 1 and ranked[1][0] - best_error < 1.0:
+            return None, (
+                "fixed-base candidate is ambiguous; primary and backup match within "
+                f"1 m using {evidence}"
+            )
+        return best, (
+            f"selected {best.get('role', 'fixed')} fixed base "
+            f"{best.get('base_station')} using {evidence} (error {best_error:.2f} m)"
+        )
 
     @staticmethod
     def _baseline_ecef(observation: Any, base_llh: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -3520,14 +4362,20 @@ class RoundRobinAdjustmentManager:
             pooled_lag_one = _pooled_lag_one_autocorrelations(groups)
             result = []
             for key, rows in groups.items():
-                precision_sum = np.zeros((3, 3), dtype=float)
-                weighted_sum = np.zeros(3, dtype=float)
+                information_state = _InformationAccumulator()
                 for row in rows:
-                    precision = np.linalg.inv(row["covariance"])
-                    precision_sum += precision
-                    weighted_sum += precision @ row["delta"]
-                mean_covariance = np.linalg.inv(precision_sum)
-                mean = mean_covariance @ weighted_sum
+                    information_state.add(
+                        int(row.get("observation_epoch") or 0),
+                        row["delta"],
+                        row["covariance"],
+                        fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                        slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                        retention_seconds=1,
+                    )
+                mean_covariance = information_state.formal_covariance
+                mean = information_state.mean
+                if mean_covariance is None or mean is None:
+                    continue
 
                 # Samples within one uninterrupted RTK FIXED window share the
                 # same ambiguity solution and correction-source state.  Their
@@ -3552,14 +4400,18 @@ class RoundRobinAdjustmentManager:
                     scatter = sum(
                         float(
                             (row["delta"] - mean).T
-                            @ np.linalg.inv(row["covariance"])
+                            @ _spd_solve(row["covariance"], np.eye(3, dtype=float))
                             @ (row["delta"] - mean)
                         )
                         for row in rows
                     )
                     scatter_scale = max(1.0, scatter / (3.0 * (len(rows) - 1)))
                 covariance = mean_covariance * temporal_inflation * scatter_scale
+                covariance = 0.5 * (covariance + covariance.T)
                 independent_covariance = mean_covariance * scatter_scale
+                independent_covariance = 0.5 * (
+                    independent_covariance + independent_covariance.T
+                )
                 position_types = sorted({
                     int(row["position_type"])
                     for row in rows
@@ -3574,11 +4426,13 @@ class RoundRobinAdjustmentManager:
                     type_precision_sum = np.zeros((3, 3), dtype=float)
                     type_weighted_sum = np.zeros(3, dtype=float)
                     for row in type_rows:
-                        type_precision = np.linalg.inv(row["covariance"])
+                        type_precision = _spd_solve(
+                            row["covariance"], np.eye(3, dtype=float)
+                        )
                         type_precision_sum += type_precision
                         type_weighted_sum += type_precision @ row["delta"]
                     type_means.append(
-                        np.linalg.inv(type_precision_sum) @ type_weighted_sum
+                        np.linalg.solve(type_precision_sum, type_weighted_sum)
                     )
                 position_type_separation = max(
                     (
@@ -3593,6 +4447,8 @@ class RoundRobinAdjustmentManager:
                     "to": key[1],
                     "delta": tuple(float(value) for value in mean),
                     "covariance": covariance,
+                    "formal_covariance": mean_covariance,
+                    "session_covariance_used": covariance,
                     "independent_covariance": independent_covariance,
                     "effective_sample_size": effective_sample_size,
                     "acf_estimated_effective_sample_size": acf_effective_sample_size,
@@ -4042,6 +4898,14 @@ class RoundRobinAdjustmentManager:
                 "observed_xyz": adjusted.observed, "adjusted_xyz": adjusted.adjusted,
                 "residual_xyz": adjusted.residual,
                 "standard_deviation_xyz": std_xyz,
+                "formal_covariance_xyz": tuple(
+                    tuple(float(value) for value in row)
+                    for row in edge["formal_covariance"]
+                ),
+                "session_covariance_used_xyz": tuple(
+                    tuple(float(value) for value in row)
+                    for row in edge["session_covariance_used"]
+                ),
                 "observed_length": _vector_length(adjusted.observed),
                 "adjusted_length": _vector_length(adjusted.adjusted),
                 "observation_count": edge["observation_count"],
@@ -4209,6 +5073,30 @@ class RoundRobinAdjustmentManager:
         quality_gate_reasons = []
         if not network_quality_passed:
             quality_gate_reasons.append("network quality test is not PASS")
+        diagnostic_warnings = []
+        if (
+            network_quality_passed
+            and result.max_standardized_residual is not None
+            and float(result.max_standardized_residual) >= 2.5
+        ):
+            diagnostic_warnings.append({
+                "code": "LOCAL_STANDARDIZED_RESIDUAL_ELEVATED",
+                "message": (
+                    "The global network test passes, but at least one local "
+                    "standardized residual is >= 2.5 sigma. Review the affected edge; "
+                    "this warning alone is not authority to reject the point."
+                ),
+                "max_standardized_residual": float(
+                    result.max_standardized_residual
+                ),
+            })
+        interpretation_status = (
+            "FAILED_QUALITY_GATE"
+            if not quality_gate_passed else
+            "PASS_WITH_WARNINGS"
+            if diagnostic_warnings else
+            "PASS"
+        )
 
         return {
             "type": "gnss_adjusted",
@@ -4218,8 +5106,18 @@ class RoundRobinAdjustmentManager:
             "cluster_name": cluster.get("name"), "computed_at": int(time.time()),
             "base": {
                 "name": cluster.get("base_station") or "BASE", "fixed": True,
+                "role": (
+                    (cluster.get("selected_fixed_base_candidate") or {}).get("role")
+                    or "primary"
+                ),
                 "lat": fixed_base_llh[0], "lon": fixed_base_llh[1], "h": fixed_base_llh[2],
                 "ecef_xyz": fixed_base_ecef,
+                "selection_diagnostic": cluster.get(
+                    "fixed_base_selection_diagnostic"
+                ),
+                "configured_candidates": copy.deepcopy(
+                    cluster.get("fixed_base_candidates", [])
+                ),
             },
             "temporary_bases": copy.deepcopy(
                 cluster.get("temporary_base_llh_by_rover", {})
@@ -4230,6 +5128,7 @@ class RoundRobinAdjustmentManager:
             "official_publish_allowed": quality_gate_passed,
             "quality_gate": {
                 "status": "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE",
+                "interpretation_status": interpretation_status,
                 "passed": quality_gate_passed,
                 "pre_adjustment_loop_closure_limit_m": None,
                 "max_pre_adjustment_loop_closure_m": max_observed_closure,
@@ -4237,6 +5136,7 @@ class RoundRobinAdjustmentManager:
                 "loop_closure_diagnostic_only": True,
                 "network_quality_passed": network_quality_passed,
                 "reasons": quality_gate_reasons,
+                "diagnostic_warnings": diagnostic_warnings,
                 "audit_report_allowed": True,
                 "official_coordinate_publish_allowed": quality_gate_passed,
             },
@@ -4279,11 +5179,33 @@ class RoundRobinAdjustmentManager:
                     for row in raw_rows
                 ),
                 "insufficient_stable_window_excluded_count": sum(
-                    "EXCLUDE_INSUFFICIENT_STABLE_WINDOW" in row["quality_flags"]
+                    (
+                        "EXCLUDE_INSUFFICIENT_STABLE_WINDOW" in row["quality_flags"]
+                        or "EXCLUDE_STABILITY_NOT_REACHED" in row["quality_flags"]
+                    )
+                    for row in raw_rows
+                ),
+                "stability_not_reached_excluded_count": sum(
+                    "EXCLUDE_STABILITY_NOT_REACHED" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "insufficient_duration_excluded_count": sum(
+                    "EXCLUDE_INSUFFICIENT_DURATION" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "source_not_confirmed_excluded_count": sum(
+                    "EXCLUDE_SOURCE_NOT_CONFIRMED" in row["quality_flags"]
                     for row in raw_rows
                 ),
                 "unstable_solver_window_excluded_count": sum(
-                    "EXCLUDE_UNSTABLE_SOLVER_WINDOW" in row["quality_flags"]
+                    (
+                        "EXCLUDE_UNSTABLE_SOLVER_WINDOW" in row["quality_flags"]
+                        or "EXCLUDE_STABILITY_LOST" in row["quality_flags"]
+                    )
+                    for row in raw_rows
+                ),
+                "stability_lost_excluded_count": sum(
+                    "EXCLUDE_STABILITY_LOST" in row["quality_flags"]
                     for row in raw_rows
                 ),
                 "inter_rotation_reacquisition_excluded_count": sum(
@@ -4306,6 +5228,18 @@ class RoundRobinAdjustmentManager:
                         self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
                     ),
                     "up_component_limit_m": self.STABILITY_UP_COMPONENT_LIMIT_M,
+                    "horizontal_std_limit_m": self.STABILITY_HORIZONTAL_STD_LIMIT_M,
+                    "up_std_limit_m": self.STABILITY_UP_STD_LIMIT_M,
+                    "horizontal_slope_limit_mps": (
+                        self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
+                    ),
+                    "up_slope_limit_mps": self.STABILITY_UP_SLOPE_LIMIT_MPS,
+                    "ewma_fast_tau_seconds": self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                    "ewma_slow_tau_seconds": self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                    "ewma_role": (
+                        "Early transition detector only; formal acceptance still "
+                        "requires two non-overlapping windows plus continuous hold"
+                    ),
                     "continuous_hold_seconds": self.STABILITY_HOLD_SECONDS,
                     "abort_horizontal_component_limit_m": (
                         self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
@@ -4335,6 +5269,8 @@ class RoundRobinAdjustmentManager:
                 "quality_gate_status": (
                     "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE"
                 ),
+                "quality_interpretation_status": interpretation_status,
+                "diagnostic_warnings": diagnostic_warnings,
                 "vector_outlier_count": len(vector_outlier_diagnostics),
                 "vector_outlier_filter": (
                     "Per edge/session coordinate-wise median center; reject 3-D deviation above "
@@ -4363,8 +5299,9 @@ class RoundRobinAdjustmentManager:
                 "baseline_std_warning_threshold_m": std_warning_threshold,
                 "raw_ecef_consistency_tolerance_m": raw_ecef_tolerance,
                 "baseline_covariance_model": (
-                    "Published solution: C_edge = (n / n_eff) * scatter_scale * "
-                    "inverse(sum(inverse(C_i))); n_eff is the number of contiguous "
+                    "Published session covariance: C_used = (n / n_eff) * scatter_scale * "
+                    "C_formal, where C_formal solves P_sum*C=I and P_sum=sum(solve(C_i,I)); "
+                    "n_eff is the number of contiguous "
                     "source/direction sessions, with no independence claimed between "
                     "1 Hz epochs inside one RTK FIXED session"
                 ),
@@ -4498,7 +5435,25 @@ class RoundRobinAdjustmentManager:
     ) -> tuple[bool, str]:
         """Verify AGRICA's reported base coordinate before assigning an edge."""
 
+        reported = observation.base_llh
         if active_base == "BASE":
+            selected_candidate = cluster.get("selected_fixed_base_candidate")
+            if not isinstance(selected_candidate, dict):
+                selected_candidate, selection_diagnostic = (
+                    self._identify_fixed_base_candidate(cluster, observation)
+                )
+                if selected_candidate is None:
+                    return False, selection_diagnostic
+                self._lock_fixed_base_candidate(
+                    cluster,
+                    selected_candidate,
+                    selection_diagnostic,
+                )
+                logger.info(
+                    "Fixed-base failover selection cluster=%s: %s",
+                    cluster.get("name"),
+                    selection_diagnostic,
+                )
             try:
                 expected = self._cluster_base_llh(cluster)
             except ValueError as exc:
@@ -4516,7 +5471,6 @@ class RoundRobinAdjustmentManager:
                 float(cached["alt"]),
             )
 
-        reported = observation.base_llh
         if not _is_usable_llh(reported):
             if active_base == "BASE":
                 # Several UM980 rover profiles emit zeroes for BASE_lat/lon/h.
@@ -5051,7 +6005,15 @@ class RoundRobinAdjustmentManager:
                     f"{self._last_set_error or 'no receiver response'}"
                 )
 
-    def _build_unicore_base_config(self, setup_method: str, duration: int = 60, lat: float = 0, lon: float = 0, alt: float = 0) -> list[bytes]:
+    def _build_unicore_base_config(
+        self,
+        setup_method: str,
+        duration: int = 60,
+        lat: float = 0,
+        lon: float = 0,
+        alt: float = 0,
+        ecef_xyz: Optional[Iterable[float]] = None,
+    ) -> list[bytes]:
         """Build a deterministic UM980 base profile for the COM2 MQTT bridge.
 
         Temporary bases start from a persisted rover profile which normally has
@@ -5067,6 +6029,22 @@ class RoundRobinAdjustmentManager:
         port = "com2"
         if setup_method.upper() == "SURVEY_IN":
             commands.append(f"mode base time {duration}\r\n".encode("ascii"))
+        elif ecef_xyz is not None:
+            xyz = tuple(float(value) for value in ecef_xyz)
+            if (
+                len(xyz) != 3
+                or not all(math.isfinite(value) for value in xyz)
+                or _vector_length(xyz) < 1_000_000.0
+            ):
+                raise ValueError("ecef_xyz must contain a usable Earth-centered XYZ coordinate")
+            # N4 receivers distinguish ECEF from geodetic MODE BASE by param1:
+            # an X coordinate outside latitude range [-90, 90] selects ECEF.
+            # Four decimals preserve 0.1 mm while matching the official examples.
+            commands.append(
+                f"mode base {xyz[0]:.4f} {xyz[1]:.4f} {xyz[2]:.4f}\r\n".encode(
+                    "ascii"
+                )
+            )
         else:
             # Unicore MODE BASE interprets its height as altitude unless the
             # undulation is explicitly zero. ``alt`` here is WGS84 ellipsoidal

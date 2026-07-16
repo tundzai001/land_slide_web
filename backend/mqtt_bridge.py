@@ -1312,6 +1312,15 @@ class MQTTBridge:
             ws.append([label, quality.get(key)])
         quality_gate = data.get("quality_gate") or {}
         ws.append(["Quality gate", quality_gate.get("status")])
+        ws.append([
+            "Quality interpretation",
+            quality_gate.get("interpretation_status") or quality_gate.get("status"),
+        ])
+        for warning in quality_gate.get("diagnostic_warnings") or []:
+            ws.append([
+                f"Diagnostic warning: {warning.get('code') or 'WARNING'}",
+                warning.get("message"),
+            ])
         ws.append(["Vòng khép trước bình sai lớn nhất (m, chỉ chẩn đoán)", quality_gate.get("max_pre_adjustment_loop_closure_m")])
         ws.append(["Cho phép publish tọa độ chính thức", bool(data.get("official_publish_allowed"))])
         if quality.get("global_test"):
@@ -1725,6 +1734,10 @@ class MQTTBridge:
         quality_gate = data.get("quality_gate") or {}
         quality_rows.extend([
             ("Quality gate", quality_gate.get("status")),
+            (
+                "Quality interpretation",
+                quality_gate.get("interpretation_status") or quality_gate.get("status"),
+            ),
             ("Vòng khép trước bình sai lớn nhất (m, chỉ chẩn đoán)", quality_gate.get("max_pre_adjustment_loop_closure_m")),
             ("Cho phép publish tọa độ chính thức", bool(data.get("official_publish_allowed"))),
         ])
@@ -2385,8 +2398,16 @@ class MQTTBridge:
                 "data": adjustment,
             })
             return
+        interpretation_status = str(
+            quality_gate.get("interpretation_status") or "PASS"
+        )
+        completed_message = (
+            "Connected GNSS network adjustment completed with diagnostic warnings."
+            if interpretation_status == "PASS_WITH_WARNINGS" else
+            "Connected GNSS network adjustment completed."
+        )
         self.adjustment_phase[project_id] = "COMPLETED"
-        self.adjustment_message[project_id] = "Connected GNSS network adjustment completed."
+        self.adjustment_message[project_id] = completed_message
         self.adjustment_results[project_id] = adjustment
 
         for point in adjustment.get("points", {}).values():
@@ -2427,7 +2448,7 @@ class MQTTBridge:
             "type": "gnss_adjustment_progress",
             "project_id": project_id,
             "phase": "COMPLETED",
-            "message": "Connected GNSS network adjustment completed.",
+            "message": completed_message,
             "timestamp": current_timestamp,
             # The UI may not currently be viewing one of the adjusted stations,
             # so publish the downloadable result on the project-level event too.
@@ -2677,19 +2698,12 @@ class MQTTBridge:
                                     )
                                 ),
                             })
-                            for cluster in info.get("project_gnss_clusters") or []:
-                                if not isinstance(cluster, dict):
-                                    continue
-                                base_mountpoint = (
-                                    cluster.get("base_stream_mp")
-                                    or cluster.get("base_stream")
-                                    or cluster.get("base_station")
-                                )
-                                if base_mountpoint:
-                                    self.client.publish(
-                                        "command/ntrip/route/stop",
-                                        json.dumps({"station_code": base_mountpoint}),
-                                    )
+                            # The Round-Robin manager has already identified and locked
+                            # the actual primary/backup fixed-base service from AGRICA.
+                            # Never stop the persisted primary mountpoint here: it may be
+                            # offline while a backup station is feeding that mountpoint.
+                            # The manager snapshots, sleeps and restores the selected
+                            # CORS service atomically inside start_cycle().
                             await self.round_robin_manager.start_cycle(proj_id)
 
                 # Only process for GNSS position/status if payload actually contains GGA.

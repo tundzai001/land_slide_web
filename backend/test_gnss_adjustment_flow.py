@@ -1,4 +1,5 @@
 import unittest
+import numpy as np
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -6,6 +7,7 @@ try:
     from backend.processors.round_robin_manager import (
         RoundRobinAdjustmentManager,
         _SafeRoverRotationSkip,
+        _InformationAccumulator,
         _graph_components,
         _initial_positive_sequence_ess,
         _rolling_mean_stability,
@@ -15,6 +17,7 @@ except ModuleNotFoundError:
     from processors.round_robin_manager import (
         RoundRobinAdjustmentManager,
         _SafeRoverRotationSkip,
+        _InformationAccumulator,
         _graph_components,
         _initial_positive_sequence_ess,
         _rolling_mean_stability,
@@ -175,6 +178,12 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
             edge["acf_estimated_effective_sample_size"] >= 1.0
             for edge in result["quality"]["effective_sample_size_edges"]
         ))
+        for edge in result["baselines"]:
+            formal = np.asarray(edge["formal_covariance_xyz"], dtype=float)
+            used = np.asarray(edge["session_covariance_used_xyz"], dtype=float)
+            self.assertTrue(np.all(np.linalg.eigvalsh(formal) > 0.0))
+            self.assertTrue(np.all(np.linalg.eigvalsh(used) > 0.0))
+            self.assertTrue(np.all(np.diag(used) >= np.diag(formal)))
 
     def test_position_type_4_is_preferred_and_type_7_is_rejected_per_edge(self):
         self._add(
@@ -258,6 +267,69 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         drifting = _rolling_mean_stability(drifting_samples)
         self.assertFalse(drifting["stable"])
         self.assertGreater(abs(drifting["delta_neu_m"][2]), 0.005)
+
+    def test_rolling_stability_rejects_scatter_and_slope_even_when_means_match(self):
+        oscillating = [
+            (epoch, (1.0 + (0.02 if epoch % 2 else -0.02), 2.0, 3.0))
+            for epoch in range(40)
+        ]
+        scatter = _rolling_mean_stability(
+            oscillating,
+            ewma_horizontal_limit_m=1.0,
+            ewma_up_limit_m=1.0,
+        )
+        self.assertTrue(scatter["mean_stable"])
+        self.assertFalse(scatter["scatter_stable"])
+        self.assertFalse(scatter["stable"])
+
+        repeating_ramp = [
+            (epoch, (1.0 + (epoch % 10) * 0.002, 2.0, 3.0))
+            for epoch in range(40)
+        ]
+        slope = _rolling_mean_stability(
+            repeating_ramp,
+            horizontal_std_limit_m=1.0,
+            ewma_horizontal_limit_m=1.0,
+            ewma_up_limit_m=1.0,
+        )
+        self.assertTrue(slope["mean_stable"])
+        self.assertFalse(slope["slope_stable"])
+        self.assertFalse(slope["stable"])
+
+    def test_information_accumulator_matches_batch_weighted_mean(self):
+        accumulator = _InformationAccumulator()
+        vectors = [
+            np.asarray((1.0, 2.0, 3.0)),
+            np.asarray((1.2, 1.9, 3.1)),
+        ]
+        covariances = [
+            np.diag((0.04, 0.09, 0.16)),
+            np.diag((0.01, 0.04, 0.09)),
+        ]
+        for epoch, (vector, covariance) in enumerate(
+            zip(vectors, covariances, strict=True), start=1
+        ):
+            accumulator.add(
+                epoch,
+                vector,
+                covariance,
+                fast_tau_seconds=3.0,
+                slow_tau_seconds=30.0,
+                retention_seconds=30,
+            )
+        precision = sum(np.linalg.solve(item, np.eye(3)) for item in covariances)
+        information = sum(
+            np.linalg.solve(covariance, vector)
+            for covariance, vector in zip(covariances, vectors, strict=True)
+        )
+        expected_mean = np.linalg.solve(precision, information)
+        expected_covariance = np.linalg.solve(precision, np.eye(3))
+        np.testing.assert_allclose(accumulator.mean, expected_mean, atol=1e-12)
+        np.testing.assert_allclose(
+            accumulator.formal_covariance,
+            expected_covariance,
+            atol=1e-12,
+        )
 
     def test_seed_solver_accepts_sixty_seconds_at_half_hz(self):
         stations = (
@@ -670,6 +742,60 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertIn(
             "matches configured fixed BASE",
             self.manager.get_last_ingest_diagnostic(17)["message"],
+        )
+
+    def test_backup_fixed_base_is_locked_from_reported_agrica_coordinate(self):
+        cluster = self.manager._sessions[17]["clusters"][0]
+        cluster["fixed_base_candidates"] = [
+            {
+                "role": "primary",
+                "base_station": "SinQuyen1",
+                "base_lat": 21.0,
+                "base_lon": 105.0,
+                "base_alt": 10.0,
+                "base_stream_host": "primary.example",
+                "base_stream_port": 2101,
+                "base_stream_mp": "SinQuyen1",
+            },
+            {
+                "role": "backup",
+                "base_station": "SinQuyen2",
+                "base_lat": 21.01,
+                "base_lon": 105.01,
+                "base_alt": 12.0,
+                "base_stream_host": "backup.example",
+                "base_stream_port": 2101,
+                "base_stream_mp": "SinQuyen1",
+            },
+        ]
+        cluster["selected_fixed_base_candidate"] = None
+
+        accepted = self._add(
+            101,
+            "S1",
+            (1.0, 2.0, 0.0),
+            (21.0101, 105.01, 12.0),
+            base_llh=(21.01, 105.01, 12.0),
+        )
+
+        self.assertEqual(len(accepted), 1)
+        selected = cluster["selected_fixed_base_candidate"]
+        self.assertEqual(selected["role"], "backup")
+        self.assertEqual(cluster["base_station"], "SinQuyen2")
+        self.assertEqual(cluster["base_stream_host"], "backup.example")
+        self.assertEqual(cluster["base_stream_mp"], "SinQuyen1")
+        self.assertIn("selected backup fixed base", cluster["fixed_base_selection_diagnostic"])
+        conflicting = self._add(
+            102,
+            "S2",
+            (1.0, 2.0, 0.0),
+            (21.0001, 105.0, 10.0),
+            base_llh=(21.0, 105.0, 10.0),
+        )
+        self.assertEqual(conflicting, [])
+        self.assertEqual(
+            cluster["selected_fixed_base_candidate"]["base_station"],
+            "SinQuyen2",
         )
 
     def test_stale_temporary_base_fixed_solution_is_not_mislabeled_as_fixed_base(self):

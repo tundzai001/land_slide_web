@@ -4,6 +4,7 @@
 
 import logging
 import asyncio
+import copy
 import json
 import time
 import math
@@ -215,6 +216,8 @@ logging.getLogger("uvicorn.access").addFilter(HeartbeatFilter())
 analyzer = LandslideAnalyzer()
 mqtt_service = MQTTBridge()
 gnss_rollup_task: Optional[asyncio.Task] = None
+cors_failover_task: Optional[asyncio.Task] = None
+cors_failover_status: list[dict] = []
 
 
 def _utc_day_start(ts: int) -> int:
@@ -467,6 +470,49 @@ async def run_gnss_daily_rollup_daemon():
             logger.error(f"❌ GNSS rollup daemon error: {e}", exc_info=True)
             await asyncio.sleep(30)
 
+async def run_cors_fixed_base_failover_daemon():
+    """Continuously enforce configured cross-station S1/S2 failover pairs."""
+
+    global cors_failover_status
+    poll_seconds = max(
+        2.0,
+        float(os.getenv("GNSS_CORS_FAILOVER_POLL_SECONDS", "5")),
+    )
+    while True:
+        try:
+            async with ConfigSessionLocal() as db_config:
+                result = await db_config.execute(
+                    select(model_config.Project).where(
+                        model_config.Project.is_active.is_(True)
+                    )
+                )
+                clusters = []
+                for project in result.scalars().all():
+                    for raw_cluster in project.gnss_clusters or []:
+                        if isinstance(raw_cluster, dict) and raw_cluster.get(
+                            "backup_base_station"
+                        ):
+                            cluster = copy.deepcopy(raw_cluster)
+                            cluster["project_id"] = int(project.id)
+                            clusters.append(cluster)
+            cors_failover_status = (
+                await mqtt_service.round_robin_manager.reconcile_cors_failover_pairs(
+                    clusters
+                )
+            )
+            await asyncio.sleep(poll_seconds)
+        except asyncio.CancelledError:
+            logger.info("CORS fixed-base failover daemon cancelled")
+            raise
+        except Exception as exc:
+            logger.error(
+                "CORS fixed-base failover reconciliation failed: %s",
+                exc,
+                exc_info=True,
+            )
+            await asyncio.sleep(poll_seconds)
+
+
 # ============================================================================
 # LIFESPAN MANAGEMENT
 # ============================================================================
@@ -476,7 +522,7 @@ async def lifespan(app: FastAPI):
     
     # Start the Security IPC Server as a background task
     asyncio.create_task(start_ipc_server())
-    global gnss_rollup_task
+    global gnss_rollup_task, cors_failover_task
     
     try:
         # 1. Khởi tạo AUTH DB
@@ -561,6 +607,9 @@ async def lifespan(app: FastAPI):
         logger.info("✓ Background MQTT Service started")
 
         gnss_rollup_task = asyncio.create_task(run_gnss_daily_rollup_daemon())
+        cors_failover_task = asyncio.create_task(
+            run_cors_fixed_base_failover_daemon()
+        )
         logger.info("✓ GNSS rollup daemon started")
 
         logger.info("=" * 60)
@@ -575,6 +624,10 @@ async def lifespan(app: FastAPI):
             gnss_rollup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await gnss_rollup_task
+        if cors_failover_task and not cors_failover_task.done():
+            cors_failover_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cors_failover_task
         await auth_engine.dispose()
         await config_engine.dispose()
         await data_engine.dispose()
@@ -829,15 +882,74 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
             continue
 
         service_config = item.get("service_config") if isinstance(item.get("service_config"), dict) else {}
+        status_text = str(item.get("status") or "").strip().casefold()
+        is_online = (
+            bool(item.get("is_online"))
+            if isinstance(item.get("is_online"), bool)
+            else (
+                status_text in {"online", "active", "connected", "streaming"}
+                if status_text
+                else bool(item.get("ntrip_connected"))
+            )
+        )
+        streams = []
+        for position, raw_stream in enumerate(
+            item.get("streams") if isinstance(item.get("streams"), list) else [],
+            start=1,
+        ):
+            if not isinstance(raw_stream, dict):
+                continue
+            stream = dict(raw_stream)
+            raw_server_id = stream.get("server_id")
+            if raw_server_id in (None, ""):
+                stream_token = str(stream.get("stream_id") or "")
+                digits = "".join(char for char in stream_token if char.isdigit())
+                raw_server_id = digits or position
+            try:
+                stream["server_id"] = int(raw_server_id)
+            except (TypeError, ValueError):
+                continue
+            streams.append(stream)
+        if not streams:
+            # Older WEB CORS responses expose only service_config.  Materialize
+            # S1/S2 explicitly so Project Management can persist the exact
+            # service identity instead of later guessing from a mountpoint.
+            for server_id in (1, 2):
+                host = str(
+                    service_config.get(f"serverhost{server_id}")
+                    or service_config.get(f"server{server_id}_host")
+                    or ""
+                ).strip()
+                mountpoint = str(
+                    service_config.get(f"mountpoint{server_id}") or ""
+                ).strip()
+                if not host or not mountpoint:
+                    continue
+                port = (
+                    service_config.get(f"serverport{server_id}")
+                    or service_config.get(f"server{server_id}_port")
+                    or 2101
+                )
+                streams.append({
+                    "server_id": server_id,
+                    "stream_id": f"s{server_id}",
+                    "host": host,
+                    "port": port,
+                    "mountpoint": mountpoint,
+                    "enabled": bool(
+                        service_config.get(f"server{server_id}_enabled", True)
+                    ),
+                })
         stations.append({
             "serial": item.get("serial"),
             "name": name,
             "status": item.get("status"),
+            "is_online": is_online,
             "lat": lat,
             "lon": lon,
             "alt": alt,
             "mountpoint": service_config.get("mountpoint1") or item.get("mountpoint") or name,
-            "streams": item.get("streams") or [],
+            "streams": streams,
             "service_config": item.get("service_config") or {},
             "is_provisioned": bool(item.get("is_provisioned")),
             "server_host": service_config.get("serverhost1"),
@@ -1343,6 +1455,15 @@ async def get_admin_cors_stations(
     except requests.RequestException as e:
         logger.warning(f"CORS base station fetch failed: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch CORS base stations")
+
+
+@app.get("/api/admin/projects/cors-failover-status")
+async def get_admin_cors_failover_status(
+    current_user: model_auth.User = Depends(
+        auth.require_permission(auth.Permission.MANAGE_USERS)
+    ),
+):
+    return {"pairs": copy.deepcopy(cors_failover_status)}
 
 @app.put("/api/admin/projects/{project_id}")
 async def update_project(
@@ -1871,27 +1992,86 @@ def _normalize_active_adjustment_clusters(
         station_ids = resolve_station_ids(cluster.get("stations", []))
         if len(station_ids) < 2:
             continue
-        try:
-            base_lat = float(cluster.get("base_lat"))
-            base_lon = float(cluster.get("base_lon"))
-            base_alt = float(cluster.get("base_alt") or 0.0)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"GNSS cluster #{index + 1} is missing a valid fixed-base coordinate"
-            ) from exc
-        if (
-            not all(math.isfinite(value) for value in (base_lat, base_lon, base_alt))
-            or not -90.0 <= base_lat <= 90.0
-            or not -180.0 <= base_lon <= 180.0
-            or (abs(base_lat) < 1e-12 and abs(base_lon) < 1e-12 and abs(base_alt) < 1e-12)
-        ):
-            raise ValueError(f"GNSS cluster #{index + 1} has an invalid fixed-base coordinate")
+        def normalize_candidate(source: dict, role: str) -> dict:
+            prefix = "" if role == "primary" else "backup_"
+            try:
+                latitude = float(source.get(f"{prefix}base_lat"))
+                longitude = float(source.get(f"{prefix}base_lon"))
+                altitude = float(source.get(f"{prefix}base_alt") or 0.0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"GNSS cluster #{index + 1} {role} base is missing a valid coordinate"
+                ) from exc
+            if (
+                not all(math.isfinite(value) for value in (latitude, longitude, altitude))
+                or not -90.0 <= latitude <= 90.0
+                or not -180.0 <= longitude <= 180.0
+                or (
+                    abs(latitude) < 1e-12
+                    and abs(longitude) < 1e-12
+                    and abs(altitude) < 1e-12
+                )
+            ):
+                raise ValueError(
+                    f"GNSS cluster #{index + 1} has an invalid {role} fixed-base coordinate"
+                )
+            return {
+                "role": role,
+                "base_station": str(source.get(f"{prefix}base_station") or "").strip(),
+                "base_lat": latitude,
+                "base_lon": longitude,
+                "base_alt": altitude,
+                "base_stream": str(source.get(f"{prefix}base_stream") or "").strip(),
+                "base_stream_host": str(
+                    source.get(f"{prefix}base_stream_host") or ""
+                ).strip(),
+                "base_stream_port": source.get(f"{prefix}base_stream_port"),
+                "base_stream_mp": str(
+                    source.get(f"{prefix}base_stream_mp") or ""
+                ).strip(),
+                "base_service_config": copy.deepcopy(
+                    source.get(f"{prefix}base_service_config") or {}
+                ),
+                "base_serial": str(
+                    source.get(f"{prefix}base_serial") or ""
+                ).strip(),
+                "base_server_id": source.get(f"{prefix}base_server_id"),
+            }
+
+        primary = normalize_candidate(cluster, "primary")
+        candidates = [primary]
+        if str(cluster.get("backup_base_station") or "").strip():
+            backup = normalize_candidate(cluster, "backup")
+            if backup["base_station"].casefold() == primary["base_station"].casefold():
+                raise ValueError(
+                    f"GNSS cluster #{index + 1} backup base must differ from its primary base"
+                )
+            if not backup["base_stream_host"] or not backup["base_stream_mp"]:
+                raise ValueError(
+                    f"GNSS cluster #{index + 1} backup base requires an explicit "
+                    "CORS stream host and mountpoint"
+                )
+            if (
+                backup["base_stream_mp"].casefold()
+                != primary["base_stream_mp"].casefold()
+            ):
+                raise ValueError(
+                    f"GNSS cluster #{index + 1} backup S2 must publish the same "
+                    "mountpoint as primary S1"
+                )
+            candidates.append(backup)
 
         cluster["stations"] = station_ids
         cluster["rovers"] = [stations_by_id[station_id].station_code for station_id in station_ids]
-        cluster["base_lat"] = base_lat
-        cluster["base_lon"] = base_lon
-        cluster["base_alt"] = base_alt
+        cluster["fixed_base_candidates"] = candidates
+        cluster["selected_fixed_base_candidate"] = (
+            copy.deepcopy(primary) if len(candidates) == 1 else None
+        )
+        cluster.update({
+            key: copy.deepcopy(value)
+            for key, value in primary.items()
+            if key != "role"
+        })
         configured.append(cluster)
 
     if not configured:

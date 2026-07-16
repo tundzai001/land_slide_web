@@ -790,7 +790,7 @@ class AdminManager {
         if (clusters.length === 0) {
             this.addClusterRow(clustersContainer);
         } else {
-            clusters.forEach(c => this.addClusterRow(clustersContainer, c.name, c.description, c.base_station, c.stations, c.base_stream));
+            clusters.forEach(c => this.addClusterRow(clustersContainer, c.name, c.description, c.base_station, c.stations, c.base_stream, c));
         }
 
         document.getElementById('projectConfigModalTitle').textContent = `Cấu hình dự án: ${project.name}`;
@@ -801,7 +801,7 @@ class AdminManager {
         this.projectConfigModal.show();
     }
 
-    addClusterRow(container, name = '', desc = '', base_station_code = '', stations = [], base_stream = '') {
+    addClusterRow(container, name = '', desc = '', base_station_code = '', stations = [], base_stream = '', clusterConfig = {}) {
         const row = document.createElement('div');
         row.className = 'cluster-row row g-2 mb-2 align-items-center';
         
@@ -836,10 +836,28 @@ class AdminManager {
         if (this.corsStationsData) {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
-                baseOptionsHtml += `<option value="${st.name || st.code}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${st.name || st.code}</option>`;
+                const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
+                baseOptionsHtml += `<option value="${st.name || st.code}" data-online="${online}" data-serial="${st.serial || ''}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${online ? '🟢' : '🔴'} ${st.name || st.code} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
             });
         }
         baseOptionsHtml += '</optgroup>';
+
+        const backupBaseCode = clusterConfig.backup_base_station || '';
+        const backupBaseStream = clusterConfig.backup_base_stream || '';
+        let backupBaseOptionsHtml = '<option value="">-- Backup fixed base (optional) --</option>';
+        backupBaseOptionsHtml += '<optgroup label="Project stations">';
+        (this.projectStationsData || []).forEach(st => {
+            const selected = st.station_code === backupBaseCode ? 'selected' : '';
+            const devices = encodeURIComponent(JSON.stringify(st.devices || []));
+            backupBaseOptionsHtml += `<option value="${st.station_code}" data-devices="${devices}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${selected}>${st.name || st.station_code}</option>`;
+        });
+        backupBaseOptionsHtml += '</optgroup><optgroup label="CORS stations">';
+        (this.corsStationsData || []).forEach(st => {
+            const selected = (st.name === backupBaseCode || st.code === backupBaseCode) ? 'selected' : '';
+            const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
+            backupBaseOptionsHtml += `<option value="${st.name || st.code}" data-online="${online}" data-serial="${st.serial || ''}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${st.name || st.code} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
+        });
+        backupBaseOptionsHtml += '</optgroup>';
 
         row.innerHTML = `
             <div class="col-md-2">
@@ -862,6 +880,19 @@ class AdminManager {
                     </div>
                     <div class="text-muted" style="line-height: 1.4;">
                         <span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m
+                    </div>
+                </div>
+                <div class="mt-2 pt-2 border-top border-secondary-subtle">
+                    <div class="small text-warning mb-1"><i class="bi bi-shield-check"></i> Luồng dự phòng chéo tự động</div>
+                    <select class="form-select cluster-backup-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
+                        ${backupBaseOptionsHtml}
+                    </select>
+                    <select class="form-select cluster-backup-stream-select mt-1" style="font-size:0.75rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${backupBaseStream}">
+                        <option value="">-- Chọn luồng base phụ --</option>
+                    </select>
+                    <div class="backup-base-station-info mt-1" style="display:none; font-size:0.68rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 8px;">
+                        <strong class="base-info-name text-warning">--</strong>
+                        <div class="text-muted"><span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m</div>
                     </div>
                 </div>
             </div>
@@ -887,6 +918,10 @@ class AdminManager {
         if (baseSelect && baseSelect.value) {
             this.onBaseStationSelected(baseSelect);
         }
+        const backupBaseSelect = row.querySelector('.cluster-backup-base-select');
+        if (backupBaseSelect && backupBaseSelect.value) {
+            this.onBaseStationSelected(backupBaseSelect);
+        }
 
         const firstCheckbox = row.querySelector('.station-checkbox');
         if (firstCheckbox) {
@@ -897,9 +932,12 @@ class AdminManager {
     onBaseStationSelected(selectEl) {
         const row = selectEl.closest('.cluster-row');
         const selectedOpt = selectEl.options[selectEl.selectedIndex];
+        const isBackup = selectEl.classList.contains('cluster-backup-base-select');
         
         // --- 1. Stream Selection ---
-        const streamSelect = row.querySelector('.cluster-stream-select');
+        const streamSelect = row.querySelector(
+            isBackup ? '.cluster-backup-stream-select' : '.cluster-stream-select'
+        );
         const selectedStreamVal = streamSelect.getAttribute('data-selected-stream');
         
         streamSelect.innerHTML = '<option value="">-- Chọn Luồng --</option>';
@@ -929,7 +967,7 @@ class AdminManager {
                     streams.forEach(s => {
                         const isSelected = (s.stream_id === selectedStreamVal || s.mountpoint === selectedStreamVal) ? 'selected' : '';
                         const hostLabel = s.host ? ` [${s.host}:${s.port}]` : '';
-                        streamSelect.innerHTML += `<option value="${s.stream_id}" data-host="${s.host || ''}" data-port="${s.port || ''}" data-mp="${s.mountpoint || ''}" ${isSelected}>Luồng: ${s.stream_id.toUpperCase()} - ${s.mountpoint}${hostLabel}</option>`;
+                        streamSelect.innerHTML += `<option value="${s.stream_id}" data-server-id="${s.server_id || String(s.stream_id || '').replace(/\D/g, '')}" data-host="${s.host || ''}" data-port="${s.port || ''}" data-mp="${s.mountpoint || ''}" ${isSelected}>Luồng: ${s.stream_id.toUpperCase()} - ${s.mountpoint}${hostLabel}</option>`;
                     });
                     streamSelect.style.display = 'block';
                 } else {
@@ -945,7 +983,9 @@ class AdminManager {
         }
 
         // --- 2. Base Info Display ---
-        const infoPanel = row.querySelector('.base-station-info');
+        const infoPanel = row.querySelector(
+            isBackup ? '.backup-base-station-info' : '.base-station-info'
+        );
         if (!selectEl.value) {
             if (infoPanel) infoPanel.style.display = 'none';
             return;
@@ -955,9 +995,10 @@ class AdminManager {
         const lon = selectedOpt.dataset.lon || '--';
         const alt = selectedOpt.dataset.alt || '0';
         const name = selectEl.value;
+        const online = selectedOpt.dataset.online === 'true';
 
         if (infoPanel) {
-            infoPanel.querySelector('.base-info-name').textContent = name;
+            infoPanel.querySelector('.base-info-name').textContent = `${online ? '🟢 ONLINE' : '🔴 OFFLINE'} · ${name}`;
             infoPanel.querySelector('.base-info-lat').textContent = `Lat: ${lat}`;
             infoPanel.querySelector('.base-info-lon').textContent = `Lon: ${lon}`;
             infoPanel.querySelector('.base-info-alt').textContent = alt;
@@ -1008,6 +1049,7 @@ class AdminManager {
 
         // Collect Clusters
         const clusters = [];
+        let clusterConfigError = '';
         document.querySelectorAll('#project-gnss-clusters-container .cluster-row').forEach(row => {
             const name = row.querySelector('.cluster-name').value.trim();
             if (name) {
@@ -1018,7 +1060,22 @@ class AdminManager {
                 const baseLat = selectedOpt?.dataset?.lat ? parseFloat(selectedOpt.dataset.lat) : null;
                 const baseLon = selectedOpt?.dataset?.lon ? parseFloat(selectedOpt.dataset.lon) : null;
                 const baseAlt = selectedOpt?.dataset?.alt ? parseFloat(selectedOpt.dataset.alt) : null;
+                const backupSelect = row.querySelector('.cluster-backup-base-select');
+                const backupOpt = backupSelect?.options[backupSelect.selectedIndex];
+                const backupStreamSelect = row.querySelector('.cluster-backup-stream-select');
+                const primaryStreamSelect = row.querySelector('.cluster-stream-select');
                 const st = Array.from(row.querySelectorAll('.station-checkbox:checked')).map(c => c.value);
+                const backupBaseStation = backupSelect?.value || '';
+                const backupStreamHost = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.host || '') : '';
+                const backupStreamMp = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
+                const primaryStreamMp = primaryStreamSelect?.selectedIndex >= 0 ? (primaryStreamSelect.options[primaryStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
+                if (backupBaseStation && backupBaseStation === baseStation) {
+                    clusterConfigError ||= `${name}: base dự phòng phải khác base chính.`;
+                } else if (backupBaseStation && (!backupStreamHost || !backupStreamMp)) {
+                    clusterConfigError ||= `${name}: hãy chọn đúng luồng CORS S1/S2 cho base dự phòng.`;
+                } else if (backupBaseStation && backupStreamMp !== primaryStreamMp) {
+                    clusterConfigError ||= `${name}: luồng S2 dự phòng phải gửi vào cùng mountpoint của S1 chính.`;
+                }
                 clusters.push({
                     name, description: desc,
                     base_station: baseStation,
@@ -1028,10 +1085,28 @@ class AdminManager {
                     base_stream_port: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.port || '') : '',
                     base_stream_mp: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.mp || '') : '',
                     base_service_config: selectedOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(selectedOpt.dataset.serviceConfig)) : {},
+                    base_serial: selectedOpt?.dataset?.serial || '',
+                    base_server_id: row.querySelector('.cluster-stream-select')?.selectedIndex >= 0 ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.serverId || '') : '',
+                    backup_base_station: backupBaseStation,
+                    backup_base_lat: backupOpt?.dataset?.lat ? parseFloat(backupOpt.dataset.lat) : null,
+                    backup_base_lon: backupOpt?.dataset?.lon ? parseFloat(backupOpt.dataset.lon) : null,
+                    backup_base_alt: backupOpt?.dataset?.alt ? parseFloat(backupOpt.dataset.alt) : null,
+                    backup_base_stream: backupStreamSelect?.value || '',
+                    backup_base_stream_host: backupStreamHost,
+                    backup_base_stream_port: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.port || '') : '',
+                    backup_base_stream_mp: backupStreamMp,
+                    backup_base_service_config: backupOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(backupOpt.dataset.serviceConfig)) : {},
+                    backup_base_serial: backupOpt?.dataset?.serial || '',
+                    backup_base_server_id: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.serverId || '') : '',
                     stations: st
                 });
             }
         });
+
+        if (clusterConfigError) {
+            window.toast?.error(clusterConfigError);
+            return;
+        }
 
         try {
             const res = await fetch(`/api/admin/projects/${projectId}`, {

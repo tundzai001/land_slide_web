@@ -202,6 +202,196 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         restored_payload = json.loads(requests[2][0].data.decode())
         self.assertEqual(restored_payload, original_config)
 
+    async def test_fixed_base_uses_exact_serial_when_backup_shares_host_and_mountpoint(self):
+        class FakeResponse:
+            status = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return self.body.encode()
+
+        primary_config = {
+            "server1_enabled": True,
+            "serverhost1": "caster.example",
+            "mountpoint1": "SinQuyen1",
+            "server1_stream_on_demand": False,
+            "server1_stream_active": True,
+        }
+        backup_config = {
+            "server2_enabled": True,
+            "serverhost2": "caster.example",
+            "mountpoint2": "SinQuyen1",
+            "server2_stream_on_demand": False,
+            "server2_stream_active": True,
+        }
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            web_cors_api_token="cors-admin-token",
+        )
+        requests = []
+
+        def urlopen(request, timeout):
+            requests.append((request, timeout))
+            if request.full_url.endswith("/api/public/map-stations"):
+                return FakeResponse(json.dumps([
+                    {
+                        "serial": "SINQUYEN1-SERIAL",
+                        "name": "SinQuyen1",
+                        "service_config": primary_config,
+                    },
+                    {
+                        "serial": "SINQUYEN2-SERIAL",
+                        "name": "SinQuyen2",
+                        "service_config": backup_config,
+                    },
+                ]))
+            return FakeResponse(json.dumps({
+                "status": "service_config_sent_and_saved",
+                "channel": "mqtt",
+            }))
+
+        with patch("urllib.request.urlopen", side_effect=urlopen):
+            await manager._toggle_cors_fixed_base(
+                "SinQuyen1",
+                sleep=True,
+                selected_host="caster.example",
+                selected_serial="SINQUYEN2-SERIAL",
+                selected_server_id=2,
+            )
+            await manager._toggle_cors_fixed_base(
+                "SinQuyen1",
+                sleep=False,
+                selected_host="caster.example",
+                selected_serial="SINQUYEN2-SERIAL",
+                selected_server_id=2,
+            )
+
+        self.assertTrue(
+            requests[1][0].full_url.endswith(
+                "/api/devices/SINQUYEN2-SERIAL/configure-service"
+            )
+        )
+        sleep_payload = json.loads(requests[1][0].data.decode())
+        self.assertTrue(sleep_payload["server2_stream_on_demand"])
+        self.assertFalse(sleep_payload["server2_stream_active"])
+        restored_payload = json.loads(requests[2][0].data.decode())
+        self.assertEqual(restored_payload, backup_config)
+
+    async def test_cross_station_failover_switches_s2_both_directions(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        stations = [
+            {
+                "serial": "SQ1-SERIAL",
+                "name": "SinQuyen1",
+                "status": "offline",
+                "service_config": {
+                    "server1_enabled": True,
+                    "serverhost1": "caster.example",
+                    "mountpoint1": "SinQuyen1",
+                    "server1_stream_on_demand": False,
+                    "server1_stream_active": True,
+                    "server2_enabled": True,
+                    "serverhost2": "caster.example",
+                    "mountpoint2": "SinQuyen2",
+                    "server2_stream_on_demand": True,
+                    "server2_stream_active": False,
+                },
+            },
+            {
+                "serial": "SQ2-SERIAL",
+                "name": "SinQuyen2",
+                "status": "online",
+                "service_config": {
+                    "server1_enabled": True,
+                    "serverhost1": "caster.example",
+                    "mountpoint1": "SinQuyen2",
+                    "server1_stream_on_demand": False,
+                    "server1_stream_active": True,
+                    "server2_enabled": True,
+                    "serverhost2": "caster.example",
+                    "mountpoint2": "SinQuyen1",
+                    "server2_stream_on_demand": True,
+                    "server2_stream_active": False,
+                },
+            },
+        ]
+        clusters = [
+            {
+                "name": "Dam 1",
+                "base_station": "SinQuyen1",
+                "base_serial": "SQ1-SERIAL",
+                "base_server_id": 1,
+                "base_stream_host": "caster.example",
+                "base_stream_mp": "SinQuyen1",
+                "backup_base_station": "SinQuyen2",
+                "backup_base_serial": "SQ2-SERIAL",
+                "backup_base_server_id": 2,
+                "backup_base_stream_host": "caster.example",
+                "backup_base_stream_mp": "SinQuyen1",
+            },
+            {
+                "name": "Dam 4",
+                "base_station": "SinQuyen2",
+                "base_serial": "SQ2-SERIAL",
+                "base_server_id": 1,
+                "base_stream_host": "caster.example",
+                "base_stream_mp": "SinQuyen2",
+                "backup_base_station": "SinQuyen1",
+                "backup_base_serial": "SQ1-SERIAL",
+                "backup_base_server_id": 2,
+                "backup_base_stream_host": "caster.example",
+                "backup_base_stream_mp": "SinQuyen2",
+            },
+        ]
+        configured = []
+
+        def configure(serial, service_config):
+            configured.append((serial, service_config))
+            return {"status": "service_config_sent_and_saved"}
+
+        with patch.object(manager, "_cors_configure_service_sync", side_effect=configure):
+            first = await manager.reconcile_cors_failover_pairs(
+                clusters,
+                stations=stations,
+            )
+            self.assertEqual([item["state"] for item in first], [
+                "BACKUP_ACTIVE",
+                "PRIMARY_ACTIVE",
+            ])
+            self.assertEqual(len(configured), 1)
+            self.assertEqual(configured[0][0], "SQ2-SERIAL")
+            self.assertFalse(configured[0][1]["server2_stream_on_demand"])
+            self.assertTrue(configured[0][1]["server2_stream_active"])
+
+            stations[0]["status"] = "online"
+            stations[1]["status"] = "offline"
+            configured.clear()
+            second = await manager.reconcile_cors_failover_pairs(
+                clusters,
+                stations=stations,
+            )
+
+        self.assertEqual([item["state"] for item in second], [
+            "PRIMARY_ACTIVE",
+            "BACKUP_ACTIVE",
+        ])
+        self.assertEqual([item[0] for item in configured], [
+            "SQ2-SERIAL",
+            "SQ1-SERIAL",
+        ])
+        self.assertTrue(configured[0][1]["server2_stream_on_demand"])
+        self.assertFalse(configured[0][1]["server2_stream_active"])
+        self.assertFalse(configured[1][1]["server2_stream_on_demand"])
+        self.assertTrue(configured[1][1]["server2_stream_active"])
+
     async def test_fixed_base_requires_configure_service_confirmation(self):
         class FakeResponse:
             status = 200
@@ -750,6 +940,16 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             b"rtcm1094 com2 1\r\n",
             b"saveconfig\r\n",
         ])
+
+        ecef_commands = manager._build_unicore_base_config(
+            "FIXED",
+            ecef_xyz=(-1773825.0657882644, 5684333.063952032, 2277604.1899894723),
+        )
+        self.assertEqual(ecef_commands[:2], [
+            b"unlogall\r\n",
+            b"mode base -1773825.0658 5684333.0640 2277604.1900\r\n",
+        ])
+        self.assertNotIn(b"config undulation 0.0\r\n", ecef_commands)
 
         rover_text = b"".join(manager._build_unicore_rover_config()).lower()
         self.assertEqual(
