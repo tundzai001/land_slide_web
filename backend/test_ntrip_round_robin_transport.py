@@ -388,9 +388,10 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_rover_recovery_sequence_restores_mode_outputs_and_saves_config(self):
-        commands = RoundRobinAdjustmentManager._build_unicore_rover_config()
+        commands = RoundRobinAdjustmentManager._build_unicore_rover_config(-24.001831)
         self.assertEqual(commands, [
             b"mode rover survey\r\n",
+            b"config undulation -24.0018\r\n",
             b"unlogall\r\n",
             b"gpgga com2 1\r\n",
             b"AGRICA COM2 1\r\n",
@@ -739,6 +740,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(commands, [
             b"unlogall\r\n",
+            b"config undulation 0.0\r\n",
             b"mode base 21.0 105.0 10.0\r\n",
             b"rtcm1006 com2 10\r\n",
             b"rtcm1033 com2 10\r\n",
@@ -752,7 +754,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         rover_text = b"".join(manager._build_unicore_rover_config()).lower()
         self.assertEqual(
             rover_text,
-            b"mode rover survey\r\nunlogall\r\ngpgga com2 1\r\n"
+            b"mode rover survey\r\nconfig undulation auto\r\nunlogall\r\ngpgga com2 1\r\n"
             b"agrica com2 1\r\nsaveconfig\r\n",
         )
 
@@ -883,6 +885,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 "collection_stopped",
                 "route_stopped",
                 "set_rover",
+                "restore_config",
                 "restore_unlogall",
                 "restore_gpgga",
                 "restore_agrica",
@@ -943,6 +946,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "set_base",
             "route_rejected",
             "set_rover",
+            "restore_config",
             "restore_unlogall",
             "restore_gpgga",
             "restore_agrica",
@@ -1001,8 +1005,10 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         # One stop cleans the failed attempt and one stops the successful route.
         self.assertEqual(route_stops, ["S1", "S1"])
 
-    async def test_collection_waits_for_verified_cross_rovers_before_stable_window(self):
+    async def test_collection_waits_for_stationarity_and_resets_when_drift_returns(self):
         status_calls = 0
+        stable_events = []
+        invalid_events = []
 
         async def route_start(*_args):
             return True
@@ -1012,6 +1018,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             route_start_callback=route_start,
             route_stop_callback=AsyncMock(),
         )
+        manager.STABILITY_HOLD_SECONDS = 0
         manager.rover_llh_cache["S1"] = {"lat": 21.0, "lon": 105.0, "alt": 10.0}
         manager._find_client_info = AsyncMock(return_value={
             "Username": "S1",
@@ -1024,31 +1031,75 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             nonlocal status_calls
             status_calls += 1
             if status_calls < 3:
-                return {"sample_count": 0, "rover_names": set()}
+                return {
+                    "sample_count": 0,
+                    "rover_names": set(),
+                    "sample_counts_by_rover": {},
+                }
             if status_calls == 3:
-                return {"sample_count": 1, "rover_names": {"S2"}}
-            return {"sample_count": 2, "rover_names": {"S2", "S3"}}
+                return {
+                    "sample_count": 6,
+                    "rover_names": {"S2", "S3"},
+                    "sample_counts_by_rover": {"S2": 5, "S3": 1},
+                }
+            status = {
+                "sample_count": 40,
+                "rover_names": {"S2", "S3"},
+                "sample_counts_by_rover": {"S2": 20, "S3": 20},
+                "rolling_stability_by_rover": {
+                    "S2": {
+                        "stable": True,
+                        "enough_samples": True,
+                        "latest_epoch": status_calls,
+                        "delta_neu_m": (0.0, 0.0, 0.0),
+                    },
+                    "S3": {
+                        "stable": True,
+                        "enough_samples": True,
+                        "latest_epoch": status_calls,
+                        "delta_neu_m": (0.0, 0.0, 0.0),
+                    },
+                },
+            }
+            if len(stable_events) == 1 and not invalid_events:
+                status["rolling_stability_by_rover"]["S3"] = {
+                    "stable": False,
+                    "enough_samples": True,
+                    "latest_epoch": status_calls,
+                    "delta_neu_m": (0.009, 0.0, 0.0),
+                }
+                status["solver_sample_counts_by_rover"] = {"S2": 10, "S3": 10}
+                status["solver_durations_by_rover_seconds"] = {"S2": 9, "S3": 9}
+            elif len(stable_events) >= 2:
+                status["solver_sample_counts_by_rover"] = {"S2": 61, "S3": 61}
+                status["solver_durations_by_rover_seconds"] = {"S2": 60, "S3": 60}
+            return status
 
         sleep_mock = AsyncMock()
         with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=sleep_mock):
             await manager._set_rover_as_temporary_base(
                 "S1",
+                on_stable_collection_started=lambda: stable_events.append("stable"),
+                on_stable_collection_invalid=lambda reason: invalid_events.append(reason),
                 collection_status_callback=collection_status,
                 expected_cross_rovers={"S2", "S3"},
             )
 
-        self.assertEqual(status_calls, 4)
+        self.assertEqual(status_calls, 10)
         delays = [call.args[0] for call in sleep_mock.await_args_list]
         self.assertEqual(
             delays.count(manager.CROSS_BASE_STATUS_POLL_SECONDS),
-            3,
+            8,
         )
-        self.assertIn(manager.CROSS_BASE_STABLE_COLLECTION_SECONDS, delays)
+        self.assertEqual(stable_events, ["stable", "stable"])
+        self.assertEqual(invalid_events, ["drift"])
+        self.assertIn(manager.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS, delays)
+        self.assertNotIn(manager.CROSS_BASE_STABLE_COLLECTION_SECONDS, delays)
 
     async def test_rover_restore_retries_each_command_until_ack_before_advancing(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         commands_seen = []
-        responses = iter([False, True, True, True, True, True])
+        responses = iter([False, True, True, True, True, True, True])
 
         async def send_set(_mountpoint, _username, _receiver_id, commands, **kwargs):
             commands_seen.append((commands[0], kwargs.get("wait_for_command_response")))
@@ -1069,6 +1120,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             [
                 b"mode rover survey\r\n",
                 b"mode rover survey\r\n",
+                b"config undulation auto\r\n",
                 b"unlogall\r\n",
                 b"gpgga com2 1\r\n",
                 b"AGRICA COM2 1\r\n",
@@ -1080,7 +1132,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_rover_restore_does_not_fail_when_only_saveconfig_ack_is_missing(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         commands_seen = []
-        responses = iter([True, True, True, True, False, False, False])
+        responses = iter([True, True, True, True, True, False, False, False])
 
         async def send_set(_mountpoint, _username, _receiver_id, commands, **_kwargs):
             commands_seen.append(commands[0])

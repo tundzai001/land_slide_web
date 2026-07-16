@@ -117,6 +117,7 @@ function phaseClassForGnssAdjustment(phase) {
         case 'COLLECTING_BASELINE': return 'ms-4 text-info fw-bold font-monospace';
         case 'FREE_NETWORK': return 'ms-4 text-warning fw-bold font-monospace';
         case 'COMPLETED': return 'ms-4 text-success fw-bold font-monospace';
+        case 'FAILED_QUALITY_GATE': return 'ms-4 text-danger fw-bold font-monospace';
         case 'ERROR': return 'ms-4 text-danger fw-bold font-monospace';
         default: return 'ms-4 text-warning fw-bold font-monospace';
     }
@@ -267,7 +268,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
         return;
     }
 
-    if (normalizedPhase === 'ERROR') {
+    if (normalizedPhase === 'ERROR' || normalizedPhase === 'FAILED_QUALITY_GATE') {
         const current = [...gnssAdjustmentDebugState.workflowNodes].reverse().find(node => node.status === 'running');
         if (current) {
             current.status = 'error';
@@ -275,7 +276,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             gnssAdjustmentDebugState.workflowRevision += 1;
         } else {
             upsertGnssWorkflowNode('error', {
-                title: 'Quy trình bị dừng', detail: message || 'Máy chủ báo lỗi.', status: 'error', icon: 'bi-exclamation-triangle',
+                title: normalizedPhase === 'FAILED_QUALITY_GATE' ? 'Không đạt kiểm định chất lượng' : 'Quy trình bị dừng', detail: message || 'Máy chủ báo lỗi.', status: 'error', icon: 'bi-exclamation-triangle',
             });
         }
         renderGnssAdjustmentWorkflow();
@@ -582,7 +583,7 @@ function setGnssAdjustmentPhase(phase, message = '') {
         window.toast?.error?.(message || 'Quy trình bình sai đã dừng do lỗi.');
     }
     window.gnssBoardState?.draw?.(performance.now());
-    if (['COMPLETED', 'ERROR', 'IDLE'].includes(gnssAdjustmentDebugState.phase)) {
+    if (['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR', 'IDLE'].includes(gnssAdjustmentDebugState.phase)) {
         if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
         gnssAdjustmentDebugState.statusPollId = null;
         if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
@@ -611,12 +612,17 @@ async function syncGnssAdjustmentStatus() {
             setGnssAdjustmentPhase(phase, message || 'Đã đồng bộ trạng thái từ máy chủ.');
             addGnssAdjustmentDebug('SYNC', 'Đã khôi phục trạng thái qua API sau khi có thể bỏ lỡ WebSocket.', 'success');
         }
-        if (phase === 'COMPLETED' && status.data) {
-            updateRealtimeSensorValues({
+        if (status.data && (phase === 'COMPLETED' || phase === 'FAILED_QUALITY_GATE')) {
+            const resultMessage = {
                 sensor_type: 'gnss_adjusted',
                 timestamp: status.data.computed_at || Math.floor(Date.now() / 1000),
                 data: status.data,
-            });
+            };
+            if (phase === 'COMPLETED') {
+                updateRealtimeSensorValues(resultMessage);
+            } else {
+                renderGnssAdjustmentAuditResult(resultMessage);
+            }
         }
     } catch (error) {
         console.warn('[GNSS] Could not synchronize adjustment status:', error);
@@ -1273,13 +1279,25 @@ function handleRealtimeUpdate(message) {
                 gnssAdjustmentDebugState.expectedStationIds = message.expected_station_ids;
             }
             setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
-            if (String(message.phase || '').toUpperCase() === 'COMPLETED' && message.data) {
-                updateRealtimeSensorValues({
+            const resultPhase = String(message.phase || '').toUpperCase();
+            if (message.data && (resultPhase === 'COMPLETED' || resultPhase === 'FAILED_QUALITY_GATE')) {
+                const resultMessage = {
                     sensor_type: 'gnss_adjusted',
                     timestamp: message.timestamp || message.data.computed_at || Math.floor(Date.now() / 1000),
                     data: message.data,
-                });
-                addGnssAdjustmentDebug('REPORT', 'Đã nhận liên kết tải JSON và XLSX.', 'success');
+                };
+                if (resultPhase === 'COMPLETED') {
+                    updateRealtimeSensorValues(resultMessage);
+                } else {
+                    renderGnssAdjustmentAuditResult(resultMessage);
+                }
+                addGnssAdjustmentDebug(
+                    'REPORT',
+                    resultPhase === 'FAILED_QUALITY_GATE'
+                        ? 'Hồ sơ audit đã sẵn sàng để tải; tọa độ không được publish.'
+                        : 'Đã nhận liên kết tải JSON và XLSX.',
+                    'success',
+                );
             }
         }
     }
@@ -1351,8 +1369,9 @@ function isGnssAdjustmentResultRelevant(result, timestamp = null) {
     }
     if (gnssAdjustmentDebugState.active) {
         // While a new run is collecting/networking, never show an old cached
-        // success panel.  The project-level COMPLETED event will render it.
-        if (gnssAdjustmentDebugState.phase !== 'COMPLETED') return false;
+        // result panel. Project-level terminal events render either an official
+        // result or a downloadable audit-only result.
+        if (!['COMPLETED', 'FAILED_QUALITY_GATE'].includes(gnssAdjustmentDebugState.phase)) return false;
         const resultTimestamp = Number(timestamp || result.computed_at || result.epoch_ts || 0);
         const runStartedAt = Math.floor(Number(gnssAdjustmentDebugState.startedAt || 0) / 1000);
         if (runStartedAt && (!resultTimestamp || resultTimestamp < runStartedAt - 2)) {
@@ -1362,15 +1381,54 @@ function isGnssAdjustmentResultRelevant(result, timestamp = null) {
     return true;
 }
 
+function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
+    if (!message?.data || !isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return false;
+    window.gnssBoardState?.loadAdjustmentResult?.(message.data);
+    const adjResultsSection = document.getElementById('adj-results-section');
+    const adjStatusEl = document.getElementById('adj-process-status');
+    const adjTimeEl = document.getElementById('adj-val-time');
+    const adjPointsList = document.getElementById('adj-points-list');
+
+    if (adjStatusEl) {
+        adjStatusEl.innerHTML = auditOnly
+            ? '<span class="text-warning fw-bold"><i class="bi bi-file-earmark-check-fill me-1"></i>Đã tạo hồ sơ audit – không publish tọa độ</span>'
+            : '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>';
+    }
+    if (adjTimeEl) {
+        const timestamp = Number(message.timestamp || message.data.computed_at || Date.now() / 1000);
+        adjTimeEl.textContent = new Date(timestamp * 1000).toLocaleString();
+    }
+    if (adjResultsSection) adjResultsSection.style.display = 'block';
+    if (adjPointsList) {
+        adjPointsList.innerHTML = '';
+        for (const [ptName, ptCoords] of Object.entries(message.data.points || {})) {
+            const coordinates = getAdjustedPointCoordinates(ptCoords);
+            const item = document.createElement('div');
+            item.className = 'list-group-item bg-transparent text-slate-300 py-1 px-0 d-flex justify-content-between align-items-center border-bottom border-secondary';
+            item.innerHTML = `
+                <span class="fw-semibold text-info font-monospace" style="font-size:0.75rem;">${ptName}</span>
+                <span class="text-light font-monospace text-end" style="font-size:0.68rem; line-height:1.2;">
+                    X: ${formatAdjustedCoordinate(coordinates[0])}<br>
+                    Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
+                    Z: ${formatAdjustedCoordinate(coordinates[2])}
+                </span>
+            `;
+            adjPointsList.appendChild(item);
+        }
+    }
+    window.gnssBoardState?.fitToResult?.();
+    return true;
+}
+
+function renderGnssAdjustmentAuditResult(message) {
+    return renderGnssAdjustmentResultPanel(message, { auditOnly: true });
+}
+
 function updateRealtimeSensorValues(message) {
     if (message.sensor_type === 'gnss_adjusted' && message.data) {
         if (!isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return;
-        window.gnssBoardState?.loadAdjustmentResult?.(message.data);
-        const adjResultsSection = document.getElementById('adj-results-section');
-        const adjStatusEl = document.getElementById('adj-process-status');
-        const adjTimeEl = document.getElementById('adj-val-time');
-        const adjPointsList = document.getElementById('adj-points-list');
-        
+        renderGnssAdjustmentResultPanel(message);
+
         const ind = document.getElementById('gnss-phase-indicator');
         gnssAdjustmentDebugState.phase = 'COMPLETED';
         if (ind) {
@@ -1378,35 +1436,6 @@ function updateRealtimeSensorValues(message) {
             ind.className = 'ms-4 text-success fw-bold font-monospace';
         }
 
-        if (adjStatusEl) {
-            adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>`;
-        }
-        if (adjTimeEl) {
-            adjTimeEl.textContent = new Date(message.timestamp * 1000).toLocaleString();
-        }
-        if (adjResultsSection) {
-            adjResultsSection.style.display = 'block';
-        }
-        if (adjPointsList) {
-            adjPointsList.innerHTML = '';
-            
-            if (message.data.points) {
-                for (const [ptName, ptCoords] of Object.entries(message.data.points)) {
-                    const coordinates = getAdjustedPointCoordinates(ptCoords);
-                    const item = document.createElement('div');
-                    item.className = 'list-group-item bg-transparent text-slate-300 py-1 px-0 d-flex justify-content-between align-items-center border-bottom border-secondary';
-                    item.innerHTML = `
-                        <span class="fw-semibold text-info font-monospace" style="font-size:0.75rem;">${ptName}</span>
-                        <span class="text-light font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
-                            X: ${formatAdjustedCoordinate(coordinates[0])}<br>
-                            Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
-                            Z: ${formatAdjustedCoordinate(coordinates[2])}
-                        </span>
-                    `;
-                    adjPointsList.appendChild(item);
-                }
-            }
-        }
     }
     const { sensor_type, data, timestamp, station_id } = message;
     const stationId = station_id || currentStationData?.id;
@@ -3038,9 +3067,11 @@ function setupEventListeners() {
         loadAdjustmentResult(result) {
             if (!result?.points) return;
             const downloadBtn = document.getElementById('gnss-download-results-btn');
+            const auditJsonBtn = document.getElementById('gnss-download-audit-json-btn');
             const reportUrl = String(result.report_file_url || '');
             const excelUrl = result.excel_report_url
                 || (reportUrl.toLowerCase().split('?', 1)[0].endsWith('.xlsx') ? reportUrl : '');
+            const auditJsonUrl = String(result.audit_json_url || '');
             if (downloadBtn) {
                 downloadBtn.disabled = !excelUrl;
                 downloadBtn.classList.toggle('disabled', !excelUrl);
@@ -3054,6 +3085,18 @@ function setupEventListeners() {
                     document.body.appendChild(excelAnchor);
                     excelAnchor.click();
                     excelAnchor.remove();
+                } : null;
+            }
+            if (auditJsonBtn) {
+                auditJsonBtn.disabled = !auditJsonUrl;
+                auditJsonBtn.classList.toggle('disabled', !auditJsonUrl);
+                auditJsonBtn.onclick = auditJsonUrl ? () => {
+                    const auditAnchor = document.createElement('a');
+                    auditAnchor.href = auditJsonUrl;
+                    auditAnchor.download = auditJsonUrl.split('/').pop() || 'gnss_adjustment_audit.json';
+                    document.body.appendChild(auditAnchor);
+                    auditAnchor.click();
+                    auditAnchor.remove();
                 } : null;
             }
             if (!this.ctx) return;
@@ -3300,9 +3343,12 @@ function setupEventListeners() {
                                 <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium" style="display: none; position: relative; flex: 0 0 auto; max-height: min(34vh, 300px); overflow-y: auto;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
                                     <div class="text-light opacity-75 font-monospace mb-2" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>Time: <span id="adj-val-time"></span></div>
-                                    <div class="text-end mb-2">
+                                    <div class="d-flex gap-2 mb-2">
                                         <button id="gnss-download-results-btn" class="btn btn-sm btn-success w-100 px-3 py-2 shadow-sm fw-bold" style="border-radius: 7px; letter-spacing: 0.4px;">
                                             <i class="bi bi-hourglass-split me-2"></i>Đang tạo file Excel...
+                                        </button>
+                                        <button id="gnss-download-audit-json-btn" class="btn btn-sm btn-outline-info px-3 py-2 shadow-sm fw-bold" style="border-radius: 7px; white-space: nowrap;" disabled>
+                                            <i class="bi bi-filetype-json me-1"></i>Audit JSON
                                         </button>
                                     </div>
                                     <div id="adj-points-list" class="mt-2" style="max-height: 120px; overflow-y: auto;"></div>

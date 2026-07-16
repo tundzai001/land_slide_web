@@ -1,6 +1,9 @@
 import sys
+import asyncio
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 from openpyxl import load_workbook
 
@@ -259,6 +262,46 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         self.assertIn("ĐẠT (tham khảo)", values)
         self.assertIn("n_eff nhỏ nhất", values)
         self.assertEqual(baseline_row[10].value, "251 / 12.50")
+
+
+class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_quality_gate_writes_audit_but_does_not_publish_coordinates(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        bridge.adjustment_phase = {}
+        bridge.adjustment_message = {}
+        bridge.adjustment_results = {}
+        bridge._sensor_buffer = []
+        bridge._buffer_lock = asyncio.Lock()
+        bridge._write_adjustment_reports = Mock(return_value={
+            "report_file_url": "/audit.xlsx",
+            "audit_json_url": "/audit.json",
+            "excel_report_url": "/audit.xlsx",
+        })
+        bridge._upsert_latest_sensor_cache = AsyncMock()
+        adjustment = {
+            "points": {"S1": {"station_id": 101}},
+            "official_publish_allowed": False,
+            "quality_gate": {
+                "passed": False,
+                "status": "FAILED_QUALITY_GATE",
+                "reasons": ["pre-adjustment loop closure exceeds 0.003 m"],
+            },
+        }
+        broadcast = AsyncMock()
+
+        with patch("mqtt_bridge.manager", SimpleNamespace(broadcast=broadcast)):
+            await bridge._handle_round_robin_adjustment_result(17, adjustment)
+
+        self.assertEqual(bridge.adjustment_phase[17], "FAILED_QUALITY_GATE")
+        self.assertIs(bridge.adjustment_results[17], adjustment)
+        self.assertEqual(bridge._sensor_buffer, [])
+        bridge._upsert_latest_sensor_cache.assert_not_awaited()
+        bridge._write_adjustment_reports.assert_called_once()
+        self.assertEqual(broadcast.await_args.kwargs, {})
+        self.assertEqual(
+            broadcast.await_args.args[0]["phase"],
+            "FAILED_QUALITY_GATE",
+        )
 
 
 if __name__ == "__main__":

@@ -25,21 +25,40 @@ class _UnusedPublisher:
 
 
 class LiveFeed:
-    def __init__(self, manager: RoundRobinAdjustmentManager, payload_callback=None):
+    def __init__(
+        self,
+        manager: RoundRobinAdjustmentManager,
+        payload_callback=None,
+        *,
+        topics=None,
+        mqtt_broker: str | None = None,
+        mqtt_port: int | None = None,
+        mqtt_user: str | None = None,
+        mqtt_password: str | None = None,
+    ):
         self.manager = manager
         self.payload_callback = payload_callback
+        self.topics = dict(topics or TOPICS)
+        self.station_topic = {
+            station: topic for topic, station in self.topics.items()
+        }
+        self.mqtt_broker = str(mqtt_broker or settings.MQTT_BROKER)
+        self.mqtt_port = int(mqtt_port or settings.MQTT_PORT)
         self.connected = threading.Event()
         self.connect_error = ""
         self.lock = threading.Lock()
-        self.stats = {station: TopicStats() for station in STATION_TOPIC}
-        self.buffers = {station: bytearray() for station in STATION_TOPIC}
+        self.stats = {station: TopicStats() for station in self.station_topic}
+        self.buffers = {station: bytearray() for station in self.station_topic}
         self.latest_agrica: dict[str, tuple[float, str]] = {}
 
         self.client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"landslide-base-probe-{int(time.time())}",
         )
-        self.client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
+        self.client.username_pw_set(
+            mqtt_user or settings.MQTT_USER,
+            mqtt_password or settings.MQTT_PASSWORD,
+        )
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
 
@@ -49,12 +68,12 @@ class LiveFeed:
             self.connect_error = str(reason_code)
             self.connected.set()
             return
-        for topic in TOPICS:
+        for topic in self.topics:
             client.subscribe(topic, qos=0)
         self.connected.set()
 
     def _on_message(self, _client, _userdata, message):
-        station = TOPICS.get(message.topic)
+        station = self.topics.get(message.topic)
         if station is None:
             return
         payload = bytes(message.payload)
@@ -81,7 +100,7 @@ class LiveFeed:
             self.payload_callback(station, message.topic, payload)
 
     def start(self) -> None:
-        self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT, 30)
+        self.client.connect(self.mqtt_broker, self.mqtt_port, 30)
         self.client.loop_start()
         if not self.connected.wait(timeout=10):
             raise RuntimeError("MQTT connection timed out")

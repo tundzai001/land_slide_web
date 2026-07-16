@@ -25,6 +25,153 @@ _ESS_MAX_CONTIGUOUS_GAP_SECONDS = 5
 _BASELINE_STD_REJECTION_THRESHOLD_M = 0.1
 
 
+def _rolling_mean_stability(
+    samples: Iterable[tuple[int, Iterable[float]]],
+    *,
+    window_seconds: int = 10,
+    min_samples_per_window: int = 4,
+    max_sample_gap_seconds: int = 5,
+    horizontal_component_limit_m: float = 0.003,
+    up_component_limit_m: float = 0.005,
+) -> dict:
+    """Compare two consecutive time-based baseline-mean windows.
+
+    FIXED/source validation says where a vector came from; it does not prove
+    that the ambiguity solution is stationary.  This diagnostic is deliberately
+    component-wise so a vertical drift cannot hide inside a 3-D norm.  The
+    windows are measured in receiver time rather than sample count because the
+    field AGRICA stream is commonly slower and more irregular than 1 Hz.
+    """
+
+    by_epoch: Dict[int, np.ndarray] = {}
+    for epoch, vector in samples:
+        try:
+            epoch_value = int(epoch)
+            vector_value = np.asarray(tuple(vector), dtype=float)
+        except (TypeError, ValueError):
+            continue
+        if vector_value.shape != (3,) or not np.all(np.isfinite(vector_value)):
+            continue
+        by_epoch[epoch_value] = vector_value
+
+    ordered = sorted(by_epoch.items())
+    window_seconds = max(1, int(window_seconds))
+    min_samples_per_window = max(1, int(min_samples_per_window))
+    max_sample_gap_seconds = max(1, int(max_sample_gap_seconds))
+    result = {
+        "stable": False,
+        "enough_samples": False,
+        "distinct_epoch_count": len(ordered),
+        "window_seconds": window_seconds,
+        "min_samples_per_window": min_samples_per_window,
+        "max_sample_gap_seconds": max_sample_gap_seconds,
+        "horizontal_component_limit_m": float(horizontal_component_limit_m),
+        "up_component_limit_m": float(up_component_limit_m),
+        "delta_neu_m": None,
+        "delta_3d_m": None,
+        "latest_epoch": ordered[-1][0] if ordered else None,
+        "stable_run_start_epoch": None,
+        "stable_run_seconds": 0,
+    }
+    if len(ordered) < min_samples_per_window * 2:
+        return result
+
+    def diagnostic_at(end_index: int) -> Optional[dict]:
+        end_epoch = int(ordered[end_index][0])
+        recent_start = end_epoch - window_seconds + 1
+        previous_start = end_epoch - 2 * window_seconds + 1
+        previous_end = end_epoch - window_seconds
+        previous = [
+            (epoch, vector)
+            for epoch, vector in ordered[:end_index + 1]
+            if previous_start <= epoch <= previous_end
+        ]
+        recent = [
+            (epoch, vector)
+            for epoch, vector in ordered[:end_index + 1]
+            if recent_start <= epoch <= end_epoch
+        ]
+        if (
+            len(previous) < min_samples_per_window
+            or len(recent) < min_samples_per_window
+        ):
+            return None
+        previous_mean = np.mean(np.vstack([vector for _epoch, vector in previous]), axis=0)
+        recent_mean = np.mean(np.vstack([vector for _epoch, vector in recent]), axis=0)
+        delta = recent_mean - previous_mean
+        stable = bool(
+            abs(float(delta[0])) <= horizontal_component_limit_m
+            and abs(float(delta[1])) <= horizontal_component_limit_m
+            and abs(float(delta[2])) <= up_component_limit_m
+        )
+        return {
+            "stable": stable,
+            "delta_neu_m": tuple(float(value) for value in delta),
+            "delta_3d_m": float(np.linalg.norm(delta)),
+            "previous_window_start_epoch": previous[0][0],
+            "previous_window_end_epoch": previous[-1][0],
+            "previous_window_sample_count": len(previous),
+            "recent_window_start_epoch": recent[0][0],
+            "recent_window_end_epoch": recent[-1][0],
+            "recent_window_sample_count": len(recent),
+        }
+
+    stable_run_start_epoch = None
+    previous_diagnostic_epoch = None
+    latest_diagnostic = None
+    latest_diagnostic_epoch = None
+    for end_index in range(len(ordered)):
+        current_diagnostic = diagnostic_at(end_index)
+        if current_diagnostic is None:
+            continue
+        current_epoch = int(ordered[end_index][0])
+        latest_diagnostic = current_diagnostic
+        latest_diagnostic_epoch = current_epoch
+        if (
+            current_diagnostic["stable"]
+            and (
+                previous_diagnostic_epoch is None
+                or current_epoch - previous_diagnostic_epoch
+                <= max_sample_gap_seconds
+            )
+        ):
+            if stable_run_start_epoch is None:
+                stable_run_start_epoch = current_epoch
+        else:
+            stable_run_start_epoch = current_epoch if current_diagnostic["stable"] else None
+        previous_diagnostic_epoch = current_epoch
+
+    if latest_diagnostic is None:
+        return result
+    result.update(latest_diagnostic)
+    result["latest_epoch"] = latest_diagnostic_epoch
+    result["enough_samples"] = True
+    if result["stable"] and stable_run_start_epoch is not None:
+        result["stable_run_start_epoch"] = stable_run_start_epoch
+        result["stable_run_seconds"] = max(
+            0, int(result["latest_epoch"]) - int(stable_run_start_epoch)
+        )
+    return result
+
+
+def _rolling_drift_exceeds_abort_limits(
+    diagnostic: dict,
+    *,
+    horizontal_component_limit_m: float,
+    up_component_limit_m: float,
+) -> bool:
+    """Return true only when a complete rolling diagnostic exceeds hysteresis."""
+
+    delta = diagnostic.get("delta_neu_m")
+    if not diagnostic.get("enough_samples") or not delta or len(delta) != 3:
+        return False
+    return bool(
+        abs(float(delta[0])) > horizontal_component_limit_m
+        or abs(float(delta[1])) > horizontal_component_limit_m
+        or abs(float(delta[2])) > up_component_limit_m
+    )
+
+
 def _ar1_effective_sample_size(sample_count: int, lag_one_correlation: float) -> float:
     """Finite-sample ESS of a mean under a stationary AR(1) correlation model."""
 
@@ -193,6 +340,9 @@ class _CollectedObservation:
 
     base_name: str
     observation: Any
+    solver_eligible: bool = True
+    quality_flags: tuple[str, ...] = ()
+    source_diagnostic: Optional[str] = None
 
 
 @dataclass
@@ -523,13 +673,50 @@ class RoundRobinAdjustmentManager:
     correctly connected ECEF baselines.
     """
 
-    SEED_COLLECTION_MAX_STEPS = 10
+    # A single 1 Hz FIXED epoch only proves that the station is alive.  Do not
+    # tear down the fixed-base stream until every retained rover has a real
+    # observation window; the July 16 field run was starting after 6--10 s and
+    # its means were still moving by roughly 1 mm/s.
+    SEED_COLLECTION_MIN_DISTINCT_EPOCHS = 20
+    SEED_COLLECTION_MIN_DURATION_SECONDS = 15
+    SEED_COLLECTION_MAX_STEPS = 20
+    # Duration is the primary coverage requirement. AGRICA arrives at roughly
+    # 0.4--0.7 distinct epochs/s in the field, so requiring 60 epochs in 60 s
+    # incorrectly rejects a healthy stream. Thirty epochs still proves broad
+    # temporal coverage without pretending they are statistically independent.
+    SEED_SOLVER_MIN_DISTINCT_EPOCHS = 30
+    SEED_SOLVER_MIN_DURATION_SECONDS = 60
+    SEED_STABILITY_TIMEOUT_SECONDS = 300
+    STABILITY_WINDOW_SECONDS = 10
+    STABILITY_MIN_SAMPLES_PER_WINDOW = 4
+    STABILITY_MAX_SAMPLE_GAP_SECONDS = 5
+    STABILITY_HORIZONTAL_COMPONENT_LIMIT_M = 0.003
+    STABILITY_UP_COMPONENT_LIMIT_M = 0.005
+    STABILITY_HOLD_SECONDS = 10
+    # Once a solver window is open, use a wider abort envelope and require
+    # repeated receiver epochs outside it. This prevents a 0.1 mm boundary
+    # crossing or a repeated UI poll from discarding a full minute of data.
+    STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M = 0.008
+    STABILITY_ABORT_UP_COMPONENT_LIMIT_M = 0.015
+    STABILITY_ABORT_CONSECUTIVE_EPOCHS = 3
     BASE_IDENTITY_TOLERANCE_M = 20.0
+    # This is only a last-resort gross-error barrier. Normal GNSS loop closure
+    # should be orders of magnitude smaller; a metre-scale closure means that
+    # at least one observation was assigned to the wrong correction source.
+    GROSS_LOOP_CLOSURE_MIN_LIMIT_M = 1.0
+    GROSS_LOOP_CLOSURE_RELATIVE_LIMIT = 1.0 / 1000.0
     CROSS_BASE_SETTLE_SECONDS = 5
     CROSS_BASE_SWITCH_TIMEOUT_SECONDS = 45
-    CROSS_BASE_STABLE_COLLECTION_SECONDS = 15
+    CROSS_BASE_HANDOVER_MIN_SAMPLES = 5
+    CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS = 5
+    CROSS_BASE_STABLE_COLLECTION_SECONDS = 60
+    CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS = 30
+    CROSS_BASE_STABLE_MIN_DURATION_SECONDS = 60
+    CROSS_BASE_STABILITY_TIMEOUT_SECONDS = 300
     CROSS_BASE_STATUS_POLL_SECONDS = 1
     CROSS_BASE_COLLECTION_ATTEMPTS = 2
+    INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS = 3
+    INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS = 60
     MODE_COMMAND_BURST_COUNT = 6
     UNLOGALL_COMMAND_BURST_COUNT = 3
     GPGGA_COMMAND_BURST_COUNT = 6
@@ -795,6 +982,8 @@ class RoundRobinAdjustmentManager:
             "clusters": prepared_clusters,
             "active_bases": {},
             "seed_collection_steps": set(),
+            "seed_window_states": {},
+            "seed_started_monotonic": time.monotonic(),
         }
 
     def clear_project(self, project_id: int) -> None:
@@ -809,6 +998,60 @@ class RoundRobinAdjustmentManager:
     def update_rover_llh(self, station_code: str, lat: float, lon: float, alt: float) -> None:
         if station_code:
             self.rover_llh_cache[station_code] = {"lat": lat, "lon": lon, "alt": alt}
+
+    def _update_rover_llh_from_observation(self, observation: Any) -> None:
+        """Cache an ellipsoidal temporary-base coordinate from AGRICA.
+
+        Field receivers report AGRICA ``lat/lon/alt`` with an MSL-like height,
+        while AGRICA ECEF is WGS84 and therefore yields ellipsoidal height. The
+        UM980 ``MODE BASE lat lon height`` coordinate must stay in one datum.
+        Prefer the ECEF-derived LLH only after its horizontal position agrees
+        with the reported LLH; malformed ECEF then cannot poison the cache.
+        """
+
+        rover_llh = getattr(observation, "rover_llh", None)
+        rover_ecef = getattr(observation, "rover_ecef", None)
+        selected = rover_llh
+        if rover_ecef and len(rover_ecef) == 3:
+            try:
+                ecef_values = tuple(float(value) for value in rover_ecef)
+                if (
+                    all(math.isfinite(value) for value in ecef_values)
+                    and _vector_length(ecef_values) > 1_000_000.0
+                ):
+                    ecef_llh = _ecef_to_llh(*ecef_values)
+                    if (
+                        not rover_llh
+                        or _llh_horizontal_distance_m(ecef_llh, rover_llh) <= 5.0
+                    ):
+                        selected = ecef_llh
+            except (TypeError, ValueError, OverflowError):
+                pass
+        if selected:
+            self.update_rover_llh(
+                observation.rover_name,
+                float(selected[0]),
+                float(selected[1]),
+                float(selected[2]),
+            )
+            cache = self.rover_llh_cache.get(observation.rover_name) or {}
+            full_data = getattr(observation, "full_data", None) or {}
+            undulation = full_data.get("undulation")
+            try:
+                undulation_value = float(undulation)
+            except (TypeError, ValueError):
+                undulation_value = None
+            if undulation_value is not None and math.isfinite(undulation_value):
+                cache["undulation"] = undulation_value
+            if rover_llh and len(rover_llh) == 3:
+                try:
+                    orthometric_height = float(rover_llh[2])
+                except (TypeError, ValueError):
+                    orthometric_height = None
+                if orthometric_height is not None and math.isfinite(orthometric_height):
+                    cache["orthometric_alt"] = orthometric_height
+            cache["ellipsoid_alt"] = float(selected[2])
+            self.rover_llh_cache[observation.rover_name] = cache
 
     def has_pending_agrica_fragment(self, project_id: int, station_id: int) -> bool:
         return (int(project_id), int(station_id)) in self._agrica_fragment_buffers
@@ -944,6 +1187,18 @@ class RoundRobinAdjustmentManager:
                 observation,
             )
             if not base_matches:
+                # Preserve the receiver evidence under the source label that
+                # was active in the controller, but quarantine it permanently.
+                # Similarity to another edge is not authority to relabel it.
+                session["clusters"][cluster_index]["observations"].append(
+                    _CollectedObservation(
+                        active_base,
+                        observation,
+                        solver_eligible=False,
+                        quality_flags=("EXCLUDE_UNCONFIRMED_SOURCE",),
+                        source_diagnostic=base_diagnostic,
+                    )
+                )
                 ignored_reasons.append(base_diagnostic)
                 logger.warning(
                     "Round-Robin project=%s cluster=%s station=%s: %s",
@@ -960,13 +1215,8 @@ class RoundRobinAdjustmentManager:
                 ignored_reasons.append(
                     "baseline STD exceeds 0.1 m; stored for RAW_AUDIT but excluded from solver"
                 )
-                if observation.rover_llh:
-                    self.update_rover_llh(
-                        observation.rover_name,
-                        observation.rover_llh[0],
-                        observation.rover_llh[1],
-                        observation.rover_llh[2],
-                    )
+                if observation.rover_llh or observation.rover_ecef:
+                    self._update_rover_llh_from_observation(observation)
                 continue
             valid_observations.append(observation)
             accepted_diagnostics.append(base_diagnostic)
@@ -978,13 +1228,8 @@ class RoundRobinAdjustmentManager:
                 session["seed_collection_steps"].add(
                     int(observation.epoch_ts or time.time())
                 )
-            if observation.rover_llh:
-                self.update_rover_llh(
-                    observation.rover_name,
-                    observation.rover_llh[0],
-                    observation.rover_llh[1],
-                    observation.rover_llh[2],
-                )
+            if observation.rover_llh or observation.rover_ecef:
+                self._update_rover_llh_from_observation(observation)
         if valid_observations:
             rejection_note = (
                 f" Rejected: {'; '.join(dict.fromkeys(ignored_reasons))}."
@@ -1039,52 +1284,276 @@ class RoundRobinAdjustmentManager:
         return session.get("active_bases", {}).get(cluster_index, "BASE")
 
     def get_seed_collection_status(self, project_id: int) -> dict:
-        """Return initial baseline coverage and 10-step fallback eligibility."""
+        """Return fixed-base window readiness and offline-rover fallback state."""
         session = self._sessions.get(project_id)
         if session is None:
             return {"complete": False, "fallback_ready": False, "step_count": 0,
                     "max_steps": self.SEED_COLLECTION_MAX_STEPS,
-                    "missing_station_ids": [], "clusters": []}
+                    "missing_station_ids": [], "warming_station_ids": [],
+                    "clusters": []}
 
         cluster_statuses = []
         missing_all = []
+        warming_all = []
         complete = True
         can_continue = True
         for index, cluster in enumerate(session["clusters"]):
             fixed_base_llh = self._cluster_base_llh(cluster)
-            observed = {
-                record.observation.station_id
-                for record in cluster["observations"]
+            source_valid_indexed = [
+                (record_index, record)
+                for record_index, record in enumerate(cluster["observations"])
                 if record.base_name == "BASE"
+                and "EXCLUDE_UNCONFIRMED_SOURCE"
+                not in tuple(getattr(record, "quality_flags", ()) or ())
                 and max(
                     float(value) for value in record.observation.std_neu
                 ) <= _BASELINE_STD_REJECTION_THRESHOLD_M
                 and _vector_length(
                     self._baseline_ecef(record.observation, fixed_base_llh)
                 ) >= 1.0
-            }
+            ]
+            epochs_by_station: Dict[int, set[int]] = {}
+            vectors_by_station: Dict[int, list[tuple[int, tuple[float, float, float]]]] = {}
+            for _record_index, record in source_valid_indexed:
+                station_id = int(record.observation.station_id)
+                epoch = int(record.observation.epoch_ts)
+                epochs_by_station.setdefault(station_id, set()).add(epoch)
+                vectors_by_station.setdefault(station_id, []).append((
+                    epoch,
+                    tuple(float(value) for value in record.observation.baseline_neu),
+                ))
+
             expected = set(cluster["stations"])
+            observed = set(epochs_by_station)
+            sample_counts_by_station = {
+                station_id: len(epochs_by_station.get(station_id, ()))
+                for station_id in expected
+            }
+            durations_by_station = {
+                station_id: (
+                    max(epochs_by_station[station_id])
+                    - min(epochs_by_station[station_id])
+                    if epochs_by_station.get(station_id) else 0
+                )
+                for station_id in expected
+            }
+            warmup_ready_by_station = {
+                station_id: bool(
+                    sample_counts_by_station[station_id]
+                    >= self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
+                    and durations_by_station[station_id]
+                    >= self.SEED_COLLECTION_MIN_DURATION_SECONDS
+                )
+                for station_id in expected
+            }
+            stability_by_station = {
+                station_id: _rolling_mean_stability(
+                    vectors_by_station.get(station_id, ()),
+                    window_seconds=self.STABILITY_WINDOW_SECONDS,
+                    min_samples_per_window=(
+                        self.STABILITY_MIN_SAMPLES_PER_WINDOW
+                    ),
+                    max_sample_gap_seconds=(
+                        self.STABILITY_MAX_SAMPLE_GAP_SECONDS
+                    ),
+                    horizontal_component_limit_m=(
+                        self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
+                    ),
+                    up_component_limit_m=self.STABILITY_UP_COMPONENT_LIMIT_M,
+                )
+                for station_id in expected
+            }
+            window_states = session.setdefault("seed_window_states", {})
+
+            def quarantine_seed_window(
+                station_id: int,
+                start_index: int,
+                flag: str,
+                diagnostic_message: str,
+            ) -> None:
+                records = cluster["observations"]
+                for record_index, record in source_valid_indexed:
+                    if (
+                        record_index < start_index
+                        or int(record.observation.station_id) != station_id
+                        or not getattr(record, "solver_eligible", True)
+                    ):
+                        continue
+                    flags = tuple(dict.fromkeys((
+                        *tuple(getattr(record, "quality_flags", ()) or ()),
+                        flag,
+                    )))
+                    records[record_index] = _CollectedObservation(
+                        base_name=record.base_name,
+                        observation=record.observation,
+                        solver_eligible=False,
+                        quality_flags=flags,
+                        source_diagnostic=diagnostic_message,
+                    )
+
+            ready = set()
+            solver_counts_by_station: Dict[int, int] = {}
+            solver_durations_by_station: Dict[int, int] = {}
+            window_open_by_station: Dict[int, bool] = {}
+            reset_counts_by_station: Dict[int, int] = {}
+            drift_failure_counts_by_station: Dict[int, int] = {}
+            for station_id in expected:
+                diagnostic = stability_by_station[station_id]
+                state_key = (index, station_id)
+                state = window_states.setdefault(state_key, {
+                    "open": False,
+                    "solver_start_index": 0,
+                    "reset_count": 0,
+                    "drift_failure_count": 0,
+                    "last_drift_evaluation_epoch": None,
+                })
+                state.setdefault("drift_failure_count", 0)
+                state.setdefault("last_drift_evaluation_epoch", None)
+                latest_epoch = diagnostic.get("latest_epoch")
+                abort_exceeded = _rolling_drift_exceeds_abort_limits(
+                    diagnostic,
+                    horizontal_component_limit_m=(
+                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                    ),
+                    up_component_limit_m=(
+                        self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
+                    ),
+                )
+                if (
+                    state["open"]
+                    and latest_epoch is not None
+                    and latest_epoch != state.get("last_drift_evaluation_epoch")
+                ):
+                    state["last_drift_evaluation_epoch"] = latest_epoch
+                    state["drift_failure_count"] = (
+                        int(state.get("drift_failure_count") or 0) + 1
+                        if abort_exceeded else 0
+                    )
+                # There is no correction-source handover during fixed-base
+                # collection: source identity and gross geometry were already
+                # verified when each AGRICA record was accepted. Natural RTK
+                # millimetre-level wander must not prevent the solver window
+                # from ever opening. Rolling N/E/U remains an audit diagnostic;
+                # only epoch/time warm-up controls this transition.
+                if (
+                    not state["open"]
+                    and warmup_ready_by_station[station_id]
+                ):
+                    quarantine_seed_window(
+                        station_id,
+                        int(state.get("solver_start_index") or 0),
+                        "EXCLUDE_PRE_STABLE_WINDOW",
+                        "Fixed-base baseline belongs to the initial epoch/time "
+                        "warm-up window; retained for audit only.",
+                    )
+                    state["open"] = True
+                    state["solver_start_index"] = len(cluster["observations"])
+                    state["drift_failure_count"] = 0
+                    state["last_drift_evaluation_epoch"] = latest_epoch
+
+                solver_epochs = {
+                    int(record.observation.epoch_ts)
+                    for record_index, record in enumerate(cluster["observations"])
+                    if record_index >= int(state["solver_start_index"])
+                    and record.base_name == "BASE"
+                    and int(record.observation.station_id) == station_id
+                    and getattr(record, "solver_eligible", True)
+                    and max(float(value) for value in record.observation.std_neu)
+                    <= _BASELINE_STD_REJECTION_THRESHOLD_M
+                }
+                solver_count = len(solver_epochs)
+                solver_duration = (
+                    max(solver_epochs) - min(solver_epochs) if solver_epochs else 0
+                )
+                solver_counts_by_station[station_id] = solver_count
+                solver_durations_by_station[station_id] = solver_duration
+                window_open_by_station[station_id] = bool(state["open"])
+                reset_counts_by_station[station_id] = int(state.get("reset_count") or 0)
+                drift_failure_counts_by_station[station_id] = int(
+                    state.get("drift_failure_count") or 0
+                )
+                if (
+                    state["open"]
+                    and solver_count >= self.SEED_SOLVER_MIN_DISTINCT_EPOCHS
+                    and solver_duration >= self.SEED_SOLVER_MIN_DURATION_SECONDS
+                ):
+                    ready.add(station_id)
             missing = sorted(expected - observed)
             available = sorted(expected & observed)
-            if missing:
+            warming = sorted((expected & observed) - ready)
+            ready_station_ids = sorted(expected & ready)
+            if missing or warming:
                 complete = False
                 missing_all.extend(missing)
+                warming_all.extend(warming)
             if len(available) < 2:
                 can_continue = False
-            cluster_statuses.append({"index": index, "missing_station_ids": missing, "available_station_ids": available})
+            cluster_statuses.append({
+                "index": index,
+                "missing_station_ids": missing,
+                "warming_station_ids": warming,
+                "available_station_ids": available,
+                "ready_station_ids": ready_station_ids,
+                "sample_counts_by_station": {
+                    station_id: sample_counts_by_station[station_id]
+                    for station_id in sorted(expected)
+                },
+                "durations_by_station_seconds": {
+                    station_id: durations_by_station[station_id]
+                    for station_id in sorted(expected)
+                },
+                "warmup_ready_by_station": warmup_ready_by_station,
+                "rolling_stability_by_station": {
+                    station_id: stability_by_station[station_id]
+                    for station_id in sorted(expected)
+                },
+                "solver_window_open_by_station": window_open_by_station,
+                "solver_sample_counts_by_station": solver_counts_by_station,
+                "solver_durations_by_station_seconds": solver_durations_by_station,
+                "solver_window_reset_counts_by_station": reset_counts_by_station,
+                "solver_drift_failure_counts_by_station": (
+                    drift_failure_counts_by_station
+                ),
+            })
 
         steps = min(len(session["seed_collection_steps"]), self.SEED_COLLECTION_MAX_STEPS)
+        seed_elapsed = max(
+            0.0,
+            time.monotonic() - float(session.get("seed_started_monotonic") or 0.0),
+        )
+        stability_timeout = (
+            not complete and seed_elapsed >= self.SEED_STABILITY_TIMEOUT_SECONDS
+        )
         return {
             "complete": complete,
-            "fallback_ready": not complete and can_continue and steps >= self.SEED_COLLECTION_MAX_STEPS,
+            # Only truly silent stations are skipped.  A station that is sending
+            # data but has not completed its window remains in COLLECTING_BASELINE.
+            "fallback_ready": bool(missing_all) and can_continue and steps >= self.SEED_COLLECTION_MAX_STEPS,
             "step_count": steps,
             "max_steps": self.SEED_COLLECTION_MAX_STEPS,
             "missing_station_ids": sorted(set(missing_all)),
+            "warming_station_ids": sorted(set(warming_all)),
+            "stability_timeout": stability_timeout,
+            "stability_elapsed_seconds": seed_elapsed,
+            "stability_timeout_seconds": self.SEED_STABILITY_TIMEOUT_SECONDS,
+            "stability_window_seconds": self.STABILITY_WINDOW_SECONDS,
+            "stability_min_samples_per_window": (
+                self.STABILITY_MIN_SAMPLES_PER_WINDOW
+            ),
+            "stability_hold_seconds": self.STABILITY_HOLD_SECONDS,
+            "seed_warmup_min_distinct_epochs": (
+                self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
+            ),
+            "seed_warmup_min_duration_seconds": (
+                self.SEED_COLLECTION_MIN_DURATION_SECONDS
+            ),
+            "solver_min_distinct_epochs": self.SEED_SOLVER_MIN_DISTINCT_EPOCHS,
+            "solver_min_duration_seconds": self.SEED_SOLVER_MIN_DURATION_SECONDS,
             "clusters": cluster_statuses,
         }
 
     def skip_missing_seed_stations(self, project_id: int) -> dict:
-        """Temporarily exclude no-data rovers after ten valid seed epochs."""
+        """Temporarily exclude no-data rovers after the fixed-base seed window."""
         session = self._sessions.get(project_id)
         status = self.get_seed_collection_status(project_id)
         if session is None or not status["fallback_ready"]:
@@ -1353,6 +1822,233 @@ class RoundRobinAdjustmentManager:
             snapshot["server_id"],
         )
 
+    async def _reacquire_fixed_base_between_rotations(
+        self,
+        project_id: int,
+        cluster: dict,
+        *,
+        next_rover: str,
+        mountpoint: str,
+        selected_host: str,
+    ) -> None:
+        """Reconnect every rover to the fixed BASE before the next rotation.
+
+        Once a temporary pusher stops, rover NTRIP sessions disappear if the
+        configured fixed stream remains asleep.  A later rover therefore cannot
+        receive its SET BASE command.  Restore the original stream, require new
+        solver-eligible BASE observations from every rover, confirm the next
+        AICaster session, and only then put the fixed stream back to sleep.
+        """
+
+        start_index = len(cluster["observations"])
+        await self._emit_progress(
+            project_id,
+            (
+                f"Inter-rotation handover: restoring fixed BASE {mountpoint} "
+                f"so every rover reconnects before {next_rover} becomes the "
+                "next temporary base."
+            ),
+        )
+        await self._toggle_cors_fixed_base(
+            mountpoint,
+            sleep=False,
+            selected_host=selected_host,
+        )
+
+        expected_rovers = {str(name) for name in cluster.get("rovers", ())}
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS
+        epochs_by_rover: Dict[str, set[int]] = {}
+        next_client_confirmed = False
+        while loop.time() < deadline:
+            epochs_by_rover = {}
+            for record in cluster["observations"][start_index:]:
+                observation = getattr(record, "observation", None)
+                if (
+                    observation is None
+                    or getattr(record, "base_name", None) != "BASE"
+                    or not getattr(record, "solver_eligible", True)
+                    or max(float(value) for value in observation.std_neu)
+                    > _BASELINE_STD_REJECTION_THRESHOLD_M
+                    or _vector_length(observation.baseline_neu) < 1.0
+                ):
+                    continue
+                rover_name = str(observation.rover_name)
+                epochs_by_rover.setdefault(rover_name, set()).add(
+                    int(observation.epoch_ts)
+                )
+
+            fixed_ready = expected_rovers and all(
+                len(epochs_by_rover.get(rover_name, ()))
+                >= self.INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS
+                for rover_name in expected_rovers
+            )
+            if fixed_ready:
+                client_info = await self._find_client_info(next_rover)
+                next_client_confirmed = client_info is not None
+                if next_client_confirmed:
+                    break
+            await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
+        else:
+            counts = {
+                rover_name: len(epochs_by_rover.get(rover_name, ()))
+                for rover_name in sorted(expected_rovers)
+            }
+            raise RuntimeError(
+                f"Fixed BASE reacquisition before {next_rover} timed out after "
+                f"{self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS}s; "
+                f"BASE epochs={counts}, next AICaster session="
+                f"{'confirmed' if next_client_confirmed else 'missing'}"
+            )
+
+        await self._emit_progress(
+            project_id,
+            (
+                f"Inter-rotation handover verified: every rover supplied at least "
+                f"{self.INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS} fresh fixed-BASE "
+                f"epochs and {next_rover} has an active AICaster session. Putting "
+                f"{mountpoint} back to Sleep before the next temporary BASE."
+            ),
+        )
+        await self._toggle_cors_fixed_base(
+            mountpoint,
+            sleep=True,
+            selected_host=selected_host,
+        )
+        await asyncio.sleep(2.0)
+
+        self._exclude_fixed_base_records(
+            cluster,
+            start_index,
+            flag="EXCLUDE_INTER_ROTATION_REACQUISITION",
+            diagnostic=(
+                "Fresh fixed-BASE epoch used only to verify inter-rotation NTRIP "
+                "reacquisition; excluded from the common 60-second fixed-BASE "
+                "solver seed."
+            ),
+        )
+
+    @staticmethod
+    def _exclude_fixed_base_records(
+        cluster: dict,
+        start_index: int,
+        *,
+        flag: str,
+        diagnostic: str,
+    ) -> None:
+        for record_index in range(start_index, len(cluster["observations"])):
+            record = cluster["observations"][record_index]
+            if str(getattr(record, "base_name", "")).casefold() != "base":
+                continue
+            flags = tuple(dict.fromkeys((
+                *tuple(getattr(record, "quality_flags", ()) or ()),
+                flag,
+            )))
+            cluster["observations"][record_index] = _CollectedObservation(
+                base_name=record.base_name,
+                observation=record.observation,
+                solver_eligible=False,
+                quality_flags=flags,
+                source_diagnostic=diagnostic,
+            )
+
+    def _freeze_temporary_base_coordinates(self, cluster: dict) -> Dict[str, dict]:
+        """Freeze temporary BASE coordinates from the common fixed-BASE seed."""
+
+        try:
+            from backend.processors.gnss_adjustment.transforms import (
+                neu_standard_deviation_to_ecef_covariance,
+            )
+            from backend.processors.gnss_adjustment_runtime import _llh_to_ecef
+        except ModuleNotFoundError:
+            from processors.gnss_adjustment.transforms import (
+                neu_standard_deviation_to_ecef_covariance,
+            )
+            from processors.gnss_adjustment_runtime import _llh_to_ecef
+
+        fixed_llh = self._cluster_base_llh(cluster)
+        fixed_ecef = np.asarray(_llh_to_ecef(*fixed_llh), dtype=float)
+        frozen: Dict[str, dict] = {}
+        for configured_rover in cluster.get("rovers", ()):
+            rover_key = str(configured_rover).casefold()
+            candidates: list[tuple[np.ndarray, np.ndarray, int]] = []
+            for record in cluster.get("observations", ()):
+                observation = getattr(record, "observation", None)
+                if (
+                    observation is None
+                    or str(getattr(record, "base_name", "")).casefold() != "base"
+                    or str(getattr(observation, "rover_name", "")).casefold()
+                    != rover_key
+                    or not getattr(record, "solver_eligible", True)
+                    or max(float(value) for value in observation.std_neu)
+                    > _BASELINE_STD_REJECTION_THRESHOLD_M
+                    or _vector_length(observation.baseline_neu) < 1.0
+                ):
+                    continue
+                delta = np.asarray(self._baseline_ecef(observation, fixed_llh), dtype=float)
+                covariance = np.asarray(
+                    neu_standard_deviation_to_ecef_covariance(
+                        observation.std_neu, fixed_llh[0], fixed_llh[1]
+                    ),
+                    dtype=float,
+                )
+                if (
+                    delta.shape == (3,)
+                    and covariance.shape == (3, 3)
+                    and np.all(np.isfinite(delta))
+                    and np.all(np.isfinite(covariance))
+                ):
+                    candidates.append((delta, covariance, int(observation.epoch_ts)))
+
+            if not candidates:
+                raise RuntimeError(
+                    f"Cannot freeze temporary BASE coordinate for {configured_rover}: "
+                    "the initial fixed-BASE solver window has no valid observation"
+                )
+
+            vectors = np.vstack([item[0] for item in candidates])
+            center = np.median(vectors, axis=0)
+            deviations = np.linalg.norm(vectors - center, axis=1)
+            median_deviation = float(np.median(deviations))
+            mad = float(np.median(np.abs(deviations - median_deviation)))
+            rejection_limit = max(
+                0.25,
+                median_deviation + 8.0 * 1.4826 * mad,
+            )
+            retained = [
+                item
+                for item, deviation in zip(candidates, deviations, strict=True)
+                if float(deviation) <= rejection_limit
+            ]
+            if not retained:
+                raise RuntimeError(
+                    f"Cannot freeze temporary BASE coordinate for {configured_rover}: "
+                    "all fixed-BASE seed vectors were rejected"
+                )
+
+            precision_sum = np.zeros((3, 3), dtype=float)
+            weighted_sum = np.zeros(3, dtype=float)
+            for delta, covariance, _epoch in retained:
+                precision = np.linalg.inv(covariance)
+                precision_sum += precision
+                weighted_sum += precision @ delta
+            endpoint = fixed_ecef + np.linalg.solve(precision_sum, weighted_sum)
+            lat, lon, alt = _ecef_to_llh(*endpoint)
+            frozen[str(configured_rover)] = {
+                "lat": float(lat),
+                "lon": float(lon),
+                "alt": float(alt),
+                "ecef_xyz": tuple(float(value) for value in endpoint),
+                "seed_observation_count": len(retained),
+                "seed_rejected_count": len(candidates) - len(retained),
+                "seed_first_epoch": min(item[2] for item in retained),
+                "seed_last_epoch": max(item[2] for item in retained),
+                "source": "FROZEN_COVARIANCE_WEIGHTED_FIXED_BASE_SEED",
+            }
+
+        cluster["temporary_base_llh_by_rover"] = frozen
+        return frozen
+
     async def _run_cycle(self, project_id: int) -> None:
         suspended_bases: set[tuple[str, str]] = set()
         cycle_error: Optional[Exception] = None
@@ -1360,12 +2056,24 @@ class RoundRobinAdjustmentManager:
             session = self._sessions[project_id]
             for cluster_index, cluster in enumerate(session["clusters"]):
                 rovers = cluster["rovers"]
+                post_seed_start_index = len(cluster["observations"])
+                cluster["fixed_base_seed_cutoff_index"] = post_seed_start_index
                 logger.info(
                     "Starting Round-Robin project=%s cluster=%s with %s rovers: %s",
                     project_id,
                     cluster.get("name", cluster_index + 1),
                     len(rovers),
                     rovers,
+                )
+                frozen_base_coordinates = self._freeze_temporary_base_coordinates(cluster)
+                await self._emit_progress(
+                    project_id,
+                    (
+                        f"{cluster.get('name', cluster_index + 1)}: froze temporary-BASE "
+                        f"coordinates for {', '.join(str(rover) for rover in rovers)} "
+                        "from the common fixed-BASE seed window; every rotation will "
+                        "reuse these exact coordinates."
+                    ),
                 )
                 route_host = (
                     cluster.get("round_robin_route_host")
@@ -1414,6 +2122,16 @@ class RoundRobinAdjustmentManager:
                     )
                     # Chờ 2s để đảm bảo caster đã xử lý ngắt
                     await asyncio.sleep(2.0)
+                    self._exclude_fixed_base_records(
+                        cluster,
+                        post_seed_start_index,
+                        flag="EXCLUDE_POST_SEED_TRANSITION",
+                        diagnostic=(
+                            "Fixed-BASE epoch arrived after the common seed window "
+                            "was frozen and while the fixed stream was entering Sleep; "
+                            "retained for audit only."
+                        ),
+                    )
                     
                 def current_solver_eligible_cross_coverage() -> tuple[set[tuple[str, str]], set[str]]:
                     edges: set[tuple[str, str]] = set()
@@ -1424,6 +2142,7 @@ class RoundRobinAdjustmentManager:
                         to_name = str(getattr(observation, "rover_name", "") or "")
                         if (
                             observation is None
+                            or not getattr(record, "solver_eligible", True)
                             or not from_name
                             or from_name == "BASE"
                             or not to_name
@@ -1451,6 +2170,7 @@ class RoundRobinAdjustmentManager:
                             observation = getattr(record, "observation", None)
                             if (
                                 observation is None
+                                or not getattr(record, "solver_eligible", True)
                                 or str(getattr(record, "base_name", "") or "").casefold()
                                 != candidate_key
                                 or max(float(value) for value in observation.std_neu)
@@ -1488,9 +2208,11 @@ class RoundRobinAdjustmentManager:
                 cluster_coverage_complete = False
                 rotation_queue = list(rovers)
                 initial_rotation_count = len(rotation_queue)
+                completed_mandatory_rotations: set[str] = set()
                 graph_recovery_scheduled = False
                 for rotation_index, rover_code in enumerate(rotation_queue):
                     is_graph_recovery = rotation_index >= initial_rotation_count
+                    mandatory_rotation_completed = False
                     if is_graph_recovery:
                         existing_edges, _ = current_solver_eligible_cross_coverage()
                         expected_cross_rovers = recovery_targets(rover_code, existing_edges)
@@ -1530,11 +2252,13 @@ class RoundRobinAdjustmentManager:
 
                     for collection_attempt in range(1, self.CROSS_BASE_COLLECTION_ATTEMPTS + 1):
                         attempt_start_index = len(cluster["observations"])
+                        solver_start_index = attempt_start_index
 
-                        def eligible_attempt_records(
+                        def eligible_records_from(
+                            start_index: int,
                             *,
+                            require_solver_eligible: bool = True,
                             current_rover: str = rover_code,
-                            start_index: int = attempt_start_index,
                             current_cluster: dict = cluster,
                         ) -> list:
                             eligible = []
@@ -1543,6 +2267,15 @@ class RoundRobinAdjustmentManager:
                                 if (
                                     getattr(record, "base_name", None) != current_rover
                                     or observation is None
+                                    or (
+                                        require_solver_eligible
+                                        and not getattr(record, "solver_eligible", True)
+                                    )
+                                    or (
+                                        not require_solver_eligible
+                                        and "EXCLUDE_UNCONFIRMED_SOURCE"
+                                        in tuple(getattr(record, "quality_flags", ()) or ())
+                                    )
                                 ):
                                     continue
                                 if max(
@@ -1554,13 +2287,150 @@ class RoundRobinAdjustmentManager:
                                 eligible.append(record)
                             return eligible
 
+                        def monitoring_records() -> list:
+                            return eligible_records_from(
+                                attempt_start_index,
+                                require_solver_eligible=False,
+                            )
+
+                        def eligible_attempt_records() -> list:
+                            return eligible_records_from(solver_start_index)
+
+                        def mark_stable_collection_started(
+                            *,
+                            current_rover: str = rover_code,
+                            current_cluster: dict = cluster,
+                        ) -> None:
+                            """Audit, but never solve with, handover/settling epochs."""
+
+                            nonlocal solver_start_index
+                            records = current_cluster["observations"]
+                            for record_index in range(solver_start_index, len(records)):
+                                record = records[record_index]
+                                if (
+                                    record.base_name != current_rover
+                                    or not record.solver_eligible
+                                ):
+                                    continue
+                                flags = tuple(dict.fromkeys(
+                                    (*record.quality_flags, "EXCLUDE_PRE_STABLE_WINDOW")
+                                ))
+                                records[record_index] = _CollectedObservation(
+                                    base_name=record.base_name,
+                                    observation=record.observation,
+                                    solver_eligible=False,
+                                    quality_flags=flags,
+                                    source_diagnostic=(
+                                        "Temporary-base source was verified, but this epoch "
+                                        "belongs to the handover/settling window."
+                                    ),
+                                )
+                            solver_start_index = len(records)
+                            self._clear_cluster_fragment_buffers(project_id, current_cluster)
+
+                        def mark_stable_collection_invalid(
+                            reason: str = "insufficient",
+                            *,
+                            current_rover: str = rover_code,
+                            current_cluster: dict = cluster,
+                        ) -> None:
+                            """Quarantine a solver window that drifted or timed out."""
+
+                            nonlocal solver_start_index
+                            drifted = str(reason).casefold() == "drift"
+                            flag = (
+                                "EXCLUDE_UNSTABLE_SOLVER_WINDOW"
+                                if drifted else "EXCLUDE_INSUFFICIENT_STABLE_WINDOW"
+                            )
+                            records = current_cluster["observations"]
+                            for record_index in range(solver_start_index, len(records)):
+                                record = records[record_index]
+                                if (
+                                    record.base_name != current_rover
+                                    or not record.solver_eligible
+                                ):
+                                    continue
+                                flags = tuple(dict.fromkeys((
+                                    *record.quality_flags,
+                                    flag,
+                                )))
+                                records[record_index] = _CollectedObservation(
+                                    base_name=record.base_name,
+                                    observation=record.observation,
+                                    solver_eligible=False,
+                                    quality_flags=flags,
+                                    source_diagnostic=(
+                                        "Rolling baseline means drifted after the solver window "
+                                        "opened; the complete window was reset."
+                                        if drifted else
+                                        "Temporary-base solver window did not reach the minimum "
+                                        "epoch/duration coverage before timeout."
+                                    ),
+                                )
+                            solver_start_index = len(records)
+                            self._clear_cluster_fragment_buffers(project_id, current_cluster)
+
                         def collection_status() -> dict:
-                            eligible = eligible_attempt_records()
+                            monitoring = monitoring_records()
+                            solver_eligible = eligible_attempt_records()
+
+                            def epoch_map(records: list) -> Dict[str, set[int]]:
+                                result: Dict[str, set[int]] = {}
+                                for record in records:
+                                    rover_name = str(record.observation.rover_name)
+                                    result.setdefault(rover_name, set()).add(
+                                        int(record.observation.epoch_ts)
+                                    )
+                                return result
+
+                            epochs_by_rover = epoch_map(monitoring)
+                            solver_epochs_by_rover = epoch_map(solver_eligible)
+                            samples_by_rover: Dict[
+                                str, list[tuple[int, tuple[float, float, float]]]
+                            ] = {}
+                            for record in monitoring:
+                                rover_name = str(record.observation.rover_name)
+                                samples_by_rover.setdefault(rover_name, []).append((
+                                    int(record.observation.epoch_ts),
+                                    tuple(
+                                        float(value)
+                                        for value in record.observation.baseline_neu
+                                    ),
+                                ))
                             return {
-                                "sample_count": len(eligible),
-                                "rover_names": {
-                                    str(record.observation.rover_name)
-                                    for record in eligible
+                                "sample_count": len(monitoring),
+                                "rover_names": set(epochs_by_rover),
+                                "sample_counts_by_rover": {
+                                    rover_name: len(epochs)
+                                    for rover_name, epochs in epochs_by_rover.items()
+                                },
+                                "solver_sample_counts_by_rover": {
+                                    rover_name: len(epochs)
+                                    for rover_name, epochs in solver_epochs_by_rover.items()
+                                },
+                                "solver_durations_by_rover_seconds": {
+                                    rover_name: max(epochs) - min(epochs)
+                                    for rover_name, epochs in solver_epochs_by_rover.items()
+                                    if epochs
+                                },
+                                "rolling_stability_by_rover": {
+                                    rover_name: _rolling_mean_stability(
+                                        samples,
+                                        window_seconds=self.STABILITY_WINDOW_SECONDS,
+                                        min_samples_per_window=(
+                                            self.STABILITY_MIN_SAMPLES_PER_WINDOW
+                                        ),
+                                        max_sample_gap_seconds=(
+                                            self.STABILITY_MAX_SAMPLE_GAP_SECONDS
+                                        ),
+                                        horizontal_component_limit_m=(
+                                            self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
+                                        ),
+                                        up_component_limit_m=(
+                                            self.STABILITY_UP_COMPONENT_LIMIT_M
+                                        ),
+                                    )
+                                    for rover_name, samples in samples_by_rover.items()
                                 },
                             }
 
@@ -1573,9 +2443,14 @@ class RoundRobinAdjustmentManager:
                                 route_mountpoint=configured_mountpoint,
                                 route_password=str(route_password),
                                 on_collection_started=mark_collection_started,
+                                on_stable_collection_started=mark_stable_collection_started,
+                                on_stable_collection_invalid=mark_stable_collection_invalid,
                                 on_collection_stopped=mark_collection_stopped,
                                 collection_status_callback=collection_status,
                                 expected_cross_rovers=expected_cross_rovers,
+                                base_llh_override=frozen_base_coordinates.get(
+                                    str(rover_code)
+                                ),
                             )
                         except _SafeRoverRotationSkip as exc:
                             warning = str(exc) or f"{rover_code}: temporary-base rotation skipped"
@@ -1603,8 +2478,13 @@ class RoundRobinAdjustmentManager:
                             })
                             await self._emit_progress(
                                 project_id,
-                                f"{rover_code}: rotation skipped after safe ROVER recovery; continuing with the next rover. {warning}",
+                                f"{rover_code}: rotation skipped after safe ROVER recovery. {warning}",
                             )
+                            if not is_graph_recovery:
+                                raise RuntimeError(
+                                    f"Mandatory temporary-BASE rotation {rover_code} "
+                                    f"did not complete: {warning}"
+                                )
                             break
                         except Exception:
                             session["active_bases"].pop(cluster_index, None)
@@ -1624,24 +2504,23 @@ class RoundRobinAdjustmentManager:
                             len(cross_edges) >= required_cross_edges
                             and len(components) == 1
                         )
-                        if cluster_coverage_complete:
-                            await self._emit_progress(
-                                project_id,
-                                (
-                                    f"{rover_code}: cross-baseline graph is complete "
-                                    f"({len(cross_edges)}/{required_cross_edges} distinct "
-                                    "edges covering every rover); remaining temporary-BASE "
-                                    "rotations are unnecessary."
-                                ),
-                            )
-                            break
                         if collected_count > 0 and not missing_rovers:
+                            mandatory_rotation_completed = True
+                            if not is_graph_recovery:
+                                completed_mandatory_rotations.add(
+                                    str(rover_code).casefold()
+                                )
                             await self._emit_progress(
                                 project_id,
                                 (
-                                    f"{rover_code}: collected {collected_count} "
-                                    "solver-eligible rover-to-rover AGRICA baseline(s) "
-                                    f"from {', '.join(sorted(collected_rovers))}."
+                                    f"{rover_code}: mandatory temporary-BASE rotation "
+                                    f"complete; collected {collected_count} solver-eligible "
+                                    "rover-to-rover AGRICA baseline(s) from "
+                                    f"{', '.join(sorted(collected_rovers))}. "
+                                    f"Full-rotation progress "
+                                    f"{len(completed_mandatory_rotations)}/"
+                                    f"{initial_rotation_count}; continuing with every "
+                                    "configured rover before solving."
                                 ),
                             )
                             break
@@ -1681,9 +2560,29 @@ class RoundRobinAdjustmentManager:
                             "message": warning,
                         })
                         await self._emit_progress(project_id, warning)
+                        if not is_graph_recovery:
+                            raise RuntimeError(
+                                f"Mandatory temporary-BASE rotation {rover_code} "
+                                f"did not collect every other rover: {warning}"
+                            )
                     session["active_bases"].pop(cluster_index, None)
-                    if cluster_coverage_complete:
-                        break
+                    if not is_graph_recovery and not mandatory_rotation_completed:
+                        raise RuntimeError(
+                            f"Mandatory temporary-BASE rotation {rover_code} "
+                            "ended without complete solver-eligible coverage"
+                        )
+                    if (
+                        not is_graph_recovery
+                        and rotation_index + 1 < initial_rotation_count
+                        and configured_mountpoint
+                    ):
+                        await self._reacquire_fixed_base_between_rotations(
+                            project_id,
+                            cluster,
+                            next_rover=str(rotation_queue[rotation_index + 1]),
+                            mountpoint=str(configured_mountpoint),
+                            selected_host=configured_base_host,
+                        )
                     if (
                         not graph_recovery_scheduled
                         and rotation_index + 1 == initial_rotation_count
@@ -1707,6 +2606,29 @@ class RoundRobinAdjustmentManager:
                                     "missing component(s)."
                                 ),
                             )
+
+                required_rotation_keys = {
+                    str(candidate).casefold() for candidate in rovers
+                }
+                missing_rotation_keys = (
+                    required_rotation_keys - completed_mandatory_rotations
+                )
+                if missing_rotation_keys:
+                    raise RuntimeError(
+                        "Full temporary-BASE rotation is incomplete; missing base "
+                        "rotation(s): " + ", ".join(sorted(missing_rotation_keys))
+                    )
+                final_cross_edges, _ = current_solver_eligible_cross_coverage()
+                await self._emit_progress(
+                    project_id,
+                    (
+                        f"{cluster.get('name', cluster_index + 1)}: all "
+                        f"{initial_rotation_count}/{initial_rotation_count} mandatory "
+                        "temporary-BASE rotations completed; collected "
+                        f"{len(final_cross_edges)} distinct rover-to-rover edge(s). "
+                        "Proceeding to fixed-base restoration and network adjustment."
+                    ),
+                )
 
         except asyncio.CancelledError:
             logger.info("RoundRobin cycle cancelled for project %s", project_id)
@@ -1754,6 +2676,15 @@ class RoundRobinAdjustmentManager:
         try:
             completed_results: List[dict] = []
             for cluster_index, cluster in enumerate(session["clusters"]):
+                self._exclude_fixed_base_records(
+                    cluster,
+                    int(cluster.get("fixed_base_seed_cutoff_index", len(cluster["observations"]))),
+                    flag="EXCLUDE_POST_SEED_TRANSITION",
+                    diagnostic=(
+                        "Fixed-BASE epoch arrived after the common seed window was "
+                        "frozen; retained for source/reconnection audit only."
+                    ),
+                )
                 await self._emit_progress(
                     project_id,
                     (
@@ -1812,16 +2743,20 @@ class RoundRobinAdjustmentManager:
         route_mountpoint: Optional[str] = None,
         route_password: Optional[str] = None,
         on_collection_started: Optional[Callable[[], None]] = None,
+        on_stable_collection_started: Optional[Callable[[], None]] = None,
+        on_stable_collection_invalid: Optional[Callable[[str], None]] = None,
         on_collection_stopped: Optional[Callable[[], None]] = None,
         collection_status_callback: Optional[Callable[[], dict]] = None,
         expected_cross_rovers: Optional[set[str]] = None,
+        base_llh_override: Optional[dict] = None,
     ) -> None:
         logger.info("[Round-Robin] Setting %s as temporary base", rover_code)
         await self._emit_progress(
             project_id,
             f"{rover_code}: querying {self.caster_hosts} for an active AICaster client session.",
         )
-        llh = self.rover_llh_cache.get(rover_code)
+        restore_llh = self.rover_llh_cache.get(rover_code) or {}
+        llh = base_llh_override or restore_llh
         if not llh:
             raise _SafeRoverRotationSkip(
                 f"No LLH cache found for {rover_code}; receiver was not changed."
@@ -1853,7 +2788,9 @@ class RoundRobinAdjustmentManager:
             lon=llh["lon"],
             alt=llh["alt"],
         )
-        rover_commands = self._build_unicore_rover_config()
+        rover_commands = self._build_unicore_rover_config(
+            restore_undulation=restore_llh.get("undulation")
+        )
         preflight_command = rover_commands[0]
         preflight_text = preflight_command.decode("ascii", errors="replace").strip()
         await self._emit_progress(
@@ -2050,6 +2987,8 @@ class RoundRobinAdjustmentManager:
                     ),
                 )
                 await asyncio.sleep(self.CROSS_BASE_SETTLE_SECONDS)
+                if on_stable_collection_started:
+                    on_stable_collection_started()
                 await self._emit_progress(
                     project_id,
                     (
@@ -2076,9 +3015,27 @@ class RoundRobinAdjustmentManager:
                 while True:
                     latest_status = dict(collection_status_callback() or {})
                     participants = set(latest_status.get("rover_names") or ())
+                    sample_counts_by_rover = {
+                        str(name): int(count)
+                        for name, count in (
+                            latest_status.get("sample_counts_by_rover") or {}
+                        ).items()
+                    }
+                    # Compatibility callbacks may not expose per-rover counts.
+                    # Production does, and requires several distinct GNSS epochs
+                    # before declaring the RTCM handover stable.
+                    stable_participants = (
+                        {
+                            name
+                            for name, count in sample_counts_by_rover.items()
+                            if count >= self.CROSS_BASE_HANDOVER_MIN_SAMPLES
+                        }
+                        if sample_counts_by_rover
+                        else participants
+                    )
                     sample_count = int(latest_status.get("sample_count") or 0)
                     handover_verified = sample_count > 0 and (
-                        not expected or expected.issubset(participants)
+                        not expected or expected.issubset(stable_participants)
                     )
                     if handover_verified or loop.time() >= deadline:
                         break
@@ -2090,12 +3047,186 @@ class RoundRobinAdjustmentManager:
                         project_id,
                         (
                             f"{rover_code}: temporary-base handover verified from "
-                            f"{', '.join(sorted(participants))}; collecting "
-                            f"{self.CROSS_BASE_STABLE_COLLECTION_SECONDS}s of stable "
-                            "cross-baselines."
+                            f"{', '.join(sorted(stable_participants))} after at least "
+                            f"{self.CROSS_BASE_HANDOVER_MIN_SAMPLES} distinct epochs each; waiting "
+                            f"{self.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS}s for the new FIXED "
+                            "solution to settle before opening the solver window."
                         ),
                     )
-                    await asyncio.sleep(self.CROSS_BASE_STABLE_COLLECTION_SECONDS)
+                    await asyncio.sleep(self.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS)
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{rover_code}: monitoring rolling baseline means in two "
+                            f"{self.STABILITY_WINDOW_SECONDS}-second windows "
+                            f"(at least {self.STABILITY_MIN_SAMPLES_PER_WINDOW} epochs each); require "
+                            f"|dN|/|dE| <= {self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M * 1000:.1f} mm, "
+                            f"|dU| <= {self.STABILITY_UP_COMPONENT_LIMIT_M * 1000:.1f} mm "
+                            f"continuously for {self.STABILITY_HOLD_SECONDS}s before opening "
+                            "the solver window."
+                        ),
+                    )
+                    stability_targets = expected or set(stable_participants)
+                    solver_window_open = False
+                    reset_count = 0
+                    drift_failure_counts = {
+                        name: 0 for name in stability_targets
+                    }
+                    drift_evaluation_epochs = {
+                        name: None for name in stability_targets
+                    }
+                    stability_deadline = (
+                        loop.time() + self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS
+                    )
+                    while True:
+                        latest_status = dict(collection_status_callback() or {})
+                        rolling = {
+                            str(name): dict(diagnostic or {})
+                            for name, diagnostic in (
+                                latest_status.get("rolling_stability_by_rover") or {}
+                            ).items()
+                        }
+                        now = loop.time()
+                        stable_held = bool(stability_targets) and all(
+                            rolling.get(name, {}).get("stable") is True
+                            and int(
+                                rolling.get(name, {}).get("stable_run_seconds") or 0
+                            ) >= self.STABILITY_HOLD_SECONDS
+                            for name in stability_targets
+                        )
+
+                        if solver_window_open:
+                            aborting_now = set()
+                            for name in stability_targets:
+                                diagnostic = rolling.get(name, {})
+                                latest_epoch = diagnostic.get("latest_epoch")
+                                abort_exceeded = _rolling_drift_exceeds_abort_limits(
+                                    diagnostic,
+                                    horizontal_component_limit_m=(
+                                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                                    ),
+                                    up_component_limit_m=(
+                                        self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
+                                    ),
+                                )
+                                if abort_exceeded:
+                                    aborting_now.add(name)
+                                if (
+                                    latest_epoch is not None
+                                    and latest_epoch
+                                    != drift_evaluation_epochs.get(name)
+                                ):
+                                    drift_evaluation_epochs[name] = latest_epoch
+                                    drift_failure_counts[name] = (
+                                        int(drift_failure_counts.get(name) or 0) + 1
+                                        if abort_exceeded else 0
+                                    )
+                            aborting_repeatedly = {
+                                name
+                                for name, count in drift_failure_counts.items()
+                                if count >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
+                            }
+                            if aborting_repeatedly:
+                                reset_count += 1
+                                drift_details = []
+                                for name in sorted(aborting_repeatedly):
+                                    delta = rolling.get(name, {}).get("delta_neu_m")
+                                    if delta and len(delta) == 3:
+                                        drift_details.append(
+                                            f"{name} dN/E/U="
+                                            f"{float(delta[0]) * 1000:.1f}/"
+                                            f"{float(delta[1]) * 1000:.1f}/"
+                                            f"{float(delta[2]) * 1000:.1f} mm"
+                                        )
+                                if on_stable_collection_invalid:
+                                    on_stable_collection_invalid("drift")
+                                solver_window_open = False
+                                drift_failure_counts = {
+                                    name: 0 for name in stability_targets
+                                }
+                                await self._emit_progress(
+                                    project_id,
+                                    (
+                                        f"{rover_code}: rolling mean exceeded the "
+                                        f"{self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M * 1000:.0f}/"
+                                        f"{self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M * 1000:.0f} mm "
+                                        f"abort envelope for {self.STABILITY_ABORT_CONSECUTIVE_EPOCHS} "
+                                        "consecutive receiver epochs; "
+                                        f"quarantined solver window #{reset_count} and reset "
+                                        "the stability hold timer. "
+                                        f"{'; '.join(drift_details) or 'rolling threshold exceeded'}."
+                                    ),
+                                )
+                            else:
+                                solver_counts = {
+                                    str(name): int(count)
+                                    for name, count in (
+                                        latest_status.get(
+                                            "solver_sample_counts_by_rover"
+                                        ) or {}
+                                    ).items()
+                                }
+                                solver_durations = {
+                                    str(name): int(duration)
+                                    for name, duration in (
+                                        latest_status.get(
+                                            "solver_durations_by_rover_seconds"
+                                        ) or {}
+                                    ).items()
+                                }
+                                solver_ready = {
+                                    name
+                                    for name in stability_targets
+                                    if solver_counts.get(name, 0)
+                                    >= self.CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS
+                                    and solver_durations.get(name, 0)
+                                    >= self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS
+                                }
+                                if (
+                                    not aborting_now
+                                    and stability_targets.issubset(solver_ready)
+                                ):
+                                    await self._emit_progress(
+                                        project_id,
+                                        (
+                                            f"{rover_code}: stationary solver window complete "
+                                            f"for {', '.join(sorted(stability_targets))}; "
+                                            f"at least {self.CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS} "
+                                            f"epochs and {self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS}s "
+                                            "per rover."
+                                        ),
+                                    )
+                                    break
+                        elif stable_held:
+                            if on_stable_collection_started:
+                                on_stable_collection_started()
+                            solver_window_open = True
+                            drift_failure_counts = {
+                                name: 0 for name in stability_targets
+                            }
+                            drift_evaluation_epochs = {
+                                name: rolling.get(name, {}).get("latest_epoch")
+                                for name in stability_targets
+                            }
+                            await self._emit_progress(
+                                project_id,
+                                (
+                                    f"{rover_code}: rolling means remained stationary for "
+                                    f"{self.STABILITY_HOLD_SECONDS}s; solver window opened. "
+                                    f"Collecting at least {self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS}s."
+                                ),
+                            )
+
+                        if now >= stability_deadline:
+                            if on_stable_collection_invalid:
+                                on_stable_collection_invalid("timeout")
+                            raise RuntimeError(
+                                f"{rover_code}: no complete stationary solver window within "
+                                f"{self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS}s; "
+                                f"rolling threshold N/E={self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M * 1000:.1f} mm, "
+                                f"U={self.STABILITY_UP_COMPONENT_LIMIT_M * 1000:.1f} mm"
+                            )
+                        await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
                 else:
                     missing = sorted(expected - participants)
                     await self._emit_progress(
@@ -2107,6 +3238,11 @@ class RoundRobinAdjustmentManager:
                             f"{', '.join(missing) or 'none'}. The rotation will be "
                             "retried after safe ROVER restore."
                         ),
+                    )
+                    if on_stable_collection_invalid:
+                        on_stable_collection_invalid("timeout")
+                    raise RuntimeError(
+                        f"{rover_code}: temporary-base handover was not verified"
                     )
         except Exception as exc:
             operation_error = exc
@@ -2240,6 +3376,7 @@ class RoundRobinAdjustmentManager:
             from backend.processors.gnss_adjustment.solver import adjust_network
             from backend.processors.gnss_adjustment.transforms import (
                 covariance_standard_deviation,
+                ecef_to_enu_rotation,
                 ecef_point_covariance_to_enu,
                 neu_standard_deviation_to_ecef_covariance,
             )
@@ -2249,6 +3386,7 @@ class RoundRobinAdjustmentManager:
             from processors.gnss_adjustment.solver import adjust_network
             from processors.gnss_adjustment.transforms import (
                 covariance_standard_deviation,
+                ecef_to_enu_rotation,
                 ecef_point_covariance_to_enu,
                 neu_standard_deviation_to_ecef_covariance,
             )
@@ -2391,13 +3529,23 @@ class RoundRobinAdjustmentManager:
                 mean_covariance = np.linalg.inv(precision_sum)
                 mean = mean_covariance @ weighted_sum
 
-                # Convert temporal correlation into an effective sample count.
-                # n_eff=1 reproduces the former fully-conservative model;
-                # n_eff=n reproduces the independent-epoch weighted mean.
-                effective_sample_size, ess_sessions = _edge_effective_sample_size(
+                # Samples within one uninterrupted RTK FIXED window share the
+                # same ambiguity solution and correction-source state.  Their
+                # statistical independence is therefore not established.  The
+                # published solution conservatively assigns one independent
+                # observation to each contiguous source/direction session.
+                # ACF ESS is retained for audit/sensitivity only.
+                acf_effective_sample_size, ess_sessions = _edge_effective_sample_size(
                     rows,
                     pooled_lag_one,
                 )
+                contiguous_sessions = _split_effective_sample_sessions(rows)
+                effective_sample_size = float(len(contiguous_sessions))
+                for session_diagnostic in ess_sessions:
+                    session_diagnostic["acf_estimated_effective_sample_size"] = (
+                        session_diagnostic.pop("effective_sample_size")
+                    )
+                    session_diagnostic["published_effective_sample_size"] = 1.0
                 temporal_inflation = len(rows) / effective_sample_size
                 scatter_scale = 1.0
                 if len(rows) > 1:
@@ -2447,6 +3595,7 @@ class RoundRobinAdjustmentManager:
                     "covariance": covariance,
                     "independent_covariance": independent_covariance,
                     "effective_sample_size": effective_sample_size,
+                    "acf_estimated_effective_sample_size": acf_effective_sample_size,
                     "temporal_scale_factor": temporal_inflation,
                     "scatter_scale_factor": scatter_scale,
                     "effective_sample_size_sessions": ess_sessions,
@@ -2471,6 +3620,8 @@ class RoundRobinAdjustmentManager:
             observation = record.observation
             rover_name = station_names.get(observation.station_id)
             if record.base_name != "BASE" or rover_name is None:
+                continue
+            if not getattr(record, "solver_eligible", True):
                 continue
             delta = self._baseline_ecef(observation, fixed_base_llh)
             if _vector_length(delta) < 1.0:
@@ -2536,7 +3687,10 @@ class RoundRobinAdjustmentManager:
                 base_llh = fixed_base_llh
                 base_ecef = fixed_base_ecef
             else:
-                cached = self.rover_llh_cache.get(from_name)
+                cached = (
+                    cluster.get("temporary_base_llh_by_rover", {}).get(from_name)
+                    or self.rover_llh_cache.get(from_name)
+                )
                 if cached:
                     base_llh = (float(cached["lat"]), float(cached["lon"]), float(cached["alt"]))
                 else:
@@ -2548,7 +3702,7 @@ class RoundRobinAdjustmentManager:
                 observation.std_neu, base_llh[0], base_llh[1]
             )
             length = _vector_length(delta)
-            flags = []
+            flags = list(getattr(record, "quality_flags", ()) or ())
             if length < 1.0:
                 flags.append("REJECTED_TOO_SHORT")
             if max(float(value) for value in observation.std_neu) > std_warning_threshold:
@@ -2556,13 +3710,35 @@ class RoundRobinAdjustmentManager:
                 flags.append("REJECTED_BASELINE_STD")
 
             consistency_error = None
+            consistency_residual_enu = None
             if observation.rover_ecef:
                 expected = tuple(base_ecef[axis] + delta[axis] for axis in range(3))
-                consistency_error = _vector_length(tuple(
+                consistency_residual_ecef = tuple(
                     observation.rover_ecef[axis] - expected[axis] for axis in range(3)
-                ))
+                )
+                consistency_error = _vector_length(consistency_residual_ecef)
+                consistency_residual_enu_array = (
+                    ecef_to_enu_rotation(base_llh[0], base_llh[1])
+                    @ np.asarray(consistency_residual_ecef, dtype=float)
+                )
+                consistency_residual_enu = tuple(
+                    float(value) for value in consistency_residual_enu_array
+                )
                 if consistency_error > raw_ecef_tolerance:
-                    flags.append("BASELINE_POSITION_INCONSISTENT")
+                    horizontal_error = math.hypot(
+                        consistency_residual_enu[0], consistency_residual_enu[1]
+                    )
+                    if (
+                        horizontal_error <= raw_ecef_tolerance
+                        and abs(consistency_residual_enu[2]) > raw_ecef_tolerance
+                    ):
+                        # The independent rover ECEF and baseline agree in plan
+                        # but use different vertical datums. Keep the validated
+                        # baseline, while never using this rover ECEF as a raw
+                        # point-coordinate observation.
+                        flags.append("ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC")
+                    else:
+                        flags.append("BASELINE_POSITION_INCONSISTENT")
 
             raw_index = len(raw_rows)
             raw_rows.append({
@@ -2587,14 +3763,18 @@ class RoundRobinAdjustmentManager:
                 "rover_position_std_ecef_raw": observation.rover_position_std_ecef_raw,
                 "rover_position_std_ecef": observation.rover_position_std_ecef,
                 "raw_ecef_consistency_error_m": consistency_error,
+                "raw_ecef_consistency_residual_enu_m": consistency_residual_enu,
                 "quality_flags": flags,
+                "source_validation_diagnostic": getattr(
+                    record, "source_diagnostic", None
+                ),
                 "raw_payload": observation.raw,
                 "vector_deviation_from_edge_m": None,
                 "vector_outlier_threshold_m": None,
                 "residual_xyz": None,
                 "standardized_residual": None,
             })
-            if observation.rover_ecef:
+            if observation.rover_ecef and getattr(record, "solver_eligible", True):
                 raw_ecef_candidates[rover_name].append((raw_index, observation.rover_ecef))
             solver_sample = {
                 "from": from_name,
@@ -2613,7 +3793,7 @@ class RoundRobinAdjustmentManager:
                 for flag in flags
                 if str(flag).startswith("REJECTED_")
             }
-            if not rejected_flags:
+            if getattr(record, "solver_eligible", True) and not rejected_flags:
                 solver_samples.append(solver_sample)
             elif (
                 from_name != "BASE"
@@ -2824,8 +4004,11 @@ class RoundRobinAdjustmentManager:
                 value
                 for raw_index, value in raw_candidates
                 if not any(
-                    str(flag).startswith("REJECTED_")
-                    or flag == "BASELINE_POSITION_INCONSISTENT"
+                    str(flag).startswith(("REJECTED_", "EXCLUDE_"))
+                    or flag in {
+                        "BASELINE_POSITION_INCONSISTENT",
+                        "ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC",
+                    }
                     for flag in raw_rows[raw_index]["quality_flags"]
                 )
             ]
@@ -2998,7 +4181,7 @@ class RoundRobinAdjustmentManager:
         accepted_raw = [
             row for row in raw_rows
             if not any(
-                str(flag).startswith("REJECTED_")
+                str(flag).startswith(("REJECTED_", "EXCLUDE_"))
                 for flag in row["quality_flags"]
             )
         ]
@@ -3013,6 +4196,20 @@ class RoundRobinAdjustmentManager:
             for edge in averaged_edges
             if len(edge["position_types"]) > 1
         ]
+        max_observed_closure = max(
+            (float(loop.get("observed_closure") or 0.0) for loop in loops),
+            default=0.0,
+        )
+        network_quality_passed = bool(global_test and global_test.get("passed"))
+        # Loop closure is a diagnostic, not an acceptance threshold. In particular,
+        # it must never reduce the retained observation count or independently block
+        # publishing a solved network. Source/window validation happens before the
+        # solver; the statistical network test remains the publish quality gate.
+        quality_gate_passed = network_quality_passed
+        quality_gate_reasons = []
+        if not network_quality_passed:
+            quality_gate_reasons.append("network quality test is not PASS")
+
         return {
             "type": "gnss_adjusted",
             "source": "AGRICA_ROUND_ROBIN",
@@ -3024,9 +4221,25 @@ class RoundRobinAdjustmentManager:
                 "lat": fixed_base_llh[0], "lon": fixed_base_llh[1], "h": fixed_base_llh[2],
                 "ecef_xyz": fixed_base_ecef,
             },
+            "temporary_bases": copy.deepcopy(
+                cluster.get("temporary_base_llh_by_rover", {})
+            ),
             "rover_count": len(adjusted_points), "points": adjusted_points,
             "baselines": adjusted_baselines, "baseline_observations": raw_rows,
             "loops": loops,
+            "official_publish_allowed": quality_gate_passed,
+            "quality_gate": {
+                "status": "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE",
+                "passed": quality_gate_passed,
+                "pre_adjustment_loop_closure_limit_m": None,
+                "max_pre_adjustment_loop_closure_m": max_observed_closure,
+                "closure_failures": [],
+                "loop_closure_diagnostic_only": True,
+                "network_quality_passed": network_quality_passed,
+                "reasons": quality_gate_reasons,
+                "audit_report_allowed": True,
+                "official_coordinate_publish_allowed": quality_gate_passed,
+            },
             "quality": {
                 "observation_baseline_count": len(accepted_raw),
                 "averaged_baseline_count": len(averaged_edges),
@@ -3057,6 +4270,71 @@ class RoundRobinAdjustmentManager:
                 ),
                 "raw_observation_count": len(raw_rows),
                 "raw_rejected_count": len(raw_rows) - len(accepted_raw),
+                "unconfirmed_source_excluded_count": sum(
+                    "EXCLUDE_UNCONFIRMED_SOURCE" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "pre_stable_window_excluded_count": sum(
+                    "EXCLUDE_PRE_STABLE_WINDOW" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "insufficient_stable_window_excluded_count": sum(
+                    "EXCLUDE_INSUFFICIENT_STABLE_WINDOW" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "unstable_solver_window_excluded_count": sum(
+                    "EXCLUDE_UNSTABLE_SOLVER_WINDOW" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "inter_rotation_reacquisition_excluded_count": sum(
+                    "EXCLUDE_INTER_ROTATION_REACQUISITION" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "post_seed_transition_excluded_count": sum(
+                    "EXCLUDE_POST_SEED_TRANSITION" in row["quality_flags"]
+                    for row in raw_rows
+                ),
+                "rolling_stability_policy": {
+                    "window_seconds": self.STABILITY_WINDOW_SECONDS,
+                    "minimum_samples_per_window": (
+                        self.STABILITY_MIN_SAMPLES_PER_WINDOW
+                    ),
+                    "maximum_sample_gap_seconds": (
+                        self.STABILITY_MAX_SAMPLE_GAP_SECONDS
+                    ),
+                    "horizontal_component_limit_m": (
+                        self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
+                    ),
+                    "up_component_limit_m": self.STABILITY_UP_COMPONENT_LIMIT_M,
+                    "continuous_hold_seconds": self.STABILITY_HOLD_SECONDS,
+                    "abort_horizontal_component_limit_m": (
+                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                    ),
+                    "abort_up_component_limit_m": (
+                        self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
+                    ),
+                    "abort_consecutive_epochs": (
+                        self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
+                    ),
+                    "solver_min_distinct_epochs": (
+                        self.CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS
+                    ),
+                    "solver_min_duration_seconds": (
+                        self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS
+                    ),
+                    "reset_complete_window_when_sustained_drift_returns": True,
+                },
+                "temporary_base_coordinate_policy": (
+                    "One immutable covariance-weighted ECEF endpoint per rover, "
+                    "derived from the common initial fixed-BASE solver window and "
+                    "reused for MODE BASE, source validation, and network reduction"
+                ),
+                "pre_adjustment_loop_closure_limit_m": None,
+                "max_pre_adjustment_loop_closure_m": max_observed_closure,
+                "loop_closure_diagnostic_only": True,
+                "quality_gate_status": (
+                    "PASS" if quality_gate_passed else "FAILED_QUALITY_GATE"
+                ),
                 "vector_outlier_count": len(vector_outlier_diagnostics),
                 "vector_outlier_filter": (
                     "Per edge/session coordinate-wise median center; reject 3-D deviation above "
@@ -3077,12 +4355,18 @@ class RoundRobinAdjustmentManager:
                     for row in raw_rows
                 ),
                 "raw_ecef_inconsistent_count": sum("BASELINE_POSITION_INCONSISTENT" in row["quality_flags"] for row in raw_rows),
+                "raw_ecef_vertical_datum_offset_count": sum(
+                    "ROVER_ECEF_VERTICAL_DATUM_OFFSET_DIAGNOSTIC"
+                    in row["quality_flags"]
+                    for row in raw_rows
+                ),
                 "baseline_std_warning_threshold_m": std_warning_threshold,
                 "raw_ecef_consistency_tolerance_m": raw_ecef_tolerance,
                 "baseline_covariance_model": (
                     "Published solution: C_edge = (n / n_eff) * scatter_scale * "
-                    "inverse(sum(inverse(C_i))); n_eff estimated per contiguous "
-                    "direction/session with a monotone initial-positive ACF sequence"
+                    "inverse(sum(inverse(C_i))); n_eff is the number of contiguous "
+                    "source/direction sessions, with no independence claimed between "
+                    "1 Hz epochs inside one RTK FIXED session"
                 ),
                 "independent_epoch_covariance_model": (
                     "Sensitivity only: C_edge = scatter_scale * "
@@ -3090,10 +4374,9 @@ class RoundRobinAdjustmentManager:
                 ),
                 "temporal_scaling_applied": temporal_scaling_applied,
                 "effective_sample_size_method": (
-                    "Per ECEF component integrated autocorrelation time; use minimum "
-                    "component ESS; long sessions use a monotone initial-positive ACF; "
-                    "sessions shorter than 8 epochs use a pooled lag-1 AR(1) correlation; "
-                    "sum ESS across sessions separated by direction change or >5 s gap"
+                    "Published n_eff: one independent observation per contiguous "
+                    "source/direction session separated by direction change or >5 s gap. "
+                    "Per-component ACF ESS is diagnostic only"
                 ),
                 "effective_sample_size_edges": [
                     {
@@ -3101,6 +4384,9 @@ class RoundRobinAdjustmentManager:
                         "to": edge["to"],
                         "observation_count": edge["observation_count"],
                         "effective_sample_size": edge["effective_sample_size"],
+                        "acf_estimated_effective_sample_size": edge[
+                            "acf_estimated_effective_sample_size"
+                        ],
                         "temporal_inflation_factor": edge["temporal_scale_factor"],
                         "scatter_scale_factor": edge["scatter_scale_factor"],
                         "pooled_lag_one_autocorrelations": edge[
@@ -3218,7 +4504,10 @@ class RoundRobinAdjustmentManager:
             except ValueError as exc:
                 return False, f"cannot verify fixed BASE: {exc}"
         else:
-            cached = self.rover_llh_cache.get(active_base)
+            cached = (
+                cluster.get("temporary_base_llh_by_rover", {}).get(active_base)
+                or self.rover_llh_cache.get(active_base)
+            )
             if not cached:
                 return False, f"cannot verify temporary base {active_base}: LLH cache is unavailable"
             expected = (
@@ -3230,7 +4519,34 @@ class RoundRobinAdjustmentManager:
         reported = observation.base_llh
         if not _is_usable_llh(reported):
             if active_base == "BASE":
-                return True, "AGRICA has no usable base_llh; using configured fixed BASE"
+                # Several UM980 rover profiles emit zeroes for BASE_lat/lon/h.
+                # Never treat that as proof that the correction source is the
+                # configured fixed base: after a temporary-base route closes,
+                # the receiver can retain a Fixed solution from that old RTCM
+                # stream for tens of seconds. Verify the baseline length against
+                # the configured fixed-base-to-rover geometry instead.
+                rover_llh = getattr(observation, "rover_llh", None)
+                baseline_neu = getattr(observation, "baseline_neu", None)
+                if not rover_llh or not baseline_neu:
+                    return False, (
+                        f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
+                        "and missing rover_llh or baseline_neu to verify configured fixed BASE"
+                    )
+                rover_to_fixed_dist = _llh_horizontal_distance_m(rover_llh, expected)
+                baseline_horiz_len = math.hypot(baseline_neu[0], baseline_neu[1])
+                fixed_error = abs(rover_to_fixed_dist - baseline_horiz_len)
+                if fixed_error > self.BASE_IDENTITY_TOLERANCE_M:
+                    return False, (
+                        f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
+                        f"and baseline length ({baseline_horiz_len:.1f} m) does not match "
+                        f"distance to configured fixed BASE ({rover_to_fixed_dist:.1f} m; "
+                        f"error {fixed_error:.2f} m). The receiver may still hold the "
+                        "previous temporary-base Fixed solution"
+                    )
+                return True, (
+                    "AGRICA has no usable base_llh; baseline geometry matches configured "
+                    f"fixed BASE (error {fixed_error:.2f} m)"
+                )
             rover_llh = getattr(observation, "rover_llh", None)
             baseline_neu = getattr(observation, "baseline_neu", None)
             if not rover_llh or not baseline_neu:
@@ -3752,6 +5068,10 @@ class RoundRobinAdjustmentManager:
         if setup_method.upper() == "SURVEY_IN":
             commands.append(f"mode base time {duration}\r\n".encode("ascii"))
         else:
+            # Unicore MODE BASE interprets its height as altitude unless the
+            # undulation is explicitly zero. ``alt`` here is WGS84 ellipsoidal
+            # height derived from AGRICA ECEF, so bind the datum before MODE BASE.
+            commands.append(b"config undulation 0.0\r\n")
             commands.append(f"mode base {lat} {lon} {alt}\r\n".encode("ascii"))
         for message, interval in (
             ("1006", 10),
@@ -3766,11 +5086,24 @@ class RoundRobinAdjustmentManager:
         return commands
 
     @staticmethod
-    def _build_unicore_rover_config() -> list[bytes]:
+    def _build_unicore_rover_config(
+        restore_undulation: Optional[float] = None,
+    ) -> list[bytes]:
         """Restore UM980 rover output after one temporary-base collection."""
 
+        undulation = "auto"
+        if restore_undulation is not None:
+            try:
+                numeric_undulation = float(restore_undulation)
+            except (TypeError, ValueError):
+                numeric_undulation = math.nan
+            if math.isfinite(numeric_undulation) and -1000.0 <= numeric_undulation <= 1000.0:
+                # N4 command manual specifies four decimal places for a
+                # user-supplied geoid separation.
+                undulation = f"{numeric_undulation:.4f}"
         return [
             b"mode rover survey\r\n",
+            f"config undulation {undulation}\r\n".encode("ascii"),
             b"unlogall\r\n",
             b"gpgga com2 1\r\n",
             b"AGRICA COM2 1\r\n",

@@ -170,7 +170,7 @@ async function bootLegacyPage(view) {
     }
 
     if (view === 'map') {
-        await loadScript('/js/map-main.js?v=react-spa-20');
+        await loadScript('/js/map-main.js?v=react-spa-21');
         await loadScript('/js/engine/simulation-controller.js', { type: 'module' });
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });

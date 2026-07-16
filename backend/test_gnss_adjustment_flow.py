@@ -8,6 +8,7 @@ try:
         _SafeRoverRotationSkip,
         _graph_components,
         _initial_positive_sequence_ess,
+        _rolling_mean_stability,
     )
     from backend.processors.gnss_adjustment_runtime import _llh_to_ecef, parse_agrica
 except ModuleNotFoundError:
@@ -16,6 +17,7 @@ except ModuleNotFoundError:
         _SafeRoverRotationSkip,
         _graph_components,
         _initial_positive_sequence_ess,
+        _rolling_mean_stability,
     )
     from processors.gnss_adjustment_runtime import _llh_to_ecef, parse_agrica
 
@@ -30,13 +32,15 @@ def _agrica_sentence(
     rover_position_std_ecef=(0.02, 0.03, 0.04),
     position_type=4,
     second=0,
+    minute=0,
+    undulation=0.0,
 ):
     """Create the subset of a valid UM980 AGRICA sentence needed by the parser."""
 
     parts = ["0"] * 57
     parts[0] = "GNSS"
     parts[1] = "232"
-    parts[2:8] = ["24", "1", "1", "0", "0", str(second)]
+    parts[2:8] = ["24", "1", "1", "0", str(minute), str(second)]
     parts[8] = str(position_type)
     parts[10:13] = ["8", "16", "8"]
     parts[13:16] = [str(value) for value in baseline_neu]
@@ -47,6 +51,7 @@ def _agrica_sentence(
     parts[38:41] = [str(value) for value in rover_position_std_ecef]
     parts[41:44] = [str(value) for value in base_llh]
     parts[48] = "0.999"
+    parts[50] = str(undulation)
     parts[53] = "11"
     return "#AGRICA,0;" + ",".join(parts) + "*00000000"
 
@@ -96,6 +101,35 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         # Fixed CORS base -> S1 and fixed CORS base -> S2.
         self._add(101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0))
         self._add(102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0))
+        self.assertFalse(self.manager.has_complete_seed_observations(17))
+        self.assertEqual(
+            self.manager.get_seed_collection_status(17)["warming_station_ids"],
+            [101, 102],
+        )
+        seed_stationary_epochs = (
+            2 * self.manager.STABILITY_WINDOW_SECONDS
+            + self.manager.STABILITY_HOLD_SECONDS
+        )
+        for second in range(1, seed_stationary_epochs):
+            self._add(
+                101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0),
+                second=second,
+            )
+            self._add(
+                102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0),
+                second=second,
+            )
+        self.assertFalse(self.manager.has_complete_seed_observations(17))
+        for sample_index in range(self.manager.SEED_SOLVER_MIN_DURATION_SECONDS + 1):
+            minute, second = divmod(sample_index, 60)
+            self._add(
+                101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0),
+                minute=minute + 1, second=second,
+            )
+            self._add(
+                102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0),
+                minute=minute + 1, second=second,
+            )
         self.assertTrue(self.manager.has_complete_seed_observations(17))
 
         # During the S1 rotation, S2 observes S1 -> S2 = (3, 3, 0) in N/E/U.
@@ -121,6 +155,26 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         )
         self.assertGreater(result["quality"]["degrees_of_freedom"], 0)
         self.assertEqual(result["source"], "AGRICA_ROUND_ROBIN")
+        self.assertGreater(
+            result["quality"]["pre_stable_window_excluded_count"],
+            0,
+        )
+        fixed_edges = [
+            edge for edge in result["baselines"] if edge["from"] == "BASE"
+        ]
+        self.assertTrue(all(
+            edge["observation_count"]
+            == self.manager.SEED_SOLVER_MIN_DURATION_SECONDS + 1
+            for edge in fixed_edges
+        ))
+        self.assertTrue(all(
+            edge["effective_sample_size"] == 1.0
+            for edge in result["quality"]["effective_sample_size_edges"]
+        ))
+        self.assertTrue(all(
+            edge["acf_estimated_effective_sample_size"] >= 1.0
+            for edge in result["quality"]["effective_sample_size_edges"]
+        ))
 
     def test_position_type_4_is_preferred_and_type_7_is_rejected_per_edge(self):
         self._add(
@@ -185,6 +239,94 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         effective = _initial_positive_sequence_ess(correlated)
         self.assertGreaterEqual(effective, 1.0)
         self.assertLess(effective, 10.0)
+
+    def test_rolling_mean_stability_is_componentwise_and_detects_returning_drift(self):
+        stable_samples = [
+            (epoch, (1.0 + epoch * 0.00001, 2.0, 3.0))
+            for epoch in range(0, 41, 2)
+        ]
+        stable = _rolling_mean_stability(stable_samples)
+        self.assertTrue(stable["stable"])
+        self.assertEqual(stable["window_seconds"], 10)
+        self.assertGreaterEqual(stable["stable_run_seconds"], 10)
+        self.assertLess(abs(stable["delta_neu_m"][0]), 0.003)
+
+        drifting_samples = [
+            (epoch, (1.0, 2.0, 3.0 + max(0, epoch - 20) * 0.001))
+            for epoch in range(0, 41, 2)
+        ]
+        drifting = _rolling_mean_stability(drifting_samples)
+        self.assertFalse(drifting["stable"])
+        self.assertGreater(abs(drifting["delta_neu_m"][2]), 0.005)
+
+    def test_seed_solver_accepts_sixty_seconds_at_half_hz(self):
+        stations = (
+            (101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0)),
+            (102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0)),
+        )
+        for epoch in range(0, 41, 2):
+            minute, second = divmod(epoch, 60)
+            for station_id, station_code, baseline, rover_llh in stations:
+                self._add(
+                    station_id,
+                    station_code,
+                    baseline,
+                    rover_llh,
+                    minute=minute,
+                    second=second,
+                )
+
+        opened = self.manager.get_seed_collection_status(17)
+        self.assertFalse(opened["complete"])
+        self.assertTrue(all(
+            opened["clusters"][0]["solver_window_open_by_station"].values()
+        ))
+
+        # 31 distinct epochs across a real 60-second interval is sufficient.
+        # The old 60-epoch rule could never pass this healthy 0.5 Hz stream.
+        for epoch in range(42, 103, 2):
+            minute, second = divmod(epoch, 60)
+            for station_id, station_code, baseline, rover_llh in stations:
+                self._add(
+                    station_id,
+                    station_code,
+                    baseline,
+                    rover_llh,
+                    minute=minute,
+                    second=second,
+                )
+
+        completed = self.manager.get_seed_collection_status(17)
+        self.assertTrue(completed["complete"])
+        self.assertEqual(
+            completed["solver_min_distinct_epochs"],
+            self.manager.SEED_SOLVER_MIN_DISTINCT_EPOCHS,
+        )
+
+    def test_fixed_base_warmup_opens_even_when_rolling_three_mm_is_not_met(self):
+        stations = (
+            (101, "S1", (21.0001, 105.0, 10.0)),
+            (102, "S2", (21.0002, 105.0, 10.0)),
+        )
+        for epoch in range(20):
+            for station_id, station_code, rover_llh in stations:
+                self._add(
+                    station_id,
+                    station_code,
+                    (1.0 + epoch * 0.0007, 2.0, 0.0),
+                    rover_llh,
+                    second=epoch,
+                )
+
+        opened = self.manager.get_seed_collection_status(17)
+        rolling = opened["clusters"][0]["rolling_stability_by_station"]
+        self.assertTrue(any(not item["stable"] for item in rolling.values()))
+        self.assertTrue(all(
+            opened["clusters"][0]["solver_window_open_by_station"].values()
+        ))
+        self.assertTrue(all(
+            opened["clusters"][0]["warmup_ready_by_station"].values()
+        ))
 
     def test_four_rovers_require_three_cross_edges_and_three_independent_loops(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
@@ -358,7 +500,10 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         )
 
         self.assertEqual(rejected, [])
-        self.assertEqual(len(session["clusters"][0]["observations"]), 2)
+        self.assertEqual(len(session["clusters"][0]["observations"]), 3)
+        audit_record = session["clusters"][0]["observations"][-1]
+        self.assertFalse(audit_record.solver_eligible)
+        self.assertIn("EXCLUDE_UNCONFIRMED_SOURCE", audit_record.quality_flags)
         self.assertIn("correction source has not switched", self.manager.get_last_ingest_diagnostic(17)["message"])
 
     def test_unfinished_fragment_is_discarded_when_base_window_changes(self):
@@ -399,7 +544,7 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertEqual(len(second_result), 1)
         self.assertFalse(self.manager.has_pending_agrica_fragment(17, 101))
 
-    def test_missing_rover_is_excluded_after_ten_seed_steps(self):
+    def test_missing_rover_is_excluded_after_complete_seed_window(self):
         self.manager.configure_project(18, [{
             "name": "cluster-with-offline-rover",
             "stations": [201, 202, 203],
@@ -409,7 +554,11 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
             "base_lon": 105.0,
             "base_alt": 10.0,
         }])
-        for second in range(10):
+        stationary_epochs = (
+            2 * self.manager.STABILITY_WINDOW_SECONDS
+            + self.manager.STABILITY_HOLD_SECONDS
+        )
+        for second in range(stationary_epochs):
             for station_id, station_code, baseline in (
                 (201, "A", (1.0, 0.0, 0.0)),
                 (202, "B", (2.0, 0.0, 0.0)),
@@ -428,9 +577,25 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertEqual(before_skip["missing_station_ids"], [203])
 
         after_skip = self.manager.skip_missing_seed_stations(18)
-        self.assertTrue(after_skip["complete"])
+        self.assertFalse(after_skip["complete"])
         self.assertEqual(after_skip["skipped_station_ids"], [203])
         self.assertEqual(self.manager._sessions[18]["clusters"][0]["stations"], [201, 202])
+        for sample_index in range(self.manager.SEED_SOLVER_MIN_DURATION_SECONDS + 1):
+            minute, second = divmod(sample_index, 60)
+            for station_id, station_code, baseline in (
+                (201, "A", (1.0, 0.0, 0.0)),
+                (202, "B", (2.0, 0.0, 0.0)),
+            ):
+                self.manager.add_agrica_payload(
+                    _agrica_sentence(
+                        baseline_neu=baseline,
+                        rover_llh=(21.0, 105.0, 10.0),
+                        minute=minute + 1,
+                        second=second,
+                    ),
+                    {"project_id": 18, "station_id": station_id, "station_code": station_code},
+                )
+        self.assertTrue(self.manager.get_seed_collection_status(18)["complete"])
 
     def test_seed_step_display_is_capped_at_configured_maximum(self):
         self.manager._sessions[17]["seed_collection_steps"] = set(range(127))
@@ -439,7 +604,7 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
 
         self.assertEqual(status["step_count"], self.manager.SEED_COLLECTION_MAX_STEPS)
 
-    def test_four_selected_rovers_continue_with_three_after_ten_gnss_epochs(self):
+    def test_four_selected_rovers_continue_with_three_after_seed_window(self):
         self.manager.configure_project(19, [{
             "name": "four-rover-cluster",
             "stations": [4, 5, 6, 7],
@@ -454,7 +619,11 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
             (5, "Dap1_1", (81.0, -354.0, -22.0)),
             (7, "Dap1_2", (318.0, -182.0, -22.0)),
         )
-        for second in range(10):
+        stationary_epochs = (
+            2 * self.manager.STABILITY_WINDOW_SECONDS
+            + self.manager.STABILITY_HOLD_SECONDS
+        )
+        for second in range(stationary_epochs):
             for station_id, station_code, baseline in live:
                 self.manager.add_agrica_payload(
                     _agrica_sentence(
@@ -467,13 +636,26 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
 
         status = self.manager.get_seed_collection_status(19)
         self.assertTrue(status["fallback_ready"])
-        self.assertEqual(status["step_count"], 10)
+        self.assertEqual(status["step_count"], self.manager.SEED_COLLECTION_MAX_STEPS)
         self.assertEqual(status["missing_station_ids"], [6])
 
         skipped = self.manager.skip_missing_seed_stations(19)
-        self.assertTrue(skipped["complete"])
+        self.assertFalse(skipped["complete"])
         self.assertEqual(skipped["skipped_station_ids"], [6])
         self.assertEqual(self.manager._sessions[19]["clusters"][0]["stations"], [4, 5, 7])
+        for sample_index in range(self.manager.SEED_SOLVER_MIN_DURATION_SECONDS + 1):
+            minute, second = divmod(sample_index, 60)
+            for station_id, station_code, baseline in live:
+                self.manager.add_agrica_payload(
+                    _agrica_sentence(
+                        baseline_neu=baseline,
+                        rover_llh=(21.0, 105.0, 10.0),
+                        minute=minute + 1,
+                        second=second,
+                    ),
+                    {"project_id": 19, "station_id": station_id, "station_code": station_code},
+                )
+        self.assertTrue(self.manager.get_seed_collection_status(19)["complete"])
 
     def test_seed_baseline_accepts_missing_reported_base_when_cluster_base_is_configured(self):
         accepted = self._add(
@@ -486,9 +668,55 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
 
         self.assertEqual(len(accepted), 1)
         self.assertIn(
-            "using configured fixed BASE",
+            "matches configured fixed BASE",
             self.manager.get_last_ingest_diagnostic(17)["message"],
         )
+
+    def test_stale_temporary_base_fixed_solution_is_not_mislabeled_as_fixed_base(self):
+        rejected = self._add(
+            101,
+            "S1",
+            (2.0, 1.0, 0.0),
+            (21.0015, 105.0, 10.0),
+            base_llh=(0.0, 0.0, 0.0),
+        )
+
+        self.assertEqual(rejected, [])
+        diagnostic = self.manager.get_last_ingest_diagnostic(17)["message"]
+        self.assertIn("does not match distance to configured fixed BASE", diagnostic)
+        self.assertIn("previous temporary-base Fixed solution", diagnostic)
+        audit_record = self.manager._sessions[17]["clusters"][0]["observations"][-1]
+        self.assertFalse(audit_record.solver_eligible)
+        self.assertEqual(audit_record.base_name, "BASE")
+        self.assertIn("EXCLUDE_UNCONFIRMED_SOURCE", audit_record.quality_flags)
+
+    def test_gross_loop_misclosure_keeps_audit_but_blocks_official_publish(self):
+        # Two correct fixed-base edges plus a cross edge that duplicates one
+        # fixed-base vector emulate a stale temporary-base Fixed solution being
+        # mislabeled after the route changes.
+        self._add(101, "S1", (100.0, 0.0, 0.0), (21.0009, 105.0, 10.0))
+        self._add(102, "S2", (200.0, 0.0, 0.0), (21.0018, 105.0, 10.0))
+        session = self.manager._sessions[17]
+        session["active_bases"][0] = "S1"
+        self._add(
+            102,
+            "S2",
+            (200.0, 0.0, 0.0),
+            (21.0018, 105.0, 10.0),
+            base_llh=(21.0009, 105.0, 10.0),
+        )
+        session["active_bases"].clear()
+
+        result = self.manager._build_cluster_result(17, 0, session["clusters"][0])
+
+        self.assertFalse(result["official_publish_allowed"])
+        self.assertEqual(result["quality_gate"]["status"], "FAILED_QUALITY_GATE")
+        self.assertGreater(result["quality_gate"]["max_pre_adjustment_loop_closure_m"], 0.003)
+        self.assertIsNone(result["quality_gate"]["pre_adjustment_loop_closure_limit_m"])
+        self.assertTrue(result["quality_gate"]["loop_closure_diagnostic_only"])
+        self.assertEqual(result["quality_gate"]["closure_failures"], [])
+        self.assertNotIn("0.003", " ".join(result["quality_gate"]["reasons"]))
+        self.assertTrue(result["quality_gate"]["audit_report_allowed"])
 
     def test_parser_keeps_baseline_and_rover_position_uncertainty_separate(self):
         observation = parse_agrica(
@@ -531,6 +759,25 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         self.assertEqual(observation.std_neu, (0.02, 0.02, 0.02))
         self.assertEqual(observation.rover_position_std_ecef_raw, (0.0, 0.0, 0.0))
         self.assertEqual(observation.rover_position_std_ecef, (0.02, 0.02, 0.02))
+
+    def test_temporary_base_cache_uses_ecef_ellipsoidal_height_not_agrica_msl_height(self):
+        ellipsoidal_llh = (21.0, 105.0, -7.2)
+        self._add(
+            101,
+            "S1",
+            (1.0, 2.0, 0.0),
+            (21.0, 105.0, 16.8),
+            rover_ecef=_llh_to_ecef(*ellipsoidal_llh),
+            undulation=-24.0,
+        )
+
+        cached = self.manager.rover_llh_cache["S1"]
+        self.assertAlmostEqual(cached["lat"], ellipsoidal_llh[0], places=7)
+        self.assertAlmostEqual(cached["lon"], ellipsoidal_llh[1], places=7)
+        self.assertAlmostEqual(cached["alt"], ellipsoidal_llh[2], places=3)
+        self.assertAlmostEqual(cached["orthometric_alt"], 16.8, places=3)
+        self.assertAlmostEqual(cached["ellipsoid_alt"], -7.2, places=3)
+        self.assertAlmostEqual(cached["undulation"], -24.0, places=3)
 
     def test_inconsistent_rover_ecef_is_excluded_from_raw_mean_but_baseline_is_kept(self):
         base_llh = (21.0, 105.0, 10.0)
@@ -731,10 +978,11 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
 
 
 class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_safely_recovered_rover_is_skipped_and_next_rotation_continues(self):
+    async def test_failed_mandatory_rotation_aborts_before_solver(self):
         attempted_rovers = []
         progress_messages = []
         published_results = []
+        errors = []
 
         async def progress_callback(_project_id, message):
             progress_messages.append(message)
@@ -742,16 +990,23 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         async def result_callback(_project_id, result):
             published_results.append(result)
 
+        async def error_callback(_project_id, message):
+            errors.append(message)
+
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             progress_callback=progress_callback,
             result_callback=result_callback,
+            error_callback=error_callback,
         )
         manager.configure_project(70, [{
             "name": "skip-cluster",
             "stations": [701, 702],
             "rovers": ["R1", "R2"],
         }])
+        manager._freeze_temporary_base_coordinates = Mock(
+            return_value={"R1": {}, "R2": {}}
+        )
 
         async def rotate(rover_code, **_kwargs):
             attempted_rovers.append(rover_code)
@@ -773,28 +1028,36 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(70)
 
-        self.assertEqual(attempted_rovers, ["R1", "R1", "R2"])
-        self.assertEqual(len(published_results), 1)
-        self.assertEqual(published_results[0]["quality"]["rotation_warning_count"], 1)
-        self.assertTrue(any("continuing with the next rover" in item for item in progress_messages))
+        self.assertEqual(attempted_rovers, ["R1", "R1"])
+        self.assertEqual(published_results, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Mandatory temporary-BASE rotation R1", errors[0])
 
-    async def test_disconnected_graph_retries_productive_base_for_missing_rover(self):
+    async def test_incomplete_rotation_does_not_fall_back_to_connected_subset(self):
         attempted_rovers = []
         expected_targets = []
         published_results = []
+        errors = []
 
         async def result_callback(_project_id, result):
             published_results.append(result)
 
+        async def error_callback(_project_id, message):
+            errors.append(message)
+
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             result_callback=result_callback,
+            error_callback=error_callback,
         )
         manager.configure_project(71, [{
             "name": "targeted-recovery-cluster",
             "stations": [701, 702, 703],
             "rovers": ["R1", "R2", "R3"],
         }])
+        manager._freeze_temporary_base_coordinates = Mock(
+            return_value={"R1": {}, "R2": {}, "R3": {}}
+        )
 
         async def rotate(rover_code, **kwargs):
             targets = set(kwargs.get("expected_cross_rovers") or ())
@@ -819,12 +1082,11 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(71)
 
-        self.assertEqual(
-            attempted_rovers,
-            ["R1", "R1", "R2", "R2", "R3", "R3", "R1"],
-        )
-        self.assertEqual(expected_targets[-1], {"R3"})
-        self.assertEqual(len(published_results), 1)
+        self.assertEqual(attempted_rovers, ["R1", "R1"])
+        self.assertEqual(expected_targets, [{"R2", "R3"}, {"R2", "R3"}])
+        self.assertEqual(published_results, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("did not collect every other rover", errors[0])
 
     async def test_high_std_cross_samples_do_not_stop_rotation_retry(self):
         attempted_rovers = []
@@ -836,6 +1098,9 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             "stations": [701, 702],
             "rovers": ["R1", "R2"],
         }])
+        manager._freeze_temporary_base_coordinates = Mock(
+            return_value={"R1": {}, "R2": {}}
+        )
 
         async def rotate(rover_code, **_kwargs):
             attempted_rovers.append(rover_code)
@@ -858,9 +1123,9 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(72)
 
-        self.assertEqual(attempted_rovers, ["R1", "R1"])
+        self.assertEqual(attempted_rovers, ["R1", "R1", "R2", "R2"])
 
-    async def test_complete_cross_graph_skips_unnecessary_base_rotations(self):
+    async def test_complete_cross_graph_still_rotates_every_configured_base(self):
         attempted_rovers = []
         progress_messages = []
 
@@ -876,10 +1141,13 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             "stations": [701, 702, 703],
             "rovers": ["R1", "R2", "R3"],
         }])
+        manager._freeze_temporary_base_coordinates = Mock(
+            return_value={"R1": {}, "R2": {}, "R3": {}}
+        )
 
         async def rotate(rover_code, **_kwargs):
             attempted_rovers.append(rover_code)
-            for target in ("R2", "R3"):
+            for target in {"R1", "R2", "R3"} - {rover_code}:
                 manager._sessions[73]["clusters"][0]["observations"].append(
                     SimpleNamespace(
                         base_name=rover_code,
@@ -896,10 +1164,66 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(73)
 
-        self.assertEqual(attempted_rovers, ["R1"])
+        self.assertEqual(attempted_rovers, ["R1", "R2", "R3"])
         self.assertTrue(any(
-            "remaining temporary-BASE rotations are unnecessary" in message
+            "all 3/3 mandatory temporary-BASE rotations completed" in message
             for message in progress_messages
+        ))
+
+    async def test_inter_rotation_reacquires_fixed_base_before_next_sleep(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        cluster = {
+            "rovers": ["R1", "R2", "R3"],
+            "observations": [],
+        }
+        toggle_calls = []
+
+        async def toggle(mountpoint, sleep, selected_host=""):
+            toggle_calls.append((mountpoint, sleep, selected_host))
+
+        async def add_fixed_epochs(_delay):
+            if cluster["observations"]:
+                return
+            for rover_name in cluster["rovers"]:
+                for epoch in range(3):
+                    cluster["observations"].append(
+                        SimpleNamespace(
+                            base_name="BASE",
+                            solver_eligible=True,
+                            observation=SimpleNamespace(
+                                rover_name=rover_name,
+                                epoch_ts=epoch,
+                                std_neu=(0.01, 0.01, 0.01),
+                                baseline_neu=(10.0, 0.0, 0.0),
+                            ),
+                        )
+                    )
+
+        manager._toggle_cors_fixed_base = AsyncMock(side_effect=toggle)
+        manager._find_client_info = AsyncMock(return_value={"Username": "R2"})
+        module_name = RoundRobinAdjustmentManager.__module__
+        with patch(f"{module_name}.asyncio.sleep", new=add_fixed_epochs):
+            await manager._reacquire_fixed_base_between_rotations(
+                71,
+                cluster,
+                next_rover="R2",
+                mountpoint="FIXED",
+                selected_host="caster.example",
+            )
+
+        self.assertEqual(
+            toggle_calls,
+            [
+                ("FIXED", False, "caster.example"),
+                ("FIXED", True, "caster.example"),
+            ],
+        )
+        manager._find_client_info.assert_awaited_once_with("R2")
+        self.assertTrue(cluster["observations"])
+        self.assertTrue(all(
+            not record.solver_eligible
+            and "EXCLUDE_INTER_ROTATION_REACQUISITION" in record.quality_flags
+            for record in cluster["observations"]
         ))
 
     async def test_fixed_base_is_restored_before_result_is_published(self):
@@ -932,12 +1256,39 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
                 "base_stream_host": "caster.example",
             },
         ])
-        manager._set_rover_as_temporary_base = AsyncMock()
+        manager._freeze_temporary_base_coordinates = Mock(
+            side_effect=lambda cluster: {
+                rover: {} for rover in cluster["rovers"]
+            }
+        )
+        async def rotate(rover_code, **_kwargs):
+            for cluster in manager._sessions[71]["clusters"]:
+                if rover_code not in cluster["rovers"]:
+                    continue
+                target = next(
+                    candidate
+                    for candidate in cluster["rovers"]
+                    if candidate != rover_code
+                )
+                cluster["observations"].append(
+                    SimpleNamespace(
+                        base_name=rover_code,
+                        observation=SimpleNamespace(
+                            rover_name=target,
+                            std_neu=(0.01, 0.01, 0.01),
+                            baseline_neu=(10.0, 0.0, 0.0),
+                        ),
+                    )
+                )
+                return
+
+        manager._set_rover_as_temporary_base = rotate
 
         async def toggle_fixed_base(_mountpoint, sleep, selected_host=""):
             events.append(("base-mode", "sleep" if sleep else "restored"))
 
         manager._toggle_cors_fixed_base = AsyncMock(side_effect=toggle_fixed_base)
+        manager._reacquire_fixed_base_between_rotations = AsyncMock()
         manager._build_cluster_result = Mock(return_value={"rover_count": 2})
 
         module_name = RoundRobinAdjustmentManager.__module__
@@ -947,6 +1298,10 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         restore_index = events.index(("base-mode", "restored"))
         result_index = events.index(("result", "published"))
         self.assertLess(restore_index, result_index)
+        self.assertEqual(
+            manager._reacquire_fixed_base_between_rotations.await_count,
+            2,
+        )
         self.assertTrue(any(
             kind == "progress" and "aggregating repeated baselines" in message
             for kind, message in events[restore_index:result_index]

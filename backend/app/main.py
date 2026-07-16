@@ -2087,7 +2087,11 @@ async def get_gnss_adjustment_status(
 
     phase = str(mqtt_service.adjustment_phase.get(project_id) or "IDLE").upper()
     message = str(mqtt_service.adjustment_message.get(project_id) or "")
-    result = mqtt_service.adjustment_results.get(project_id) if phase == "COMPLETED" else None
+    result = (
+        mqtt_service.adjustment_results.get(project_id)
+        if phase in {"COMPLETED", "FAILED_QUALITY_GATE"}
+        else None
+    )
     seed_status = None
     if phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
         try:

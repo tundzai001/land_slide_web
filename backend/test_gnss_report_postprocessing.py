@@ -170,14 +170,19 @@ class BaseIdentityValidationTests(unittest.TestCase):
         self.assertIn("height delta 31.65 m", diagnostic)
 
     def test_fixed_base_uses_config_when_agrica_base_coordinate_is_missing(self):
-        observation = SimpleNamespace(rover_name="S2", base_llh=(0.0, 0.0, 0.0))
+        observation = SimpleNamespace(
+            rover_name="S2",
+            base_llh=(0.0, 0.0, 0.0),
+            rover_llh=(21.001, 105.0, 10.0),
+            baseline_neu=(111.0, 0.0, 0.0),
+        )
 
         accepted, diagnostic = self.manager._observation_matches_active_base(
             self.cluster, "BASE", observation
         )
 
         self.assertTrue(accepted)
-        self.assertIn("using configured fixed BASE", diagnostic)
+        self.assertIn("matches configured fixed BASE", diagnostic)
 
     def test_temporary_base_still_rejects_missing_base_coordinate(self):
         observation = SimpleNamespace(rover_name="S2", base_llh=(0.0, 0.0, 0.0))

@@ -1287,6 +1287,10 @@ class MQTTBridge:
         header(["Chỉ tiêu", "Giá trị"])
         quality = data.get("quality", {})
         for label, key in (("Tổng số raw nhận được", "raw_observation_count"),
+                           ("Raw loại do nguồn chưa xác nhận", "unconfirmed_source_excluded_count"),
+                           ("Raw loại trong cửa sổ chuyển nguồn/chờ ổn định", "pre_stable_window_excluded_count"),
+                           ("Raw loại do cửa sổ ổn định chưa đủ", "insufficient_stable_window_excluded_count"),
+                           ("Raw loại do drift quay lại", "unstable_solver_window_excluded_count"),
                            ("Số raw bị loại", "raw_rejected_count"),
                            ("Số raw bị loại do vector nhảy nghiệm", "vector_outlier_count"),
                            ("Số baseline quan sát dùng bình sai", "observation_baseline_count"),
@@ -1297,6 +1301,7 @@ class MQTTBridge:
                            ("Số raw bị loại do STD", "baseline_std_rejected_count"),
                            ("Số raw Type 7 bị loại", "position_type_rejected_count"),
                            ("Số ECEF rover không nhất quán với baseline", "raw_ecef_inconsistent_count"),
+                           ("Số ECEF rover lệch thuần phương đứng do hệ cao", "raw_ecef_vertical_datum_offset_count"),
                            ("Số cạnh trộn nhiều position type", "mixed_position_type_edge_count"),
                            ("Bậc tự do", "degrees_of_freedom"),
                            ("Hệ số phương sai", "variance_factor"),
@@ -1305,6 +1310,10 @@ class MQTTBridge:
                            ("Rank", "rank"), ("Condition number", "condition_number"),
                            ("Số dư chuẩn hóa tiên nghiệm lớn nhất", "max_standardized_residual")):
             ws.append([label, quality.get(key)])
+        quality_gate = data.get("quality_gate") or {}
+        ws.append(["Quality gate", quality_gate.get("status")])
+        ws.append(["Vòng khép trước bình sai lớn nhất (m, chỉ chẩn đoán)", quality_gate.get("max_pre_adjustment_loop_closure_m")])
+        ws.append(["Cho phép publish tọa độ chính thức", bool(data.get("official_publish_allowed"))])
         if quality.get("global_test"):
             global_test = quality["global_test"]
             ws.append(["Kiểm định chất lượng mạng (phía trên)", "Đạt" if global_test.get("passed") else "Không đạt - số dư lớn"])
@@ -1339,6 +1348,10 @@ class MQTTBridge:
         ws.append(["Scale STD điểm công bố", quality.get("published_point_std_scale", "a_priori")])
         ws.append(["Scale số dư chuẩn hóa", quality.get("normalized_residual_scale", "a_priori")])
         ws.append(["Mô hình covariance baseline", quality.get("baseline_covariance_model")])
+        ws.append([
+            "Chính sách rolling stability",
+            json.dumps(quality.get("rolling_stability_policy") or {}, ensure_ascii=False),
+        ])
         ws.append(["Ngưỡng cảnh báo STD baseline (m)", quality.get("baseline_std_warning_threshold_m")])
         ws.append(["Dung sai nhất quán ECEF rover/baseline (m)", quality.get("raw_ecef_consistency_tolerance_m")])
         ws.append(["Ngưỡng tách phiên liên tục (s)", quality.get("observation_session_gap_seconds")])
@@ -1673,6 +1686,19 @@ class MQTTBridge:
         quality_warning_rows = set()
         quality_rows = [
             ("Raw nhận được", quality.get("raw_observation_count")),
+            ("Raw loại do nguồn chưa xác nhận", quality.get("unconfirmed_source_excluded_count")),
+            (
+                "Raw loại trong cửa sổ chuyển nguồn/chờ ổn định",
+                quality.get("pre_stable_window_excluded_count"),
+            ),
+            (
+                "Raw loại do cửa sổ ổn định chưa đủ",
+                quality.get("insufficient_stable_window_excluded_count"),
+            ),
+            (
+                "Raw loại do drift quay lại",
+                quality.get("unstable_solver_window_excluded_count"),
+            ),
             ("Raw dùng", quality.get("observation_baseline_count")),
             ("Raw bị loại", quality.get("raw_rejected_count")),
             ("Raw vector sai thô", quality.get("vector_outlier_count")),
@@ -1682,16 +1708,26 @@ class MQTTBridge:
                 quality.get("baseline_std_repeatability_fallback_count"),
             ),
             ("Raw loại Type 7", quality.get("position_type_rejected_count")),
+            (
+                "Raw ECEF lệch thuần phương đứng do hệ cao",
+                quality.get("raw_ecef_vertical_datum_offset_count"),
+            ),
             ("Số cạnh trung bình", quality.get("averaged_baseline_count", len(baselines))),
             ("Số vòng cơ sở", quality.get("fundamental_loop_count")),
             ("Chiều không gian vòng", quality.get("cycle_space_dimension")),
             ("Rank ma trận vòng", quality.get("fundamental_loop_basis_rank")),
             ("Bậc tự do", quality.get("degrees_of_freedom")),
-            ("vTPv (covariance n_eff)", quality.get("weighted_residual_sum")),
-            ("M0 (covariance n_eff)", quality.get("reference_standard_deviation")),
+            ("vTPv (covariance theo phiên)", quality.get("weighted_residual_sum")),
+            ("M0 (covariance theo phiên)", quality.get("reference_standard_deviation")),
             ("Rank", quality.get("rank")),
             ("Condition number", quality.get("condition_number")),
         ]
+        quality_gate = data.get("quality_gate") or {}
+        quality_rows.extend([
+            ("Quality gate", quality_gate.get("status")),
+            ("Vòng khép trước bình sai lớn nhất (m, chỉ chẩn đoán)", quality_gate.get("max_pre_adjustment_loop_closure_m")),
+            ("Cho phép publish tọa độ chính thức", bool(data.get("official_publish_allowed"))),
+        ])
         global_test = quality.get("global_test") or {}
         stochastic_test = quality.get("stochastic_model_test") or {}
         independent_test = quality.get("independent_epoch_sensitivity") or {}
@@ -1748,8 +1784,9 @@ class MQTTBridge:
         quality_notes = []
         if global_test and global_test.get("approximate"):
             quality_notes.append(
-                "Covariance nghiệm chính đã dùng n_eff ước lượng từ tự tương quan "
-                "theo từng cạnh/phiên; kiểm định là xấp xỉ vì n_eff được ước lượng từ dữ liệu."
+                "Covariance nghiệm chính chỉ tính một trị đo độc lập cho mỗi phiên RTK FIXED "
+                "liên tục; các epoch 1 Hz trong cùng phiên không được cộng như các trị đo độc lập. "
+                "ACF chỉ được lưu để chẩn đoán độ nhạy."
             )
         if stochastic_test.get("status") == "CONSERVATIVE_WEIGHTS":
             quality_notes.append(
@@ -1931,7 +1968,9 @@ class MQTTBridge:
             "Rover_StdX_Raw (m)", "Rover_StdY_Raw (m)", "Rover_StdZ_Raw (m)",
             "Rover_StdX_Used (m)", "Rover_StdY_Used (m)", "Rover_StdZ_Used (m)",
             "Vector_Deviation (m)", "Vector_Filter_Threshold (m)",
-            "ECEF_Consistency_Error (m)", "Quality_Flags", "Accepted_For_Solver",
+            "ECEF_Consistency_Error (m)",
+            "ECEF_Residual_E (m)", "ECEF_Residual_N (m)", "ECEF_Residual_U (m)",
+            "Quality_Flags", "Accepted_For_Solver",
             "Raw_AGRICA",
         ]
         raw_sheet.append(raw_headers)
@@ -1945,7 +1984,10 @@ class MQTTBridge:
             1,
         ):
             flags = list(observation.get("quality_flags") or [])
-            rejected = any(str(flag).startswith("REJECTED_") for flag in flags)
+            rejected = any(
+                str(flag).startswith(("REJECTED_", "EXCLUDE_"))
+                for flag in flags
+            )
             raw_sheet.append([
                 raw_index,
                 observation.get("from"),
@@ -1973,6 +2015,7 @@ class MQTTBridge:
                 observation.get("vector_deviation_from_edge_m"),
                 observation.get("vector_outlier_threshold_m"),
                 observation.get("raw_ecef_consistency_error_m"),
+                *values3(observation.get("raw_ecef_consistency_residual_enu_m")),
                 ", ".join(flags),
                 not rejected,
                 observation.get("raw_payload"),
@@ -2062,7 +2105,7 @@ class MQTTBridge:
         rejected_rows = [
             row for row in raw_rows
             if any(
-                str(flag).startswith("REJECTED_")
+                str(flag).startswith(("REJECTED_", "EXCLUDE_"))
                 for flag in (row.get("quality_flags") or [])
             )
         ]
@@ -2166,8 +2209,8 @@ class MQTTBridge:
             (
                 f"Số ẩn: {3 * int(data.get('rover_count', len(points)) or 0)} | "
                 f"Bậc tự do: {quality.get('degrees_of_freedom', '-')} | "
-                f"vTPv n_eff: {number(quality.get('weighted_residual_sum'), 6)} | "
-                f"M0 n_eff: {number(quality.get('reference_standard_deviation'), 6)}"
+                f"vTPv theo phiên: {number(quality.get('weighted_residual_sum'), 6)} | "
+                f"M0 theo phiên: {number(quality.get('reference_standard_deviation'), 6)}"
             ),
             (
                 f"Rank: {quality.get('rank', '-')} | "
@@ -2247,8 +2290,8 @@ class MQTTBridge:
             )
         if global_test and global_test.get("approximate"):
             warnings.append(
-                "Chi-square dùng covariance n_eff ước lượng từ ACF nên là kiểm định xấp xỉ; "
-                "xem n_eff từng cạnh trong JSON audit."
+                "Chi-square dùng covariance bảo thủ: mỗi phiên RTK FIXED liên tục chỉ có "
+                "n_eff=1; ACF chỉ là chẩn đoán trong JSON audit."
             )
         if stochastic_test.get("status") == "CONSERVATIVE_WEIGHTS":
             warnings.append(
@@ -2312,7 +2355,7 @@ class MQTTBridge:
         }
 
     async def _handle_round_robin_adjustment_result(self, project_id: int, adjustment: dict):
-        """Persist and publish one completed, connected GNSS network adjustment."""
+        """Always persist audit reports; publish coordinates only after quality PASS."""
         current_timestamp = int(time.time())
         try:
             report_urls = self._write_adjustment_reports(project_id, current_timestamp, adjustment)
@@ -2322,6 +2365,26 @@ class MQTTBridge:
             await self._handle_round_robin_adjustment_error(project_id, message)
             return
         adjustment.update(report_urls)
+        quality_gate = adjustment.get("quality_gate") or {}
+        if not bool(quality_gate.get("passed")):
+            reasons = "; ".join(quality_gate.get("reasons") or [])
+            message = (
+                "Bình sai đã tạo hồ sơ audit nhưng không đạt quality gate; "
+                "không lưu/publish tọa độ chính thức. "
+                f"{reasons or 'quality gate failed'}"
+            )
+            self.adjustment_phase[project_id] = "FAILED_QUALITY_GATE"
+            self.adjustment_message[project_id] = message
+            self.adjustment_results[project_id] = adjustment
+            await manager.broadcast({
+                "type": "gnss_adjustment_progress",
+                "project_id": project_id,
+                "phase": "FAILED_QUALITY_GATE",
+                "message": message,
+                "timestamp": current_timestamp,
+                "data": adjustment,
+            })
+            return
         self.adjustment_phase[project_id] = "COMPLETED"
         self.adjustment_message[project_id] = "Connected GNSS network adjustment completed."
         self.adjustment_results[project_id] = adjustment
@@ -2434,15 +2497,126 @@ class MQTTBridge:
                             seed_status = self.round_robin_manager.get_seed_collection_status(proj_id)
                             if seed_status["fallback_ready"]:
                                 seed_status = self.round_robin_manager.skip_missing_seed_stations(proj_id)
+                            seed_progress_parts = []
+                            for cluster_status in seed_status.get("clusters") or ():
+                                rolling_by_station = (
+                                    cluster_status.get("rolling_stability_by_station") or {}
+                                )
+                                open_by_station = (
+                                    cluster_status.get("solver_window_open_by_station") or {}
+                                )
+                                count_by_station = (
+                                    cluster_status.get("solver_sample_counts_by_station") or {}
+                                )
+                                duration_by_station = (
+                                    cluster_status.get("solver_durations_by_station_seconds") or {}
+                                )
+                                warmup_count_by_station = (
+                                    cluster_status.get("sample_counts_by_station") or {}
+                                )
+                                warmup_duration_by_station = (
+                                    cluster_status.get("durations_by_station_seconds") or {}
+                                )
+                                reset_by_station = (
+                                    cluster_status.get("solver_window_reset_counts_by_station") or {}
+                                )
+                                drift_by_station = (
+                                    cluster_status.get("solver_drift_failure_counts_by_station") or {}
+                                )
+                                for waiting_station_id in (
+                                    cluster_status.get("warming_station_ids") or ()
+                                ):
+                                    rolling = (
+                                        rolling_by_station.get(waiting_station_id)
+                                        or rolling_by_station.get(str(waiting_station_id))
+                                        or {}
+                                    )
+                                    delta = rolling.get("delta_neu_m")
+                                    if delta and len(delta) == 3:
+                                        delta_text = (
+                                            "dN/E/U="
+                                            f"{float(delta[0]) * 1000:.1f}/"
+                                            f"{float(delta[1]) * 1000:.1f}/"
+                                            f"{float(delta[2]) * 1000:.1f}mm"
+                                        )
+                                    else:
+                                        delta_text = (
+                                            f"waiting for two {seed_status.get('stability_window_seconds', 10)}s windows"
+                                        )
+                                    is_open = bool(
+                                        open_by_station.get(waiting_station_id)
+                                        or open_by_station.get(str(waiting_station_id))
+                                    )
+                                    if is_open:
+                                        state_text = (
+                                            "solver="
+                                            f"{int(count_by_station.get(waiting_station_id, count_by_station.get(str(waiting_station_id), 0)) or 0)}/"
+                                            f"{int(seed_status.get('solver_min_distinct_epochs') or 0)} epochs, "
+                                            f"{int(duration_by_station.get(waiting_station_id, duration_by_station.get(str(waiting_station_id), 0)) or 0)}/"
+                                            f"{int(seed_status.get('solver_min_duration_seconds') or 0)}s"
+                                        )
+                                    else:
+                                        state_text = (
+                                            "fixed-base warm-up="
+                                            f"{int(warmup_count_by_station.get(waiting_station_id, warmup_count_by_station.get(str(waiting_station_id), 0)) or 0)}/"
+                                            f"{int(seed_status.get('seed_warmup_min_distinct_epochs') or 0)} epochs, "
+                                            f"{int(warmup_duration_by_station.get(waiting_station_id, warmup_duration_by_station.get(str(waiting_station_id), 0)) or 0)}/"
+                                            f"{int(seed_status.get('seed_warmup_min_duration_seconds') or 0)}s"
+                                        )
+                                    reset_count = int(
+                                        reset_by_station.get(
+                                            waiting_station_id,
+                                            reset_by_station.get(str(waiting_station_id), 0),
+                                        ) or 0
+                                    )
+                                    drift_count = int(
+                                        drift_by_station.get(
+                                            waiting_station_id,
+                                            drift_by_station.get(str(waiting_station_id), 0),
+                                        ) or 0
+                                    )
+                                    seed_progress_parts.append(
+                                        f"ID {waiting_station_id}: {state_text}, {delta_text}, "
+                                        f"resets={reset_count}, rolling-advisory-strikes={drift_count}"
+                                    )
+                            if seed_status.get("stability_timeout"):
+                                phase = "ERROR"
+                                await self._handle_round_robin_adjustment_error(
+                                    proj_id,
+                                    (
+                                        "Fixed-base baselines did not produce a complete "
+                                        "time-based stable solver window within "
+                                        f"{seed_status['stability_timeout_seconds']}s. "
+                                        "No network solution was published. Last station state: "
+                                        f"{' | '.join(seed_progress_parts) or 'no rolling diagnostics'}"
+                                    ),
+                                )
                         diagnostic = self.round_robin_manager.get_last_ingest_diagnostic(proj_id)
                         if diagnostic:
-                            if seed_status and seed_status["missing_station_ids"]:
+                            if seed_status:
+                                diagnostic = {**diagnostic, "seed_status": seed_status}
+                            if seed_status and (
+                                seed_status["missing_station_ids"]
+                                or seed_status.get("warming_station_ids")
+                            ):
+                                waiting_parts = []
+                                if seed_status["missing_station_ids"]:
+                                    waiting_parts.append(
+                                        "no-data station IDs "
+                                        f"{seed_status['missing_station_ids']}"
+                                    )
+                                if seed_status.get("warming_station_ids"):
+                                    waiting_parts.append(
+                                        " | ".join(seed_progress_parts)
+                                        or "stations still building a stable seed window "
+                                        f"{seed_status['warming_station_ids']}"
+                                    )
                                 diagnostic = {
                                     **diagnostic,
                                     "message": (
                                         f"{diagnostic['message']} "
-                                        f"Seed step {seed_status['step_count']}/{seed_status['max_steps']}; "
-                                        f"waiting for station IDs {seed_status['missing_station_ids']}."
+                                        f"Offline discovery {seed_status['step_count']}/{seed_status['max_steps']}; "
+                                        f"waiting for {'; '.join(waiting_parts)}."
                                     ),
                                 }
                             diagnostic_message = str(diagnostic.get("message") or "")
@@ -2496,7 +2670,11 @@ class MQTTBridge:
                                     f"{skipped_station_ids} after {self.round_robin_manager.SEED_COLLECTION_MAX_STEPS} seed steps. "
                                     "Starting Round-Robin with the remaining rovers."
                                     if skipped_station_ids
-                                    else "All selected rovers have a fixed-base baseline. Starting Round-Robin."
+                                    else (
+                                        "All selected rovers completed the fixed-base seed window "
+                                        f"({self.round_robin_manager.SEED_SOLVER_MIN_DURATION_SECONDS}s "
+                                        "stationary solver data each). Starting Round-Robin."
+                                    )
                                 ),
                             })
                             for cluster in info.get("project_gnss_clusters") or []:
