@@ -2393,17 +2393,6 @@ function addOrUpdateCorsBaseMarker(station) {
                 filter: drop-shadow(0 0 8px ${glow});
                 position: relative;
             ">
-                ${isMountpointConnected ? `<div title="Mountpoint connected" style="
-                    position: absolute;
-                    right: -15px;
-                    top: -3px;
-                    width: 9px;
-                    height: 9px;
-                    border-radius: 50%;
-                    background: #22c55e;
-                    border: 2px solid white;
-                    box-shadow: 0 0 5px rgba(34,197,94,0.8);
-                "></div>` : ''}
                 <div style="
                     position: absolute;
                     left: -9px;
@@ -3772,6 +3761,8 @@ function initMap() {
         stationClusterGroup = createStationClusterGroup();
         map.addLayer(stationClusterGroup);
 
+
+
         const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
         switchMapTiles(currentTheme);
 
@@ -3832,7 +3823,7 @@ async function loadProjectsAndClusters() {
                     .filter(station => station && hasValidLatLon(station.location));
                 const stationIds = clusterMembers.map(station => station.id);
                 
-                if (c.cluster_type === 'total') return; // Do not draw lines for total clusters to avoid overlap
+                const isTotal = c.cluster_type === 'total';
                 if (clusterMembers.length < 2) return;
                 
                 const latlngs = [];
@@ -3844,19 +3835,19 @@ async function loadProjectsAndClusters() {
                 
                 if (latlngs.length >= 2) {
                     const multiLatLngs = []; for (let i = 0; i < latlngs.length; i++) { for (let j = i + 1; j < latlngs.length; j++) { multiLatLngs.push([latlngs[i], latlngs[j]]); } } const polyline = L.polyline(multiLatLngs, {
-                        color: colors[colorIdx % colors.length],
-                        weight: 3,
-                        opacity: 0.7,
-                        dashArray: '5, 10'
+                        color: isTotal ? '#f43f5e' : colors[colorIdx % colors.length],
+                        weight: isTotal ? 4 : 3,
+                        opacity: isTotal ? 0.15 : 0.7,
+                        dashArray: isTotal ? '10, 20' : '5, 10'
                     });
                     
                     polyline.on('click', (e) => {
-                        showAdjustmentPopup(proj.id, proj.name, stationIds, clusterStations, e.latlng);
+                        showAdjustmentPopup(proj.id, isTotal ? `${proj.name} (Cụm Tổng)` : proj.name, stationIds, clusterStations, e.latlng);
                     });
                     
                     if (leafletMap) polyline.addTo(leafletMap);
                     clusterPolylines.push(polyline);
-                    colorIdx++;
+                    if (!isTotal) colorIdx++;
                 }
             });
         });
