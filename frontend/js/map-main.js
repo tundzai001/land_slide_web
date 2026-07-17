@@ -3841,12 +3841,26 @@ async function loadProjectsAndClusters() {
                         dashArray: isTotal ? '10, 20' : '5, 10'
                     });
                     
-                    polyline.on('click', (e) => {
-                        showAdjustmentPopup(proj.id, isTotal ? `${proj.name} (Cụm Tổng)` : proj.name, stationIds, clusterStations, e.latlng);
+                    // Hitbox invisible polyline to make clicking easier
+                    const hitbox = L.polyline(multiLatLngs, {
+                        color: 'transparent',
+                        weight: 20,
+                        opacity: 0
                     });
+
+                    const clickHandler = (e) => {
+                        showAdjustmentPopup(proj.id, isTotal ? `${proj.name} (Cụm Tổng)` : proj.name, stationIds, clusterStations, e.latlng);
+                    };
+
+                    polyline.on('click', clickHandler);
+                    hitbox.on('click', clickHandler);
                     
-                    if (leafletMap) polyline.addTo(leafletMap);
+                    if (leafletMap) {
+                        polyline.addTo(leafletMap);
+                        hitbox.addTo(leafletMap);
+                    }
                     clusterPolylines.push(polyline);
+                    clusterPolylines.push(hitbox);
                     if (!isTotal) colorIdx++;
                 }
             });
@@ -4115,16 +4129,16 @@ function updateMarker(station) {
         const newIcon = L.divIcon({
             className: 'custom-map-marker',
             html: iconHtml,
-            iconSize: [18, 18],
-            iconAnchor: [9, 9]
+            iconSize: [22, 22],
+            iconAnchor: [11, 11]
         });
         markers[station.id].setIcon(newIcon);
     } else {
         const icon = L.divIcon({
             className: 'custom-map-marker',
             html: iconHtml,
-            iconSize: [18, 18],
-            iconAnchor: [9, 9]
+            iconSize: [22, 22],
+            iconAnchor: [11, 11]
         });
 
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
