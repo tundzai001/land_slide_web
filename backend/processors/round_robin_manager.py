@@ -434,7 +434,7 @@ def _edge_effective_sample_size(
     return min(float(len(rows)), max(1.0, effective_sample_size)), diagnostics
 
 
-@dataclass(frozen=True)
+@dataclass
 class _CollectedObservation:
     """An AGRICA observation tagged with the rover acting as its base."""
 
@@ -443,6 +443,12 @@ class _CollectedObservation:
     solver_eligible: bool = True
     quality_flags: tuple[str, ...] = ()
     source_diagnostic: Optional[str] = None
+
+    rotation_index: Optional[int] = None
+    stable_window_index: Optional[int] = None
+    vector_deviation_m: Optional[float] = None
+    vector_filter_threshold_m: Optional[float] = None
+    vector_filter_status: str = "SKIPPED_PRIOR_FILTER"
 
 
 @dataclass
@@ -890,19 +896,19 @@ class RoundRobinAdjustmentManager:
     correctly connected ECEF baselines.
     """
 
-    # A single 1 Hz FIXED epoch only proves that the station is alive.  Do not
-    # tear down the fixed-base stream until every retained rover has a real
-    # observation window; the July 16 field run was starting after 6--10 s and
-    # its means were still moving by roughly 1 mm/s.
+    # A single 1 Hz FIXED epoch only proves that the station is alive. Keep one
+    # continuous, source-verified seed session: the initial epochs are useful
+    # observations, not a disposable warm-up followed by a second collection.
     SEED_COLLECTION_MIN_DISTINCT_EPOCHS = 20
     SEED_COLLECTION_MIN_DURATION_SECONDS = 15
     SEED_COLLECTION_MAX_STEPS = 20
-    # Duration is the primary coverage requirement. AGRICA arrives at roughly
-    # 0.4--0.7 distinct epochs/s in the field, so requiring 60 epochs in 60 s
-    # incorrectly rejects a healthy stream. Thirty epochs still proves broad
-    # temporal coverage without pretending they are statistically independent.
+    # AGRICA arrives at roughly 0.4--0.7 distinct epochs/s in the field. Thirty
+    # distinct epochs over at least 30 seconds therefore normally takes about
+    # 45--75 seconds of wall time and gives useful temporal coverage without
+    # making the old mistake of discarding 20 good epochs and then waiting for
+    # another complete 60-second window.
     SEED_SOLVER_MIN_DISTINCT_EPOCHS = 30
-    SEED_SOLVER_MIN_DURATION_SECONDS = 60
+    SEED_SOLVER_MIN_DURATION_SECONDS = 30
     SEED_STABILITY_TIMEOUT_SECONDS = 300
     STABILITY_WINDOW_SECONDS = 10
     STABILITY_MIN_SAMPLES_PER_WINDOW = 4
@@ -1208,6 +1214,7 @@ class RoundRobinAdjustmentManager:
             "seed_collection_steps": set(),
             "seed_window_states": {},
             "online_baseline_states": {},
+            "seed_station_reports": {},
             "seed_started_monotonic": time.monotonic(),
         }
 
@@ -1449,12 +1456,30 @@ class RoundRobinAdjustmentManager:
         ignored_reasons = []
         accepted_diagnostics = []
         for observation in observations:
+            cluster_index = self._cluster_index_for_station(
+                session, observation.station_id
+            )
+            if cluster_index is not None:
+                session.setdefault("seed_station_reports", {})[
+                    int(observation.station_id)
+                ] = {
+                    "position_type": int(observation.position_type),
+                    "epoch_ts": int(observation.epoch_ts or 0),
+                    "received_monotonic": time.monotonic(),
+                    "solver_eligible": False,
+                    "reason": "awaiting baseline validation",
+                }
             if observation.position_type not in (4, 7):
-                ignored_reasons.append(
-                    f"position_type={observation.position_type}; requires RTK Fixed (4) or Input Fixed (7)"
+                reason = (
+                    f"position_type={observation.position_type}; requires RTK "
+                    "Fixed (4) or Input Fixed (7)"
                 )
+                ignored_reasons.append(reason)
+                if cluster_index is not None:
+                    session["seed_station_reports"][
+                        int(observation.station_id)
+                    ]["reason"] = reason
                 continue
-            cluster_index = self._cluster_index_for_station(session, observation.station_id)
             if cluster_index is None:
                 ignored_reasons.append("station is not included in the active GNSS cluster")
                 continue
@@ -1479,8 +1504,13 @@ class RoundRobinAdjustmentManager:
                         solver_eligible=False,
                         quality_flags=("EXCLUDE_UNCONFIRMED_SOURCE",),
                         source_diagnostic=base_diagnostic,
+                        rotation_index=cluster.get("current_rotation_index", 0),
+                        stable_window_index=None,
                     )
                 )
+                session["seed_station_reports"][
+                    int(observation.station_id)
+                ]["reason"] = base_diagnostic
                 ignored_reasons.append(base_diagnostic)
                 logger.warning(
                     "Round-Robin project=%s cluster=%s station=%s: %s",
@@ -1491,16 +1521,30 @@ class RoundRobinAdjustmentManager:
                 )
                 continue
             session["clusters"][cluster_index]["observations"].append(
-                _CollectedObservation(active_base, observation)
+                _CollectedObservation(
+                    active_base,
+                    observation,
+                    rotation_index=cluster.get("current_rotation_index", 0),
+                    stable_window_index=cluster.get("current_stable_window_index", 0),
+                )
             )
             if max(float(value) for value in observation.std_neu) > _BASELINE_STD_REJECTION_THRESHOLD_M:
-                ignored_reasons.append(
-                    "baseline STD exceeds 0.1 m; stored for RAW_AUDIT but excluded from solver"
+                reason = (
+                    "baseline STD exceeds 0.1 m; stored for RAW_AUDIT but "
+                    "excluded from solver"
                 )
+                ignored_reasons.append(reason)
+                session["seed_station_reports"][
+                    int(observation.station_id)
+                ]["reason"] = reason
                 if observation.rover_llh or observation.rover_ecef:
                     self._update_rover_llh_from_observation(observation)
                 continue
             valid_observations.append(observation)
+            session["seed_station_reports"][int(observation.station_id)].update({
+                "solver_eligible": True,
+                "reason": "RTK Fixed baseline accepted",
+            })
             self._update_online_baseline_state(
                 session,
                 cluster_index,
@@ -1582,6 +1626,8 @@ class RoundRobinAdjustmentManager:
 
         cluster_statuses = []
         missing_all = []
+        silent_all = []
+        invalid_fix_all = []
         warming_all = []
         complete = True
         can_continue = True
@@ -1622,6 +1668,21 @@ class RoundRobinAdjustmentManager:
 
             expected = set(cluster["stations"])
             observed = set(epochs_by_station)
+            station_reports = session.setdefault("seed_station_reports", {})
+            latest_position_type_by_station = {
+                station_id: station_reports.get(station_id, {}).get("position_type")
+                for station_id in sorted(expected)
+            }
+            invalid_fix_station_ids = sorted(
+                station_id
+                for station_id in expected - observed
+                if latest_position_type_by_station.get(station_id) not in (None, 4, 7)
+            )
+            silent_station_ids = sorted(
+                station_id
+                for station_id in expected - observed
+                if latest_position_type_by_station.get(station_id) is None
+            )
             sample_counts_by_station = {
                 station_id: len(epochs_by_station.get(station_id, ()))
                 for station_id in expected
@@ -1692,13 +1753,9 @@ class RoundRobinAdjustmentManager:
                         *tuple(getattr(record, "quality_flags", ()) or ()),
                         flag,
                     )))
-                    records[record_index] = _CollectedObservation(
-                        base_name=record.base_name,
-                        observation=record.observation,
-                        solver_eligible=False,
-                        quality_flags=flags,
-                        source_diagnostic=diagnostic_message,
-                    )
+                    record.solver_eligible = False
+                    record.quality_flags = flags
+                    record.source_diagnostic = diagnostic_message
 
             ready = set()
             solver_counts_by_station: Dict[int, int] = {}
@@ -1749,7 +1806,7 @@ class RoundRobinAdjustmentManager:
                         "EXCLUDE_STABILITY_LOST",
                         "Fixed-BASE solver session lost stationarity according to "
                         "the rolling-window/EWMA abort envelope; the complete "
-                        "60-second session was reset.",
+                        "continuous seed session was reset.",
                     )
                     state["solver_start_index"] = len(cluster["observations"])
                     state["reset_count"] = int(state.get("reset_count") or 0) + 1
@@ -1765,15 +1822,12 @@ class RoundRobinAdjustmentManager:
                     not state["open"]
                     and warmup_ready_by_station[station_id]
                 ):
-                    quarantine_seed_window(
-                        station_id,
-                        int(state.get("solver_start_index") or 0),
-                        "EXCLUDE_PRE_STABLE_WINDOW",
-                        "Fixed-base baseline belongs to the initial epoch/time "
-                        "warm-up window; retained for audit only.",
-                    )
+                    # Source identity and gross BASE geometry were already
+                    # verified before records reached this state. Reuse the
+                    # warm-up epochs in the same independent seed session;
+                    # restarting here doubled field collection time and gave
+                    # no statistical independence benefit.
                     state["open"] = True
-                    state["solver_start_index"] = len(cluster["observations"])
                     state["drift_failure_count"] = 0
                     state["last_drift_evaluation_epoch"] = latest_epoch
 
@@ -1811,12 +1865,17 @@ class RoundRobinAdjustmentManager:
             if missing or warming:
                 complete = False
                 missing_all.extend(missing)
+                silent_all.extend(silent_station_ids)
+                invalid_fix_all.extend(invalid_fix_station_ids)
                 warming_all.extend(warming)
             if len(available) < 2:
                 can_continue = False
             cluster_statuses.append({
                 "index": index,
                 "missing_station_ids": missing,
+                "silent_station_ids": silent_station_ids,
+                "invalid_fix_station_ids": invalid_fix_station_ids,
+                "latest_position_type_by_station": latest_position_type_by_station,
                 "warming_station_ids": warming,
                 "available_station_ids": available,
                 "ready_station_ids": ready_station_ids,
@@ -1858,6 +1917,8 @@ class RoundRobinAdjustmentManager:
             "step_count": steps,
             "max_steps": self.SEED_COLLECTION_MAX_STEPS,
             "missing_station_ids": sorted(set(missing_all)),
+            "silent_station_ids": sorted(set(silent_all)),
+            "invalid_fix_station_ids": sorted(set(invalid_fix_all)),
             "warming_station_ids": sorted(set(warming_all)),
             "stability_timeout": stability_timeout,
             "stability_elapsed_seconds": seed_elapsed,
@@ -2004,7 +2065,7 @@ class RoundRobinAdjustmentManager:
     @staticmethod
     def _cors_service_config_with_server_mode(
         service_config: dict,
-        server_id: int,
+        server_id: Optional[int],
         *,
         on_demand: bool,
     ) -> dict:
@@ -2013,8 +2074,11 @@ class RoundRobinAdjustmentManager:
         cfg = copy.deepcopy(service_config or {})
         global_on_demand = bool(cfg.get("stream_on_demand", False))
         global_active = bool(cfg.get("stream_active", False))
-        cfg[f"server{server_id}_stream_on_demand"] = bool(on_demand)
-        cfg[f"server{server_id}_stream_active"] = not bool(on_demand)
+        
+        target_sids = [1, 2] if server_id is None else [server_id]
+        for sid in target_sids:
+            cfg[f"server{sid}_stream_on_demand"] = bool(on_demand)
+            cfg[f"server{sid}_stream_active"] = not bool(on_demand)
 
         any_on_demand = False
         any_can_push = False
@@ -2104,6 +2168,7 @@ class RoundRobinAdjustmentManager:
         selected_host: str = "",
         selected_serial: str = "",
         selected_server_id: Optional[int] = None,
+        sleep_all_streams: bool = False,
     ) -> None:
         if not mountpoint:
             return
@@ -2130,7 +2195,7 @@ class RoundRobinAdjustmentManager:
             }
             sleep_config = self._cors_service_config_with_server_mode(
                 original,
-                server_id,
+                None if sleep_all_streams else server_id,
                 on_demand=True,
             )
             await asyncio.to_thread(
@@ -2407,6 +2472,12 @@ class RoundRobinAdjustmentManager:
                 "primary_online": primary_online,
                 "backup_online": backup_online,
                 "mountpoint": primary_mp,
+                "primary_station": str(cluster.get("base_station") or ""),
+                "primary_serial": primary_serial,
+                "primary_server_id": primary_server_id,
+                "backup_station": str(cluster.get("backup_base_station") or ""),
+                "backup_serial": backup_serial,
+                "backup_server_id": backup_server_id,
             })
         return outcomes
 
@@ -2420,6 +2491,7 @@ class RoundRobinAdjustmentManager:
         selected_host: str,
         selected_serial: str = "",
         selected_server_id: Optional[int] = None,
+        sleep_all_streams: bool = False,
     ) -> None:
         """Reconnect every rover to the fixed BASE before the next rotation.
 
@@ -2510,6 +2582,7 @@ class RoundRobinAdjustmentManager:
             mountpoint,
             sleep=True,
             selected_host=selected_host,
+            sleep_all_streams=sleep_all_streams,
             **identity_kwargs,
         )
         await asyncio.sleep(2.0)
@@ -2520,7 +2593,7 @@ class RoundRobinAdjustmentManager:
             flag="EXCLUDE_INTER_ROTATION_REACQUISITION",
             diagnostic=(
                 "Fresh fixed-BASE epoch used only to verify inter-rotation NTRIP "
-                "reacquisition; excluded from the common 60-second fixed-BASE "
+                "reacquisition; excluded from the common fixed-BASE "
                 "solver seed."
             ),
         )
@@ -2541,13 +2614,9 @@ class RoundRobinAdjustmentManager:
                 *tuple(getattr(record, "quality_flags", ()) or ()),
                 flag,
             )))
-            cluster["observations"][record_index] = _CollectedObservation(
-                base_name=record.base_name,
-                observation=record.observation,
-                solver_eligible=False,
-                quality_flags=flags,
-                source_diagnostic=diagnostic,
-            )
+            record.solver_eligible = False
+            record.quality_flags = flags
+            record.source_diagnostic = diagnostic
 
     def _freeze_temporary_base_coordinates(self, cluster: dict) -> Dict[str, dict]:
         """Freeze temporary BASE coordinates from the common fixed-BASE seed."""
@@ -2764,10 +2833,12 @@ class RoundRobinAdjustmentManager:
                     # Add it before the API call so finally also restores a
                     # configuration when the HTTP response is lost after CORS
                     # has already accepted the change.
+                    is_multi_mp = "," in str(cluster.get("round_robin_route_mountpoint") or "")
                     await self._toggle_cors_fixed_base(
                         configured_mountpoint,
                         sleep=True,
                         selected_host=configured_base_host,
+                        sleep_all_streams=is_multi_mp,
                         **fixed_base_identity_kwargs,
                     )
                     # Chờ 2s để đảm bảo caster đã xử lý ngắt
@@ -2861,6 +2932,9 @@ class RoundRobinAdjustmentManager:
                 completed_mandatory_rotations: set[str] = set()
                 graph_recovery_scheduled = False
                 for rotation_index, rover_code in enumerate(rotation_queue):
+                    cluster["current_rotation_index"] = rotation_index + 1
+                    cluster["current_stable_window_index"] = None
+                    next_stable_window_index = 0
                     is_graph_recovery = rotation_index >= initial_rotation_count
                     mandatory_rotation_completed = False
                     if is_graph_recovery:
@@ -2958,7 +3032,7 @@ class RoundRobinAdjustmentManager:
                         ) -> None:
                             """Audit, but never solve with, handover/settling epochs."""
 
-                            nonlocal solver_start_index
+                            nonlocal solver_start_index, next_stable_window_index
                             records = current_cluster["observations"]
                             for record_index in range(solver_start_index, len(records)):
                                 record = records[record_index]
@@ -2970,17 +3044,15 @@ class RoundRobinAdjustmentManager:
                                 flags = tuple(dict.fromkeys(
                                     (*record.quality_flags, "EXCLUDE_PRE_STABLE_WINDOW")
                                 ))
-                                records[record_index] = _CollectedObservation(
-                                    base_name=record.base_name,
-                                    observation=record.observation,
-                                    solver_eligible=False,
-                                    quality_flags=flags,
-                                    source_diagnostic=(
-                                        "Temporary-base source was verified, but this epoch "
-                                        "belongs to the handover/settling window."
-                                    ),
+                                record.solver_eligible = False
+                                record.quality_flags = flags
+                                record.source_diagnostic = (
+                                    "Temporary-base source was verified, but this epoch "
+                                    "belongs to the handover/settling window."
                                 )
                             solver_start_index = len(records)
+                            current_cluster["current_stable_window_index"] = next_stable_window_index
+                            next_stable_window_index += 1
                             self._clear_cluster_fragment_buffers(project_id, current_cluster)
 
                         def mark_stable_collection_invalid(
@@ -3010,25 +3082,22 @@ class RoundRobinAdjustmentManager:
                                     *record.quality_flags,
                                     flag,
                                 )))
-                                records[record_index] = _CollectedObservation(
-                                    base_name=record.base_name,
-                                    observation=record.observation,
-                                    solver_eligible=False,
-                                    quality_flags=flags,
-                                    source_diagnostic=(
-                                        "Stationarity was lost after the solver window opened; "
-                                        "the complete window was reset."
-                                        if reason_key == "drift" else
-                                        "Temporary-base source identity was not confirmed."
-                                        if reason_key == "source" else
-                                        "Stationarity was confirmed but minimum solver duration "
-                                        "was not reached before timeout."
-                                        if reason_key == "duration" else
-                                        "Collection duration was sufficient, but the non-overlapping "
-                                        "windows never satisfied mean/scatter/slope stationarity."
-                                    ),
+                                record.solver_eligible = False
+                                record.quality_flags = flags
+                                record.source_diagnostic = (
+                                    "Stationarity was lost after the solver window opened; "
+                                    "the complete window was reset."
+                                    if reason_key == "drift" else
+                                    "Temporary-base source identity was not confirmed."
+                                    if reason_key == "source" else
+                                    "Stationarity was confirmed but minimum solver duration "
+                                    "was not reached before timeout."
+                                    if reason_key == "duration" else
+                                    "Collection duration was sufficient, but the non-overlapping "
+                                    "windows never satisfied mean/scatter/slope stationarity."
                                 )
                             solver_start_index = len(records)
+                            current_cluster["current_stable_window_index"] = None
                             self._clear_cluster_fragment_buffers(project_id, current_cluster)
 
                         def collection_status() -> dict:
@@ -3193,11 +3262,6 @@ class RoundRobinAdjustmentManager:
                                 project_id,
                                 f"{rover_code}: rotation skipped after safe ROVER recovery. {warning}",
                             )
-                            if not is_graph_recovery:
-                                raise RuntimeError(
-                                    f"Mandatory temporary-BASE rotation {rover_code} "
-                                    f"did not complete: {warning}"
-                                )
                             break
                         except Exception:
                             session["active_bases"].pop(cluster_index, None)
@@ -3273,30 +3337,25 @@ class RoundRobinAdjustmentManager:
                             "message": warning,
                         })
                         await self._emit_progress(project_id, warning)
-                        if not is_graph_recovery:
-                            raise RuntimeError(
-                                f"Mandatory temporary-BASE rotation {rover_code} "
-                                f"did not collect every other rover: {warning}"
-                            )
                     session["active_bases"].pop(cluster_index, None)
-                    if not is_graph_recovery and not mandatory_rotation_completed:
-                        raise RuntimeError(
-                            f"Mandatory temporary-BASE rotation {rover_code} "
-                            "ended without complete solver-eligible coverage"
-                        )
                     if (
                         not is_graph_recovery
                         and rotation_index + 1 < initial_rotation_count
                         and configured_mountpoint
                     ):
+                        is_multi_mp = "," in str(cluster.get("round_robin_route_mountpoint") or "")
+                        fixed_base_identity_kwargs = {
+                            "selected_serial": configured_base_serial,
+                            "selected_server_id": (configured_base_server_id or None),
+                        }
                         await self._reacquire_fixed_base_between_rotations(
                             project_id,
                             cluster,
                             next_rover=str(rotation_queue[rotation_index + 1]),
                             mountpoint=str(configured_mountpoint),
                             selected_host=configured_base_host,
-                            selected_serial=configured_base_serial,
-                            selected_server_id=(configured_base_server_id or None),
+                            sleep_all_streams=is_multi_mp,
+                            **fixed_base_identity_kwargs,
                         )
                     if (
                         not graph_recovery_scheduled
@@ -4263,20 +4322,24 @@ class RoundRobinAdjustmentManager:
         def filter_vector_outliers(samples: List[dict]) -> tuple[List[dict], List[dict]]:
             """Reject isolated vector jumps per geometric edge without trusting reported STD."""
 
-            groups: Dict[tuple[str, str, str], List[tuple[dict, np.ndarray]]] = {}
+            groups: Dict[tuple[str, str], List[tuple[dict, np.ndarray]]] = {}
             for sample in samples:
                 edge, vector, _direction = _canonical_baseline(
                     sample["from"], sample["to"], sample["delta"]
                 )
-                session_id = str(sample.get("session_id", cluster_index))
-                groups.setdefault((edge[0], edge[1], session_id), []).append(
+                groups.setdefault((edge[0], edge[1]), []).append(
                     (sample, np.asarray(vector, dtype=float))
                 )
 
             rejected_ids: set[int] = set()
             diagnostics: List[dict] = []
-            for (from_name, to_name, session_id), rows in groups.items():
+            for (from_name, to_name), rows in groups.items():
                 if len(rows) < vector_outlier_min_samples:
+                    for sample, _vector in rows:
+                        diagnostics.append({
+                            "raw_index": sample.get("raw_index"),
+                            "vector_filter_status": "NOT_EVALUATED_INSUFFICIENT_GROUP",
+                        })
                     continue
                 vectors = np.vstack([vector for _sample, vector in rows])
                 center = np.median(vectors, axis=0)
@@ -4289,17 +4352,15 @@ class RoundRobinAdjustmentManager:
                     median_deviation + vector_outlier_sigma_multiplier * robust_sigma,
                 )
                 for (sample, _vector), deviation in zip(rows, deviations, strict=True):
-                    if float(deviation) <= threshold:
-                        continue
-                    rejected_ids.add(id(sample))
+                    is_outlier = float(deviation) > threshold
                     diagnostics.append({
                         "raw_index": sample.get("raw_index"),
-                        "from": from_name,
-                        "to": to_name,
-                        "session_id": session_id,
-                        "deviation_m": float(deviation),
-                        "threshold_m": threshold,
+                        "vector_deviation_from_edge_m": float(deviation),
+                        "vector_outlier_threshold_m": threshold,
+                        "vector_filter_status": "EVALUATED_OUTLIER" if is_outlier else "EVALUATED_INLIER",
                     })
+                    if is_outlier:
+                        rejected_ids.add(id(sample))
             return [sample for sample in samples if id(sample) not in rejected_ids], diagnostics
 
         def filter_position_type_mixes(
@@ -4624,9 +4685,18 @@ class RoundRobinAdjustmentManager:
                 "source_validation_diagnostic": getattr(
                     record, "source_diagnostic", None
                 ),
+                "rotation_index": getattr(record, "rotation_index", None),
+                "stable_window_index": getattr(record, "stable_window_index", None),
+                "effective_session_id": (
+                    f"R{getattr(record, 'rotation_index'):03d}-W{getattr(record, 'stable_window_index'):02d}-{from_name}>{rover_name}"
+                    if getattr(record, "rotation_index", None) is not None
+                    and getattr(record, "stable_window_index", None) is not None
+                    else None
+                ),
                 "raw_payload": observation.raw,
                 "vector_deviation_from_edge_m": None,
                 "vector_outlier_threshold_m": None,
+                "vector_filter_status": "SKIPPED_PRIOR_FILTER",
                 "residual_xyz": None,
                 "standardized_residual": None,
             })
@@ -4638,7 +4708,7 @@ class RoundRobinAdjustmentManager:
                 "delta": delta,
                 "covariance": covariance,
                 "raw_index": raw_index,
-                "session_id": str(cluster_index),
+                "session_id": raw_rows[-1]["effective_session_id"] or str(cluster_index),
                 "observation_epoch": observation.epoch_ts,
                 "position_type": observation.position_type,
                 "ratio": observation.full_data.get("ratio"),
@@ -4757,10 +4827,16 @@ class RoundRobinAdjustmentManager:
             if raw_index is None or raw_index < 0:
                 continue
             row = raw_rows[raw_index]
-            if "REJECTED_VECTOR_OUTLIER" not in row["quality_flags"]:
-                row["quality_flags"].append("REJECTED_VECTOR_OUTLIER")
-            row["vector_deviation_from_edge_m"] = diagnostic["deviation_m"]
-            row["vector_outlier_threshold_m"] = diagnostic["threshold_m"]
+            
+            row["vector_filter_status"] = diagnostic.get("vector_filter_status")
+            if "vector_deviation_from_edge_m" in diagnostic:
+                row["vector_deviation_from_edge_m"] = diagnostic["vector_deviation_from_edge_m"]
+            if "vector_outlier_threshold_m" in diagnostic:
+                row["vector_outlier_threshold_m"] = diagnostic["vector_outlier_threshold_m"]
+                
+            if row["vector_filter_status"] == "EVALUATED_OUTLIER":
+                if "REJECTED_VECTOR_OUTLIER" not in row["quality_flags"]:
+                    row["quality_flags"].append("REJECTED_VECTOR_OUTLIER")
 
         averaged_edges = weighted_edges(solver_samples)
         rover_names = set(station_names.values())
@@ -4906,6 +4982,7 @@ class RoundRobinAdjustmentManager:
                     tuple(float(value) for value in row)
                     for row in edge["session_covariance_used"]
                 ),
+                "variance_inflation": edge.get("scatter_scale_factor"),
                 "observed_length": _vector_length(adjusted.observed),
                 "adjusted_length": _vector_length(adjusted.adjusted),
                 "observation_count": edge["observation_count"],
@@ -5089,6 +5166,21 @@ class RoundRobinAdjustmentManager:
                 "max_standardized_residual": float(
                     result.max_standardized_residual
                 ),
+            })
+        
+        max_variance_inflation = max(
+            (float(edge.get("scatter_scale_factor") or 1.0) for edge in averaged_edges),
+            default=1.0,
+        )
+        if max_variance_inflation > 1.5:
+            diagnostic_warnings.append({
+                "code": "HIGH_INTER_SESSION_SCATTER",
+                "message": (
+                    "High inter-session scatter detected (variance inflation > 1.5). "
+                    "The rover positions drifted significantly between consecutive "
+                    "RTK fixed sessions. Check for physical movement or multipath."
+                ),
+                "max_variance_inflation": max_variance_inflation,
             })
         interpretation_status = (
             "FAILED_QUALITY_GATE"
