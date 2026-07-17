@@ -4129,16 +4129,16 @@ function updateMarker(station) {
         const newIcon = L.divIcon({
             className: 'custom-map-marker',
             html: iconHtml,
-            iconSize: [22, 22],
-            iconAnchor: [11, 11]
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         });
         markers[station.id].setIcon(newIcon);
     } else {
         const icon = L.divIcon({
             className: 'custom-map-marker',
             html: iconHtml,
-            iconSize: [22, 22],
-            iconAnchor: [11, 11]
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         });
 
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
