@@ -669,7 +669,7 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         if (elapsed >= 10 && gnssAdjustmentDebugState.baselineCount === 0 && gnssAdjustmentDebugState.phase === 'COLLECTING_BASELINE') {
             const last = gnssAdjustmentDebugState.entries.at(-1);
             if (!last || last.label !== 'WAIT') {
-                addGnssAdjustmentDebug('WAIT', 'Chưa nhận baseline hợp lệ. Kiểm tra #AGRICA, RTK Fixed và WebSocket.', 'warning');
+                addGnssAdjustmentDebug('WAIT', 'Chưa nhận baseline hợp lệ. Đang kiểm tra #AGRICA, RTK Fixed và tiến độ seed trên máy chủ.', 'warning');
             }
         } else {
             refreshGnssAdjustmentDebugUi();
@@ -887,7 +887,9 @@ function initialize() {
     }
 
     setInterval(loadStations, 30000);
-    setInterval(loadCorsBaseStations, 300000);
+    // Physical base availability and automatic S1/S2 failover can change at
+    // any time; five minutes left stale/incorrect marker states on the map.
+    setInterval(loadCorsBaseStations, 15000);
     setInterval(loadRescueMarkers, 60000);
 
     // ✅ Refresh sensor online status of currently-viewed station every 30s
@@ -953,9 +955,10 @@ function setupWebSocket() {
     socket.onerror = (error) => {
         if (wsConnection !== socket) return;
         console.error('❌ [WS] Error:', error);
-        gnssAdjustmentDebugState.wsStatus = 'ERROR';
-        if (gnssAdjustmentDebugState.active) addGnssAdjustmentDebug('WS', 'WebSocket gặp lỗi kết nối.', 'error');
-        else refreshGnssAdjustmentDebugUi();
+        // WebSocket is only the realtime display channel. The adjustment runs
+        // server-side and the authoritative state continues via REST polling.
+        gnssAdjustmentDebugState.wsStatus = 'RECONNECTING';
+        refreshGnssAdjustmentDebugUi();
     };
 
     socket.onclose = () => {
@@ -2359,12 +2362,24 @@ async function loadCorsBaseStations() {
 function addOrUpdateCorsBaseMarker(station) {
     if (!station?.name || !Number.isFinite(station.lat) || !Number.isFinite(station.lon)) return;
 
-    const isConnected = station.ntrip_connected || station.stream_active;
-    const fill = isConnected ? '#0ea5e9' : '#64748b';
-    const glow = isConnected ? 'rgba(14, 165, 233, 0.55)' : 'rgba(100, 116, 139, 0.45)';
+    const normalizedStatus = String(station.status || '').trim().toLowerCase();
+    const hasExplicitPhysicalState = typeof station.station_online === 'boolean'
+        || typeof station.is_online === 'boolean';
+    const isStationOnline = station.station_online === true
+        || station.is_online === true
+        || (!hasExplicitPhysicalState && ['online', 'active', 'connected', 'streaming'].includes(normalizedStatus));
+    const isMountpointConnected = station.mountpoint_connected === true
+        || (station.mountpoint_connected == null && station.ntrip_connected === true);
+    const isFailoverActive = station.failover_active === true;
+    const fill = isStationOnline ? '#0ea5e9' : '#ef4444';
+    const glow = isStationOnline ? 'rgba(14, 165, 233, 0.55)' : 'rgba(239, 68, 68, 0.50)';
     const safeName = escapeHtml(station.name);
-    const safeStatus = escapeHtml(station.status || 'unknown');
     const safeMountpoint = escapeHtml(station.mountpoint || station.name);
+    const safeCorrectionSource = escapeHtml(
+        station.correction_source || `${station.name}/S1`
+    );
+    const stationStateLabel = isStationOnline ? 'ONLINE' : 'OFFLINE';
+    const mountpointStateLabel = isMountpointConnected ? 'connected' : 'disconnected';
 
     const icon = L.divIcon({
         className: 'custom-cors-base-marker',
@@ -2378,6 +2393,17 @@ function addOrUpdateCorsBaseMarker(station) {
                 filter: drop-shadow(0 0 8px ${glow});
                 position: relative;
             ">
+                ${isMountpointConnected ? `<div title="Mountpoint connected" style="
+                    position: absolute;
+                    right: -15px;
+                    top: -3px;
+                    width: 9px;
+                    height: 9px;
+                    border-radius: 50%;
+                    background: #22c55e;
+                    border: 2px solid white;
+                    box-shadow: 0 0 5px rgba(34,197,94,0.8);
+                "></div>` : ''}
                 <div style="
                     position: absolute;
                     left: -9px;
@@ -2413,11 +2439,11 @@ function addOrUpdateCorsBaseMarker(station) {
                 align-items: center;
                 gap: 8px;
                 padding: 10px 12px;
-                color: #0369a1;
+                color: ${isStationOnline ? '#0369a1' : '#b91c1c'};
                 font-weight: 800;
                 border-bottom: 1px solid #e2e8f0;
             ">
-                <span style="color:#0ea5e9;"><i class="bi bi-triangle-fill"></i></span>
+                <span style="color:${fill};"><i class="bi bi-triangle-fill"></i></span>
                 <span>${safeName}</span>
             </div>
             <div style="padding: 10px 12px; display: grid; gap: 7px;">
@@ -2434,14 +2460,30 @@ function addOrUpdateCorsBaseMarker(station) {
                     <span style="color:#64748b;">Mountpoint</span><strong>${safeMountpoint}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
-                    <span style="color:#64748b;">NTRIP</span>
+                    <span style="color:#64748b;">Trạm vật lý</span>
                     <span style="
                         padding: 2px 8px;
                         border-radius: 999px;
-                        background: ${isConnected ? '#dcfce7' : '#f1f5f9'};
-                        color: ${isConnected ? '#166534' : '#475569'};
+                        background: ${isStationOnline ? '#dcfce7' : '#fee2e2'};
+                        color: ${isStationOnline ? '#166534' : '#b91c1c'};
                         font-weight: 700;
-                    ">${isConnected ? 'connected' : safeStatus}</span>
+                    ">${stationStateLabel}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
+                    <span style="color:#64748b;">Mountpoint</span>
+                    <span style="
+                        padding: 2px 8px;
+                        border-radius: 999px;
+                        background: ${isMountpointConnected ? '#dcfce7' : '#f1f5f9'};
+                        color: ${isMountpointConnected ? '#166534' : '#475569'};
+                        font-weight: 700;
+                    ">${mountpointStateLabel}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
+                    <span style="color:#64748b;">Nguồn RTCM</span>
+                    <strong style="color:${isFailoverActive ? '#d97706' : '#0f172a'};">
+                        ${safeCorrectionSource}${isFailoverActive ? ' (backup)' : ''}
+                    </strong>
                 </div>
             </div>
         </div>
@@ -3562,7 +3604,7 @@ function setupEventListeners() {
                 );
                 upsertGnssWorkflowNode('online-filter', {
                     title: 'Lọc cụm GNSS đang hoạt động',
-                    detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm offline (ID ${startResult.skipped_offline_station_ids.join(', ')}); tiếp tục với ${gnssAdjustmentDebugState.expectedStationIds.length} rover online.`,
+                    detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm không có heartbeat GNSS gần đây (ID ${startResult.skipped_offline_station_ids.join(', ')}); còn ${gnssAdjustmentDebugState.expectedStationIds.length} rover ứng viên, đang chờ #AGRICA RTK Fixed để xác nhận.`,
                     status: 'warning',
                     icon: 'bi-funnel',
                 });
@@ -3790,6 +3832,7 @@ async function loadProjectsAndClusters() {
                     .filter(station => station && hasValidLatLon(station.location));
                 const stationIds = clusterMembers.map(station => station.id);
                 
+                if (c.cluster_type === 'total') return; // Do not draw lines for total clusters to avoid overlap
                 if (clusterMembers.length < 2) return;
                 
                 const latlngs = [];

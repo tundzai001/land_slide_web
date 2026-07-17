@@ -861,7 +861,11 @@ class AdminManager {
 
         row.innerHTML = `
             <div class="col-md-2">
-                <input type="text" class="form-control cluster-name" placeholder="Tên cụm (vd: Cụm 1)" value="${name}">
+                <input type="text" class="form-control cluster-name mb-1" placeholder="Tên cụm (vd: Cụm 1)" value="${name}">
+                <select class="form-select cluster-type" style="font-size:0.75rem; background-color: #f8fafc; border-color: #cbd5e1;">
+                    <option value="normal" ${clusterConfig.cluster_type === 'total' ? '' : 'selected'}>⚡ Cụm thường</option>
+                    <option value="total" ${clusterConfig.cluster_type === 'total' ? 'selected' : ''}>🌐 Cụm tổng (Ẩn tia chéo)</option>
+                </select>
             </div>
             <div class="col-md-2">
                 <input type="text" class="form-control cluster-desc" placeholder="Mô tả" value="${desc}">
@@ -882,19 +886,21 @@ class AdminManager {
                         <span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m
                     </div>
                 </div>
-                <div class="mt-2 pt-2 border-top border-secondary-subtle">
-                    <div class="small text-warning mb-1"><i class="bi bi-shield-check"></i> Luồng dự phòng chéo tự động</div>
-                    <select class="form-select cluster-backup-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
-                        ${backupBaseOptionsHtml}
-                    </select>
-                    <select class="form-select cluster-backup-stream-select mt-1" style="font-size:0.75rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${backupBaseStream}">
-                        <option value="">-- Chọn luồng base phụ --</option>
-                    </select>
-                    <div class="backup-base-station-info mt-1" style="display:none; font-size:0.68rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 8px;">
-                        <strong class="base-info-name text-warning">--</strong>
-                        <div class="text-muted"><span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m</div>
+                <details class="mt-1">
+                    <summary class="small text-warning mb-1" style="cursor:pointer; font-size:0.75rem; user-select:none;"><i class="bi bi-shield-check"></i> Luồng dự phòng chéo</summary>
+                    <div class="pt-1 border-top border-secondary-subtle">
+                        <select class="form-select cluster-backup-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
+                            ${backupBaseOptionsHtml}
+                        </select>
+                        <select class="form-select cluster-backup-stream-select mt-1" style="font-size:0.75rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${backupBaseStream}">
+                            <option value="">-- Chọn luồng base phụ --</option>
+                        </select>
+                        <div class="backup-base-station-info mt-1" style="display:none; font-size:0.68rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 8px;">
+                            <strong class="base-info-name text-warning">--</strong>
+                            <div class="text-muted"><span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m</div>
+                        </div>
                     </div>
-                </div>
+                </details>
             </div>
             <div class="col-md-4">
                 <div class="dropdown w-100">
@@ -1098,6 +1104,7 @@ class AdminManager {
                     backup_base_service_config: backupOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(backupOpt.dataset.serviceConfig)) : {},
                     backup_base_serial: backupOpt?.dataset?.serial || '',
                     backup_base_server_id: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.serverId || '') : '',
+                    cluster_type: row.querySelector('.cluster-type')?.value || 'normal',
                     stations: st
                 });
             }
