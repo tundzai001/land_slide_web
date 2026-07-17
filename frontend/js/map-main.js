@@ -1729,7 +1729,7 @@ function updateStationMarker(stationId, riskLevel) {
 
     // ✅ Dùng setIcon với HTML string để Leaflet giữ pulse class khi re-render
     const iconHtml = `<div class="marker-circle${pulseClass}" style="
-                width: 18px; height: 18px; background: ${color};
+                width: 18px; height: 18px; box-sizing: border-box; background: ${color};
                 border-radius: 50%; border: 2px solid white;
                 box-shadow: 0 0 8px rgba(0,0,0,0.5);
                 transition: background 0.3s ease;
@@ -1757,7 +1757,7 @@ function setMarkerAlert(stationId, active) {
         markerAlertState[stationId] = true;
 
         const iconHtml = `<div class="marker-circle marker-device-alert" style="
-                    width: 22px; height: 22px; background: #fa5252;
+                    width: 22px; height: 22px; box-sizing: border-box; background: #fa5252;
                     border-radius: 50%; border: 3px solid white;
                     box-shadow: 0 0 12px rgba(250, 82, 82, 0.8);
                 "></div>`;
@@ -4116,7 +4116,7 @@ function updateMarker(station) {
     // ✅ Tạo HTML string cho divIcon (giúp Leaflet giữ nguyên class khi re-render)
     const pulseClass = shouldPulse ? ' marker-alert-pulse' : '';
     const iconHtml = `<div class="marker-circle${pulseClass}" style="
-                width: 18px; height: 18px; background: ${color};
+                width: 18px; height: 18px; box-sizing: border-box; background: ${color};
                 border-radius: 50%; border: 2px solid white;
                 box-shadow: 0 0 8px rgba(0,0,0,0.5);
                 transition: background 0.3s ease;

@@ -52,7 +52,7 @@
     <script>
         (async function() {
             try {
-                const response = await fetch('/js/react-app.js?v=react-spa-14');
+                const response = await fetch('/js/react-app.js?v=react-spa-16');
                 if (!response.ok) throw new Error('Cannot load react-app.js');
                 const source = await response.text();
                 const compiled = Babel.transform(source, {
