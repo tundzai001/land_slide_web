@@ -859,6 +859,16 @@ class AdminManager {
         });
         backupBaseOptionsHtml += '</optgroup>';
 
+        const conflictBases = clusterConfig.conflict_bases || [];
+        let conflictBaseOptionsHtml = '';
+        if (this.corsStationsData) {
+            this.corsStationsData.forEach(st => {
+                const isSelected = conflictBases.some(cb => cb.serial === st.serial) ? 'selected' : '';
+                conflictBaseOptionsHtml += `<option value="${st.serial}" data-name="${st.name || st.code}" ${isSelected}>${st.name || st.code}</option>`;
+            });
+        }
+
+
         row.innerHTML = `
             <!-- COMPACT ROW -->
             <div class="col-md-2">
@@ -915,6 +925,15 @@ class AdminManager {
                             </div>
                         </div>
                         
+                        <!-- Conflict Bases config -->
+                        <div class="col-12 mt-3 conflict-bases-container" style="display: ${clusterConfig.cluster_type === 'total' ? 'block' : 'none'};">
+                            <label class="form-label small fw-bold text-danger mb-1"><i class="bi bi-power"></i> Các Trạm Base Phụ Cần Tắt (Khi chạy Cụm Tổng)</label>
+                            <select class="form-select cluster-conflict-bases-select mb-2" multiple style="font-size:0.85rem; height: 80px;">
+                                ${conflictBaseOptionsHtml}
+                            </select>
+                            <div class="form-text mt-0" style="font-size: 0.75rem;">Chọn các trạm vật lý phụ thuộc (VD: SinQuyen1) cần ép đi ngủ để tránh xung đột mốc khi Base Chính đẩy S2. Nhấn Ctrl để chọn nhiều.</div>
+                        </div>
+                        
                         <!-- Backup Base config -->
                         <div class="col-md-6">
                             <label class="form-label small fw-bold text-warning mb-1"><i class="bi bi-shield-check"></i> Trạm Base Dự Phòng</label>
@@ -934,6 +953,14 @@ class AdminManager {
             </div>
         `;
         container.appendChild(row);
+
+        const clusterTypeSelect = row.querySelector('.cluster-type');
+        const conflictBasesContainer = row.querySelector('.conflict-bases-container');
+        if (clusterTypeSelect && conflictBasesContainer) {
+            clusterTypeSelect.addEventListener('change', function() {
+                conflictBasesContainer.style.display = this.value === 'total' ? 'block' : 'none';
+            });
+        }
 
         const baseSelect = row.querySelector('.cluster-base-select');
         if (baseSelect && baseSelect.value) {
@@ -1086,6 +1113,12 @@ class AdminManager {
                 const backupStreamSelect = row.querySelector('.cluster-backup-stream-select');
                 const primaryStreamSelect = row.querySelector('.cluster-stream-select');
                 const st = Array.from(row.querySelectorAll('.station-checkbox:checked')).map(c => c.value);
+                const conflictBasesSelect = row.querySelector('.cluster-conflict-bases-select');
+                const conflictBases = conflictBasesSelect ? Array.from(conflictBasesSelect.selectedOptions).map(opt => ({
+                    serial: opt.value,
+                    name: opt.dataset.name
+                })) : [];
+                
                 const backupBaseStation = backupSelect?.value || '';
                 const backupStreamHost = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.host || '') : '';
                 const backupStreamMp = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
@@ -1120,6 +1153,7 @@ class AdminManager {
                     backup_base_serial: backupOpt?.dataset?.serial || '',
                     backup_base_server_id: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.serverId || '') : '',
                     cluster_type: row.querySelector('.cluster-type')?.value || 'normal',
+                    conflict_bases: conflictBases,
                     stations: st
                 });
             }

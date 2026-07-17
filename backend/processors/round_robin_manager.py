@@ -2161,6 +2161,33 @@ class RoundRobinAdjustmentManager:
             )
         return matches[0]
 
+    def _sleep_conflict_base_sync(self, serial: str) -> None:
+        stations = self._cors_api_request_sync("GET", "/api/public/map-stations")
+        if isinstance(stations, dict):
+            stations = stations.get("value") or stations.get("items") or []
+        for station in stations or []:
+            if not isinstance(station, dict):
+                continue
+            station_serial = str(station.get("serial") or "").strip()
+            if station_serial.casefold() == serial.casefold():
+                cfg = station.get("service_config")
+                if not isinstance(cfg, dict):
+                    return
+                new_cfg = copy.deepcopy(cfg)
+                new_cfg["server1_stream_on_demand"] = True
+                new_cfg["server1_stream_active"] = False
+                new_cfg["server2_stream_on_demand"] = True
+                new_cfg["server2_stream_active"] = False
+                new_cfg["stream_on_demand"] = True
+                new_cfg["stream_active"] = False
+                self._cors_api_request_sync(
+                    "PUT",
+                    f"/api/admin/devices/{station_serial}/service-config",
+                    json=new_cfg,
+                )
+                return
+        logger.warning(f"Could not find conflict base with serial {serial} to sleep")
+
     async def _toggle_cors_fixed_base(
         self,
         mountpoint: str,
@@ -2844,6 +2871,28 @@ class RoundRobinAdjustmentManager:
                     )
                     # Chờ 2s để đảm bảo caster đã xử lý ngắt
                     await asyncio.sleep(2.0)
+                    
+                    # Ngắt các trạm Base phụ thuộc (conflict bases)
+                    conflict_bases = cluster.get("conflict_bases", [])
+                    for cb in conflict_bases:
+                        cb_serial = cb.get("serial", "").strip()
+                        cb_name = cb.get("name", "").strip()
+                        if not cb_serial:
+                            continue
+                        
+                        cb_key = ("conflict", cb_serial)
+                        if cb_key not in suspended_bases:
+                            await self._emit_progress(
+                                project_id,
+                                f"Tắt trạm Base phụ thuộc {cb_name} (theo cấu hình Cụm Tổng) để tránh xung đột dữ liệu.",
+                            )
+                            suspended_bases.add(cb_key)
+                            try:
+                                await asyncio.to_thread(self._sleep_conflict_base_sync, cb_serial)
+                                await asyncio.sleep(2.0)
+                            except Exception as e:
+                                logger.error(f"Failed to sleep conflict base {cb_name}: {e}")
+
                     self._exclude_fixed_base_records(
                         cluster,
                         post_seed_start_index,
