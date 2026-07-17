@@ -298,73 +298,78 @@ class NtripPusher:
 
 
 class NtripPusherManager:
-    _instances: Dict[str, NtripPusher] = {}
+    _instances: Dict[str, list[NtripPusher]] = {}
 
     @classmethod
     async def start_pusher(cls, station_code: str, host: str, port: int, mountpoint: str, password: str):
         # Stop existing if any
         if station_code in cls._instances:
-            await cls._instances[station_code].stop()
+            await cls.stop_pusher(station_code)
         
-        pusher = NtripPusher(station_code, host, port, mountpoint, password)
-        cls._instances[station_code] = pusher
+        pushers = []
+        for mp in [m.strip() for m in str(mountpoint).split(",") if m.strip()]:
+            pushers.append(NtripPusher(station_code, host, port, mp, password))
+        
+        cls._instances[station_code] = pushers
         try:
-            await pusher.start()
+            await asyncio.gather(*(pusher.start() for pusher in pushers))
         except Exception:
             cls._instances.pop(station_code, None)
             raise
-        logger.info(f"[NTRIP Pusher] Started for station {station_code}")
+        logger.info(f"[NTRIP Pusher] Started for station {station_code} to mountpoints: {[p.mountpoint for p in pushers]}")
 
     @classmethod
     async def stop_pusher(cls, station_code: str):
         if station_code in cls._instances:
-            await cls._instances[station_code].stop()
+            pushers = cls._instances[station_code]
+            await asyncio.gather(*(pusher.stop() for pusher in pushers), return_exceptions=True)
             del cls._instances[station_code]
             logger.info(f"[NTRIP Pusher] Stopped for station {station_code}")
 
     @classmethod
     async def wait_for_rtcm(cls, station_code: str, timeout: float = 10.0) -> None:
-        pusher = cls._instances.get(station_code)
-        if not pusher:
+        pushers = cls._instances.get(station_code)
+        if not pushers:
             raise RuntimeError(f"NTRIP pusher is not running for station {station_code}")
-        await pusher.wait_for_rtcm(timeout=timeout)
+        await asyncio.gather(*(pusher.wait_for_rtcm(timeout=timeout) for pusher in pushers))
 
     @classmethod
     def feed_data(cls, station_code: str, data: bytes):
         if station_code in cls._instances:
-            pusher = cls._instances[station_code]
-            if pusher.is_running:
+            pushers = cls._instances[station_code]
+            # Since all pushers for a station process the exact same RTCM, we only need to filter once.
+            if pushers and pushers[0].is_running:
                 try:
-                    pusher._last_chunk_at = time.monotonic()
                     sample_hex = bytes(data[:24]).hex()
-                    if pusher._first_chunk_hex is None:
-                        pusher._first_chunk_hex = sample_hex
-                    pusher._last_chunk_hex = sample_hex
-                    pusher.observe_gnss_chunk(data)
-                    # GNSS MQTT payloads also contain GGA/AGRICA text.  An
-                    # NTRIP source must forward only complete RTCM3 frames.
-                    rtcm_data = pusher._rtcm_filter.feed(data)
-                    if rtcm_data and pusher._loop and pusher._loop.is_running():
-                        def enqueue() -> None:
-                            try:
-                                pusher.queue.put_nowait(rtcm_data)
-                                pusher._queued_frame_batches += 1
-                            except asyncio.QueueFull:
-                                logger.warning(
-                                    f"[NTRIP Pusher] {station_code}: Queue full, dropping data."
-                                )
-
-                        # Paho invokes feed_data from its network thread; an
-                        # asyncio.Queue must only be touched by its event loop.
-                        pusher._loop.call_soon_threadsafe(enqueue)
+                    rtcm_data = None
+                    for pusher in pushers:
+                        if pusher.is_running:
+                            pusher._last_chunk_at = time.monotonic()
+                            if pusher._first_chunk_hex is None:
+                                pusher._first_chunk_hex = sample_hex
+                            pusher._last_chunk_hex = sample_hex
+                            pusher.observe_gnss_chunk(data)
+                            if rtcm_data is None:
+                                rtcm_data = pusher._rtcm_filter.feed(data)
+                            
+                            if rtcm_data and pusher._loop and pusher._loop.is_running():
+                                def enqueue(p=pusher, rd=rtcm_data) -> None:
+                                    try:
+                                        p.queue.put_nowait(rd)
+                                        p._queued_frame_batches += 1
+                                    except asyncio.QueueFull:
+                                        logger.warning(
+                                            f"[NTRIP Pusher] {station_code}: Queue full for {p.mountpoint}, dropping data."
+                                        )
+                                pusher._loop.call_soon_threadsafe(enqueue)
                 except Exception as exc:
                     logger.error(f"[NTRIP Pusher] {station_code}: Could not queue RTCM data: {exc}")
 
     @classmethod
     def get_diagnostics(cls, station_code: str) -> dict:
-        pusher = cls._instances.get(station_code)
-        if not pusher:
+        pushers = cls._instances.get(station_code)
+        if not pushers:
             return {"station": station_code, "likely_cause": "pusher instance is not running"}
-        return pusher.diagnostics()
+        return {p.mountpoint: p.diagnostics() for p in pushers}
 
 ntrip_manager = NtripPusherManager()
