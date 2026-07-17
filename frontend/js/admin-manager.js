@@ -860,51 +860,19 @@ class AdminManager {
         backupBaseOptionsHtml += '</optgroup>';
 
         row.innerHTML = `
+            <!-- COMPACT ROW -->
             <div class="col-md-2">
-                <input type="text" class="form-control cluster-name mb-1" placeholder="Tên cụm (vd: Cụm 1)" value="${name}">
-                <select class="form-select cluster-type" style="font-size:0.75rem; background-color: #f8fafc; border-color: #cbd5e1;">
-                    <option value="normal" ${clusterConfig.cluster_type === 'total' ? '' : 'selected'}>⚡ Cụm thường</option>
-                    <option value="total" ${clusterConfig.cluster_type === 'total' ? 'selected' : ''}>🌐 Cụm tổng (Ẩn tia chéo)</option>
-                </select>
+                <input type="text" class="form-control form-control-sm cluster-name fw-bold" placeholder="Tên cụm (vd: Cụm 1)" value="${name}">
             </div>
             <div class="col-md-2">
-                <input type="text" class="form-control cluster-desc" placeholder="Mô tả" value="${desc}">
+                <select class="form-select form-select-sm cluster-type text-primary fw-medium" style="background-color: #f8fafc; border-color: #cbd5e1;">
+                    <option value="normal" ${clusterConfig.cluster_type === 'total' ? '' : 'selected'}>⚡ Cụm thường</option>
+                    <option value="total" ${clusterConfig.cluster_type === 'total' ? 'selected' : ''}>🌐 Cụm tổng</option>
+                </select>
             </div>
             <div class="col-md-3">
-                <select class="form-select cluster-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
-                    ${baseOptionsHtml}
-                </select>
-                <select class="form-select cluster-stream-select mt-1" style="font-size:0.75rem; display: ${base_stream ? 'block' : 'none'};" data-selected-stream="${base_stream}">
-                    <option value="">-- Chọn Luồng (S1/S2) --</option>
-                </select>
-                <div class="base-station-info mt-1" style="display: none; font-size: 0.68rem; background: rgba(14,165,233,0.08); border: 1px solid rgba(14,165,233,0.25); border-radius: 6px; padding: 6px 8px;">
-                    <div class="d-flex align-items-center gap-1 mb-1">
-                        <i class="bi bi-broadcast text-info" style="font-size: 0.75rem;"></i>
-                        <strong class="base-info-name text-info">--</strong>
-                    </div>
-                    <div class="text-muted" style="line-height: 1.4;">
-                        <span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m
-                    </div>
-                </div>
-                <details class="mt-1">
-                    <summary class="small text-warning mb-1" style="cursor:pointer; font-size:0.75rem; user-select:none;"><i class="bi bi-shield-check"></i> Luồng dự phòng chéo</summary>
-                    <div class="pt-1 border-top border-secondary-subtle">
-                        <select class="form-select cluster-backup-base-select" style="font-size:0.75rem;" onchange="window.adminManager.onBaseStationSelected(this)">
-                            ${backupBaseOptionsHtml}
-                        </select>
-                        <select class="form-select cluster-backup-stream-select mt-1" style="font-size:0.75rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${backupBaseStream}">
-                            <option value="">-- Chọn luồng base phụ --</option>
-                        </select>
-                        <div class="backup-base-station-info mt-1" style="display:none; font-size:0.68rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 8px;">
-                            <strong class="base-info-name text-warning">--</strong>
-                            <div class="text-muted"><span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m</div>
-                        </div>
-                    </div>
-                </details>
-            </div>
-            <div class="col-md-4">
                 <div class="dropdown w-100">
-                    <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start overflow-hidden text-truncate selected-stations-label py-1.5" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" style="font-size:0.75rem;">
+                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start overflow-hidden text-truncate selected-stations-label" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                         Chọn trạm...
                     </button>
                     <div class="dropdown-menu p-2 station-checkbox-list w-100" style="min-width: 240px; max-height: 200px; overflow-y: auto;">
@@ -912,10 +880,57 @@ class AdminManager {
                     </div>
                 </div>
             </div>
-            <div class="col-md-1 text-end">
-                <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.cluster-row').remove()">
-                    <i class="bi bi-x"></i>
+            <div class="col-md-2">
+                <input type="text" class="form-control form-control-sm cluster-desc" placeholder="Mô tả..." value="${desc}">
+            </div>
+            <div class="col-md-3 text-end d-flex gap-1 justify-content-end">
+                <button type="button" class="btn btn-sm btn-primary" onclick="const bsCollapse = new bootstrap.Collapse(this.closest('.cluster-row').querySelector('.config-collapse'), {toggle: true});">
+                    <i class="bi bi-gear"></i> Cấu hình Base
                 </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.cluster-row').remove()">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            
+            <!-- COLLAPSED CONFIGURATION PANEL -->
+            <div class="col-12 collapse config-collapse mt-2">
+                <div class="card card-body bg-light border-0 shadow-sm p-3">
+                    <div class="row">
+                        <!-- Primary Base config -->
+                        <div class="col-md-6 border-end">
+                            <label class="form-label small fw-bold text-primary mb-1"><i class="bi bi-broadcast"></i> Trạm Base Chính</label>
+                            <select class="form-select cluster-base-select mb-2" style="font-size:0.85rem;" onchange="window.adminManager.onBaseStationSelected(this)">
+                                ${baseOptionsHtml}
+                            </select>
+                            <select class="form-select cluster-stream-select" style="font-size:0.85rem; display: ${base_stream ? 'block' : 'none'};" data-selected-stream="${base_stream}">
+                                <option value="">-- Chọn Luồng (S1/S2) --</option>
+                            </select>
+                            <div class="base-station-info mt-2" style="display: none; font-size: 0.75rem; background: rgba(14,165,233,0.08); border: 1px solid rgba(14,165,233,0.25); border-radius: 6px; padding: 8px;">
+                                <div class="d-flex align-items-center gap-1 mb-1">
+                                    <strong class="base-info-name text-info">--</strong>
+                                </div>
+                                <div class="text-muted" style="line-height: 1.4;">
+                                    <span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Backup Base config -->
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-warning mb-1"><i class="bi bi-shield-check"></i> Trạm Base Dự Phòng</label>
+                            <select class="form-select cluster-backup-base-select mb-2" style="font-size:0.85rem;" onchange="window.adminManager.onBaseStationSelected(this)">
+                                ${backupBaseOptionsHtml}
+                            </select>
+                            <select class="form-select cluster-backup-stream-select" style="font-size:0.85rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${backupBaseStream}">
+                                <option value="">-- Chọn Luồng Base Phụ --</option>
+                            </select>
+                            <div class="backup-base-station-info mt-2" style="display:none; font-size:0.75rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:8px;">
+                                <strong class="base-info-name text-warning">--</strong>
+                                <div class="text-muted"><span class="base-info-lat">--</span> · <span class="base-info-lon">--</span> · Alt: <span class="base-info-alt">--</span>m</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
         container.appendChild(row);
