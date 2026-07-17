@@ -2833,7 +2833,8 @@ class RoundRobinAdjustmentManager:
                     # Add it before the API call so finally also restores a
                     # configuration when the HTTP response is lost after CORS
                     # has already accepted the change.
-                    is_multi_mp = "," in str(cluster.get("round_robin_route_mountpoint") or "")
+                    # Always sleep ALL streams (S1 & S2) of the fixed base to ensure cross-base streams are also stopped
+                    is_multi_mp = True
                     await self._toggle_cors_fixed_base(
                         configured_mountpoint,
                         sleep=True,
@@ -3343,7 +3344,8 @@ class RoundRobinAdjustmentManager:
                         and rotation_index + 1 < initial_rotation_count
                         and configured_mountpoint
                     ):
-                        is_multi_mp = "," in str(cluster.get("round_robin_route_mountpoint") or "")
+                        # Always sleep ALL streams (S1 & S2) of the fixed base to ensure cross-base streams are also stopped
+                        is_multi_mp = True
                         fixed_base_identity_kwargs = {
                             "selected_serial": configured_base_serial,
                             "selected_server_id": (configured_base_server_id or None),
