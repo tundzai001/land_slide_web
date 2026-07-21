@@ -1080,13 +1080,6 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected["Username"], "generic-user")
         self.assertEqual(selected["receiverID"], "Dap1_2")
 
-    def test_client_table_can_match_known_station_alias(self):
-        client_table = "STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
-        selected = RoundRobinAdjustmentManager._select_client_info(client_table, "Dap4_1")
-
-        self.assertEqual(selected["Username"], "Dap2_1")
-        self.assertEqual(selected["Mountpoint"], "SinQuyen1")
-
     async def test_client_lookup_searches_all_configured_aicasters(self):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
@@ -1104,6 +1097,49 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(selected["CasterHost"], "aitogy.click")
         self.assertEqual(selected["Mountpoint"], "CORS_B")
+
+    async def test_client_lookup_uses_station_configured_aicaster_username(self):
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            caster_host="aitogy.com.vn",
+            caster_hosts=["aitogy.com.vn"],
+        )
+        manager.configure_project(94, [{
+            "stations": [4, 2],
+            "rovers": ["Dap4_1", "Dap1_2"],
+            "aicaster_clients": {
+                "Dap4_1": {
+                    "username": "Dap2_1",
+                    "caster_host": "aitogy.com.vn",
+                }
+            },
+        }])
+        manager._query_client_table = AsyncMock(
+            return_value="STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
+        )
+
+        selected = await manager._find_client_info("Dap4_1", project_id=94)
+
+        self.assertEqual(selected["Username"], "Dap2_1")
+        self.assertEqual(selected["Mountpoint"], "SinQuyen1")
+
+    async def test_active_aicaster_clients_are_deduplicated_for_setup_ui(self):
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            caster_host="aitogy.com.vn",
+            caster_hosts=["aitogy.com.vn"],
+        )
+        manager._query_client_table = AsyncMock(
+            return_value=(
+                "STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
+                "STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
+            )
+        )
+
+        clients = await manager.list_active_aicaster_clients()
+
+        self.assertEqual(len(clients), 1)
+        self.assertEqual(clients[0]["Username"], "Dap2_1")
 
     async def test_client_lookup_can_poll_missing_session_without_error_spam(self):
         manager = RoundRobinAdjustmentManager(

@@ -2114,6 +2114,18 @@ def _normalize_active_adjustment_clusters(
 
         cluster["stations"] = station_ids
         cluster["rovers"] = [stations_by_id[station_id].station_code for station_id in station_ids]
+        cluster["aicaster_clients"] = {}
+        for station_id in station_ids:
+            station = stations_by_id[station_id]
+            station_config = station.config if isinstance(station.config, dict) else {}
+            binding = station_config.get("gnss_aicaster_client") or {}
+            username = str(binding.get("username") or "").strip()
+            if not username:
+                continue
+            cluster["aicaster_clients"][station.station_code] = {
+                "username": username,
+                "caster_host": str(binding.get("caster_host") or "").strip(),
+            }
         cluster["fixed_base_candidates"] = candidates
         cluster["selected_fixed_base_candidate"] = (
             copy.deepcopy(primary) if len(candidates) == 1 else None
@@ -2176,6 +2188,33 @@ def _restrict_adjustment_clusters_to_online_stations(
     if not active_clusters:
         raise ValueError("fewer than two online GNSS rovers are available in the selected cluster")
     return active_clusters, sorted(set(excluded_station_ids))
+
+
+@app.get("/api/admin/gnss/aicaster-clients")
+async def list_active_aicaster_clients(
+    current_user: model_auth.User = Depends(
+        auth.require_permission(auth.Permission.EDIT_STATIONS)
+    ),
+):
+    """List live rover identities reported by AICaster GET /clienttable."""
+
+    try:
+        clients = await mqtt_service.round_robin_manager.list_active_aicaster_clients()
+    except Exception as exc:
+        logger.error("Could not load AICaster client table: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "clients": [
+            {
+                "username": item.get("Username") or "",
+                "receiver_id": item.get("receiverID") or "",
+                "mountpoint": item.get("Mountpoint") or "",
+                "caster_host": item.get("CasterHost") or "",
+                "caster_port": item.get("CasterPort"),
+            }
+            for item in clients
+        ]
+    }
 
 @app.post("/api/admin/gnss/adjustment/start")
 async def start_gnss_adjustment(

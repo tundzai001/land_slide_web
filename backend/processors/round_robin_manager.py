@@ -23,14 +23,6 @@ logger = logging.getLogger(__name__)
 _ESS_MIN_SESSION_SAMPLES = 8
 _ESS_MAX_CONTIGUOUS_GAP_SECONDS = 5
 _BASELINE_STD_REJECTION_THRESHOLD_M = 0.1
-_AICASTER_STATION_ALIASES = {
-    "dap4_1": {"dap2_1"},
-    "dap4_2": {"dap2_2"},
-    "dap2_1": {"dap4_1"},
-    "dap2_2": {"dap4_2"},
-}
-
-
 def _spd_solve(matrix: Any, right_hand_side: Any) -> np.ndarray:
     """Solve a symmetric positive-definite system without forming an inverse."""
 
@@ -2899,6 +2891,7 @@ class RoundRobinAdjustmentManager:
                 try:
                     client_info = await self._find_client_info(
                         next_rover,
+                        project_id=project_id,
                         log_missing=False,
                     )
                     next_client_confirmed = client_info is not None
@@ -3782,6 +3775,7 @@ class RoundRobinAdjustmentManager:
                                 while loop.time() < deadline:
                                     refreshed_client = await self._find_client_info(
                                         rover_code,
+                                        project_id=project_id,
                                         log_missing=False,
                                     )
                                     if refreshed_client:
@@ -4198,7 +4192,10 @@ class RoundRobinAdjustmentManager:
                 f"No LLH cache found for {rover_code}; receiver was not changed."
             )
 
-        client_info = await self._find_client_info(rover_code)
+        client_info = await self._find_client_info(
+            rover_code,
+            project_id=project_id,
+        )
         if not client_info:
             raise _SafeRoverRotationSkip(
                 f"Could not find an active AICaster client session for {rover_code}; receiver was not changed."
@@ -6243,32 +6240,31 @@ class RoundRobinAdjustmentManager:
         self,
         station_code: str,
         *,
+        project_id: Optional[int] = None,
         log_missing: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """Find a rover across every configured AICaster client table."""
 
-        results = await asyncio.gather(
-            *(self._query_client_table(host) for host in self.caster_hosts),
-            return_exceptions=True,
-        )
-        candidates = []
-        query_errors = []
-        successful_hosts = []
-        for host, result in zip(self.caster_hosts, results):
-            if isinstance(result, BaseException):
-                detail = str(result).strip() or result.__class__.__name__
-                query_errors.append(f"{host}:{self.caster_port} ({detail})")
-                continue
-            successful_hosts.append(host)
-            candidates.extend(
-                self._parse_client_table(result, caster_host=host, caster_port=self.caster_port)
-            )
+        candidates, successful_hosts, query_errors = await self._fetch_active_client_candidates()
+        binding = self._configured_aicaster_client(project_id, station_code)
+        configured_username = str(binding.get("username") or "").strip()
+        configured_host = str(binding.get("caster_host") or "").strip()
+        eligible_candidates = candidates
+        if configured_host:
+            eligible_candidates = [
+                item
+                for item in candidates
+                if str(item.get("CasterHost") or "").casefold()
+                == configured_host.casefold()
+            ]
 
-        selected = self._select_client_candidate(candidates, station_code)
+        lookup_name = configured_username or station_code
+        selected = self._select_client_candidate(eligible_candidates, lookup_name)
         if selected:
             logger.info(
-                "Matched station %s to AICaster %s:%s (username=%s receiverID=%s mountpoint=%s)",
+                "Matched station %s%s to AICaster %s:%s (username=%s receiverID=%s mountpoint=%s)",
                 station_code,
+                f" via configured username {configured_username}" if configured_username else "",
                 selected["CasterHost"],
                 selected["CasterPort"],
                 selected["Username"],
@@ -6284,8 +6280,11 @@ class RoundRobinAdjustmentManager:
             )
         if log_missing:
             logger.error(
-                "No AICaster client session matched station %s. Queried=%s errors=%s available=%s",
+                "No AICaster client session matched station %s (configured username=%s host=%s). "
+                "Queried=%s errors=%s available=%s",
                 station_code,
+                configured_username or "<station-code fallback>",
+                configured_host or "<any>",
                 successful_hosts,
                 query_errors,
                 [
@@ -6299,6 +6298,74 @@ class RoundRobinAdjustmentManager:
                 ],
             )
         return None
+
+    def _configured_aicaster_client(
+        self,
+        project_id: Optional[int],
+        station_code: str,
+    ) -> Dict[str, Any]:
+        if project_id is None:
+            return {}
+        session = self._sessions.get(int(project_id)) or {}
+        target = str(station_code or "").strip().casefold()
+        for cluster in session.get("clusters", []):
+            bindings = cluster.get("aicaster_clients") or {}
+            for code, binding in bindings.items():
+                if str(code).strip().casefold() == target and isinstance(binding, dict):
+                    return binding
+        return {}
+
+    async def _fetch_active_client_candidates(
+        self,
+    ) -> tuple[List[Dict[str, Any]], List[str], List[str]]:
+        results = await asyncio.gather(
+            *(self._query_client_table(host) for host in self.caster_hosts),
+            return_exceptions=True,
+        )
+        candidates: List[Dict[str, Any]] = []
+        query_errors: List[str] = []
+        successful_hosts: List[str] = []
+        for host, result in zip(self.caster_hosts, results):
+            if isinstance(result, BaseException):
+                detail = str(result).strip() or result.__class__.__name__
+                query_errors.append(f"{host}:{self.caster_port} ({detail})")
+                continue
+            successful_hosts.append(host)
+            candidates.extend(
+                self._parse_client_table(
+                    result,
+                    caster_host=host,
+                    caster_port=self.caster_port,
+                )
+            )
+        return candidates, successful_hosts, query_errors
+
+    async def list_active_aicaster_clients(self) -> List[Dict[str, Any]]:
+        """Return live AICaster client identities for the station setup UI."""
+
+        candidates, successful_hosts, query_errors = await self._fetch_active_client_candidates()
+        if not successful_hosts:
+            raise RuntimeError(
+                "Could not query any configured AICaster client table: "
+                + "; ".join(query_errors)
+            )
+        unique: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
+        for item in candidates:
+            key = (
+                str(item.get("CasterHost") or "").casefold(),
+                str(item.get("Username") or "").casefold(),
+                str(item.get("receiverID") or "").casefold(),
+                str(item.get("Mountpoint") or "").casefold(),
+            )
+            unique[key] = item
+        return sorted(
+            unique.values(),
+            key=lambda item: (
+                str(item.get("CasterHost") or "").casefold(),
+                str(item.get("Mountpoint") or "").casefold(),
+                str(item.get("Username") or "").casefold(),
+            ),
+        )
 
     def _observation_matches_active_base(
         self,
@@ -6517,7 +6584,6 @@ class RoundRobinAdjustmentManager:
         station_code: str,
     ) -> Optional[Dict[str, Any]]:
         target = station_code.strip().lower()
-        alias_targets = {target, *_AICASTER_STATION_ALIASES.get(target, set())}
         exact_matches = []
         fuzzy_matches = []
         for candidate in candidates:
@@ -6527,7 +6593,7 @@ class RoundRobinAdjustmentManager:
             # Depending on the AICaster build, the station code can be exposed
             # as Username, receiverID, or Mountpoint.
             fields = {username.lower(), receiver_id.lower(), mountpoint.lower()}
-            if alias_targets & fields:
+            if target in fields:
                 exact_matches.append(candidate)
             elif any(target in field for field in fields):
                 fuzzy_matches.append(candidate)

@@ -226,6 +226,10 @@ class AdminManager {
                     const section = document.getElementById(`mqtt-${type}-section`);
                     if (section) section.style.display = e.target.checked ? 'block' : 'none';
 
+                    if (type === 'gnss' && e.target.checked) {
+                        this.loadAICasterClients();
+                    }
+
                     const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t =>
                         document.getElementById(`edit-${t}`)?.checked
                     );
@@ -1379,6 +1383,16 @@ class AdminManager {
         fwdToggleIds.forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
         const rtkTopicEl = document.getElementById('gnss-rtk-topic');
         if (rtkTopicEl) rtkTopicEl.value = '';
+        const aicasterSelect = document.getElementById('cfg-gnss-aicaster-client');
+        if (aicasterSelect) {
+            aicasterSelect.innerHTML = '<option value="">-- Chọn rover đang online trên AICaster --</option>';
+            delete aicasterSelect.dataset.loaded;
+        }
+        const aicasterStatus = document.getElementById('aicaster-client-status');
+        if (aicasterStatus) {
+            aicasterStatus.textContent = 'Danh sách lấy trực tiếp bằng GET /clienttable; tên trạm giám sát không bị thay đổi.';
+            aicasterStatus.className = 'd-block text-muted mt-2';
+        }
         this.syncForwardingWrapStates();
 
         document.getElementById('mqtt-empty-state').style.display = 'block';
@@ -1498,6 +1512,7 @@ class AdminManager {
                 offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
             }
             this.currentStationConfig = cfg;
+            this.loadAICasterClients(cfg.gnss_aicaster_client || {});
 
             // Populate custom MQTT Broker fields
             const mqttCfg = cfg.mqtt || {};
@@ -1845,6 +1860,99 @@ class AdminManager {
         });
 
         if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
+    }
+
+    async loadAICasterClients(selectedBinding = null) {
+        const select = document.getElementById('cfg-gnss-aicaster-client');
+        const statusEl = document.getElementById('aicaster-client-status');
+        const refreshButton = document.getElementById('btn-refresh-aicaster-clients');
+        if (!select) return;
+
+        let desired = selectedBinding && typeof selectedBinding === 'object'
+            ? selectedBinding
+            : null;
+        if (!desired && select.value) {
+            try { desired = JSON.parse(select.value); } catch (_) { desired = null; }
+        }
+        if (!desired) desired = this.currentStationConfig?.gnss_aicaster_client || {};
+
+        select.disabled = true;
+        if (refreshButton) refreshButton.disabled = true;
+        if (statusEl) {
+            statusEl.textContent = 'Đang đọc client đang online từ AICaster...';
+            statusEl.className = 'd-block text-info mt-2';
+        }
+
+        try {
+            const response = await fetch('/api/admin/gnss/aicaster-clients', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.detail || 'Không đọc được client table');
+
+            const clients = Array.isArray(payload.clients) ? payload.clients : [];
+            select.innerHTML = '<option value="">-- Chọn rover đang online trên AICaster --</option>';
+            let matched = false;
+            clients.forEach(client => {
+                const binding = {
+                    username: String(client.username || '').trim(),
+                    caster_host: String(client.caster_host || '').trim()
+                };
+                if (!binding.username) return;
+                const option = document.createElement('option');
+                option.value = JSON.stringify(binding);
+                const receiver = client.receiver_id ? ` · ID ${client.receiver_id}` : '';
+                option.textContent = `${binding.username} · ${client.mountpoint || 'không có MP'} · ${binding.caster_host}${receiver}`;
+                if (
+                    String(desired?.username || '').toLowerCase() === binding.username.toLowerCase()
+                    && (
+                        !desired?.caster_host
+                        || String(desired.caster_host).toLowerCase() === binding.caster_host.toLowerCase()
+                    )
+                ) {
+                    option.selected = true;
+                    matched = true;
+                }
+                select.appendChild(option);
+            });
+
+            if (desired?.username && !matched) {
+                const offlineOption = document.createElement('option');
+                offlineOption.value = JSON.stringify({
+                    username: String(desired.username),
+                    caster_host: String(desired.caster_host || '')
+                });
+                offlineOption.textContent = `${desired.username} · đã lưu, hiện không online`;
+                offlineOption.selected = true;
+                select.appendChild(offlineOption);
+            }
+            select.dataset.loaded = '1';
+            if (statusEl) {
+                statusEl.textContent = clients.length
+                    ? `Đã tìm thấy ${clients.length} client đang online. Chọn đúng rover vật lý của trạm này.`
+                    : 'AICaster hiện không báo client nào đang online.';
+                statusEl.className = `d-block ${clients.length ? 'text-success' : 'text-warning'} mt-2`;
+            }
+        } catch (error) {
+            select.innerHTML = '<option value="">-- Không tải được danh sách AICaster --</option>';
+            if (desired?.username) {
+                const savedOption = document.createElement('option');
+                savedOption.value = JSON.stringify({
+                    username: String(desired.username),
+                    caster_host: String(desired.caster_host || '')
+                });
+                savedOption.textContent = `${desired.username} · cấu hình đã lưu`;
+                savedOption.selected = true;
+                select.appendChild(savedOption);
+            }
+            if (statusEl) {
+                statusEl.textContent = `Không đọc được AICaster: ${error.message}`;
+                statusEl.className = 'd-block text-danger mt-2';
+            }
+        } finally {
+            select.disabled = false;
+            if (refreshButton) refreshButton.disabled = false;
+        }
     }
 
     syncSaveIntervalsForStep() {
@@ -2388,6 +2496,20 @@ class AdminManager {
             password: document.getElementById('station-mqtt-pass')?.value?.trim() || ''
         };
 
+        let gnssAicasterClient = { username: '', caster_host: '' };
+        const aicasterValue = document.getElementById('cfg-gnss-aicaster-client')?.value;
+        if (aicasterValue) {
+            try {
+                const selectedClient = JSON.parse(aicasterValue);
+                gnssAicasterClient = {
+                    username: String(selectedClient.username || '').trim(),
+                    caster_host: String(selectedClient.caster_host || '').trim()
+                };
+            } catch (error) {
+                console.error('Invalid AICaster client selection:', error);
+            }
+        }
+
         const config = {
             active_preset: this.activePreset || '',
             alerting: {
@@ -2457,6 +2579,7 @@ class AdminManager {
             },
             velocity_classification: this.velocityConfig,
             offline_thresholds: offlineThresholds,
+            gnss_aicaster_client: gnssAicasterClient,
             gnss_rtk_forwarding: rtkForwarding,
             vn2000: vn2000,
             vn2000_params: vn2000,
