@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 _ESS_MIN_SESSION_SAMPLES = 8
 _ESS_MAX_CONTIGUOUS_GAP_SECONDS = 5
 _BASELINE_STD_REJECTION_THRESHOLD_M = 0.1
+_AICASTER_STATION_ALIASES = {
+    "dap4_1": {"dap2_1"},
+    "dap4_2": {"dap2_2"},
+    "dap2_1": {"dap4_1"},
+    "dap2_2": {"dap4_2"},
+}
 
 
 def _spd_solve(matrix: Any, right_hand_side: Any) -> np.ndarray:
@@ -6511,6 +6517,7 @@ class RoundRobinAdjustmentManager:
         station_code: str,
     ) -> Optional[Dict[str, Any]]:
         target = station_code.strip().lower()
+        alias_targets = {target, *_AICASTER_STATION_ALIASES.get(target, set())}
         exact_matches = []
         fuzzy_matches = []
         for candidate in candidates:
@@ -6520,7 +6527,7 @@ class RoundRobinAdjustmentManager:
             # Depending on the AICaster build, the station code can be exposed
             # as Username, receiverID, or Mountpoint.
             fields = {username.lower(), receiver_id.lower(), mountpoint.lower()}
-            if target in fields:
+            if alias_targets & fields:
                 exact_matches.append(candidate)
             elif any(target in field for field in fields):
                 fuzzy_matches.append(candidate)

@@ -1080,6 +1080,13 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected["Username"], "generic-user")
         self.assertEqual(selected["receiverID"], "Dap1_2")
 
+    def test_client_table_can_match_known_station_alias(self):
+        client_table = "STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
+        selected = RoundRobinAdjustmentManager._select_client_info(client_table, "Dap4_1")
+
+        self.assertEqual(selected["Username"], "Dap2_1")
+        self.assertEqual(selected["Mountpoint"], "SinQuyen1")
+
     async def test_client_lookup_searches_all_configured_aicasters(self):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
