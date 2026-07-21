@@ -1483,6 +1483,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             route_stop_callback=AsyncMock(),
         )
         manager.STABILITY_HOLD_SECONDS = 0
+        manager.CROSS_BASE_PARTIAL_HANDOVER_GRACE_SECONDS = 0
         manager.rover_llh_cache["S1"] = {"lat": 21.0, "lon": 105.0, "alt": 10.0}
         manager._find_client_info = AsyncMock(return_value={
             "Username": "S1",
@@ -1504,7 +1505,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 return {
                     "sample_count": 6,
                     "rover_names": {"S2", "S3"},
-                    "sample_counts_by_rover": {"S2": 5, "S3": 1},
+                    "sample_counts_by_rover": {"S2": 4, "S3": 1},
                 }
             status = {
                 "sample_count": 40,
@@ -1559,6 +1560,69 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invalid_events, ["drift"])
         self.assertIn(manager.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS, delays)
         self.assertNotIn(manager.CROSS_BASE_STABLE_COLLECTION_SECONDS, delays)
+
+    async def test_partial_handover_uses_live_rover_and_does_not_wait_for_silent_peer(self):
+        progress_messages = []
+        status_calls = 0
+
+        async def route_start(*_args):
+            return True
+
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            route_start_callback=route_start,
+            route_stop_callback=AsyncMock(),
+            progress_callback=AsyncMock(
+                side_effect=lambda _project_id, message: progress_messages.append(message)
+            ),
+        )
+        manager.STABILITY_HOLD_SECONDS = 0
+        manager.CROSS_BASE_PARTIAL_HANDOVER_GRACE_SECONDS = 0
+        manager.rover_llh_cache["S1"] = {"lat": 21.0, "lon": 105.0, "alt": 10.0}
+        manager._find_client_info = AsyncMock(return_value={
+            "Username": "S1",
+            "receiverID": "101",
+            "Mountpoint": "CORS_A",
+        })
+        manager._send_set_command = AsyncMock(return_value=True)
+
+        def collection_status():
+            nonlocal status_calls
+            status_calls += 1
+            status = {
+                "sample_count": 20,
+                "rover_names": {"S2"},
+                "sample_counts_by_rover": {"S2": 20},
+                "rolling_stability_by_rover": {
+                    "S2": {
+                        "stable": True,
+                        "enough_samples": True,
+                        "latest_epoch": status_calls,
+                        "stable_run_seconds": 1,
+                        "delta_neu_m": (0.0, 0.0, 0.0),
+                    },
+                },
+            }
+            if status_calls >= 3:
+                status["solver_sample_counts_by_rover"] = {"S2": 61}
+                status["solver_durations_by_rover_seconds"] = {"S2": 60}
+            return status
+
+        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+            await manager._set_rover_as_temporary_base(
+                "S1",
+                project_id=17,
+                on_stable_collection_started=lambda: None,
+                collection_status_callback=collection_status,
+                expected_cross_rovers={"S2", "S3"},
+            )
+
+        self.assertEqual(status_calls, 3)
+        self.assertTrue(any(
+            "continuing with partial live coverage" in message
+            and "S3" in message
+            for message in progress_messages
+        ))
 
     async def test_rover_restore_retries_each_command_until_ack_before_advancing(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())

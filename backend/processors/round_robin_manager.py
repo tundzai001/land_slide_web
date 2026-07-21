@@ -944,6 +944,7 @@ class RoundRobinAdjustmentManager:
     # up to two minutes instead of prematurely cycling the base again.
     CROSS_BASE_SWITCH_TIMEOUT_SECONDS = 120
     CROSS_BASE_HANDOVER_MIN_SAMPLES = 5
+    CROSS_BASE_PARTIAL_HANDOVER_GRACE_SECONDS = 5
     CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS = 5
     CROSS_BASE_STABLE_COLLECTION_SECONDS = 60
     CROSS_BASE_STABLE_MIN_DISTINCT_EPOCHS = 30
@@ -3871,7 +3872,7 @@ class RoundRobinAdjustmentManager:
                             len(cross_edges) >= required_cross_edges
                             and len(components) == 1
                         )
-                        if collected_count > 0 and not missing_rovers:
+                        if collected_count > 0:
                             mandatory_rotation_completed = True
                             if not is_graph_recovery:
                                 completed_mandatory_rotations.add(
@@ -3884,7 +3885,13 @@ class RoundRobinAdjustmentManager:
                                     f"complete; collected {collected_count} solver-eligible "
                                     "rover-to-rover AGRICA baseline(s) from "
                                     f"{', '.join(sorted(collected_rovers))}. "
-                                    f"Full-rotation progress "
+                                    + (
+                                        "No usable edge from "
+                                        f"{', '.join(missing_rovers)}; final graph connectivity "
+                                        "will decide whether adjustment can proceed. "
+                                        if missing_rovers else ""
+                                    )
+                                    + f"Full-rotation progress "
                                     f"{len(completed_mandatory_rotations)}/"
                                     f"{initial_rotation_count}; continuing with every "
                                     "configured rover before solving."
@@ -4011,13 +4018,15 @@ class RoundRobinAdjustmentManager:
                         len(final_cross_edges) >= max(len(rovers) - 1, 1)
                         and len(_graph_components(rovers, final_cross_edges)) == 1
                     )
-                    if not (
-                        cluster.get("skip_offline_rovers")
-                        and cross_graph_connected
-                    ):
+                    if not cross_graph_connected:
+                        components = _graph_components(rovers, final_cross_edges)
                         raise RuntimeError(
-                            "Full temporary-BASE rotation is incomplete; missing base "
-                            "rotation(s): " + ", ".join(sorted(missing_rotation_keys))
+                            "Temporary-BASE coverage is insufficient: missing productive "
+                            "base rotation(s) "
+                            + ", ".join(sorted(missing_rotation_keys))
+                            + "; cross-baseline graph remains disconnected (components: "
+                            + " | ".join(", ".join(sorted(component)) for component in components)
+                            + ")"
                         )
                     warning = (
                         "Proceeding with connected partial rotation coverage; skipped "
@@ -4501,6 +4510,8 @@ class RoundRobinAdjustmentManager:
                 deadline = loop.time() + self.CROSS_BASE_SWITCH_TIMEOUT_SECONDS
                 latest_status: dict = {}
                 handover_verified = False
+                verified_participants: set[str] = set()
+                partial_handover_started_at: Optional[float] = None
                 while True:
                     latest_status = dict(collection_status_callback() or {})
                     participants = set(latest_status.get("rover_names") or ())
@@ -4523,9 +4534,28 @@ class RoundRobinAdjustmentManager:
                         else participants
                     )
                     sample_count = int(latest_status.get("sample_count") or 0)
-                    handover_verified = sample_count > 0 and (
-                        not expected or expected.issubset(stable_participants)
+                    verified_participants = (
+                        stable_participants & expected
+                        if expected else set(stable_participants)
                     )
+                    # One stable rover is sufficient to prove that this
+                    # temporary RTCM source is live. Requiring every configured
+                    # rover made one silent receiver invalidate useful edges
+                    # from all the other receivers. Overall solvability is
+                    # enforced later by the connected cross-baseline graph. A
+                    # short grace window still lets other healthy rovers join
+                    # before the stability target set is frozen.
+                    now = loop.time()
+                    if sample_count > 0 and verified_participants:
+                        if partial_handover_started_at is None:
+                            partial_handover_started_at = now
+                        all_expected_verified = (
+                            not expected or expected.issubset(stable_participants)
+                        )
+                        handover_verified = all_expected_verified or (
+                            now - partial_handover_started_at
+                            >= self.CROSS_BASE_PARTIAL_HANDOVER_GRACE_SECONDS
+                        )
                     if handover_verified or loop.time() >= deadline:
                         break
                     await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
@@ -4536,12 +4566,23 @@ class RoundRobinAdjustmentManager:
                         project_id,
                         (
                             f"{rover_code}: temporary-base handover verified from "
-                            f"{', '.join(sorted(stable_participants))} after at least "
+                            f"{', '.join(sorted(verified_participants))} after at least "
                             f"{self.CROSS_BASE_HANDOVER_MIN_SAMPLES} distinct epochs each; waiting "
                             f"{self.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS}s for the new FIXED "
                             "solution to settle before opening the solver window."
                         ),
                     )
+                    unavailable_targets = sorted(expected - verified_participants)
+                    if unavailable_targets:
+                        await self._emit_progress(
+                            project_id,
+                            (
+                                f"{rover_code}: continuing with partial live coverage; "
+                                f"no verified handover from {', '.join(unavailable_targets)}. "
+                                "These rovers will not invalidate the useful cross-baselines; "
+                                "the final connected-graph check remains mandatory."
+                            ),
+                        )
                     await asyncio.sleep(self.CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS)
                     await self._emit_progress(
                         project_id,
@@ -4558,7 +4599,7 @@ class RoundRobinAdjustmentManager:
                             "the solver window."
                         ),
                     )
-                    stability_targets = expected or set(stable_participants)
+                    stability_targets = set(verified_participants)
                     solver_window_open = False
                     reset_count = 0
                     drift_failure_counts = {

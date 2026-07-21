@@ -1168,7 +1168,7 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
 
 
 class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_failed_mandatory_rotation_aborts_before_solver(self):
+    async def test_failed_rotation_can_proceed_when_other_base_connects_graph(self):
         attempted_rovers = []
         progress_messages = []
         published_results = []
@@ -1218,12 +1218,15 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(70)
 
-        self.assertEqual(attempted_rovers, ["R1", "R1"])
-        self.assertEqual(published_results, [])
-        self.assertEqual(len(errors), 1)
-        self.assertIn("Mandatory temporary-BASE rotation R1", errors[0])
+        self.assertEqual(attempted_rovers, ["R1", "R1", "R2"])
+        self.assertEqual(len(published_results), 1)
+        self.assertEqual(errors, [])
+        self.assertTrue(any(
+            "Proceeding with connected partial rotation coverage" in message
+            for message in progress_messages
+        ))
 
-    async def test_incomplete_rotation_does_not_fall_back_to_connected_subset(self):
+    async def test_partial_rotation_uses_targeted_recovery_to_connect_graph(self):
         attempted_rovers = []
         expected_targets = []
         published_results = []
@@ -1272,11 +1275,37 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         await manager._run_cycle(71)
 
-        self.assertEqual(attempted_rovers, ["R1", "R1"])
-        self.assertEqual(expected_targets, [{"R2", "R3"}, {"R2", "R3"}])
+        self.assertEqual(attempted_rovers, ["R1", "R2", "R2", "R3", "R3", "R1"])
+        self.assertEqual(expected_targets[0], {"R2", "R3"})
+        self.assertEqual(expected_targets[-1], {"R3"})
+        self.assertEqual(len(published_results), 1)
+        self.assertEqual(errors, [])
+
+    async def test_disconnected_cross_graph_still_aborts_adjustment(self):
+        published_results = []
+        errors = []
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            result_callback=lambda _project_id, result: published_results.append(result),
+            error_callback=lambda _project_id, message: errors.append(message),
+        )
+        manager.configure_project(74, [{
+            "name": "disconnected-cluster",
+            "stations": [701, 702],
+            "rovers": ["R1", "R2"],
+        }])
+        manager._freeze_temporary_base_coordinates = Mock(
+            return_value={"R1": {}, "R2": {}}
+        )
+        manager._set_rover_as_temporary_base = AsyncMock()
+        manager._build_cluster_result = Mock(return_value={"rover_count": 2})
+
+        await manager._run_cycle(74)
+
         self.assertEqual(published_results, [])
         self.assertEqual(len(errors), 1)
-        self.assertIn("did not collect every other rover", errors[0])
+        self.assertIn("cross-baseline graph remains disconnected", errors[0])
+        manager._build_cluster_result.assert_not_called()
 
     async def test_high_std_cross_samples_do_not_stop_rotation_retry(self):
         attempted_rovers = []
@@ -1356,7 +1385,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(attempted_rovers, ["R1", "R2", "R3"])
         self.assertTrue(any(
-            "all 3/3 mandatory temporary-BASE rotations completed" in message
+            "3/3 temporary-BASE rotations completed" in message
             for message in progress_messages
         ))
 
@@ -1408,7 +1437,11 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertGreaterEqual(manager._find_client_info.await_count, 2)
-        manager._find_client_info.assert_any_await("R2", log_missing=False)
+        manager._find_client_info.assert_any_await(
+            "R2",
+            project_id=71,
+            log_missing=False,
+        )
         self.assertTrue(cluster["observations"])
         self.assertTrue(all(
             not record.solver_eligible
