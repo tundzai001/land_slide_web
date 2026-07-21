@@ -2675,20 +2675,20 @@ window.LegacyTemplates = {
                                     <div class="p-3 mb-3 rounded border"
                                         style="background:rgba(6,182,212,.06);border-color:rgba(6,182,212,.28)!important">
                                         <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-                                            <label class="form-label small fw-semibold mb-0" for="cfg-gnss-aicaster-client">
-                                                <i class="bi bi-broadcast-pin text-info me-1"></i>AICaster client điều khiển bình sai
+                                            <label class="form-label small fw-semibold mb-0" for="cfg-gnss-aicaster-user">
+                                                <i class="bi bi-broadcast-pin text-info me-1"></i>User AICaster của rover
                                             </label>
                                             <button type="button" class="btn btn-sm btn-outline-info"
-                                                id="btn-refresh-aicaster-clients"
-                                                onclick="window.adminManager.loadAICasterClients()">
+                                                id="btn-refresh-aicaster-users"
+                                                onclick="window.adminManager.loadAICasterUsers()">
                                                 <i class="bi bi-arrow-clockwise me-1"></i>Làm mới
                                             </button>
                                         </div>
-                                        <select class="form-select form-select-sm" id="cfg-gnss-aicaster-client">
-                                            <option value="">-- Chọn rover đang online trên AICaster --</option>
+                                        <select class="form-select form-select-sm" id="cfg-gnss-aicaster-user">
+                                            <option value="">-- Chọn user AICaster của rover --</option>
                                         </select>
-                                        <small class="d-block text-muted mt-2" id="aicaster-client-status">
-                                            Danh sách lấy trực tiếp bằng GET /clienttable; tên trạm giám sát không bị thay đổi.
+                                        <small class="d-block text-muted mt-2" id="aicaster-user-status">
+                                            Danh sách lấy trực tiếp bằng GET /usertable; mật khẩu không được đưa ra trình duyệt.
                                         </small>
                                     </div>
 

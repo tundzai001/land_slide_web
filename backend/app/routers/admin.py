@@ -459,7 +459,7 @@ def get_default_station_config():
                 "VdH": True    # Vận tốc U (mm/phút)
             }
         },
-        "gnss_aicaster_client": {
+        "gnss_aicaster_user": {
             "username": "",
             "caster_host": ""
         },

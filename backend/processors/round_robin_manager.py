@@ -6246,7 +6246,7 @@ class RoundRobinAdjustmentManager:
         """Find a rover across every configured AICaster client table."""
 
         candidates, successful_hosts, query_errors = await self._fetch_active_client_candidates()
-        binding = self._configured_aicaster_client(project_id, station_code)
+        binding = self._configured_aicaster_user(project_id, station_code)
         configured_username = str(binding.get("username") or "").strip()
         configured_host = str(binding.get("caster_host") or "").strip()
         eligible_candidates = candidates
@@ -6299,7 +6299,7 @@ class RoundRobinAdjustmentManager:
             )
         return None
 
-    def _configured_aicaster_client(
+    def _configured_aicaster_user(
         self,
         project_id: Optional[int],
         station_code: str,
@@ -6309,7 +6309,7 @@ class RoundRobinAdjustmentManager:
         session = self._sessions.get(int(project_id)) or {}
         target = str(station_code or "").strip().casefold()
         for cluster in session.get("clusters", []):
-            bindings = cluster.get("aicaster_clients") or {}
+            bindings = cluster.get("aicaster_users") or {}
             for code, binding in bindings.items():
                 if str(code).strip().casefold() == target and isinstance(binding, dict):
                     return binding
@@ -6340,29 +6340,45 @@ class RoundRobinAdjustmentManager:
             )
         return candidates, successful_hosts, query_errors
 
-    async def list_active_aicaster_clients(self) -> List[Dict[str, Any]]:
-        """Return live AICaster client identities for the station setup UI."""
+    async def list_aicaster_users(self) -> List[Dict[str, Any]]:
+        """Return configured AICaster users without exposing their passwords."""
 
-        candidates, successful_hosts, query_errors = await self._fetch_active_client_candidates()
+        results = await asyncio.gather(
+            *(self._query_user_table(host) for host in self.caster_hosts),
+            return_exceptions=True,
+        )
+        users: List[Dict[str, Any]] = []
+        successful_hosts: List[str] = []
+        query_errors: List[str] = []
+        for host, result in zip(self.caster_hosts, results):
+            if isinstance(result, BaseException):
+                detail = str(result).strip() or result.__class__.__name__
+                query_errors.append(f"{host}:{self.caster_port} ({detail})")
+                continue
+            successful_hosts.append(host)
+            users.extend(
+                self._parse_user_table(
+                    result,
+                    caster_host=host,
+                    caster_port=self.caster_port,
+                )
+            )
         if not successful_hosts:
             raise RuntimeError(
-                "Could not query any configured AICaster client table: "
+                "Could not query any configured AICaster user table: "
                 + "; ".join(query_errors)
             )
-        unique: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
-        for item in candidates:
+        unique: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for item in users:
             key = (
                 str(item.get("CasterHost") or "").casefold(),
                 str(item.get("Username") or "").casefold(),
-                str(item.get("receiverID") or "").casefold(),
-                str(item.get("Mountpoint") or "").casefold(),
             )
             unique[key] = item
         return sorted(
             unique.values(),
             key=lambda item: (
                 str(item.get("CasterHost") or "").casefold(),
-                str(item.get("Mountpoint") or "").casefold(),
                 str(item.get("Username") or "").casefold(),
             ),
         )
@@ -6557,6 +6573,53 @@ class RoundRobinAdjustmentManager:
                     await writer.wait_closed()
                 except Exception:
                     pass
+
+    async def _query_user_table(self, caster_host: str) -> str:
+        writer = None
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(caster_host, self.caster_port),
+                timeout=10.0,
+            )
+            writer.write(b"GET /usertable HTTP/1.0\r\n\r\n")
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(), timeout=10.0)
+            return data.decode(errors="ignore")
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _parse_user_table(
+        user_table: str,
+        caster_host: Optional[str] = None,
+        caster_port: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        users = []
+        for line in user_table.strip().splitlines():
+            parts = [part.strip() for part in line.split(";")]
+            if len(parts) <= 3 or parts[0] != "STR" or not parts[1]:
+                continue
+            # parts[2] is the password. It is intentionally discarded here and
+            # must never leave the backend API.
+            users.append({
+                "Username": parts[1],
+                "Mountpoints": [
+                    mountpoint.strip()
+                    for mountpoint in parts[3].split(",")
+                    if mountpoint.strip()
+                ],
+                "Status": parts[5] if len(parts) > 5 else "",
+                "Identifier": parts[6] if len(parts) > 6 else "",
+                "ActiveClientCount": parts[7] if len(parts) > 7 else "",
+                "CasterHost": caster_host,
+                "CasterPort": caster_port,
+            })
+        return users
 
     @staticmethod
     def _parse_client_table(

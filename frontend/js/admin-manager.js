@@ -227,7 +227,7 @@ class AdminManager {
                     if (section) section.style.display = e.target.checked ? 'block' : 'none';
 
                     if (type === 'gnss' && e.target.checked) {
-                        this.loadAICasterClients();
+                        this.loadAICasterUsers();
                     }
 
                     const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t =>
@@ -1383,14 +1383,14 @@ class AdminManager {
         fwdToggleIds.forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
         const rtkTopicEl = document.getElementById('gnss-rtk-topic');
         if (rtkTopicEl) rtkTopicEl.value = '';
-        const aicasterSelect = document.getElementById('cfg-gnss-aicaster-client');
+        const aicasterSelect = document.getElementById('cfg-gnss-aicaster-user');
         if (aicasterSelect) {
-            aicasterSelect.innerHTML = '<option value="">-- Chọn rover đang online trên AICaster --</option>';
+            aicasterSelect.innerHTML = '<option value="">-- Chọn user AICaster của rover --</option>';
             delete aicasterSelect.dataset.loaded;
         }
-        const aicasterStatus = document.getElementById('aicaster-client-status');
+        const aicasterStatus = document.getElementById('aicaster-user-status');
         if (aicasterStatus) {
-            aicasterStatus.textContent = 'Danh sách lấy trực tiếp bằng GET /clienttable; tên trạm giám sát không bị thay đổi.';
+            aicasterStatus.textContent = 'Danh sách lấy trực tiếp bằng GET /usertable; mật khẩu không được đưa ra trình duyệt.';
             aicasterStatus.className = 'd-block text-muted mt-2';
         }
         this.syncForwardingWrapStates();
@@ -1512,7 +1512,9 @@ class AdminManager {
                 offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
             }
             this.currentStationConfig = cfg;
-            this.loadAICasterClients(cfg.gnss_aicaster_client || {});
+            this.loadAICasterUsers(
+                cfg.gnss_aicaster_user || cfg.gnss_aicaster_client || {}
+            );
 
             // Populate custom MQTT Broker fields
             const mqttCfg = cfg.mqtt || {};
@@ -1862,10 +1864,10 @@ class AdminManager {
         if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
     }
 
-    async loadAICasterClients(selectedBinding = null) {
-        const select = document.getElementById('cfg-gnss-aicaster-client');
-        const statusEl = document.getElementById('aicaster-client-status');
-        const refreshButton = document.getElementById('btn-refresh-aicaster-clients');
+    async loadAICasterUsers(selectedBinding = null) {
+        const select = document.getElementById('cfg-gnss-aicaster-user');
+        const statusEl = document.getElementById('aicaster-user-status');
+        const refreshButton = document.getElementById('btn-refresh-aicaster-users');
         if (!select) return;
 
         let desired = selectedBinding && typeof selectedBinding === 'object'
@@ -1874,35 +1876,44 @@ class AdminManager {
         if (!desired && select.value) {
             try { desired = JSON.parse(select.value); } catch (_) { desired = null; }
         }
-        if (!desired) desired = this.currentStationConfig?.gnss_aicaster_client || {};
+        if (!desired) {
+            desired = this.currentStationConfig?.gnss_aicaster_user
+                || this.currentStationConfig?.gnss_aicaster_client
+                || {};
+        }
 
         select.disabled = true;
         if (refreshButton) refreshButton.disabled = true;
         if (statusEl) {
-            statusEl.textContent = 'Đang đọc client đang online từ AICaster...';
+            statusEl.textContent = 'Đang đọc danh sách user từ AICaster...';
             statusEl.className = 'd-block text-info mt-2';
         }
 
         try {
-            const response = await fetch('/api/admin/gnss/aicaster-clients', {
+            const response = await fetch('/api/admin/gnss/aicaster-users', {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             const payload = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(payload.detail || 'Không đọc được client table');
+            if (!response.ok) throw new Error(payload.detail || 'Không đọc được user table');
 
-            const clients = Array.isArray(payload.clients) ? payload.clients : [];
-            select.innerHTML = '<option value="">-- Chọn rover đang online trên AICaster --</option>';
+            const users = Array.isArray(payload.users) ? payload.users : [];
+            select.innerHTML = '<option value="">-- Chọn user AICaster của rover --</option>';
             let matched = false;
-            clients.forEach(client => {
+            users.forEach(user => {
                 const binding = {
-                    username: String(client.username || '').trim(),
-                    caster_host: String(client.caster_host || '').trim()
+                    username: String(user.username || '').trim(),
+                    caster_host: String(user.caster_host || '').trim()
                 };
                 if (!binding.username) return;
                 const option = document.createElement('option');
                 option.value = JSON.stringify(binding);
-                const receiver = client.receiver_id ? ` · ID ${client.receiver_id}` : '';
-                option.textContent = `${binding.username} · ${client.mountpoint || 'không có MP'} · ${binding.caster_host}${receiver}`;
+                const mountpoints = Array.isArray(user.mountpoints) && user.mountpoints.length
+                    ? user.mountpoints.join(', ')
+                    : 'không giới hạn MP';
+                const active = user.active_client_count !== ''
+                    ? ` · ${user.active_client_count} client`
+                    : '';
+                option.textContent = `${binding.username} · ${mountpoints} · ${binding.caster_host}${active}`;
                 if (
                     String(desired?.username || '').toLowerCase() === binding.username.toLowerCase()
                     && (
@@ -1922,16 +1933,16 @@ class AdminManager {
                     username: String(desired.username),
                     caster_host: String(desired.caster_host || '')
                 });
-                offlineOption.textContent = `${desired.username} · đã lưu, hiện không online`;
+                offlineOption.textContent = `${desired.username} · đã lưu, hiện không còn trong user table`;
                 offlineOption.selected = true;
                 select.appendChild(offlineOption);
             }
             select.dataset.loaded = '1';
             if (statusEl) {
-                statusEl.textContent = clients.length
-                    ? `Đã tìm thấy ${clients.length} client đang online. Chọn đúng rover vật lý của trạm này.`
-                    : 'AICaster hiện không báo client nào đang online.';
-                statusEl.className = `d-block ${clients.length ? 'text-success' : 'text-warning'} mt-2`;
+                statusEl.textContent = users.length
+                    ? `Đã đọc ${users.length} user AICaster. Chọn tài khoản mà rover vật lý đang sử dụng.`
+                    : 'User table của AICaster hiện không có tài khoản.';
+                statusEl.className = `d-block ${users.length ? 'text-success' : 'text-warning'} mt-2`;
             }
         } catch (error) {
             select.innerHTML = '<option value="">-- Không tải được danh sách AICaster --</option>';
@@ -2496,12 +2507,12 @@ class AdminManager {
             password: document.getElementById('station-mqtt-pass')?.value?.trim() || ''
         };
 
-        let gnssAicasterClient = { username: '', caster_host: '' };
-        const aicasterValue = document.getElementById('cfg-gnss-aicaster-client')?.value;
+        let gnssAicasterUser = { username: '', caster_host: '' };
+        const aicasterValue = document.getElementById('cfg-gnss-aicaster-user')?.value;
         if (aicasterValue) {
             try {
                 const selectedClient = JSON.parse(aicasterValue);
-                gnssAicasterClient = {
+                gnssAicasterUser = {
                     username: String(selectedClient.username || '').trim(),
                     caster_host: String(selectedClient.caster_host || '').trim()
                 };
@@ -2579,7 +2590,7 @@ class AdminManager {
             },
             velocity_classification: this.velocityConfig,
             offline_thresholds: offlineThresholds,
-            gnss_aicaster_client: gnssAicasterClient,
+            gnss_aicaster_user: gnssAicasterUser,
             gnss_rtk_forwarding: rtkForwarding,
             vn2000: vn2000,
             vn2000_params: vn2000,

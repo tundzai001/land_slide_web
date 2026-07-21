@@ -2114,15 +2114,19 @@ def _normalize_active_adjustment_clusters(
 
         cluster["stations"] = station_ids
         cluster["rovers"] = [stations_by_id[station_id].station_code for station_id in station_ids]
-        cluster["aicaster_clients"] = {}
+        cluster["aicaster_users"] = {}
         for station_id in station_ids:
             station = stations_by_id[station_id]
             station_config = station.config if isinstance(station.config, dict) else {}
-            binding = station_config.get("gnss_aicaster_client") or {}
+            binding = (
+                station_config.get("gnss_aicaster_user")
+                or station_config.get("gnss_aicaster_client")
+                or {}
+            )
             username = str(binding.get("username") or "").strip()
             if not username:
                 continue
-            cluster["aicaster_clients"][station.station_code] = {
+            cluster["aicaster_users"][station.station_code] = {
                 "username": username,
                 "caster_host": str(binding.get("caster_host") or "").strip(),
             }
@@ -2190,29 +2194,31 @@ def _restrict_adjustment_clusters_to_online_stations(
     return active_clusters, sorted(set(excluded_station_ids))
 
 
-@app.get("/api/admin/gnss/aicaster-clients")
-async def list_active_aicaster_clients(
+@app.get("/api/admin/gnss/aicaster-users")
+async def list_aicaster_users(
     current_user: model_auth.User = Depends(
         auth.require_permission(auth.Permission.EDIT_STATIONS)
     ),
 ):
-    """List live rover identities reported by AICaster GET /clienttable."""
+    """List configured accounts reported by AICaster GET /usertable."""
 
     try:
-        clients = await mqtt_service.round_robin_manager.list_active_aicaster_clients()
+        users = await mqtt_service.round_robin_manager.list_aicaster_users()
     except Exception as exc:
-        logger.error("Could not load AICaster client table: %s", exc)
+        logger.error("Could not load AICaster user table: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
-        "clients": [
+        "users": [
             {
                 "username": item.get("Username") or "",
-                "receiver_id": item.get("receiverID") or "",
-                "mountpoint": item.get("Mountpoint") or "",
+                "mountpoints": item.get("Mountpoints") or [],
+                "status": item.get("Status") or "",
+                "identifier": item.get("Identifier") or "",
+                "active_client_count": item.get("ActiveClientCount") or "",
                 "caster_host": item.get("CasterHost") or "",
                 "caster_port": item.get("CasterPort"),
             }
-            for item in clients
+            for item in users
         ]
     }
 

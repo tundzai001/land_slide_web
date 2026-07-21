@@ -1107,7 +1107,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         manager.configure_project(94, [{
             "stations": [4, 2],
             "rovers": ["Dap4_1", "Dap1_2"],
-            "aicaster_clients": {
+            "aicaster_users": {
                 "Dap4_1": {
                     "username": "Dap2_1",
                     "caster_host": "aitogy.com.vn",
@@ -1123,23 +1123,28 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected["Username"], "Dap2_1")
         self.assertEqual(selected["Mountpoint"], "SinQuyen1")
 
-    async def test_active_aicaster_clients_are_deduplicated_for_setup_ui(self):
+    async def test_aicaster_users_are_loaded_without_exposing_passwords(self):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             caster_host="aitogy.com.vn",
             caster_hosts=["aitogy.com.vn"],
         )
-        manager._query_client_table = AsyncMock(
+        manager._query_user_table = AsyncMock(
             return_value=(
-                "STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
-                "STR;Dap2_1;1.4.10;SinQuyen1;0;\r\n"
+                "USERTABLE 200 OK\r\n\r\n"
+                "STR;Dap2_1;secret;SinQuyen1,SinQuyen2,;0;online;dam;1;2;\r\n"
+                "STR;Dap2_1;secret;SinQuyen1,SinQuyen2,;0;online;dam;1;2;\r\n"
+                "ENDUSERTABLE\r\n"
             )
         )
 
-        clients = await manager.list_active_aicaster_clients()
+        users = await manager.list_aicaster_users()
 
-        self.assertEqual(len(clients), 1)
-        self.assertEqual(clients[0]["Username"], "Dap2_1")
+        self.assertEqual(len(users), 1)
+        self.assertEqual(users[0]["Username"], "Dap2_1")
+        self.assertEqual(users[0]["Mountpoints"], ["SinQuyen1", "SinQuyen2"])
+        self.assertNotIn("Password", users[0])
+        self.assertNotIn("secret", str(users[0]))
 
     async def test_client_lookup_can_poll_missing_session_without_error_spam(self):
         manager = RoundRobinAdjustmentManager(
