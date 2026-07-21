@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
+import json
 import logging
-import statistics
+import shutil
+import sys
 import time
+from pathlib import Path
 
 from backend.app.config import settings
 from backend.app.modules.ntrip_pusher import ntrip_manager
 from backend.processors.gnss_adjustment_runtime import parse_agrica
 from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
 from live_base_output_probe import LiveFeed, _UnusedPublisher
+from live_gnss_probe import TOPICS
 
 
 PROJECT_ID = 9003
 STATIONS = {
+    "Dap2_1": 8,
+    "Dap2_2": 9,
     "Dap1_1": 5,
     "Dap1_2": 7,
     "Dap1_3": 6,
@@ -28,6 +35,38 @@ def ts() -> str:
 
 
 async def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--stations",
+        nargs="+",
+        choices=sorted(STATIONS),
+        default=list(STATIONS),
+    )
+    parser.add_argument("--base", default="SinQuyen2")
+    parser.add_argument("--cluster-name", default="Sin Quyen live local probe")
+    parser.add_argument("--preflight-seconds", type=float, default=30.0)
+    parser.add_argument("--seed-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--restore-only", action="store_true")
+    parser.add_argument(
+        "--output",
+        default="live_full_adjustment_result.json",
+        help="Write the complete successful adjustment result as JSON.",
+    )
+    parser.add_argument(
+        "--xlsx-output",
+        default="",
+        help="Also write the production adjustment workbook to this path.",
+    )
+    args = parser.parse_args()
+    selected_stations = {
+        station: STATIONS[station]
+        for station in dict.fromkeys(args.stations)
+    }
+    selected_topics = {
+        topic: station
+        for topic, station in TOPICS.items()
+        if station in selected_stations
+    }
     results: list[dict] = []
     errors: list[str] = []
 
@@ -115,21 +154,59 @@ async def main() -> int:
                 payload.decode("utf-8", errors="ignore"),
                 {
                     "project_id": PROJECT_ID,
-                    "station_id": STATIONS[station],
+                    "station_id": selected_stations[station],
                     "station_code": station,
                 },
             )
 
         loop.call_soon_threadsafe(ingest)
 
-    feed = LiveFeed(manager, payload_callback=process_payload)
+    feed = LiveFeed(
+        manager,
+        payload_callback=process_payload,
+        topics=selected_topics,
+    )
     feed.start()
     try:
+        if args.restore_only:
+            if len(selected_stations) != 1:
+                raise RuntimeError("--restore-only requires exactly one station")
+            station = next(iter(selected_stations))
+            await asyncio.sleep(3)
+            client_info = await manager._find_client_info(station)
+            if not client_info:
+                raise RuntimeError(
+                    f"No active AICaster session is available to restore {station}"
+                )
+            print(
+                f"[{ts()}] RESTORE ONLY: {station} via "
+                f"{client_info.get('CasterHost')}:{client_info.get('CasterPort')}/"
+                f"{client_info.get('Mountpoint')}",
+                flush=True,
+            )
+            await manager._restore_rover_output_sequence(
+                rover_code=station,
+                mountpoint=str(client_info.get("Mountpoint") or ""),
+                client_info=client_info,
+                commands=manager._build_unicore_rover_config(),
+                project_id=None,
+            )
+            restore_started = time.monotonic()
+            deadline = restore_started + 20
+            while time.monotonic() < deadline:
+                if feed.latest_agrica_time(station) >= restore_started:
+                    print(f"[{ts()}] RESTORE VERIFIED: fresh AGRICA from {station}", flush=True)
+                    return 0
+                await asyncio.sleep(0.25)
+            raise RuntimeError(
+                f"{station} acknowledged ROVER restore but emitted no fresh AGRICA"
+            )
+
         print(f"[{ts()}] MQTT connected; sampling live fixed-base identity ...", flush=True)
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + max(5.0, args.preflight_seconds)
         observations = {}
         while time.monotonic() < deadline:
-            for station, station_id in STATIONS.items():
+            for station, station_id in selected_stations.items():
                 with feed.lock:
                     latest = feed.latest_agrica.get(station)
                 if not latest:
@@ -142,18 +219,13 @@ async def main() -> int:
                 )
                 if parsed and parsed[-1].rover_llh and parsed[-1].base_llh:
                     observations[station] = parsed[-1]
-            if len(observations) == len(STATIONS):
+            if len(observations) == len(selected_stations):
                 break
             await asyncio.sleep(0.25)
-        if len(observations) != len(STATIONS):
-            missing = sorted(set(STATIONS) - set(observations))
+        if len(observations) != len(selected_stations):
+            missing = sorted(set(selected_stations) - set(observations))
             raise RuntimeError(f"Missing complete live AGRICA from: {', '.join(missing)}")
 
-        base_llh = tuple(
-            statistics.median(obs.base_llh[axis] for obs in observations.values())
-            for axis in range(3)
-        )
-        print(f"[{ts()}] Fixed BASE LLH from live AGRICA: {base_llh}", flush=True)
         for station, obs in observations.items():
             print(
                 f"[{ts()}] SEED LIVE {station}: pos_type={obs.position_type}, "
@@ -162,42 +234,117 @@ async def main() -> int:
                 flush=True,
             )
 
+        cors_stations = await asyncio.to_thread(
+            manager._cors_api_request_sync,
+            "GET",
+            "/api/public/map-stations",
+        )
+        if isinstance(cors_stations, dict):
+            cors_stations = cors_stations.get("value") or cors_stations.get("items") or []
+        base_station = next(
+            (
+                station
+                for station in cors_stations
+                if str(station.get("name") or station.get("code") or "").strip().casefold()
+                == str(args.base).strip().casefold()
+            ),
+            None,
+        )
+        if base_station is None:
+            raise RuntimeError(f"CORS base {args.base!r} was not found")
+        base_config = base_station.get("service_config") or {}
+        base_server_id = next(
+            (
+                server_id
+                for server_id in (1, 2)
+                if str(base_config.get(f"mountpoint{server_id}") or "").strip().casefold()
+                == str(args.base).strip().casefold()
+            ),
+            None,
+        )
+        if base_server_id is None:
+            raise RuntimeError(f"CORS base {args.base!r} has no matching S1/S2 mountpoint")
+        base_llh = (
+            float(base_station["lat"]),
+            float(base_station["lon"]),
+            float(base_station.get("alt") or 0.0),
+        )
+        print(
+            f"[{ts()}] CORS SELECTED: {args.base} status={base_station.get('status')} "
+            f"serial={base_station.get('serial')} S{base_server_id} LLH={base_llh}",
+            flush=True,
+        )
+
         manager.configure_project(
             PROJECT_ID,
             [{
-                "name": "Dam 1 live local probe",
-                "stations": list(STATIONS.values()),
-                "rovers": list(STATIONS),
-                "base_station": "SinQuyen1",
+                "name": str(args.cluster_name),
+                "stations": list(selected_stations.values()),
+                "rovers": list(selected_stations),
+                "base_station": str(args.base),
                 "base_lat": base_llh[0],
                 "base_lon": base_llh[1],
                 "base_alt": base_llh[2],
-                "base_stream_host": "aitogy.com.vn",
-                "base_stream_port": 2101,
-                "base_stream_mp": "SinQuyen1",
-                "round_robin_route_host": "aitogy.com.vn",
-                "round_robin_route_port": 2101,
-                "round_robin_route_mountpoint": "SinQuyen1",
+                "base_stream_host": str(base_config.get(f"serverhost{base_server_id}") or ""),
+                "base_stream_port": int(base_config.get(f"port{base_server_id}") or 2101),
+                "base_stream_mp": str(base_config.get(f"mountpoint{base_server_id}") or ""),
+                "base_service_config": base_config,
+                "base_serial": str(base_station.get("serial") or ""),
+                "base_server_id": base_server_id,
+                "round_robin_route_host": str(base_config.get(f"serverhost{base_server_id}") or ""),
+                "round_robin_route_port": int(base_config.get(f"port{base_server_id}") or 2101),
+                "round_robin_route_mountpoint": str(base_config.get(f"mountpoint{base_server_id}") or ""),
                 "round_robin_route_password": settings.NTRIP_SOURCE_PASSWORD,
+                "skip_offline_rovers": True,
             }],
         )
 
-        print(f"[{ts()}] Collecting 10 live fixed-base seed epochs ...", flush=True)
-        seed_deadline = time.monotonic() + 30
+        topology = await manager.prepare_common_fixed_base_seed(PROJECT_ID)
+        print(f"[{ts()}] COMMON BASE TOPOLOGY: {topology}", flush=True)
+
+        print(f"[{ts()}] Collecting source/length-verified live seed ...", flush=True)
+        seed_deadline = time.monotonic() + max(30.0, args.seed_timeout_seconds)
         while time.monotonic() < seed_deadline:
             status = manager.get_seed_collection_status(PROJECT_ID)
-            if (
-                status.get("complete")
-                and int(status.get("step_count") or 0)
-                >= int(status.get("max_steps") or 10)
-            ):
+            if status.get("complete"):
                 break
             await asyncio.sleep(0.5)
         else:
-            raise RuntimeError(
-                f"Seed collection did not become ready: "
-                f"{manager.get_seed_collection_status(PROJECT_ID)}"
-            )
+            status = manager.get_seed_collection_status(PROJECT_ID)
+            cluster = manager._sessions[PROJECT_ID]["clusters"][0]
+            rejected_ids = {
+                int(station_id)
+                for station_id in (
+                    list(status.get("missing_station_ids") or ())
+                    + list(status.get("silent_station_ids") or ())
+                    + list(status.get("invalid_fix_station_ids") or ())
+                )
+            }
+            retained_pairs = [
+                (int(station_id), str(rover))
+                for station_id, rover in zip(
+                    cluster.get("stations") or (),
+                    cluster.get("rovers") or (),
+                )
+                if int(station_id) not in rejected_ids
+            ]
+            if (
+                cluster.get("skip_offline_rovers")
+                and status.get("fallback_ready")
+                and len(retained_pairs) >= 2
+            ):
+                cluster["stations"] = [item[0] for item in retained_pairs]
+                cluster["rovers"] = [item[1] for item in retained_pairs]
+                print(
+                    f"[{ts()}] SEED SKIP OFFLINE/INVALID: station_ids="
+                    f"{sorted(rejected_ids)}; continuing with "
+                    f"{', '.join(cluster['rovers'])}",
+                    flush=True,
+                )
+            else:
+                raise RuntimeError(
+                    f"Seed collection did not become ready: {status}"
+                )
         cluster = manager._sessions[PROJECT_ID]["clusters"][0]
         print(
             f"[{ts()}] SEED READY: {manager.get_seed_collection_status(PROJECT_ID)}, "
@@ -216,7 +363,32 @@ async def main() -> int:
             return 1
 
         result = results[-1]
+        output_path = Path(args.output).resolve()
+        output_path.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        xlsx_output_path = None
+        if args.xlsx_output:
+            backend_directory = Path(__file__).resolve().parent / "backend"
+            if str(backend_directory) not in sys.path:
+                sys.path.insert(0, str(backend_directory))
+            from mqtt_bridge import MQTTBridge
+
+            report_bridge = MQTTBridge.__new__(MQTTBridge)
+            generated_xlsx = report_bridge._append_adjustment_to_excel(
+                PROJECT_ID,
+                int(time.time()),
+                result,
+                "",
+            )
+            xlsx_output_path = Path(args.xlsx_output).resolve()
+            xlsx_output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(generated_xlsx, xlsx_output_path)
         print(f"[{ts()}] FINAL SUCCESS", flush=True)
+        print(f"[{ts()}] RESULT JSON: {output_path}", flush=True)
+        if xlsx_output_path:
+            print(f"[{ts()}] RESULT XLSX: {xlsx_output_path}", flush=True)
         for point_name, point in sorted((result.get("points") or {}).items()):
             print(
                 f"  POINT {point_name}: adjusted={point.get('adjusted')} "
@@ -231,7 +403,11 @@ async def main() -> int:
             )
         return 0
     finally:
-        for station in STATIONS:
+        try:
+            await manager.restore_common_fixed_base_topology(PROJECT_ID)
+        except Exception:
+            logging.exception("Failed to restore common SinQuyen topology")
+        for station in selected_stations:
             try:
                 await ntrip_manager.stop_pusher(station)
             except Exception:

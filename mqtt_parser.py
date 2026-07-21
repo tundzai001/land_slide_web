@@ -6,7 +6,7 @@ import re
 # ==========================================
 MQTT_BROKER = "aitogy.asia"  # Thay bằng địa chỉ broker của bạn
 MQTT_PORT = 1883                   # Cổng MQTT (thường là 1883, nếu có TLS/SSL thì là 8883)
-MQTT_TOPIC = "device/DEMO_DEVICE_2/upload"     # Topic bạn cần subscribe
+MQTT_TOPIC = "device/DEMO_DEVICE_3/upload"     # Topic bạn cần subscribe
 MQTT_USERNAME = "mqttUser"                 # Để trống nếu không có user
 MQTT_PASSWORD = ""                 # Để trống nếu không có pass
 

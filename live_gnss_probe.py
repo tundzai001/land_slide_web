@@ -1,4 +1,4 @@
-"""Read-only live MQTT probe for the four Dam 1 GNSS receivers."""
+"""Read-only live MQTT probe for the configured Sin Quyen GNSS receivers."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from backend.app.modules.ntrip_pusher import Rtcm3FrameFilter
 
 
 TOPICS = {
+    "device/860549070374009/upload": "Dap2_1",
+    "device/860549070365916/upload": "Dap2_2",
     "device/DEMO_DEVICE_1/upload": "Dap1_1",
     "device/DEMO_DEVICE_2/upload": "Dap1_2",
     "device/DEMO_DEVICE_3/upload": "Dap1_3",

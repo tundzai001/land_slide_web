@@ -14,6 +14,9 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        # MQTT pipelines broadcast concurrently. Serialize writes per browser;
+        # Starlette rejects overlapping sends on the same WebSocket.
+        self._send_locks: Dict[int, asyncio.Lock] = {}
         
         # GIẢM THROTTLE - Cho phép cập nhật nhanh hơn
         self.last_broadcast_time = defaultdict(float)
@@ -44,7 +47,9 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        if websocket not in self.active_connections:
+            self.active_connections.append(websocket)
+        self._send_locks.setdefault(id(websocket), asyncio.Lock())
         logger.info(f"✅ WebSocket connected. Total: {len(self.active_connections)}")
         
         if self.buffer_task is None or self.buffer_task.done():
@@ -53,6 +58,7 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            self._send_locks.pop(id(websocket), None)
             logger.info(f"❌ WebSocket disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
@@ -127,28 +133,47 @@ class ConnectionManager:
         }
         await self._send_to_all(batch_payload)
 
+    async def send_personal(self, websocket: WebSocket, message: dict):
+        """Send through the same per-client lock used by broadcasts."""
+        await self._send_one(websocket, message)
+
+    async def _send_one(self, connection: WebSocket, message: dict):
+        if connection not in self.active_connections:
+            return
+        send_lock = self._send_locks.setdefault(
+            id(connection), asyncio.Lock()
+        )
+        async with send_lock:
+            # Another broadcast may have removed the client while this
+            # coroutine waited. Never send again after close.
+            if connection not in self.active_connections:
+                return
+            try:
+                await asyncio.wait_for(
+                    connection.send_json(message),
+                    timeout=self.SEND_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                # Membership makes removal/logging idempotent across all
+                # concurrent broadcast snapshots.
+                if connection in self.active_connections:
+                    detail = str(exc).strip() or exc.__class__.__name__
+                    logger.warning(
+                        "WebSocket client removed after send failure: %s",
+                        detail,
+                    )
+                    self.disconnect(connection)
+
     async def _send_to_all(self, message: dict):
         """Fan out concurrently; one dead browser must never block server work."""
         connections = tuple(self.active_connections)
         if not connections:
             return
 
-        async def send_one(connection: WebSocket):
-            await asyncio.wait_for(
-                connection.send_json(message),
-                timeout=self.SEND_TIMEOUT_SECONDS,
-            )
-
-        results = await asyncio.gather(
-            *(send_one(connection) for connection in connections),
+        await asyncio.gather(
+            *(self._send_one(connection, message) for connection in connections),
             return_exceptions=True,
         )
-        for connection, result in zip(connections, results):
-            if not isinstance(result, BaseException):
-                continue
-            detail = str(result).strip() or result.__class__.__name__
-            logger.warning("WebSocket client removed after send failure: %s", detail)
-            self.disconnect(connection)
 
 # Khởi tạo instance global
 manager = ConnectionManager()

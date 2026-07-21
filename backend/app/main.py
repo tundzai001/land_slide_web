@@ -997,9 +997,60 @@ async def get_cors_base_stations(
                             used_bases.add(base_station)
 
         filtered_cors = [
-            st for st in all_cors 
+            st for st in all_cors
             if st["name"] in used_bases or st.get("mountpoint") in used_bases or st.get("code") in used_bases
         ]
+
+        # Physical receiver state and mountpoint availability are different.
+        # A primary receiver may be offline while another station's S2 keeps
+        # its mountpoint connected.  Never let that backup source make the
+        # offline physical station appear online on the public map.
+        failover_pairs = copy.deepcopy(cors_failover_status)
+        for station in filtered_cors:
+            station["station_online"] = bool(station.get("is_online"))
+            station["mountpoint_connected"] = bool(
+                station.get("ntrip_connected")
+            )
+            station["failover_active"] = bool(
+                not station["station_online"]
+                and station["mountpoint_connected"]
+            )
+            station["correction_source"] = (
+                "Nguồn dự phòng khác"
+                if station["failover_active"]
+                else f"{station.get('name')}/S1"
+            )
+            station_name = str(station.get("name") or "").strip().casefold()
+            station_mountpoint = str(
+                station.get("mountpoint") or ""
+            ).strip().casefold()
+            pair = next(
+                (
+                    item
+                    for item in failover_pairs
+                    if str(item.get("primary_station") or "").strip().casefold()
+                    == station_name
+                    or (
+                        station_mountpoint
+                        and str(item.get("mountpoint") or "").strip().casefold()
+                        == station_mountpoint
+                    )
+                ),
+                None,
+            )
+            if pair:
+                station["failover_state"] = pair.get("state")
+                station["failover_active"] = pair.get("state") == "BACKUP_ACTIVE"
+                if station["failover_active"]:
+                    station["correction_source"] = (
+                        f"{pair.get('backup_station')}/S"
+                        f"{pair.get('backup_server_id')}"
+                    )
+                else:
+                    station["correction_source"] = (
+                        f"{pair.get('primary_station')}/S"
+                        f"{pair.get('primary_server_id')}"
+                    )
 
         return filtered_cors
     except requests.RequestException as e:
@@ -2162,6 +2213,13 @@ async def start_gnss_adjustment(
                 "message": "Adjustment is already running; reopened the existing session.",
             }
 
+        stale_session = mqtt_service.round_robin_manager._sessions.get(req.project_id)
+        if stale_session and stale_session.get("seed_topology_snapshots"):
+            await mqtt_service.round_robin_manager.restore_common_fixed_base_topology(
+                req.project_id
+            )
+            mqtt_service.round_robin_manager.clear_project(req.project_id)
+
         stations_result = await db.execute(
             select(model_config.Station).where(model_config.Station.project_id == project.id)
         )
@@ -2189,7 +2247,6 @@ async def start_gnss_adjustment(
             gnss_devices = devices_result.scalars().all()
             stations_by_id = {int(station.id): station for station in stations}
             pending_device_updates = getattr(mqtt_service, "_device_update_buffer", {})
-            pending_station_updates = getattr(mqtt_service, "_station_update_buffer", {})
             now_ts = int(time.time())
             online_station_ids = set()
             for device in gnss_devices:
@@ -2199,8 +2256,6 @@ async def start_gnss_adjustment(
                 last_seen = max(
                     int(device.last_data_time or 0),
                     int(pending_device_updates.get(int(device.id), 0) or 0),
-                    int(station.last_update or 0),
-                    int((pending_station_updates.get(int(station.id)) or {}).get("last_update", 0) or 0),
                 )
                 threshold = get_offline_threshold(station.config, "gnss")
                 if last_seen and now_ts - last_seen < threshold:
@@ -2212,6 +2267,23 @@ async def start_gnss_adjustment(
                 )
             )
             mqtt_service.round_robin_manager.configure_project(req.project_id, active_clusters)
+            try:
+                seed_topology = (
+                    await mqtt_service.round_robin_manager.prepare_common_fixed_base_seed(
+                        req.project_id
+                    )
+                )
+            except Exception:
+                failed_session = mqtt_service.round_robin_manager._sessions.get(
+                    req.project_id
+                )
+                # Keep a failed restore snapshot reachable so a stop/retry can
+                # restore the exact pre-adjustment service configuration.
+                if not failed_session or not failed_session.get(
+                    "seed_topology_snapshots"
+                ):
+                    mqtt_service.round_robin_manager.clear_project(req.project_id)
+                raise
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -2226,7 +2298,8 @@ async def start_gnss_adjustment(
         # 1. Bật chế độ chờ thu thập Baseline (COLLECTING_BASELINE)
         mqtt_service.adjustment_phase[req.project_id] = "COLLECTING_BASELINE"
         mqtt_service.adjustment_message[req.project_id] = (
-            "Adjustment started; waiting for a valid #AGRICA baseline from every selected rover."
+            "Common fixed-base route is ready; waiting for source-verified #AGRICA "
+            "baselines from every selected rover."
         )
         mqtt_service.adjustment_results.pop(req.project_id, None)
         logger.info(f"🎯 Started GNSS Adjustment for project {req.project_id}. Phase: COLLECTING_BASELINE.")
@@ -2240,9 +2313,10 @@ async def start_gnss_adjustment(
             "type": "gnss_adjustment_progress",
             "project_id": req.project_id,
             "phase": "COLLECTING_BASELINE",
-            "message": "Adjustment started; waiting for a valid #AGRICA baseline from every selected rover.",
+            "message": "Common fixed-base route is ready; waiting for source-verified #AGRICA baselines from every selected rover.",
             "expected_station_ids": expected_station_ids,
             "skipped_offline_station_ids": skipped_offline_station_ids,
+            "seed_topology": seed_topology,
         })
 
         return {
@@ -2250,7 +2324,8 @@ async def start_gnss_adjustment(
             "phase": "COLLECTING_BASELINE",
             "expected_station_ids": expected_station_ids,
             "skipped_offline_station_ids": skipped_offline_station_ids,
-            "message": "Adjustment cycle started, waiting for baseline before stopping Base",
+            "seed_topology": seed_topology,
+            "message": "Both rover streams now use the selected physical base; waiting for verified baseline collection.",
         }
     except Exception as e:
         logger.error(f"Failed to start GNSS adjustment cycle: {e}")
@@ -2296,6 +2371,19 @@ async def stop_gnss_adjustment(
     try:
         if not hasattr(mqtt_service, "active_adjustment_clusters"):
             mqtt_service.active_adjustment_clusters = {}
+
+        # Cancel first so the cycle's finally block can restore both the
+        # temporary-base stream and the pre-seed S1/S2 topology.
+        running_task = mqtt_service.round_robin_manager.running_tasks.get(req.project_id)
+        if running_task and not running_task.done():
+            running_task.cancel()
+            try:
+                await running_task
+            except asyncio.CancelledError:
+                pass
+        await mqtt_service.round_robin_manager.restore_common_fixed_base_topology(
+            req.project_id
+        )
 
         # Clear dynamic active adjustment clusters and phase
         mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
@@ -3743,8 +3831,8 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            if data == "ping": 
-                await websocket.send_json({"type": "pong"})
+            if data == "ping":
+                await ws_manager.send_personal(websocket, {"type": "pong"})
     except WebSocketDisconnect:
         pass
     except Exception as exc:

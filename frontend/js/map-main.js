@@ -50,6 +50,8 @@ const gnssAdjustmentDebugState = {
     wsStatus: 'CONNECTING',
     entries: [],
     entriesRevision: 0,
+    entriesGeneration: 0,
+    entrySequence: 0,
     autoScroll: true,
     lastGnssStatusAtByStation: {},
     workflowNodes: [],
@@ -61,6 +63,27 @@ const gnssAdjustmentDebugState = {
     serverMessage: '',
     watchdogId: null,
 };
+
+const GNSS_DEBUG_MEMORY_LIMIT = 500;
+const GNSS_DEBUG_DOM_LIMIT = 180;
+let gnssDebugUiFrameId = null;
+let gnssWorkflowFrameId = null;
+
+function scheduleGnssAdjustmentDebugUiRefresh() {
+    if (gnssDebugUiFrameId !== null) return;
+    gnssDebugUiFrameId = requestAnimationFrame(() => {
+        gnssDebugUiFrameId = null;
+        refreshGnssAdjustmentDebugUi();
+    });
+}
+
+function scheduleGnssAdjustmentWorkflowRender() {
+    if (gnssWorkflowFrameId !== null) return;
+    gnssWorkflowFrameId = requestAnimationFrame(() => {
+        gnssWorkflowFrameId = null;
+        renderGnssAdjustmentWorkflow();
+    });
+}
 
 const GNSS_ADJUSTMENT_RUNNING_PHASES = new Set(['WAITING', 'COLLECTING_BASELINE', 'FREE_NETWORK']);
 
@@ -150,7 +173,7 @@ function upsertGnssWorkflowNode(key, options = {}) {
         });
     }
     gnssAdjustmentDebugState.workflowRevision += 1;
-    renderGnssAdjustmentWorkflow();
+    scheduleGnssAdjustmentWorkflowRender();
     return node;
 }
 
@@ -160,7 +183,7 @@ function finishGnssWorkflowNode(key, detail = undefined) {
     if (node.status !== 'warning') node.status = 'success';
     if (detail !== undefined) node.detail = detail;
     gnssAdjustmentDebugState.workflowRevision += 1;
-    renderGnssAdjustmentWorkflow();
+    scheduleGnssAdjustmentWorkflowRender();
 }
 
 function finishRunningGnssWorkflowNodes(group = null) {
@@ -173,7 +196,7 @@ function finishRunningGnssWorkflowNodes(group = null) {
     });
     if (changed) {
         gnssAdjustmentDebugState.workflowRevision += 1;
-        renderGnssAdjustmentWorkflow();
+        scheduleGnssAdjustmentWorkflowRender();
     }
 }
 
@@ -474,14 +497,21 @@ function refreshGnssAdjustmentDebugUi() {
     }
 
     const log = document.getElementById('gnss-debug-log');
-    if (log) {
+    if (log && log.offsetParent !== null) {
         const revision = String(gnssAdjustmentDebugState.entriesRevision);
         if (log.dataset.entriesRevision !== revision) {
             const previousScrollTop = log.scrollTop;
             const shouldAutoScroll = gnssAdjustmentDebugState.autoScroll;
-            log.innerHTML = '';
-            gnssAdjustmentDebugState.entries.forEach(entry => {
+            const generation = String(gnssAdjustmentDebugState.entriesGeneration);
+            const lastRenderedId = Number(log.dataset.lastEntryId || 0);
+            const mustRebuild = log.dataset.entriesGeneration !== generation;
+            const entriesToRender = mustRebuild
+                ? gnssAdjustmentDebugState.entries.slice(-GNSS_DEBUG_DOM_LIMIT)
+                : gnssAdjustmentDebugState.entries.filter(entry => entry.id > lastRenderedId);
+            const fragment = document.createDocumentFragment();
+            entriesToRender.forEach(entry => {
                 const row = document.createElement('div');
+                row.className = 'gnss-debug-row';
                 const color = entry.level === 'error'
                     ? '#ff6b6b'
                     : entry.level === 'warning'
@@ -491,14 +521,24 @@ function refreshGnssAdjustmentDebugUi() {
                             : '#93c5fd';
                 row.style.color = color;
                 row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
-                log.appendChild(row);
+                fragment.appendChild(row);
             });
+            if (mustRebuild) log.replaceChildren();
+            log.appendChild(fragment);
+            let removedHeight = 0;
+            while (log.childElementCount > GNSS_DEBUG_DOM_LIMIT) {
+                removedHeight += log.firstElementChild?.offsetHeight || 0;
+                log.firstElementChild?.remove();
+            }
+            const newestEntry = gnssAdjustmentDebugState.entries.at(-1);
+            log.dataset.lastEntryId = String(newestEntry?.id || 0);
+            log.dataset.entriesGeneration = generation;
             log.dataset.entriesRevision = revision;
             if (shouldAutoScroll) {
                 log.scrollTop = log.scrollHeight;
             } else {
                 log.scrollTop = Math.min(
-                    previousScrollTop,
+                    Math.max(0, previousScrollTop - removedHeight),
                     Math.max(0, log.scrollHeight - log.clientHeight),
                 );
             }
@@ -560,16 +600,17 @@ function scrollGnssAdjustmentDebugToBottom() {
 function addGnssAdjustmentDebug(label, message, level = 'info') {
     if (!gnssAdjustmentDebugState.active) return;
     gnssAdjustmentDebugState.entries.push({
+        id: ++gnssAdjustmentDebugState.entrySequence,
         time: formatGnssDebugTime(),
         label,
         message: String(message || '-'),
         level,
     });
     gnssAdjustmentDebugState.entriesRevision += 1;
-    if (gnssAdjustmentDebugState.entries.length > 500) {
-        gnssAdjustmentDebugState.entries.splice(0, gnssAdjustmentDebugState.entries.length - 500);
+    if (gnssAdjustmentDebugState.entries.length > GNSS_DEBUG_MEMORY_LIMIT) {
+        gnssAdjustmentDebugState.entries.splice(0, gnssAdjustmentDebugState.entries.length - GNSS_DEBUG_MEMORY_LIMIT);
     }
-    refreshGnssAdjustmentDebugUi();
+    scheduleGnssAdjustmentDebugUiRefresh();
 }
 
 function setGnssAdjustmentPhase(phase, message = '') {
@@ -647,6 +688,7 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         wsStatus: wsConnection?.readyState === WebSocket.OPEN ? 'CONNECTED' : 'DISCONNECTED',
         entries: [],
         entriesRevision: gnssAdjustmentDebugState.entriesRevision + 1,
+        entriesGeneration: gnssAdjustmentDebugState.entriesGeneration + 1,
         autoScroll: true,
         lastGnssStatusAtByStation: {},
         workflowNodes: [],
@@ -2940,6 +2982,7 @@ function setupEventListeners() {
         baselines: [],
         basePoint: null,
         animationId: null,
+        lastAnimationDrawAt: 0,
         viewWidth: 0,
         viewHeight: 0,
         init({ preserve = false } = {}) {
@@ -2982,8 +3025,13 @@ function setupEventListeners() {
         startAnimation() {
             this.stopAnimation();
             const animate = timestamp => {
-                this.resize();
-                this.draw(timestamp);
+                // The board is ambient status UI; 30 FPS keeps the pulse smooth
+                // while leaving the main thread available for realtime messages.
+                if (timestamp - this.lastAnimationDrawAt >= 32) {
+                    this.resize();
+                    this.draw(timestamp);
+                    this.lastAnimationDrawAt = timestamp;
+                }
                 this.animationId = requestAnimationFrame(animate);
             };
             this.animationId = requestAnimationFrame(animate);
@@ -2991,6 +3039,7 @@ function setupEventListeners() {
         stopAnimation() {
             if (this.animationId) cancelAnimationFrame(this.animationId);
             this.animationId = null;
+            this.lastAnimationDrawAt = 0;
         },
         addPoint(name, relX, relY, isBase = false) {
             if (!this.points[name]) {
@@ -3322,8 +3371,8 @@ function setupEventListeners() {
         const wrapper = document.createElement('div');
         wrapper.innerHTML = `
             <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
-                <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 95vw;">
-                    <div class="modal-content bg-dark text-light border-primary" style="height: 85vh;">
+                <div class="modal-dialog modal-xl modal-dialog-centered gnss-terminal-dialog">
+                    <div class="modal-content bg-dark text-light border-primary gnss-terminal-content">
                         <div class="modal-header border-bottom border-secondary py-2">
                             <h5 class="modal-title text-primary font-monospace" style="font-size: 1.1rem;">
                                 <i class="bi bi-cpu me-2"></i>GNSS Agent Calculation Board (Real-time)
@@ -3331,13 +3380,13 @@ function setupEventListeners() {
                             <div id="gnss-phase-indicator" class="ms-4 text-warning fw-bold font-monospace">Phase: WAITING</div>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" title="Thu nhỏ cửa sổ; tiến trình bình sai vẫn tiếp tục"></button>
                         </div>
-                        <div class="modal-body p-0 d-flex flex-row" style="height: calc(100% - 60px); overflow: hidden;">
-                            <div class="position-relative" style="background: radial-gradient(circle at 50% 45%, #0d3037 0%, #06141b 70%); overflow: hidden; min-width: 280px; width: 0; flex: 1 1 0;" id="gnss-board-container">
+                        <div class="modal-body p-0 d-flex flex-row gnss-terminal-body">
+                            <div class="position-relative" id="gnss-board-container">
                                 <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block; background: #06141b;"></canvas>
                                 <div id="gnss-board-tooltips" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
                             </div>
                             <div id="gnss-column-resizer" title="Kéo để đổi chiều rộng bảng dữ liệu" style="flex: 0 0 7px; cursor: col-resize; background: #374151; border-left: 1px solid #111827; border-right: 1px solid #64748b; touch-action: none;"></div>
-                            <div id="gnss-data-column" class="d-flex flex-column" style="width: 520px; flex: 0 0 520px; min-width: 380px; max-width: 75vw; background-color: var(--bs-dark); overflow: hidden; box-shadow: -5px 0 15px rgba(0,0,0,0.5);">
+                            <div id="gnss-data-column" class="d-flex flex-column">
                                 <section class="gnss-workflow-panel flex-grow-1" id="gnss-data-panel" aria-label="Sơ đồ tiến trình bình sai">
                                     <header class="gnss-workflow-header">
                                         <div>
@@ -3359,12 +3408,13 @@ function setupEventListeners() {
                                     </div>
                                 </section>
                                 <div id="gnss-debug-resizer" title="Kéo để đổi chiều cao Live Debug" style="height: 7px; flex: 0 0 7px; cursor: row-resize; background: #2c3440; border-top: 1px solid #4a5568; border-bottom: 1px solid #1a202c; touch-action: none; transition: background 0.2s;"></div>
-                                <div id="gnss-debug-section" class="bg-darker d-flex flex-column live-debug-panel" style="height: 280px; flex: 0 0 280px; min-height: 160px; overflow: hidden; position: relative;">
-                                    <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-gradient-debug border-bottom border-secondary">
+                                <div id="gnss-debug-section" class="bg-darker d-flex flex-column live-debug-panel">
+                                    <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-gradient-debug border-bottom border-secondary gnss-debug-header">
                                         <h6 class="mb-0 text-warning font-monospace fw-bold" style="font-size: 0.8rem; letter-spacing: 0.5px;"><i class="bi bi-terminal-fill me-2"></i>Live Debug</h6>
-                                        <div class="d-flex gap-1">
+                                        <div class="d-flex gap-1 gnss-debug-actions">
                                             <button id="gnss-debug-copy" type="button" class="btn btn-sm btn-outline-info py-0 px-1" style="font-size: 0.65rem;" title="Sao chép toàn bộ log">Sao chép</button>
                                             <button id="gnss-debug-follow" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;" title="Xuống cuối và tiếp tục tự cuộn">↓ Cuối</button>
+                                            <button id="gnss-debug-toggle" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;" title="Thu gọn hoặc mở Live Debug"><i class="bi bi-chevron-down"></i></button>
                                             <button id="gnss-debug-clear" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;">Xóa log</button>
                                         </div>
                                     </div>
@@ -3403,16 +3453,29 @@ function setupEventListeners() {
         window.addEventListener('resize', () => window.gnssBoardState?.resize?.());
         const dataColumn = modal.querySelector('#gnss-data-column');
         const debugSection = modal.querySelector('#gnss-debug-section');
+        const debugToggle = modal.querySelector('#gnss-debug-toggle');
         const savedColumnWidth = Number(localStorage.getItem('gnssDataColumnWidth'));
         const savedDebugHeight = Number(localStorage.getItem('gnssDebugHeight'));
-        if (savedColumnWidth >= 380) {
-            dataColumn.style.width = `${savedColumnWidth}px`;
-            dataColumn.style.flexBasis = `${savedColumnWidth}px`;
+        const maxInitialColumnWidth = Math.max(340, window.innerWidth * 0.68);
+        if (savedColumnWidth >= 340) {
+            const fittedWidth = Math.min(savedColumnWidth, maxInitialColumnWidth);
+            dataColumn.style.width = `${fittedWidth}px`;
+            dataColumn.style.flexBasis = `${fittedWidth}px`;
         }
-        if (savedDebugHeight >= 160) {
-            debugSection.style.height = `${savedDebugHeight}px`;
-            debugSection.style.flexBasis = `${savedDebugHeight}px`;
+        const maxInitialDebugHeight = Math.max(150, window.innerHeight * 0.48);
+        if (savedDebugHeight >= 140) {
+            const fittedHeight = Math.min(savedDebugHeight, maxInitialDebugHeight);
+            debugSection.style.height = `${fittedHeight}px`;
+            debugSection.style.flexBasis = `${fittedHeight}px`;
         }
+        const setDebugCollapsed = collapsed => {
+            dataColumn.classList.toggle('gnss-debug-collapsed', collapsed);
+            debugToggle?.setAttribute('aria-expanded', String(!collapsed));
+            const icon = debugToggle?.querySelector('i');
+            if (icon) icon.className = collapsed ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+            if (!collapsed) scheduleGnssAdjustmentDebugUiRefresh();
+            requestAnimationFrame(redrawGnssBoard);
+        };
 
         const redrawGnssBoard = () => {
             const board = window.gnssBoardState;
@@ -3422,6 +3485,7 @@ function setupEventListeners() {
             board.canvas.height = container.clientHeight;
             board.draw?.();
         };
+        setDebugCollapsed(localStorage.getItem('gnssDebugCollapsed') === '1');
         const installResizer = (handle, onMove, onEnd) => {
             handle?.addEventListener('pointerdown', event => {
                 event.preventDefault();
@@ -3468,9 +3532,15 @@ function setupEventListeners() {
         modal.querySelector('#gnss-debug-follow')?.addEventListener('click', () => {
             scrollGnssAdjustmentDebugToBottom();
         });
+        debugToggle?.addEventListener('click', () => {
+            const collapsed = !dataColumn.classList.contains('gnss-debug-collapsed');
+            setDebugCollapsed(collapsed);
+            localStorage.setItem('gnssDebugCollapsed', collapsed ? '1' : '0');
+        });
         modal.querySelector('#gnss-debug-clear')?.addEventListener('click', () => {
             gnssAdjustmentDebugState.entries = [];
             gnssAdjustmentDebugState.entriesRevision += 1;
+            gnssAdjustmentDebugState.entriesGeneration += 1;
             gnssAdjustmentDebugState.autoScroll = true;
             addGnssAdjustmentDebug('UI', 'Đã xóa nhật ký debug.', 'info');
         });

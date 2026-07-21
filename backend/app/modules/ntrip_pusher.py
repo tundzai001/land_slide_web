@@ -263,7 +263,9 @@ class NtripPusher:
             ),
             "elapsed_s": round(time.monotonic() - self._created_at, 3),
         })
-        if result["mqtt_chunks"] == 0:
+        if result["sent_bytes"] > 0:
+            result["likely_cause"] = "RTCM fanout was written to the caster"
+        elif result["mqtt_chunks"] == 0:
             result["likely_cause"] = "no MQTT payload reached the pusher for this station"
         elif result["d3_preambles"] == 0 and result["last_gga_fix_quality"] == 0:
             satellite_detail = (
@@ -314,6 +316,10 @@ class NtripPusherManager:
         try:
             await asyncio.gather(*(pusher.start() for pusher in pushers))
         except Exception:
+            await asyncio.gather(
+                *(pusher.stop() for pusher in pushers),
+                return_exceptions=True,
+            )
             cls._instances.pop(station_code, None)
             raise
         logger.info(f"[NTRIP Pusher] Started for station {station_code} to mountpoints: {[p.mountpoint for p in pushers]}")

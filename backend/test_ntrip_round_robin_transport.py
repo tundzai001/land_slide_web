@@ -5,11 +5,16 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 try:
-    from backend.app.modules.ntrip_pusher import NtripPusher, Rtcm3FrameFilter, _crc24q
+    from backend.app.modules.ntrip_pusher import (
+        NtripPusher,
+        NtripPusherManager,
+        Rtcm3FrameFilter,
+        _crc24q,
+    )
     from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
     ROUND_ROBIN_MODULE = "backend.processors.round_robin_manager"
 except ModuleNotFoundError:
-    from app.modules.ntrip_pusher import NtripPusher, Rtcm3FrameFilter, _crc24q
+    from app.modules.ntrip_pusher import NtripPusher, NtripPusherManager, Rtcm3FrameFilter, _crc24q
     from processors.round_robin_manager import RoundRobinAdjustmentManager
     ROUND_ROBIN_MODULE = "processors.round_robin_manager"
 
@@ -72,6 +77,46 @@ class RtcmFilterTests(unittest.TestCase):
 
 
 class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        await NtripPusherManager.stop_pusher("FANOUT")
+
+    async def test_manager_fans_same_rtcm_to_every_mountpoint(self):
+        requests = []
+        received = {}
+        both_frames = asyncio.Event()
+
+        async def handle(reader, writer):
+            request = await reader.readuntil(b"\r\n\r\n")
+            first_line = request.splitlines()[0].decode("ascii")
+            mountpoint = first_line.rsplit("/", 1)[-1]
+            requests.append(mountpoint)
+            writer.write(b"ICY 200 OK\r\n")
+            await writer.drain()
+            received[mountpoint] = await reader.read(1024)
+            if len(received) == 2:
+                both_frames.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        frame = _rtcm_frame(b"\x3e\xd0\x01\x02")
+        try:
+            await NtripPusherManager.start_pusher(
+                "FANOUT", "127.0.0.1", port, "SinQuyen2,SinQuyen1", "secret"
+            )
+            NtripPusherManager.feed_data("FANOUT", frame)
+            await NtripPusherManager.wait_for_rtcm("FANOUT", timeout=1.0)
+            await asyncio.wait_for(both_frames.wait(), timeout=1.0)
+        finally:
+            await NtripPusherManager.stop_pusher("FANOUT")
+            server.close()
+            await server.wait_closed()
+
+        self.assertCountEqual(requests, ["SinQuyen2", "SinQuyen1"])
+        self.assertEqual(received["SinQuyen2"], frame)
+        self.assertEqual(received["SinQuyen1"], frame)
+
     async def test_start_waits_for_caster_acceptance(self):
         request_received = asyncio.Event()
         rtcm_received = asyncio.Event()
@@ -391,6 +436,138 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(configured[0][1]["server2_stream_active"])
         self.assertFalse(configured[1][1]["server2_stream_on_demand"])
         self.assertTrue(configured[1][1]["server2_stream_active"])
+
+    async def test_seed_forces_both_streams_to_selected_physical_base(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        selected_config = {
+            "server1_enabled": True,
+            "mountpoint1": "SinQuyen2",
+            "server1_stream_on_demand": False,
+            "server1_stream_active": True,
+            "server2_enabled": True,
+            "mountpoint2": "SinQuyen1",
+            "server2_stream_on_demand": True,
+            "server2_stream_active": False,
+        }
+        other_config = {
+            "server1_enabled": True,
+            "mountpoint1": "SinQuyen1",
+            "server1_stream_on_demand": False,
+            "server1_stream_active": True,
+            "server2_enabled": True,
+            "mountpoint2": "SinQuyen2",
+            "server2_stream_on_demand": True,
+            "server2_stream_active": False,
+        }
+        stations = [
+            {"serial": "SQ2", "name": "SinQuyen2", "status": "online", "service_config": selected_config},
+            {"serial": "SQ1", "name": "SinQuyen1", "status": "online", "service_config": other_config},
+        ]
+        candidates = [
+            {
+                "role": "primary", "base_station": "SinQuyen2", "base_serial": "SQ2",
+                "base_server_id": 1, "base_stream_mp": "SinQuyen2",
+                "base_lat": 21.0, "base_lon": 105.0, "base_alt": 10.0,
+            },
+            {
+                "role": "backup", "base_station": "SinQuyen1", "base_serial": "SQ1",
+                "base_server_id": 2, "base_stream_mp": "SinQuyen2",
+                "base_lat": 21.1, "base_lon": 105.0, "base_alt": 10.0,
+            },
+        ]
+        manager.configure_project(91, [{
+            "name": "Cụm tổng", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "fixed_base_candidates": candidates,
+        }])
+        configured = []
+
+        def configure(serial, service_config):
+            configured.append((serial, service_config))
+            return {"status": "service_config_sent_and_saved"}
+
+        with patch.object(manager, "_cors_api_request_sync", return_value=stations), patch.object(
+            manager, "_cors_configure_service_sync", side_effect=configure
+        ):
+            outcome = await manager.prepare_common_fixed_base_seed(91)
+            self.assertEqual([item[0] for item in configured], ["SQ1", "SQ2"])
+            self.assertTrue(configured[0][1]["server1_stream_on_demand"])
+            self.assertTrue(configured[0][1]["server2_stream_on_demand"])
+            self.assertFalse(configured[1][1]["server1_stream_on_demand"])
+            self.assertFalse(configured[1][1]["server2_stream_on_demand"])
+            self.assertEqual(outcome[0]["selected_base"], "SinQuyen2")
+            self.assertTrue(outcome[0]["opposite_online"])
+            self.assertEqual(
+                manager._sessions[91]["clusters"][0]["selected_fixed_base_candidate"]["base_station"],
+                "SinQuyen2",
+            )
+            self.assertTrue(
+                manager._sessions[91]["clusters"][0]["require_fixed_base_length_check"]
+            )
+
+            configured.clear()
+            await manager.restore_common_fixed_base_topology(91)
+
+        self.assertEqual([item[0] for item in configured], ["SQ1", "SQ2"])
+        self.assertEqual(configured[0][1], other_config)
+        self.assertEqual(configured[1][1], selected_config)
+
+    async def test_seed_keeps_offline_counterpart_and_asserts_selected_s2(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        selected_config = {
+            "server1_enabled": True, "mountpoint1": "SinQuyen2",
+            "server1_stream_on_demand": False, "server1_stream_active": True,
+            "server2_enabled": True, "mountpoint2": "SinQuyen1",
+            "server2_stream_on_demand": True, "server2_stream_active": False,
+        }
+        other_config = {
+            "server1_enabled": True, "mountpoint1": "SinQuyen1",
+            "server1_stream_on_demand": False, "server1_stream_active": True,
+            "server2_enabled": True, "mountpoint2": "SinQuyen2",
+            "server2_stream_on_demand": True, "server2_stream_active": False,
+        }
+        stations = [
+            {"serial": "SQ2", "name": "SinQuyen2", "status": "online", "service_config": selected_config},
+            {"serial": "SQ1", "name": "SinQuyen1", "status": "offline", "service_config": other_config},
+        ]
+        manager.configure_project(92, [{
+            "name": "Cụm tổng", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "fixed_base_candidates": [
+                {"role": "primary", "base_station": "SinQuyen2", "base_serial": "SQ2", "base_server_id": 1, "base_stream_mp": "SinQuyen2", "base_lat": 21.0, "base_lon": 105.0},
+                {"role": "backup", "base_station": "SinQuyen1", "base_serial": "SQ1", "base_server_id": 2, "base_stream_mp": "SinQuyen2", "base_lat": 21.1, "base_lon": 105.0},
+            ],
+        }])
+        configured = []
+
+        with patch.object(manager, "_cors_api_request_sync", return_value=stations), patch.object(
+            manager,
+            "_cors_configure_service_sync",
+            side_effect=lambda serial, cfg: configured.append((serial, cfg)) or {"status": "service_config_sent_and_saved"},
+        ):
+            outcome = await manager.prepare_common_fixed_base_seed(92)
+
+        self.assertEqual([item[0] for item in configured], ["SQ2"])
+        self.assertFalse(configured[0][1]["server2_stream_on_demand"])
+        self.assertTrue(configured[0][1]["server2_stream_active"])
+        self.assertFalse(outcome[0]["opposite_online"])
+
+    async def test_single_fixed_base_seed_does_not_require_cors_topology_api(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.configure_project(93, [{
+            "name": "Legacy", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "base_station": "CORS-A", "base_lat": 21.0, "base_lon": 105.0,
+        }])
+
+        with patch.object(manager, "_cors_api_request_sync") as cors_request:
+            outcome = await manager.prepare_common_fixed_base_seed(93)
+
+        self.assertEqual(outcome, [])
+        cors_request.assert_not_called()
+        self.assertEqual(
+            manager._sessions[93]["clusters"][0]["selected_fixed_base_candidate"]["base_station"],
+            "CORS-A",
+        )
 
     async def test_fixed_base_requires_configure_service_confirmation(self):
         class FakeResponse:
@@ -921,6 +1098,26 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected["CasterHost"], "aitogy.click")
         self.assertEqual(selected["Mountpoint"], "CORS_B")
 
+    async def test_client_lookup_can_poll_missing_session_without_error_spam(self):
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            caster_host="aitogy.com.vn",
+            caster_hosts=["aitogy.com.vn"],
+        )
+        manager._query_client_table = AsyncMock(
+            return_value="STR;other;other;CORS_A;0;\r\n"
+        )
+        module_name = RoundRobinAdjustmentManager.__module__
+
+        with patch(f"{module_name}.logger.error") as error_log:
+            selected = await manager._find_client_info(
+                "Dap4_1",
+                log_missing=False,
+            )
+
+        self.assertIsNone(selected)
+        error_log.assert_not_called()
+
     def test_temporary_base_and_rover_recovery_both_end_with_saveconfig(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         commands = manager._build_unicore_base_config(
@@ -1028,6 +1225,17 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         async def route_stop(station_code):
             events.append(("route_stopped", station_code))
 
+        async def wake_fixed_base():
+            events.append(("fixed_base_woken",))
+            return {
+                "Username": "S1",
+                "receiverID": "101-new",
+                "Mountpoint": "CORS_B",
+            }
+
+        async def sleep_fixed_base():
+            events.append(("fixed_base_sleep",))
+
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             source_host="caster.example",
@@ -1072,6 +1280,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 route_password="12345",
                 on_collection_started=lambda: events.append(("collection_started",)),
                 on_collection_stopped=lambda: events.append(("collection_stopped",)),
+                before_rover_restore=wake_fixed_base,
+                after_rover_restore=sleep_fixed_base,
             )
 
         event_names = [event[0] for event in events]
@@ -1079,23 +1289,29 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             event_names,
             [
                 "set_rover",
-                "set_base",
                 "route_started",
+                "set_base",
                 "collection_started",
                 "collection_stopped",
                 "route_stopped",
+                "fixed_base_woken",
                 "set_rover",
                 "restore_config",
                 "restore_unlogall",
                 "restore_gpgga",
                 "restore_agrica",
                 "restore_saveconfig",
+                "fixed_base_sleep",
             ],
         )
         self.assertEqual(
-            events[2],
+            events[1],
             ("route_started", "S1", "aitogy.click", 2101, "QN.CP", "12345"),
         )
+        restore_calls = [
+            event for event in events if event[0] in {"set_rover", "restore_config"}
+        ]
+        self.assertEqual(len(restore_calls), 3)
 
     async def test_route_rejection_still_restores_rover_without_collecting(self):
         events = []
@@ -1143,14 +1359,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, [
             "set_rover",
-            "set_base",
             "route_rejected",
-            "set_rover",
-            "restore_config",
-            "restore_unlogall",
-            "restore_gpgga",
-            "restore_agrica",
-            "restore_saveconfig",
         ])
 
     async def test_missing_rtcm_reapplies_clean_base_profile_and_retries_route(self):
@@ -1158,15 +1367,20 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         route_stops = []
         command_groups = []
         collection_events = []
+        wait_calls = 0
 
         async def route_start(*_args):
             nonlocal route_calls
             route_calls += 1
-            if route_calls == 1:
+            return True
+
+        async def route_wait(*_args):
+            nonlocal wait_calls
+            wait_calls += 1
+            if wait_calls == 1:
                 raise RuntimeError(
                     "No valid RTCM3 frame was forwarded within 25s; d3_preambles=0"
                 )
-            return True
 
         async def route_stop(station_code):
             route_stops.append(station_code)
@@ -1174,6 +1388,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             route_start_callback=route_start,
+            route_wait_callback=route_wait,
             route_stop_callback=route_stop,
         )
         manager.rover_llh_cache["S1"] = {"lat": 21.0, "lon": 105.0, "alt": 10.0}
@@ -1199,6 +1414,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "FIXED", lat=21.0, lon=105.0, alt=10.0
         )
         self.assertEqual(route_calls, 2)
+        self.assertEqual(wait_calls, 2)
         self.assertEqual(collection_events, ["started", "stopped"])
         self.assertEqual(command_groups[1], expected_base_profile)
         self.assertEqual(command_groups[2], expected_base_profile)
@@ -1351,6 +1567,31 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(commands_seen[-3:], [b"saveconfig\r\n"] * 3)
         self.assertEqual(commands_seen.count(b"mode rover survey\r\n"), 1)
+
+    async def test_unacknowledged_undulation_does_not_block_mandatory_rover_outputs(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        commands_seen = []
+
+        async def send_set(_mountpoint, _username, _receiver_id, commands, **_kwargs):
+            command = commands[0]
+            commands_seen.append(command)
+            manager._last_set_error = "no verified MQTT ACK"
+            return not command.startswith(b"config undulation ")
+
+        manager._send_set_command = send_set
+        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+            await manager._restore_rover_output_sequence(
+                rover_code="Dap1_2",
+                mountpoint="SinQuyen1",
+                client_info={"Username": "Dap1_2", "receiverID": "1.4.10"},
+                commands=manager._build_unicore_rover_config(),
+                project_id=3,
+            )
+
+        self.assertEqual(commands_seen.count(b"config undulation auto\r\n"), 3)
+        self.assertIn(b"unlogall\r\n", commands_seen)
+        self.assertIn(b"AGRICA COM2 1\r\n", commands_seen)
+        self.assertEqual(commands_seen[-1], b"saveconfig\r\n")
 
 
 if __name__ == "__main__":

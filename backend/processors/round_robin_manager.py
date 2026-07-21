@@ -910,6 +910,9 @@ class RoundRobinAdjustmentManager:
     SEED_SOLVER_MIN_DISTINCT_EPOCHS = 30
     SEED_SOLVER_MIN_DURATION_SECONDS = 30
     SEED_STABILITY_TIMEOUT_SECONDS = 300
+    # After the CORS pair has been forced onto one physical receiver, discard
+    # the caster/rover handover interval before opening the common seed window.
+    FIXED_BASE_HANDOVER_SETTLE_SECONDS = 5
     STABILITY_WINDOW_SECONDS = 10
     STABILITY_MIN_SAMPLES_PER_WINDOW = 4
     STABILITY_MAX_SAMPLE_GAP_SECONDS = 5
@@ -929,13 +932,19 @@ class RoundRobinAdjustmentManager:
     STABILITY_ABORT_UP_COMPONENT_LIMIT_M = 0.015
     STABILITY_ABORT_CONSECUTIVE_EPOCHS = 3
     BASE_IDENTITY_TOLERANCE_M = 20.0
+    FIXED_BASE_LENGTH_TOLERANCE_M = 20.0
     # This is only a last-resort gross-error barrier. Normal GNSS loop closure
     # should be orders of magnitude smaller; a metre-scale closure means that
     # at least one observation was assigned to the wrong correction source.
     GROSS_LOOP_CLOSURE_MIN_LIMIT_M = 1.0
     GROSS_LOOP_CLOSURE_RELATIVE_LIMIT = 1.0 / 1000.0
     CROSS_BASE_SETTLE_SECONDS = 5
-    CROSS_BASE_SWITCH_TIMEOUT_SECONDS = 45
+    # A rover that was tracking the stopped fixed source may need well over a
+    # minute to reconnect, decode the replacement ephemerides and regain a
+    # solver-eligible FIX.  The live Sin Quyen handover showed 45 seconds is
+    # too short for the slower receiver, so keep validating source/length for
+    # up to two minutes instead of prematurely cycling the base again.
+    CROSS_BASE_SWITCH_TIMEOUT_SECONDS = 120
     CROSS_BASE_HANDOVER_MIN_SAMPLES = 5
     CROSS_BASE_POST_HANDOVER_SETTLE_SECONDS = 5
     CROSS_BASE_STABLE_COLLECTION_SECONDS = 60
@@ -945,7 +954,18 @@ class RoundRobinAdjustmentManager:
     CROSS_BASE_STATUS_POLL_SECONDS = 1
     CROSS_BASE_COLLECTION_ATTEMPTS = 2
     INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS = 3
-    INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS = 60
+    # If the fixed stream is demonstrably serving another rover while the next
+    # candidate remains completely silent, do not burn the full reacquisition
+    # timeout on a data-plane-stale receiver.
+    INTER_ROTATION_STALE_ROVER_GRACE_SECONDS = 45
+    INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS = 120
+    # A slow receiver can keep publishing transition AGRICA for almost the
+    # entire nominal wait and acquire the fixed source a few seconds later.
+    # Give recent activity a bounded sliding grace period, but retain a hard
+    # ceiling so a permanently stale stream cannot block the rotation forever.
+    INTER_ROTATION_REACQUIRE_ACTIVITY_GRACE_SECONDS = 60
+    INTER_ROTATION_REACQUIRE_MAX_SECONDS = 300
+    INTER_ROTATION_CLIENT_POLL_SECONDS = 5
     MODE_COMMAND_BURST_COUNT = 6
     UNLOGALL_COMMAND_BURST_COUNT = 3
     GPGGA_COMMAND_BURST_COUNT = 6
@@ -976,6 +996,7 @@ class RoundRobinAdjustmentManager:
         web_cors_api_username: str = "",
         web_cors_api_password: str = "",
         route_start_callback: Optional[Callable[[str, str, int, str, str], Any]] = None,
+        route_wait_callback: Optional[Callable[[str, float], Any]] = None,
         route_stop_callback: Optional[Callable[[str], Any]] = None,
         result_callback: Optional[Callable[[int, dict], Any]] = None,
         error_callback: Optional[Callable[[int, str], Any]] = None,
@@ -1002,6 +1023,7 @@ class RoundRobinAdjustmentManager:
         self._cors_fixed_base_snapshots: Dict[tuple[Any, ...], Dict[str, Any]] = {}
         self._cors_failover_last_state: Dict[tuple[Any, ...], str] = {}
         self.route_start_callback = route_start_callback
+        self.route_wait_callback = route_wait_callback
         self.route_stop_callback = route_stop_callback
         self.result_callback = result_callback
         self.error_callback = error_callback
@@ -2279,10 +2301,16 @@ class RoundRobinAdjustmentManager:
         server_id: int,
     ) -> bool:
         target_serial = str(serial or "").strip().casefold()
-        return any(
+        fixed_stream_is_managed = any(
             str(key[2] or "").strip().casefold() == target_serial
             and int(key[3] or 0) == int(server_id)
             for key in self._cors_fixed_base_snapshots
+        )
+        if fixed_stream_is_managed:
+            return True
+        return any(
+            target_serial in session.get("seed_topology_managed_serials", set())
+            for session in self._sessions.values()
         )
 
     @staticmethod
@@ -2508,6 +2536,257 @@ class RoundRobinAdjustmentManager:
             })
         return outcomes
 
+    async def prepare_common_fixed_base_seed(self, project_id: int) -> list[dict]:
+        """Force both CORS outputs to originate at the selected physical base.
+
+        A total-cluster seed is only geometrically valid when every rover sees
+        one control coordinate.  In the normal failover topology, S1 and S2 may
+        legitimately be fed by two different physical receivers, so the
+        adjustment must establish a temporary break-before-make topology before
+        accepting any fixed-base observations.
+        """
+
+        session = self._sessions.get(project_id)
+        if session is None:
+            raise KeyError(f"no active adjustment session for project {project_id}")
+        def has_dual_selected_stream(cluster: dict) -> bool:
+            candidates = self._fixed_base_candidates(cluster)
+            selected_config = candidates[0].get("base_service_config") or {}
+            return len(candidates) >= 2 or all(
+                bool(selected_config.get(f"server{server_id}_enabled", False))
+                and bool(str(selected_config.get(f"mountpoint{server_id}") or "").strip())
+                for server_id in (1, 2)
+            )
+
+        if not any(has_dual_selected_stream(cluster) for cluster in session["clusters"]):
+            for cluster in session["clusters"]:
+                self._lock_fixed_base_candidate(
+                    cluster,
+                    self._fixed_base_candidates(cluster)[0],
+                    "configured fixed base selected before seed collection",
+                )
+            return []
+        raw_stations = await asyncio.to_thread(
+            self._cors_api_request_sync,
+            "GET",
+            "/api/public/map-stations",
+        )
+        if isinstance(raw_stations, dict):
+            raw_stations = raw_stations.get("value") or raw_stations.get("items") or []
+        stations = [item for item in (raw_stations or []) if isinstance(item, dict)]
+        snapshots: dict[str, dict] = session.setdefault("seed_topology_snapshots", {})
+        outcomes: list[dict] = []
+
+        try:
+            for cluster_index, cluster in enumerate(session["clusters"]):
+                candidates = self._fixed_base_candidates(cluster)
+                selected = candidates[0]
+                # A mixed request may still contain a legacy single-stream
+                # base alongside a dual-stream total cluster.
+                if not has_dual_selected_stream(cluster):
+                    self._lock_fixed_base_candidate(
+                        cluster,
+                        selected,
+                        "configured fixed base selected before seed collection",
+                    )
+                    continue
+
+                selected_match = self._cors_failover_stream(
+                    stations,
+                    station_name=selected.get("base_station"),
+                    serial=selected.get("base_serial"),
+                    server_id=selected.get("base_server_id"),
+                    host=selected.get("base_stream_host"),
+                    mountpoint=selected.get("base_stream_mp"),
+                )
+                if selected_match is None:
+                    raise RuntimeError(
+                        f"{cluster.get('name', cluster_index + 1)}: could not resolve "
+                        "the selected CORS stream uniquely"
+                    )
+
+                selected_station, _ = selected_match
+                selected_serial = str(selected_station.get("serial") or "").strip()
+                selected_service_config = selected_station.get("service_config") or {}
+                if not all(
+                    bool(selected_service_config.get(f"server{server_id}_enabled", False))
+                    and bool(str(selected_service_config.get(f"mountpoint{server_id}") or "").strip())
+                    for server_id in (1, 2)
+                ):
+                    raise RuntimeError(
+                        f"{cluster.get('name', cluster_index + 1)}: selected physical base "
+                        f"{selected.get('base_station')} must have both S1 and S2 enabled "
+                        "with explicit mountpoints before a common-base seed can start"
+                    )
+
+                try:
+                    selected_server_id = int(selected.get("base_server_id") or 1)
+                except (TypeError, ValueError):
+                    selected_server_id = 1
+                paired_mountpoints = {
+                    str(selected_service_config.get(f"mountpoint{server_id}") or "")
+                    .strip()
+                    .casefold()
+                    for server_id in (1, 2)
+                    if server_id != selected_server_id
+                    and bool(selected_service_config.get(f"server{server_id}_enabled", False))
+                    and str(selected_service_config.get(f"mountpoint{server_id}") or "").strip()
+                }
+                physical_matches = []
+                for station in stations:
+                    serial = str(station.get("serial") or "").strip()
+                    if not serial or serial.casefold() == selected_serial.casefold():
+                        continue
+                    service_config = station.get("service_config") or {}
+                    identity_tokens = {
+                        str(station.get("name") or "").strip().casefold(),
+                        str(station.get("code") or "").strip().casefold(),
+                        str(station.get("mountpoint") or "").strip().casefold(),
+                        str(service_config.get("mountpoint1") or "").strip().casefold(),
+                    }
+                    if paired_mountpoints.intersection(identity_tokens):
+                        physical_matches.append(station)
+
+                # Compatibility fallback for older project records where the
+                # selected station did not expose its reciprocal S2 metadata.
+                other = candidates[1] if len(candidates) >= 2 else {}
+                if len(physical_matches) != 1 and other:
+                    target_serial = str(other.get("base_serial") or "").strip().casefold()
+                    target_name = str(other.get("base_station") or "").strip().casefold()
+                    physical_matches = [
+                        station
+                        for station in stations
+                        if (
+                            target_serial
+                            and str(station.get("serial") or "").strip().casefold()
+                            == target_serial
+                        )
+                        or (
+                            not target_serial
+                            and target_name
+                            and str(station.get("name") or station.get("code") or "")
+                            .strip()
+                            .casefold()
+                            == target_name
+                        )
+                    ]
+                if len(physical_matches) != 1:
+                    raise RuntimeError(
+                        f"{cluster.get('name', cluster_index + 1)}: selected base "
+                        f"{selected.get('base_station')} has reciprocal mountpoint(s) "
+                        f"{sorted(paired_mountpoints)}, but matched "
+                        f"{len(physical_matches)} opposite physical stations"
+                    )
+                other_station = physical_matches[0]
+                other_serial = str(other_station.get("serial") or "").strip()
+                other_name = str(
+                    other_station.get("name") or other_station.get("code") or ""
+                ).strip()
+
+                for station in (selected_station, other_station):
+                    serial = str(station.get("serial") or "").strip()
+                    snapshots.setdefault(
+                        serial.casefold(),
+                        {
+                            "serial": serial,
+                            "service_config": copy.deepcopy(station.get("service_config") or {}),
+                        },
+                    )
+                session.setdefault("seed_topology_managed_serials", set()).update({
+                    selected_serial.casefold(),
+                    other_serial.casefold(),
+                })
+
+                other_online = self._cors_station_is_online(other_station)
+                if other_online:
+                    other_disabled = self._cors_service_config_with_server_mode(
+                        other_station.get("service_config") or {},
+                        None,
+                        on_demand=True,
+                    )
+                    await asyncio.to_thread(
+                        self._cors_configure_service_sync,
+                        other_serial,
+                        other_disabled,
+                    )
+                    other_station["service_config"] = other_disabled
+
+                # Whether the opposite receiver is online or offline, assert
+                # both enabled outputs on the chosen receiver. If it is offline,
+                # failover normally already made S2 active and this is a no-op.
+                selected_original = selected_service_config
+                selected_enabled = self._cors_service_config_with_server_mode(
+                    selected_original,
+                    None,
+                    on_demand=False,
+                )
+                if selected_enabled != selected_original:
+                    await asyncio.to_thread(
+                        self._cors_configure_service_sync,
+                        selected_serial,
+                        selected_enabled,
+                    )
+                    selected_station["service_config"] = selected_enabled
+
+                self._lock_fixed_base_candidate(
+                    cluster,
+                    selected,
+                    (
+                        f"selected {selected.get('base_station')} was forced onto both S1/S2; "
+                        f"opposite station {other_name} was "
+                        f"{'online and stopped' if other_online else 'offline'} before seed"
+                    ),
+                )
+                cluster["require_fixed_base_length_check"] = True
+                outcomes.append({
+                    "cluster": str(cluster.get("name") or cluster_index + 1),
+                    "selected_base": str(selected.get("base_station") or ""),
+                    "opposite_base": other_name,
+                    "opposite_online": other_online,
+                    "state": "COMMON_SELECTED_BASE_PENDING_RTCM_VERIFICATION",
+                })
+
+            if outcomes:
+                await self._emit_progress(
+                    project_id,
+                    "Đã ngắt base đối nghịch và bật cả S1/S2 của base được chọn; "
+                    "đang chờ RTCM chuyển nguồn ổn định trước khi thu baseline chung.",
+                )
+                await asyncio.sleep(self.FIXED_BASE_HANDOVER_SETTLE_SECONDS)
+                # No pre-handover fragment or observation may enter the seed.
+                for cluster in session["clusters"]:
+                    cluster["observations"].clear()
+                    self._clear_cluster_fragment_buffers(project_id, cluster)
+                session["seed_started_monotonic"] = time.monotonic()
+            return outcomes
+        except Exception:
+            await self.restore_common_fixed_base_topology(project_id)
+            raise
+
+    async def restore_common_fixed_base_topology(self, project_id: int) -> None:
+        """Restore CORS service modes saved before common-base seed collection."""
+
+        session = self._sessions.get(project_id)
+        if session is None:
+            return
+        snapshots = session.get("seed_topology_snapshots") or {}
+        errors: list[str] = []
+        remaining: dict[str, dict] = {}
+        for snapshot_key, snapshot in reversed(list(snapshots.items())):
+            try:
+                await asyncio.to_thread(
+                    self._cors_configure_service_sync,
+                    snapshot["serial"],
+                    copy.deepcopy(snapshot["service_config"]),
+                )
+            except Exception as exc:
+                errors.append(f"{snapshot.get('serial')}: {exc}")
+                remaining[snapshot_key] = snapshot
+        session["seed_topology_snapshots"] = remaining
+        session["seed_topology_managed_serials"] = set(remaining)
+        if errors:
+            raise RuntimeError("could not restore common-base topology: " + "; ".join(errors))
+
     async def _reacquire_fixed_base_between_rotations(
         self,
         project_id: int,
@@ -2519,7 +2798,7 @@ class RoundRobinAdjustmentManager:
         selected_serial: str = "",
         selected_server_id: Optional[int] = None,
         sleep_all_streams: bool = False,
-    ) -> None:
+    ) -> bool:
         """Reconnect every rover to the fixed BASE before the next rotation.
 
         Once a temporary pusher stops, rover NTRIP sessions disappear if the
@@ -2530,6 +2809,7 @@ class RoundRobinAdjustmentManager:
         """
 
         start_index = len(cluster["observations"])
+        cluster.pop("_last_reacquire_skip_mode", None)
         identity_kwargs = {}
         if selected_serial:
             identity_kwargs["selected_serial"] = selected_serial
@@ -2550,15 +2830,42 @@ class RoundRobinAdjustmentManager:
             **identity_kwargs,
         )
 
-        expected_rovers = {str(name) for name in cluster.get("rovers", ())}
+        all_rovers = {str(name) for name in cluster.get("rovers", ())}
+        # Only the receiver that will become the next temporary BASE must have
+        # an active fixed-source solution and SET control session here. Other
+        # rovers can legitimately take longer to reconnect; their observations
+        # are still rejected by source identity and estimated-length checks
+        # until the next temporary source is genuinely acquired.
+        required_rovers = {str(next_rover)}
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS
+        started_at = loop.time()
+        nominal_deadline = (
+            started_at + self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS
+        )
+        hard_deadline = started_at + max(
+            self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS,
+            self.INTER_ROTATION_REACQUIRE_MAX_SECONDS,
+        )
         epochs_by_rover: Dict[str, set[int]] = {}
         next_client_confirmed = False
-        while loop.time() < deadline:
+        client_check_state = "not-checked"
+        client_check_error = ""
+        client_check_failure_logged = False
+        next_client_check_at = started_at
+        last_next_rover_activity_at: Optional[float] = None
+        next_rover_record_count = 0
+        extension_announced = False
+        while loop.time() < hard_deadline:
+            now = loop.time()
             epochs_by_rover = {}
+            current_next_rover_record_count = 0
             for record in cluster["observations"][start_index:]:
                 observation = getattr(record, "observation", None)
+                if (
+                    observation is not None
+                    and str(getattr(observation, "rover_name", "")) == str(next_rover)
+                ):
+                    current_next_rover_record_count += 1
                 if (
                     observation is None
                     or getattr(record, "base_name", None) != "BASE"
@@ -2573,46 +2880,188 @@ class RoundRobinAdjustmentManager:
                     int(observation.epoch_ts)
                 )
 
-            fixed_ready = expected_rovers and all(
+            if current_next_rover_record_count > next_rover_record_count:
+                next_rover_record_count = current_next_rover_record_count
+                last_next_rover_activity_at = now
+
+            fixed_ready = all(
                 len(epochs_by_rover.get(rover_name, ()))
                 >= self.INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS
-                for rover_name in expected_rovers
+                for rover_name in required_rovers
             )
-            if fixed_ready:
-                client_info = await self._find_client_info(next_rover)
-                next_client_confirmed = client_info is not None
-                if next_client_confirmed:
-                    break
+            if fixed_ready or now >= next_client_check_at:
+                try:
+                    client_info = await self._find_client_info(
+                        next_rover,
+                        log_missing=False,
+                    )
+                    next_client_confirmed = client_info is not None
+                    client_check_state = (
+                        "confirmed" if next_client_confirmed else "checked-missing"
+                    )
+                    client_check_error = ""
+                except Exception as exc:
+                    next_client_confirmed = False
+                    client_check_state = "check-failed"
+                    client_check_error = str(exc) or type(exc).__name__
+                    if not client_check_failure_logged:
+                        client_check_failure_logged = True
+                        logger.warning(
+                            "AICaster session check failed during fixed BASE "
+                            "reacquisition for %s; polling will continue: %s",
+                            next_rover,
+                            client_check_error,
+                        )
+                next_client_check_at = (
+                    now + self.INTER_ROTATION_CLIENT_POLL_SECONDS
+                )
+            if fixed_ready and next_client_confirmed:
+                break
+
+            fixed_service_proven_elsewhere = any(
+                rover_name != str(next_rover)
+                and len(epochs) >= self.INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS
+                for rover_name, epochs in epochs_by_rover.items()
+            )
+            if (
+                next_client_confirmed
+                and next_rover_record_count == 0
+                and fixed_service_proven_elsewhere
+                and now - started_at
+                >= self.INTER_ROTATION_STALE_ROVER_GRACE_SECONDS
+            ):
+                break
+
+            activity_deadline = (
+                last_next_rover_activity_at
+                + self.INTER_ROTATION_REACQUIRE_ACTIVITY_GRACE_SECONDS
+                if last_next_rover_activity_at is not None
+                else nominal_deadline
+            )
+            effective_deadline = min(
+                hard_deadline,
+                max(nominal_deadline, activity_deadline),
+            )
+            if now >= nominal_deadline and effective_deadline > now:
+                if not extension_announced:
+                    extension_announced = True
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{next_rover}: nominal fixed-BASE reacquisition wait "
+                            f"reached {self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS}s, "
+                            "but fresh AGRICA transition data is still arriving; "
+                            f"extending adaptively up to "
+                            f"{self.INTER_ROTATION_REACQUIRE_MAX_SECONDS}s."
+                        ),
+                    )
+            elif now >= effective_deadline:
+                break
             await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
-        else:
+
+        if not (fixed_ready and next_client_confirmed):
             counts = {
                 rover_name: len(epochs_by_rover.get(rover_name, ()))
-                for rover_name in sorted(expected_rovers)
+                for rover_name in sorted(all_rovers)
             }
-            raise RuntimeError(
+            elapsed_seconds = max(0, int(round(loop.time() - started_at)))
+            client_detail = client_check_state
+            if client_check_error:
+                client_detail += f" ({client_check_error})"
+            detail = (
                 f"Fixed BASE reacquisition before {next_rover} timed out after "
-                f"{self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS}s; "
+                f"{elapsed_seconds}s "
+                f"(nominal {self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS}s, "
+                f"hard limit {self.INTER_ROTATION_REACQUIRE_MAX_SECONDS}s); "
                 f"BASE epochs={counts}, next AICaster session="
-                f"{'confirmed' if next_client_confirmed else 'missing'}"
+                f"{client_detail}"
             )
+            # This receiver has not entered its temporary-BASE rotation yet.
+            # Either an authoritative client-table miss *or* an active control
+            # session with no fresh fixed-BASE observations proves that this
+            # rover cannot safely become the next temporary BASE.  Skip that
+            # rover and continue the cluster.  Query failures remain fatal:
+            # they describe loss of controller visibility, not the state of
+            # this individual rover.
+            confirmed_offline = client_check_state == "checked-missing"
+            fixed_service_proven_elsewhere = any(
+                rover_name != str(next_rover)
+                and len(epochs) >= self.INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS
+                for rover_name, epochs in epochs_by_rover.items()
+            )
+            fixed_data_missing = bool(
+                next_client_confirmed
+                and not fixed_ready
+                and (
+                    next_rover_record_count > 0
+                    or fixed_service_proven_elsewhere
+                )
+            )
+            live_but_uncontrolled = bool(
+                confirmed_offline
+                and next_rover_record_count > 0
+            )
+            if not confirmed_offline and not fixed_data_missing:
+                raise RuntimeError(detail)
+            if fixed_data_missing:
+                availability = (
+                    "AICaster control session is active but no fresh, solver-eligible "
+                    "fixed-BASE epochs arrived"
+                )
+                skip_detail = (
+                    "skipping this data-plane-stale rover from the remaining "
+                    "temporary-BASE rotation and cross-baseline expectations. "
+                )
+                skip_mode = "offline"
+            elif live_but_uncontrolled:
+                availability = (
+                    "AGRICA is live but the AICaster control identity is unavailable"
+                )
+                skip_detail = (
+                    "skipping only its temporary-BASE rotation. The station remains "
+                    "eligible as a rover in other rotations. "
+                )
+                skip_mode = "uncontrolled"
+            else:
+                availability = "AICaster session disappeared"
+                skip_detail = "skipping its temporary-BASE rotation. "
+                skip_mode = "offline"
+            warning = (
+                f"{next_rover}: "
+                f"{availability} during inter-rotation handover; "
+                + skip_detail
+                + detail
+            )
+            cluster["_last_reacquire_skip_mode"] = skip_mode
+            session = self._sessions.get(project_id) or {}
+            session.setdefault("rotation_warnings", []).append({
+                "cluster_index": int(cluster.get("current_rotation_index") or 0),
+                "rover": str(next_rover),
+                "message": warning,
+            })
+            await self._emit_progress(project_id, warning)
+            self._exclude_fixed_base_records(
+                cluster,
+                start_index,
+                flag="EXCLUDE_INTER_ROTATION_REACQUISITION",
+                diagnostic=(
+                    "Fresh fixed-BASE epoch used only to verify inter-rotation NTRIP "
+                    "reacquisition; excluded from the common fixed-BASE solver seed."
+                ),
+            )
+            return False
 
         await self._emit_progress(
             project_id,
             (
-                f"Inter-rotation handover verified: every rover supplied at least "
+                f"Inter-rotation handover verified: {next_rover} supplied at least "
                 f"{self.INTER_ROTATION_REACQUIRE_MIN_DISTINCT_EPOCHS} fresh fixed-BASE "
-                f"epochs and {next_rover} has an active AICaster session. Putting "
-                f"{mountpoint} back to Sleep before the next temporary BASE."
+                "epochs and has an active AICaster session. Other slow clients "
+                "remain quarantined by source/length validation. Keeping "
+                f"{mountpoint} active through the next rover preflight; it will "
+                "Sleep immediately before temporary SOURCE fanout."
             ),
         )
-        await self._toggle_cors_fixed_base(
-            mountpoint,
-            sleep=True,
-            selected_host=selected_host,
-            sleep_all_streams=sleep_all_streams,
-            **identity_kwargs,
-        )
-        await asyncio.sleep(2.0)
 
         self._exclude_fixed_base_records(
             cluster,
@@ -2624,6 +3073,7 @@ class RoundRobinAdjustmentManager:
                 "solver seed."
             ),
         )
+        return True
 
     @staticmethod
     def _exclude_fixed_base_records(
@@ -2815,6 +3265,38 @@ class RoundRobinAdjustmentManager:
                     cluster.get("round_robin_route_mountpoint")
                     or cluster.get("base_stream_mp")
                 )
+                # A physical CORS base can publish the same RTCM source through
+                # both S1 and S2 (for example SinQuyen2 -> SinQuyen2,SinQuyen1).
+                # Temporary rover bases must replace both outputs as well;
+                # otherwise clients attached to the reciprocal mountpoint keep
+                # receiving the fixed base and never complete the handover.
+                temporary_route_mountpoints: list[str] = []
+                if configured_mountpoint:
+                    temporary_route_mountpoints.append(str(configured_mountpoint).strip())
+                selected_service_config = cluster.get("base_service_config") or {}
+                normalized_route_host = str(route_host or "").strip().casefold()
+                for server_id in (1, 2):
+                    candidate_mountpoint = str(
+                        selected_service_config.get(f"mountpoint{server_id}") or ""
+                    ).strip()
+                    candidate_host = str(
+                        selected_service_config.get(f"serverhost{server_id}") or route_host or ""
+                    ).strip()
+                    if (
+                        not selected_service_config.get(f"server{server_id}_enabled", False)
+                        or not candidate_mountpoint
+                        or (
+                            normalized_route_host
+                            and candidate_host.casefold() != normalized_route_host
+                        )
+                    ):
+                        continue
+                    if not any(
+                        existing.casefold() == candidate_mountpoint.casefold()
+                        for existing in temporary_route_mountpoints
+                    ):
+                        temporary_route_mountpoints.append(candidate_mountpoint)
+                temporary_route_mountpoint = ",".join(temporary_route_mountpoints)
                 # This is the exact S1/S2 host selected in Project Management.
                 # Do not infer server 1 from the mountpoint alone: S1 and S2 may
                 # expose the same mountpoint on different caster hosts.
@@ -2851,29 +3333,24 @@ class RoundRobinAdjustmentManager:
                     configured_base_serial,
                     configured_base_server_id,
                 )
+                is_multi_mp = True
                 if configured_mountpoint and base_stream_key not in suspended_bases:
                     await self._emit_progress(
                         project_id,
-                        f"Chuyển Base cố định {configured_mountpoint} sang On-Demand/Sleep và ngắt luồng NTRIP.",
+                        f"Đã khóa topology Base cố định {configured_mountpoint}; giữ stream hoạt động "
+                        "qua preflight và chỉ Sleep ngay trước khi mở fanout BASE tạm.",
                     )
                     suspended_bases.add(base_stream_key)
-                    # Add it before the API call so finally also restores a
-                    # configuration when the HTTP response is lost after CORS
-                    # has already accepted the change.
-                    # Always sleep ALL streams (S1 & S2) of the fixed base to ensure cross-base streams are also stopped
-                    is_multi_mp = True
-                    await self._toggle_cors_fixed_base(
-                        configured_mountpoint,
-                        sleep=True,
-                        selected_host=configured_base_host,
-                        sleep_all_streams=is_multi_mp,
-                        **fixed_base_identity_kwargs,
-                    )
-                    # Chờ 2s để đảm bảo caster đã xử lý ngắt
-                    await asyncio.sleep(2.0)
+                    # The actual break happens immediately before SOURCE fanout.
+                    # Keeping the fixed stream alive through SET/preflight prevents
+                    # rover clients from entering a long reconnect backoff.
                     
                     # Ngắt các trạm Base phụ thuộc (conflict bases)
-                    conflict_bases = cluster.get("conflict_bases", [])
+                    conflict_bases = (
+                        []
+                        if session.get("seed_topology_snapshots")
+                        else cluster.get("conflict_bases", [])
+                    )
                     for cb in conflict_bases:
                         cb_serial = cb.get("serial", "").strip()
                         cb_name = cb.get("name", "").strip()
@@ -2980,8 +3457,15 @@ class RoundRobinAdjustmentManager:
                 rotation_queue = list(rovers)
                 initial_rotation_count = len(rotation_queue)
                 completed_mandatory_rotations: set[str] = set()
+                skipped_offline_rotation_keys: set[str] = set()
+                waived_uncontrolled_rotation_keys: set[str] = set()
                 graph_recovery_scheduled = False
                 for rotation_index, rover_code in enumerate(rotation_queue):
+                    if str(rover_code).casefold() in (
+                        skipped_offline_rotation_keys
+                        | waived_uncontrolled_rotation_keys
+                    ):
+                        continue
                     cluster["current_rotation_index"] = rotation_index + 1
                     cluster["current_stable_window_index"] = None
                     next_stable_window_index = 0
@@ -3005,6 +3489,8 @@ class RoundRobinAdjustmentManager:
                             str(candidate)
                             for candidate in rovers
                             if str(candidate).casefold() != str(rover_code).casefold()
+                            and str(candidate).casefold()
+                            not in skipped_offline_rotation_keys
                         }
 
                     def mark_collection_started(
@@ -3267,12 +3753,56 @@ class RoundRobinAdjustmentManager:
                             }
 
                         try:
+                            async def wake_fixed_base_for_rover_restore() -> dict:
+                                await self._emit_progress(
+                                    project_id,
+                                    (
+                                        f"{rover_code}: temporary route stopped; restoring fixed "
+                                        f"BASE {configured_mountpoint} and waiting for its "
+                                        "AICaster control session before SET ROVER."
+                                    ),
+                                )
+                                await self._toggle_cors_fixed_base(
+                                    str(configured_mountpoint),
+                                    sleep=False,
+                                    selected_host=configured_base_host,
+                                    **fixed_base_identity_kwargs,
+                                )
+                                loop = asyncio.get_running_loop()
+                                deadline = (
+                                    loop.time()
+                                    + self.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS
+                                )
+                                while loop.time() < deadline:
+                                    refreshed_client = await self._find_client_info(
+                                        rover_code,
+                                        log_missing=False,
+                                    )
+                                    if refreshed_client:
+                                        return refreshed_client
+                                    await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
+                                raise RuntimeError(
+                                    f"{rover_code}: fixed BASE returned but its AICaster "
+                                    "control session did not reconnect before ROVER restore"
+                                )
+
+                            async def sleep_fixed_base_before_temporary_route() -> None:
+                                await self._toggle_cors_fixed_base(
+                                    str(configured_mountpoint),
+                                    sleep=True,
+                                    selected_host=configured_base_host,
+                                    sleep_all_streams=True,
+                                    **fixed_base_identity_kwargs,
+                                )
+
                             await self._set_rover_as_temporary_base(
                                 rover_code,
                                 project_id=project_id,
                                 route_host=route_host,
                                 route_port=route_port,
-                                route_mountpoint=configured_mountpoint,
+                                route_mountpoint=(
+                                    temporary_route_mountpoint or configured_mountpoint
+                                ),
                                 route_password=str(route_password),
                                 on_collection_started=mark_collection_started,
                                 on_stable_collection_started=mark_stable_collection_started,
@@ -3282,6 +3812,16 @@ class RoundRobinAdjustmentManager:
                                 expected_cross_rovers=expected_cross_rovers,
                                 base_llh_override=frozen_base_coordinates.get(
                                     str(rover_code)
+                                ),
+                                before_rover_restore=(
+                                    wake_fixed_base_for_rover_restore
+                                    if configured_mountpoint
+                                    else None
+                                ),
+                                before_route_start=(
+                                    sleep_fixed_base_before_temporary_route
+                                    if configured_mountpoint
+                                    else None
                                 ),
                             )
                         except _SafeRoverRotationSkip as exc:
@@ -3399,15 +3939,39 @@ class RoundRobinAdjustmentManager:
                             "selected_serial": configured_base_serial,
                             "selected_server_id": (configured_base_server_id or None),
                         }
-                        await self._reacquire_fixed_base_between_rotations(
-                            project_id,
-                            cluster,
-                            next_rover=str(rotation_queue[rotation_index + 1]),
-                            mountpoint=str(configured_mountpoint),
-                            selected_host=configured_base_host,
-                            sleep_all_streams=is_multi_mp,
-                            **fixed_base_identity_kwargs,
-                        )
+                        for next_index in range(
+                            rotation_index + 1,
+                            initial_rotation_count,
+                        ):
+                            next_candidate = str(rotation_queue[next_index])
+                            if next_candidate.casefold() in (
+                                skipped_offline_rotation_keys
+                                | waived_uncontrolled_rotation_keys
+                            ):
+                                continue
+                            reacquired = await self._reacquire_fixed_base_between_rotations(
+                                project_id,
+                                cluster,
+                                next_rover=next_candidate,
+                                mountpoint=str(configured_mountpoint),
+                                selected_host=configured_base_host,
+                                sleep_all_streams=is_multi_mp,
+                                **fixed_base_identity_kwargs,
+                            )
+                            if reacquired:
+                                break
+                            skip_mode = cluster.pop(
+                                "_last_reacquire_skip_mode",
+                                "offline",
+                            )
+                            if skip_mode == "uncontrolled":
+                                waived_uncontrolled_rotation_keys.add(
+                                    next_candidate.casefold()
+                                )
+                            else:
+                                skipped_offline_rotation_keys.add(
+                                    next_candidate.casefold()
+                                )
                     if (
                         not graph_recovery_scheduled
                         and rotation_index + 1 == initial_rotation_count
@@ -3436,20 +4000,43 @@ class RoundRobinAdjustmentManager:
                     str(candidate).casefold() for candidate in rovers
                 }
                 missing_rotation_keys = (
-                    required_rotation_keys - completed_mandatory_rotations
+                    required_rotation_keys
+                    - completed_mandatory_rotations
+                    - skipped_offline_rotation_keys
+                    - waived_uncontrolled_rotation_keys
                 )
-                if missing_rotation_keys:
-                    raise RuntimeError(
-                        "Full temporary-BASE rotation is incomplete; missing base "
-                        "rotation(s): " + ", ".join(sorted(missing_rotation_keys))
-                    )
                 final_cross_edges, _ = current_solver_eligible_cross_coverage()
+                if missing_rotation_keys:
+                    cross_graph_connected = (
+                        len(final_cross_edges) >= max(len(rovers) - 1, 1)
+                        and len(_graph_components(rovers, final_cross_edges)) == 1
+                    )
+                    if not (
+                        cluster.get("skip_offline_rovers")
+                        and cross_graph_connected
+                    ):
+                        raise RuntimeError(
+                            "Full temporary-BASE rotation is incomplete; missing base "
+                            "rotation(s): " + ", ".join(sorted(missing_rotation_keys))
+                        )
+                    warning = (
+                        "Proceeding with connected partial rotation coverage; skipped "
+                        "base rotation(s): "
+                        + ", ".join(sorted(missing_rotation_keys))
+                        + f". Cross graph remains connected with {len(final_cross_edges)} edge(s)."
+                    )
+                    session.setdefault("rotation_warnings", []).append({
+                        "cluster_index": cluster_index,
+                        "rover": ",".join(sorted(missing_rotation_keys)),
+                        "message": warning,
+                    })
+                    await self._emit_progress(project_id, warning)
                 await self._emit_progress(
                     project_id,
                     (
-                        f"{cluster.get('name', cluster_index + 1)}: all "
-                        f"{initial_rotation_count}/{initial_rotation_count} mandatory "
-                        "temporary-BASE rotations completed; collected "
+                        f"{cluster.get('name', cluster_index + 1)}: "
+                        f"{len(completed_mandatory_rotations)}/"
+                        f"{initial_rotation_count} temporary-BASE rotations completed; collected "
                         f"{len(final_cross_edges)} distinct rover-to-rover edge(s). "
                         "Proceeding to fixed-base restoration and network adjustment."
                     ),
@@ -3486,6 +4073,15 @@ class RoundRobinAdjustmentManager:
                 except Exception as e:
                     logger.error("Failed to restore fixed base %s in finally block: %s", mp, e)
                     restore_errors.append(f"{mp}: {e}")
+            try:
+                await self.restore_common_fixed_base_topology(project_id)
+            except Exception as e:
+                logger.error(
+                    "Failed to restore common fixed-base topology for project %s: %s",
+                    project_id,
+                    e,
+                )
+                restore_errors.append(str(e))
             self.running_tasks.pop(project_id, None)
 
             # A result must never be announced before every fixed-base stream is
@@ -3580,6 +4176,9 @@ class RoundRobinAdjustmentManager:
         collection_status_callback: Optional[Callable[[], dict]] = None,
         expected_cross_rovers: Optional[set[str]] = None,
         base_llh_override: Optional[dict] = None,
+        before_route_start: Optional[Callable[[], Any]] = None,
+        before_rover_restore: Optional[Callable[[], Any]] = None,
+        after_rover_restore: Optional[Callable[[], Any]] = None,
     ) -> None:
         logger.info("[Round-Robin] Setting %s as temporary base", rover_code)
         await self._emit_progress(
@@ -3661,6 +4260,56 @@ class RoundRobinAdjustmentManager:
                 f"Refusing to set {rover_code} as BASE because ROVER recovery "
                 f"preflight was not verified: {detail}"
             )
+
+        route_started = False
+        collection_started = False
+        restore_error: Optional[str] = None
+        target_route_host = route_host or self.source_host
+        target_route_port = int(route_port or self.source_port)
+        target_route_mountpoint = route_mountpoint or f"{rover_code}_BASE"
+        target_route_password = self.source_password if route_password is None else route_password
+        operation_error: Optional[Exception] = None
+        if before_route_start:
+            try:
+                before_route_result = before_route_start()
+                if inspect.isawaitable(before_route_result):
+                    await before_route_result
+            except Exception as route_prepare_exc:
+                if before_rover_restore:
+                    recovery_result = before_rover_restore()
+                    if inspect.isawaitable(recovery_result):
+                        await recovery_result
+                raise _SafeRoverRotationSkip(
+                    f"{rover_code}: could not stop the fixed BASE immediately before "
+                    f"temporary fanout; receiver remains ROVER: {route_prepare_exc}"
+                ) from route_prepare_exc
+        await self._emit_progress(
+            project_id,
+            (
+                f"{rover_code}: priming MQTT-to-NTRIP fanout "
+                f"{target_route_host}:{target_route_port}/{target_route_mountpoint} "
+                "before BASE mode to minimize the correction-source handover gap."
+            ),
+        )
+        try:
+            await self._start_ntrip_route(
+                rover_code,
+                target_route_mountpoint,
+                host=target_route_host,
+                port=target_route_port,
+                password=target_route_password,
+            )
+            route_started = True
+        except Exception as route_exc:
+            if before_rover_restore:
+                recovery_result = before_rover_restore()
+                if inspect.isawaitable(recovery_result):
+                    await recovery_result
+            raise _SafeRoverRotationSkip(
+                f"{rover_code}: could not prime every temporary SOURCE target; "
+                f"receiver remains ROVER: {route_exc}"
+            ) from route_exc
+
         await self._emit_progress(
             project_id,
             (
@@ -3669,16 +4318,22 @@ class RoundRobinAdjustmentManager:
                 f"{'enabled' if self.control_password else 'disabled'})."
             ),
         )
-        if not await self._send_set_command(
-            mountpoint,
-            client_info.get("Username", rover_code),
-            client_info.get("receiverID", ""),
-            commands,
-            password=self.control_password,
-            caster_host=client_info.get("CasterHost"),
-            caster_port=client_info.get("CasterPort"),
-            ack_station_code=rover_code,
-        ):
+        try:
+            base_verified = await self._send_set_command(
+                mountpoint,
+                client_info.get("Username", rover_code),
+                client_info.get("receiverID", ""),
+                commands,
+                password=self.control_password,
+                caster_host=client_info.get("CasterHost"),
+                caster_port=client_info.get("CasterPort"),
+                ack_station_code=rover_code,
+            )
+        except Exception:
+            await self._stop_ntrip_route(rover_code)
+            route_started = False
+            raise
+        if not base_verified:
             detail = self._last_set_error or "AICaster returned no rejection detail"
             await self._emit_progress(
                 project_id,
@@ -3687,6 +4342,10 @@ class RoundRobinAdjustmentManager:
                     "immediate ROVER recovery sequence before aborting."
                 ),
             )
+            try:
+                await self._stop_ntrip_route(rover_code)
+            finally:
+                route_started = False
             try:
                 await self._restore_rover_output_sequence(
                     rover_code=rover_code,
@@ -3720,39 +4379,33 @@ class RoundRobinAdjustmentManager:
             ),
         )
 
-        route_started = False
-        collection_started = False
-        restore_error: Optional[str] = None
-        target_route_host = route_host or self.source_host
-        target_route_port = int(route_port or self.source_port)
-        target_route_mountpoint = route_mountpoint or f"{rover_code}_BASE"
-        target_route_password = self.source_password if route_password is None else route_password
-        operation_error: Optional[Exception] = None
         try:
             await self._emit_progress(
                 project_id,
                 (
-                    f"{rover_code}: BASE profile acknowledged; starting the MQTT-to-NTRIP "
-                    "route and waiting adaptively for the first verified RTCM3 frame."
+                    f"{rover_code}: BASE profile acknowledged; waiting for every primed "
+                    "SOURCE target to forward its first verified RTCM3 frame."
                 ),
             )
             await self._emit_progress(
                 project_id,
                 (
-                    f"{rover_code}: starting MQTT-to-NTRIP route "
+                    f"{rover_code}: verifying MQTT-to-NTRIP fanout "
                     f"{target_route_host}:{target_route_port}/{target_route_mountpoint}."
                 ),
             )
             for route_attempt in range(1, self.RTCM_ROUTE_RECOVERY_ATTEMPTS + 1):
                 try:
-                    await self._start_ntrip_route(
-                        rover_code,
-                        target_route_mountpoint,
-                        host=target_route_host,
-                        port=target_route_port,
-                        password=target_route_password,
-                    )
-                    route_started = True
+                    if not route_started:
+                        await self._start_ntrip_route(
+                            rover_code,
+                            target_route_mountpoint,
+                            host=target_route_host,
+                            port=target_route_port,
+                            password=target_route_password,
+                        )
+                        route_started = True
+                    await self._wait_for_ntrip_route(rover_code, timeout=25.0)
                     break
                 except Exception as route_exc:
                     is_missing_rtcm = "no valid rtcm3 frame" in str(route_exc).casefold()
@@ -3767,6 +4420,7 @@ class RoundRobinAdjustmentManager:
                     # again before abandoning this rotation.
                     try:
                         await self._stop_ntrip_route(rover_code)
+                        route_started = False
                     except Exception as stop_exc:
                         logger.warning(
                             "Could not stop failed RTCM route for %s before recovery: %s",
@@ -4039,6 +4693,17 @@ class RoundRobinAdjustmentManager:
                             if on_stable_collection_started:
                                 on_stable_collection_started()
                             solver_window_open = True
+                            # The stability timeout governs how long we wait to
+                            # open a clean window.  Once it opens, always grant
+                            # the full mandatory solver duration; otherwise a
+                            # window opened near the deadline is quarantined
+                            # before it can possibly accumulate enough epochs.
+                            stability_deadline = max(
+                                stability_deadline,
+                                now
+                                + self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS
+                                + self.CROSS_BASE_STATUS_POLL_SECONDS * 2,
+                            )
                             drift_failure_counts = {
                                 name: 0 for name in stability_targets
                             }
@@ -4071,13 +4736,21 @@ class RoundRobinAdjustmentManager:
                         await asyncio.sleep(self.CROSS_BASE_STATUS_POLL_SECONDS)
                 else:
                     missing = sorted(expected - participants)
+                    unstable = sorted(expected - stable_participants)
+                    handover_counts = {
+                        name: sample_counts_by_rover.get(name, 0)
+                        for name in sorted(expected or participants)
+                    }
                     await self._emit_progress(
                         project_id,
                         (
                             f"{rover_code}: temporary-base handover was not fully "
-                            f"verified before timeout; valid rovers="
+                            f"verified before timeout; seen rovers="
                             f"{', '.join(sorted(participants)) or 'none'}, missing="
-                            f"{', '.join(missing) or 'none'}. The rotation will be "
+                            f"{', '.join(missing) or 'none'}, below "
+                            f"{self.CROSS_BASE_HANDOVER_MIN_SAMPLES}-epoch requirement="
+                            f"{', '.join(unstable) or 'none'}, epoch counts="
+                            f"{handover_counts}. The rotation will be "
                             "retried after safe ROVER restore."
                         ),
                     )
@@ -4102,6 +4775,25 @@ class RoundRobinAdjustmentManager:
                 except Exception as exc:
                     logger.error("Could not stop temporary NTRIP route for %s: %s", rover_code, exc)
 
+            if before_rover_restore:
+                try:
+                    refreshed_client = before_rover_restore()
+                    if inspect.isawaitable(refreshed_client):
+                        refreshed_client = await refreshed_client
+                    if isinstance(refreshed_client, dict) and refreshed_client:
+                        client_info = refreshed_client
+                        refreshed_mountpoint = str(
+                            refreshed_client.get("Mountpoint") or ""
+                        ).strip()
+                        if refreshed_mountpoint:
+                            mountpoint = refreshed_mountpoint
+                except Exception as wake_exc:
+                    restore_error = (
+                        f"Could not restore fixed BASE before returning {rover_code} "
+                        f"to ROVER: {str(wake_exc) or wake_exc.__class__.__name__}"
+                    )
+                    logger.error(restore_error)
+
             # A temporary base must never be left in BASE mode. Restore the
             # receiver without FRESET so its persistent NTRIP setup and baud
             # rate remain intact.
@@ -4109,27 +4801,42 @@ class RoundRobinAdjustmentManager:
                 project_id,
                 f"{rover_code}: sending SET ROVER to restore normal AGRICA operation.",
             )
-            try:
-                await self._restore_rover_output_sequence(
-                    rover_code=rover_code,
-                    mountpoint=mountpoint,
-                    client_info=client_info,
-                    commands=rover_commands,
-                    project_id=project_id,
-                )
-                restored = True
-            except Exception as restore_exc:
+            if restore_error:
                 restored = False
-                restore_error = (
-                    f"Could not restore {rover_code} to ROVER mode: "
-                    f"{str(restore_exc) or restore_exc.__class__.__name__}"
-                )
-                logger.error(restore_error)
+            else:
+                try:
+                    await self._restore_rover_output_sequence(
+                        rover_code=rover_code,
+                        mountpoint=mountpoint,
+                        client_info=client_info,
+                        commands=rover_commands,
+                        project_id=project_id,
+                    )
+                    restored = True
+                except Exception as restore_exc:
+                    restored = False
+                    restore_error = (
+                        f"Could not restore {rover_code} to ROVER mode: "
+                        f"{str(restore_exc) or restore_exc.__class__.__name__}"
+                    )
+                    logger.error(restore_error)
             if restored:
                 await self._emit_progress(
                     project_id,
                     f"{rover_code}: SET ROVER accepted; receiver restored.",
                 )
+                if after_rover_restore:
+                    try:
+                        after_result = after_rover_restore()
+                        if inspect.isawaitable(after_result):
+                            await after_result
+                    except Exception as sleep_exc:
+                        restore_error = (
+                            f"{rover_code} is back in ROVER mode, but fixed BASE could "
+                            f"not return to Sleep: "
+                            f"{str(sleep_exc) or sleep_exc.__class__.__name__}"
+                        )
+                        logger.error(restore_error)
             await asyncio.sleep(5)
         if restore_error:
             raise RuntimeError(restore_error) from operation_error
@@ -4174,6 +4881,17 @@ class RoundRobinAdjustmentManager:
             "password": target_password,
         }
         self.mqtt_client.publish("command/ntrip/route/start", json.dumps(route_payload))
+
+    async def _wait_for_ntrip_route(
+        self,
+        station_code: str,
+        timeout: float = 25.0,
+    ) -> None:
+        if not self.route_wait_callback:
+            return
+        result = self.route_wait_callback(station_code, timeout)
+        if inspect.isawaitable(result):
+            await result
 
     async def _stop_ntrip_route(self, station_code: str) -> None:
         if self.route_stop_callback:
@@ -5515,7 +6233,12 @@ class RoundRobinAdjustmentManager:
             },
         }
 
-    async def _find_client_info(self, station_code: str) -> Optional[Dict[str, Any]]:
+    async def _find_client_info(
+        self,
+        station_code: str,
+        *,
+        log_missing: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         """Find a rover across every configured AICaster client table."""
 
         results = await asyncio.gather(
@@ -5553,21 +6276,22 @@ class RoundRobinAdjustmentManager:
                 "Could not query any configured AICaster client table: "
                 + "; ".join(query_errors)
             )
-        logger.error(
-            "No AICaster client session matched station %s. Queried=%s errors=%s available=%s",
-            station_code,
-            successful_hosts,
-            query_errors,
-            [
-                {
-                    "host": item["CasterHost"],
-                    "username": item["Username"],
-                    "receiver_id": item["receiverID"],
-                    "mountpoint": item["Mountpoint"],
-                }
-                for item in candidates
-            ],
-        )
+        if log_missing:
+            logger.error(
+                "No AICaster client session matched station %s. Queried=%s errors=%s available=%s",
+                station_code,
+                successful_hosts,
+                query_errors,
+                [
+                    {
+                        "host": item["CasterHost"],
+                        "username": item["Username"],
+                        "receiver_id": item["receiverID"],
+                        "mountpoint": item["Mountpoint"],
+                    }
+                    for item in candidates
+                ],
+            )
         return None
 
     def _observation_matches_active_base(
@@ -5698,9 +6422,44 @@ class RoundRobinAdjustmentManager:
                 f"from expected {active_base} (limit {self.BASE_IDENTITY_TOLERANCE_M:.1f} m); "
                 "correction source has not switched yet or this is a transition fragment"
             )
+
+        # A matching BASE_lat/lon alone is not enough during a caster handover:
+        # a receiver can briefly combine a new/stale metadata sentence with a
+        # baseline vector from the previous correction stream. Independently
+        # estimate the horizontal base-to-rover distance and require the AGRICA
+        # N/E vector length to agree before admitting this epoch to the seed.
+        geometry_diagnostic = ""
+        if active_base == "BASE" and cluster.get("require_fixed_base_length_check"):
+            rover_llh = getattr(observation, "rover_llh", None)
+            baseline_neu = getattr(observation, "baseline_neu", None)
+            if not _is_usable_llh(rover_llh) or not baseline_neu:
+                return False, (
+                    f"rejected {observation.rover_name}: fixed-base identity matched, "
+                    "but rover_llh or baseline_neu is unavailable for the mandatory "
+                    "baseline-length handover check"
+                )
+            estimated_length = _llh_horizontal_distance_m(expected, rover_llh)
+            measured_length = math.hypot(
+                float(baseline_neu[0]),
+                float(baseline_neu[1]),
+            )
+            length_error = abs(estimated_length - measured_length)
+            if length_error > self.FIXED_BASE_LENGTH_TOLERANCE_M:
+                return False, (
+                    f"rejected {observation.rover_name}: base coordinate matches {active_base}, "
+                    f"but baseline horizontal length is {measured_length:.1f} m while "
+                    f"selected-base geometry estimates {estimated_length:.1f} m "
+                    f"(error {length_error:.2f} m, limit "
+                    f"{self.FIXED_BASE_LENGTH_TOLERANCE_M:.1f} m); rover is probably still "
+                    "using the previous RTCM source"
+                )
+            geometry_diagnostic = (
+                f", baseline length {measured_length:.1f}/{estimated_length:.1f} m "
+                f"(error {length_error:.2f} m)"
+            )
         return True, (
             f"verified base {active_base} (horizontal delta {separation:.2f} m, "
-            f"height delta {height_delta:.2f} m)"
+            f"height delta {height_delta:.2f} m{geometry_diagnostic})"
         )
 
     def _clear_cluster_fragment_buffers(self, project_id: int, cluster: dict) -> None:
@@ -5794,7 +6553,10 @@ class RoundRobinAdjustmentManager:
         caster_host: Optional[str] = None,
         caster_port: Optional[int] = None,
         wait_for_command_response: bool = True,
-        command_response_timeout: float = 8.0,
+        # Field MQTT command ACKs commonly arrive around 8.1--8.3 seconds.
+        # Twelve seconds avoids an unnecessary duplicate idempotent command
+        # while retaining bounded retries for a genuinely lost response.
+        command_response_timeout: float = 12.0,
         ack_station_code: Optional[str] = None,
         optional_unacknowledged_commands: Optional[List[str]] = None,
     ) -> bool:
@@ -6119,6 +6881,27 @@ class RoundRobinAdjustmentManager:
                 if attempt < safe_max_attempts:
                     await asyncio.sleep(2)
             else:
+                is_optional_undulation = (
+                    command_index > 1
+                    and command_text.lower().startswith("config undulation ")
+                )
+                if is_optional_undulation:
+                    detail = self._last_set_error or "no receiver response"
+                    logger.warning(
+                        "ROVER mode verified for %s, but optional undulation command "
+                        "was not acknowledged; continuing to mandatory UNLOGALL and "
+                        "AGRICA recovery. detail=%s",
+                        rover_code,
+                        detail,
+                    )
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{rover_code}: optional {command_text} was not ACKed; "
+                            "continuing with mandatory BASE-log shutdown and ROVER outputs."
+                        ),
+                    )
+                    continue
                 is_final_saveconfig = (
                     command_index == len(commands)
                     and command_index > 1

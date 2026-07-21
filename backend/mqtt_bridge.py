@@ -123,6 +123,7 @@ class MQTTBridge:
             web_cors_api_username=settings.WEB_CORS_API_USERNAME,
             web_cors_api_password=settings.WEB_CORS_API_PASSWORD,
             route_start_callback=self._start_round_robin_ntrip_route,
+            route_wait_callback=self._wait_round_robin_ntrip_route,
             route_stop_callback=self._stop_round_robin_ntrip_route,
             result_callback=self._handle_round_robin_adjustment_result,
             error_callback=self._handle_round_robin_adjustment_error,
@@ -145,6 +146,14 @@ class MQTTBridge:
         self._buffer_lock = asyncio.Lock()
         self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
         self._diag_last_log_ts = defaultdict(int)
+        # Coalesce best-effort latest-value work. Fragmented GNSS/AGRICA can
+        # create several pipeline tasks per second for one station; one DB
+        # transaction per fragment can exhaust the connection pool.
+        self._latest_cache_write_locks = defaultdict(asyncio.Lock)
+        self._latest_cache_last_attempt = defaultdict(float)
+        self._latest_cache_min_interval_seconds = 0.75
+        self._alert_suppression_last_attempt = defaultdict(float)
+        self._alert_suppression_interval_seconds = 5.0
 
         self.loop = None
 
@@ -517,7 +526,7 @@ class MQTTBridge:
         mountpoint: str,
         password: str,
     ) -> bool:
-        """Start SOURCE in-process and wait until the caster accepts it."""
+        """Open every SOURCE target and wait for all caster handshakes."""
 
         from app.modules.ntrip_pusher import ntrip_manager
 
@@ -537,7 +546,6 @@ class MQTTBridge:
         )
         try:
             await ntrip_manager.start_pusher(station_code, host, port, mountpoint, password)
-            await ntrip_manager.wait_for_rtcm(station_code, timeout=25.0)
         except Exception as exc:
             diagnostics = ntrip_manager.get_diagnostics(station_code)
             diagnostics["mapped_mqtt_topics"] = mapped_topics
@@ -552,6 +560,30 @@ class MQTTBridge:
                 f"{exc}; mapped_mqtt_topics={mapped_topics}"
             ) from exc
         return True
+
+    async def _wait_round_robin_ntrip_route(
+        self,
+        station_code: str,
+        timeout: float = 25.0,
+    ) -> None:
+        """Require the first valid RTCM frame on every primed mountpoint."""
+
+        from app.modules.ntrip_pusher import ntrip_manager
+
+        try:
+            await ntrip_manager.wait_for_rtcm(station_code, timeout=timeout)
+        except Exception:
+            logger.error(
+                "[Round-Robin RTCM] station=%s fanout verification failed diagnostics=%s",
+                station_code,
+                ntrip_manager.get_diagnostics(station_code),
+            )
+            raise
+        logger.info(
+            "[Round-Robin RTCM] station=%s fanout verified diagnostics=%s",
+            station_code,
+            ntrip_manager.get_diagnostics(station_code),
+        )
 
     async def _stop_round_robin_ntrip_route(self, station_code: str) -> None:
         from app.modules.ntrip_pusher import ntrip_manager
@@ -875,6 +907,13 @@ class MQTTBridge:
 
     async def _suppress_station_alerts(self, station_id: int):
         """Resolve active alerts and keep station status LOW when alerting is disabled."""
+        now = time.monotonic()
+        if (
+            now - self._alert_suppression_last_attempt[station_id]
+            < self._alert_suppression_interval_seconds
+        ):
+            return
+        self._alert_suppression_last_attempt[station_id] = now
         try:
             async with DataSessionLocal() as db_data:
                 res = await db_data.execute(
@@ -897,7 +936,13 @@ class MQTTBridge:
                 "risk_level": "LOW"
             })
         except Exception as e:
-            logger.error(f"Error suppressing alerts for station {station_id}: {e}")
+            if self._diag_should_log(f"alert_suppression:{station_id}", 30):
+                logger.error(
+                    "Error suppressing alerts for station %s: %s: %r",
+                    station_id,
+                    e.__class__.__name__,
+                    e,
+                )
 
     async def _get_station_active_alert_summary(self, station_id: int, station_config: Optional[dict] = None) -> Dict[str, Any]:
         """Return highest active risk level and unresolved alert count for a station."""
@@ -1002,21 +1047,41 @@ class MQTTBridge:
         """Luôn cập nhật giá trị mới nhất vào bảng cache riêng, bất kể chu kỳ lưu sensor_data."""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
         cleaned_data = clean_null_bytes(data)
-        try:
-            async with DataSessionLocal() as db:
-                stmt = pg_insert(model_data.LatestSensorCache).values(
-                    station_id=station_id,
-                    sensor_type=sensor_type,
-                    timestamp=timestamp,
-                    data=cleaned_data,
-                ).on_conflict_do_update(
-                    index_elements=['station_id', 'sensor_type'],
-                    set_=dict(timestamp=timestamp, data=cleaned_data),
-                )
-                await db.execute(stmt)
-                await db.commit()
-        except Exception as e:
-            logger.error(f"❌ [CACHE] Upsert failed station={station_id} sensor={sensor_type}: {e}")
+        cache_key = (int(station_id), str(sensor_type))
+        async with self._latest_cache_write_locks[cache_key]:
+            now = time.monotonic()
+            if (
+                now - self._latest_cache_last_attempt[cache_key]
+                < self._latest_cache_min_interval_seconds
+            ):
+                return
+            # Mark before awaiting DB. If the pool times out, queued fragments
+            # must not retry together as a thundering herd.
+            self._latest_cache_last_attempt[cache_key] = now
+            try:
+                async with DataSessionLocal() as db:
+                    stmt = pg_insert(model_data.LatestSensorCache).values(
+                        station_id=station_id,
+                        sensor_type=sensor_type,
+                        timestamp=timestamp,
+                        data=cleaned_data,
+                    ).on_conflict_do_update(
+                        index_elements=['station_id', 'sensor_type'],
+                        set_=dict(timestamp=timestamp, data=cleaned_data),
+                    )
+                    await db.execute(stmt)
+                    await db.commit()
+            except Exception as e:
+                if self._diag_should_log(
+                    f"latest_cache:{station_id}:{sensor_type}", 30
+                ):
+                    logger.error(
+                        "❌ [CACHE] Upsert failed station=%s sensor=%s: %s: %r",
+                        station_id,
+                        sensor_type,
+                        e.__class__.__name__,
+                        e,
+                    )
 
     def _get_sensor_offline_threshold(self, station_config: dict, sensor_type: str) -> int:
         offline_config = (station_config or {}).get('offline_thresholds', {}) or {}
@@ -1581,8 +1646,11 @@ class MQTTBridge:
         append_header([
             "STT", "From_Point", "To_Point", "dX (m)", "dY (m)", "dZ (m)",
             "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "Length (m)", "Raw / n_eff",
+            "Variance_Inflation", "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
         ])
         for index, baseline in enumerate(baselines, 1):
+            cov = baseline.get("session_covariance_used_xyz")
+            formal_cov = baseline.get("formal_covariance_xyz")
             sheet.append([
                 index,
                 baseline.get("from"),
@@ -1596,6 +1664,13 @@ class MQTTBridge:
                     if baseline.get("effective_sample_size") is not None
                     else baseline.get("observation_count", 1)
                 ),
+                baseline.get("variance_inflation"),
+                cov[0][1] if cov else None,
+                cov[0][2] if cov else None,
+                cov[1][2] if cov else None,
+                formal_cov[0][1] if formal_cov else None,
+                formal_cov[0][2] if formal_cov else None,
+                formal_cov[1][2] if formal_cov else None,
             ])
 
         append_section("FOUND LOOPS - VÒNG KHÉP TRƯỚC BÌNH SAI")
@@ -1618,8 +1693,11 @@ class MQTTBridge:
         append_header([
             "STT", "From_Point", "To_Point", "vX (m)", "vY (m)", "vZ (m)",
             "Adj_X (m)", "Adj_Y (m)", "Adj_Z (m)", "Length (m)", "Raw / n_eff",
+            "Variance_Inflation", "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
         ])
         for index, baseline in enumerate(baselines, 1):
+            cov = baseline.get("session_covariance_used_xyz")
+            formal_cov = baseline.get("formal_covariance_xyz")
             sheet.append([
                 index,
                 baseline.get("from"),
@@ -1633,6 +1711,13 @@ class MQTTBridge:
                     if baseline.get("effective_sample_size") is not None
                     else baseline.get("observation_count", 1)
                 ),
+                baseline.get("variance_inflation"),
+                cov[0][1] if cov else None,
+                cov[0][2] if cov else None,
+                cov[1][2] if cov else None,
+                formal_cov[0][1] if formal_cov else None,
+                formal_cov[0][2] if formal_cov else None,
+                formal_cov[1][2] if formal_cov else None,
             ])
 
         append_section("ADJUSTED LOOPS")
@@ -1699,6 +1784,10 @@ class MQTTBridge:
             (
                 "Raw loại trong cửa sổ chuyển nguồn/chờ ổn định",
                 quality.get("pre_stable_window_excluded_count"),
+            ),
+            (
+                "Raw loại do thời gian thu chưa đạt tối thiểu",
+                quality.get("insufficient_duration_excluded_count"),
             ),
             (
                 "Raw loại do cửa sổ ổn định chưa đủ",
@@ -1970,7 +2059,7 @@ class MQTTBridge:
         sheet.sheet_properties.tabColor = "1F6F78"
         raw_sheet.sheet_properties.tabColor = "D4A017"
         raw_headers = [
-            "Raw_STT", "From_Point", "To_Point", "Session", "Epoch",
+            "Raw_STT", "From_Point", "To_Point", "Session", "Effective_Session_ID", "Rotation_ID", "Stable_Window_ID", "Epoch",
             "Position_Type", "Baseline_N (m)", "Baseline_E (m)", "Baseline_U (m)",
             "Std_N_Raw (m)", "Std_E_Raw (m)", "Std_U_Raw (m)",
             "Std_N_Used (m)", "Std_E_Used (m)", "Std_U_Used (m)",
@@ -1980,7 +2069,7 @@ class MQTTBridge:
             "Rover_X (m)", "Rover_Y (m)", "Rover_Z (m)",
             "Rover_StdX_Raw (m)", "Rover_StdY_Raw (m)", "Rover_StdZ_Raw (m)",
             "Rover_StdX_Used (m)", "Rover_StdY_Used (m)", "Rover_StdZ_Used (m)",
-            "Vector_Deviation (m)", "Vector_Filter_Threshold (m)",
+            "Vector_Deviation (m)", "Vector_Filter_Threshold (m)", "Vector_Filter_Status",
             "ECEF_Consistency_Error (m)",
             "ECEF_Residual_E (m)", "ECEF_Residual_N (m)", "ECEF_Residual_U (m)",
             "Quality_Flags", "Accepted_For_Solver",
@@ -2006,6 +2095,9 @@ class MQTTBridge:
                 observation.get("from"),
                 observation.get("to"),
                 observation.get("session_id"),
+                observation.get("effective_session_id"),
+                observation.get("rotation_index"),
+                observation.get("stable_window_index"),
                 observation.get("observation_epoch"),
                 observation.get("position_type"),
                 *values3(observation.get("baseline_neu")),
@@ -2027,6 +2119,7 @@ class MQTTBridge:
                 *values3(observation.get("rover_position_std_ecef")),
                 observation.get("vector_deviation_from_edge_m"),
                 observation.get("vector_outlier_threshold_m"),
+                observation.get("vector_filter_status"),
                 observation.get("raw_ecef_consistency_error_m"),
                 *values3(observation.get("raw_ecef_consistency_residual_enu_m")),
                 ", ".join(flags),
@@ -2622,10 +2715,33 @@ class MQTTBridge:
                             ):
                                 waiting_parts = []
                                 if seed_status["missing_station_ids"]:
-                                    waiting_parts.append(
-                                        "no-data station IDs "
-                                        f"{seed_status['missing_station_ids']}"
-                                    )
+                                    silent_ids = seed_status.get("silent_station_ids") or []
+                                    invalid_fix_ids = seed_status.get("invalid_fix_station_ids") or []
+                                    if silent_ids:
+                                        waiting_parts.append(
+                                            "no AGRICA station IDs "
+                                            f"{silent_ids}"
+                                        )
+                                    if invalid_fix_ids:
+                                        position_type_parts = []
+                                        for item in seed_status.get("clusters") or ():
+                                            position_types = (
+                                                item.get("latest_position_type_by_station") or {}
+                                            )
+                                            for invalid_station_id in invalid_fix_ids:
+                                                value = position_types.get(
+                                                    invalid_station_id,
+                                                    position_types.get(str(invalid_station_id)),
+                                                )
+                                                if value is not None:
+                                                    position_type_parts.append(
+                                                        f"ID {invalid_station_id}=type {value}"
+                                                    )
+                                        waiting_parts.append(
+                                            "AGRICA not RTK Fixed: "
+                                            + (", ".join(dict.fromkeys(position_type_parts))
+                                               or str(invalid_fix_ids))
+                                        )
                                 if seed_status.get("warming_station_ids"):
                                     waiting_parts.append(
                                         " | ".join(seed_progress_parts)

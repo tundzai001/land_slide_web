@@ -16,13 +16,33 @@ class _RecordingSocket:
 
 
 class _HangingSocket:
+    def __init__(self):
+        self.send_calls = 0
+
     async def send_json(self, _message):
+        self.send_calls += 1
         await asyncio.Event().wait()
 
 
 class _BrokenSocket:
     async def send_json(self, _message):
         raise ConnectionError("browser closed")
+
+
+class _OverlapDetectingSocket:
+    def __init__(self):
+        self.messages = []
+        self.sending = False
+
+    async def send_json(self, message):
+        if self.sending:
+            raise RuntimeError("overlapping websocket send")
+        self.sending = True
+        try:
+            await asyncio.sleep(0.002)
+            self.messages.append(message)
+        finally:
+            self.sending = False
 
 
 class WebSocketIsolationTests(unittest.IsolatedAsyncioTestCase):
@@ -48,6 +68,34 @@ class WebSocketIsolationTests(unittest.IsolatedAsyncioTestCase):
             timeout=0.1,
         )
 
+        self.assertEqual(manager.active_connections, [])
+
+    async def test_concurrent_broadcasts_are_serialized_per_client(self):
+        manager = ConnectionManager()
+        socket = _OverlapDetectingSocket()
+        manager.active_connections = [socket]
+        messages = [
+            {"type": "gnss_adjustment_progress", "sequence": sequence}
+            for sequence in range(20)
+        ]
+
+        await asyncio.gather(*(manager.broadcast(item) for item in messages))
+
+        self.assertEqual(len(socket.messages), len(messages))
+        self.assertEqual(manager.active_connections, [socket])
+
+    async def test_concurrent_timeouts_remove_and_attempt_dead_client_once(self):
+        manager = ConnectionManager()
+        manager.SEND_TIMEOUT_SECONDS = 0.02
+        hanging = _HangingSocket()
+        manager.active_connections = [hanging]
+
+        await asyncio.gather(*(
+            manager.broadcast({"type": "gnss_adjustment_progress", "n": n})
+            for n in range(25)
+        ))
+
+        self.assertEqual(hanging.send_calls, 1)
         self.assertEqual(manager.active_connections, [])
 
 
