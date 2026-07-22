@@ -1,0 +1,86 @@
+(() => {
+class AdminLifecycleFeature extends window.AdminManager {
+    logout() {
+        console.log('[SPA-NAV] admin logout redirect landing', {
+            path: window.location.pathname,
+            search: window.location.search,
+        });
+        window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
+        if (window.authManager?.logout) {
+            window.authManager.logout(true);
+            return;
+        }
+        localStorage.removeItem('token');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('auth_user');
+        window.location.href = '/';
+    }
+
+    dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
+        this._refreshIntervals.forEach(clearInterval);
+        this._refreshIntervals = [];
+        if (this._wsReconnectTimer) clearTimeout(this._wsReconnectTimer);
+        this._wsReconnectTimer = null;
+        if (this.ws) {
+            const socket = this.ws;
+            this.ws = null;
+            socket.onclose = null;
+            socket.close();
+        }
+        window.removeEventListener('spa:navigate', this._spaNavigateHandler);
+    }
+
+    toggleVn2000AdvancedSlide(animate = true) {
+        const checkbox = document.getElementById('vn2000-enabled');
+        const content = document.getElementById('vn2000-advanced-content');
+        if (!checkbox || !content) return;
+
+        if (checkbox.checked) {
+            content.style.display = 'block';
+            content.style.maxHeight = animate ? '0px' : 'none';
+            if (animate) {
+                setTimeout(() => {
+                    content.style.maxHeight = '1000px';
+                }, 10);
+            }
+        } else {
+            if (animate) {
+                content.style.maxHeight = '0px';
+                setTimeout(() => {
+                    content.style.display = 'none';
+                }, 300);
+            } else {
+                content.style.display = 'none';
+            }
+        }
+    }
+
+    toggleRtkForwardingSlide(animate = true) {
+        const checkbox = document.getElementById('cfg-fwd-enabled');
+        const content = document.getElementById('rtk-forwarding-content');
+        if (!checkbox || !content) return;
+
+        if (checkbox.checked) {
+            content.style.display = 'block';
+            content.style.maxHeight = animate ? '0px' : 'none';
+            if (animate) {
+                setTimeout(() => {
+                    content.style.maxHeight = '2000px';
+                }, 10);
+            }
+        } else {
+            if (animate) {
+                content.style.maxHeight = '0px';
+                setTimeout(() => {
+                    content.style.display = 'none';
+                }, 300);
+            } else {
+                content.style.display = 'none';
+            }
+        }
+    }
+}
+window.applyAdminFeature(AdminLifecycleFeature);
+})();

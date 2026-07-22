@@ -160,6 +160,20 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
         )
         self.assertGreater(result["quality"]["degrees_of_freedom"], 0)
         self.assertEqual(result["source"], "AGRICA_ROUND_ROBIN")
+        m0 = result["quality"]["reference_standard_deviation"]
+        self.assertGreater(m0, 0.0)
+        for point in result["points"].values():
+            prior = np.asarray([
+                point["std_x_a_priori"],
+                point["std_y_a_priori"],
+                point["std_z_a_priori"],
+            ])
+            posterior = np.asarray([
+                point["std_x_a_posteriori"],
+                point["std_y_a_posteriori"],
+                point["std_z_a_posteriori"],
+            ])
+            np.testing.assert_allclose(posterior, m0 * prior, rtol=1e-12, atol=1e-15)
         self.assertEqual(
             result["quality"]["pre_stable_window_excluded_count"],
             0,
@@ -186,6 +200,41 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
             self.assertTrue(np.all(np.linalg.eigvalsh(formal) > 0.0))
             self.assertTrue(np.all(np.linalg.eigvalsh(used) > 0.0))
             self.assertTrue(np.all(np.diag(used) >= np.diag(formal)))
+
+    def test_final_solver_uses_immutable_fixed_base_seed_snapshot(self):
+        self._add(101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0))
+        self._add(102, "S2", (4.0, 5.0, 0.0), (21.0002, 105.0, 10.0))
+
+        session = self.manager._sessions[17]
+        cluster = session["clusters"][0]
+        cluster["fixed_base_seed_cutoff_index"] = len(cluster["observations"])
+        self.manager._freeze_temporary_base_coordinates(cluster)
+
+        # Reproduce the field failure: later handover bookkeeping mutates the
+        # live BASE records after their seed has already been accepted/frozen.
+        for record in cluster["observations"]:
+            record.solver_eligible = False
+            record.quality_flags = ("EXCLUDE_POST_SEED_TRANSITION",)
+
+        session["active_bases"][0] = "S1"
+        self._add(
+            102,
+            "S2",
+            (3.0, 3.0, 0.0),
+            (21.0002, 105.0, 10.0),
+            base_llh=(21.0001, 105.0, 10.0),
+        )
+        session["active_bases"].clear()
+
+        result = self.manager._build_cluster_result(17, 0, cluster)
+
+        fixed_edges = {
+            edge["to"]
+            for edge in result["baselines"]
+            if edge["from"] == "BASE"
+        }
+        self.assertEqual(fixed_edges, {"S1", "S2"})
+        self.assertEqual(len(result["baselines"]), 3)
 
     def test_position_type_4_is_preferred_and_type_7_is_rejected_per_edge(self):
         self._add(

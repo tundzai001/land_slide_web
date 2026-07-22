@@ -58,6 +58,12 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
                 "std_x": 0.01,
                 "std_y": 0.02,
                 "std_z": 0.03,
+                "std_x_a_priori": 0.01,
+                "std_y_a_priori": 0.02,
+                "std_z_a_priori": 0.03,
+                "std_x_a_posteriori": 0.005,
+                "std_y_a_posteriori": 0.01,
+                "std_z_a_posteriori": 0.015,
                 "raw_rover_ecef_observation_count": 251,
                 "raw_rover_ecef_rejected_count": 2,
             }},
@@ -80,9 +86,13 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
                 "fundamental_loop_count": 1,
                 "cycle_space_dimension": 1,
                 "fundamental_loop_basis_rank": 1,
+                "rover_only_loop_count": 0,
+                "base_anchored_loop_count": 1,
                 "degrees_of_freedom": 3,
                 "weighted_residual_sum": 0.9,
+                "variance_factor": 0.25,
                 "reference_standard_deviation": 0.5,
+                "reference_standard_deviation_m_at_1mm": 0.0005,
                 "rank": 3,
                 "condition_number": 2.0,
                 "mixed_position_type_warning_threshold_m": 0.01,
@@ -171,6 +181,20 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         self.assertIn("CONTROL POINT", values)
         self.assertIn("ADJUSTED POINTS", values)
         self.assertIn("REFERENCE STANDARD DEVIATION / QUALITY", values)
+        self.assertIn("Std_X a priori (m)", values)
+        self.assertIn("Std_X a posteriori (m)", values)
+        self.assertIn(
+            "Variance factor σ₀² = vTPv / f (không thứ nguyên)",
+            values,
+        )
+        self.assertIn(
+            "M0 = σ₀ = √(vTPv / f) (không thứ nguyên)",
+            values,
+        )
+        self.assertIn("M0 quy đổi theo quy ước trọng số đơn vị 1 mm (m)", values)
+        self.assertIn("Vòng độc lập chỉ rover-rover", values)
+        self.assertIn("Vòng độc lập có BASE", values)
+        self.assertIn(0.0005, values)
         self.assertIn("Khép kín", values)
         self.assertIn("Raw STD cao giữ bảo thủ nhờ lặp ổn định", values)
         self.assertIn("Rank ma trận vòng", values)
@@ -225,6 +249,16 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         self.assertIsNone(quality_row[0].value)
         self.assertEqual(quality_row[2].value, 253)
         self.assertEqual(quality_row[2].alignment.horizontal, "right")
+
+        point_row = next(
+            row
+            for row in sheet.iter_rows()
+            if row[1].value == "Dap1_2" and row[2].value == -1406000.0
+        )
+        self.assertEqual(
+            tuple(cell.value for cell in point_row[5:11]),
+            (0.01, 0.02, 0.03, 0.005, 0.01, 0.015),
+        )
 
         warning_row = next(
             row

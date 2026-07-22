@@ -1,0 +1,177 @@
+/* =====================================================
+   MAP PAGE STYLES - Complete Fixed Version
+   Module: css/map/base.css
+===================================================== */
+
+/* ROOT VARIABLES & RESET  */
+:root {
+    --sidebar-width: 340px;
+    --sidebar-expanded-width: 720px;
+    --sidebar-collapsed-width: 60px;
+    --transition-speed: 0.3s;
+
+    /* Typography & Spacing Variables */
+    --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Courier New', monospace;
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--bg-primary);
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text-primary);
+}
+
+/*  TOP NAVBAR  */
+.top-navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 56px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: saturate(200%) blur(32px);
+    -webkit-backdrop-filter: saturate(200%) blur(32px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 1040;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.brand-text {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1.25rem;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: color 0.2s;
+}
+
+.brand-text:hover {
+    color: var(--accent-primary);
+}
+
+/*  MAP CONTAINER  */
+#map {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1;
+}
+
+/* Offset Leaflet Top Controls to start below Navbar */
+.leaflet-top {
+    top: 80px !important;
+}
+
+/*  HAMBURGER MENU BUTTON  */
+.navbar-hamburger {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.navbar-hamburger:hover {
+    background: rgba(13, 110, 253, 0.12);
+    color: var(--accent-primary);
+}
+
+/* === COMPACT LAYER TOGGLE SWITCH === */
+.layer-toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .layer-toggle-switch {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.layer-toggle-icon {
+    font-size: 0.85rem;
+    opacity: 0.7;
+    transition: opacity 0.2s, color 0.2s;
+}
+
+.layer-toggle-icon.text-rescue {
+    color: #dc3545;
+}
+
+.toggle-switch-track {
+    position: relative;
+    width: 34px;
+    height: 18px;
+    display: inline-block;
+    margin: 0;
+    cursor: pointer;
+}
+
+.toggle-switch-track input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-switch-thumb {
+    position: absolute;
+    inset: 0;
+    background: rgba(13, 110, 253, 0.3);
+    border-radius: 9px;
+    transition: background 0.25s;
+}
+
+.toggle-switch-thumb::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 14px;
+    height: 14px;
+    background: #0d6efd;
+    border-radius: 50%;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.toggle-switch-track input:checked+.toggle-switch-thumb {
+    background: rgba(220, 53, 69, 0.3);
+}
+
+.toggle-switch-track input:checked+.toggle-switch-thumb::before {
+    transform: translateX(16px);
+    background: #dc3545;
+}

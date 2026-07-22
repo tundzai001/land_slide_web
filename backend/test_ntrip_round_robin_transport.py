@@ -1657,6 +1657,53 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(all(wait_for_response for _, wait_for_response in commands_seen))
 
+    async def test_rover_restore_refreshes_stale_set_session_and_extends_transport_retries(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        calls = []
+        responses = iter([False, False, False, True, True, True, True, True, True])
+
+        async def send_set(mountpoint, username, receiver_id, commands, **_kwargs):
+            calls.append((mountpoint, username, receiver_id, commands[0]))
+            accepted = next(responses)
+            if not accepted:
+                manager._last_set_error = (
+                    f"caster.example:2101 mountpoint={mountpoint} "
+                    f"username={username} auth=enabled response=empty response"
+                )
+            return accepted
+
+        manager._send_set_command = send_set
+        manager._find_client_info = AsyncMock(return_value={
+            "Username": "Dap4_1-new",
+            "receiverID": "4.1-new",
+            "Mountpoint": "SinQuyen1",
+            "CasterHost": "caster.example",
+            "CasterPort": 2101,
+        })
+        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+            await manager._restore_rover_output_sequence(
+                rover_code="Dap4_1",
+                mountpoint="SinQuyen2",
+                client_info={
+                    "Username": "Dap2_1",
+                    "receiverID": "stale",
+                    "Mountpoint": "SinQuyen2",
+                    "CasterHost": "caster.example",
+                    "CasterPort": 2101,
+                },
+                commands=manager._build_unicore_rover_config(),
+                project_id=3,
+            )
+
+        mode_calls = [call for call in calls if call[3] == b"mode rover survey\r\n"]
+        self.assertEqual(len(mode_calls), 4)
+        self.assertEqual(mode_calls[0][:3], ("SinQuyen2", "Dap2_1", "stale"))
+        self.assertEqual(
+            mode_calls[-1][:3],
+            ("SinQuyen1", "Dap4_1-new", "4.1-new"),
+        )
+        self.assertEqual(manager._find_client_info.await_count, 3)
+
     async def test_rover_restore_does_not_fail_when_only_saveconfig_ack_is_missing(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         commands_seen = []

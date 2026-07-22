@@ -1,0 +1,128 @@
+"""Administrative station-device CRUD routes."""
+import logging
+import time
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .. import auth
+from ..database import get_config_db
+from ..models import auth as model_auth
+from ..models import config as model_config
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+@router.get("/api/admin/stations/{station_id}/devices")
+async def get_station_devices(
+    station_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.get_current_user)
+):
+    try:
+        result = await db.execute(
+            select(model_config.Device)
+            .where(model_config.Device.station_id == station_id)
+            .order_by(model_config.Device.created_at.desc())
+        )
+
+        devices = result.scalars().all()
+
+        return [
+            {
+                "id": d.id,
+                "device_code": d.device_code,
+                "name": d.name,
+                "device_type": d.device_type,
+                "mqtt_topic": d.mqtt_topic,
+                "position": d.position,
+                "is_active": d.is_active,
+                "last_data_time": d.last_data_time,
+                "config": d.config or {}
+            }
+            for d in devices
+        ]
+
+    except Exception as e:
+        logger.error(f"Error loading devices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/admin/stations/{station_id}/devices")
+async def create_device_in_station(
+    station_id: int,
+    device_data: dict,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        # Verify station exists
+        result = await db.execute(
+            select(model_config.Station).where(model_config.Station.id == station_id)
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Station not found")
+
+        new_device = model_config.Device(
+            device_code=device_data['device_code'],
+            name=device_data['name'],
+            station_id=station_id,
+            device_type=device_data['device_type'],
+            mqtt_topic=device_data.get('mqtt_topic'),
+            position=device_data.get('position'),
+            is_active=True,
+            last_data_time=0,
+            config={},
+            created_at=int(time.time()),
+            updated_at=int(time.time())
+        )
+
+        db.add(new_device)
+        await db.commit()
+        await db.refresh(new_device)
+
+        return {
+            "id": new_device.id,
+            "device_code": new_device.device_code,
+            "name": new_device.name,
+            "device_type": new_device.device_type
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error creating device: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/api/admin/devices/{device_id}")
+async def delete_device(
+    device_id: int,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+):
+    try:
+        result = await db.execute(
+            select(model_config.Device).where(model_config.Device.id == device_id)
+        )
+        device = result.scalar_one_or_none()
+
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        await db.delete(device)
+        await db.commit()
+
+        return {"status": "success", "message": f"Deleted device {device_id}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting device: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+
+

@@ -1,0 +1,389 @@
+/* ========================================
+   PI DEVICES GRID - PING STATUS DOT
+======================================== */
+.ping-online {
+    color: #22c55e !important;
+    font-size: .8rem;
+}
+
+.ping-offline {
+    color: #ef4444 !important;
+    font-size: .8rem;
+}
+
+/* Dark mode overrides for ping dots (override the broad [data-theme="dark"] span rule) */
+[data-theme="dark"] span.ping-offline {
+    color: #ef4444 !important;
+}
+
+[data-theme="dark"] span.ping-online {
+    color: #22c55e !important;
+}
+
+/* Assigned device detail: station and project */
+.pi-assign-detail {
+    display: block;
+    font-size: .7rem !important;
+    color: #64748b !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    margin-top: 2px;
+}
+
+[data-theme="dark"] .pi-assign-detail {
+    color: #94a3b8 !important;
+}
+
+/* ============================================
+   STYLES CHO ADMIN & WIZARD (Moved from HTML)
+============================================ */
+.sensor-config-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        max-height: 500px;
+        transform: translateY(0);
+    }
+}
+
+.sensor-config-header {
+    background: rgba(14, 165, 233, 0.08);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sensor-config-body {
+    padding: 16px;
+}
+
+.coordinate-lock-box {
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+#stationConfigModal .wizard-steps {
+    display: flex !important;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    position: relative;
+}
+
+#stationConfigModal .wizard-steps::before {
+    content: '';
+    position: absolute;
+    top: 20px;
+    left: 10%;
+    right: 10%;
+    height: 2px;
+    background: var(--border-color);
+    z-index: 0;
+}
+
+#stationConfigModal .wizard-step {
+    flex: 1;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+}
+
+#stationConfigModal .step-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-bottom: 8px;
+    transition: all 0.3s;
+}
+
+#stationConfigModal .wizard-step.active .step-circle {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
+}
+
+#stationConfigModal .step-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+#stationConfigModal .wizard-step.active .step-label {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+#stationConfigModal .wizard-content {
+    display: none !important;
+}
+
+#stationConfigModal .wizard-content.active {
+    display: block !important;
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.btn-gradient {
+    background: var(--gradient-button);
+    border: none;
+    color: white;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-gradient:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(14, 165, 233, 0.4);
+    color: white;
+}
+
+#tab-database .sticky-top,
+#tab-pi .sticky-top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg-secondary);
+}
+
+#stationConfigModal .modal-content {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-secondary) !important;
+    max-height: 85vh;
+}
+
+#stationConfigModal .modal-body {
+    position: relative;
+    z-index: 1;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    padding-bottom: 24px;
+    min-height: 0;
+}
+
+#stationConfigModal .modal-header {
+    position: relative;
+    z-index: 50;
+    background-color: var(--bg-secondary) !important;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+#stationConfigModal .wizard-steps-container {
+    background-color: var(--bg-secondary) !important;
+    border-bottom: 1px solid var(--border-color);
+    z-index: 40;
+    position: relative;
+    padding: 24px 24px 0 24px;
+    flex-shrink: 0;
+}
+
+#stationConfigModal .modal-footer {
+    position: relative;
+    z-index: 50;
+    background-color: transparent !important;
+    border-top: none;
+    box-shadow: none !important;
+    pointer-events: auto;
+    flex-shrink: 0;
+    padding-top: 0;
+}
+
+#stationConfigModal .modal-footer .btn {
+    position: relative;
+    z-index: 51;
+    pointer-events: auto;
+}
+
+/* Session Time Display */
+.session-time {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+/* ============================================
+   iOS-STYLE TOGGLE (SGM OUTPUT PARAMS)
+============================================ */
+.ios-toggle-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    transition: background 0.2s, border-color 0.2s;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+.ios-toggle-wrap:hover {
+    border-color: rgba(14, 165, 233, 0.4);
+    background: rgba(14, 165, 233, 0.05);
+}
+.ios-toggle-wrap.is-on {
+    border-color: rgba(34, 197, 94, 0.35);
+    background: rgba(34, 197, 94, 0.06);
+}
+.ios-toggle-info {
+    flex: 1;
+    min-width: 0;
+}
+.ios-toggle-info .param-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+}
+.ios-toggle-info .param-unit {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 1px;
+}
+
+/* The actual iOS switch */
+.ios-switch {
+    position: relative;
+    width: 44px;
+    height: 26px;
+    flex-shrink: 0;
+    display: inline-block;
+}
+.ios-switch input {
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    cursor: pointer;
+    z-index: 2;
+}
+.ios-switch-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 13px;
+    background: #3a3f4a;
+    transition: background 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1.5px solid rgba(255,255,255,0.06);
+    pointer-events: none;
+}
+.ios-switch input:checked + .ios-switch-track {
+    background: #22c55e;
+    border-color: rgba(255,255,255,0.1);
+}
+.ios-switch-track::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ios-switch input:checked + .ios-switch-track::after {
+    transform: translateX(18px);
+}
+/* Light mode adaptation */
+@media (prefers-color-scheme: light) {
+    .ios-switch-track { background: #c7c7cc; }
+}
+[data-theme="light"] .ios-switch-track { background: #c7c7cc; }
+
+/* Keep sensor switches visually aligned and fully clickable */
+.form-check.form-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 0;
+}
+.form-check.form-switch .form-check-input {
+    float: none;
+    margin-left: 0;
+    margin-top: 0;
+    cursor: pointer;
+}
+.form-check.form-switch .form-check-label {
+    margin-bottom: 0;
+    cursor: pointer;
+}
+
+.project-checkbox-list .form-check,
+.station-checkbox-list .form-check,
+#assignProjectModal .form-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding-left: 0;
+}
+
+.project-checkbox-list .form-check-input,
+.station-checkbox-list .form-check-input,
+#assignProjectModal .form-check-input {
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+    margin: 0 !important;
+    flex: 0 0 16px;
+}
+
+.project-checkbox-list .form-check-label,
+.station-checkbox-list .form-check-label,
+#assignProjectModal .form-check-label {
+    margin: 0;
+    line-height: 1.35;
+}
+
+/* ========================================
+   MOBILE BOTTOM NAV — ẩn trên desktop,
+   chỉ hiển thị ở trang bản đồ (< 768px)
+   Trên trang admin/management luôn ẩn.
+======================================== */
+.mobile-bottom-nav {
+    display: none !important;
+}

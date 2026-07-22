@@ -1,18 +1,19 @@
 #backend/app/schemas.py
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
+from .config import settings
 
 class StationBase(BaseModel):
     station_code: str
     name: str
-    location: Optional[Dict[str, Any]] = None 
+    location: Optional[Dict[str, Any]] = None
     has_gnss: bool = False
     has_water: bool = False
     has_rain: bool = False
     has_imu: bool = False
     sensor_positions: Optional[Dict] = None
     config: Optional[Dict[str, Any]] = None
-    sensors: Optional[Dict[str, Any]] = None 
+    sensors: Optional[Dict[str, Any]] = None
 
 class StationCreate(StationBase):
     pass
@@ -23,12 +24,12 @@ class StationConfigUpdate(BaseModel):
     gnss: Dict[str, float]
     rain: Dict[str, float]
     gnss_classification: List[Dict]
-    
+
 class StationResponse(StationBase):
     id: int
     status: str
     last_update: int
-    
+
     class Config:
         from_attributes = True
 
@@ -45,7 +46,7 @@ class SensorDataCreate(BaseModel):
 
 class SensorDataResponse(SensorDataCreate):
     id: int
-    
+
     class Config:
         from_attributes = True
 
@@ -59,7 +60,7 @@ class AlertCreate(BaseModel):
 class AlertResponse(AlertCreate):
     id: int
     is_resolved: bool
-    
+
     class Config:
         from_attributes = True
 
@@ -70,7 +71,7 @@ class GNSSOriginResponse(BaseModel):
     h: float
     locked_at: int
     spread_meters: float
-    
+
     class Config:
         from_attributes = True
 
@@ -88,7 +89,7 @@ class UserResponse(UserBase):
     is_active: bool
     permissions: List[str] = []
     assigned_projects: List[int] = []
-    
+
     class Config:
         from_attributes = True
 
@@ -113,7 +114,7 @@ class GNSSOriginResponse(BaseModel):
     h: float
     locked_at: int
     spread_meters: float
-    
+
     class Config:
         from_attributes = True
 
@@ -145,7 +146,7 @@ class SystemConfigPayload(BaseModel):
     save_intervals: SaveIntervalsConfig
 
 class NtripRouteStart(BaseModel):
-    host: str = "127.0.0.1"
-    port: int = 2101
+    host: str = settings.NTRIP_SOURCE_HOST
+    port: int = settings.NTRIP_SOURCE_PORT
     mountpoint: str
-    password: str = ""
+    password: str = ""

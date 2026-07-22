@@ -1,4 +1,6 @@
 const { useEffect, useMemo, useState } = React;
+window.LegacyTemplates ||= {};
+window.LegacyTemplateParts ||= {};
 
 const ROUTES = new Set(['map', 'login', 'admin']);
 const EMBEDDED_ROOT_APP = window.LANDING_EMBEDDED_APP === true;
@@ -11,9 +13,47 @@ const scriptPromises = new Map();
 const loadedStylesheets = new Set();
 const legacyBootedViews = new Set();
 const ROUTE_STYLES = {
-    map: ['/css/map.css?v=react-spa-14', '/css/digital-twin.css?v=react-spa-12', '/css/rescue-markers.css?v=react-spa-12', '/css/map-responsive.css?v=react-spa-12'],
-    admin: ['/css/admin.css?v=react-spa-12', '/css/admin-responsive.css?v=react-spa-12'],
+    map: [
+        '/css/map/base.css?v=map-css-split-1',
+        '/css/map/station-panels.css?v=map-css-split-1',
+        '/css/map/analysis.css?v=map-css-split-1',
+        '/css/map/effects-theme.css?v=map-css-split-1',
+        '/css/map/responsive.css?v=map-css-split-1',
+        '/css/map/tools.css?v=map-css-split-1',
+        '/css/map/gnss.css?v=map-css-split-1',
+        '/css/digital-twin.css?v=react-spa-12',
+        '/css/rescue-markers.css?v=react-spa-12',
+        '/css/map-responsive.css?v=react-spa-12',
+    ],
+    admin: [
+        '/css/admin/base.css?v=admin-css-split-1',
+        '/css/admin/responsive.css?v=admin-css-split-1',
+        '/css/admin/effects-theme.css?v=admin-css-split-1',
+        '/css/admin/system-settings.css?v=admin-css-split-1',
+        '/css/admin/pi-wizard.css?v=admin-css-split-1',
+        '/css/admin-responsive.css?v=react-spa-12',
+    ],
     login: ['/css/login.css'],
+};
+const ROUTE_TEMPLATES = {
+    map: [
+        '/js/templates/map/shell.js?v=template-split-1',
+        '/js/templates/map/station-panels.js?v=template-split-1',
+        '/js/templates/map/analysis.js?v=template-split-1',
+        '/js/templates/map/rescue.js?v=template-split-1',
+        '/js/templates/map-template.js?v=template-split-1',
+    ],
+    admin: [
+        '/js/templates/admin/shell.js?v=template-split-1',
+        '/js/templates/admin/gnss-project-modals.js?v=template-split-1',
+        '/js/templates/admin/station-wizard-shell.js?v=template-split-1',
+        '/js/templates/admin/station-basic.js?v=template-split-1',
+        '/js/templates/admin/station-connectivity.js?v=template-split-1',
+        '/js/templates/admin/station-alerts.js?v=template-split-1',
+        '/js/templates/admin/station-storage.js?v=template-split-1',
+        '/js/templates/admin/data-modals-nav.js?v=template-split-1',
+        '/js/templates/admin-template.js?v=template-split-1',
+    ],
 };
 
 function navDebug(label, data = {}) {
@@ -157,6 +197,15 @@ function loadRouteStyles(view) {
     return Promise.all((ROUTE_STYLES[view] || []).map(loadStylesheet));
 }
 
+async function loadRouteTemplate(view) {
+    const sources = ROUTE_TEMPLATES[view] || [];
+    if (!sources.length || window.LegacyTemplates?.[view]) return;
+    for (const source of sources) await loadScript(source);
+    if (!window.LegacyTemplates?.[view]) {
+        throw new Error(`Template ${view} did not register correctly`);
+    }
+}
+
 function fireLegacyReady() {
     setTimeout(() => window.authManager?.updateAuthUI?.(), 50);
 }
@@ -170,7 +219,8 @@ async function bootLegacyPage(view) {
     }
 
     if (view === 'map') {
-        await loadScript('/js/map-main.js?v=react-spa-25');
+        await loadScript('/js/map-main.js?v=map-split-1');
+        await window.mapBundleReady;
         await loadScript('/js/engine/simulation-controller.js', { type: 'module' });
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });
@@ -188,7 +238,8 @@ async function bootLegacyPage(view) {
         };
 
         await loadScript('/js/toast-notifications.js');
-        await loadScript('/js/admin-manager.js?v=react-spa-12');
+        await loadScript('/js/admin-manager.js?v=admin-split-1');
+        await window.adminBundleReady;
         await loadScript('/js/db-manager.js?v=export-bg-2');
         await loadScript('/js/system-manager.js');
         await window.bootstrapAdminManager?.();
@@ -206,7 +257,7 @@ function LegacyPage({ view }) {
         setDocumentView(view);
         const root = document.getElementById('legacy-root');
         root.innerHTML = '<div class="route-loading">Loading...</div>';
-        loadRouteStyles(view).then(() => {
+        Promise.all([loadRouteStyles(view), loadRouteTemplate(view)]).then(() => {
             root.innerHTML = window.LegacyTemplates?.[view] || '';
             return bootLegacyPage(view);
         }).catch((error) => {

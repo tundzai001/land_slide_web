@@ -6,8 +6,16 @@ class AuthManager {
     constructor() {
         this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
         this.user = null;
+        try {
+            const cachedUser = sessionStorage.getItem('auth_user');
+            this.user = this.token && cachedUser ? JSON.parse(cachedUser) : null;
+        } catch (_) {
+            sessionStorage.removeItem('auth_user');
+        }
         this.tokenCheckInterval = null;
         this._isVerifyingToken = false;
+        this._verifyPromise = null;
+        this._unauthorizedCheckPromise = null;
     }
 
     // ✅ CRITICAL: Verify token on init
@@ -17,15 +25,20 @@ class AuthManager {
         if (this.token) {
             const isValid = await this.verifyToken();
 
-            if (!isValid) {
+            if (isValid === false) {
                 console.warn('⚠️ [AUTH] Token expired or invalid');
                 this.logout(false); // Don't redirect immediately
                 return false;
             }
 
-            console.log('✅ [AUTH] Token valid');
+            if (isValid === null) {
+                console.warn('⚠️ [AUTH] Server unavailable; retaining the existing session until verification recovers');
+            } else {
+                console.log('✅ [AUTH] Token valid');
+            }
 
-            // ✅ Start periodic token check (every 5 minutes)
+            // Keep validation lightweight; protected requests still confirm a
+            // real 401 immediately through handleUnauthorizedResponse().
             this.startTokenCheck();
 
             return true;
@@ -42,38 +55,84 @@ class AuthManager {
         }
 
         this.tokenCheckInterval = setInterval(async () => {
+            const hadUser = Boolean(this.user);
             const isValid = await this.verifyToken();
-            if (!isValid) {
+            if (isValid === false) {
                 console.warn('⚠️ [AUTH] Token expired during session');
                 this.logout();
+            } else if (isValid === true && !hadUser) {
+                this.updateAuthUI();
             }
-        }, 15 * 1000); // Check every 15 seconds for faster kickout if locked
+        }, 60 * 1000);
     }
 
     // ✅ NEW: Verify token by calling backend
     async verifyToken() {
         if (!this.token) return false;
 
-        this._isVerifyingToken = true;
-        try {
-            const res = await fetch('/api/auth/me', {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`
-                }
-            });
+        if (this._verifyPromise) return this._verifyPromise;
 
-            if (res.ok) {
-                this.user = await res.json();
-                return true;
-            } else {
-                return false;
+        const verification = (async () => {
+            this._isVerifyingToken = true;
+            try {
+                const res = await fetch('/api/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${this.token}`
+                    }
+                });
+
+                if (res.ok) {
+                    this.user = await res.json();
+                    sessionStorage.setItem('auth_user', JSON.stringify(this.user));
+                    return true;
+                }
+                if (res.status === 401) return false;
+
+                console.warn(`⚠️ [AUTH] Verification temporarily unavailable (HTTP ${res.status})`);
+                return null;
+            } catch (e) {
+                console.warn('⚠️ [AUTH] Verification network error; session retained:', e);
+                return null;
+            } finally {
+                this._isVerifyingToken = false;
             }
-        } catch (e) {
-            console.error('❌ [AUTH] Verify failed:', e);
-            return false;
+        })();
+        this._verifyPromise = verification;
+        try {
+            return await verification;
         } finally {
-            this._isVerifyingToken = false;
+            if (this._verifyPromise === verification) this._verifyPromise = null;
         }
+    }
+
+    handleUnauthorizedResponse(source = '') {
+        if (!this.token || this._isVerifyingToken) return;
+        if (this._unauthorizedCheckPromise) return this._unauthorizedCheckPromise;
+
+        const confirmation = (async () => {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            const isValid = await this.verifyToken();
+            if (isValid !== false || !this.token) {
+                if (isValid === null) {
+                    console.warn('⚠️ [AUTH] Could not confirm 401; preserving session:', source);
+                } else {
+                    console.warn('⚠️ [AUTH] Endpoint returned 401 but token remains valid:', source);
+                }
+                return;
+            }
+
+            if (!sessionStorage.getItem('kicked_alert_shown')) {
+                sessionStorage.setItem('kicked_alert_shown', 'true');
+                alert('Tài khoản của bạn đã bị khóa hoặc phiên đăng nhập hết hạn.');
+            }
+            this.logout(true);
+        })().finally(() => {
+            if (this._unauthorizedCheckPromise === confirmation) {
+                this._unauthorizedCheckPromise = null;
+            }
+        });
+        this._unauthorizedCheckPromise = confirmation;
+        return confirmation;
     }
 
     isAuthenticated() {
@@ -149,6 +208,7 @@ class AuthManager {
         localStorage.removeItem('token');
         localStorage.removeItem('rememberMe');
         sessionStorage.removeItem('token');
+        sessionStorage.removeItem('auth_user');
         sessionStorage.removeItem('justLoggedIn');
         sessionStorage.removeItem('loginReturnView');
         sessionStorage.removeItem('kicked_alert_shown');
@@ -303,8 +363,7 @@ class AuthManager {
         const response = await fetch(url, { ...options, headers });
 
         if (response.status === 401) {
-            this.logout();
-            return;
+            void this.handleUnauthorizedResponse(url);
         }
 
         return response;
@@ -318,14 +377,9 @@ const originalFetch = window.fetch;
 window.fetch = async function (...args) {
     const response = await originalFetch(...args);
     if (response.status === 401 && window.authManager && window.authManager.isAuthenticated() && !window.authManager._isVerifyingToken) {
-        console.warn('⚠️ [AUTH] 401 Unauthorized response detected. Forcing logout...');
-
-        // Anti-spam cho alert
-        if (!sessionStorage.getItem('kicked_alert_shown')) {
-            sessionStorage.setItem('kicked_alert_shown', 'true');
-            alert('Tài khoản của bạn đã bị khóa hoặc phiên đăng nhập hết hạn.');
-            window.authManager.logout(true);
-        }
+        const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+        console.warn('⚠️ [AUTH] 401 detected; confirming token before logout:', requestUrl || 'unknown request');
+        void window.authManager.handleUnauthorizedResponse(requestUrl || 'unknown request');
     }
     return response;
 };

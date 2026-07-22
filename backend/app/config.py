@@ -7,16 +7,16 @@ class Settings(BaseSettings):
     # Pydantic sẽ tự động đọc giá trị từ file .env khớp với tên biến
     # Nếu không đọc được .env, nó sẽ dùng giá trị mặc định bên phải (dự phòng)
     
-    AUTH_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_auth"
-    CONFIG_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_config"
-    DATA_DB_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5432/landslide_data"
+    AUTH_DB_URL: str = ""
+    CONFIG_DB_URL: str = ""
+    DATA_DB_URL: str = ""
 
     # --- 2. CÁC CẤU HÌNH KHÁC ---
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     
-    MQTT_BROKER: str = "aitogy.asia"
+    MQTT_BROKER: str = ""
     MQTT_PORT: int = 1883
     MQTT_USER: str = "mqttUser"
     MQTT_PASSWORD: str = ""
@@ -27,15 +27,20 @@ class Settings(BaseSettings):
     # two endpoints separate prevents Round-Robin from sending SOURCE requests
     # to the SET control socket.
     NTRIP_CONTROL_HOST: str = ""
-    NTRIP_CONTROL_HOSTS: str = "aitogy.com.vn,aitogy.click"
+    NTRIP_CONTROL_HOSTS: str = ""
     NTRIP_CONTROL_PORT: int = 2101
-    NTRIP_CONTROL_PASSWORD: str = "12345"
-    NTRIP_SOURCE_HOST: str = "aitogy.click"
+    NTRIP_CONTROL_PASSWORD: str = ""
+    NTRIP_SOURCE_HOST: str = ""
     NTRIP_SOURCE_PORT: int = 2101
-    NTRIP_SOURCE_PASSWORD: str = "12345"
+    NTRIP_SOURCE_PASSWORD: str = ""
     # Login/API credentials of the WEB CORS dashboard (cors.aitogy.com).
     # These are not NTRIP/Caster usernames or mountpoint passwords.
-    WEB_CORS_API_BASE_URL: str = "https://cors.aitogy.com"
+    WEB_CORS_API_BASE_URL: str = ""
+    CORS_BASE_STATIONS_URL: str = ""
+    CORS_BASE_STATIONS_CACHE_TTL_SECONDS: float = 20.0
+    CORS_BASE_STATIONS_STALE_TTL_SECONDS: float = 300.0
+    CORS_BASE_STATIONS_RETRY_SECONDS: float = 15.0
+    GNSS_CORS_FAILOVER_POLL_SECONDS: float = 5.0
     WEB_CORS_API_TOKEN: str = ""
     WEB_CORS_API_USERNAME: str = ""
     WEB_CORS_API_PASSWORD: str = ""

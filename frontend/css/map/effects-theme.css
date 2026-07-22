@@ -1,0 +1,456 @@
+/*  SEARCH INPUT  */
+#search-station {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 12px;
+    width: 100%;
+    transition: all 0.2s;
+}
+
+#search-station:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+/*  SCROLLBAR  */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--accent-primary);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-secondary);
+}
+
+/*  ANIMATIONS  */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* âœ… MARKER FLASHING ANIMATION for HIGH/EXTREME alerts */
+@keyframes markerPulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+    }
+
+    50% {
+        transform: scale(1.6);
+        box-shadow: 0 0 20px rgba(250, 82, 82, 0.9), 0 0 40px rgba(250, 82, 82, 0.5);
+    }
+}
+
+.marker-alert-pulse {
+    animation: markerPulse 1s ease-in-out infinite !important;
+}
+
+/* âœ… DEVICE MARKER ALERT â€” Äá» + nháº¥p nhÃ¡y khi cÃ³ cáº£nh bÃ¡o */
+@keyframes markerDeviceBlink {
+
+    0%,
+    100% {
+        background: #fa5252 !important;
+        box-shadow: 0 0 8px rgba(250, 82, 82, 0.6),
+            0 0 20px rgba(250, 82, 82, 0.3);
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        background: #c92a2a !important;
+        box-shadow: 0 0 20px rgba(250, 82, 82, 1),
+            0 0 50px rgba(250, 82, 82, 0.6),
+            0 0 80px rgba(250, 82, 82, 0.3);
+        transform: scale(1.5);
+        opacity: 0.8;
+    }
+}
+
+.marker-device-alert {
+    animation: markerDeviceBlink 0.8s ease-in-out infinite !important;
+    border: 3px solid #fff !important;
+}
+
+/*  LOADING STATES  */
+.spinner-border {
+    border-color: var(--border-color);
+    border-right-color: var(--accent-primary);
+}
+
+/*  TOOLTIPS  */
+.leaflet-tooltip {
+    background: var(--bg-overlay) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-primary) !important;
+    border-radius: 6px !important;
+    padding: 6px 10px !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+}
+
+/*  DARK MODE EXPLICIT OVERRIDES  */
+[data-theme="dark"] .station-list-sidebar {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .top-navbar {
+    background: rgba(15, 23, 42, 0.4);
+    /* Deep glass dark mode */
+    border-bottom: none;
+    /* Removed border */
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .station-item,
+[data-theme="dark"] .sensor-item,
+[data-theme="dark"] .chart-box {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .station-item:hover,
+[data-theme="dark"] .sensor-item:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+}
+
+[data-theme="dark"] .detail-sidebar {
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .sidebar-header,
+[data-theme="dark"] .charts-panel-header,
+[data-theme="dark"] .longterm-header {
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* === DARK MODE: Analysis overlay cards & text === */
+[data-theme="dark"] .longterm-container .card {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .longterm-container .card-body {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .longterm-container .card-title,
+[data-theme="dark"] .longterm-container h5,
+[data-theme="dark"] .longterm-container h6 {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .longterm-container .text-muted {
+    color: var(--text-muted) !important;
+}
+
+[data-theme="dark"] .longterm-metric-card {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .reliability-note-warning {
+    color: #ffd166;
+    background: rgba(92, 59, 12, 0.55);
+    border-color: rgba(255, 209, 102, 0.35);
+}
+
+[data-theme="dark"] .longterm-metric-card.is-preliminary {
+    border-color: rgba(255, 209, 102, 0.35) !important;
+    background: linear-gradient(180deg, rgba(92, 59, 12, 0.45) 0%, var(--bg-tertiary) 100%) !important;
+}
+
+[data-theme="dark"] .metric-inline-warning {
+    color: #ffd166;
+    background: rgba(92, 59, 12, 0.55);
+    border-color: rgba(255, 209, 102, 0.35);
+}
+
+[data-theme="dark"] .longterm-metric-card .text-muted {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .longterm-container .classification-item {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .longterm-container .classification-name,
+[data-theme="dark"] .longterm-container .classification-range {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .longterm-content-wrapper hr {
+    border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .longterm-container .fs-6,
+[data-theme="dark"] .longterm-container .fs-5,
+[data-theme="dark"] .longterm-container .small {
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .sm-model-popup-card {
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .sm-model-popup-status.status-ok {
+    color: #86efac;
+}
+
+[data-theme="dark"] .sm-model-popup-status.status-warn {
+    color: #fde68a;
+}
+
+[data-theme="dark"] .sm-model-popup-status.status-fail {
+    color: #fca5a5;
+}
+
+/*  LIGHT MODE EXPLICIT OVERRIDES  */
+[data-theme="light"] .station-item,
+[data-theme="light"] .sensor-item,
+[data-theme="light"] .chart-box {
+    background: white;
+    border-color: var(--border-color);
+}
+
+/* Carto's dark tiles are already color-correct. Filtering the full tile pane
+   forces an expensive full-screen repaint during every pan and zoom. */
+[data-theme="dark"] .leaflet-tile-pane {
+    filter: none;
+}
+
+#map .leaflet-map-pane,
+#map .leaflet-tile-pane {
+    will-change: transform;
+}
+
+#map.map-is-moving .marker-alert-pulse,
+#map.map-is-moving .marker-device-alert {
+    animation-play-state: paused !important;
+    box-shadow: none !important;
+}
+
+#map.map-is-moving .custom-cors-base-marker > div {
+    filter: none !important;
+}
+
+#map.map-is-moving .leaflet-marker-icon,
+#map.map-is-moving .leaflet-tooltip,
+#map.map-is-moving .leaflet-popup {
+    transition: none !important;
+}
+
+body.map-is-moving .top-navbar,
+body.map-is-moving .station-list-sidebar,
+body.map-is-moving .detail-sidebar {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.map-is-moving .marker-alert-pulse,
+body.map-is-moving .marker-device-alert,
+body.map-is-moving .sensor-alert-warning,
+body.map-is-moving .sensor-alert-critical,
+body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
+    animation-play-state: paused !important;
+}
+
+/* ========================================
+   ALERT BANNER - Cáº£nh bÃ¡o giá»¯a mÃ n hÃ¬nh
+======================================== */
+.alert-banner {
+    --alert-banner-bg: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    --alert-banner-border: #fca5a5;
+    --alert-banner-title: #fef3c7;
+    --alert-banner-icon: #fef3c7;
+    --alert-banner-shadow: 0 20px 60px rgba(220, 38, 38, 0.6), 0 0 100px rgba(220, 38, 38, 0.4);
+    --alert-banner-shadow-pulse: 0 25px 70px rgba(220, 38, 38, 0.8), 0 0 120px rgba(220, 38, 38, 0.6);
+    display: none;
+    position: fixed;
+    top: 80px;
+    /* Náº±m giá»¯a khoáº£ng trá»‘ng: left sidebar 340px, right sidebar 420px */
+    left: calc(var(--sidebar-width) + (100vw - var(--sidebar-width) - 420px) / 2);
+    transform: translateX(-50%) translateY(-120%);
+    z-index: 9998;
+    width: calc(100vw - var(--sidebar-width) - 420px - 40px);
+    max-width: 700px;
+    background: var(--alert-banner-bg);
+    border: 3px solid var(--alert-banner-border);
+    border-radius: 16px;
+    box-shadow: var(--alert-banner-shadow);
+    transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    animation: alertPulse 2s ease-in-out infinite;
+}
+
+.alert-banner.level-critical {
+    --alert-banner-bg: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    --alert-banner-border: #fca5a5;
+    --alert-banner-title: #fef3c7;
+    --alert-banner-icon: #fef3c7;
+    --alert-banner-shadow: 0 20px 60px rgba(220, 38, 38, 0.6), 0 0 100px rgba(220, 38, 38, 0.4);
+    --alert-banner-shadow-pulse: 0 25px 70px rgba(220, 38, 38, 0.8), 0 0 120px rgba(220, 38, 38, 0.6);
+}
+
+.alert-banner.level-warning {
+    --alert-banner-bg: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+    --alert-banner-border: #fde68a;
+    --alert-banner-title: #fff7cc;
+    --alert-banner-icon: #fff7cc;
+    --alert-banner-shadow: 0 20px 60px rgba(245, 158, 11, 0.55), 0 0 100px rgba(245, 158, 11, 0.35);
+    --alert-banner-shadow-pulse: 0 25px 70px rgba(245, 158, 11, 0.75), 0 0 120px rgba(245, 158, 11, 0.5);
+}
+
+.alert-banner.show {
+    display: flex;
+    /* Hiá»‡n láº¡i khi cÃ³ class .show */
+    transform: translateX(-50%) translateY(0);
+}
+
+@keyframes alertPulse {
+
+    0%,
+    100% {
+        box-shadow: var(--alert-banner-shadow);
+    }
+
+    50% {
+        box-shadow: var(--alert-banner-shadow-pulse);
+    }
+}
+
+.alert-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+    color: white;
+}
+
+.alert-icon {
+    font-size: 2.5rem;
+    color: var(--alert-banner-icon);
+    animation: shake 0.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-8px) rotate(-5deg);
+    }
+
+    75% {
+        transform: translateX(8px) rotate(5deg);
+    }
+}
+
+.alert-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.alert-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    margin: 0 0 4px 0;
+    color: var(--alert-banner-title);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.alert-info-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.alert-station {
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.95);
+    display: inline;
+}
+
+.alert-message {
+    font-size: 1rem;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.9);
+    display: inline;
+}
+
+.alert-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.btn-alert-follow {
+    background: white;
+    color: #dc2626;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.btn-alert-follow:hover {
+    background: #f3f4f6;
+    transform: scale(1.05);
+}
+
+.btn-alert-dismiss {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-alert-dismiss:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+

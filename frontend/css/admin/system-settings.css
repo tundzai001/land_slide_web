@@ -1,0 +1,557 @@
+/* ========================================
+   SYSTEM SETTINGS - PASSWORD SHIELD
+======================================== */
+.password-shield {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    backdrop-filter: blur(10px);
+}
+
+.password-dialog {
+    background: var(--bg-secondary);
+    border: 2px solid var(--accent-danger);
+    border-radius: 16px;
+    padding: 40px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(239, 68, 68, 0.4);
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-12px);
+    }
+
+    50% {
+        transform: translateX(12px);
+    }
+
+    75% {
+        transform: translateX(-8px);
+    }
+}
+
+.password-dialog h4 {
+    color: var(--accent-danger);
+    margin-bottom: 8px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 1.5rem;
+}
+
+.password-dialog .subtitle {
+    color: var(--text-muted);
+    text-align: center;
+    margin-bottom: 24px;
+    font-size: 0.95rem;
+}
+
+.password-dialog .form-control {
+    font-size: 1.3rem;
+    padding: 16px;
+    text-align: center;
+    letter-spacing: 6px;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    border: 2px solid var(--border-color);
+}
+
+.password-dialog .form-control:focus {
+    border-color: var(--accent-danger);
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
+}
+
+.password-hint {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 16px;
+    font-size: 0.85rem;
+    color: var(--accent-warning);
+    text-align: center;
+}
+
+.config-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    transition: all 0.3s;
+}
+
+.config-section:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.1);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.section-header i {
+    font-size: 1.5rem;
+    color: var(--accent-primary);
+}
+
+.section-header h5 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] h5,
+[data-theme="dark"] h6 {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] p,
+[data-theme="dark"] span,
+[data-theme="dark"] div,
+[data-theme="dark"] label {
+    color: var(--text-primary) !important;
+}
+
+/* Table trong dark mode */
+[data-theme="dark"] .table thead {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .table th {
+    color: var(--text-primary) !important;
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .table td {
+    color: var(--text-primary) !important;
+    background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .table tbody tr {
+    background: var(--bg-secondary) !important;
+}
+
+[data-theme="dark"] .table tbody tr:hover {
+    background: var(--bg-tertiary) !important;
+}
+
+/* Form elements */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .form-label {
+    color: var(--text-primary) !important;
+}
+
+/* Buttons */
+[data-theme="dark"] .btn {
+    color: inherit;
+}
+
+[data-theme="dark"] .btn-outline-primary {
+    color: var(--accent-primary) !important;
+}
+
+/* Breadcrumb */
+[data-theme="dark"] .breadcrumb-item {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .breadcrumb-item.active {
+    color: var(--text-primary) !important;
+}
+
+/* Cards */
+[data-theme="dark"] .card {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .card-body,
+[data-theme="dark"] .card-header,
+[data-theme="dark"] .card-footer {
+    color: var(--text-primary) !important;
+}
+
+.config-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    transition: all 0.3s;
+}
+
+.config-section:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.1);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.section-header i {
+    font-size: 1.5rem;
+    color: var(--accent-primary);
+}
+
+.section-header h5 {
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* Input Group Styling for Timeout Controls */
+.input-group .form-control {
+    border-right: none;
+}
+
+.input-group .input-group-text {
+    background: var(--bg-tertiary);
+    border-left: none;
+    color: var(--text-secondary);
+    font-weight: 600;
+    border-color: var(--border-color);
+}
+
+.input-group .btn-outline-secondary {
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.input-group .btn-outline-secondary:hover {
+    background: rgba(14, 165, 233, 0.1);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+/* Real-time Display Text */
+.form-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+}
+
+small.text-muted span.fw-bold {
+    color: var(--accent-primary);
+    font-family: var(--font-mono);
+}
+
+/* Info Alert Styling */
+.config-section .alert {
+    background: rgba(14, 165, 233, 0.05);
+    border-color: rgba(14, 165, 233, 0.2);
+}
+
+.config-section .alert ul {
+    padding-left: 20px;
+}
+
+.config-section .alert ul li {
+    margin-bottom: 6px;
+}
+
+/* ========================================
+   COMPREHENSIVE LIGHT/DARK MODE TEXT FIXES
+======================================== */
+
+/* Card text uses theme vars */
+.card-title,
+.card-body h5,
+.card-body h6 {
+    color: var(--text-primary) !important;
+}
+
+.card-body .text-muted {
+    color: var(--text-muted) !important;
+}
+
+/* btn-outline-primary visible in both modes */
+.btn-outline-primary {
+    color: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+}
+
+.btn-outline-primary:hover {
+    background: var(--accent-primary) !important;
+    color: white !important;
+}
+
+/* btn-outline-danger visible in both modes */
+.btn-outline-danger {
+    color: var(--accent-danger) !important;
+    border-color: var(--accent-danger) !important;
+}
+
+.btn-outline-danger:hover {
+    background: var(--accent-danger) !important;
+    color: white !important;
+}
+
+/* === Badge visibility fixes === */
+/* Only force white text on SOLID backgrounds, not techno-outline ones */
+.badge.bg-primary:not(.bg-opacity-10),
+.badge.bg-success:not(.bg-opacity-10),
+.badge.bg-danger:not(.bg-opacity-10),
+.badge.bg-secondary:not(.bg-opacity-10) {
+    color: white !important;
+}
+
+/* Ensure Techno Badges (opacity 10) are readable in Light Mode */
+[data-theme="light"] .badge.bg-opacity-10 {
+    background-color: transparent !important;
+    /* Remove the faint background in light mode if it looks muddy */
+    border-width: 1px;
+    font-weight: 600;
+}
+
+
+/* === Light mode specific === */
+[data-theme="light"] .card-title,
+[data-theme="light"] .card-body h5,
+[data-theme="light"] .card-body h6 {
+    color: #212529 !important;
+}
+
+[data-theme="light"] .card-footer {
+    color: #212529 !important;
+}
+
+/* === Dark mode specific === */
+[data-theme="dark"] .card-title,
+[data-theme="dark"] .card-body h5,
+[data-theme="dark"] .card-body h6 {
+    color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .text-muted {
+    color: var(--text-muted) !important;
+}
+
+[data-theme="dark"] .breadcrumb {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .card-footer {
+    color: #f1f5f9 !important;
+}
+
+/* === Bootstrap text-primary/text-success overrides === */
+[data-theme="dark"] .text-primary {
+    color: var(--accent-primary) !important;
+}
+
+[data-theme="dark"] .text-success {
+    color: var(--accent-success) !important;
+}
+
+[data-theme="dark"] .text-danger {
+    color: var(--accent-danger) !important;
+}
+
+[data-theme="dark"] .text-info {
+    color: var(--accent-info) !important;
+}
+
+[data-theme="dark"] .text-warning {
+    color: var(--accent-warning) !important;
+}
+
+.config-section .alert strong {
+    color: var(--accent-primary);
+}
+
+/* Number Input Enhancements */
+input[type="number"] {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* Remove spinner arrows in number inputs (optional) */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* Focus State Enhancement */
+.config-section .form-control:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+
+/* Icon Colors for Different Sensors */
+.bi-geo-alt-fill {
+    color: #ef4444;
+}
+
+/* Red for GNSS */
+.bi-cloud-rain-fill {
+    color: #0ea5e9;
+}
+
+/* Blue for Rain */
+.bi-water {
+    color: #06b6d4;
+}
+
+/* Cyan for Water */
+.bi-compass-fill {
+    color: #f59e0b;
+}
+
+/* Orange for IMU */
+.bi-clock-history {
+    color: #8b5cf6;
+}
+
+/* Purple for Time */
+
+/* Reset Button Animation */
+.input-group .btn-outline-secondary i {
+    transition: transform 0.3s ease;
+}
+
+.input-group .btn-outline-secondary:active i {
+    transform: rotate(360deg);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .config-section {
+        padding: 16px;
+    }
+
+    .section-header h5 {
+        font-size: 1rem;
+    }
+
+    .input-group .btn-outline-secondary span {
+        display: none;
+    }
+
+    .config-section .alert ul {
+        font-size: 0.8rem;
+    }
+}
+
+/* Dark Mode Enhancements */
+[data-theme="dark"] .config-section {
+    background: rgba(30, 41, 59, 0.5);
+    border-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .config-section:hover {
+    border-color: var(--accent-primary);
+    background: rgba(30, 41, 59, 0.7);
+}
+
+[data-theme="dark"] .input-group .input-group-text {
+    background: rgba(30, 41, 59, 0.8);
+    border-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .config-section .alert {
+    background: rgba(14, 165, 233, 0.08);
+    border-color: rgba(14, 165, 233, 0.25);
+}
+
+/* Light Mode Enhancements */
+[data-theme="light"] .config-section {
+    background: var(--bg-tertiary);
+    box-shadow: none;
+}
+
+[data-theme="light"] .input-group .input-group-text {
+    background: white;
+}
+
+[data-theme="light"] .config-section .alert {
+    background: rgba(14, 165, 233, 0.05);
+}
+
+/* Validation States */
+.form-control.is-invalid {
+    border-color: var(--accent-danger);
+}
+
+.form-control.is-valid {
+    border-color: var(--accent-success);
+}
+
+/* Tooltip Enhancement for Reset Buttons */
+.input-group .btn-outline-secondary[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.hover-opacity-100 {
+    transition: opacity 0.2s;
+}
+
+.hover-opacity-100:hover {
+    opacity: 1 !important;
+}
+

@@ -1,0 +1,335 @@
+"""MQTT connection, callback, and NTRIP-route transport behavior."""
+import asyncio
+import logging
+import re
+
+import paho.mqtt.client as mqtt
+
+logger = logging.getLogger(__name__)
+
+
+class MQTTTransportMixin:
+    def _get_fwd_client(self, host: str, port: int, user: Optional[str], password: Optional[str]):
+        """Get or create a persistent MQTT client for external forwarding."""
+        key = (host, port, user, password)
+        if key in self._fwd_clients:
+            client = self._fwd_clients[key]
+            if client.is_connected():
+                return client
+            try:
+                client.reconnect()
+                return client
+            except Exception:
+                pass
+
+        try:
+            logger.info(f"🌐 [FORWARD] Creating new external MQTT client for {host}:{port}")
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+            if user:
+                client.username_pw_set(user, password)
+            client.connect(host, port, 60)
+            client.loop_start()
+            self._fwd_clients[key] = client
+            return client
+        except Exception as e:
+            logger.error(f"❌ [FORWARD] Failed to connect to external broker {host}:{port}: {e}")
+            return None
+
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        if not isinstance(userdata, tuple) or len(userdata) < 5:
+            # Default client
+            if rc == 0:
+                logger.info("✅ Default MQTT Connected to Broker.")
+                client.subscribe("command/ntrip/#")
+            else:
+                logger.error(f"❌ Default MQTT Connection failed: rc={rc}")
+            return
+
+        broker_key = userdata
+        if rc == 0:
+            logger.info(f"✅ MQTT Connected to Broker {broker_key[0]}:{broker_key[1]}.")
+            topics = self._client_topics.get(broker_key, set())
+            for topic in topics:
+                client.subscribe(topic)
+                logger.info(f"   ✓ Subscribed: {topic} on {broker_key[0]}:{broker_key[1]}")
+        else:
+            logger.error(f"❌ MQTT Connection to {broker_key[0]}:{broker_key[1]} failed: rc={rc}")
+
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        if not isinstance(userdata, tuple) or len(userdata) < 5:
+            # Default client
+            if reason_code != 0:
+                logger.warning(f"⚠️ Default MQTT disconnect: rc={reason_code}. Reconnecting...")
+                try:
+                    client.reconnect()
+                    logger.info("✅ Default MQTT Reconnected successfully")
+                except Exception as e:
+                    logger.error(f"❌ Default Reconnect failed: {e}. Will retry in 5s...")
+                    if self.loop and self.loop.is_running():
+                        self.loop.call_later(5, self._retry_connect)
+            else:
+                logger.info("✅ Default MQTT Disconnected gracefully")
+            return
+
+        broker_key = userdata
+        if reason_code != 0:
+            logger.warning(f"⚠️ MQTT disconnect from {broker_key[0]}:{broker_key[1]}: rc={reason_code}. Reconnecting...")
+            try:
+                client.reconnect()
+                logger.info(f"✅ MQTT Reconnected to {broker_key[0]}:{broker_key[1]} successfully")
+            except Exception as e:
+                logger.error(f"❌ Reconnect to {broker_key[0]}:{broker_key[1]} failed: {e}.")
+        else:
+            logger.info(f"✅ MQTT Disconnected from {broker_key[0]}:{broker_key[1]} gracefully")
+
+    def _retry_connect(self):
+        try:
+            self.client.reconnect()
+            logger.info("✅ MQTT Reconnected after retry")
+        except Exception as e:
+            logger.error(f"❌ Retry failed: {e}. Next retry in 10s...")
+            self.loop.call_later(10, self._retry_connect)
+
+    def _extract_gga_from_payload(self, payload_bytes: bytes) -> Optional[str]:
+        """Extract a single NMEA GGA sentence from mixed binary/text payload."""
+        if not payload_bytes:
+            return None
+
+        gga_regex = re.compile(rb'\$G[NP]GGA,[^\r\n*]*(?:\*[0-9A-Fa-f]{2})?')
+
+        match = gga_regex.search(payload_bytes)
+        if not match and b'\x00' in payload_bytes:
+            # Some encoders interleave NULL bytes; remove them and retry.
+            compact_bytes = payload_bytes.replace(b'\x00', b'')
+            match = gga_regex.search(compact_bytes)
+
+        if not match:
+            return None
+
+        return match.group(0).decode('ascii', errors='ignore').strip()
+
+    def on_message(self, client, userdata, msg):
+        try:
+            topic = msg.topic
+            
+            if topic.startswith("command/ntrip/"):
+                self._handle_ntrip_command(msg)
+                return
+            
+            # Resolve the correct broker key for lookup
+            if isinstance(userdata, tuple) and len(userdata) >= 5:
+                broker_key = userdata
+            else:
+                # Default client's broker key
+                broker_key = (
+                    self.runtime_mqtt["broker"],
+                    self.runtime_mqtt["port"],
+                    self.runtime_mqtt["user"] or None,
+                    self.runtime_mqtt["password"] or None,
+                    False
+                )
+                
+            info = self.topic_map.get((broker_key, topic))
+            if not info:
+                # Fallback to check with TLS=True in case default client gets hit
+                info = self.topic_map.get(((broker_key[0], broker_key[1], broker_key[2], broker_key[3], True), topic))
+                
+            if not info:
+                if self._diag_should_log(f"unknown_topic:{broker_key}:{topic}", 60):
+                    logger.warning(f"[MQTT] Received message from {broker_key[0]}:{broker_key[1]} on unknown topic: {topic}")
+                return
+
+            sensor_type = (info or {}).get('type')
+            if sensor_type == 'gnss':
+                station_code = (info or {}).get('station_code')
+                if station_code:
+                    from app.modules.ntrip_pusher import ntrip_manager
+                    ntrip_manager.feed_data(station_code, msg.payload)
+                    
+            try:
+                if sensor_type == 'gnss':
+                    # Decode full text payload, retaining AGRICA and other sentences
+                    payload_str = msg.payload.decode('utf-8', errors='ignore')
+                    decrypted_payload = payload_str.strip()
+                else:
+                    payload_str = msg.payload.decode('utf-8')
+                    decrypted_payload = payload_str.strip()
+
+                if sensor_type == 'gnss' and not decrypted_payload:
+                    # Silently return on empty/binary frames to avoid console flooding
+                    return
+
+                if sensor_type == 'gnss':
+                    # SET socket data only proves that AICaster echoed the bytes.
+                    # Receiver acceptance is reported on this rover's own GNSS
+                    # MQTT topic as: exact command echo, then OK/ERROR.
+                    self.round_robin_manager.add_receiver_command_payload(
+                        decrypted_payload,
+                        info,
+                        topic,
+                    )
+                
+            except UnicodeDecodeError:
+                return # Bỏ qua dữ liệu nhị phân (RTCM)
+
+            if not decrypted_payload:
+                return
+            
+            if self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.process_pipeline(info, decrypted_payload), 
+                    self.loop
+                )
+        except Exception as e:
+            logger.error(f"Error in on_message: {e}")
+
+    def _handle_ntrip_command(self, msg):
+        try:
+            import json
+            payload = json.loads(msg.payload.decode('utf-8'))
+            from app.modules.ntrip_pusher import ntrip_manager
+            import asyncio
+            if msg.topic == "command/ntrip/route/start":
+                route_payload = payload.get("ntrip_route") if isinstance(payload.get("ntrip_route"), dict) else payload
+                station_code = route_payload.get("station_code")
+                mountpoint = route_payload.get("mountpoint")
+                if not station_code and isinstance(mountpoint, str) and mountpoint.endswith("_BASE"):
+                    station_code = mountpoint[:-5]
+                host = (
+                    route_payload.get("host")
+                    or route_payload.get("target_host")
+                    or settings.NTRIP_SOURCE_HOST
+                )
+                port = int(
+                    route_payload.get("port")
+                    or route_payload.get("target_port")
+                    or settings.NTRIP_SOURCE_PORT
+                )
+                password = route_payload.get("password", "")
+                if station_code and mountpoint and host:
+                    if self.loop and self.loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            ntrip_manager.start_pusher(station_code, host, port, mountpoint, password),
+                            self.loop
+                        )
+                else:
+                    logger.warning("[NTRIP COMMAND] Ignored start route missing station_code or mountpoint: %s", payload)
+            elif msg.topic == "command/ntrip/route/stop":
+                station_code = payload.get("station_code")
+                if station_code:
+                    if self.loop and self.loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            ntrip_manager.stop_pusher(station_code),
+                            self.loop
+                        )
+        except Exception as e:
+            logger.error(f"[NTRIP COMMAND] Error processing command: {e}")
+
+    async def _start_round_robin_ntrip_route(
+        self,
+        station_code: str,
+        host: str,
+        port: int,
+        mountpoint: str,
+        password: str,
+    ) -> bool:
+        """Open every SOURCE target and wait for all caster handshakes."""
+
+        from app.modules.ntrip_pusher import ntrip_manager
+
+        mapped_topics = sorted({
+            topic
+            for (_broker_key, topic), info in self.topic_map.items()
+            if str((info or {}).get("station_code") or "").casefold() == str(station_code).casefold()
+            and (info or {}).get("type") == "gnss"
+        })
+        logger.info(
+            "[Round-Robin RTCM] station=%s source_target=%s:%s/%s mqtt_topics=%s",
+            station_code,
+            host,
+            port,
+            mountpoint,
+            mapped_topics,
+        )
+        try:
+            await ntrip_manager.start_pusher(station_code, host, port, mountpoint, password)
+        except Exception as exc:
+            diagnostics = ntrip_manager.get_diagnostics(station_code)
+            diagnostics["mapped_mqtt_topics"] = mapped_topics
+            logger.error(
+                "[Round-Robin RTCM] station=%s failed: %s diagnostics=%s",
+                station_code,
+                exc,
+                diagnostics,
+            )
+            await ntrip_manager.stop_pusher(station_code)
+            raise RuntimeError(
+                f"{exc}; mapped_mqtt_topics={mapped_topics}"
+            ) from exc
+        return True
+
+    async def _wait_round_robin_ntrip_route(
+        self,
+        station_code: str,
+        timeout: float = 25.0,
+    ) -> None:
+        """Require the first valid RTCM frame on every primed mountpoint."""
+
+        from app.modules.ntrip_pusher import ntrip_manager
+
+        try:
+            await ntrip_manager.wait_for_rtcm(station_code, timeout=timeout)
+        except Exception:
+            logger.error(
+                "[Round-Robin RTCM] station=%s fanout verification failed diagnostics=%s",
+                station_code,
+                ntrip_manager.get_diagnostics(station_code),
+            )
+            raise
+        logger.info(
+            "[Round-Robin RTCM] station=%s fanout verified diagnostics=%s",
+            station_code,
+            ntrip_manager.get_diagnostics(station_code),
+        )
+
+    async def _stop_round_robin_ntrip_route(self, station_code: str) -> None:
+        from app.modules.ntrip_pusher import ntrip_manager
+
+        await ntrip_manager.stop_pusher(station_code)
+
+    def start(self):
+        logger.info("🚀 Starting MQTT Bridge inside FastAPI...")
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.error("❌ No running event loop found!")
+            return
+
+        try:
+            if self.loop and self.loop.is_running():
+                self.loop.create_task(self.load_runtime_config_from_db())
+
+            self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
+            self.client.loop_start()
+            self.loop.create_task(self.reload_topics_from_db())
+            self.loop.create_task(self._flush_loop())  # ✅ Khởi động flush buffer
+            logger.info("✅ MQTT Bridge started successfully.")
+        except Exception as e:
+            logger.error(f"❌ Failed to start MQTT Bridge: {e}")
+
+    def stop(self):
+        logger.info("🛑 Stopping MQTT Bridge...")
+        self.client.loop_stop()
+        self.client.disconnect()
+
+    async def reset_gnss_origin(self, device_id: int):
+        """Trigger origin reset for a specific GNSS device."""
+        proc_key = f"device_{device_id}"
+        processor = self.processors_cache.get(proc_key)
+        if processor and hasattr(processor, 'reset_origin'):
+            processor.reset_origin()
+            logger.info(f"🎯 [BRIDGE] Triggered origin reset for device {device_id}")
+            return True
+        return False
+
+

@@ -2,6 +2,8 @@ import math
 import unittest
 from types import SimpleNamespace
 
+import numpy as np
+
 from backend.processors.round_robin_manager import (
     RoundRobinAdjustmentManager,
     _aggregate_parallel_baselines,
@@ -31,9 +33,49 @@ class FundamentalLoopReportTests(unittest.TestCase):
         loops = _build_fundamental_loops(baselines)
 
         self.assertEqual(len(loops), 1)
-        self.assertEqual(loops[0]["points"], ["A", "B", "BASE", "A"])
+        self.assertEqual(loops[0]["points"], ["BASE", "B", "A", "BASE"])
         self.assertAlmostEqual(loops[0]["observed_closure"], 0.01, places=12)
         self.assertAlmostEqual(loops[0]["adjusted_closure"], 0.0, places=12)
+
+    def test_complete_network_basis_contains_rover_only_and_base_loops(self):
+        rovers = ["R1", "R2", "R3", "R4"]
+        baselines = [
+            baseline("BASE", rover, (float(index), 0.0, 0.0))
+            for index, rover in enumerate(rovers, start=1)
+        ]
+        baselines.extend(
+            baseline(
+                rovers[left],
+                rovers[right],
+                (float(right - left), 0.0, 0.0),
+            )
+            for left in range(len(rovers))
+            for right in range(left + 1, len(rovers))
+        )
+
+        loops = _build_fundamental_loops(baselines)
+        rover_only = [loop for loop in loops if "BASE" not in loop["points"]]
+        base_anchored = [loop for loop in loops if "BASE" in loop["points"]]
+
+        # K5 has cycle-space dimension 10 - 5 + 1 = 6.  The rover-first
+        # spanning tree exposes all three independent rover triangles instead
+        # of producing six BASE-centred loops.
+        self.assertEqual(len(loops), 6)
+        self.assertEqual(len(rover_only), 3)
+        self.assertEqual(len(base_anchored), 3)
+        directed_edge_matrix = np.zeros((len(loops), len(baselines)))
+        for row, loop in enumerate(loops):
+            self.assertEqual(
+                len(loop["baseline_indices"]),
+                len(loop["baseline_directions"]),
+            )
+            for edge_index, direction in zip(
+                loop["baseline_indices"],
+                loop["baseline_directions"],
+            ):
+                self.assertIn(direction, (-1, 1))
+                directed_edge_matrix[row, edge_index] = direction
+        self.assertEqual(int(np.linalg.matrix_rank(directed_edge_matrix)), 6)
 
     def test_parallel_baselines_do_not_form_a_geometric_loop(self):
         baselines = [

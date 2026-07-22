@@ -1,0 +1,307 @@
+/* === Map Navbar buttons â€” visible in both themes === */
+.top-navbar .btn-outline-primary {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.top-navbar .btn-outline-primary:hover {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.top-navbar .btn-link {
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.top-navbar .btn-link:hover {
+    color: var(--accent-primary);
+}
+
+/* === Light Mode: navbar deep glass === */
+[data-theme="light"] .top-navbar {
+    background: rgba(255, 255, 255, 0.55);
+    border-bottom: none;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .brand-text {
+    color: #1e293b;
+}
+
+/* === Dark Mode: navbar deep glass === */
+[data-theme="dark"] .top-navbar {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: transparent;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .brand-text {
+    color: #f1f5f9;
+}
+
+/* === CUSTOM GLASS MAP CONTROLS (Bottom-Right) === */
+.custom-map-controls {
+    position: fixed;
+    bottom: 30px;
+    right: 24px;
+    z-index: 1050;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.3);
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dark"] .custom-map-controls {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.map-ctrl-btn {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.map-ctrl-btn:hover {
+    background: rgba(13, 110, 253, 0.12);
+}
+
+[data-theme="dark"] .map-ctrl-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.map-ctrl-btn:active {
+    background: rgba(13, 110, 253, 0.25);
+}
+
+.map-ctrl-divider {
+    width: 24px;
+    height: 1px;
+    background: rgba(0, 0, 0, 0.1);
+    margin: 0 8px;
+}
+
+[data-theme="dark"] .map-ctrl-divider {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.map-ctrl-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 32px;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+
+.map-ctrl-brand:hover {
+    opacity: 0.9;
+}
+
+/* === LIGHT THEME: Modal & Form text contrast fixes === */
+[data-theme="light"] .glass-modal-content {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .glass-modal-content .modal-header,
+[data-theme="light"] .glass-modal-content .modal-title {
+    color: #020617 !important;
+    font-weight: 800;
+}
+
+[data-theme="light"] .glass-modal-content .form-label {
+    color: #1e293b !important;
+    font-weight: 700;
+}
+
+[data-theme="light"] .glass-modal-content .form-control,
+[data-theme="light"] .glass-modal-content .form-select {
+    color: #020617 !important;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-color: rgba(0, 0, 0, 0.4) !important;
+}
+
+[data-theme="light"] .glass-modal-content .form-control::placeholder {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .glass-modal-content h6 {
+    color: #0d6efd !important;
+    font-weight: 700;
+}
+
+[data-theme="light"] .glass-modal-content .form-text {
+    color: #334155 !important;
+    font-weight: 600;
+}
+
+[data-theme="light"] .glass-modal-content .btn-outline-danger,
+[data-theme="light"] .glass-modal-content .btn-outline-success,
+[data-theme="light"] .glass-modal-content .btn-outline-warning,
+[data-theme="light"] .glass-modal-content .btn-outline-info {
+    border-width: 2px;
+    font-weight: 800;
+    color: #020617 !important;
+}
+
+[data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-danger {
+    color: white !important;
+    background: #dc3545 !important;
+}
+
+[data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-success {
+    color: white !important;
+    background: #198754 !important;
+}
+
+[data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-warning {
+    color: #000 !important;
+    background: #ffc107 !important;
+}
+
+[data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-info {
+    color: white !important;
+    background: #0dcaf0 !important;
+}
+
+/* Hide default Leaflet controls */
+.leaflet-control-zoom,
+.leaflet-control-attribution {
+    display: none !important;
+}
+
+/* === QR POPUP GLASSMORPHISM === */
+.qr-popup-glass {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 20px;
+    padding: 24px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+    min-width: 240px;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .qr-popup-glass {
+    background: rgba(15, 23, 42, 0.55);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* === HEATMAP TOGGLE === */
+.heatmap-toggle-wrap {
+    position: fixed;
+    bottom: 124px;
+    right: 24px;
+    z-index: 1050;
+}
+
+.heatmap-toggle-btn {
+    background: rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 12px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    transition: all 0.2s;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.heatmap-toggle-btn.active {
+    background: rgba(255, 107, 53, 0.3);
+    color: #ff6b35;
+    border-color: rgba(255, 107, 53, 0.4);
+}
+
+[data-theme="dark"] .heatmap-toggle-btn {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* === TIMELINE SLIDER (Bottom) === */
+.timeline-slider-container {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.25);
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 20px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+    min-width: 320px;
+    max-width: 500px;
+}
+
+[data-theme="dark"] .timeline-slider-container {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.timeline-slider-container input[type="range"] {
+    flex: 1;
+    accent-color: #0d6efd;
+    height: 6px;
+    cursor: pointer;
+}
+
+.timeline-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--text-primary);
+    min-width: 65px;
+    text-align: center;
+}
+
+/* === PDF PRINT FRIENDLY === */
+@media print {
+    body {
+        background: #fff !important;
+        color: #1e293b !important;
+    }
+
+    .top-navbar,
+    .custom-map-controls,
+    .heatmap-toggle-wrap,
+    .timeline-slider-container,
+    .sidebar-close-btn,
+    .btn-export-pdf,
+    .btn-qr-share {
+        display: none !important;
+    }
+}
+

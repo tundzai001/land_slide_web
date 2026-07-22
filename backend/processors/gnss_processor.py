@@ -573,7 +573,7 @@ class GNSSVelocityProcessor:
                 )
             return {
                 "type": "gnss_status",
-                "status": "INVALID_DATA", # Updated to INVALID_DATA for anomalies
+                "status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "INVALID_DATA",
                 "sub_status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "UNSTABLE_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
@@ -777,10 +777,28 @@ class GNSSVelocityProcessor:
             self.disp_state_ready = True
             displacement_updated = True
         else:
-            # Revert to continuous EMA so values jump continuously (as requested)
-            alpha = 0.15
-            self.disp_enu_state = (1.0 - alpha) * self.disp_enu_state + alpha * displacement_candidate
-            displacement_updated = True
+            # A rolling median can move by millimetres even when a receiver is
+            # perfectly stationary. Only advance the published displacement
+            # while the robust velocity is significant (or during its short
+            # settling tail) and the candidate moved beyond the measured noise.
+            if velocity_reliable and velocity_significant:
+                self.last_significant_motion_ts = ts
+            settling_motion = bool(
+                self.last_significant_motion_ts
+                and (ts - self.last_significant_motion_ts) <= displacement_settle_s
+            )
+            candidate_step_mm = float(
+                np.linalg.norm(displacement_candidate - self.disp_enu_state) * 1000.0
+            )
+            if (
+                (velocity_reliable and velocity_significant) or settling_motion
+            ) and candidate_step_mm > displacement_noise_floor_mm:
+                alpha = 0.15
+                self.disp_enu_state = (
+                    (1.0 - alpha) * self.disp_enu_state
+                    + alpha * displacement_candidate
+                )
+                displacement_updated = True
 
         total_displacement_m = float(np.linalg.norm(self.disp_enu_state[:2]))
         total_displacement_3d_m = float(np.linalg.norm(self.disp_enu_state))

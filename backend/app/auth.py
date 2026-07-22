@@ -1,6 +1,8 @@
 # backend/app/auth.py
 from datetime import datetime, timedelta
 from typing import Optional
+import asyncio
+import time
 from jose import JWTError, jwt
 import bcrypt
 from fastapi import Depends, HTTPException, status
@@ -14,6 +16,32 @@ from .models import auth as model_auth # Import từ thư mục models/auth.py
 from .config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+
+_AUTH_USER_CACHE_TTL_SECONDS = 15.0
+_auth_user_cache = {}
+_auth_user_locks = {}
+
+
+async def get_user_by_username_cached(username: str, db: AsyncSession):
+    now = time.monotonic()
+    cached = _auth_user_cache.get(username)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    lock = _auth_user_locks.setdefault(username, asyncio.Lock())
+    async with lock:
+        now = time.monotonic()
+        cached = _auth_user_cache.get(username)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        result = await db.execute(select(model_auth.User).where(model_auth.User.username == username))
+        user = result.scalar_one_or_none()
+        if user is not None and user.is_active:
+            _auth_user_cache[username] = (time.monotonic() + _AUTH_USER_CACHE_TTL_SECONDS, user)
+        else:
+            _auth_user_cache.pop(username, None)
+        return user
 
 class Role:
     ADMIN = "admin"
@@ -64,8 +92,7 @@ async def get_current_user(
         raise credentials_exception
         
     # Query từ bảng User trong Auth DB
-    result = await db.execute(select(model_auth.User).where(model_auth.User.username == username))
-    user = result.scalar_one_or_none()
+    user = await get_user_by_username_cached(username, db)
     
     if user is None or not user.is_active:
         raise credentials_exception

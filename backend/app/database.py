@@ -9,11 +9,21 @@ def create_pg_engine(url):
         url,
         echo=False,
         pool_pre_ping=True,
-        pool_size=20,        # Tăng lên 20 để phục vụ nhiều trạm GNSS đồng thời
-        max_overflow=40,     # Cho phép tối đa 60 kết nối khi tải cao (10+ trạm * nhiều sensor)
+        # All three engines normally target databases on the same PostgreSQL
+        # instance.  The old 20 + 40 configuration allowed 180 concurrent
+        # connections in total and could exhaust a default PostgreSQL server
+        # during a polling/cache burst.
+        pool_size=10,
+        max_overflow=10,
         pool_recycle=1800,
-        pool_timeout=60,     # Tăng timeout lên 60s để tránh lỗi khi burst
-        pool_use_lifo=True,  # Tái sử dụng kết nối gần nhất (tốt cho cache)
+        # Fail fast enough for HTTP clients to back off instead of retaining a
+        # growing queue of one-minute requests while the local DB is unhealthy.
+        pool_timeout=10,
+        pool_use_lifo=True,
+        connect_args={
+            "timeout": 10,
+            "command_timeout": 30,
+        },
     )
 
 # 1. AUTH DB
