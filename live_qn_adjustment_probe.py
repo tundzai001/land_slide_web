@@ -129,7 +129,7 @@ async def main() -> int:
 
     hosts = [
         host.strip()
-        for host in settings.NTRIP_CONTROL_HOSTS.split(",")
+        for host in settings.NTRIP_HOSTS.split(",")
         if host.strip()
     ]
     if CASTER_HOST not in hosts:
@@ -138,11 +138,11 @@ async def main() -> int:
         _UnusedPublisher(),
         caster_host=CASTER_HOST,
         caster_hosts=hosts,
-        caster_port=settings.NTRIP_CONTROL_PORT,
+        caster_port=settings.NTRIP_PORT,
         source_host=CASTER_HOST,
         source_port=CASTER_PORT,
-        control_password=settings.NTRIP_CONTROL_PASSWORD,
-        source_password=settings.NTRIP_SOURCE_PASSWORD,
+        control_password=settings.NTRIP_PASSWORD,
+        source_password=settings.NTRIP_PASSWORD,
         web_cors_api_base_url=settings.WEB_CORS_API_BASE_URL,
         web_cors_api_token=settings.WEB_CORS_API_TOKEN,
         web_cors_api_username=settings.WEB_CORS_API_USERNAME,
@@ -318,7 +318,7 @@ async def main() -> int:
                 "round_robin_route_host": CASTER_HOST,
                 "round_robin_route_port": CASTER_PORT,
                 "round_robin_route_mountpoint": MOUNTPOINT,
-                "round_robin_route_password": settings.NTRIP_SOURCE_PASSWORD,
+                "round_robin_route_password": settings.NTRIP_PASSWORD,
             }],
         )
 

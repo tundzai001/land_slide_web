@@ -256,13 +256,15 @@ async def async_main() -> int:
     parser.add_argument("--capture", type=float, default=20.0)
     args = parser.parse_args()
 
-    hosts = [host.strip() for host in settings.NTRIP_CONTROL_HOSTS.split(",") if host.strip()]
+    hosts = [host.strip() for host in settings.NTRIP_HOSTS.split(",") if host.strip()]
+    if not hosts:
+        raise RuntimeError("NTRIP_HOSTS must contain at least one caster host")
     manager = RoundRobinAdjustmentManager(
         _UnusedPublisher(),
         caster_host=hosts[0],
         caster_hosts=hosts,
-        caster_port=settings.NTRIP_CONTROL_PORT,
-        control_password=settings.NTRIP_CONTROL_PASSWORD,
+        caster_port=settings.NTRIP_PORT,
+        control_password=settings.NTRIP_PASSWORD,
     )
     feed = LiveFeed(manager)
     feed.start()

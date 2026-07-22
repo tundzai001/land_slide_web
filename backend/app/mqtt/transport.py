@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+from typing import Optional
 
 import paho.mqtt.client as mqtt
 
@@ -198,14 +199,23 @@ class MQTTTransportMixin:
                 host = (
                     route_payload.get("host")
                     or route_payload.get("target_host")
-                    or settings.NTRIP_SOURCE_HOST
+                    or next(
+                        (
+                            item.strip()
+                            for item in settings.NTRIP_HOSTS.split(",")
+                            if item.strip()
+                        ),
+                        "",
+                    )
                 )
                 port = int(
                     route_payload.get("port")
                     or route_payload.get("target_port")
-                    or settings.NTRIP_SOURCE_PORT
+                    or settings.NTRIP_PORT
                 )
-                password = route_payload.get("password", "")
+                password = route_payload.get("password")
+                if password is None:
+                    password = settings.NTRIP_PASSWORD
                 if station_code and mountpoint and host:
                     if self.loop and self.loop.is_running():
                         asyncio.run_coroutine_threadsafe(
@@ -243,30 +253,58 @@ class MQTTTransportMixin:
             if str((info or {}).get("station_code") or "").casefold() == str(station_code).casefold()
             and (info or {}).get("type") == "gnss"
         })
-        logger.info(
-            "[Round-Robin RTCM] station=%s source_target=%s:%s/%s mqtt_topics=%s",
-            station_code,
-            host,
-            port,
-            mountpoint,
-            mapped_topics,
-        )
-        try:
-            await ntrip_manager.start_pusher(station_code, host, port, mountpoint, password)
-        except Exception as exc:
-            diagnostics = ntrip_manager.get_diagnostics(station_code)
-            diagnostics["mapped_mqtt_topics"] = mapped_topics
-            logger.error(
-                "[Round-Robin RTCM] station=%s failed: %s diagnostics=%s",
-                station_code,
-                exc,
-                diagnostics,
+        configured_hosts = list(
+            dict.fromkeys(
+                [str(host).strip()]
+                + [
+                    str(item).strip()
+                    for item in getattr(
+                        self.round_robin_manager, "caster_hosts", []
+                    )
+                ]
             )
-            await ntrip_manager.stop_pusher(station_code)
-            raise RuntimeError(
-                f"{exc}; mapped_mqtt_topics={mapped_topics}"
-            ) from exc
-        return True
+        )
+        configured_hosts = [item for item in configured_hosts if item]
+        failures = []
+        for source_host in configured_hosts:
+            logger.info(
+                "[Round-Robin RTCM] station=%s source_target=%s:%s/%s mqtt_topics=%s",
+                station_code,
+                source_host,
+                port,
+                mountpoint,
+                mapped_topics,
+            )
+            try:
+                await ntrip_manager.start_pusher(
+                    station_code, source_host, port, mountpoint, password
+                )
+                if source_host != host:
+                    logger.warning(
+                        "[Round-Robin RTCM] station=%s SOURCE failed over from %s to %s",
+                        station_code,
+                        host,
+                        source_host,
+                    )
+                return True
+            except Exception as exc:
+                failures.append(f"{source_host}:{port} ({exc})")
+                diagnostics = ntrip_manager.get_diagnostics(station_code)
+                diagnostics["mapped_mqtt_topics"] = mapped_topics
+                logger.warning(
+                    "[Round-Robin RTCM] station=%s source_target=%s failed: %s diagnostics=%s",
+                    station_code,
+                    source_host,
+                    exc,
+                    diagnostics,
+                )
+                await ntrip_manager.stop_pusher(station_code)
+
+        detail = "; ".join(failures) or "no NTRIP SOURCE host is configured"
+        raise RuntimeError(
+            f"All NTRIP SOURCE hosts failed for {station_code}: {detail}; "
+            f"mapped_mqtt_topics={mapped_topics}"
+        )
 
     async def _wait_round_robin_ntrip_route(
         self,
@@ -331,5 +369,3 @@ class MQTTTransportMixin:
             logger.info(f"🎯 [BRIDGE] Triggered origin reset for device {device_id}")
             return True
         return False
-
-

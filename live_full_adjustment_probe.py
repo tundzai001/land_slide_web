@@ -121,18 +121,20 @@ async def main() -> int:
 
     hosts = [
         host.strip()
-        for host in settings.NTRIP_CONTROL_HOSTS.split(",")
+        for host in settings.NTRIP_HOSTS.split(",")
         if host.strip()
     ]
+    if not hosts:
+        raise RuntimeError("NTRIP_HOSTS must contain at least one caster host")
     manager = RoundRobinAdjustmentManager(
         _UnusedPublisher(),
         caster_host=hosts[0],
         caster_hosts=hosts,
-        caster_port=settings.NTRIP_CONTROL_PORT,
-        source_host=settings.NTRIP_SOURCE_HOST,
-        source_port=settings.NTRIP_SOURCE_PORT,
-        control_password=settings.NTRIP_CONTROL_PASSWORD,
-        source_password=settings.NTRIP_SOURCE_PASSWORD,
+        caster_port=settings.NTRIP_PORT,
+        source_host=hosts[0],
+        source_port=settings.NTRIP_PORT,
+        control_password=settings.NTRIP_PASSWORD,
+        source_password=settings.NTRIP_PASSWORD,
         web_cors_api_base_url=settings.WEB_CORS_API_BASE_URL,
         web_cors_api_token=settings.WEB_CORS_API_TOKEN,
         web_cors_api_username=settings.WEB_CORS_API_USERNAME,
@@ -294,7 +296,7 @@ async def main() -> int:
                 "round_robin_route_host": str(base_config.get(f"serverhost{base_server_id}") or ""),
                 "round_robin_route_port": int(base_config.get(f"port{base_server_id}") or 2101),
                 "round_robin_route_mountpoint": str(base_config.get(f"mountpoint{base_server_id}") or ""),
-                "round_robin_route_password": settings.NTRIP_SOURCE_PASSWORD,
+                "round_robin_route_password": settings.NTRIP_PASSWORD,
                 "skip_offline_rovers": True,
             }],
         )

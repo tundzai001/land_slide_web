@@ -22,17 +22,12 @@ class Settings(BaseSettings):
     MQTT_PASSWORD: str = ""
     TOPIC_RELOAD_INTERVAL: int = 60
 
-    # AICaster uses a control/tunnel port for /clienttable and SET, while an
-    # NTRIP SOURCE normally connects to the caster's NTRIP port.  Keeping the
-    # two endpoints separate prevents Round-Robin from sending SOURCE requests
-    # to the SET control socket.
-    NTRIP_CONTROL_HOST: str = ""
-    NTRIP_CONTROL_HOSTS: str = ""
-    NTRIP_CONTROL_PORT: int = 2101
-    NTRIP_CONTROL_PASSWORD: str = ""
-    NTRIP_SOURCE_HOST: str = ""
-    NTRIP_SOURCE_PORT: int = 2101
-    NTRIP_SOURCE_PASSWORD: str = ""
+    # Shared AICaster endpoints for SOURCE upload, control-table lookup and SET
+    # commands. Order is primary -> failover; project-specific stream settings
+    # may still select the exact host serving a fixed base.
+    NTRIP_HOSTS: str = ""
+    NTRIP_PORT: int = 2101
+    NTRIP_PASSWORD: str = ""
     # Login/API credentials of the WEB CORS dashboard (cors.aitogy.com).
     # These are not NTRIP/Caster usernames or mountpoint passwords.
     WEB_CORS_API_BASE_URL: str = ""

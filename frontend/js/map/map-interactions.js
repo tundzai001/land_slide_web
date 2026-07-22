@@ -311,6 +311,7 @@ function setupEventListeners() {
         pendingViewHeight: 0,
         interactionActive: false,
         backgroundGradient: null,
+        roverCount: 0,
         init({ preserve = false } = {}) {
             this.canvas = document.getElementById('gnss-board-canvas');
             if (!this.canvas) return;
@@ -319,6 +320,7 @@ function setupEventListeners() {
                 this.points = {};
                 this.baselines = [];
                 this.basePoint = null;
+                this.roverCount = 0;
                 const tableBody = document.getElementById('gnss-baseline-table-body');
                 const tooltips = document.getElementById('gnss-board-tooltips');
                 if (tableBody) tableBody.innerHTML = '';
@@ -400,6 +402,12 @@ function setupEventListeners() {
             if (this.animationId) cancelAnimationFrame(this.animationId);
             this.animationId = null;
             this.lastAnimationDrawAt = 0;
+        },
+        getRoverCount() {
+            if (Number.isFinite(this.roverCount) && this.roverCount >= 0) {
+                return Math.trunc(this.roverCount);
+            }
+            return Math.max(0, Object.keys(this.points || {}).filter(name => name !== 'BASE').length);
         },
         addPoint(name, relX, relY, isBase = false) {
             if (!this.points[name]) {
@@ -567,6 +575,9 @@ function setupEventListeners() {
             }
             baseXYZ = Array.isArray(baseXYZ) ? baseXYZ.map(Number) : [0, 0, 0];
             this.addPoint('BASE', 0, 0, true);
+            this.roverCount = Array.isArray(result.points)
+                ? result.points.length
+                : Object.keys(result.points || {}).length;
             Object.entries(result.points).forEach(([name, point]) => {
                 const coordinate = getAdjustedPointCoordinates(point).map(Number);
                 if (coordinate.length >= 2 && coordinate.every(Number.isFinite)) {
@@ -619,6 +630,7 @@ function setupEventListeners() {
             ctx.fillStyle = 'rgba(203,255,248,.55)';
             ctx.font = "11px 'IBM Plex Mono', monospace";
             ctx.fillText(`${gnssAdjustmentDebugState.phase}  ·  ${this.baselines.length} cạnh  ·  ${gnssAdjustmentDebugState.baselineCount} trị đo`, 24, 49);
+            ctx.fillText(`${this.getRoverCount()} rover + 1 BASE`, 24, 66);
 
             if (Object.keys(this.points).length === 0) {
                 const centerX = width / 2;

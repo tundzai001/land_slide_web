@@ -146,7 +146,10 @@ class SystemConfigPayload(BaseModel):
     save_intervals: SaveIntervalsConfig
 
 class NtripRouteStart(BaseModel):
-    host: str = settings.NTRIP_SOURCE_HOST
-    port: int = settings.NTRIP_SOURCE_PORT
+    host: str = next(
+        (item.strip() for item in settings.NTRIP_HOSTS.split(",") if item.strip()),
+        "",
+    )
+    port: int = settings.NTRIP_PORT
     mountpoint: str
-    password: str = ""
+    password: str = settings.NTRIP_PASSWORD

@@ -90,27 +90,24 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self.adjustment_results: Dict[int, dict] = {}
         self.active_adjustment_clusters: Dict[int, list] = {}  # {project_id: [[station_id, ...], ...]}
         # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
-        control_hosts = [
+        ntrip_hosts = [
             host.strip()
-            for host in settings.NTRIP_CONTROL_HOSTS.split(",")
+            for host in settings.NTRIP_HOSTS.split(",")
             if host.strip()
         ]
-        if settings.NTRIP_CONTROL_HOST:
-            control_hosts.insert(0, settings.NTRIP_CONTROL_HOST.strip())
-        control_hosts = list(dict.fromkeys(control_hosts))
-        if not control_hosts:
-            control_hosts = [settings.MQTT_BROKER]
-        control_host = control_hosts[0]
-        source_host = settings.NTRIP_SOURCE_HOST or control_host
+        ntrip_hosts = list(dict.fromkeys(ntrip_hosts))
+        if not ntrip_hosts:
+            ntrip_hosts = [settings.MQTT_BROKER]
+        primary_ntrip_host = ntrip_hosts[0]
         self.round_robin_manager = RoundRobinAdjustmentManager(
             self.client,
-            caster_host=control_host,
-            caster_hosts=control_hosts,
-            caster_port=settings.NTRIP_CONTROL_PORT,
-            source_host=source_host,
-            source_port=settings.NTRIP_SOURCE_PORT,
-            control_password=settings.NTRIP_CONTROL_PASSWORD,
-            source_password=settings.NTRIP_SOURCE_PASSWORD,
+            caster_host=primary_ntrip_host,
+            caster_hosts=ntrip_hosts,
+            caster_port=settings.NTRIP_PORT,
+            source_host=primary_ntrip_host,
+            source_port=settings.NTRIP_PORT,
+            control_password=settings.NTRIP_PASSWORD,
+            source_password=settings.NTRIP_PASSWORD,
             web_cors_api_base_url=settings.WEB_CORS_API_BASE_URL,
             web_cors_api_token=settings.WEB_CORS_API_TOKEN,
             web_cors_api_username=settings.WEB_CORS_API_USERNAME,
