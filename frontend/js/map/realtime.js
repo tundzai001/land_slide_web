@@ -388,7 +388,7 @@ function handleRealtimeUpdate(message) {
         );
         if (belongsToActiveRun) {
             if (Array.isArray(message.expected_station_ids)) {
-                gnssAdjustmentDebugState.expectedStationIds = message.expected_station_ids;
+                syncGnssExpectedStationIds(message.expected_station_ids);
             }
             setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
             const resultPhase = String(message.phase || '').toUpperCase();
@@ -432,6 +432,9 @@ function handleRealtimeUpdate(message) {
             && Number(message.project_id) === gnssAdjustmentDebugState.projectId
         );
         if (belongsToActiveRun) {
+            if (!isGnssAdjustmentExpectedStation(message.station_id)) {
+                return;
+            }
             gnssAdjustmentDebugState.baselineCount += 1;
             syncGnssWorkflowBaseline(message);
             addGnssAdjustmentDebug(
@@ -873,4 +876,3 @@ function updateStationMarker(stationId, riskLevel) {
     });
     marker.setIcon(newIcon);
 }
-

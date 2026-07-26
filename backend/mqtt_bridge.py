@@ -813,13 +813,22 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                             and self.round_robin_manager.has_complete_seed_observations(proj_id)
                         ):
                             skipped_station_ids = (seed_status or {}).get("skipped_station_ids", [])
+                            active_session = (
+                                self.round_robin_manager._sessions.get(proj_id) or {}
+                            )
+                            expected_station_ids = sorted({
+                                int(station_id)
+                                for cluster in active_session.get("clusters") or ()
+                                for station_id in cluster.get("stations") or ()
+                            })
                             self.adjustment_phase[proj_id] = "FREE_NETWORK"
                             await manager.broadcast({
                                 "type": "gnss_adjustment_progress",
                                 "project_id": proj_id,
                                 "phase": "FREE_NETWORK",
+                                "expected_station_ids": expected_station_ids,
                                 "message": (
-                                    "Skipped offline/no-data station IDs "
+                                    "Skipped offline/degraded station IDs "
                                     f"{skipped_station_ids} after {self.round_robin_manager.SEED_COLLECTION_MAX_STEPS} seed steps. "
                                     "Starting Round-Robin with the remaining rovers."
                                     if skipped_station_ids

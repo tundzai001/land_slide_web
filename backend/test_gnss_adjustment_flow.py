@@ -1,4 +1,5 @@
 import unittest
+import time
 import numpy as np
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -805,6 +806,67 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
                     {"project_id": 19, "station_id": station_id, "station_code": station_code},
                 )
         self.assertTrue(self.manager.get_seed_collection_status(19)["complete"])
+
+    def test_sparse_seed_rover_is_skipped_after_stability_timeout(self):
+        self.manager.configure_project(20, [{
+            "name": "three-rover-cluster",
+            "stations": [201, 202, 203],
+            "rovers": ["ReadyA", "ReadyB", "Sparse"],
+            "base_station": "CORS-A",
+            "base_lat": 21.0,
+            "base_lon": 105.0,
+            "base_alt": 10.0,
+        }])
+        ready_epochs = self.manager.SEED_SOLVER_MIN_DURATION_SECONDS + 1
+        for second in range(ready_epochs):
+            for station_id, station_code, baseline in (
+                (201, "ReadyA", (1.0, 0.0, 0.0)),
+                (202, "ReadyB", (2.0, 0.0, 0.0)),
+            ):
+                self.manager.add_agrica_payload(
+                    _agrica_sentence(
+                        baseline_neu=baseline,
+                        rover_llh=(21.0, 105.0, 10.0),
+                        second=second,
+                    ),
+                    {
+                        "project_id": 20,
+                        "station_id": station_id,
+                        "station_code": station_code,
+                    },
+                )
+        for second in range(2):
+            self.manager.add_agrica_payload(
+                _agrica_sentence(
+                    baseline_neu=(3.0, 0.0, 0.0),
+                    rover_llh=(21.0, 105.0, 10.0),
+                    second=second,
+                ),
+                {
+                    "project_id": 20,
+                    "station_id": 203,
+                    "station_code": "Sparse",
+                },
+            )
+        self.manager._sessions[20]["seed_started_monotonic"] = (
+            time.monotonic() - self.manager.SEED_STABILITY_TIMEOUT_SECONDS - 1.0
+        )
+
+        status = self.manager.get_seed_collection_status(20)
+
+        self.assertTrue(status["stability_timeout"])
+        self.assertTrue(status["fallback_ready"])
+        self.assertEqual(status["warming_station_ids"], [203])
+        self.assertEqual(status["timeout_skippable_station_ids"], [203])
+
+        skipped = self.manager.skip_missing_seed_stations(20)
+
+        self.assertTrue(skipped["complete"])
+        self.assertEqual(skipped["skipped_station_ids"], [203])
+        self.assertEqual(
+            self.manager._sessions[20]["clusters"][0]["stations"],
+            [201, 202],
+        )
 
     def test_seed_baseline_accepts_missing_reported_base_when_cluster_base_is_configured(self):
         accepted = self._add(

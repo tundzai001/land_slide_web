@@ -409,6 +409,45 @@ function setupEventListeners() {
             }
             return Math.max(0, Object.keys(this.points || {}).filter(name => name !== 'BASE').length);
         },
+        pruneToExpectedStations(expectedStationIds = [], stationIdByRoverName = {}) {
+            const expected = new Set(
+                (Array.isArray(expectedStationIds) ? expectedStationIds : [])
+                    .map(Number)
+                    .filter(Number.isFinite)
+            );
+            if (!expected.size) return false;
+
+            const keepPoint = name => {
+                if (name === 'BASE') return true;
+                const stationId = Number(stationIdByRoverName?.[name]);
+                return !Number.isFinite(stationId) || expected.has(stationId);
+            };
+            const removedNames = new Set();
+            Object.keys(this.points || {}).forEach(name => {
+                if (!keepPoint(name)) {
+                    delete this.points[name];
+                    removedNames.add(name);
+                }
+            });
+            if (!removedNames.size) return false;
+
+            this.baselines = (this.baselines || []).filter(edge => (
+                keepPoint(edge.from) && keepPoint(edge.to)
+            ));
+            this.roverCount = Object.keys(this.points || {}).filter(name => name !== 'BASE').length;
+
+            const tbody = document.getElementById('gnss-baseline-table-body');
+            if (tbody) {
+                Array.from(tbody.rows).forEach(row => {
+                    const [from, to] = String(row.dataset.edgeKey || '').split('\u0000');
+                    if ((from && removedNames.has(from)) || (to && removedNames.has(to))) {
+                        row.remove();
+                    }
+                });
+            }
+            this.draw(performance.now());
+            return true;
+        },
         addPoint(name, relX, relY, isBase = false) {
             if (!this.points[name]) {
                 this.points[name] = { name, x: Number(relX) || 0, y: Number(relY) || 0, isBase, samples: 1 };
@@ -1075,7 +1114,7 @@ function setupEventListeners() {
                 startResult = {};
             }
             if (Array.isArray(startResult.expected_station_ids)) {
-                gnssAdjustmentDebugState.expectedStationIds = startResult.expected_station_ids;
+                syncGnssExpectedStationIds(startResult.expected_station_ids);
             }
             if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
                 addGnssAdjustmentDebug(

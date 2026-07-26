@@ -816,11 +816,20 @@ class RoundRobinAdjustmentManager:
                     "missing_station_ids": [], "warming_station_ids": [],
                     "clusters": []}
 
+        steps = min(len(session["seed_collection_steps"]), self.SEED_COLLECTION_MAX_STEPS)
+        seed_elapsed = max(
+            0.0,
+            time.monotonic() - float(session.get("seed_started_monotonic") or 0.0),
+        )
+        elapsed_timeout = seed_elapsed >= self.SEED_STABILITY_TIMEOUT_SECONDS
+
         cluster_statuses = []
         missing_all = []
         silent_all = []
         invalid_fix_all = []
         warming_all = []
+        timeout_skippable_all = []
+        timeout_fallback_blocked = False
         complete = True
         can_continue = True
         for index, cluster in enumerate(session["clusters"]):
@@ -1054,12 +1063,18 @@ class RoundRobinAdjustmentManager:
             available = sorted(expected & observed)
             warming = sorted((expected & observed) - ready)
             ready_station_ids = sorted(expected & ready)
+            not_ready_station_ids = sorted(expected - ready)
             if missing or warming:
                 complete = False
                 missing_all.extend(missing)
                 silent_all.extend(silent_station_ids)
                 invalid_fix_all.extend(invalid_fix_station_ids)
                 warming_all.extend(warming)
+            if elapsed_timeout and not_ready_station_ids:
+                if len(ready_station_ids) >= 2:
+                    timeout_skippable_all.extend(not_ready_station_ids)
+                else:
+                    timeout_fallback_blocked = True
             if len(available) < 2:
                 can_continue = False
             cluster_statuses.append({
@@ -1071,6 +1086,7 @@ class RoundRobinAdjustmentManager:
                 "warming_station_ids": warming,
                 "available_station_ids": available,
                 "ready_station_ids": ready_station_ids,
+                "not_ready_station_ids": not_ready_station_ids,
                 "sample_counts_by_station": {
                     station_id: sample_counts_by_station[station_id]
                     for station_id in sorted(expected)
@@ -1093,25 +1109,31 @@ class RoundRobinAdjustmentManager:
                 ),
             })
 
-        steps = min(len(session["seed_collection_steps"]), self.SEED_COLLECTION_MAX_STEPS)
-        seed_elapsed = max(
-            0.0,
-            time.monotonic() - float(session.get("seed_started_monotonic") or 0.0),
-        )
-        stability_timeout = (
-            not complete and seed_elapsed >= self.SEED_STABILITY_TIMEOUT_SECONDS
+        stability_timeout = not complete and elapsed_timeout
+        timeout_fallback_ready = (
+            not complete
+            and stability_timeout
+            and bool(timeout_skippable_all)
+            and not timeout_fallback_blocked
         )
         return {
             "complete": complete,
-            # Only truly silent stations are skipped.  A station that is sending
-            # data but has not completed its window remains in COLLECTING_BASELINE.
-            "fallback_ready": bool(missing_all) and can_continue and steps >= self.SEED_COLLECTION_MAX_STEPS,
+            # Initially skip only truly silent stations after enough fixed-base
+            # seed epochs exist.  If the hard stability timeout is reached,
+            # stations that are still not ready are treated as degraded and may
+            # be excluded, but only when each cluster still has at least two
+            # ready rovers left for the network solve.
+            "fallback_ready": bool(
+                (bool(missing_all) and can_continue and steps >= self.SEED_COLLECTION_MAX_STEPS)
+                or timeout_fallback_ready
+            ),
             "step_count": steps,
             "max_steps": self.SEED_COLLECTION_MAX_STEPS,
             "missing_station_ids": sorted(set(missing_all)),
             "silent_station_ids": sorted(set(silent_all)),
             "invalid_fix_station_ids": sorted(set(invalid_fix_all)),
             "warming_station_ids": sorted(set(warming_all)),
+            "timeout_skippable_station_ids": sorted(set(timeout_skippable_all)),
             "stability_timeout": stability_timeout,
             "stability_elapsed_seconds": seed_elapsed,
             "stability_timeout_seconds": self.SEED_STABILITY_TIMEOUT_SECONDS,
@@ -1132,7 +1154,7 @@ class RoundRobinAdjustmentManager:
         }
 
     def skip_missing_seed_stations(self, project_id: int) -> dict:
-        """Temporarily exclude no-data rovers after the fixed-base seed window."""
+        """Temporarily exclude no-data/degraded rovers after fixed-base seed."""
         session = self._sessions.get(project_id)
         status = self.get_seed_collection_status(project_id)
         if session is None or not status["fallback_ready"]:
@@ -1140,14 +1162,26 @@ class RoundRobinAdjustmentManager:
 
         skipped = []
         for item in status["clusters"]:
-            missing = set(item["missing_station_ids"])
-            if not missing:
-                continue
             cluster = session["clusters"][item["index"]]
+            skipped_station_ids = set(item["missing_station_ids"])
+            if status.get("stability_timeout"):
+                ready = {int(station_id) for station_id in item.get("ready_station_ids") or ()}
+                if len(ready) >= 2:
+                    skipped_station_ids.update(
+                        int(station_id)
+                        for station_id in cluster["stations"]
+                        if int(station_id) not in ready
+                    )
+            if not skipped_station_ids:
+                continue
             rover_by_station = dict(zip(cluster["stations"], cluster["rovers"], strict=True))
-            cluster["stations"] = [station_id for station_id in cluster["stations"] if station_id not in missing]
+            cluster["stations"] = [
+                station_id
+                for station_id in cluster["stations"]
+                if int(station_id) not in skipped_station_ids
+            ]
             cluster["rovers"] = [rover_by_station[station_id] for station_id in cluster["stations"]]
-            skipped.extend(missing)
+            skipped.extend(skipped_station_ids)
 
         result = self.get_seed_collection_status(project_id)
         result["skipped_station_ids"] = sorted(set(skipped))
@@ -3675,6 +3709,11 @@ class RoundRobinAdjustmentManager:
                             "the route immediately."
                         ),
                     )
+            await self._reset_cross_rovers_for_temporary_base(
+                temporary_base_code=rover_code,
+                target_rovers=expected_cross_rovers,
+                project_id=project_id,
+            )
             if on_collection_started:
                 on_collection_started()
             collection_started = True
@@ -6008,6 +6047,7 @@ class RoundRobinAdjustmentManager:
             for command in (optional_unacknowledged_commands or [])
         }
         writer = None
+        active_mqtt_waiter = None
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(target_host, target_port),
@@ -6062,6 +6102,7 @@ class RoundRobinAdjustmentManager:
                             ack_station_code,
                             command_str,
                         )
+                        active_mqtt_waiter = mqtt_waiter
                     normalized_command = _normalized_receiver_command(command_str)
                     is_optional_command = normalized_command in optional_commands
                     if normalized_command.startswith("mode "):
@@ -6228,11 +6269,15 @@ class RoundRobinAdjustmentManager:
                         finally:
                             if mqtt_waiter is not None:
                                 self._remove_command_ack_waiter(mqtt_waiter)
+                                active_mqtt_waiter = None
                     else:
                         await asyncio.sleep(0.1)
                         break  # No need to retry if we don't wait for response
             return True
         except Exception as exc:
+            if active_mqtt_waiter is not None:
+                self._remove_command_ack_waiter(active_mqtt_waiter)
+                active_mqtt_waiter = None
             detail = str(exc).strip() or exc.__class__.__name__
             self._last_set_error = (
                 f"{target_host}:{target_port} mountpoint={mountpoint} "
@@ -6254,6 +6299,95 @@ class RoundRobinAdjustmentManager:
                     await writer.wait_closed()
                 except Exception:
                     pass
+
+    async def _reset_cross_rovers_for_temporary_base(
+        self,
+        *,
+        temporary_base_code: str,
+        target_rovers: Optional[Iterable[str]],
+        project_id: Optional[int],
+    ) -> None:
+        """Reboot rover clients after the temporary RTCM source is live."""
+
+        temporary_base_key = str(temporary_base_code).casefold()
+        reset_targets = [
+            str(name)
+            for name in sorted(set(target_rovers or ()))
+            if str(name).casefold() != temporary_base_key
+        ]
+        if not reset_targets:
+            return
+
+        await self._emit_progress(
+            project_id,
+            (
+                f"{temporary_base_code}: temporary RTCM source is live; sending RESET "
+                f"to rover clients {', '.join(reset_targets)} to reacquire FIXED faster."
+            ),
+        )
+        for rover_code in reset_targets:
+            try:
+                client_info = await self._find_client_info(
+                    rover_code,
+                    project_id=project_id,
+                    log_missing=False,
+                )
+                if not client_info:
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{temporary_base_code}: could not RESET {rover_code}; "
+                            "no active AICaster client session was found."
+                        ),
+                    )
+                    continue
+                mountpoint = str(client_info.get("Mountpoint") or "").strip()
+                if not mountpoint:
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{temporary_base_code}: could not RESET {rover_code}; "
+                            "AICaster client session has no mountpoint."
+                        ),
+                    )
+                    continue
+                accepted = await self._send_set_command(
+                    mountpoint,
+                    client_info.get("Username", rover_code),
+                    client_info.get("receiverID", ""),
+                    [b"RESET\r\n"],
+                    password=self.control_password,
+                    caster_host=client_info.get("CasterHost"),
+                    caster_port=client_info.get("CasterPort"),
+                    wait_for_command_response=False,
+                )
+                if accepted:
+                    await self._emit_progress(
+                        project_id,
+                        f"{temporary_base_code}: RESET sent to rover client {rover_code}.",
+                    )
+                else:
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{temporary_base_code}: RESET was not accepted for "
+                            f"{rover_code}: {self._last_set_error or 'no Caster response'}."
+                        ),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Could not send temporary-base RESET to rover=%s via base=%s: %s",
+                    rover_code,
+                    temporary_base_code,
+                    exc,
+                )
+                await self._emit_progress(
+                    project_id,
+                    (
+                        f"{temporary_base_code}: RESET failed for {rover_code}: "
+                        f"{str(exc) or exc.__class__.__name__}."
+                    ),
+                )
 
     async def _restore_rover_output_sequence(
         self,

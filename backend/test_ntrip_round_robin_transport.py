@@ -1624,6 +1624,54 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             for message in progress_messages
         ))
 
+    async def test_temporary_base_resets_only_cross_rover_clients(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        clients = {
+            "S2": {
+                "Username": "S2",
+                "receiverID": "102",
+                "Mountpoint": "CORS_S2",
+                "CasterHost": "caster.example",
+                "CasterPort": 2101,
+            },
+            "S3": {
+                "Username": "S3",
+                "receiverID": "103",
+                "Mountpoint": "CORS_S3",
+                "CasterHost": "caster.example",
+                "CasterPort": 2101,
+            },
+        }
+        reset_calls = []
+
+        async def find_client(station_code, **_kwargs):
+            return clients.get(station_code)
+
+        async def send_set(mountpoint, username, receiver_id, commands, **kwargs):
+            reset_calls.append((mountpoint, username, receiver_id, commands, kwargs))
+            return True
+
+        manager._find_client_info = find_client
+        manager._send_set_command = send_set
+
+        await manager._reset_cross_rovers_for_temporary_base(
+            temporary_base_code="S1",
+            target_rovers={"S1", "S2", "S3"},
+            project_id=17,
+        )
+
+        self.assertEqual(
+            [(mountpoint, username, receiver_id, commands) for mountpoint, username, receiver_id, commands, _ in reset_calls],
+            [
+                ("CORS_S2", "S2", "102", [b"RESET\r\n"]),
+                ("CORS_S3", "S3", "103", [b"RESET\r\n"]),
+            ],
+        )
+        self.assertTrue(all(
+            call_kwargs.get("wait_for_command_response") is False
+            for *_prefix, call_kwargs in reset_calls
+        ))
+
     async def test_rover_restore_retries_each_command_until_ack_before_advancing(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         commands_seen = []

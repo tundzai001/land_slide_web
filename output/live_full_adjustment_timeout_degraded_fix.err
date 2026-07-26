@@ -1,0 +1,92 @@
+Traceback (most recent call last):
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1501, in connect
+    super().connect()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\socket.py", line 874, in create_connection
+    raise exceptions[0]
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\socket.py", line 859, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\len\Desktop\tun\land_slide_web\backend\processors\gnss_adjustment\round_robin.py", line 1224, in _cors_api_request_sync
+    with urllib.request.urlopen(request, timeout=15) as response:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 487, in open
+    response = self._open(req, data)
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 464, in _call_chain
+    result = func(*args)
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 1369, in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        context=self._context)
+                        ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\urllib\request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\len\Desktop\tun\land_slide_web\live_full_adjustment_probe.py", line 413, in <module>
+    raise SystemExit(asyncio.run(main()))
+                     ~~~~~~~~~~~^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "C:\Users\len\Desktop\tun\land_slide_web\live_full_adjustment_probe.py", line 242, in main
+    cors_stations = await asyncio.to_thread(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Users\len\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\len\Desktop\tun\land_slide_web\backend\processors\gnss_adjustment\round_robin.py", line 1234, in _cors_api_request_sync
+    raise RuntimeError(f"CORS API unavailable for {path}: {exc.reason}") from exc
+RuntimeError: CORS API unavailable for /api/public/map-stations: [WinError 10061] No connection could be made because the target machine actively refused it

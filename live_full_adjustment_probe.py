@@ -101,8 +101,11 @@ async def main() -> int:
             flush=True,
         )
         await ntrip_manager.start_pusher(station, host, port, mountpoint, password)
+        return True
+
+    async def route_wait(station: str, timeout: float = 25.0) -> None:
         try:
-            await ntrip_manager.wait_for_rtcm(station, timeout=25.0)
+            await ntrip_manager.wait_for_rtcm(station, timeout=timeout)
         except Exception:
             diagnostic = ntrip_manager.get_diagnostics(station)
             print(f"[{ts()}] ROUTE DIAGNOSTIC {station}: {diagnostic}", flush=True)
@@ -113,7 +116,6 @@ async def main() -> int:
             f"{ntrip_manager.get_diagnostics(station)}",
             flush=True,
         )
-        return True
 
     async def route_stop(station: str) -> None:
         await ntrip_manager.stop_pusher(station)
@@ -140,6 +142,7 @@ async def main() -> int:
         web_cors_api_username=settings.WEB_CORS_API_USERNAME,
         web_cors_api_password=settings.WEB_CORS_API_PASSWORD,
         route_start_callback=route_start,
+        route_wait_callback=route_wait,
         route_stop_callback=route_stop,
         result_callback=result_callback,
         error_callback=error_callback,
@@ -313,37 +316,22 @@ async def main() -> int:
             await asyncio.sleep(0.5)
         else:
             status = manager.get_seed_collection_status(PROJECT_ID)
-            cluster = manager._sessions[PROJECT_ID]["clusters"][0]
-            rejected_ids = {
-                int(station_id)
-                for station_id in (
-                    list(status.get("missing_station_ids") or ())
-                    + list(status.get("silent_station_ids") or ())
-                    + list(status.get("invalid_fix_station_ids") or ())
-                )
-            }
-            retained_pairs = [
-                (int(station_id), str(rover))
-                for station_id, rover in zip(
-                    cluster.get("stations") or (),
-                    cluster.get("rovers") or (),
-                )
-                if int(station_id) not in rejected_ids
-            ]
-            if (
-                cluster.get("skip_offline_rovers")
-                and status.get("fallback_ready")
-                and len(retained_pairs) >= 2
-            ):
-                cluster["stations"] = [item[0] for item in retained_pairs]
-                cluster["rovers"] = [item[1] for item in retained_pairs]
-                print(
-                    f"[{ts()}] SEED SKIP OFFLINE/INVALID: station_ids="
-                    f"{sorted(rejected_ids)}; continuing with "
-                    f"{', '.join(cluster['rovers'])}",
-                    flush=True,
-                )
-            else:
+            if status.get("fallback_ready"):
+                status = manager.skip_missing_seed_stations(PROJECT_ID)
+                if status.get("complete"):
+                    print(
+                        f"[{ts()}] SEED SKIP OFFLINE/DEGRADED: station_ids="
+                        f"{status.get('skipped_station_ids') or []}; continuing with "
+                        f"{', '.join(manager._sessions[PROJECT_ID]['clusters'][0]['rovers'])}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[{ts()}] SEED SKIP OFFLINE/DEGRADED: station_ids="
+                        f"{status.get('skipped_station_ids') or []}; still not ready",
+                        flush=True,
+                    )
+            if not status.get("complete"):
                 raise RuntimeError(
                     f"Seed collection did not become ready: {status}"
                 )

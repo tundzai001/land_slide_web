@@ -123,6 +123,7 @@ const gnssAdjustmentDebugState = {
     workflowRevision: 0,
     workflowSeedStations: [],
     workflowSampleCounts: {},
+    workflowStationIdByRoverName: {},
     workflowCurrentRover: null,
     statusPollId: null,
     statusPollInFlight: false,
@@ -136,6 +137,28 @@ let gnssDebugUiFrameId = null;
 let gnssWorkflowFrameId = null;
 let gnssLayoutInteractionActive = false;
 let pendingGnssAdjustmentResult = null;
+
+function normalizeGnssStationIds(stationIds) {
+    return Array.isArray(stationIds)
+        ? stationIds.map(Number).filter(Number.isFinite)
+        : [];
+}
+
+function syncGnssExpectedStationIds(stationIds) {
+    gnssAdjustmentDebugState.expectedStationIds = normalizeGnssStationIds(stationIds);
+    window.gnssBoardState?.pruneToExpectedStations?.(
+        gnssAdjustmentDebugState.expectedStationIds,
+        gnssAdjustmentDebugState.workflowStationIdByRoverName,
+    );
+}
+
+function isGnssAdjustmentExpectedStation(stationId) {
+    const expected = gnssAdjustmentDebugState.expectedStationIds;
+    if (!Array.isArray(expected) || expected.length === 0) return true;
+    const numericStationId = Number(stationId);
+    if (!Number.isFinite(numericStationId)) return true;
+    return expected.includes(numericStationId);
+}
 
 function scheduleGnssAdjustmentDebugUiRefresh() {
     if (gnssLayoutInteractionActive) return;
@@ -515,6 +538,10 @@ function syncGnssWorkflowBaseline(message) {
     const roverName = String(message.rover_name || '').trim();
     const fromPoint = String(message.from || 'BASE').trim();
     if (!roverName) return;
+    const stationId = Number(message.station_id);
+    if (Number.isFinite(stationId)) {
+        gnssAdjustmentDebugState.workflowStationIdByRoverName[roverName] = stationId;
+    }
     if (gnssAdjustmentDebugState.phase === 'COLLECTING_BASELINE' && fromPoint.toUpperCase() === 'BASE') {
         if (!gnssAdjustmentDebugState.workflowSeedStations.includes(roverName)) {
             gnssAdjustmentDebugState.workflowSeedStations.push(roverName);
@@ -769,6 +796,7 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         workflowRevision: gnssAdjustmentDebugState.workflowRevision + 1,
         workflowSeedStations: [],
         workflowSampleCounts: {},
+        workflowStationIdByRoverName: {},
         workflowCurrentRover: null,
         statusPollId: null,
         serverMessage: '',
@@ -1038,4 +1066,3 @@ function initialize() {
 
     console.log('✅ [MAP] Initialization complete!');
 }
-
