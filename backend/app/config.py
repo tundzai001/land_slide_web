@@ -1,8 +1,17 @@
 # backend/app/config.py
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".env",
+        ),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # --- 1. DATABASE URLs ---
     # Pydantic sẽ tự động đọc giá trị từ file .env khớp với tên biến
     # Nếu không đọc được .env, nó sẽ dùng giá trị mặc định bên phải (dự phòng)
@@ -49,11 +58,5 @@ class Settings(BaseSettings):
     # GNSS rollup/purge workflow: thu thập dày theo giây, chốt ngày/tuần rồi dọn raw.
     GNSS_ROLLUP_INTERVAL_SECONDS: int = 300
     GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP: bool = False
-
-    class Config:
-        # Chỉ định đường dẫn tuyệt đối tới file .env để chạy ổn định trên IIS
-        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-        env_file_encoding = 'utf-8'
-        extra = "ignore"
 
 settings = Settings()

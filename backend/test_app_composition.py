@@ -10,12 +10,34 @@ from app.services import rescue_storage
 
 
 def _route_key(route):
-    methods = tuple(sorted(getattr(route, "methods", ()) or (route.__class__.__name__,)))
-    return route.path, methods
+    original_route = getattr(route, "original_route", route)
+    methods = tuple(
+        sorted(
+            getattr(route, "methods", ())
+            or getattr(original_route, "methods", ())
+            or (original_route.__class__.__name__,)
+        )
+    )
+    return getattr(route, "path", "") or original_route.path, methods
+
+
+def _route_endpoint_module(route):
+    original_route = getattr(route, "original_route", route)
+    endpoint = getattr(route, "endpoint", None) or getattr(original_route, "endpoint", None)
+    return getattr(endpoint, "__module__", "")
+
+
+def _iter_effective_routes(routes):
+    for route in routes:
+        effective_candidates = getattr(route, "effective_candidates", None)
+        if callable(effective_candidates):
+            yield from _iter_effective_routes(effective_candidates())
+        elif hasattr(route, "path"):
+            yield route
 
 
 def test_application_has_no_duplicate_routes():
-    counts = Counter(_route_key(route) for route in app.routes)
+    counts = Counter(_route_key(route) for route in _iter_effective_routes(app.routes))
     assert [key for key, count in counts.items() if count > 1] == []
 
 
@@ -40,8 +62,8 @@ def test_extracted_routes_keep_their_public_contract():
         ("/api/field/provision", ("POST",)): "app.routers.field_provisioning",
     }
     actual = {
-        _route_key(route): getattr(getattr(route, "endpoint", None), "__module__", "")
-        for route in app.routes
+        _route_key(route): _route_endpoint_module(route)
+        for route in _iter_effective_routes(app.routes)
     }
     for key, module_name in expected_modules.items():
         assert actual.get(key) == module_name
