@@ -201,6 +201,13 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
             self.assertTrue(np.all(np.linalg.eigvalsh(formal) > 0.0))
             self.assertTrue(np.all(np.linalg.eigvalsh(used) > 0.0))
             self.assertTrue(np.all(np.diag(used) >= np.diag(formal)))
+            self.assertGreaterEqual(edge["session_count"], 1)
+            self.assertAlmostEqual(
+                edge["total_covariance_inflation_factor"],
+                edge["temporal_inflation_factor"]
+                * edge["scatter_scale_factor"],
+            )
+            self.assertGreaterEqual(edge["max_session_mean_separation_m"], 0.0)
 
     def test_final_solver_uses_immutable_fixed_base_seed_snapshot(self):
         self._add(101, "S1", (1.0, 2.0, 0.0), (21.0001, 105.0, 10.0))

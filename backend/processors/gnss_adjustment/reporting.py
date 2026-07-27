@@ -443,11 +443,20 @@ class AdjustmentReportMixin:
         header_fill = PatternFill("solid", fgColor="DDEBF7")
         thin_gray = Side(style="thin", color="B7C9CE")
         table_border = Border(bottom=thin_gray)
+        # Keep the human-readable report printable through Total_Cov_Inflation.
+        # The detailed used/formal cross-covariances remain available in O:T for
+        # on-screen audit without shrinking every printed column to illegibility.
+        report_max_column = 14
 
         def append_title(value):
             sheet.append([value])
             row = sheet.max_row
-            sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=11)
+            sheet.merge_cells(
+                start_row=row,
+                start_column=1,
+                end_row=row,
+                end_column=report_max_column,
+            )
             cell = sheet.cell(row, 1)
             cell.font = Font(bold=True, color="FFFFFF", size=14)
             cell.fill = title_fill
@@ -457,7 +466,12 @@ class AdjustmentReportMixin:
             sheet.append([])
             sheet.append([value])
             row = sheet.max_row
-            sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=11)
+            sheet.merge_cells(
+                start_row=row,
+                start_column=1,
+                end_row=row,
+                end_column=report_max_column,
+            )
             cell = sheet.cell(row, 1)
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = section_fill
@@ -475,6 +489,24 @@ class AdjustmentReportMixin:
         def values3(value):
             value = value or (None, None, None)
             return [value[index] if index < len(value) else None for index in range(3)]
+
+        def covariance_scaling(baseline):
+            observation_count = float(baseline.get("observation_count") or 1.0)
+            effective_sample_size = float(
+                baseline.get("effective_sample_size") or observation_count
+            )
+            temporal = baseline.get("temporal_inflation_factor")
+            if temporal is None:
+                temporal = observation_count / max(effective_sample_size, 1.0)
+            scatter = baseline.get("scatter_scale_factor")
+            if scatter is None:
+                scatter = baseline.get("variance_inflation")
+            scatter = float(scatter or 1.0)
+            temporal = float(temporal)
+            total = baseline.get("total_covariance_inflation_factor")
+            if total is None:
+                total = temporal * scatter
+            return temporal, scatter, float(total)
 
         def loop_ratio(loop):
             ratio = loop.get("observed_relative_precision")
@@ -508,11 +540,13 @@ class AdjustmentReportMixin:
         append_header([
             "STT", "From_Point", "To_Point", "dX (m)", "dY (m)", "dZ (m)",
             "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "Length (m)", "Raw / n_eff",
-            "Variance_Inflation", "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
+            "Temporal_Inflation (n/n_eff)", "Scatter_Scale", "Total_Cov_Inflation",
+            "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
         ])
         for index, baseline in enumerate(baselines, 1):
             cov = baseline.get("session_covariance_used_xyz")
             formal_cov = baseline.get("formal_covariance_xyz")
+            temporal_scale, scatter_scale, total_scale = covariance_scaling(baseline)
             sheet.append([
                 index,
                 baseline.get("from"),
@@ -526,7 +560,9 @@ class AdjustmentReportMixin:
                     if baseline.get("effective_sample_size") is not None
                     else baseline.get("observation_count", 1)
                 ),
-                baseline.get("variance_inflation"),
+                temporal_scale,
+                scatter_scale,
+                total_scale,
                 cov[0][1] if cov else None,
                 cov[0][2] if cov else None,
                 cov[1][2] if cov else None,
@@ -534,6 +570,56 @@ class AdjustmentReportMixin:
                 formal_cov[0][2] if formal_cov else None,
                 formal_cov[1][2] if formal_cov else None,
             ])
+
+        repeatability_baselines = [
+            baseline
+            for baseline in baselines
+            if int(baseline.get("session_count") or 0) >= 2
+            and baseline.get("max_session_mean_difference_xyz") is not None
+        ]
+        if repeatability_baselines:
+            append_section("SESSION REPEATABILITY - ĐỘ LẶP GIỮA CÁC PHIÊN")
+            sheet.append([
+                None,
+                "Ghi chú",
+                (
+                    "Hiệu vector là mean phiên sau trừ mean phiên trước theo hướng cạnh "
+                    "ECEF chuẩn hóa; dấu phụ thuộc thứ tự phiên, còn norm không đổi. Đây là "
+                    "diagnostic, không phải sai số tọa độ sau bình sai."
+                ),
+            ])
+            repeatability_note_row = sheet.max_row
+            sheet.merge_cells(
+                start_row=repeatability_note_row,
+                start_column=3,
+                end_row=repeatability_note_row,
+                end_column=report_max_column,
+            )
+            append_header([
+                "STT", "From_Point", "To_Point", "Cặp phiên",
+                "ΔX (mm)", "ΔY (mm)", "ΔZ (mm)", "Norm (mm)",
+                "Scatter_Scale", "Chẩn đoán",
+            ])
+            for index, baseline in enumerate(repeatability_baselines, 1):
+                difference = values3(
+                    baseline.get("max_session_mean_difference_xyz")
+                )
+                pair = baseline.get("max_session_mean_pair") or ()
+                pair_label = " → ".join(str(value) for value in pair) or "-"
+                scatter_scale = covariance_scaling(baseline)[1]
+                norm_m = float(
+                    baseline.get("max_session_mean_separation_m") or 0.0
+                )
+                sheet.append([
+                    index,
+                    baseline.get("from"),
+                    baseline.get("to"),
+                    pair_label,
+                    *(float(value) * 1000.0 for value in difference),
+                    norm_m * 1000.0,
+                    scatter_scale,
+                    "CẢNH BÁO" if scatter_scale > 1.5 else "THAM KHẢO",
+                ])
 
         append_section("FOUND LOOPS - VÒNG KHÉP TRƯỚC BÌNH SAI")
         append_header([
@@ -555,11 +641,13 @@ class AdjustmentReportMixin:
         append_header([
             "STT", "From_Point", "To_Point", "vX (m)", "vY (m)", "vZ (m)",
             "Adj_X (m)", "Adj_Y (m)", "Adj_Z (m)", "Length (m)", "Raw / n_eff",
-            "Variance_Inflation", "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
+            "Temporal_Inflation (n/n_eff)", "Scatter_Scale", "Total_Cov_Inflation",
+            "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
         ])
         for index, baseline in enumerate(baselines, 1):
             cov = baseline.get("session_covariance_used_xyz")
             formal_cov = baseline.get("formal_covariance_xyz")
+            temporal_scale, scatter_scale, total_scale = covariance_scaling(baseline)
             sheet.append([
                 index,
                 baseline.get("from"),
@@ -573,7 +661,9 @@ class AdjustmentReportMixin:
                     if baseline.get("effective_sample_size") is not None
                     else baseline.get("observation_count", 1)
                 ),
-                baseline.get("variance_inflation"),
+                temporal_scale,
+                scatter_scale,
+                total_scale,
                 cov[0][1] if cov else None,
                 cov[0][2] if cov else None,
                 cov[1][2] if cov else None,
@@ -597,7 +687,7 @@ class AdjustmentReportMixin:
             start_row=loop_note_row,
             start_column=3,
             end_row=loop_note_row,
-            end_column=11,
+            end_column=report_max_column,
         )
         append_header([
             "STT", "List of Point", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
@@ -649,8 +739,16 @@ class AdjustmentReportMixin:
             ("Raw nhận được", quality.get("raw_observation_count")),
             ("Raw loại do nguồn chưa xác nhận", quality.get("unconfirmed_source_excluded_count")),
             (
-                "Raw loại trong cửa sổ chuyển nguồn/chờ ổn định",
+                "Raw loại trước cửa sổ ổn định (EXCLUDE_PRE_STABLE_WINDOW)",
                 quality.get("pre_stable_window_excluded_count"),
+            ),
+            (
+                "Raw loại sau chuyển seed/source (EXCLUDE_POST_SEED_TRANSITION)",
+                quality.get("post_seed_transition_excluded_count"),
+            ),
+            (
+                "Raw loại khi tái bắt giữa rotation (EXCLUDE_INTER_ROTATION_REACQUISITION)",
+                quality.get("inter_rotation_reacquisition_excluded_count"),
             ),
             (
                 "Raw loại do thời gian thu chưa đạt tối thiểu",
@@ -678,6 +776,10 @@ class AdjustmentReportMixin:
                 quality.get("raw_ecef_vertical_datum_offset_count"),
             ),
             ("Số cạnh trung bình", quality.get("averaged_baseline_count", len(baselines))),
+            (
+                "Chênh mean giữa các phiên lớn nhất (m, diagnostic)",
+                quality.get("max_session_mean_separation_m"),
+            ),
             ("Số vòng cơ sở", quality.get("fundamental_loop_count")),
             ("Vòng độc lập chỉ rover-rover", quality.get("rover_only_loop_count")),
             ("Vòng độc lập có BASE", quality.get("base_anchored_loop_count")),
@@ -698,6 +800,10 @@ class AdjustmentReportMixin:
             ),
             ("Rank", quality.get("rank")),
             ("Condition number", quality.get("condition_number")),
+            (
+                "Số dư chuẩn hóa tiên nghiệm lớn nhất",
+                quality.get("max_standardized_residual"),
+            ),
         ]
         quality_gate = data.get("quality_gate") or {}
         quality_rows.extend([
@@ -734,6 +840,11 @@ class AdjustmentReportMixin:
                     "Ngưỡng trên Chi-square 95%",
                     global_test.get("upper_critical_value"),
                 ),
+                ("Chi-square statistic = vTPv", global_test.get("statistic")),
+                (
+                    "Kiểm định Chi-square là xấp xỉ",
+                    bool(global_test.get("approximate")),
+                ),
             ])
         if stochastic_test:
             stochastic_labels = {
@@ -748,6 +859,16 @@ class AdjustmentReportMixin:
                     stochastic_test.get("status"),
                 ),
             ))
+            quality_rows.extend([
+                (
+                    "Cận dưới Chi-square hai phía 95%",
+                    stochastic_test.get("lower_critical_value"),
+                ),
+                (
+                    "Cận trên Chi-square hai phía 95%",
+                    stochastic_test.get("upper_critical_value"),
+                ),
+            ])
         if independent_test:
             quality_rows.extend([
                 (
@@ -763,11 +884,22 @@ class AdjustmentReportMixin:
                 quality_value_rows.add(sheet.max_row)
 
         quality_notes = []
+        if quality.get("raw_exclusion_reason_counts_overlap"):
+            quality_notes.append(
+                "Các reason loại raw có thể overlap; không cộng các reason count. "
+                f"Raw bị loại unique = {int(quality.get('raw_rejected_count') or 0)}."
+            )
         if global_test and global_test.get("approximate"):
             quality_notes.append(
                 "Covariance nghiệm chính chỉ tính một trị đo độc lập cho mỗi phiên RTK FIXED "
                 "liên tục; các epoch 1 Hz trong cùng phiên không được cộng như các trị đo độc lập. "
                 "ACF chỉ được lưu để chẩn đoán độ nhạy."
+            )
+        if quality.get("source_cross_covariance_available") is False:
+            quality_notes.append(
+                "Kiểm định Chi-square giả định các baseline trung bình độc lập; "
+                "covariance chéo giữa các baseline chưa có. Scatter scale cũng được "
+                "ước lượng từ chính dữ liệu nên kết luận thống kê là xấp xỉ."
             )
         if stochastic_test.get("status") == "CONSERVATIVE_WEIGHTS":
             quality_notes.append(
@@ -805,7 +937,7 @@ class AdjustmentReportMixin:
                 start_row=note_row,
                 start_column=3,
                 end_row=note_row,
-                end_column=11,
+                end_column=report_max_column,
             )
             quality_warning_rows.add(note_row)
 
@@ -828,7 +960,7 @@ class AdjustmentReportMixin:
                 start_row=warning_row,
                 start_column=3,
                 end_row=warning_row,
-                end_column=11,
+                end_column=report_max_column,
             )
             quality_warning_rows.add(warning_row)
 
@@ -848,7 +980,7 @@ class AdjustmentReportMixin:
                 start_row=filter_row,
                 start_column=3,
                 end_row=filter_row,
-                end_column=11,
+                end_column=report_max_column,
             )
             quality_warning_rows.add(filter_row)
 
@@ -858,7 +990,7 @@ class AdjustmentReportMixin:
             if (
                 cell_range.min_row == cell_range.max_row
                 and cell_range.min_col == 1
-                and cell_range.max_col == 11
+                and cell_range.max_col == report_max_column
             )
         }
         for row_index, row in enumerate(sheet.iter_rows(), 1):
@@ -920,6 +1052,15 @@ class AdjustmentReportMixin:
             "I": 15,
             "J": 15,
             "K": 12,
+            "L": 22,
+            "M": 15,
+            "N": 19,
+            "O": 16,
+            "P": 16,
+            "Q": 16,
+            "R": 18,
+            "S": 18,
+            "T": 18,
         }
         for letter, width in main_column_widths.items():
             sheet.column_dimensions[letter].width = width
@@ -927,6 +1068,10 @@ class AdjustmentReportMixin:
         sheet.sheet_properties.pageSetUpPr.fitToPage = True
         sheet.page_setup.fitToWidth = 1
         sheet.page_setup.fitToHeight = 0
+        sheet.page_setup.orientation = "landscape"
+        sheet.print_area = (
+            f"A1:{get_column_letter(report_max_column)}{sheet.max_row}"
+        )
         sheet.print_options.horizontalCentered = True
         sheet.page_margins.left = 0.25
         sheet.page_margins.right = 0.25

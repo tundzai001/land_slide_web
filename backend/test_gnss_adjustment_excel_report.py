@@ -40,6 +40,13 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
                 "adjusted_length": 367.0,
                 "observation_count": 251,
                 "effective_sample_size": 12.5,
+                "temporal_inflation_factor": 20.08,
+                "scatter_scale_factor": 1.5,
+                "total_covariance_inflation_factor": 30.12,
+                "session_count": 2,
+                "max_session_mean_difference_xyz": (0.01, -0.02, 0.03),
+                "max_session_mean_separation_m": 0.0374165739,
+                "max_session_mean_pair": ("R001", "R002"),
             }],
             "loops": [{
                 "loop": 1,
@@ -70,6 +77,9 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
             "quality": {
                 "raw_observation_count": 253,
                 "raw_rejected_count": 2,
+                "raw_exclusion_reason_counts_overlap": True,
+                "post_seed_transition_excluded_count": 3,
+                "inter_rotation_reacquisition_excluded_count": 4,
                 "observation_baseline_count": 251,
                 "vector_outlier_count": 2,
                 "baseline_std_rejected_count": 1,
@@ -95,6 +105,9 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
                 "reference_standard_deviation_m_at_1mm": 0.0005,
                 "rank": 3,
                 "condition_number": 2.0,
+                "max_standardized_residual": 2.1,
+                "max_session_mean_separation_m": 0.0374165739,
+                "source_cross_covariance_available": False,
                 "mixed_position_type_warning_threshold_m": 0.01,
                 "mixed_position_type_edges": [],
                 "position_type_filter_edges": [{
@@ -175,6 +188,7 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         values = [cell.value for row in sheet.iter_rows() for cell in row]
         raw_values = [cell.value for row in raw_sheet.iter_rows() for cell in row]
         self.assertIn("CALCULATED BASELINES - BASELINE TRUNG BÌNH", values)
+        self.assertIn("SESSION REPEATABILITY - ĐỘ LẶP GIỮA CÁC PHIÊN", values)
         self.assertIn("FOUND LOOPS - VÒNG KHÉP TRƯỚC BÌNH SAI", values)
         self.assertIn("ADJUSTED BASELINES", values)
         self.assertIn("ADJUSTED LOOPS", values)
@@ -209,10 +223,31 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
             for value in values
         ))
         self.assertIn("Raw bị loại", values)
+        self.assertIn(
+            "Raw loại sau chuyển seed/source (EXCLUDE_POST_SEED_TRANSITION)",
+            values,
+        )
+        self.assertIn(
+            "Raw loại khi tái bắt giữa rotation (EXCLUDE_INTER_ROTATION_REACQUISITION)",
+            values,
+        )
+        self.assertIn("Temporal_Inflation (n/n_eff)", values)
+        self.assertIn("Scatter_Scale", values)
+        self.assertIn("Total_Cov_Inflation", values)
         self.assertIn("Kiểm định chất lượng mạng", values)
         self.assertIn("Chẩn đoán mô hình trọng số", values)
         self.assertIn("TRỌNG SỐ BẢO THỦ", values)
         self.assertIn(2, values)
+        self.assertTrue(any(
+            isinstance(value, str)
+            and "Raw bị loại unique = 2" in value
+            for value in values
+        ))
+        self.assertTrue(any(
+            isinstance(value, str)
+            and "covariance chéo giữa các baseline chưa có" in value
+            for value in values
+        ))
         self.assertNotIn("#AGRICA,THIS-MUST-NOT-APPEAR*00", values)
         self.assertNotIn("RAW PAYLOAD BẰNG CHỨNG", values)
         self.assertIn("Baseline_N (m)", raw_values)
@@ -224,11 +259,13 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         self.assertIn("Accepted_For_Solver", raw_values)
         self.assertIn("#AGRICA,THIS-MUST-NOT-APPEAR*00", raw_values)
         self.assertIn(False, raw_values)
-        self.assertLess(sheet.max_row, 80)
+        self.assertLess(sheet.max_row, 100)
         self.assertEqual(sheet.column_dimensions["A"].width, 8)
         self.assertEqual(sheet.column_dimensions["B"].width, 34)
         self.assertEqual(sheet.column_dimensions["C"].width, 18)
         self.assertEqual(sheet.column_dimensions["D"].width, 15)
+        self.assertEqual(sheet.column_dimensions["L"].width, 22)
+        self.assertEqual(sheet.page_setup.orientation, "landscape")
 
         baseline_row = next(
             row
@@ -296,6 +333,21 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
         self.assertIn("ĐẠT (tham khảo)", values)
         self.assertIn("n_eff nhỏ nhất", values)
         self.assertEqual(baseline_row[10].value, "251 / 12.50")
+        self.assertAlmostEqual(baseline_row[11].value, 20.08)
+        self.assertAlmostEqual(baseline_row[12].value, 1.5)
+        self.assertAlmostEqual(baseline_row[13].value, 30.12)
+
+        repeatability_row = next(
+            row
+            for row in sheet.iter_rows()
+            if row[3].value == "R001 → R002"
+        )
+        self.assertEqual(repeatability_row[1].value, "BASE")
+        self.assertEqual(repeatability_row[2].value, "Dap1_2")
+        self.assertAlmostEqual(repeatability_row[4].value, 10.0)
+        self.assertAlmostEqual(repeatability_row[5].value, -20.0)
+        self.assertAlmostEqual(repeatability_row[6].value, 30.0)
+        self.assertAlmostEqual(repeatability_row[7].value, 37.4165739)
 
 
 class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):

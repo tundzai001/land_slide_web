@@ -4526,11 +4526,58 @@ class RoundRobinAdjustmentManager:
                 )
                 contiguous_sessions = _split_effective_sample_sessions(rows)
                 effective_sample_size = float(len(contiguous_sessions))
-                for session_diagnostic in ess_sessions:
+                session_summaries = []
+                for session_index, session_rows in enumerate(contiguous_sessions, 1):
+                    session_state = _InformationAccumulator()
+                    for session_row in session_rows:
+                        session_state.add(
+                            int(session_row.get("observation_epoch") or 0),
+                            session_row["delta"],
+                            session_row["covariance"],
+                            fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                            slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                            retention_seconds=1,
+                        )
+                    session_mean = np.asarray(session_state.mean, dtype=float)
+                    session_summary = {
+                        "session": session_index,
+                        "session_id": session_rows[0].get("session_id"),
+                        "observation_count": len(session_rows),
+                        "mean_xyz": tuple(float(value) for value in session_mean),
+                    }
+                    session_summaries.append(session_summary)
+
+                max_session_mean_separation = 0.0
+                max_session_mean_difference = None
+                max_session_mean_pair = None
+                for left in range(len(session_summaries)):
+                    for right in range(left + 1, len(session_summaries)):
+                        difference = (
+                            np.asarray(session_summaries[right]["mean_xyz"], dtype=float)
+                            - np.asarray(session_summaries[left]["mean_xyz"], dtype=float)
+                        )
+                        separation = float(np.linalg.norm(difference))
+                        if separation > max_session_mean_separation:
+                            max_session_mean_separation = separation
+                            max_session_mean_difference = tuple(
+                                float(value) for value in difference
+                            )
+                            max_session_mean_pair = (
+                                session_summaries[left]["session_id"]
+                                or session_summaries[left]["session"],
+                                session_summaries[right]["session_id"]
+                                or session_summaries[right]["session"],
+                            )
+
+                for session_diagnostic, session_summary in zip(
+                    ess_sessions, session_summaries, strict=True
+                ):
                     session_diagnostic["acf_estimated_effective_sample_size"] = (
                         session_diagnostic.pop("effective_sample_size")
                     )
                     session_diagnostic["published_effective_sample_size"] = 1.0
+                    session_diagnostic["session_id"] = session_summary["session_id"]
+                    session_diagnostic["mean_xyz"] = session_summary["mean_xyz"]
                 temporal_inflation = len(rows) / effective_sample_size
                 scatter_scale = 1.0
                 if len(rows) > 1:
@@ -4592,6 +4639,10 @@ class RoundRobinAdjustmentManager:
                     "temporal_scale_factor": temporal_inflation,
                     "scatter_scale_factor": scatter_scale,
                     "effective_sample_size_sessions": ess_sessions,
+                    "session_count": len(session_summaries),
+                    "max_session_mean_separation_m": max_session_mean_separation,
+                    "max_session_mean_difference_xyz": max_session_mean_difference,
+                    "max_session_mean_pair": max_session_mean_pair,
                     "pooled_lag_one_autocorrelations": pooled_lag_one,
                     "observation_count": len(rows),
                     "raw_indices": [row["raw_index"] for row in rows],
@@ -5080,6 +5131,17 @@ class RoundRobinAdjustmentManager:
                 "effective_sample_size": edge["effective_sample_size"],
                 "temporal_inflation_factor": edge["temporal_scale_factor"],
                 "scatter_scale_factor": edge["scatter_scale_factor"],
+                "total_covariance_inflation_factor": (
+                    edge["temporal_scale_factor"] * edge["scatter_scale_factor"]
+                ),
+                "session_count": edge["session_count"],
+                "max_session_mean_separation_m": edge[
+                    "max_session_mean_separation_m"
+                ],
+                "max_session_mean_difference_xyz": edge[
+                    "max_session_mean_difference_xyz"
+                ],
+                "max_session_mean_pair": edge["max_session_mean_pair"],
                 "position_types": edge["position_types"],
                 "position_type_mean_separation_m": edge["position_type_mean_separation_m"],
                 "velocity_up_std": edge["velocity_up_std"], "ratio": edge["ratio"],
@@ -5268,19 +5330,30 @@ class RoundRobinAdjustmentManager:
                 ),
             })
         
-        max_variance_inflation = max(
-            (float(edge.get("scatter_scale_factor") or 1.0) for edge in averaged_edges),
-            default=1.0,
+        worst_scatter_edge = max(
+            averaged_edges,
+            key=lambda edge: float(edge.get("scatter_scale_factor") or 1.0),
+            default=None,
+        )
+        max_variance_inflation = float(
+            (worst_scatter_edge or {}).get("scatter_scale_factor") or 1.0
         )
         if max_variance_inflation > 1.5:
+            max_session_separation = float(
+                (worst_scatter_edge or {}).get("max_session_mean_separation_m")
+                or 0.0
+            )
             diagnostic_warnings.append({
                 "code": "HIGH_INTER_SESSION_SCATTER",
                 "message": (
-                    "High inter-session scatter detected (variance inflation > 1.5). "
-                    "The rover positions drifted significantly between consecutive "
-                    "RTK fixed sessions. Check for physical movement or multipath."
+                    "High pooled edge scatter detected (scatter scale > 1.5). "
+                    "Review the displayed session-mean repeatability together with "
+                    "multipath, physical movement, and source changes."
                 ),
                 "max_variance_inflation": max_variance_inflation,
+                "from": (worst_scatter_edge or {}).get("from"),
+                "to": (worst_scatter_edge or {}).get("to"),
+                "max_session_mean_separation_m": max_session_separation,
             })
         interpretation_status = (
             "FAILED_QUALITY_GATE"
@@ -5362,6 +5435,7 @@ class RoundRobinAdjustmentManager:
                 ),
                 "raw_observation_count": len(raw_rows),
                 "raw_rejected_count": len(raw_rows) - len(accepted_raw),
+                "raw_exclusion_reason_counts_overlap": True,
                 "unconfirmed_source_excluded_count": sum(
                     "EXCLUDE_UNCONFIRMED_SOURCE" in row["quality_flags"]
                     for row in raw_rows
@@ -5463,6 +5537,13 @@ class RoundRobinAdjustmentManager:
                 ),
                 "quality_interpretation_status": interpretation_status,
                 "diagnostic_warnings": diagnostic_warnings,
+                "max_session_mean_separation_m": max(
+                    (
+                        float(edge.get("max_session_mean_separation_m") or 0.0)
+                        for edge in averaged_edges
+                    ),
+                    default=0.0,
+                ),
                 "vector_outlier_count": sum(
                     diagnostic.get("vector_filter_status") == "EVALUATED_OUTLIER"
                     for diagnostic in vector_outlier_diagnostics
@@ -5521,6 +5602,18 @@ class RoundRobinAdjustmentManager:
                         ],
                         "temporal_inflation_factor": edge["temporal_scale_factor"],
                         "scatter_scale_factor": edge["scatter_scale_factor"],
+                        "total_covariance_inflation_factor": (
+                            edge["temporal_scale_factor"]
+                            * edge["scatter_scale_factor"]
+                        ),
+                        "session_count": edge["session_count"],
+                        "max_session_mean_separation_m": edge[
+                            "max_session_mean_separation_m"
+                        ],
+                        "max_session_mean_difference_xyz": edge[
+                            "max_session_mean_difference_xyz"
+                        ],
+                        "max_session_mean_pair": edge["max_session_mean_pair"],
                         "pooled_lag_one_autocorrelations": edge[
                             "pooled_lag_one_autocorrelations"
                         ],
