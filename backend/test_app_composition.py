@@ -45,6 +45,7 @@ def test_extracted_routes_keep_their_public_contract():
     expected_modules = {
         ("/api/auth/login", ("POST",)): "app.routers.authentication",
         ("/api/auth/me", ("GET",)): "app.routers.authentication",
+        ("/api/auth/ws-ticket", ("POST",)): "app.routers.authentication",
         ("/api/admin/db/stats", ("GET",)): "app.routers.database_admin",
         ("/api/health", ("GET",)): "app.routers.frontend",
         ("/ws/updates", ("APIWebSocketRoute",)): "app.routers.frontend",
@@ -58,6 +59,7 @@ def test_extracted_routes_keep_their_public_contract():
         ("/api/projects", ("GET",)): "app.routers.projects",
         ("/api/admin/projects", ("GET",)): "app.routers.projects",
         ("/api/stations", ("GET",)): "app.routers.stations",
+        ("/api/stations/{station_id}/history", ("GET",)): "app.routers.stations",
         ("/api/stations/{station_id}/detail", ("GET",)): "app.routers.stations",
         ("/api/field/provision", ("POST",)): "app.routers.field_provisioning",
     }
@@ -101,6 +103,17 @@ def test_versioned_assets_are_immutable_but_unversioned_assets_are_not():
 
     assert versioned.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert unversioned.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+
+
+def test_root_html_is_always_revalidated():
+    middleware = VersionedAssetCacheMiddleware(lambda _scope, _receive, _send: None)
+
+    async def call_next(_request):
+        return Response("ok", media_type="text/html")
+
+    response = asyncio.run(middleware.dispatch(_request("/"), call_next))
+
+    assert response.headers["cache-control"] == "no-cache, no-store, must-revalidate"
 
 
 def test_charset_is_added_only_once():

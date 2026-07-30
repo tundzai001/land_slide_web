@@ -19,10 +19,15 @@ def on_connect(client, userdata, flags, rc, properties=None):
     else:
         print(f"Failed to connect, return code {rc}")
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-client.username_pw_set(USER, PASS)
-client.on_connect = on_connect
+def main():
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.username_pw_set(USER, PASS)
+    client.on_connect = on_connect
 
-print(f"Connecting to {BROKER}:{PORT}...")
-client.connect(BROKER, PORT, 60)
-client.loop_forever()
+    print(f"Connecting to {BROKER}:{PORT}...")
+    client.connect(BROKER, PORT, 60)
+    client.loop_forever()
+
+
+if __name__ == "__main__":
+    main()

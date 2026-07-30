@@ -137,14 +137,21 @@ class MQTTPersistenceMixin:
     async def _flush_write_buffer(self):
         """Flush toàn bộ buffer ra DB bằng bulk insert / batch update."""
         async with self._buffer_lock:
-            if not self._sensor_buffer and not self._station_update_buffer:
+            if (
+                not self._sensor_buffer
+                and not self._station_update_buffer
+                and not self._device_update_buffer
+                and not self._latest_cache_buffer
+            ):
                 return
             sensor_batch = [clean_null_bytes(r) for r in self._sensor_buffer]
             station_batch = dict(self._station_update_buffer)
             device_batch = dict(self._device_update_buffer)
+            latest_cache_batch = list(self._latest_cache_buffer.values())
             self._sensor_buffer.clear()
             self._station_update_buffer.clear()
             self._device_update_buffer.clear()
+            self._latest_cache_buffer.clear()
 
         logger.debug(
             f"[FLUSH] Flushing: {len(sensor_batch)} sensor records, "
@@ -162,6 +169,34 @@ class MQTTPersistenceMixin:
                 logger.error(f"❌ Bulk sensor flush error: {e}")
 
         # 2. Batch update Device.last_data_time + Station.last_update / status
+        if latest_cache_batch:
+            try:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                async with DataSessionLocal() as db:
+                    stmt = pg_insert(model_data.LatestSensorCache).values(latest_cache_batch)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["station_id", "sensor_type"],
+                        set_={
+                            "timestamp": stmt.excluded.timestamp,
+                            "data": stmt.excluded.data,
+                        },
+                        where=(
+                            model_data.LatestSensorCache.timestamp
+                            <= stmt.excluded.timestamp
+                        ),
+                    )
+                    await db.execute(stmt)
+                    await db.commit()
+            except Exception as exc:
+                logger.error("Latest sensor cache bulk UPSERT failed: %s", exc)
+                async with self._buffer_lock:
+                    for row in latest_cache_batch:
+                        key = (int(row["station_id"]), str(row["sensor_type"]))
+                        pending = self._latest_cache_buffer.get(key)
+                        if not pending or int(row["timestamp"]) > int(pending["timestamp"]):
+                            self._latest_cache_buffer[key] = row
+
         if station_batch or device_batch:
             try:
                 from app.models.config import Station, Device
@@ -370,44 +405,17 @@ class MQTTPersistenceMixin:
             logger.error(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
 
     async def _upsert_latest_sensor_cache(self, station_id: int, sensor_type: str, timestamp: int, data: dict):
-        """Luôn cập nhật giá trị mới nhất vào bảng cache riêng, bất kể chu kỳ lưu sensor_data."""
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-        cleaned_data = clean_null_bytes(data)
         cache_key = (int(station_id), str(sensor_type))
-        async with self._latest_cache_write_locks[cache_key]:
-            now = time.monotonic()
-            if (
-                now - self._latest_cache_last_attempt[cache_key]
-                < self._latest_cache_min_interval_seconds
-            ):
-                return
-            # Mark before awaiting DB. If the pool times out, queued fragments
-            # must not retry together as a thundering herd.
-            self._latest_cache_last_attempt[cache_key] = now
-            try:
-                async with DataSessionLocal() as db:
-                    stmt = pg_insert(model_data.LatestSensorCache).values(
-                        station_id=station_id,
-                        sensor_type=sensor_type,
-                        timestamp=timestamp,
-                        data=cleaned_data,
-                    ).on_conflict_do_update(
-                        index_elements=['station_id', 'sensor_type'],
-                        set_=dict(timestamp=timestamp, data=cleaned_data),
-                    )
-                    await db.execute(stmt)
-                    await db.commit()
-            except Exception as e:
-                if self._diag_should_log(
-                    f"latest_cache:{station_id}:{sensor_type}", 30
-                ):
-                    logger.error(
-                        "❌ [CACHE] Upsert failed station=%s sensor=%s: %s: %r",
-                        station_id,
-                        sensor_type,
-                        e.__class__.__name__,
-                        e,
-                    )
+        row = {
+            "station_id": int(station_id),
+            "sensor_type": str(sensor_type),
+            "timestamp": int(timestamp),
+            "data": clean_null_bytes(data),
+        }
+        async with self._buffer_lock:
+            pending = self._latest_cache_buffer.get(cache_key)
+            if not pending or row["timestamp"] >= int(pending["timestamp"]):
+                self._latest_cache_buffer[cache_key] = row
 
     def _get_sensor_offline_threshold(self, station_config: dict, sensor_type: str) -> int:
         offline_config = (station_config or {}).get('offline_thresholds', {}) or {}
@@ -484,5 +492,3 @@ class MQTTPersistenceMixin:
         if broker_key and broker_key in self._sub_clients:
             return self._sub_clients[broker_key]
         return self.client # Fallback to default client
-
-

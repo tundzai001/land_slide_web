@@ -98,6 +98,56 @@ class WebSocketIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hanging.send_calls, 1)
         self.assertEqual(manager.active_connections, [])
 
+    async def test_protocol_v2_scopes_sensor_stream_to_selected_station(self):
+        manager = ConnectionManager()
+        socket = _RecordingSocket()
+        manager.active_connections = [socket]
+
+        handled = await manager.handle_client_message(
+            socket,
+            '{"type":"subscribe","station_ids":[101],"channels":["sensor","alerts"]}',
+        )
+        self.assertTrue(handled)
+        self.assertEqual(socket.messages[-1]["type"], "subscription_ack")
+        socket.messages.clear()
+
+        await manager.broadcast(
+            {"type": "sensor_data", "station_id": 101, "sensor_type": "gnss"}
+        )
+        await manager.broadcast(
+            {"type": "sensor_data", "station_id": 102, "sensor_type": "gnss"}
+        )
+
+        self.assertEqual(len(socket.messages), 1)
+        self.assertEqual(socket.messages[0]["station_id"], 101)
+
+    async def test_legacy_connection_keeps_broadcast_contract(self):
+        manager = ConnectionManager()
+        socket = _RecordingSocket()
+        manager.active_connections = [socket]
+
+        await manager.broadcast(
+            {"type": "sensor_data", "station_id": 101, "sensor_type": "gnss"}
+        )
+
+        self.assertEqual(len(socket.messages), 1)
+
+    async def test_protocol_v2_without_station_suppresses_sensor_stream(self):
+        manager = ConnectionManager()
+        socket = _RecordingSocket()
+        manager.active_connections = [socket]
+
+        await manager.handle_client_message(
+            socket,
+            '{"type":"subscribe","station_ids":[],"channels":["sensor","status"]}',
+        )
+        socket.messages.clear()
+        await manager.broadcast(
+            {"type": "sensor_data", "station_id": 101, "sensor_type": "gnss"}
+        )
+
+        self.assertEqual(socket.messages, [])
+
 
 if __name__ == "__main__":
     unittest.main()

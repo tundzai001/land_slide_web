@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ENVIRONMENT: str = "production"
+    CORS_ORIGINS: str = "https://monitoring.aitogy.com,http://127.0.0.1:8001,http://localhost:8001"
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: int = 10
+    DB_COMMAND_TIMEOUT_SECONDS: int = 30
+    RUN_SCHEMA_BOOTSTRAP: bool = False
+    BOOTSTRAP_ADMIN_PASSWORD: str = ""
+    BOOTSTRAP_SYSTEM_PASSWORD: str = ""
     
     MQTT_BROKER: str = ""
     MQTT_PORT: int = 1883
@@ -58,5 +67,9 @@ class Settings(BaseSettings):
     # GNSS rollup/purge workflow: thu thập dày theo giây, chốt ngày/tuần rồi dọn raw.
     GNSS_ROLLUP_INTERVAL_SECONDS: int = 300
     GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP: bool = False
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
 settings = Settings()

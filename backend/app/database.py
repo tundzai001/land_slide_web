@@ -13,16 +13,16 @@ def create_pg_engine(url):
         # instance.  The old 20 + 40 configuration allowed 180 concurrent
         # connections in total and could exhaust a default PostgreSQL server
         # during a polling/cache burst.
-        pool_size=10,
-        max_overflow=10,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
         pool_recycle=1800,
         # Fail fast enough for HTTP clients to back off instead of retaining a
         # growing queue of one-minute requests while the local DB is unhealthy.
-        pool_timeout=10,
+        pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
         pool_use_lifo=True,
         connect_args={
             "timeout": 10,
-            "command_timeout": 30,
+            "command_timeout": settings.DB_COMMAND_TIMEOUT_SECONDS,
         },
     )
 

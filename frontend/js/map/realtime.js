@@ -23,6 +23,7 @@ function setupWebSocket() {
         if (wsConnection !== socket) return;
         console.log('✅ [WS] Connected');
         wsReconnectAttempt = 0;
+        syncWebSocketSubscription();
         gnssAdjustmentDebugState.wsStatus = 'CONNECTED';
         if (gnssAdjustmentDebugState.active) {
             addGnssAdjustmentDebug('WS', 'WebSocket đã kết nối.', 'success');
@@ -82,6 +83,21 @@ function setupWebSocket() {
     };
 }
 
+function syncWebSocketSubscription(stationId = currentStationData?.id) {
+    if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
+    const normalizedStationId = Number(stationId || 0);
+    try {
+        wsConnection.send(JSON.stringify({
+            type: 'subscribe',
+            station_ids: normalizedStationId > 0 ? [normalizedStationId] : [],
+            project_ids: [],
+            channels: ['sensor', 'status', 'alerts', 'adjustment', 'rescue'],
+        }));
+    } catch (error) {
+        console.warn('[WS] Subscription update failed:', error);
+    }
+}
+
 window.addEventListener('online', () => {
     if (!isMapViewActive()) return;
     if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) setupWebSocket();
@@ -102,6 +118,12 @@ window.addEventListener('spa:navigate', (event) => {
 
 function handleRealtimeUpdate(message) {
     //console.log('📡 [WS] Received:', message);
+
+    if (message.type === 'hello') {
+        syncWebSocketSubscription();
+        return;
+    }
+    if (message.type === 'subscription_ack') return;
 
     if (message.type === 'sensor_data') {
         if (currentStationData && message.station_id === currentStationData.id) {

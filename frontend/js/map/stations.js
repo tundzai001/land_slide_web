@@ -340,6 +340,7 @@ async function refreshCurrentStationDetail() {
 }
 
 function renderStationList(stations) {
+    if (window.renderReactStationList?.(stations)) return;
     const container = document.getElementById('station-list-container');
     if (!container) return;
 
@@ -484,4 +485,3 @@ function updateMarker(station) {
         markers[station.id] = marker;
     }
 }
-

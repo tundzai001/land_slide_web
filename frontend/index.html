@@ -469,20 +469,10 @@
         }
 
         async function loadBabelScript(src) {
-            if (document.querySelector(`script[data-babel-src="${src}"]`)) return;
-            const response = await fetch(src);
-            if (!response.ok) throw new Error(`Cannot load ${src}`);
-            const source = await response.text();
-            const compiled = Babel.transform(source, {
-                presets: [
-                    ['react', { runtime: 'classic' }]
-                ]
-            }).code;
-            const script = document.createElement('script');
-            script.dataset.babelSrc = src;
-            script.charset = 'utf-8';
-            script.textContent = compiled;
-            document.body.appendChild(script);
+            if (!window.compileAndExecuteReactSource) {
+                throw new Error('Runtime JSX loader is unavailable');
+            }
+            await window.compileAndExecuteReactSource(src);
         }
 
         async function openMapExperience() {
@@ -494,31 +484,42 @@
             window.LANDING_EMBEDDED_VIEW = 'map';
             ensureImportMap();
 
-            await Promise.all([
+            const stylesReady = Promise.all([
                 ensureStylesheet('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'),
+                ensureStylesheet('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css'),
+                ensureStylesheet('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css'),
                 ensureStylesheet('https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css'),
                 ensureStylesheet('https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css'),
-                ensureStylesheet('/css/theme-variables.css'),
-                ensureStylesheet('/css/theme-transition.css'),
-                ensureStylesheet('/css/components.css'),
-                ensureStylesheet('/css/shell.css')
+                ensureStylesheet('/css/theme-variables.css?v=performance-1'),
+                ensureStylesheet('/css/theme-transition.css?v=performance-1'),
+                ensureStylesheet('/css/components.css?v=performance-1'),
+                ensureStylesheet('/css/shell.css?v=performance-1'),
+                ensureStylesheet('/css/performance.css?v=performance-1')
             ]);
 
-            await ensureScript('https://unpkg.com/react@18/umd/react.production.min.js');
-            await ensureScript('https://unpkg.com/react-dom@18/umd/react-dom.production.min.js');
-            await ensureScript('https://unpkg.com/@babel/standalone/babel.min.js');
-            await ensureStylesheet('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css').catch(error => console.warn(error));
-            await ensureStylesheet('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css').catch(error => console.warn(error));
-            await ensureScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
-            await ensureScript('https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js').catch(error => console.warn(error));
-            await ensureScript('https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js');
-            await ensureScript('https://cdn.jsdelivr.net/npm/chart.js');
-            await ensureScript('https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js');
-            await ensureScript('https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js');
-            await ensureScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js');
-            await ensureScript('/js/theme-manager.js?v=react-spa-12');
-            await ensureScript('/js/auth.js?v=react-spa-14');
-            await loadBabelScript('/js/react-app.js?v=react-spa-17');
+            const reactReady = ensureScript('https://unpkg.com/react@18/umd/react.production.min.js')
+                .then(() => ensureScript('https://unpkg.com/react-dom@18/umd/react-dom.production.min.js'));
+            const babelReady = ensureScript('https://unpkg.com/@babel/standalone/babel.min.js')
+                .then(() => ensureScript('/js/babel-runtime-loader.js?v=react-runtime-1'));
+            const leafletReady = ensureScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')
+                .then(() => Promise.all([
+                    ensureScript('https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js'),
+                    ensureScript('https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js'),
+                ]));
+            const uiLibrariesReady = Promise.all([
+                ensureScript('https://cdn.jsdelivr.net/npm/chart.js'),
+                ensureScript('https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js'),
+                ensureScript('https://cdn.jsdelivr.net/npm/sweetalert2@11'),
+                ensureScript('https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js'),
+                ensureScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'),
+            ]);
+
+            await Promise.all([stylesReady, reactReady, babelReady, leafletReady, uiLibrariesReady]);
+            await Promise.all([
+                ensureScript('/js/theme-manager.js?v=performance-1'),
+                ensureScript('/js/auth.js?v=react-spa-14'),
+            ]);
+            await loadBabelScript('/js/react-app.js?v=react-spa-18');
         }
 
         document.querySelectorAll('[data-map-trigger]').forEach(trigger => {

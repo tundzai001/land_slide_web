@@ -41,6 +41,14 @@ class LatestSensorCache(BaseData):
 
 class Alert(BaseData):
     __tablename__ = "alerts"
+    __table_args__ = (
+        Index(
+            "ix_alerts_station_unresolved_ts",
+            "station_id",
+            "is_resolved",
+            "timestamp",
+        ),
+    )
     
     id = Column(Integer, primary_key=True)
     station_id = Column(Integer, index=True, nullable=False)

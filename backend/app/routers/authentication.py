@@ -1,6 +1,7 @@
 """Login and current-session API routes."""
 from datetime import timedelta
 import logging
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -65,3 +66,20 @@ async def get_current_user_info(
     user_response.permissions = permissions
     user_response.assigned_projects = getattr(current_user, 'assigned_projects', []) or []
     return user_response
+
+
+@router.post("/api/auth/ws-ticket")
+async def create_websocket_ticket(
+    current_user: model_auth.User = Depends(auth.get_current_user),
+):
+    """Return a short-lived credential so access tokens never enter proxy URLs."""
+    ticket = auth.create_access_token(
+        data={
+            "sub": current_user.username,
+            "role": current_user.role,
+            "purpose": "websocket",
+            "jti": secrets.token_urlsafe(12),
+        },
+        expires_delta=timedelta(seconds=30),
+    )
+    return {"ticket": ticket, "expires_in": 30}

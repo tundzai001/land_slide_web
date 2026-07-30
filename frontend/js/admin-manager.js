@@ -29,10 +29,9 @@
         document.body.appendChild(script);
     });
 
-    window.adminBundleReady = modules.reduce(
-        (ready, src) => ready.then(() => loadModule(src)),
-        Promise.resolve(),
-    ).catch((error) => {
+    // Preserve feature execution order with async=false, but start every
+    // download immediately to remove the previous sixteen-request waterfall.
+    window.adminBundleReady = Promise.all(modules.map(loadModule)).catch((error) => {
         console.error('[ADMIN] Feature bundle failed:', error);
         throw error;
     });

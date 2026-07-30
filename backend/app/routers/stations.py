@@ -2,10 +2,11 @@
 import logging
 import math
 import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +68,154 @@ def calculate_station_location(sensors: dict, manual_location: dict = None):
             "source": f"Average of {len(coords)} sensors"
         }
 
+
+async def _load_station_runtime_maps(
+    stations: List[model_config.Station],
+    db_config: AsyncSession,
+    db_data: AsyncSession,
+):
+    """Load station runtime state in bulk instead of querying per station/device."""
+    station_ids = [int(station.id) for station in stations]
+    if not station_ids:
+        return defaultdict(list), {}, defaultdict(list)
+
+    devices_result = await db_config.execute(
+        select(model_config.Device).where(
+            and_(
+                model_config.Device.station_id.in_(station_ids),
+                model_config.Device.is_active.is_(True),
+            )
+        )
+    )
+    devices_by_station = defaultdict(list)
+    active_keys = set()
+    for device in devices_result.scalars().all():
+        devices_by_station[int(device.station_id)].append(device)
+        active_keys.add((int(device.station_id), str(device.device_type)))
+
+    cache_result = await db_data.execute(
+        select(model_data.LatestSensorCache).where(
+            model_data.LatestSensorCache.station_id.in_(station_ids)
+        )
+    )
+    latest_by_key = {
+        (int(row.station_id), str(row.sensor_type)): int(row.timestamp or 0)
+        for row in cache_result.scalars().all()
+    }
+
+    # A cache miss is expected only during migration/recovery. Resolve every
+    # missing station/sensor pair with one window query rather than N queries.
+    missing_keys = active_keys.difference(latest_by_key)
+    if missing_keys:
+        missing_station_ids = sorted({key[0] for key in missing_keys})
+        missing_sensor_types = sorted({key[1] for key in missing_keys})
+        ranked = (
+            select(
+                model_data.SensorData.station_id.label("station_id"),
+                model_data.SensorData.sensor_type.label("sensor_type"),
+                model_data.SensorData.timestamp.label("timestamp"),
+                func.row_number().over(
+                    partition_by=(
+                        model_data.SensorData.station_id,
+                        model_data.SensorData.sensor_type,
+                    ),
+                    order_by=model_data.SensorData.timestamp.desc(),
+                ).label("row_number"),
+            )
+            .where(
+                and_(
+                    model_data.SensorData.station_id.in_(missing_station_ids),
+                    model_data.SensorData.sensor_type.in_(missing_sensor_types),
+                )
+            )
+            .subquery()
+        )
+        fallback_result = await db_data.execute(
+            select(ranked.c.station_id, ranked.c.sensor_type, ranked.c.timestamp).where(
+                ranked.c.row_number == 1
+            )
+        )
+        for station_id, sensor_type, timestamp in fallback_result.all():
+            key = (int(station_id), str(sensor_type))
+            if key in missing_keys:
+                latest_by_key[key] = int(timestamp or 0)
+
+    alerts_result = await db_data.execute(
+        select(model_data.Alert).where(
+            and_(
+                model_data.Alert.station_id.in_(station_ids),
+                model_data.Alert.is_resolved.is_(False),
+            )
+        )
+    )
+    alerts_by_station = defaultdict(list)
+    for alert in alerts_result.scalars().all():
+        alerts_by_station[int(alert.station_id)].append(alert)
+
+    return devices_by_station, latest_by_key, alerts_by_station
+
+
+def _summarize_station_alerts(
+    alerts: List[model_data.Alert],
+    station_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    config = station_config or {}
+    alerting_cfg = config.get("alerting", {})
+    if alerting_cfg.get("enabled", config.get("alerting_enabled", True)) is False:
+        return {"overall_risk": "LOW", "active_alerts": []}
+
+    default_ttl = {
+        "gnss_velocity": max(90, get_offline_threshold(config, "gnss") * 2),
+        "rainfall": max(120, get_offline_threshold(config, "rain") * 2),
+        "water_level": max(120, get_offline_threshold(config, "water") * 2),
+        "tilt": max(300, get_offline_threshold(config, "imu")),
+        "tilt_warning": max(300, get_offline_threshold(config, "imu")),
+        "tilt_critical": max(300, get_offline_threshold(config, "imu")),
+        "shock": max(300, get_offline_threshold(config, "imu")),
+    }
+    ttl_cfg = config.get("alert_ttl_seconds", {}) or {}
+    now_ts = int(time.time())
+    fresh_alerts = [
+        alert
+        for alert in alerts
+        if now_ts - int(alert.timestamp or 0)
+        <= int(ttl_cfg.get(alert.category, default_ttl.get(alert.category, 180)))
+    ]
+
+    priority = {
+        "EXTREME": 5,
+        "CRITICAL": 4,
+        "HIGH": 3,
+        "WARNING": 2,
+        "MEDIUM": 1,
+        "LOW": 0,
+    }
+    overall_risk = "LOW"
+    highest_score = -1
+    for alert in fresh_alerts:
+        level = str(alert.level or "").upper()
+        if alert.category in {"tilt_warning", "tilt_critical", "shock", "tilt"} and level == "WARNING":
+            level = "CRITICAL"
+        score = priority.get(level, 0)
+        if score > highest_score:
+            overall_risk = level
+            highest_score = score
+
+    if overall_risk not in priority:
+        overall_risk = "LOW"
+    return {
+        "overall_risk": overall_risk,
+        "active_alerts": [
+            {
+                "level": alert.level,
+                "category": alert.category,
+                "message": alert.message,
+                "timestamp": alert.timestamp,
+            }
+            for alert in fresh_alerts
+        ],
+    }
+
 # ============================================================================
 # RBAC HELPER: Check operator project access
 # ============================================================================
@@ -83,23 +232,17 @@ async def get_stations_by_project(
         select(model_config.Station).where(model_config.Station.project_id == project_id)
     )
     stations = result.scalars().all()
+    devices_by_station, latest_by_key, _alerts_by_station = await _load_station_runtime_maps(
+        stations, db_config, db_data
+    )
 
     # Tính status động cho từng trạm
     current_time = int(time.time())
 
     stations_with_status = []
     for station in stations:
+        devices = devices_by_station[int(station.id)]
         # Lấy danh sách devices của trạm
-        devices_result = await db_config.execute(
-            select(model_config.Device).where(
-                and_(
-                    model_config.Device.station_id == station.id,
-                    model_config.Device.is_active == True
-                )
-            )
-        )
-        devices = devices_result.scalars().all()
-
         # Kiểm tra status cho từng sensor type
         station_online = False
 
@@ -108,33 +251,7 @@ async def get_stations_by_project(
             threshold = get_offline_threshold(station.config, sensor_type)
 
             # ✅ Ưu tiên lấy từ latest_sensor_cache
-            cache_result = await db_data.execute(
-                select(model_data.LatestSensorCache)
-                .where(
-                    and_(
-                        model_data.LatestSensorCache.station_id == station.id,
-                        model_data.LatestSensorCache.sensor_type == sensor_type
-                    )
-                )
-            )
-            cached = cache_result.scalar_one_or_none()
-
-            if cached:
-                latest_ts = cached.timestamp
-            else:
-                latest_data_result = await db_data.execute(
-                    select(model_data.SensorData)
-                    .where(
-                        and_(
-                            model_data.SensorData.station_id == station.id,
-                            model_data.SensorData.sensor_type == sensor_type
-                        )
-                    )
-                    .order_by(desc(model_data.SensorData.timestamp))
-                    .limit(1)
-                )
-                latest_data = latest_data_result.scalar_one_or_none()
-                latest_ts = latest_data.timestamp if latest_data else None
+            latest_ts = latest_by_key.get((int(station.id), str(sensor_type)), 0)
 
             # Nếu có ít nhất 1 sensor online -> station online
             if latest_ts and (current_time - latest_ts) < threshold:
@@ -250,22 +367,16 @@ async def get_stations(
 
         result = await db_config.execute(stmt)
         stations = result.scalars().all()
+        devices_by_station, latest_by_key, alerts_by_station = await _load_station_runtime_maps(
+            stations, db_config, db_data
+        )
 
         current_time = int(time.time())
 
         stations_with_status = []
         for station in stations:
+            devices = devices_by_station[int(station.id)]
             # ✅ Chỉ lấy devices ACTIVE
-            devices_result = await db_config.execute(
-                select(model_config.Device).where(
-                    and_(
-                        model_config.Device.station_id == station.id,
-                        model_config.Device.is_active == True
-                    )
-                )
-            )
-            devices = devices_result.scalars().all()
-
             # Kiểm tra status cho từng sensor type
             station_online = False
 
@@ -274,34 +385,7 @@ async def get_stations(
                 threshold = get_offline_threshold(station.config, sensor_type)
 
                 # ✅ Ưu tiên lấy từ latest_sensor_cache (luôn cập nhật mỗi lần MQTT nhận data)
-                cache_result = await db_data.execute(
-                    select(model_data.LatestSensorCache)
-                    .where(
-                        and_(
-                            model_data.LatestSensorCache.station_id == station.id,
-                            model_data.LatestSensorCache.sensor_type == sensor_type
-                        )
-                    )
-                )
-                cached = cache_result.scalar_one_or_none()
-
-                if cached:
-                    latest_ts = cached.timestamp
-                else:
-                    # Fallback: query SensorData nếu cache chưa có
-                    latest_data_result = await db_data.execute(
-                        select(model_data.SensorData)
-                        .where(
-                            and_(
-                                model_data.SensorData.station_id == station.id,
-                                model_data.SensorData.sensor_type == sensor_type
-                            )
-                        )
-                        .order_by(desc(model_data.SensorData.timestamp))
-                        .limit(1)
-                    )
-                    latest_row = latest_data_result.scalar_one_or_none()
-                    latest_ts = latest_row.timestamp if latest_row else None
+                latest_ts = latest_by_key.get((int(station.id), str(sensor_type)), 0)
 
                 # Nếu có ít nhất 1 sensor online -> station online
                 if latest_ts and (current_time - latest_ts) < threshold:
@@ -309,10 +393,8 @@ async def get_stations(
                     break
 
             # ✅ Tính risk_level thực tế từ alerts (không hardcode LOW nữa)
-            risk_assessment = await _calculate_station_risk_assessment(
-                db_data,
-                station.id,
-                station.config
+            risk_assessment = _summarize_station_alerts(
+                alerts_by_station[int(station.id)], station.config
             )
             computed_risk = risk_assessment.get("overall_risk", "LOW")
             offline_display_enabled = is_offline_display_enabled(station.config)
@@ -334,6 +416,76 @@ async def get_stations(
     except Exception as e:
         logger.error(f"Error loading stations: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/stations/{station_id}/history")
+async def get_station_history(
+    station_id: int,
+    request: Request,
+    sensor_types: str = Query("gnss,rain,water,imu"),
+    hours: int = Query(24, ge=1, le=2160),
+    limit: int = Query(500, ge=1, le=2000),
+    db_config: AsyncSession = Depends(get_config_db),
+    db_data: AsyncSession = Depends(get_data_db),
+    db_auth: AsyncSession = Depends(get_auth_db),
+):
+    station_result = await db_config.execute(
+        select(model_config.Station).where(model_config.Station.id == station_id)
+    )
+    station = station_result.scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station not found")
+
+    current_user = await get_optional_current_user_from_request(request, db_auth)
+    project_filter_ids = user_project_filter_ids(current_user)
+    if project_filter_ids is not None and station.project_id not in project_filter_ids:
+        raise HTTPException(status_code=403, detail="Station not allowed")
+
+    allowed_types = {"gnss", "rain", "water", "imu", "gnss_adjusted"}
+    requested_types = {
+        value.strip().lower()
+        for value in sensor_types.split(",")
+        if value.strip().lower() in allowed_types
+    }
+    if not requested_types:
+        raise HTTPException(status_code=400, detail="No valid sensor types requested")
+
+    cutoff = int(time.time()) - int(hours * 3600)
+    ranked = (
+        select(
+            model_data.SensorData.sensor_type.label("sensor_type"),
+            model_data.SensorData.timestamp.label("timestamp"),
+            model_data.SensorData.data.label("data"),
+            func.row_number().over(
+                partition_by=model_data.SensorData.sensor_type,
+                order_by=model_data.SensorData.timestamp.desc(),
+            ).label("row_number"),
+        )
+        .where(
+            and_(
+                model_data.SensorData.station_id == station_id,
+                model_data.SensorData.sensor_type.in_(sorted(requested_types)),
+                model_data.SensorData.timestamp >= cutoff,
+            )
+        )
+        .subquery()
+    )
+    history_result = await db_data.execute(
+        select(ranked.c.sensor_type, ranked.c.timestamp, ranked.c.data)
+        .where(ranked.c.row_number <= limit)
+        .order_by(ranked.c.sensor_type.asc(), ranked.c.timestamp.asc())
+    )
+    sensors = {sensor_type: {"history": []} for sensor_type in requested_types}
+    for sensor_type, timestamp, data in history_result.all():
+        sensors[str(sensor_type)]["history"].append(
+            {"timestamp": int(timestamp), "data": data}
+        )
+    return {
+        "station_id": station_id,
+        "hours": hours,
+        "limit_per_sensor": limit,
+        "sensors": sensors,
+    }
 
 
 @router.get("/api/stations/{station_id}/detail")
@@ -846,6 +998,7 @@ async def get_long_term_analysis(
         max_window = max(days, 90)
         cutoff_time = int(time.time() - (max_window * 86400))
         cutoff_requested = int(time.time() - (days * 86400))
+        raw_gnss_cutoff = max(cutoff_time, int(time.time() - 86400))
 
         # 2. Lấy dữ liệu GNSS (mở rộng window cho multi-window)
         gnss_result = await db_data.execute(
@@ -854,12 +1007,13 @@ async def get_long_term_analysis(
                 and_(
                     model_data.SensorData.station_id == station_id,
                     model_data.SensorData.sensor_type == "gnss",
-                    model_data.SensorData.timestamp >= cutoff_time
+                    model_data.SensorData.timestamp >= raw_gnss_cutoff
                 )
             )
-            .order_by(model_data.SensorData.timestamp.asc())
+            .order_by(model_data.SensorData.timestamp.desc())
+            .limit(10000)
         )
-        gnss_data = gnss_result.scalars().all()
+        gnss_data = list(reversed(gnss_result.scalars().all()))
 
         # 2b. Lấy GNSS daily summary để fallback khi raw đã purge
         daily_summary_result = await db_data.execute(
@@ -921,6 +1075,8 @@ async def get_long_term_analysis(
             if is_gnss_analysis_point(d.data)
         ]
         historical_gnss_requested = [p for p in historical_gnss_full if p['timestamp'] >= cutoff_requested]
+        if days > 1 and daily_gnss_requested:
+            historical_gnss_requested = []
         # ✅ FALLBACK: Nếu khoảng thời gian ngắn mà không có đủ dữ liệu, lấy dữ liệu gần nhất
         if len(historical_gnss_requested) < 2 and len(historical_gnss_full) >= 2 and days <= 1:
             historical_gnss_requested = historical_gnss_full[-20:]
@@ -1205,6 +1361,3 @@ async def get_gnss_weekly_summary(
     except Exception as e:
         logger.error(f"Error fetching GNSS weekly summary: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-

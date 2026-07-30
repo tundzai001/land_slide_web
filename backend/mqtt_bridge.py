@@ -133,15 +133,13 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self._sensor_buffer: list = []
         self._station_update_buffer: dict = {}  # {station_id: {status, last_update}}
         self._device_update_buffer: dict = {}   # {device_id: last_data_time}
+        self._latest_cache_buffer: dict = {}    # {(station_id, sensor_type): newest row}
         self._buffer_lock = asyncio.Lock()
         self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
         self._diag_last_log_ts = defaultdict(int)
         # Coalesce best-effort latest-value work. Fragmented GNSS/AGRICA can
         # create several pipeline tasks per second for one station; one DB
         # transaction per fragment can exhaust the connection pool.
-        self._latest_cache_write_locks = defaultdict(asyncio.Lock)
-        self._latest_cache_last_attempt = defaultdict(float)
-        self._latest_cache_min_interval_seconds = 0.75
         self._alert_suppression_last_attempt = defaultdict(float)
         self._alert_suppression_interval_seconds = 5.0
 

@@ -12,10 +12,12 @@ import mimetypes
 from pathlib import Path
 
 mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('application/javascript', '.jsx')
 mimetypes.add_type('text/css', '.css')
 # Force utf-8 for text files to fix mojibake on Windows
 mimetypes.init()
 mimetypes.types_map['.js'] = 'application/javascript; charset=utf-8'
+mimetypes.types_map['.jsx'] = 'application/javascript; charset=utf-8'
 mimetypes.types_map['.css'] = 'text/css; charset=utf-8'
 mimetypes.types_map['.html'] = 'text/html; charset=utf-8'
 
@@ -29,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete, text
+from sqlalchemy import select, and_, delete
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from .logging_config import (
     configure_system_logging,
@@ -135,33 +137,17 @@ async def lifespan(app: FastAPI):
     global gnss_rollup_task, cors_failover_task
 
     try:
-        # 1. Khởi tạo AUTH DB
-        async with auth_engine.begin() as conn:
-            await conn.run_sync(model_auth.BaseAuth.metadata.create_all)
-        logger.info("✓ Auth database initialized")
-
-        # 2. Khởi tạo CONFIG DB (stations, devices, pi_devices, ...)
-        async with config_engine.begin() as conn:
-            await conn.run_sync(model_config.BaseConfig.metadata.create_all)
-        logger.info("✓ Config database initialized (incl. pi_devices)")
-
-        # 3. Khởi tạo DATA DB
-        async with data_engine.begin() as conn:
-            await conn.run_sync(model_data.BaseData.metadata.create_all)
-        logger.info("✓ Data database initialized")
-
-        # 3b. Đảm bảo composite index tồn tại (idempotent, không ảnh hưởng nếu đã có)
-        async with data_engine.connect() as conn:
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_sensor_data_station_type_ts "
-                "ON sensor_data (station_id, sensor_type, timestamp)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_sensor_data_station_ts "
-                "ON sensor_data (station_id, timestamp)"
-            ))
-            await conn.commit()
-        logger.info("✓ sensor_data composite indexes ensured")
+        # Production startup must not acquire DDL locks. Fresh development
+        # environments can opt in; production schema changes use Alembic.
+        if config.settings.RUN_SCHEMA_BOOTSTRAP:
+            for engine, metadata, label in (
+                (auth_engine, model_auth.BaseAuth.metadata, "auth"),
+                (config_engine, model_config.BaseConfig.metadata, "config"),
+                (data_engine, model_data.BaseData.metadata, "data"),
+            ):
+                async with engine.begin() as conn:
+                    await conn.run_sync(metadata.create_all)
+                logger.info("Database schema bootstrap complete: %s", label)
 
         # 4. Tạo Admin mặc định
         async with asyncio.timeout(10):
@@ -171,8 +157,10 @@ async def lifespan(app: FastAPI):
                 )
                 admin_user = result.scalar_one_or_none()
 
-                if not admin_user:
-                    hashed_password = await auth.get_password_hash("")
+                if not admin_user and config.settings.BOOTSTRAP_ADMIN_PASSWORD:
+                    hashed_password = await auth.get_password_hash(
+                        config.settings.BOOTSTRAP_ADMIN_PASSWORD
+                    )
                     new_admin = model_auth.User(
                         username="admin",
                         hashed_password=hashed_password,
@@ -182,36 +170,33 @@ async def lifespan(app: FastAPI):
                     )
                     db_auth.add(new_admin)
                     await db_auth.commit()
-                    logger.info("✓ Default admin user created (admin/)")
+                    logger.info("Bootstrap admin user created")
+                elif not admin_user:
+                    logger.warning(
+                        "No admin user exists; set BOOTSTRAP_ADMIN_PASSWORD once to create it"
+                    )
 
         async with asyncio.timeout(10):
             async with ConfigSessionLocal() as db_config:
-                # Mật khẩu cứng bạn muốn
-                TARGET_PASSWORD = "password"
-
-                # Kiểm tra xem đã có system_password chưa
                 result = await db_config.execute(
                     select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "system_password")
                 )
                 sys_pass_config = result.scalar_one_or_none()
 
-                if not sys_pass_config:
-                    # TRƯỜNG HỢP 1: Chưa có -> Tạo mới
-                    logger.info(f"⚙️ Initializing System Password: {TARGET_PASSWORD}")
+                if not sys_pass_config and config.settings.BOOTSTRAP_SYSTEM_PASSWORD:
                     new_config = model_config.GlobalConfig(
                         key="system_password",
-                        value=TARGET_PASSWORD, # ✅ Đã thêm value
+                        value=config.settings.BOOTSTRAP_SYSTEM_PASSWORD,
                         updated_at=int(time.time()),
                         updated_by="system_init"
                     )
                     db_config.add(new_config)
-                else:
-                    if sys_pass_config.value != TARGET_PASSWORD:
-                        logger.info(f"🔄 Updating System Password from '{sys_pass_config.value}' to '{TARGET_PASSWORD}'")
-                        sys_pass_config.value = TARGET_PASSWORD
-                        sys_pass_config.updated_at = int(time.time())
-                    else:
-                        logger.info("✓ System Password is up to date.")
+                    await db_config.commit()
+                    logger.info("Bootstrap system password created")
+                elif not sys_pass_config:
+                    logger.warning(
+                        "No system password exists; set BOOTSTRAP_SYSTEM_PASSWORD once to create it"
+                    )
 
         mqtt_service.start()
         logger.info("✓ Background MQTT Service started")
@@ -270,10 +255,11 @@ app.add_middleware(AdvancedSecurityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag", "Server-Timing", "X-Request-ID"],
 )
 app.add_middleware(CharsetMiddleware)
 app.include_router(admin_router.router)

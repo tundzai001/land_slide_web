@@ -73,6 +73,16 @@ async function fetchStationDetail(stationId, { includeHistory = false, signal } 
     return response.json();
 }
 
+async function fetchStationHistory(stationId, { signal } = {}) {
+    const url = `/api/stations/${stationId}/history?hours=24&limit=500`;
+    const requestOptions = signal ? { signal } : {};
+    const response = window.authManager?.isAuthenticated?.()
+        ? await window.authManager.apiFetch(url, requestOptions)
+        : await fetch(url, requestOptions);
+    if (!response?.ok) throw new Error('Failed to load station history');
+    return response.json();
+}
+
 function focusMapOnStation(stationId, skipZoom = false) {
     const marker = markers[stationId];
     const leafletMap = getLeafletMap();
@@ -120,11 +130,20 @@ async function loadStationHistoryAndRenderCharts() {
     chartsPanel?.classList.add('station-history-loading');
     if (chartsButton) chartsButton.disabled = true;
     try {
-        const data = await fetchStationDetail(stationId, {
-            includeHistory: true,
+        const historyPayload = await fetchStationHistory(stationId, {
             signal: stationHistoryController.signal,
         });
         if (Number(currentStationData?.id || 0) !== stationId) return;
+        const data = {
+            ...currentStationData,
+            sensors: { ...currentStationData.sensors },
+        };
+        Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
+            data.sensors[sensorType] = {
+                ...(data.sensors[sensorType] || {}),
+                history: sensorHistory.history || [],
+            };
+        });
         stationHistoryCache.set(stationId, { data, loadedAt: Date.now() });
         currentStationData = data;
         renderCharts(data);
@@ -149,6 +168,7 @@ async function selectStation(stationId, options = {}) {
     stationSelectionController?.abort();
     stationHistoryController?.abort();
     stationSelectionController = new AbortController();
+    syncWebSocketSubscription(stationId);
     console.log(`🎯 [MAP] Selecting station: ${stationId}`, options);
 
     const sidebar = document.getElementById('detail-sidebar');
@@ -930,4 +950,3 @@ function renderImuChart(history) {
         }
     });
 }
-

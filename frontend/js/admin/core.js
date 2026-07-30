@@ -96,12 +96,21 @@ class AdminManager {
         return { value: Number.isFinite(decimal) ? decimal : 105.0, format: 'decimal_deg' };
     }
 
-    setupWebSocketListener() {
+    async setupWebSocketListener() {
         if (this._disposed || document.documentElement.dataset.appView !== 'admin') return;
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/admin?token=${this.token}`;
 
         try {
+            const ticketResponse = await fetch('/api/auth/ws-ticket', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${this.token}` },
+                cache: 'no-store',
+            });
+            if (!ticketResponse.ok) throw new Error(`WebSocket ticket HTTP ${ticketResponse.status}`);
+            const { ticket } = await ticketResponse.json();
+            if (this._disposed || document.documentElement.dataset.appView !== 'admin') return;
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/admin?ticket=${encodeURIComponent(ticket)}`;
             this.ws = new WebSocket(wsUrl);
             this.ws.onmessage = (event) => {
                 const message = JSON.parse(event.data);
@@ -156,7 +165,13 @@ class AdminManager {
                 }, 5000);
             };
         } catch (e) {
-            console.error('WebSocket connection error:', e);
+            console.warn('Admin WebSocket unavailable:', e);
+            if (!this._disposed && document.documentElement.dataset.appView === 'admin') {
+                this._wsReconnectTimer = setTimeout(() => {
+                    this._wsReconnectTimer = null;
+                    this.setupWebSocketListener();
+                }, 5000);
+            }
         }
     }
 

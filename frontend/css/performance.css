@@ -1,0 +1,91 @@
+/* Rendering guardrails shared by the React shell and legacy feature views. */
+
+.route-loading {
+    contain: layout paint;
+}
+
+.station-list-content,
+.admin-main,
+.tab-content {
+    overscroll-behavior: contain;
+}
+
+body .station-item,
+body .sensor-item,
+body .admin-sidebar .nav-link,
+body .sidebar-close-btn,
+body .sidebar-close-tab,
+body #admin-nav-btn {
+    transition-property: transform, opacity, color, background-color, border-color, box-shadow;
+}
+
+.station-item,
+.sensor-item {
+    contain: layout paint style;
+}
+
+.station-virtual-list {
+    position: relative;
+    width: 100%;
+}
+
+.station-virtual-window {
+    position: absolute;
+    inset: 0 0 auto;
+    padding: 0;
+    will-change: transform;
+}
+
+.station-item.station-item-react {
+    width: 100%;
+    height: 76px;
+    margin: 0 0 8px;
+    color: var(--text-primary);
+    text-align: left;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.station-item-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.station-item-copy strong,
+.station-item-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.station-item-copy small {
+    color: var(--text-secondary);
+}
+
+.station-list-content:not(.is-scrolling) .station-item,
+.sensor-item,
+.detail-sidebar,
+.station-list-sidebar {
+    backface-visibility: hidden;
+}
+
+body.map-is-moving .station-list-sidebar,
+body.map-is-moving .detail-sidebar,
+.station-list-content.is-scrolling .station-item {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
+}

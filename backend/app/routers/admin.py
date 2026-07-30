@@ -1723,8 +1723,9 @@ async def verify_system_password(
     )
     config_record = result.scalar_one_or_none()
     
-    # Mặc định là 2025 nếu lỡ DB bị lỗi
-    stored_password = config_record.value if config_record else "password"
+    if not config_record or not config_record.value:
+        raise HTTPException(status_code=503, detail="Mật khẩu hệ thống chưa được cấu hình")
+    stored_password = config_record.value
     
     # 2. So sánh
     if payload.password == stored_password:

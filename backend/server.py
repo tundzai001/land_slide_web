@@ -4,11 +4,14 @@ Quick start server:
     python server.py
 """
 import uvicorn
+from app.config import settings
 
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=8001,
-        reload=True,
+        reload=settings.ENVIRONMENT.strip().lower() == "development",
+        proxy_headers=True,
+        forwarded_allow_ips="127.0.0.1",
     )

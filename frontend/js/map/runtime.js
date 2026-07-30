@@ -65,6 +65,7 @@ function stopMapBackgroundWork() {
     if (realtimeSensorUiFrameId !== null) cancelAnimationFrame(realtimeSensorUiFrameId);
     realtimeSensorUiFrameId = null;
     pendingRealtimeSensorUi.clear();
+    window.unmountReactStationList?.();
     destroyStationCharts();
     stopLongTerm3DAnimations();
 }

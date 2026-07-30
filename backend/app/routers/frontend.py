@@ -1,11 +1,19 @@
 """Frontend document, health-check, and WebSocket routes."""
+import asyncio
 import logging
 import time
 from pathlib import Path
 
+import jwt
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
+from .. import auth
+from ..config import settings
+from ..database import AuthSessionLocal, auth_engine, config_engine, data_engine
+from ..runtime import mqtt_service
 from ..websocket import manager as ws_manager
 
 router = APIRouter()
@@ -15,15 +23,58 @@ FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend"
 # ============================================================================
 # WEBSOCKET & HEALTH CHECK
 # ============================================================================
+async def _authorize_websocket(websocket: WebSocket) -> bool:
+    origin = websocket.headers.get("origin")
+    if origin and origin not in settings.cors_origins:
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return False
+
+    if websocket.url.path != "/ws/admin":
+        return True
+
+    token = websocket.query_params.get("ticket")
+    if not token:
+        await websocket.close(code=1008, reason="Authentication required")
+        return False
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+        )
+        username = payload.get("sub")
+        if not username or payload.get("purpose") != "websocket":
+            raise ValueError("Token has no subject")
+
+        async with AuthSessionLocal() as db:
+            user = await auth.get_user_by_username_cached(username, db)
+        if user is None or not user.is_active:
+            raise ValueError("Inactive user")
+    except (jwt.InvalidTokenError, ValueError):
+        await websocket.close(code=1008, reason="Invalid authentication")
+        return False
+    except Exception:
+        logger.exception("WebSocket authentication service failed")
+        await websocket.close(code=1013, reason="Authentication unavailable")
+        return False
+
+    return True
+
+
 @router.websocket("/ws/updates")
 @router.websocket("/ws/admin")
 async def websocket_endpoint(websocket: WebSocket):
+    if not await _authorize_websocket(websocket):
+        return
     await ws_manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_text()
             if data == "ping":
                 await ws_manager.send_personal(websocket, {"type": "pong"})
+            else:
+                await ws_manager.handle_client_message(websocket, data)
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -35,6 +86,38 @@ async def websocket_endpoint(websocket: WebSocket):
 @router.get("/api/health")
 async def health_check():
     return {"status": "ok", "time": time.time(), "db_status": "3-DB-Active"}
+
+
+@router.get("/api/health/live")
+async def liveness_check():
+    return {"status": "ok", "time": time.time()}
+
+
+@router.get("/api/health/ready")
+async def readiness_check():
+    async def check_database(name, engine):
+        try:
+            async with engine.connect() as connection:
+                await asyncio.wait_for(connection.execute(text("SELECT 1")), timeout=3)
+            return name, True
+        except Exception as exc:
+            logger.warning("Readiness check failed for %s: %s", name, exc)
+            return name, False
+
+    database_checks = await asyncio.gather(
+        check_database("auth_db", auth_engine),
+        check_database("config_db", config_engine),
+        check_database("data_db", data_engine),
+    )
+    checks = dict(database_checks)
+    try:
+        checks["mqtt"] = bool(mqtt_service.client.is_connected())
+    except Exception:
+        checks["mqtt"] = False
+
+    ready = all(checks.values())
+    payload = {"status": "ready" if ready else "degraded", "checks": checks, "time": time.time()}
+    return JSONResponse(status_code=200 if ready else 503, content=payload)
 
 @router.get("/")
 async def read_root(request: Request):

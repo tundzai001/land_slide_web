@@ -1,10 +1,15 @@
 """HTTP response middleware shared by the application entry point."""
+import time
+import uuid
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 
 class CharsetMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        started_at = time.perf_counter()
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
         response = await call_next(request)
         content_type = response.headers.get("content-type", "")
         textual = (
@@ -14,6 +19,8 @@ class CharsetMiddleware(BaseHTTPMiddleware):
         )
         if textual and "charset=" not in content_type.lower():
             response.headers["content-type"] = f"{content_type}; charset=utf-8"
+        response.headers["X-Request-ID"] = request_id
+        response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - started_at) * 1000:.1f}"
         return response
 
 
@@ -23,13 +30,15 @@ class VersionedAssetCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         path = request.url.path.lower()
-        if path.endswith((".js", ".css")) and request.query_params.get("v"):
+        versioned_extensions = (".js", ".jsx", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".mp3")
+        html_routes = {"/", "/management", "/management.html", "/admin", "/admin.html"}
+        if path.endswith(versioned_extensions) and request.query_params.get("v"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             if "Pragma" in response.headers:
                 del response.headers["Pragma"]
             if "Expires" in response.headers:
                 del response.headers["Expires"]
-        elif path.endswith((".html", ".js", ".css")):
+        elif path in html_routes or path.endswith((".html", ".js", ".css")):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"

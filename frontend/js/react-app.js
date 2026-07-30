@@ -33,7 +33,7 @@ const ROUTE_STYLES = {
         '/css/admin/pi-wizard.css?v=admin-css-split-1',
         '/css/admin-responsive.css?v=react-spa-12',
     ],
-    login: ['/css/login.css'],
+    login: ['/css/login.css?v=performance-1'],
 };
 const ROUTE_TEMPLATES = {
     map: [
@@ -200,7 +200,9 @@ function loadRouteStyles(view) {
 async function loadRouteTemplate(view) {
     const sources = ROUTE_TEMPLATES[view] || [];
     if (!sources.length || window.LegacyTemplates?.[view]) return;
-    for (const source of sources) await loadScript(source);
+    const aggregator = sources[sources.length - 1];
+    await Promise.all(sources.slice(0, -1).map(source => loadScript(source)));
+    await loadScript(aggregator);
     if (!window.LegacyTemplates?.[view]) {
         throw new Error(`Template ${view} did not register correctly`);
     }
@@ -221,7 +223,7 @@ async function bootLegacyPage(view) {
     if (view === 'map') {
         await loadScript('/js/map-main.js?v=map-split-1');
         await window.mapBundleReady;
-        await loadScript('/js/engine/simulation-controller.js', { type: 'module' });
+        await loadScript('/js/engine/simulation-controller.js?v=performance-1', { type: 'module' });
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });
         fireLegacyReady();
@@ -237,11 +239,11 @@ async function bootLegacyPage(view) {
             if (button) button.className = input.type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
         };
 
-        await loadScript('/js/toast-notifications.js');
+        await loadScript('/js/toast-notifications.js?v=performance-1');
         await loadScript('/js/admin-manager.js?v=admin-split-1');
         await window.adminBundleReady;
         await loadScript('/js/db-manager.js?v=export-bg-2');
-        await loadScript('/js/system-manager.js');
+        await loadScript('/js/system-manager.js?v=performance-1');
         await window.bootstrapAdminManager?.();
         window.bootstrapDatabaseManager?.();
         window.bootstrapSystemManager?.();

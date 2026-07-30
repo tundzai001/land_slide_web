@@ -1,4 +1,4 @@
-// Lightweight entry point: feature modules are loaded sequentially to preserve the legacy global API.
+// Lightweight entry point: download feature modules in parallel and execute them in order.
 (() => {
     if (window.mapBundleReady) return;
     const modules = [
@@ -26,10 +26,10 @@
         document.body.appendChild(script);
     });
 
-    window.mapBundleReady = modules.reduce(
-        (ready, src) => ready.then(() => loadModule(src)),
-        Promise.resolve(),
-    ).then(() => {
+    // Dynamic classic scripts with async=false execute in insertion order while
+    // their network requests are allowed to run in parallel.
+    window.mapBundleReady = Promise.all(modules.map(loadModule)).then(async () => {
+        await window.compileAndExecuteReactSource?.('/js/react/station-list.jsx?v=react-ui-1');
         window.__MAP_BUNDLE_LOADING__ = false;
         window.flushMapReadyQueue?.();
     }).catch((error) => {

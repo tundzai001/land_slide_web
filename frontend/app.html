@@ -15,10 +15,11 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/css/theme-variables.css">
-    <link rel="stylesheet" href="/css/theme-transition.css">
-    <link rel="stylesheet" href="/css/components.css">
-    <link rel="stylesheet" href="/css/shell.css">
+    <link rel="stylesheet" href="/css/theme-variables.css?v=performance-1">
+    <link rel="stylesheet" href="/css/theme-transition.css?v=performance-1">
+    <link rel="stylesheet" href="/css/components.css?v=performance-1">
+    <link rel="stylesheet" href="/css/shell.css?v=performance-1">
+    <link rel="stylesheet" href="/css/performance.css?v=performance-1">
 
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
     <script type="importmap">
@@ -46,23 +47,13 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="/js/theme-manager.js" charset="utf-8"></script>
+    <script src="/js/theme-manager.js?v=performance-1" charset="utf-8"></script>
     <script src="/js/auth.js?v=react-spa-14" charset="utf-8"></script>
+    <script src="/js/babel-runtime-loader.js?v=react-runtime-1" charset="utf-8"></script>
     <script>
         (async function() {
             try {
-                const response = await fetch('/js/react-app.js?v=react-spa-17');
-                if (!response.ok) throw new Error('Cannot load react-app.js');
-                const source = await response.text();
-                const compiled = Babel.transform(source, {
-                    presets: [
-                        ['react', { runtime: 'classic' }]
-                    ]
-                }).code;
-                const script = document.createElement('script');
-                script.charset = 'utf-8';
-                script.textContent = compiled;
-                document.body.appendChild(script);
+                await window.compileAndExecuteReactSource('/js/react-app.js?v=react-spa-18');
             } catch (error) {
                 console.error('Failed to load/compile react-app.js:', error);
             }
