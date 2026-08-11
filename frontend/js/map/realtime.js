@@ -22,6 +22,7 @@ function setupWebSocket() {
     socket.onopen = () => {
         if (wsConnection !== socket) return;
         console.log('✅ [WS] Connected');
+        document.documentElement.dataset.realtime = 'connected';
         wsReconnectAttempt = 0;
         syncWebSocketSubscription();
         gnssAdjustmentDebugState.wsStatus = 'CONNECTED';
@@ -65,6 +66,7 @@ function setupWebSocket() {
     socket.onclose = () => {
         if (wsConnection !== socket) return;
         console.warn('⚠️ [WS] Disconnected; scheduling reconnect...');
+        document.documentElement.dataset.realtime = 'disconnected';
         wsConnection = null;
         if (wsHeartbeatId) clearInterval(wsHeartbeatId);
         wsHeartbeatId = null;
@@ -74,7 +76,8 @@ function setupWebSocket() {
             syncGnssAdjustmentStatus();
         }
         else refreshGnssAdjustmentDebugUi();
-        const reconnectDelay = Math.min(15000, 1000 * (2 ** Math.min(wsReconnectAttempt, 4)));
+        const baseDelay = Math.min(30000, 1000 * (2 ** Math.min(wsReconnectAttempt, 5)));
+        const reconnectDelay = Math.round(baseDelay * (0.75 + Math.random() * 0.5));
         wsReconnectAttempt += 1;
         wsReconnectId = setTimeout(() => {
             wsReconnectId = null;

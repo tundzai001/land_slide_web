@@ -1038,6 +1038,7 @@ function initialize() {
 
     initMap();
     setupEventListeners();
+    setupMobileMapNavigation();
     setupMarkerLayerControls();
     setupGuestRescueUI();
     loadStations();
@@ -1066,4 +1067,47 @@ function initialize() {
     mapRefreshIntervalIds.push(setInterval(refreshCurrentStationDetail, 30000));
 
     console.log('✅ [MAP] Initialization complete!');
+}
+
+function setupMobileMapNavigation() {
+    const navigation = document.getElementById('map-bottom-nav');
+    const stationSheet = document.getElementById('station-list-sidebar');
+    const detailSheet = document.getElementById('detail-sidebar');
+    if (!navigation || !stationSheet || !detailSheet) return;
+
+    const closePrimarySheets = (except) => {
+        if (except !== stationSheet) stationSheet.classList.add('hidden');
+        if (except !== detailSheet) detailSheet.classList.remove('active');
+    };
+    navigation.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-map-action]');
+        if (!button) return;
+        const action = button.dataset.mapAction;
+        navigation.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        if (action === 'stations') {
+            closePrimarySheets(stationSheet);
+            stationSheet.classList.remove('hidden', 'force-hidden');
+            stationSheet.classList.add('active');
+        } else if (action === 'layers') {
+            closePrimarySheets();
+            document.getElementById('layer-mode-toggle')?.click();
+        } else if (action === 'rescue') {
+            closePrimarySheets();
+            document.getElementById('btn-guest-rescue')?.click();
+        } else if (action === 'account') {
+            closePrimarySheets();
+            document.getElementById('auth-btn')?.click();
+        }
+        setTimeout(() => map?.invalidateSize?.(), 220);
+    });
+
+    const header = detailSheet.querySelector('.sidebar-header');
+    header?.addEventListener('click', (event) => {
+        if (event.target.closest('button,a')) return;
+        const states = ['map-sheet-35', 'map-sheet-65', 'map-sheet-full'];
+        const current = states.findIndex(state => detailSheet.classList.contains(state));
+        detailSheet.classList.remove(...states);
+        detailSheet.classList.add(states[(current + 1) % states.length]);
+        setTimeout(() => map?.invalidateSize?.(), 220);
+    });
 }

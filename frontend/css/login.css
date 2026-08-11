@@ -25,8 +25,8 @@
     position: absolute;
     inset: 0;
     background-image:
-        linear-gradient(180deg, rgba(2, 6, 23, 0.3), rgba(2, 6, 23, 0.82)),
-        url("https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1600&auto=format&fit=crop");
+        radial-gradient(circle at 30% 25%, rgba(34, 211, 238, .24), transparent 25%),
+        linear-gradient(155deg, rgba(8, 47, 73, .7), rgba(2, 6, 23, .96));
     background-position: center;
     background-size: cover;
     background-repeat: no-repeat;
@@ -108,7 +108,7 @@
 }
 
 .login-back {
-    min-height: 38px;
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     gap: 9px;
@@ -127,6 +127,9 @@
     color: #fff;
     background: rgba(8, 47, 73, 0.88);
 }
+
+.login-toolbar { display: flex; justify-content: space-between; align-items: center; }
+.login-toolbar .login-back:last-child { width: 44px; padding: 0; justify-content: center; }
 
 .login-card {
     border: 1px solid rgba(148, 163, 184, 0.22);
@@ -298,8 +301,8 @@
         align-items: center;
         padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
         background-image:
-            linear-gradient(180deg, rgba(2, 6, 23, 0.64), #020617),
-            url("https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1200&auto=format&fit=crop");
+            radial-gradient(circle at 80% 10%, rgba(34, 211, 238, .18), transparent 25%),
+            linear-gradient(180deg, rgba(8, 47, 73, .5), #020617);
         background-position: center;
         background-size: cover;
         background-repeat: no-repeat;
@@ -333,3 +336,17 @@
         font-size: 1.38rem;
     }
 }
+
+[data-theme="light"] .login-page {
+    background: radial-gradient(circle at 82% 16%, rgba(13, 148, 136, .12), transparent 28%), #eef5f4;
+    color: #102a2e;
+}
+[data-theme="light"] .login-panel { background-color: #eef5f4; background-image: none; }
+[data-theme="light"] .login-card { background: rgba(255,255,255,.94); border-color: rgba(15,70,75,.16); color: #102a2e; box-shadow: 0 24px 70px rgba(15,70,75,.12); }
+[data-theme="light"] .login-card h2 { color: #102a2e; }
+[data-theme="light"] .login-subtitle { color: #5d7378; }
+[data-theme="light"] .login-field span,
+[data-theme="light"] .login-check { color: #29484e; }
+[data-theme="light"] .login-input,
+[data-theme="light"] .login-password-row { background: #fff; border-color: rgba(15,70,75,.22); color: #102a2e; }
+[data-theme="light"] .login-back { background: #fff; border-color: rgba(15,70,75,.18); color: #29484e; }

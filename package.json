@@ -1,0 +1,13 @@
+{
+  "name": "landslide-monitor-ui-tests",
+  "private": true,
+  "scripts": {
+    "build:frontend": "node scripts/build-frontend.mjs",
+    "test:ui": "playwright test",
+    "test:ui:update": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.0",
+    "esbuild": "^0.25.0"
+  }
+}

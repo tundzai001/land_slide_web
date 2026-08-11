@@ -4,16 +4,17 @@ import time
 import math
 import json
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .. import config as app_config
 from ..database import get_config_db
 from .. import auth
 from ..models import config as model_config
 from ..models.pi_device import PiDevice
+from ..services.pagination import normalize_page, set_pagination_headers
 
 logger = logging.getLogger(__name__)
 
@@ -231,15 +232,38 @@ async def heartbeat_pi_device(
 
 @router.get("/pi-devices")
 async def list_pi_devices(
+    response: Response,
+    q: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    device_status: Optional[str] = Query(None, alias="status"),
+    station_id: Optional[int] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: str = "-registered_at",
     db: AsyncSession = Depends(get_config_db),
     current_user=Depends(auth.get_current_user)
 ):
     """List all registered Pi devices (admin only)."""
     try:
-        res = await db.execute(
-            select(PiDevice).order_by(PiDevice.registered_at.desc())
-        )
-        devices = res.scalars().all()
+        query = select(PiDevice)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            query = query.where(or_(PiDevice.name.ilike(pattern), PiDevice.serial.ilike(pattern)))
+        normalized_status = (device_status or status_filter or "").strip().lower()
+        if normalized_status:
+            query = query.where(PiDevice.status == normalized_status)
+        if station_id is not None:
+            query = query.where(PiDevice.station_id == station_id)
+        sort_fields = {"registered_at": PiDevice.registered_at, "last_seen": PiDevice.last_seen, "name": PiDevice.name, "status": PiDevice.status}
+        field_name = sort.lstrip("-")
+        if field_name not in sort_fields:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        order_column = sort_fields[field_name]
+        query = query.order_by(order_column.desc() if sort.startswith("-") else order_column.asc())
+        page_offset, page_limit = normalize_page(offset, limit)
+        all_devices = list((await db.execute(query)).scalars().all())
+        set_pagination_headers(response, total=len(all_devices), offset=page_offset, limit=page_limit)
+        devices = all_devices[page_offset:] if page_limit is None else all_devices[page_offset:page_offset + page_limit]
 
         # Fetch station + project info for assigned devices
         station_info = {}  # station_id -> {name, project_name}
@@ -295,6 +319,8 @@ async def list_pi_devices(
             }
             for d in devices
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing Pi devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -29,7 +29,8 @@
     // Dynamic classic scripts with async=false execute in insertion order while
     // their network requests are allowed to run in parallel.
     window.mapBundleReady = Promise.all(modules.map(loadModule)).then(async () => {
-        await window.compileAndExecuteReactSource?.('/js/react/station-list.jsx?v=react-ui-1');
+        // stations.js includes an accessible DOM renderer, so production no
+        // longer needs to compile JSX in the browser.
         window.__MAP_BUNDLE_LOADING__ = false;
         window.flushMapReadyQueue?.();
     }).catch((error) => {

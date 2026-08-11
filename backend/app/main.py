@@ -30,6 +30,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
@@ -201,6 +202,9 @@ async def lifespan(app: FastAPI):
         mqtt_service.start()
         logger.info("✓ Background MQTT Service started")
 
+        from .services.scheduler import start_scheduler
+        await start_scheduler()
+
         gnss_rollup_task = asyncio.create_task(run_gnss_daily_rollup_daemon())
         cors_failover_task = asyncio.create_task(
             run_cors_fixed_base_failover_daemon()
@@ -215,6 +219,8 @@ async def lifespan(app: FastAPI):
 
     finally:
         logger.info("🛑 Shutting down...")
+        from .services.scheduler import stop_scheduler
+        stop_scheduler()
         if gnss_rollup_task and not gnss_rollup_task.done():
             gnss_rollup_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -259,7 +265,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["ETag", "Server-Timing", "X-Request-ID"],
+    expose_headers=[
+        "ETag", "Server-Timing", "X-Request-ID",
+        "X-Total-Count", "X-Offset", "X-Limit",
+    ],
 )
 app.add_middleware(CharsetMiddleware)
 app.include_router(admin_router.router)
@@ -277,6 +286,7 @@ app.include_router(stations_router.router)
 
 # ── Anti-cache middleware for frontend assets ──
 app.add_middleware(VersionedAssetCacheMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # Mount static files directory (for sounds, etc.)
 app.mount("/static", StaticFiles(directory=BACKEND_DIR / "static"), name="static")
@@ -290,4 +300,10 @@ app.mount("/static", StaticFiles(directory=BACKEND_DIR / "static"), name="static
 # =====================
 # Field Unit Provisioning API
 # =====================
-app.mount("/", StaticFiles(directory=PROJECT_ROOT / "frontend", html=True), name="frontend-static")
+# Only compiled/minified browser assets are public. Source JSX, templates and
+# feature modules remain outside the HTTP surface and are used only at build time.
+app.mount(
+    "/assets",
+    StaticFiles(directory=PROJECT_ROOT / "frontend" / "dist"),
+    name="frontend-assets",
+)

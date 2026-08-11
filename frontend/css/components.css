@@ -248,6 +248,15 @@
 
 /* === MOBILE-FRIENDLY BUTTON & FORM ADJUSTMENTS === */
 
+/* The visible icon can stay compact, but its interactive box must remain a
+   WCAG-friendly touch target on every viewport. */
+button,
+[role="button"],
+a.button {
+    min-width: 44px;
+    min-height: 44px;
+}
+
 /* Ensure all buttons have touch-friendly minimum heights */
 .btn {
     min-height: 44px;
@@ -258,7 +267,7 @@
 }
 
 .btn-sm {
-    min-height: 40px;
+    min-height: 44px;
     padding: 8px 12px;
 }
 

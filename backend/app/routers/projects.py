@@ -3,9 +3,10 @@ import asyncio
 import copy
 import logging
 import time
+from typing import Optional
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,7 @@ from ..models import auth as model_auth
 from ..models import config as model_config
 from ..runtime import cors_failover_status
 from ..services.access import get_optional_current_user_from_request, user_project_filter_ids
+from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
 from .cors_stations import _fetch_cors_base_stations_sync
 
 router = APIRouter(tags=["Projects"])
@@ -23,6 +25,12 @@ logger = logging.getLogger(__name__)
 @router.get("/api/projects")
 async def get_public_projects(
     request: Request,
+    response: Response,
+    q: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
     db_auth: AsyncSession = Depends(get_auth_db)
 ):
@@ -42,12 +50,23 @@ async def get_public_projects(
 
         if project_filter_ids is not None:
             if not project_filter_ids:
+                page_offset, page_limit = normalize_page(offset, limit)
+                set_pagination_headers(response, total=0, offset=page_offset, limit=page_limit)
                 return []
             stmt = stmt.where(model_config.Project.id.in_(project_filter_ids))
 
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            stmt = stmt.where(
+                model_config.Project.name.ilike(pattern)
+                | model_config.Project.project_code.ilike(pattern)
+            )
+        if is_active is not None:
+            stmt = stmt.where(model_config.Project.is_active.is_(is_active))
+        page_offset, page_limit = normalize_page(offset, limit)
         result = await db.execute(stmt)
 
-        return [
+        rows = [
             {
                 "id": p.id,
                 "project_code": p.project_code,
@@ -57,17 +76,34 @@ async def get_public_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
-                "gnss_clusters": getattr(p, "gnss_clusters", None)
+                "gnss_clusters": getattr(p, "gnss_clusters", None),
+                "auto_adjustment_config": getattr(p, "auto_adjustment_config", None)
             }
             for p, count in result.all()
         ]
+        allowed_sort = {"name", "project_code", "created_at", "station_count"}
+        if sort:
+            field = sort.lstrip("-")
+            if field not in allowed_sort:
+                raise HTTPException(status_code=422, detail="Unsupported sort field")
+            rows.sort(key=lambda row: row.get(field) if row.get(field) is not None else "", reverse=sort.startswith("-"))
+        set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
+        return slice_rows(rows, page_offset, page_limit)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error loading public projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/admin/projects")
 async def get_projects(
+    response: Response,
+    q: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
@@ -89,7 +125,7 @@ async def get_projects(
         if current_user.role == 'operator' and assigned:
             projects_with_counts = [(p, c) for p, c in projects_with_counts if p.id in assigned]
 
-        return [
+        rows = [
             {
                 "id": p.id,
                 "project_code": p.project_code,
@@ -99,11 +135,28 @@ async def get_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
-                "gnss_clusters": getattr(p, "gnss_clusters", None)
+                "gnss_clusters": getattr(p, "gnss_clusters", None),
+                "auto_adjustment_config": getattr(p, "auto_adjustment_config", None)
             }
             for p, count in projects_with_counts
         ]
+        normalized_q = (q or "").strip().lower()
+        if normalized_q:
+            rows = [row for row in rows if normalized_q in row["name"].lower() or normalized_q in row["project_code"].lower()]
+        if is_active is not None:
+            rows = [row for row in rows if row["is_active"] is is_active]
+        allowed_sort = {"name", "project_code", "created_at", "station_count"}
+        if sort:
+            field = sort.lstrip("-")
+            if field not in allowed_sort:
+                raise HTTPException(status_code=422, detail="Unsupported sort field")
+            rows.sort(key=lambda row: row.get(field) if row.get(field) is not None else "", reverse=sort.startswith("-"))
+        page_offset, page_limit = normalize_page(offset, limit)
+        set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
+        return slice_rows(rows, page_offset, page_limit)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error loading projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -187,11 +240,21 @@ async def update_project(
             project.is_active = project_data['is_active']
         if 'gnss_clusters' in project_data:
             project.gnss_clusters = project_data['gnss_clusters']
+        if 'auto_adjustment_config' in project_data:
+            project.auto_adjustment_config = project_data['auto_adjustment_config']
 
         project.updated_at = int(time.time())
 
         await db.commit()
         await db.refresh(project)
+
+        if 'auto_adjustment_config' in project_data:
+            try:
+                from ..services.scheduler import reload_scheduler
+                await reload_scheduler()
+            except Exception as e:
+                logger.warning(f"Could not reload scheduler: {e}")
+
 
         return {
             "id": project.id,
@@ -199,7 +262,8 @@ async def update_project(
             "name": project.name,
             "description": project.description,
             "location": project.location,
-            "gnss_clusters": project.gnss_clusters
+            "gnss_clusters": project.gnss_clusters,
+            "auto_adjustment_config": project.auto_adjustment_config
         }
 
     except HTTPException:
@@ -228,7 +292,8 @@ async def get_project(
             "name": project.name,
             "description": project.description,
             "location": project.location,
-            "gnss_clusters": project.gnss_clusters
+            "gnss_clusters": project.gnss_clusters,
+            "auto_adjustment_config": project.auto_adjustment_config
         }
     except HTTPException:
         raise
@@ -263,5 +328,3 @@ async def delete_project(
         await db.rollback()
         logger.error(f"Error deleting project: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-

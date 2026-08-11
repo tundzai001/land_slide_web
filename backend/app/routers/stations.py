@@ -3,10 +3,10 @@ import logging
 import math
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from ..runtime import analyzer, mqtt_service
 from ..services.gnss_rollup import _utc_day_start
 from ..services.access import get_optional_current_user_from_request, user_project_filter_ids
 from ..services.station_policy import check_operator_project_access, get_offline_threshold
+from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
 
 router = APIRouter(tags=["Stations"])
 logger = logging.getLogger(__name__)
@@ -222,15 +223,30 @@ def _summarize_station_alerts(
 @router.get("/api/admin/projects/{project_id}/stations")
 async def get_stations_by_project(
     project_id: int,
+    response: Response,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
     # Enforce operator project access
     check_operator_project_access(current_user, project_id)
-    result = await db_config.execute(
-        select(model_config.Station).where(model_config.Station.project_id == project_id)
-    )
+    stmt = select(model_config.Station).where(model_config.Station.project_id == project_id)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        stmt = stmt.where(model_config.Station.name.ilike(pattern) | model_config.Station.station_code.ilike(pattern))
+    sort_fields = {"name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
+    if sort:
+        field_name = sort.lstrip("-")
+        if field_name not in sort_fields:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        column = sort_fields[field_name]
+        stmt = stmt.order_by(column.desc() if sort.startswith("-") else column.asc())
+    result = await db_config.execute(stmt)
     stations = result.scalars().all()
     devices_by_station, latest_by_key, _alerts_by_station = await _load_station_runtime_maps(
         stations, db_config, db_data
@@ -281,7 +297,14 @@ async def get_stations_by_project(
             "devices": devices_list
         })
 
-    return stations_with_status
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status not in {"online", "offline", "stale"}:
+            raise HTTPException(status_code=422, detail="Unsupported status filter")
+        stations_with_status = [row for row in stations_with_status if row["status"] == normalized_status]
+    page_offset, page_limit = normalize_page(offset, limit)
+    set_pagination_headers(response, total=len(stations_with_status), offset=page_offset, limit=page_limit)
+    return slice_rows(stations_with_status, page_offset, page_limit)
 
 @router.post("/api/admin/projects/{project_id}/stations", response_model=schemas.StationResponse)
 async def create_station_in_project(
@@ -345,9 +368,49 @@ async def create_station_in_project(
 
 # STATION DATA ENDPOINTS
 # ============================================================================
+@router.get("/api/public/dashboard-summary")
+async def get_public_dashboard_summary(
+    db_config: AsyncSession = Depends(get_config_db),
+    db_data: AsyncSession = Depends(get_data_db),
+):
+    """Return small landing metrics without transferring every station."""
+    stations = (await db_config.execute(select(model_config.Station))).scalars().all()
+    devices_by_station, latest_by_key, _alerts = await _load_station_runtime_maps(
+        stations, db_config, db_data
+    )
+    now = int(time.time())
+    counts = {"total": len(stations), "online": 0, "offline": 0, "stale": 0}
+    for station in stations:
+        online = any(
+            latest_by_key.get((int(station.id), str(device.device_type)), 0)
+            and now - latest_by_key[(int(station.id), str(device.device_type))]
+            < get_offline_threshold(station.config, device.device_type)
+            for device in devices_by_station[int(station.id)]
+        )
+        if online:
+            counts["online"] += 1
+        elif is_offline_display_enabled(station.config):
+            counts["stale"] += 1
+        else:
+            counts["offline"] += 1
+    return {
+        "stations": counts,
+        "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
 @router.get("/api/stations")
 async def get_stations(
     request: Request,
+    response: Response,
+    project_id: Optional[int] = None,
+    status: Optional[str] = None,
+    risk: Optional[str] = None,
+    bbox: Optional[str] = None,
+    q: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db),
     db_auth: AsyncSession = Depends(get_auth_db)
@@ -359,11 +422,37 @@ async def get_stations(
         current_user = await get_optional_current_user_from_request(request, db_auth)
         project_filter_ids = user_project_filter_ids(current_user)
 
+        page_offset, page_limit = normalize_page(offset, limit)
         stmt = select(model_config.Station)
         if project_filter_ids is not None:
             if not project_filter_ids:
+                set_pagination_headers(response, total=0, offset=page_offset, limit=page_limit)
                 return []
             stmt = stmt.where(model_config.Station.project_id.in_(project_filter_ids))
+        if project_id is not None:
+            stmt = stmt.where(model_config.Station.project_id == project_id)
+        normalized_q = (q or "").strip().lower()
+        if normalized_q:
+            pattern = f"%{normalized_q}%"
+            stmt = stmt.where(
+                model_config.Station.name.ilike(pattern)
+                | model_config.Station.station_code.ilike(pattern)
+            )
+
+        sort_fields = {
+            "name": model_config.Station.name,
+            "station_code": model_config.Station.station_code,
+            "created_at": model_config.Station.created_at,
+            "updated_at": model_config.Station.updated_at,
+        }
+        sort_value = (sort or "").strip()
+        descending = sort_value.startswith("-")
+        sort_name = sort_value.lstrip("-")
+        if sort_value and sort_name not in sort_fields:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        if sort_name:
+            column = sort_fields[sort_name]
+            stmt = stmt.order_by(column.desc() if descending else column.asc())
 
         result = await db_config.execute(stmt)
         stations = result.scalars().all()
@@ -410,9 +499,38 @@ async def get_stations(
                 "last_update": station.last_update,
                 "risk_level": computed_risk
             })
+        normalized_status = (status or "").strip().lower()
+        if normalized_status:
+            if normalized_status not in {"online", "offline", "stale"}:
+                raise HTTPException(status_code=422, detail="Unsupported status filter")
+            stations_with_status = [row for row in stations_with_status if row["status"] == normalized_status]
+        normalized_risk = (risk or "").strip().upper()
+        if normalized_risk:
+            if normalized_risk not in {"LOW", "MEDIUM", "WARNING", "HIGH", "CRITICAL", "EXTREME"}:
+                raise HTTPException(status_code=422, detail="Unsupported risk filter")
+            stations_with_status = [row for row in stations_with_status if row["risk_level"] == normalized_risk]
+        if bbox:
+            try:
+                west, south, east, north = (float(value.strip()) for value in bbox.split(","))
+                if west > east or south > north:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="bbox must be west,south,east,north")
+            def in_bbox(row):
+                location = row.get("location") or {}
+                try:
+                    lat, lon = float(location["lat"]), float(location.get("lon", location.get("lng")))
+                    return west <= lon <= east and south <= lat <= north
+                except (KeyError, TypeError, ValueError):
+                    return False
+            stations_with_status = [row for row in stations_with_status if in_bbox(row)]
 
-        return stations_with_status
+        total = len(stations_with_status)
+        set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
+        return slice_rows(stations_with_status, page_offset, page_limit)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error loading stations: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

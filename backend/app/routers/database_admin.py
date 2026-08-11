@@ -2,8 +2,10 @@
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, desc, func, select
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import auth
@@ -11,6 +13,7 @@ from ..database import get_config_db, get_data_db
 from ..models import auth as model_auth
 from ..models import config as model_config
 from ..models import data as model_data
+from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -59,15 +62,36 @@ async def get_database_stats(
 
 @router.get("/api/admin/db/stations")
 async def admin_get_all_stations(
+    response: Response,
+    q: Optional[str] = None,
+    project_id: Optional[int] = None,
+    status: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy tất cả stations từ DB"""
     try:
-        result = await db.execute(select(model_config.Station))
+        query = select(model_config.Station)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            query = query.where(or_(model_config.Station.name.ilike(pattern), model_config.Station.station_code.ilike(pattern)))
+        if project_id is not None:
+            query = query.where(model_config.Station.project_id == project_id)
+        if status:
+            query = query.where(model_config.Station.status == status)
+        sort_fields = {"id": model_config.Station.id, "name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
+        if sort:
+            field = sort.lstrip("-")
+            if field not in sort_fields:
+                raise HTTPException(status_code=422, detail="Unsupported sort field")
+            column = sort_fields[field]
+            query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+        result = await db.execute(query)
         stations = result.scalars().all()
-        
-        return [
+        rows = [
             {
                 "id": s.id,
                 "station_code": s.station_code,
@@ -82,6 +106,11 @@ async def admin_get_all_stations(
             }
             for s in stations
         ]
+        page_offset, page_limit = normalize_page(offset, limit)
+        set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
+        return slice_rows(rows, page_offset, page_limit)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching stations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -89,15 +118,36 @@ async def admin_get_all_stations(
 
 @router.get("/api/admin/db/devices")
 async def admin_get_all_devices(
+    response: Response,
+    q: Optional[str] = None,
+    station_id: Optional[int] = None,
+    is_active: Optional[bool] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy tất cả devices từ DB"""
     try:
-        result = await db.execute(select(model_config.Device))
+        query = select(model_config.Device)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            query = query.where(or_(model_config.Device.name.ilike(pattern), model_config.Device.device_code.ilike(pattern)))
+        if station_id is not None:
+            query = query.where(model_config.Device.station_id == station_id)
+        if is_active is not None:
+            query = query.where(model_config.Device.is_active.is_(is_active))
+        sort_fields = {"id": model_config.Device.id, "name": model_config.Device.name, "device_code": model_config.Device.device_code, "created_at": model_config.Device.created_at}
+        if sort:
+            field = sort.lstrip("-")
+            if field not in sort_fields:
+                raise HTTPException(status_code=422, detail="Unsupported sort field")
+            column = sort_fields[field]
+            query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+        result = await db.execute(query)
         devices = result.scalars().all()
-        
-        return [
+        rows = [
             {
                 "id": d.id,
                 "device_code": d.device_code,
@@ -114,6 +164,11 @@ async def admin_get_all_devices(
             }
             for d in devices
         ]
+        page_offset, page_limit = normalize_page(offset, limit)
+        set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
+        return slice_rows(rows, page_offset, page_limit)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -121,19 +176,32 @@ async def admin_get_all_devices(
 
 @router.get("/api/admin/db/sensor-data")
 async def admin_get_sensor_data(
+    response: Response,
+    offset: int = 0,
     limit: int = 500,
+    station_id: Optional[int] = None,
+    sensor_type: Optional[str] = None,
+    sort: str = "-timestamp",
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy sensor data gần nhất"""
     try:
-        result = await db.execute(
-            select(model_data.SensorData)
-            .order_by(desc(model_data.SensorData.timestamp))
-            .limit(limit)
-        )
+        query = select(model_data.SensorData)
+        if station_id is not None:
+            query = query.where(model_data.SensorData.station_id == station_id)
+        if sensor_type:
+            query = query.where(model_data.SensorData.sensor_type == sensor_type)
+        sort_fields = {"id": model_data.SensorData.id, "timestamp": model_data.SensorData.timestamp, "station_id": model_data.SensorData.station_id, "sensor_type": model_data.SensorData.sensor_type}
+        field = sort.lstrip("-")
+        if field not in sort_fields:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        page_offset, page_limit = normalize_page(offset, limit, max_limit=2000)
+        total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
+        column = sort_fields[field]
+        result = await db.execute(query.order_by(column.desc() if sort.startswith("-") else column.asc()).offset(page_offset).limit(page_limit))
         data = result.scalars().all()
-        
+        set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
         return [
             {
                 "id": d.id,
@@ -149,6 +217,8 @@ async def admin_get_sensor_data(
             }
             for d in data
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching sensor data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -156,19 +226,35 @@ async def admin_get_sensor_data(
 
 @router.get("/api/admin/db/alerts")
 async def admin_get_alerts(
+    response: Response,
+    offset: int = 0,
     limit: int = 200,
+    station_id: Optional[int] = None,
+    level: Optional[str] = None,
+    is_resolved: Optional[bool] = None,
+    sort: str = "-timestamp",
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy alerts gần nhất"""
     try:
-        result = await db.execute(
-            select(model_data.Alert)
-            .order_by(desc(model_data.Alert.timestamp))
-            .limit(limit)
-        )
+        query = select(model_data.Alert)
+        if station_id is not None:
+            query = query.where(model_data.Alert.station_id == station_id)
+        if level:
+            query = query.where(model_data.Alert.level == level.upper())
+        if is_resolved is not None:
+            query = query.where(model_data.Alert.is_resolved.is_(is_resolved))
+        sort_fields = {"id": model_data.Alert.id, "timestamp": model_data.Alert.timestamp, "station_id": model_data.Alert.station_id, "level": model_data.Alert.level}
+        field = sort.lstrip("-")
+        if field not in sort_fields:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        page_offset, page_limit = normalize_page(offset, limit, max_limit=1000)
+        total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
+        column = sort_fields[field]
+        result = await db.execute(query.order_by(column.desc() if sort.startswith("-") else column.asc()).offset(page_offset).limit(page_limit))
         alerts = result.scalars().all()
-        
+        set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
         return [
             {
                 "id": a.id,
@@ -181,6 +267,8 @@ async def admin_get_alerts(
             }
             for a in alerts
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -379,9 +379,11 @@ function renderStationList(stations) {
                 if (badge.textContent.trim() !== riskUi.display) badge.textContent = riskUi.display;
             }
         } else {
-            div = document.createElement('div');
+            div = document.createElement('button');
+            div.type = 'button';
             div.className = 'station-item';
             div.dataset.stationId = st.id;
+            div.setAttribute('aria-label', `${st.name}: ${riskUi.display}`);
             div.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
                     <div>

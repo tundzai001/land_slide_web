@@ -586,7 +586,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     imuCamera.position.set(5, 6, 8);
 
     imuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    imuRenderer.setPixelRatio(window.devicePixelRatio);
+    imuRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     imuRenderer.setSize(dims.w, dims.h);
     imuRenderer.shadowMap.enabled = true;
     imuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -810,7 +810,7 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         realtimeImuCamera.position.set(5, 6, 8);
 
         realtimeImuRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        realtimeImuRenderer.setPixelRatio(window.devicePixelRatio);
+        realtimeImuRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
         realtimeImuRenderer.setSize(dims.w, dims.h);
         realtimeImuRenderer.shadowMap.enabled = true;
         realtimeImuRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1029,4 +1029,3 @@ function renderImuLongTermSection(imuData) {
     document.getElementById('imu-trend-icon').textContent = trendIcons[analysis.trend] || '';
     document.getElementById('imu-trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
 }
-

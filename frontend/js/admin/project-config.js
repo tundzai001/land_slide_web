@@ -42,6 +42,11 @@ class AdminProjectConfigFeature extends window.AdminManager {
             this.projectConfigModal = new bootstrap.Modal(document.getElementById('projectConfigModal'));
         }
         this.projectConfigModal.show();
+
+        // 4. Load Auto-Adjustment config
+        if (typeof this.loadAutoAdjustmentConfig === 'function') {
+            this.loadAutoAdjustmentConfig(project);
+        }
     }
 
     addClusterRow(container, name = '', desc = '', base_station_code = '', stations = [], base_stream = '', clusterConfig = {}) {
@@ -415,7 +420,8 @@ class AdminProjectConfigFeature extends window.AdminManager {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    gnss_clusters: clusters
+                    gnss_clusters: clusters,
+                    auto_adjustment_config: typeof this.collectAutoAdjustmentConfig === 'function' ? this.collectAutoAdjustmentConfig() : undefined
                 })
             });
 

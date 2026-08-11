@@ -128,7 +128,19 @@ function setupEventListeners() {
     // ✅ NEW: Mở Digital Twin 3D
     const btnDigitalTwin = document.getElementById('btn-digital-twin');
     if (btnDigitalTwin) {
-        btnDigitalTwin.addEventListener('click', () => {
+        btnDigitalTwin.addEventListener('click', async () => {
+            if (typeof window.openDigitalTwin !== 'function') {
+                btnDigitalTwin.disabled = true;
+                try {
+                    await window.loadFeatureLibrary?.('digital-twin');
+                } catch (error) {
+                    console.error('[DIGITAL TWIN] Load failed:', error);
+                    window.toast?.error?.('Không thể tải mô phỏng 3D.');
+                    return;
+                } finally {
+                    btnDigitalTwin.disabled = false;
+                }
+            }
             if (currentStationData) {
                 console.log('🌋 [DIGITAL TWIN] Opening for station:', currentStationData.id);
                 const rainData = currentStationData.sensors && currentStationData.sensors.rain && currentStationData.sensors.rain.latest ? currentStationData.sensors.rain.latest.data : null;

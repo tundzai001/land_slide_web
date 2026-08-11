@@ -1,5 +1,5 @@
 # backend/app/models/pi_device.py
-from sqlalchemy import Column, Integer, String, BigInteger, JSON, Boolean
+from sqlalchemy import Column, Integer, String, BigInteger, JSON, Boolean, Index
 from .config import BaseConfig  # shares metadata with config DB → auto-created with create_all
 
 
@@ -24,4 +24,7 @@ class PiDevice(BaseConfig):
     registered_at = Column(BigInteger, nullable=False)
     mqtt_topic    = Column(String(255), nullable=True)       # MQTT topic cho pi_point (light/siren control)
     extra_config  = Column(JSON, default={})                 # MQTT info, firmware, v.v.
+
+
+Index("ix_pi_devices_status_station_seen", PiDevice.status, PiDevice.station_id, PiDevice.last_seen)
 

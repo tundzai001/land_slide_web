@@ -18,7 +18,7 @@ import paho.mqtt.client as mqtt
 import io
 from io import BytesIO, StringIO
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Response
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,7 @@ from ..database import get_auth_db, get_config_db, get_data_db, ConfigSessionLoc
 from ..models import auth as model_auth
 from ..models import config as model_config
 from ..models import data as model_data
+from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
 import math
 import json
 import uuid
@@ -492,11 +493,33 @@ def get_default_station_config():
 
 @router.get("/users", response_model=List[schemas.UserResponse])
 async def get_users(
+    response: Response,
+    q: Optional[str] = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_auth_db), # ✅ Dùng Auth DB
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
-    result = await db.execute(select(model_auth.User))
-    return result.scalars().all()
+    users = list((await db.execute(select(model_auth.User))).scalars().all())
+    normalized_q = (q or "").strip().lower()
+    if normalized_q:
+        users = [user for user in users if normalized_q in (user.username or "").lower() or normalized_q in (user.full_name or "").lower()]
+    if role:
+        users = [user for user in users if user.role == role]
+    if is_active is not None:
+        users = [user for user in users if user.is_active is is_active]
+    allowed_sort = {"id", "username", "full_name", "role", "is_active"}
+    if sort:
+        field = sort.lstrip("-")
+        if field not in allowed_sort:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        users.sort(key=lambda user: getattr(user, field, None) or "", reverse=sort.startswith("-"))
+    page_offset, page_limit = normalize_page(offset, limit)
+    set_pagination_headers(response, total=len(users), offset=page_offset, limit=page_limit)
+    return slice_rows(users, page_offset, page_limit)
 
 @router.post("/users", response_model=schemas.UserResponse)
 async def create_user(

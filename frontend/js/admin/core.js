@@ -56,10 +56,7 @@ class AdminManager {
                 path: window.location.pathname,
                 search: window.location.search,
             });
-            window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
-            sessionStorage.setItem('loginReturnView', 'admin');
-            sessionStorage.setItem('openLandingLogin', 'true');
-            window.location.href = '/';
+            window.location.href = '/login?return_to=%2Fmanagement';
             return;
         }
 

@@ -286,22 +286,13 @@ class AuthManager {
             console.log('ℹ️ [AUTH] Not authenticated');
 
             // Reset auth button
-            authBtn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i> <span>Login</span>';
+            authBtn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i> <span>Đăng nhập</span>';
             authBtn.classList.add('btn-primary');
             authBtn.classList.remove('btn-outline-danger');
             authBtn.onclick = () => {
                 const currentPath = window.location.pathname;
-                const currentView = currentPath === '/management' || currentPath === '/admin'
-                    ? 'admin'
-                    : 'map';
-                sessionStorage.setItem('loginReturnView', currentView);
-                if (typeof window.appNavigate === 'function') {
-                    sessionStorage.setItem('openLandingLogin', 'true');
-                    window.location.href = '/';
-                    return;
-                }
-                sessionStorage.setItem('openLandingLogin', 'true');
-                window.location.href = '/';
+                const returnTo = currentPath === '/management' || currentPath === '/admin' ? '/management' : '/map';
+                window.location.href = `/login?return_to=${encodeURIComponent(returnTo)}`;
             };
 
             // Hide user elements
@@ -332,8 +323,8 @@ class AuthManager {
 
     requireAuth(redirectUrl = '/') {
         if (!this.isAuthenticated()) {
-            sessionStorage.setItem('openLandingLogin', 'true');
-            window.location.href = redirectUrl;
+            const returnTo = redirectUrl.startsWith('/') ? redirectUrl : window.location.pathname;
+            window.location.href = `/login?return_to=${encodeURIComponent(returnTo)}`;
             return false;
         }
         return true;
@@ -350,8 +341,7 @@ class AuthManager {
 
     async apiFetch(url, options = {}) {
         if (!this.token) {
-            sessionStorage.setItem('openLandingLogin', 'true');
-            window.location.href = '/';
+            window.location.href = `/login?return_to=${encodeURIComponent(window.location.pathname)}`;
             return;
         }
 

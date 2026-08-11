@@ -93,6 +93,13 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <div id="map">
     </div>
 
+    <nav class="map-bottom-nav" id="map-bottom-nav" aria-label="Điều hướng bản đồ">
+        <button type="button" data-map-action="stations"><i class="bi bi-hdd-network"></i><span>Trạm</span></button>
+        <button type="button" data-map-action="layers"><i class="bi bi-layers"></i><span>Lớp bản đồ</span></button>
+        <button type="button" data-map-action="rescue"><i class="bi bi-life-preserver"></i><span>Cứu hộ</span></button>
+        <button type="button" data-map-action="account"><i class="bi bi-person-circle"></i><span>Tài khoản</span></button>
+    </nav>
+
     <!-- CUSTOM GLASS ZOOM CONTROLS (Bottom-Right) -->
     <div class="custom-map-controls">
         <button class="map-ctrl-btn" id="map-zoom-in" title="Phóng to">

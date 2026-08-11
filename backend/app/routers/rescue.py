@@ -3,9 +3,9 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -14,6 +14,7 @@ from ..database import get_data_db
 from ..models import auth as model_auth
 from ..models import data as model_data
 from ..services import rescue_storage
+from ..services.pagination import normalize_page, set_pagination_headers
 from ..websocket import manager as ws_manager
 
 router = APIRouter()
@@ -127,19 +128,44 @@ async def create_rescue_request(
 
 @router.get("/api/admin/rescue-requests")
 async def get_rescue_requests(
+    response: Response,
     status_filter: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    offset: int = 0,
     limit: int = 100,
+    sort: str = "-created_at",
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user),
 ):
     _require_admin(current_user)
     query = select(model_data.RescueRequest)
-    normalized = (status_filter or "").strip().lower()
+    normalized = (status or status_filter or "").strip().lower()
     if normalized in ("pending", "resolved", "rejected"):
         query = query.where(model_data.RescueRequest.status == normalized)
-    query = query.order_by(desc(model_data.RescueRequest.created_at)).limit(
-        max(1, min(int(limit), 500))
-    )
+    normalized_q = (q or "").strip()
+    if normalized_q:
+        pattern = f"%{normalized_q}%"
+        query = query.where(or_(
+            model_data.RescueRequest.requester_name.ilike(pattern),
+            model_data.RescueRequest.phone.ilike(pattern),
+            model_data.RescueRequest.message.ilike(pattern),
+        ))
+    page_offset, page_limit = normalize_page(offset, limit)
+    sort_fields = {
+        "created_at": model_data.RescueRequest.created_at,
+        "status": model_data.RescueRequest.status,
+        "requester_name": model_data.RescueRequest.requester_name,
+    }
+    field_name = sort.lstrip("-")
+    if field_name not in sort_fields:
+        raise HTTPException(status_code=422, detail="Unsupported sort field")
+    order_column = sort_fields[field_name]
+    query = query.order_by(order_column.desc() if sort.startswith("-") else order_column.asc())
+    count_query = select(func.count()).select_from(query.order_by(None).subquery())
+    total = int((await db.execute(count_query)).scalar() or 0)
+    query = query.offset(page_offset).limit(page_limit)
+    set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
     rows = (await db.execute(query)).scalars().all()
     result = []
     for row in rows:

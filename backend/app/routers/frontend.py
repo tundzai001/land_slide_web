@@ -18,7 +18,7 @@ from ..websocket import manager as ws_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend"
+FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 # ============================================================================
 # WEBSOCKET & HEALTH CHECK
@@ -144,5 +144,9 @@ async def read_app():
 
 @router.get("/map")
 @router.get("/login")
-async def redirect_legacy_frontend_routes_to_landing():
-    return RedirectResponse(url="/", status_code=307)
+async def read_map_or_login():
+    """Serve the route-aware application shell for stable deep links."""
+    file_path = FRONTEND_DIR / "app.html"
+    if file_path.exists():
+        return FileResponse(file_path, media_type="text/html; charset=utf-8")
+    return {"error": "Frontend not found"}

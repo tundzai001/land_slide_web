@@ -3,7 +3,7 @@
    Tablet/mobile: detail panel becomes a bottom sheet, controls stay thumb-safe. */
 
 :root {
-    --map-navbar-h: 56px;
+    --map-navbar-h: calc(56px + env(safe-area-inset-top));
     --map-edge: 16px;
     --map-bottom-safe: max(18px, env(safe-area-inset-bottom));
     --map-control-size: 42px;
@@ -11,6 +11,7 @@
 
 .top-navbar {
     height: var(--map-navbar-h);
+    padding-top: env(safe-area-inset-top);
     gap: 12px;
     padding-inline: var(--map-edge);
 }
@@ -132,7 +133,7 @@
 
 @media (max-width: 900px) {
     :root {
-        --map-navbar-h: 58px;
+        --map-navbar-h: calc(58px + env(safe-area-inset-top));
         --map-edge: 12px;
     }
 
@@ -145,9 +146,9 @@
     }
 
     .navbar-hamburger {
-        width: 38px;
-        min-width: 38px;
-        height: 38px;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
         padding: 0;
         font-size: 1.35rem;
     }
@@ -160,7 +161,7 @@
 
     #admin-nav-btn {
         max-width: 154px;
-        min-height: 38px;
+        min-height: 44px;
         padding: 0 12px;
         white-space: nowrap;
         overflow: hidden;
@@ -169,20 +170,20 @@
     }
 
     .layer-toggle-switch {
-        height: 38px;
+        height: 44px;
         padding: 0 7px;
         gap: 5px;
     }
 
     #theme-toggle-btn {
-        width: 38px;
-        min-width: 38px;
-        height: 38px;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
     }
 
     #auth-btn {
         min-width: 66px;
-        height: 38px;
+        height: 44px;
         padding: 0 10px !important;
         border-radius: 9px;
         font-size: 0.78rem;
@@ -255,9 +256,9 @@
 
 @media (max-width: 600px) {
     :root {
-        --map-navbar-h: 52px;
+        --map-navbar-h: calc(52px + env(safe-area-inset-top));
         --map-edge: 8px;
-        --map-control-size: 40px;
+        --map-control-size: 44px;
     }
 
     .top-navbar {
@@ -300,7 +301,7 @@
 
     #auth-btn {
         min-width: 56px;
-        height: 36px;
+        height: 44px;
         padding: 0 8px !important;
         font-size: 0.72rem;
     }
@@ -389,5 +390,80 @@
     #auth-btn {
         min-width: 52px;
         padding: 0 7px !important;
+    }
+}
+
+/* Mobile map navigation and snap-height sheets. This is the sole responsive
+   stylesheet loaded for the map route. */
+.map-bottom-nav { display: none; }
+
+html[data-realtime="disconnected"] .top-navbar::after {
+    content: "Mất kết nối · đang thử lại";
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    border: 1px solid rgba(245, 158, 11, .45);
+    border-radius: 99px;
+    background: var(--bg-secondary);
+    color: var(--accent-warning);
+    font-size: .72rem;
+    white-space: nowrap;
+    box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 900px) {
+    .map-bottom-nav {
+        position: fixed;
+        z-index: 1600;
+        inset: auto 0 0;
+        height: calc(62px + env(safe-area-inset-bottom));
+        padding: 5px max(6px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(6px, env(safe-area-inset-left));
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+        border-top: 1px solid var(--border-color);
+        backdrop-filter: blur(16px);
+    }
+
+    .map-bottom-nav button {
+        min-width: 0;
+        min-height: 52px;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 1px;
+        padding: 3px;
+        border: 0;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: .68rem;
+    }
+
+    .map-bottom-nav button i { font-size: 1.15rem; }
+    .map-bottom-nav button.active { color: var(--accent-primary); }
+    .station-list-sidebar { height: calc(100svh - var(--map-navbar-h) - 62px - env(safe-area-inset-bottom)); }
+    .detail-sidebar { bottom: calc(62px + env(safe-area-inset-bottom)); height: min(65svh, 560px); }
+    .detail-sidebar.map-sheet-35 { height: 35svh; }
+    .detail-sidebar.map-sheet-65 { height: 65svh; }
+    .detail-sidebar.map-sheet-full { top: var(--map-navbar-h); height: calc(100svh - var(--map-navbar-h) - 62px - env(safe-area-inset-bottom)); }
+    .custom-map-controls { bottom: calc(72px + env(safe-area-inset-bottom)); }
+    .heatmap-toggle-wrap { bottom: calc(166px + env(safe-area-inset-bottom)); }
+    .rescue-fab { bottom: calc(72px + env(safe-area-inset-bottom)); }
+    html:has(.detail-sidebar.active) .custom-map-controls,
+    html:has(.detail-sidebar.active) .heatmap-toggle-wrap { opacity: 0; pointer-events: none; }
+}
+
+@media (max-width: 900px) and (max-height: 500px) and (orientation: landscape) {
+    .detail-sidebar.active,
+    .detail-sidebar.map-sheet-35,
+    .detail-sidebar.map-sheet-65,
+    .detail-sidebar.map-sheet-full {
+        top: var(--map-navbar-h);
+        height: calc(100svh - var(--map-navbar-h) - 58px - env(safe-area-inset-bottom));
     }
 }

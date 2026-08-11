@@ -191,8 +191,8 @@ html[data-app-view="admin"] body {
     }
 
     .theme-toggle-mini {
-        width: 34px;
-        height: 34px;
+        width: 44px;
+        height: 44px;
     }
 
     .avatar-circle {
@@ -223,7 +223,7 @@ html[data-app-view="admin"] body {
 
     .btn,
     .btn-sm {
-        min-height: 38px;
+        min-height: 44px;
         padding: 7px 10px !important;
         font-size: 0.82rem;
     }
@@ -264,4 +264,102 @@ html[data-app-view="admin"] body {
     .custom-table .table {
         min-width: 600px;
     }
+}
+
+/* Mobile administration navigation. The legacy desktop sidebar is retained
+   above 768px; compact screens use a safe-area aware bottom bar. */
+.mobile-bottom-nav { display: none; }
+
+@media (max-width: 767px) {
+    .admin-sidebar { display: none; }
+    .admin-navbar { top: 0; height: calc(var(--navbar-height) + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+    .admin-main { margin-top: calc(var(--navbar-height) + env(safe-area-inset-top)); padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+    .mobile-bottom-nav {
+        position: fixed;
+        z-index: 1800;
+        inset: auto 0 0;
+        height: calc(64px + env(safe-area-inset-bottom));
+        padding: 4px max(4px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(4px, env(safe-area-inset-left));
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+        border-top: 1px solid var(--border-color);
+        backdrop-filter: blur(16px);
+    }
+    .mobile-bottom-nav > button {
+        min-width: 0;
+        min-height: 54px;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 1px;
+        padding: 2px !important;
+        border: 0;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: .64rem;
+    }
+    .mobile-bottom-nav > button i { font-size: 1.1rem; }
+    .mobile-bottom-nav > button.active { color: var(--accent-primary); }
+    .admin-more-sheet {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: calc(70px + env(safe-area-inset-bottom));
+        padding: 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        background: var(--bg-secondary);
+        box-shadow: var(--shadow-xl);
+    }
+    .admin-more-sheet[hidden] { display: none; }
+    .admin-more-sheet button {
+        width: 100%;
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border: 0;
+        border-bottom: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-primary);
+        text-align: left;
+    }
+    .modal { padding: 0 !important; }
+    .modal-dialog { width: 100%; max-width: none; min-height: 100%; margin: 0; }
+    .modal-content { min-height: 100svh; border: 0; border-radius: 0; }
+    .modal-footer { position: sticky; bottom: 0; z-index: 2; background: var(--bg-secondary); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+    .row > [class*="col-"] { min-width: 100%; }
+}
+
+@media (max-width: 640px) {
+    .custom-table { overflow: visible; background: transparent; border: 0; }
+    .custom-table .table { min-width: 0; display: block; background: transparent; }
+    .custom-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+    .custom-table tbody { display: grid; gap: 10px; }
+    .custom-table tbody tr {
+        display: grid;
+        gap: 7px;
+        padding: 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        background: var(--bg-secondary);
+        box-shadow: var(--shadow-sm);
+    }
+    .custom-table tbody td {
+        max-width: none;
+        min-height: 28px;
+        display: grid;
+        grid-template-columns: minmax(92px, 38%) 1fr;
+        gap: 8px;
+        align-items: center;
+        padding: 0 !important;
+        border: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: right;
+    }
+    .custom-table tbody td::before { content: attr(data-label); color: var(--text-secondary); font-size: .72rem; font-weight: 700; text-align: left; }
+    .custom-table tbody td:last-child { padding-top: 8px !important; border-top: 1px solid var(--border-color); }
+    .custom-table tbody td:last-child .btn { margin-left: auto; }
 }

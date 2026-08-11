@@ -1,5 +1,5 @@
 #backend/app/models/config.py
-from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, BigInteger, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, BigInteger, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from app.database import BaseConfig
 
@@ -15,7 +15,8 @@ class Project(BaseConfig):
     updated_at = Column(BigInteger, nullable=False)
     is_active = Column(Boolean, default=True)
     gnss_clusters = Column(JSON, nullable=True) # Array of arrays of station IDs: [[1, 2], [3, 4]]
-    
+    auto_adjustment_config = Column(JSON, nullable=True)
+
     stations = relationship("Station", back_populates="project", cascade="all, delete-orphan")
 
 class Station(BaseConfig):
@@ -52,6 +53,10 @@ class Device(BaseConfig):
     updated_at = Column(BigInteger, nullable=False)
     
     station = relationship("Station", back_populates="devices")
+
+
+Index("ix_stations_project_status", Station.project_id, Station.status)
+Index("ix_devices_station_active", Device.station_id, Device.is_active)
 
 class GNSSOrigin(BaseConfig):
     __tablename__ = "gnss_origins"

@@ -139,7 +139,7 @@ function playWarningVoice(stationName, level) {
 window.playWarningVoice = playWarningVoice;
 
 // --- FEATURE 3: QR CODE SHARING ---
-window.showStationQR = function (lat, lng, stationName) {
+window.showStationQR = async function (lat, lng, stationName) {
     // Xoá popup cũ nếu có
     let existing = document.getElementById('qr-popup-overlay');
     if (existing) existing.remove();
@@ -161,7 +161,10 @@ window.showStationQR = function (lat, lng, stationName) {
     `;
     document.body.appendChild(overlay);
 
-    // Render QR (qrcode.js loaded from CDN)
+    // Load the optional QR bundle only when this feature is opened.
+    if (typeof QRCode === 'undefined') {
+        await window.loadFeatureLibrary?.('qr');
+    }
     if (typeof QRCode !== 'undefined') {
         new QRCode(document.getElementById('qr-canvas-wrap'), {
             text: url, width: 180, height: 180, colorDark: '#0f172a', colorLight: '#ffffff'
@@ -175,10 +178,13 @@ window.showStationQR = function (lat, lng, stationName) {
 };
 
 // --- FEATURE 4: PDF EXPORT (Server-side) ---
-window.exportStationPDF = function () {
+window.exportStationPDF = async function () {
     if (!currentStationData || !currentStationData.id) {
         // Fallback client-side
         const sidebar = document.getElementById('detail-sidebar');
+        if (typeof html2pdf === 'undefined') {
+            await window.loadFeatureLibrary?.('pdf');
+        }
         if (!sidebar || typeof html2pdf === 'undefined') {
             window.toast?.error('Không thể xuất PDF.');
             return;
@@ -315,4 +321,3 @@ window.showTimelineSlider = function () {
 };
 
 console.log('[MAP] Script fully loaded');
-

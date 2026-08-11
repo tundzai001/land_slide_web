@@ -31,7 +31,10 @@ class VersionedAssetCacheMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         path = request.url.path.lower()
         versioned_extensions = (".js", ".jsx", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".mp3")
-        html_routes = {"/", "/management", "/management.html", "/admin", "/admin.html"}
+        html_routes = {
+            "/", "/map", "/login", "/management", "/management.html",
+            "/admin", "/admin.html",
+        }
         if path.endswith(versioned_extensions) and request.query_params.get("v"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             if "Pragma" in response.headers:

@@ -24,3 +24,23 @@ html[data-app-view="admin"] body {
     color: var(--text-primary, #f8fafc);
     font-weight: 700;
 }
+
+.route-error {
+    min-height: 100svh;
+    display: grid;
+    place-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    text-align: center;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.route-error button {
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--accent-primary);
+    color: #001014;
+    font-weight: 700;
+}
