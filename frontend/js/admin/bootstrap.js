@@ -10,7 +10,7 @@ async function bootstrapAdminManager() {
         return;
     }
 
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const token = window.authSession?.getToken();
     if (!token) return;
 
     try {
@@ -39,4 +39,3 @@ async function bootstrapAdminManager() {
 }
 
 window.bootstrapAdminManager = bootstrapAdminManager;
-

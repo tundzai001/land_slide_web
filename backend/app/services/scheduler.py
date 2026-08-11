@@ -7,10 +7,29 @@ from sqlalchemy.future import select
 
 from app.database import ConfigSessionLocal
 from app.models.config import Project
+from app.services import adjustment_failure
 
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+
+
+async def _start_normal_adjustment(project_id: int, selected_clusters: list, db):
+    """Enter the same validated workflow used by the manual admin action."""
+
+    from app.routers.gnss_adjustment import (
+        GnssAdjustmentStartRequest,
+        start_gnss_adjustment,
+    )
+
+    return await start_gnss_adjustment(
+        GnssAdjustmentStartRequest(
+            project_id=project_id,
+            selected_clusters=selected_clusters,
+        ),
+        db=db,
+        current_user=SimpleNamespace(role="system", assigned_projects=[]),
+    )
 
 
 async def run_scheduled_adjustment(project_id: int):
@@ -39,11 +58,20 @@ async def run_scheduled_adjustment(project_id: int):
 
             try:
                 normalized_indices = {int(index) for index in selected_indices}
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
                 logger.error(
                     "Invalid selected cluster indices for project %s: %r",
                     project_id,
                     selected_indices,
+                )
+                adjustment_failure.write_adjustment_failure_report(
+                    project_id,
+                    exc,
+                    source="automatic_scheduler",
+                    context={
+                        "selected_clusters": selected_indices,
+                        "stage": "validate_configuration",
+                    },
                 )
                 return
 
@@ -61,13 +89,6 @@ async def run_scheduled_adjustment(project_id: int):
                 )
                 return
 
-            # Reuse the public workflow entry point. It prepares the fixed-base
-            # topology and waits for verified AGRICA seeds before round-robin starts.
-            from app.routers.gnss_adjustment import (
-                GnssAdjustmentStartRequest,
-                start_gnss_adjustment,
-            )
-
             selected_clusters = []
             for cluster in filtered_clusters:
                 stations = (
@@ -77,13 +98,12 @@ async def run_scheduled_adjustment(project_id: int):
                 )
                 selected_clusters.append(list(stations or []))
 
-            response = await start_gnss_adjustment(
-                GnssAdjustmentStartRequest(
-                    project_id=project_id,
-                    selected_clusters=selected_clusters,
-                ),
-                db=db_config,
-                current_user=SimpleNamespace(role="system", assigned_projects=[]),
+            # Reuse the manual workflow. It resolves persisted station codes to
+            # project station IDs before preparing the fixed-base topology.
+            response = await _start_normal_adjustment(
+                project_id,
+                selected_clusters,
+                db_config,
             )
             logger.info(
                 "Scheduled auto-adjustment accepted for project %s "
@@ -95,6 +115,12 @@ async def run_scheduled_adjustment(project_id: int):
 
     except Exception as e:
         logger.error(f"Error in scheduled auto-adjustment for project {project_id}: {e}", exc_info=True)
+        adjustment_failure.write_adjustment_failure_report(
+            project_id,
+            e,
+            source="automatic_scheduler",
+            context={"stage": "start_adjustment"},
+        )
 
 async def reload_scheduler():
     logger.info("Reloading auto-adjustment schedules")

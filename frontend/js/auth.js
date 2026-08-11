@@ -6,7 +6,7 @@ const authenticatedBlobUrls = new Map();
 
 class AuthManager {
     constructor() {
-        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        this.token = window.authSession?.getToken() || null;
         this.user = null;
         try {
             const cachedUser = sessionStorage.getItem('auth_user');
@@ -174,14 +174,7 @@ class AuthManager {
             this.token = data.access_token;
 
             // Remember Me: localStorage = permanent, sessionStorage = session only
-            if (rememberMe) {
-                localStorage.setItem('token', data.access_token);
-                localStorage.setItem('rememberMe', 'true');
-            } else {
-                sessionStorage.setItem('token', data.access_token);
-                localStorage.removeItem('token');
-                localStorage.removeItem('rememberMe');
-            }
+            window.authSession.storeToken(data.access_token, rememberMe);
 
             // Fetch user info immediately
             await this.verifyToken();
@@ -207,10 +200,7 @@ class AuthManager {
         // Clear data from both storages
         this.token = null;
         this.user = null;
-        localStorage.removeItem('token');
-        localStorage.removeItem('rememberMe');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('auth_user');
+        window.authSession.clearToken();
         sessionStorage.removeItem('justLoggedIn');
         sessionStorage.removeItem('loginReturnView');
         sessionStorage.removeItem('kicked_alert_shown');

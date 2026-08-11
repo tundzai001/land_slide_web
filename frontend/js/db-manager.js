@@ -4,7 +4,7 @@
 
 class DatabaseManager {
     constructor() {
-        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        this.token = window.authSession?.getToken() || null;
         this.allData = [];
         this.filteredData = [];
         this.currentEditModal = null;

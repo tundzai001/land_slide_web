@@ -37,7 +37,9 @@ class GnssAdjustmentStartRequest(BaseModel):
     base_mountpoint: Optional[str] = None
     caster_address: Optional[str] = None
     new_base_station_id: Optional[int] = None
-    selected_clusters: Optional[list[list[int]]] = None
+    # Persisted project clusters may contain station codes while map requests
+    # contain numeric IDs. The normalizer below resolves both against this project.
+    selected_clusters: Optional[list[list[int | str]]] = None
 
 
 @router.get("/api/admin/gnss/adjustment/reports/{project_id}/{filename}")
@@ -89,7 +91,7 @@ async def download_gnss_adjustment_report(
 def _normalize_active_adjustment_clusters(
     raw_clusters: Any,
     stations: list[Any],
-    selected_clusters: Optional[list[list[int]]],
+    selected_clusters: Optional[list[list[int | str]]],
 ) -> list[dict]:
     """Resolve persisted station codes to IDs without losing base metadata."""
 

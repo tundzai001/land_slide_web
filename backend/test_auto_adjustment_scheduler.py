@@ -1,4 +1,7 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -37,7 +40,7 @@ class AutoAdjustmentSchedulerTests(unittest.IsolatedAsyncioTestCase):
             },
             gnss_clusters=[
                 {"name": "north", "stations": [1, 2]},
-                {"name": "south", "stations": [3, 4]},
+                {"name": "south", "stations": ["Dap4_2", "Dap4_1"]},
             ],
         )
         start_adjustment = AsyncMock(
@@ -50,18 +53,50 @@ class AutoAdjustmentSchedulerTests(unittest.IsolatedAsyncioTestCase):
                 "ConfigSessionLocal",
                 return_value=_ConfigSession(project),
             ),
-            patch(
-                "app.routers.gnss_adjustment.start_gnss_adjustment",
-                start_adjustment,
-            ),
+            patch.object(scheduler_service, "_start_normal_adjustment", start_adjustment),
         ):
             await scheduler_service.run_scheduled_adjustment(project.id)
 
         start_adjustment.assert_awaited_once()
-        request = start_adjustment.await_args.args[0]
-        self.assertEqual(request.project_id, project.id)
-        self.assertEqual(request.selected_clusters, [[3, 4]])
-        self.assertEqual(start_adjustment.await_args.kwargs["current_user"].role, "system")
+        self.assertEqual(start_adjustment.await_args.args[0], project.id)
+        self.assertEqual(start_adjustment.await_args.args[1], [["Dap4_2", "Dap4_1"]])
+        self.assertIs(start_adjustment.await_args.args[2].project, project)
+
+    async def test_scheduled_start_failure_is_persisted_without_escaping_job(self):
+        project = SimpleNamespace(
+            id=3,
+            auto_adjustment_config={"enabled": True, "selected_clusters": [0]},
+            gnss_clusters=[{"name": "dam", "stations": ["Dap1_4", "Dap1_3"]}],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(
+                    scheduler_service,
+                    "ConfigSessionLocal",
+                    return_value=_ConfigSession(project),
+                ),
+                patch.object(
+                    scheduler_service.adjustment_failure,
+                    "ADJUSTMENT_REPORT_DIR",
+                    Path(temp_dir),
+                ),
+                patch.object(
+                    scheduler_service,
+                    "_start_normal_adjustment",
+                    AsyncMock(side_effect=RuntimeError("receiver did not enter rover mode")),
+                ),
+            ):
+                await scheduler_service.run_scheduled_adjustment(project.id)
+                reports = list(Path(temp_dir).glob("gnss_adjustment_3_*.json"))
+                self.assertEqual(len(reports), 1)
+                payload = json.loads(reports[0].read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["source"], "automatic_scheduler")
+        self.assertEqual(payload["project_id"], project.id)
+        self.assertEqual(payload["context"]["stage"], "start_adjustment")
+        self.assertIn("receiver did not enter rover mode", payload["error"]["message"])
 
 
 if __name__ == "__main__":

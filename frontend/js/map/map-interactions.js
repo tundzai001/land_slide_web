@@ -568,7 +568,7 @@ function setupEventListeners() {
             });
         },
         loadAdjustmentResult(result) {
-            if (!result?.points) return;
+            if (!result || typeof result !== 'object') return;
             const downloadBtn = document.getElementById('gnss-download-results-btn');
             const auditJsonBtn = document.getElementById('gnss-download-audit-json-btn');
             const reportUrl = String(result.report_file_url || '');
@@ -608,6 +608,7 @@ function setupEventListeners() {
                     }
                 } : null;
             }
+            if (!result.points) return;
             if (!this.ctx) return;
             this.points = {};
             this.baselines = [];

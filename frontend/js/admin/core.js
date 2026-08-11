@@ -4,7 +4,7 @@
 
 class AdminManager {
     constructor() {
-        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        this.token = window.authSession?.getToken() || null;
         this._disposed = false;
         this._refreshIntervals = [];
         this._wsReconnectTimer = null;

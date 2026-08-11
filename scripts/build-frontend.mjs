@@ -48,7 +48,7 @@ const groups = {
     'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/system-settings.css',
     'css/admin/pi-wizard.css', 'css/admin-responsive.css'
   ],
-  'shared.min.js': ['js/theme-manager.js', 'js/api-client.js', 'js/auth.js'],
+  'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js'],
   'map-app.min.js': [
     'js/templates/map/shell.js', 'js/templates/map/station-panels.js',
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
@@ -111,8 +111,8 @@ await mkdir(outputRoot, { recursive: true });
 
 await Promise.all(Object.entries(groups).map(([name, files]) => minify(name, files)));
 await Promise.all([
-  minify('landing.min.js', ['js/landing.js']),
-  minify('app-runtime.min.js', ['js/app-runtime.js'])
+  minify('landing.min.js', ['js/session-state.js', 'js/landing.js']),
+  minify('app-runtime.min.js', ['js/session-state.js', 'js/app-runtime.js'])
 ]);
 
 await esbuild.build({

@@ -28,6 +28,18 @@
     addEventListener('resize', () => { if (innerWidth >= 1024) closeMenu(); }, {passive: true});
     addEventListener('scroll', () => document.getElementById('site-header').classList.toggle('scrolled', scrollY > 12), {passive: true});
 
+    async function syncAuthLinks() {
+        const links = document.querySelectorAll('[data-auth-link]');
+        if (!links.length || !window.authSession) return;
+        const session = await window.authSession.inspect();
+        if (session.status !== 'authenticated') return;
+        const canManage = session.user?.role === 'admin' || session.user?.role === 'operator';
+        links.forEach(link => {
+            link.href = canManage ? '/management' : '/map';
+            link.textContent = canManage ? 'Quản trị hệ thống' : 'Mở bản đồ';
+        });
+    }
+
     const number = new Intl.NumberFormat('vi-VN');
     async function loadSummary() {
         try {
@@ -41,4 +53,5 @@
         }
     }
     loadSummary();
+    void syncAuthLinks();
 })();

@@ -804,6 +804,21 @@ input[type="number"] {
     font-weight: 750;
 }
 
+.auto-adjustment-next-day {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    margin-left: 2px;
+    padding: 5px 9px;
+    border: 1px dashed color-mix(in srgb, var(--accent-success) 45%, transparent);
+    border-radius: 999px;
+    color: var(--accent-success);
+    background: color-mix(in srgb, var(--accent-success) 7%, transparent);
+    font-size: .7rem;
+    font-weight: 750;
+}
+
 @media (max-width: 640px) {
     .auto-adjustment-card {
         padding: 16px;

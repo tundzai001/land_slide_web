@@ -60,6 +60,20 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
     }
 
     // Generate the schedule preview based on interval and start hour
+    calculateDailySchedule(interval, startHour) {
+        const safeInterval = Number.isInteger(interval) && interval > 0 ? interval : 4;
+        const safeStart = Number.isInteger(startHour) && startHour >= 0 && startHour <= 23
+            ? startHour
+            : 0;
+        const hours = [];
+        let hour = safeStart;
+        while (hours.length < Math.floor(24 / safeInterval)) {
+            hours.push(`${String(hour).padStart(2, '0')}:00`);
+            hour = (hour + safeInterval) % 24;
+        }
+        return { hours, nextCycle: `${String(safeStart).padStart(2, '0')}:00` };
+    }
+
     generateSchedulePreview() {
         const intervalSelect = document.getElementById('auto-adj-interval');
         const startHourInput = document.getElementById('auto-adj-start-hour');
@@ -68,14 +82,9 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
 
         const interval = parseInt(intervalSelect.value) || 4;
         let startHour = parseInt(startHourInput.value);
-        if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 1;
+        if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
 
-        const hours = [];
-        let hour = startHour;
-        while (hours.length < Math.floor(24 / interval)) {
-            hours.push(`${String(hour).padStart(2, '0')}:00`);
-            hour = (hour + interval) % 24;
-        }
+        const { hours, nextCycle } = this.calculateDailySchedule(interval, startHour);
 
         if (hours.length === 0) {
             previewContainer.innerHTML = '<span class="text-muted small">Không có mốc giờ nào</span>';
@@ -84,7 +93,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
 
         previewContainer.innerHTML = hours.map(h =>
             `<span class="auto-adjustment-time-chip"><i class="bi bi-clock"></i>${h}</span>`
-        ).join('');
+        ).join('') + `<span class="auto-adjustment-next-day"><i class="bi bi-arrow-right"></i>Ngày kế tiếp&nbsp; ${nextCycle}</span>`;
     }
 
     // Load auto-adjustment config into the modal when it opens
@@ -112,7 +121,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
             if (startHourInput) startHourInput.value = String(h1);
         } else if (config.interval_hours) {
             if (intervalSelect) intervalSelect.value = String(config.interval_hours);
-            if (startHourInput) startHourInput.value = String(config.start_hour || 1);
+            if (startHourInput) startHourInput.value = String(config.start_hour ?? 0);
         }
 
         if (isEnabled) {
@@ -133,15 +142,9 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
 
         const interval = parseInt(intervalSelect?.value) || 4;
         let startHour = parseInt(startHourInput?.value);
-        if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 1;
+        if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
 
-        // Generate scheduled_hours
-        const scheduledHours = [];
-        let hour = startHour;
-        while (scheduledHours.length < Math.floor(24 / interval)) {
-            scheduledHours.push(`${String(hour).padStart(2, '0')}:00`);
-            hour = (hour + interval) % 24;
-        }
+        const { hours: scheduledHours } = this.calculateDailySchedule(interval, startHour);
 
         // Collect selected cluster indices
         const selectedClusters = [];

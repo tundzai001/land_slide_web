@@ -4,7 +4,7 @@
 
 class SystemManager {
     constructor() {
-        this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        this.token = window.authSession?.getToken() || null;
         this.isVerified = false;
 
         // Khởi tạo chặn tab ngay lập tức

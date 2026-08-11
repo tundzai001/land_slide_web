@@ -20,6 +20,7 @@ from app.config import settings
 from app.landslide_analyzer import LandslideAnalyzer
 from app.mqtt.persistence import MQTTPersistenceMixin
 from app.mqtt.transport import MQTTTransportMixin
+from app.services import adjustment_failure
 
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
@@ -565,12 +566,22 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
     async def _handle_round_robin_adjustment_error(self, project_id: int, message: str):
         self.adjustment_phase[project_id] = "ERROR"
         self.adjustment_message[project_id] = message
-        self.adjustment_results.pop(project_id, None)
+        failure_result = adjustment_failure.write_adjustment_failure_report(
+            project_id,
+            message,
+            source="round_robin_runtime",
+            context={"phase": "FREE_NETWORK"},
+        )
+        if failure_result:
+            self.adjustment_results[project_id] = failure_result
+        else:
+            self.adjustment_results.pop(project_id, None)
         await manager.broadcast({
             "type": "gnss_adjustment_progress",
             "project_id": project_id,
             "phase": "ERROR",
             "message": message,
+            "data": failure_result,
         })
 
     async def _handle_round_robin_progress(self, project_id: int, message: str):

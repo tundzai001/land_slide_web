@@ -1,7 +1,7 @@
 /* Shared bounded HTTP client for new UI code; existing authManager stays compatible. */
 (() => {
     const active = new Map();
-    const token = () => sessionStorage.getItem('token') || localStorage.getItem('token');
+    const token = () => window.authSession?.getToken() || null;
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     window.apiClient = async function apiClient(url, options = {}) {
         const method = (options.method || 'GET').toUpperCase();

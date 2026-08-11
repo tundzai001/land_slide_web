@@ -753,7 +753,7 @@ async function syncGnssAdjustmentStatus() {
             setGnssAdjustmentPhase(phase, message || 'Đã đồng bộ trạng thái từ máy chủ.');
             addGnssAdjustmentDebug('SYNC', 'Đã khôi phục trạng thái qua API sau khi có thể bỏ lỡ WebSocket.', 'success');
         }
-        if (status.data && (phase === 'COMPLETED' || phase === 'FAILED_QUALITY_GATE')) {
+        if (status.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR'].includes(phase)) {
             const resultMessage = {
                 sensor_type: 'gnss_adjusted',
                 timestamp: status.data.computed_at || Math.floor(Date.now() / 1000),

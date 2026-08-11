@@ -128,10 +128,7 @@
                 const response = await fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(15000)});
                 if (!response.ok) throw new Error(response.status === 401 ? 'Tài khoản hoặc mật khẩu không đúng.' : 'Không thể đăng nhập. Vui lòng thử lại.');
                 const data = await response.json();
-                const store = document.getElementById('login-remember').checked ? localStorage : sessionStorage;
-                store.setItem('token', data.access_token);
-                if (store === localStorage) { localStorage.setItem('rememberMe', 'true'); sessionStorage.removeItem('token'); }
-                else { localStorage.removeItem('token'); localStorage.removeItem('rememberMe'); }
+                window.authSession.storeToken(data.access_token, document.getElementById('login-remember').checked);
                 location.replace(safeReturnTo());
             } catch (reason) {
                 error.textContent = reason.name === 'TimeoutError' ? 'Máy chủ phản hồi quá chậm. Vui lòng thử lại.' : reason.message;
@@ -224,6 +221,11 @@
     async function start() {
         const path = location.pathname.replace(/\/+$/, '') || '/';
         if (path === '/login') {
+            const session = await window.authSession.inspect();
+            if (session.status === 'authenticated' || session.status === 'unavailable') {
+                location.replace(safeReturnTo());
+                return;
+            }
             await loadStyle('/assets/login.min.css?v=__BUILD_VERSION__');
             renderLogin();
             return;

@@ -10,9 +10,7 @@ class AdminLifecycleFeature extends window.AdminManager {
             window.authManager.logout(true);
             return;
         }
-        localStorage.removeItem('token');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('auth_user');
+        window.authSession?.clearToken();
         window.location.href = '/';
     }
 
