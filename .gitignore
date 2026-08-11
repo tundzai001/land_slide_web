@@ -9,6 +9,15 @@ venv/
 node_modules/
 test-results/
 playwright-report/
+.agents/
+.vscode/
+tmp/
+output/
+backend/temp_exports/
+backend/static/adjustments/
+backend/static/uploads/
+frontend/js/dist/
+/config.db
 *.log
 
 # OS/editor artifacts
