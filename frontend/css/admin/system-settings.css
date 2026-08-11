@@ -555,3 +555,275 @@ input[type="number"] {
     opacity: 1 !important;
 }
 
+/* Automatic GNSS adjustment -------------------------------------------------
+   Scoped controls avoid the global 44px checkbox rule used for touch targets. */
+.auto-adjustment-card {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-color));
+    background:
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 38%),
+        var(--bg-tertiary);
+}
+
+.auto-adjustment-card * {
+    box-sizing: border-box;
+}
+
+.auto-adjustment-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--accent-primary), var(--accent-success));
+}
+
+.auto-adjustment-header {
+    gap: 14px;
+    margin-bottom: 0;
+    padding-bottom: 18px;
+    border-bottom-width: 1px;
+}
+
+.auto-adjustment-icon {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: grid;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--accent-success) 35%, transparent);
+    border-radius: 12px;
+    color: var(--accent-success);
+    background: color-mix(in srgb, var(--accent-success) 10%, transparent);
+}
+
+.auto-adjustment-header .auto-adjustment-icon i {
+    color: inherit;
+    font-size: 1.15rem;
+}
+
+.auto-adjustment-heading {
+    min-width: 0;
+}
+
+.auto-adjustment-heading h5 {
+    font-size: 1rem;
+    line-height: 1.25;
+}
+
+.auto-adjustment-heading p {
+    margin: 3px 0 0;
+    color: var(--text-muted);
+    font-size: .76rem;
+}
+
+.auto-adjustment-switch {
+    flex: 0 0 auto;
+    min-height: 38px;
+    padding: 5px 8px !important;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+}
+
+.auto-adjustment-switch .form-check-input {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 22px !important;
+    min-height: 22px !important;
+    margin: 0 !important;
+    flex: 0 0 38px;
+}
+
+.auto-adjustment-switch .form-check-label {
+    margin: 0;
+    padding-right: 3px;
+    color: var(--text-secondary);
+    font-size: .75rem;
+    font-weight: 700;
+}
+
+.auto-adjustment-body {
+    padding-top: 20px;
+}
+
+.auto-adjustment-field-label {
+    gap: 7px;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+    font-size: .72rem;
+    font-weight: 750;
+    letter-spacing: .025em;
+    text-transform: uppercase;
+}
+
+.auto-adjustment-field-label i {
+    color: var(--accent-primary);
+}
+
+.auto-adjustment-cluster-list {
+    max-height: 188px;
+    min-height: 126px;
+    display: grid;
+    align-content: start;
+    gap: 7px;
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.auto-adjustment-cluster-option {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+    transition: border-color .18s ease, background .18s ease;
+}
+
+.auto-adjustment-cluster-option:hover,
+.auto-adjustment-cluster-option:has(.form-check-input:checked) {
+    border-color: color-mix(in srgb, var(--accent-primary) 42%, transparent);
+    background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-tertiary));
+}
+
+.auto-adjustment-cluster-option .form-check-input {
+    width: 18px !important;
+    min-width: 18px !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    flex: 0 0 18px;
+    margin: 0 !important;
+    border-radius: 5px;
+}
+
+.auto-adjustment-cluster-option .form-check-label {
+    min-width: 0;
+    flex: 1;
+    gap: 9px;
+    margin: 0;
+    color: var(--text-primary);
+    font-size: .82rem;
+    font-weight: 650;
+}
+
+.auto-adjustment-cluster-icon {
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+.auto-adjustment-control-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+}
+
+.auto-adjustment-control-stack .auto-adjustment-field-label:not(:first-child) {
+    margin-top: 13px;
+}
+
+.auto-adjustment-input-wrap {
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+}
+
+.auto-adjustment-input-wrap:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.auto-adjustment-input-wrap .form-control,
+.auto-adjustment-input-wrap .form-select {
+    min-height: 44px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none !important;
+    background: transparent;
+}
+
+.auto-adjustment-hour-wrap > span {
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+    padding: 0 13px;
+    border-left: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: .75rem;
+    font-weight: 700;
+}
+
+.auto-adjustment-schedule-block {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.auto-adjustment-schedule {
+    min-height: 46px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+}
+
+.auto-adjustment-time-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 5px 9px;
+    border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent);
+    border-radius: 999px;
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 9%, transparent);
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    font-weight: 750;
+}
+
+@media (max-width: 640px) {
+    .auto-adjustment-card {
+        padding: 16px;
+    }
+
+    .auto-adjustment-header {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .auto-adjustment-heading {
+        flex: 1;
+    }
+
+    .auto-adjustment-switch {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .auto-adjustment-cluster-list {
+        min-height: 0;
+    }
+}

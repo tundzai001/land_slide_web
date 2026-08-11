@@ -46,9 +46,12 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
             const isChecked = savedClusters.includes(idx) ? 'checked' : '';
             const inputId = `auto-adj-cluster-${idx}`;
             html += `
-                <div class="form-check">
+                <div class="form-check auto-adjustment-cluster-option">
                     <input class="form-check-input auto-adj-cluster-cb" type="checkbox" value="${idx}" id="${inputId}" ${isChecked}>
-                    <label class="form-check-label small" for="${inputId}">${this.escapeHtml(clusterName)}</label>
+                    <label class="form-check-label" for="${inputId}">
+                        <span class="auto-adjustment-cluster-icon"><i class="bi bi-bounding-box-circles"></i></span>
+                        <span>${this.escapeHtml(clusterName)}</span>
+                    </label>
                 </div>
             `;
         });
@@ -80,7 +83,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         }
 
         previewContainer.innerHTML = hours.map(h =>
-            `<span class="badge bg-primary bg-opacity-75 px-2 py-1" style="font-size: 0.85rem;">🕐 ${h}</span>`
+            `<span class="auto-adjustment-time-chip"><i class="bi bi-clock"></i>${h}</span>`
         ).join('');
     }
 

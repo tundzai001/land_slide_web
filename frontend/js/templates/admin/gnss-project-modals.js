@@ -100,26 +100,30 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                         </div>
                     </div>
                     <!-- AUTO-ADJUSTMENT SCHEDULING -->
-                    <div class="config-section mb-4" id="auto-adjustment-config-section">
-                        <div class="section-header">
-                            <i class="bi bi-clock-history text-success"></i>
-                            <h5>Bình sai tự động</h5>
-                            <div class="form-check form-switch ms-auto">
+                    <div class="config-section auto-adjustment-card mb-4" id="auto-adjustment-config-section">
+                        <div class="section-header auto-adjustment-header">
+                            <span class="auto-adjustment-icon"><i class="bi bi-clock-history"></i></span>
+                            <div class="auto-adjustment-heading">
+                                <h5>Bình sai tự động</h5>
+                                <p>Thiết lập cụm GNSS và lịch xử lý định kỳ</p>
+                            </div>
+                            <div class="form-check form-switch auto-adjustment-switch ms-auto">
                                 <input class="form-check-input" type="checkbox" id="auto-adj-enabled" onchange="window.adminManager.onAutoAdjToggle(this.checked)">
-                                <label class="form-check-label small" for="auto-adj-enabled">Bật</label>
+                                <label class="form-check-label" for="auto-adj-enabled">Kích hoạt</label>
                             </div>
                         </div>
-                        <div class="sensor-config-body" id="auto-adj-body" style="display:none;">
-                            <div class="row g-3">
+                        <div class="sensor-config-body auto-adjustment-body" id="auto-adj-body" style="display:none;">
+                            <div class="row g-3 auto-adjustment-grid">
                                 <div class="col-md-6">
-                                    <label class="form-label small fw-bold">Chọn Cụm chạy tự động</label>
-                                    <div id="auto-adj-cluster-checkboxes" class="border rounded p-2" style="max-height:150px;overflow-y:auto;">
+                                    <label class="form-label auto-adjustment-field-label"><i class="bi bi-diagram-3"></i> Chọn cụm chạy tự động</label>
+                                    <div id="auto-adj-cluster-checkboxes" class="auto-adjustment-cluster-list">
                                         <span class="text-muted small">Lưu cấu hình cụm trước...</span>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label small fw-bold">Tần suất</label>
-                                    <div class="d-flex gap-2 align-items-center mb-2">
+                                    <div class="auto-adjustment-control-stack">
+                                    <label class="form-label auto-adjustment-field-label" for="auto-adj-interval"><i class="bi bi-arrow-repeat"></i> Tần suất</label>
+                                    <div class="auto-adjustment-input-wrap">
                                         <select class="form-select form-select-sm" id="auto-adj-interval" onchange="window.adminManager.generateSchedulePreview()">
                                             <option value="1">Mỗi 1 giờ</option>
                                             <option value="2">Mỗi 2 giờ</option>
@@ -130,13 +134,17 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                                             <option value="12">Mỗi 12 giờ</option>
                                         </select>
                                     </div>
-                                    <label class="form-label small fw-bold">Giờ bắt đầu</label>
-                                    <input type="number" class="form-control form-control-sm" id="auto-adj-start-hour" value="1" min="0" max="23" onchange="window.adminManager.generateSchedulePreview()">
+                                    <label class="form-label auto-adjustment-field-label" for="auto-adj-start-hour"><i class="bi bi-play-circle"></i> Giờ bắt đầu</label>
+                                    <div class="auto-adjustment-input-wrap auto-adjustment-hour-wrap">
+                                        <input type="number" class="form-control form-control-sm" id="auto-adj-start-hour" value="1" min="0" max="23" onchange="window.adminManager.generateSchedulePreview()">
+                                        <span>giờ</span>
+                                    </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="mt-3">
-                                <label class="form-label small fw-bold">Các mốc giờ sẽ chạy:</label>
-                                <div id="auto-adj-schedule-preview" class="d-flex flex-wrap gap-2 p-2 border rounded bg-light">
+                            <div class="auto-adjustment-schedule-block">
+                                <label class="form-label auto-adjustment-field-label"><i class="bi bi-calendar3"></i> Lịch chạy trong ngày</label>
+                                <div id="auto-adj-schedule-preview" class="auto-adjustment-schedule">
                                     <span class="text-muted small">Chưa có lịch</span>
                                 </div>
                             </div>

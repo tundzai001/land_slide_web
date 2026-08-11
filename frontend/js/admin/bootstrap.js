@@ -7,7 +7,6 @@ async function bootstrapAdminManager() {
     if (hasAdminDom && !window.adminManager) {
         window.adminManager = new AdminManager();
     } else if (!hasAdminDom) {
-        console.error('[ADMIN] Dashboard DOM element missing');
         return;
     }
 
@@ -40,11 +39,4 @@ async function bootstrapAdminManager() {
 }
 
 window.bootstrapAdminManager = bootstrapAdminManager;
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapAdminManager, { once: true });
-} else {
-    bootstrapAdminManager();
-}
-
 

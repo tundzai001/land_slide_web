@@ -11,6 +11,15 @@ const gnssPanelCss = [
   'frontend/css/map-responsive.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
+const autoAdjustmentCss = [
+  'frontend/css/theme-variables.css',
+  'frontend/css/components.css',
+  'frontend/css/admin/base.css',
+  'frontend/css/admin/system-settings.css',
+  'frontend/css/admin/pi-wizard.css',
+  'frontend/css/admin-responsive.css',
+].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
+
 const viewports = [
   { name: '320x568', width: 320, height: 568 },
   { name: '390x844', width: 390, height: 844 },
@@ -54,6 +63,40 @@ for (const viewport of viewports) {
     await expect(page.locator('#login-form')).toBeVisible();
     await assertViewportContract(page);
     await expect(page).toHaveScreenshot(`login-${viewport.name}-${testInfo.project.name}.png`, { fullPage: true });
+  });
+}
+
+for (const viewport of viewports.filter(({ width }) => [390, 768, 1366].includes(width))) {
+  test(`automatic adjustment controls stay aligned ${viewport.name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const options = ['Đập 1', 'Đập 4', 'Cả 2 đập'].map((name, index) => `
+      <div class="form-check auto-adjustment-cluster-option">
+        <input class="form-check-input auto-adj-cluster-cb" type="checkbox" id="cluster-${index}" ${index === 0 ? 'checked' : ''}>
+        <label class="form-check-label" for="cluster-${index}"><span class="auto-adjustment-cluster-icon">◎</span><span>${name}</span></label>
+      </div>`).join('');
+    await page.setContent(`<!doctype html><html data-theme="light" data-app-view="admin"><head><style>${autoAdjustmentCss}</style></head><body>
+      <main style="width:min(720px,100%);padding:16px;margin:auto"><section class="config-section auto-adjustment-card">
+        <header class="section-header auto-adjustment-header"><span class="auto-adjustment-icon">◷</span><div class="auto-adjustment-heading"><h5>Bình sai tự động</h5><p>Thiết lập cụm GNSS và lịch xử lý định kỳ</p></div><div class="form-check form-switch auto-adjustment-switch"><input class="form-check-input" type="checkbox" checked><label class="form-check-label">Kích hoạt</label></div></header>
+        <div class="sensor-config-body auto-adjustment-body"><div class="row auto-adjustment-grid"><div class="col-md-6"><label class="form-label auto-adjustment-field-label">Chọn cụm chạy tự động</label><div class="auto-adjustment-cluster-list">${options}</div></div><div class="col-md-6"><div class="auto-adjustment-control-stack"><label class="form-label auto-adjustment-field-label">Tần suất</label><div class="auto-adjustment-input-wrap"><select class="form-select"><option>Mỗi 4 giờ</option></select></div><label class="form-label auto-adjustment-field-label">Giờ bắt đầu</label><div class="auto-adjustment-input-wrap auto-adjustment-hour-wrap"><input class="form-control" value="1"><span>giờ</span></div></div></div></div><div class="auto-adjustment-schedule-block"><label class="form-label auto-adjustment-field-label">Lịch chạy trong ngày</label><div class="auto-adjustment-schedule"><span class="auto-adjustment-time-chip">◷ 01:00</span><span class="auto-adjustment-time-chip">◷ 05:00</span><span class="auto-adjustment-time-chip">◷ 09:00</span></div></div></div>
+      </section></main></body></html>`);
+
+    const contract = await page.locator('.auto-adjustment-card').evaluate(card => {
+      const toggle = card.querySelector('.auto-adjustment-switch .form-check-input').getBoundingClientRect();
+      const checkboxes = Array.from(card.querySelectorAll('.auto-adj-cluster-cb')).map(input => input.getBoundingClientRect());
+      const options = Array.from(card.querySelectorAll('.auto-adjustment-cluster-option')).map(option => option.getBoundingClientRect());
+      return {
+        pageOverflow: document.documentElement.scrollWidth - innerWidth,
+        cardOverflow: card.scrollWidth - card.clientWidth,
+        toggle: { width: toggle.width, height: toggle.height },
+        checkboxSizes: checkboxes.map(rect => ({ width: rect.width, height: rect.height })),
+        optionsDoNotOverlap: options.every((rect, index) => index === 0 || rect.top >= options[index - 1].bottom),
+      };
+    });
+    expect(contract.pageOverflow).toBeLessThanOrEqual(1);
+    expect(contract.cardOverflow).toBeLessThanOrEqual(1);
+    expect(contract.toggle).toEqual({ width: 38, height: 22 });
+    expect(contract.checkboxSizes).toEqual(Array(3).fill({ width: 18, height: 18 }));
+    expect(contract.optionsDoNotOverlap).toBe(true);
   });
 }
 
