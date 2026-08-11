@@ -4,6 +4,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,32 @@ class RescueRequestUpdate(BaseModel):
 def _require_admin(user: model_auth.User) -> None:
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
+
+
+@router.get("/api/admin/rescue-images/{file_name}")
+async def get_rescue_image(
+    file_name: str,
+    current_user: model_auth.User = Depends(auth.get_current_user),
+):
+    _require_admin(current_user)
+    image_path = rescue_storage.resolve_image_path(
+        f"{rescue_storage.RESCUE_IMAGE_URL_PREFIX}{file_name}"
+    )
+    if image_path is None or image_path.name != file_name:
+        raise HTTPException(status_code=404, detail="Rescue image not found")
+    media_type = rescue_storage.validated_image_media_type(image_path)
+    if media_type is None:
+        raise HTTPException(status_code=404, detail="Rescue image not found")
+    return FileResponse(
+        image_path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/api/public/rescue-requests")
@@ -103,7 +130,7 @@ async def create_rescue_request(
 
     parsed = rescue_storage.unpack_message(row.message)
     try:
-        await ws_manager.broadcast(
+        await ws_manager.broadcast_admins(
             {
                 "type": "rescue_request",
                 "id": int(row.id),
@@ -118,7 +145,7 @@ async def create_rescue_request(
                 "rescue_type": parsed["rescue_type"],
                 "province_city": parsed["province_city"],
                 "source_link": parsed["source_link"],
-                "image_url": parsed["image_url"],
+                "image_url": rescue_storage.protected_image_url(parsed["image_url"]),
             }
         )
     except Exception as exc:
@@ -187,7 +214,7 @@ async def get_rescue_requests(
                 "rescue_type": parsed["rescue_type"],
                 "province_city": parsed["province_city"],
                 "source_link": parsed["source_link"],
-                "image_url": parsed["image_url"],
+                "image_url": rescue_storage.protected_image_url(parsed["image_url"]),
             }
         )
     return result

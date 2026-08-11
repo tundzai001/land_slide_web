@@ -1,6 +1,7 @@
 """Frontend document, health-check, and WebSocket routes."""
 import asyncio
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -19,10 +20,29 @@ from ..websocket import manager as ws_manager
 router = APIRouter()
 logger = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+PUBLIC_SOUND_DIR = Path(__file__).resolve().parents[2] / "static" / "sounds"
+PUBLIC_SOUND_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}\.mp3$")
 
 # ============================================================================
 # WEBSOCKET & HEALTH CHECK
 # ============================================================================
+
+
+@router.get("/static/sounds/{file_name}")
+async def get_public_sound(file_name: str):
+    """Serve only known-safe MP3 filenames from the public sound directory."""
+    if PUBLIC_SOUND_NAME.fullmatch(file_name) is None:
+        return JSONResponse(status_code=404, content={"detail": "Sound not found"})
+    sound_path = (PUBLIC_SOUND_DIR / file_name).resolve()
+    if sound_path.parent != PUBLIC_SOUND_DIR.resolve() or not sound_path.is_file():
+        return JSONResponse(status_code=404, content={"detail": "Sound not found"})
+    return FileResponse(
+        sound_path,
+        media_type="audio/mpeg",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
 async def _authorize_websocket(websocket: WebSocket) -> bool:
     origin = websocket.headers.get("origin")
     if origin and origin not in settings.cors_origins:
@@ -51,6 +71,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
             user = await auth.get_user_by_username_cached(username, db)
         if user is None or not user.is_active:
             raise ValueError("Inactive user")
+        websocket.state.user_role = str(user.role or "")
     except (jwt.InvalidTokenError, ValueError):
         await websocket.close(code=1008, reason="Invalid authentication")
         return False

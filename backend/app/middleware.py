@@ -21,6 +21,13 @@ class CharsetMiddleware(BaseHTTPMiddleware):
             response.headers["content-type"] = f"{content_type}; charset=utf-8"
         response.headers["X-Request-ID"] = request_id
         response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - started_at) * 1000:.1f}"
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), payment=(), usb=()",
+        )
         return response
 
 
@@ -35,7 +42,11 @@ class VersionedAssetCacheMiddleware(BaseHTTPMiddleware):
             "/", "/map", "/login", "/management", "/management.html",
             "/admin", "/admin.html",
         }
-        if path.endswith(versioned_extensions) and request.query_params.get("v"):
+        if path.startswith(("/api/admin/", "/api/auth/")):
+            response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        elif path.endswith(versioned_extensions) and request.query_params.get("v"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             if "Pragma" in response.headers:
                 del response.headers["Pragma"]

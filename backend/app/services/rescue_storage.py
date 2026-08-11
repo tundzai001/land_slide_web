@@ -3,6 +3,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -12,7 +13,8 @@ from fastapi import HTTPException, UploadFile
 
 RESCUE_META_PREFIX = "__RESCUE_META_V1__"
 RESCUE_IMAGE_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "rescue"
-RESCUE_IMAGE_URL_PREFIX = "/static/uploads/rescue/"
+RESCUE_IMAGE_URL_PREFIX = "/api/admin/rescue-images/"
+LEGACY_RESCUE_IMAGE_URL_PREFIX = "/static/uploads/rescue/"
 MAX_RESCUE_IMAGE_BYTES = 400 * 1024
 IMAGE_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -20,14 +22,32 @@ IMAGE_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+IMAGE_MIME_BY_EXTENSION = {
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+SAFE_IMAGE_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def _validate_image(mime_type: str, image_bytes: bytes) -> str:
-    extension = IMAGE_EXTENSIONS.get((mime_type or "").lower())
+    normalized_mime = (mime_type or "").lower()
+    extension = IMAGE_EXTENSIONS.get(normalized_mime)
     if not extension:
         raise HTTPException(status_code=400, detail="Unsupported image type")
     if len(image_bytes) > MAX_RESCUE_IMAGE_BYTES:
         raise HTTPException(status_code=400, detail="Image too large")
+    signatures_valid = {
+        ".jpg": image_bytes.startswith(b"\xff\xd8\xff"),
+        ".png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".webp": (
+            len(image_bytes) >= 12
+            and image_bytes.startswith(b"RIFF")
+            and image_bytes[8:12] == b"WEBP"
+        ),
+    }
+    if not signatures_valid.get(extension, False):
+        raise HTTPException(status_code=400, detail="Image content does not match its type")
     return extension
 
 
@@ -118,9 +138,47 @@ def unpack_message(raw_message: Optional[str]) -> dict:
 
 def resolve_image_path(image_url: Optional[str]) -> Optional[Path]:
     url = (image_url or "").strip()
-    if not url.startswith(RESCUE_IMAGE_URL_PREFIX):
+    prefix = next(
+        (
+            candidate
+            for candidate in (
+                RESCUE_IMAGE_URL_PREFIX,
+                LEGACY_RESCUE_IMAGE_URL_PREFIX,
+            )
+            if url.startswith(candidate)
+        ),
+        None,
+    )
+    if prefix is None:
         return None
-    file_name = url[len(RESCUE_IMAGE_URL_PREFIX):].strip()
-    if not file_name or Path(file_name).name != file_name:
+    file_name = url[len(prefix):].strip()
+    if (
+        not file_name
+        or Path(file_name).name != file_name
+        or SAFE_IMAGE_FILE_NAME.fullmatch(file_name) is None
+    ):
         return None
-    return RESCUE_IMAGE_DIR / file_name
+    image_root = RESCUE_IMAGE_DIR.resolve()
+    image_path = (image_root / file_name).resolve()
+    if image_path.parent != image_root:
+        return None
+    return image_path
+
+
+def protected_image_url(image_url: Optional[str]) -> Optional[str]:
+    image_path = resolve_image_path(image_url)
+    if image_path is None:
+        return None
+    return f"{RESCUE_IMAGE_URL_PREFIX}{image_path.name}"
+
+
+def validated_image_media_type(image_path: Path) -> Optional[str]:
+    mime_type = IMAGE_MIME_BY_EXTENSION.get(image_path.suffix.lower())
+    if mime_type is None or not image_path.is_file():
+        return None
+    try:
+        image_bytes = image_path.read_bytes()
+        _validate_image(mime_type, image_bytes)
+    except (HTTPException, OSError):
+        return None
+    return mime_type

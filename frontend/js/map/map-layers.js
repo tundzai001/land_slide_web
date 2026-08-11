@@ -415,6 +415,21 @@ async function loadRescueMarkers() {
     }
 }
 
+function escapeRescueHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
+}
+
+function safeRescueSourceUrl(value) {
+    try {
+        const url = new URL(String(value || '').trim());
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch (_) {
+        return '';
+    }
+}
+
 function addRescueMarker(rescueRequest) {
     const {
         id,
@@ -429,7 +444,6 @@ function addRescueMarker(rescueRequest) {
         province_city,
         source_link,
         image_url,
-        image_data_url,
     } = rescueRequest;
     if (!id || !latitude || !longitude) return;
     const existingMarker = rescueMarkers[id];
@@ -438,8 +452,9 @@ function addRescueMarker(rescueRequest) {
         if (leafletMap?.hasLayer(existingMarker)) leafletMap.removeLayer(existingMarker);
     }
 
-    const safeSourceLink = /^https?:\/\//i.test(String(source_link || '').trim())
-        ? String(source_link).trim()
+    const safeSourceLink = safeRescueSourceUrl(source_link);
+    const protectedImageUrl = /^\/api\/admin\/rescue-images\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(String(image_url || ''))
+        ? String(image_url)
         : '';
 
     const icon = L.divIcon({
@@ -458,7 +473,7 @@ function addRescueMarker(rescueRequest) {
     });
 
     const marker = L.marker([latitude, longitude], { icon })
-        .bindTooltip(`${requester_name || 'SOS'} - ${phone || 'N/A'}`, {
+        .bindTooltip(`${escapeRescueHtml(requester_name || 'SOS')} - ${escapeRescueHtml(phone || 'N/A')}`, {
             direction: 'top',
             offset: [0, -15],
             permanent: false
@@ -476,22 +491,22 @@ function addRescueMarker(rescueRequest) {
                 <i class="bi bi-exclamation-circle me-1"></i>Yêu cầu cứu hộ
             </h6>
             <div style="font-size: 13px; line-height: 1.6;">
-                <div><strong>ID:</strong> #${id}</div>
-                <div><strong>Người yêu cầu:</strong> ${requester_name || '(Không có)'}</div>
-                <div><strong>Số điện thoại:</strong> ${phone || '(Không có)'}</div>
-                <div><strong>Phân loại:</strong> ${rescue_type || '(Không có)'}</div>
-                <div><strong>Tỉnh/TP:</strong> ${province_city || '(Không có)'}</div>
+                <div><strong>ID:</strong> #${escapeRescueHtml(id)}</div>
+                <div><strong>Người yêu cầu:</strong> ${escapeRescueHtml(requester_name || '(Không có)')}</div>
+                <div><strong>Số điện thoại:</strong> ${escapeRescueHtml(phone || '(Không có)')}</div>
+                <div><strong>Phân loại:</strong> ${escapeRescueHtml(rescue_type || '(Không có)')}</div>
+                <div><strong>Tỉnh/TP:</strong> ${escapeRescueHtml(province_city || '(Không có)')}</div>
                 <div><strong>Vị trí:</strong> ${latitude.toFixed(6)}, ${longitude.toFixed(6)}</div>
                 ${accuracy_m ? `<div><strong>Độ chính xác:</strong> ±${accuracy_m}m</div>` : ''}
                 <div><strong>Thời gian:</strong> ${new Date(created_at).toLocaleString('vi-VN')}</div>
-                ${safeSourceLink ? `<div><strong>Nguồn:</strong> <a href="${safeSourceLink}" target="_blank" rel="noopener">Mở link</a></div>` : ''}
+                ${safeSourceLink ? `<div><strong>Nguồn:</strong> <a href="${escapeRescueHtml(safeSourceLink)}" target="_blank" rel="noopener noreferrer">Mở link</a></div>` : ''}
                 <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
                     <strong style="font-size: 12px;">Tình trạng:</strong>
                     <div style="font-size: 13px; margin-top: 4px; word-wrap: break-word;">
-                        ${message || '(Không có mô tả)'}
+                        ${escapeRescueHtml(message || '(Không có mô tả)')}
                     </div>
                 </div>
-                ${(image_url || image_data_url) ? `<div style="margin-top:8px;"><img src="${image_url || image_data_url}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : ''}
+                ${protectedImageUrl ? `<div style="margin-top:8px;"><img data-auth-src="${escapeRescueHtml(protectedImageUrl)}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : ''}
                 <div style="margin-top: 15px;">
                     <a href="https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}"
                        target="_blank" rel="noopener"
@@ -504,6 +519,10 @@ function addRescueMarker(rescueRequest) {
     `;
 
     marker.bindPopup(popupContent, { maxWidth: 300, maxHeight: 400 });
+    marker.on('popupopen', () => {
+        const popupElement = marker.getPopup()?.getElement();
+        if (popupElement) void window.hydrateAuthenticatedImages?.(popupElement);
+    });
     marker.on('click', () => {
         marker.openPopup();
     });
@@ -529,4 +548,3 @@ function updateRescueMarkerFromWebSocket(message) {
         }
     }
 }
-

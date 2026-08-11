@@ -4,10 +4,13 @@ import copy
 import json
 import logging
 import math
+import re
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +25,11 @@ from ..websocket import manager as ws_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+ADJUSTMENT_REPORT_DIR = Path(__file__).resolve().parents[2] / "static" / "adjustments"
+ADJUSTMENT_REPORT_NAME = re.compile(
+    r"^gnss_(?:binh_sai|adjustment)_(?P<project_id>[1-9][0-9]*)_"
+    r"(?P<timestamp>[1-9][0-9]*)\.(?P<extension>xlsx|json)$"
+)
 
 
 class GnssAdjustmentStartRequest(BaseModel):
@@ -30,6 +38,52 @@ class GnssAdjustmentStartRequest(BaseModel):
     caster_address: Optional[str] = None
     new_base_station_id: Optional[int] = None
     selected_clusters: Optional[list[list[int]]] = None
+
+
+@router.get("/api/admin/gnss/adjustment/reports/{project_id}/{filename}")
+async def download_gnss_adjustment_report(
+    project_id: int,
+    filename: str,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(
+        auth.require_permission(auth.Permission.EDIT_STATIONS)
+    ),
+):
+    """Download one project-scoped adjustment artifact after authorization."""
+    match = ADJUSTMENT_REPORT_NAME.fullmatch(filename)
+    if not match or int(match.group("project_id")) != project_id:
+        raise HTTPException(status_code=404, detail="Adjustment report not found")
+
+    project = (
+        await db.execute(
+            select(model_config.Project).where(model_config.Project.id == project_id)
+        )
+    ).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Adjustment report not found")
+    check_operator_project_access(current_user, project_id)
+
+    report_root = ADJUSTMENT_REPORT_DIR.resolve()
+    report_path = (report_root / filename).resolve()
+    if report_path.parent != report_root or not report_path.is_file():
+        raise HTTPException(status_code=404, detail="Adjustment report not found")
+
+    extension = match.group("extension")
+    media_type = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if extension == "xlsx"
+        else "application/json"
+    )
+    return FileResponse(
+        report_path,
+        filename=filename,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 def _normalize_active_adjustment_clusters(
@@ -483,5 +537,3 @@ async def stop_gnss_adjustment(
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
-
-

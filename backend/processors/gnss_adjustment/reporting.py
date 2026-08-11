@@ -1503,9 +1503,10 @@ class AdjustmentReportMixin:
         excel_path = self._append_adjustment_to_excel(project_id, timestamp, data, "")
         if not excel_path:
             raise OSError("Adjustment Excel exporter did not return an output path")
-        excel_url = f"/static/adjustments/{os.path.basename(excel_path)}"
+        report_api_prefix = f"/api/admin/gnss/adjustment/reports/{project_id}"
+        excel_url = f"{report_api_prefix}/{os.path.basename(excel_path)}"
         return {
             "report_file_url": excel_url,
-            "audit_json_url": f"/static/adjustments/{audit_name}",
+            "audit_json_url": f"{report_api_prefix}/{audit_name}",
             "excel_report_url": excel_url,
         }

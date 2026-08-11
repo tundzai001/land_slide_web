@@ -437,8 +437,11 @@ class AdminManager {
                 : '<span class="text-muted">--</span>';
             const provinceCity = String(r.province_city || '').trim() || '--';
             const imageUrl = String(r.image_url || r.image_data_url || '').trim();
-            const imageHtml = imageUrl
-                ? `<a href="${esc(imageUrl)}" target="_blank" rel="noopener"><img src="${esc(imageUrl)}" alt="rescue-evidence" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ddd;"></a>`
+            const protectedImageUrl = /^\/api\/admin\/rescue-images\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(imageUrl)
+                ? imageUrl
+                : '';
+            const imageHtml = protectedImageUrl
+                ? `<img data-auth-src="${esc(protectedImageUrl)}" alt="rescue-evidence" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ddd;">`
                 : '<span class="text-muted">--</span>';
 
             const detailCellHtml = `
@@ -475,6 +478,7 @@ class AdminManager {
                 <td>${actionBtns}</td>
             </tr>`;
         }).join('');
+        void window.hydrateAuthenticatedImages?.(body);
     }
 
     updateRescueSummary(rows) {

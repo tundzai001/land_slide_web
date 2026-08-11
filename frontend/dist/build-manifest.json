@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "build": "1cd019bb0a67",
-  "generated_at": "2026-08-11T03:11:21.230Z",
+  "build": "941f570a6fe2",
+  "generated_at": "2026-08-11T04:05:34.008Z",
   "assets": {
     "admin-app.min.js": {
-      "bytes": 375513,
-      "sha256": "8cb92bb5c15849086bfdcfc7518965b5542c1dd2cf445124a9112edb5ae7e823"
+      "bytes": 375664,
+      "sha256": "8fdb0932bc93f32787f69027f90921b0e836c689c97b6bfa7c4bbee606e35453"
     },
     "admin.min.css": {
       "bytes": 31321,
@@ -17,11 +17,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 11889,
-      "sha256": "3e92bf1a0ac497ccf2a9b4ac141c64cc017b4bf094c51758c40af15965417fd1"
+      "sha256": "57c217a8d94b734a29da2c1a3e8eb3fa24665f657eb460ab983a22488c461814"
     },
     "app.html": {
       "bytes": 944,
-      "sha256": "4c1c7b9ad36b7ba1fdcabcba981add1baf8e5ddfba5d443e8b98a342f0f8eb27"
+      "sha256": "457c3c6c5972a1f5c63a0fbc32f714221fdb18f5a88f3e6a83ba070bad018983"
     },
     "digital-twin.min.js": {
       "bytes": 50359,
@@ -29,7 +29,7 @@
     },
     "index.html": {
       "bytes": 5222,
-      "sha256": "a84de0afb63e83b61787acabd65f6501e3c941d49b0830d544c387b0dbb2db9a"
+      "sha256": "1ba675cc1c42f31246c494febe3e1d881dc999744c0b52170474e82e43b0154e"
     },
     "landing.min.css": {
       "bytes": 8757,
@@ -44,16 +44,16 @@
       "sha256": "4227ffffb0b98ec2377e0892071c14e4d0345814a3b4e22860285eff8e5a9e08"
     },
     "map-app.min.js": {
-      "bytes": 361080,
-      "sha256": "129c543868eda961074a3e642ca5cae0a27c32bd421f83f00a93d7854b36a4b7"
+      "bytes": 362013,
+      "sha256": "663f747b2682433e7e6b52a92aa1e9d98665392bc1d504f3eca774a7ce18daa3"
     },
     "map.min.css": {
       "bytes": 80709,
       "sha256": "104a48c475cf22bc4a2ada7cdba01bf64f230274cb4fdd6510d225bcbe1500d0"
     },
     "shared.min.js": {
-      "bytes": 13119,
-      "sha256": "ce6ecd3bc947a7762d543ae06aff5bfe1f86830d1ee5530d8477d441d8ec1460"
+      "bytes": 15696,
+      "sha256": "71a92177577cd2163f70dd2e16a501ed2dcdef51ad51a6695bea2ef8cef4dcc0"
     }
   }
 }

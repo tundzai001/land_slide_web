@@ -83,14 +83,29 @@ async def verify() -> None:
     assert status == 200, status
     assert headers.get("content-encoding") == "gzip", headers
 
+    status, headers, body = await get("/static/sounds/siren.mp3", "v=contract")
+    assert status == 200 and body, status
+    assert headers.get("x-content-type-options") == "nosniff", headers
+
     for source_path in (
         "/js/app-runtime.js",
         "/js/react/station-list.jsx",
         "/js/templates/map-template.js",
         "/css/map/base.css",
+        "/static/adjustments/gnss_adjustment_1_1.json",
+        "/static/uploads/rescue/evidence.png",
+        "/static/sounds/secrets.json",
     ):
         status, _, _ = await get(source_path)
         assert status == 404, (source_path, status)
+
+    for protected_path in (
+        "/api/admin/gnss/adjustment/reports/1/gnss_adjustment_1_1.json",
+        "/api/admin/rescue-images/evidence.png",
+    ):
+        status, headers, _ = await get(protected_path)
+        assert status == 401, (protected_path, status)
+        assert "no-store" in headers.get("cache-control", ""), headers
 
 
 if __name__ == "__main__":

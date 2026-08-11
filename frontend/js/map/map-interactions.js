@@ -581,25 +581,31 @@ function setupEventListeners() {
                 downloadBtn.innerHTML = excelUrl
                     ? '<i class="bi bi-file-earmark-spreadsheet-fill me-2"></i>Tải kết quả Excel (.xlsx)'
                     : '<i class="bi bi-hourglass-split me-2"></i>Đang tạo file Excel...';
-                downloadBtn.onclick = excelUrl ? () => {
-                    const excelAnchor = document.createElement('a');
-                    excelAnchor.href = excelUrl;
-                    excelAnchor.download = excelUrl.split('/').pop() || 'gnss_binh_sai.xlsx';
-                    document.body.appendChild(excelAnchor);
-                    excelAnchor.click();
-                    excelAnchor.remove();
+                downloadBtn.onclick = excelUrl ? async () => {
+                    try {
+                        await window.downloadAuthenticatedFile(
+                            excelUrl,
+                            excelUrl.split('/').pop() || 'gnss_binh_sai.xlsx'
+                        );
+                    } catch (error) {
+                        console.error('[GNSS] Excel download failed:', error);
+                        window.toast?.error?.('Không tải được báo cáo bình sai.');
+                    }
                 } : null;
             }
             if (auditJsonBtn) {
                 auditJsonBtn.disabled = !auditJsonUrl;
                 auditJsonBtn.classList.toggle('disabled', !auditJsonUrl);
-                auditJsonBtn.onclick = auditJsonUrl ? () => {
-                    const auditAnchor = document.createElement('a');
-                    auditAnchor.href = auditJsonUrl;
-                    auditAnchor.download = auditJsonUrl.split('/').pop() || 'gnss_adjustment_audit.json';
-                    document.body.appendChild(auditAnchor);
-                    auditAnchor.click();
-                    auditAnchor.remove();
+                auditJsonBtn.onclick = auditJsonUrl ? async () => {
+                    try {
+                        await window.downloadAuthenticatedFile(
+                            auditJsonUrl,
+                            auditJsonUrl.split('/').pop() || 'gnss_adjustment_audit.json'
+                        );
+                    } catch (error) {
+                        console.error('[GNSS] Audit download failed:', error);
+                        window.toast?.error?.('Không tải được hồ sơ audit.');
+                    }
                 } : null;
             }
             if (!this.ctx) return;

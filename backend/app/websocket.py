@@ -234,6 +234,22 @@ class ConnectionManager:
 
         await self._send_to_all(message)
 
+    async def broadcast_admins(self, message: dict):
+        """Send sensitive operational events only to authenticated admins."""
+        connections = tuple(
+            connection
+            for connection in self.active_connections
+            if connection.url.path == "/ws/admin"
+            and getattr(connection.state, "user_role", None) == "admin"
+            and self._should_send(connection, message)
+        )
+        if not connections:
+            return
+        await asyncio.gather(
+            *(self._send_one(connection, message) for connection in connections),
+            return_exceptions=True,
+        )
+
     async def send_personal(self, websocket: WebSocket, message: dict):
         await self._send_one(websocket, message)
 

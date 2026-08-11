@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 
 try:
     from backend.app.websocket import ConnectionManager
@@ -13,6 +14,13 @@ class _RecordingSocket:
 
     async def send_json(self, message):
         self.messages.append(message)
+
+
+class _RoleSocket(_RecordingSocket):
+    def __init__(self, path, role=None):
+        super().__init__()
+        self.url = SimpleNamespace(path=path)
+        self.state = SimpleNamespace(user_role=role)
 
 
 class _HangingSocket:
@@ -46,6 +54,20 @@ class _OverlapDetectingSocket:
 
 
 class WebSocketIsolationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sensitive_admin_broadcast_never_reaches_public_or_viewer_socket(self):
+        manager = ConnectionManager()
+        public = _RoleSocket("/ws/updates")
+        viewer = _RoleSocket("/ws/admin", "viewer")
+        admin = _RoleSocket("/ws/admin", "admin")
+        manager.active_connections = [public, viewer, admin]
+        message = {"type": "rescue_request", "phone": "private"}
+
+        await manager.broadcast_admins(message)
+
+        self.assertEqual(public.messages, [])
+        self.assertEqual(viewer.messages, [])
+        self.assertEqual(admin.messages, [message])
+
     async def test_dead_or_hanging_browser_does_not_block_other_clients(self):
         manager = ConnectionManager()
         manager.SEND_TIMEOUT_SECONDS = 0.02

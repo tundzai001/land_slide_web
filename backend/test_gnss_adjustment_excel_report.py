@@ -177,6 +177,11 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
             audit_path.unlink(missing_ok=True)
 
         self.assertEqual(urls["report_file_url"], urls["excel_report_url"])
+        self.assertTrue(
+            urls["excel_report_url"].startswith(
+                "/api/admin/gnss/adjustment/reports/999999/"
+            )
+        )
         self.assertTrue(urls["excel_report_url"].endswith(".xlsx"))
         self.assertNotIn("summary_report_url", urls)
 

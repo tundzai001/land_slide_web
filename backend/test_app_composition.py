@@ -134,4 +134,19 @@ def test_rescue_metadata_round_trip_and_path_guard():
     assert unpacked["text"] == "Need help"
     assert unpacked["rescue_type"] == "flood"
     assert rescue_storage.resolve_image_path("/static/uploads/rescue/a.jpg").name == "a.jpg"
+    assert rescue_storage.protected_image_url("/static/uploads/rescue/a.jpg") == (
+        "/api/admin/rescue-images/a.jpg"
+    )
     assert rescue_storage.resolve_image_path("/static/uploads/rescue/../secret") is None
+
+
+def test_only_allowlisted_static_directories_are_mounted():
+    mounts = {
+        route.path: str(getattr(route.app, "directory", ""))
+        for route in app.routes
+        if hasattr(route, "app") and hasattr(route.app, "directory")
+    }
+    assert set(mounts) == {"/assets"}
+    assert mounts["/assets"].replace("\\", "/").endswith("/frontend/dist")
+    assert all("adjustments" not in directory for directory in mounts.values())
+    assert all("uploads" not in directory for directory in mounts.values())

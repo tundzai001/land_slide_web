@@ -2,6 +2,8 @@
 // AUTHENTICATION HANDLER - COMPLETE FIXED VERSION
 // =============================================
 
+const authenticatedBlobUrls = new Map();
+
 class AuthManager {
     constructor() {
         this.token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -212,6 +214,7 @@ class AuthManager {
         sessionStorage.removeItem('justLoggedIn');
         sessionStorage.removeItem('loginReturnView');
         sessionStorage.removeItem('kicked_alert_shown');
+        window.revokeAuthenticatedBlobUrls?.();
 
         // Redirect
         if (redirect) {
@@ -359,6 +362,70 @@ class AuthManager {
         return response;
     }
 }
+
+window.revokeAuthenticatedBlobUrls = function () {
+    authenticatedBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    authenticatedBlobUrls.clear();
+};
+
+window.fetchAuthenticatedBlobUrl = async function (url) {
+    const safeUrl = String(url || '').trim();
+    if (!safeUrl.startsWith('/api/admin/')) {
+        throw new Error('Refusing to fetch a non-admin protected asset');
+    }
+    if (authenticatedBlobUrls.has(safeUrl)) return authenticatedBlobUrls.get(safeUrl);
+    const response = await window.authManager.apiFetch(safeUrl, { cache: 'no-store' });
+    if (!response?.ok) throw new Error(`Protected asset HTTP ${response?.status || 0}`);
+    const objectUrl = URL.createObjectURL(await response.blob());
+    if (authenticatedBlobUrls.size >= 128) {
+        const [oldestKey, oldestUrl] = authenticatedBlobUrls.entries().next().value;
+        URL.revokeObjectURL(oldestUrl);
+        authenticatedBlobUrls.delete(oldestKey);
+    }
+    authenticatedBlobUrls.set(safeUrl, objectUrl);
+    return objectUrl;
+};
+
+window.hydrateAuthenticatedImages = async function (root = document) {
+    const images = Array.from(root.querySelectorAll?.('img[data-auth-src]') || []);
+    await Promise.all(images.map(async image => {
+        if (image.dataset.authLoaded === 'true') return;
+        image.dataset.authLoaded = 'pending';
+        try {
+            image.src = await window.fetchAuthenticatedBlobUrl(image.dataset.authSrc);
+            image.dataset.authLoaded = 'true';
+        } catch (error) {
+            image.dataset.authLoaded = 'error';
+            image.alt = 'Không tải được ảnh bảo mật';
+            console.warn('[AUTH] Protected image unavailable:', error);
+        }
+    }));
+};
+
+window.downloadAuthenticatedFile = async function (url, fallbackName) {
+    const safeUrl = String(url || '').trim();
+    if (!safeUrl.startsWith('/api/admin/') || safeUrl.startsWith('//')) {
+        throw new Error('Refusing to download a non-admin protected asset');
+    }
+    const response = await window.authManager.apiFetch(safeUrl, { cache: 'no-store' });
+    if (!response?.ok) throw new Error(`Download HTTP ${response?.status || 0}`);
+    const blobUrl = URL.createObjectURL(await response.blob());
+    try {
+        const disposition = response.headers.get('content-disposition') || '';
+        const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+        const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+        const anchor = document.createElement('a');
+        anchor.href = blobUrl;
+        anchor.download = encodedName
+            ? decodeURIComponent(encodedName)
+            : (plainName || fallbackName || 'download');
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    } finally {
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    }
+};
 
 // ============================================
 // GLOBAL FETCH INTERCEPTOR

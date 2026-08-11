@@ -288,9 +288,6 @@ app.include_router(stations_router.router)
 app.add_middleware(VersionedAssetCacheMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
-# Mount static files directory (for sounds, etc.)
-app.mount("/static", StaticFiles(directory=BACKEND_DIR / "static"), name="static")
-
 # ADMIN - PROJECTS API
 # ============================================================================
 # ============================================================================
