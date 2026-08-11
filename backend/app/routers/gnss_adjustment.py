@@ -390,6 +390,11 @@ async def start_gnss_adjustment(
             )
             mqtt_service.round_robin_manager.configure_project(req.project_id, active_clusters)
             try:
+                rover_preflight = (
+                    await mqtt_service.round_robin_manager.ensure_rover_streams_ready(
+                        req.project_id
+                    )
+                )
                 seed_topology = (
                     await mqtt_service.round_robin_manager.prepare_common_fixed_base_seed(
                         req.project_id
@@ -438,6 +443,7 @@ async def start_gnss_adjustment(
             "message": "Common fixed-base route is ready; waiting for source-verified #AGRICA baselines from every selected rover.",
             "expected_station_ids": expected_station_ids,
             "skipped_offline_station_ids": skipped_offline_station_ids,
+            "rover_preflight": rover_preflight,
             "seed_topology": seed_topology,
         })
 
@@ -446,6 +452,7 @@ async def start_gnss_adjustment(
             "phase": "COLLECTING_BASELINE",
             "expected_station_ids": expected_station_ids,
             "skipped_offline_station_ids": skipped_offline_station_ids,
+            "rover_preflight": rover_preflight,
             "seed_topology": seed_topology,
             "message": "Both rover streams now use the selected physical base; waiting for verified baseline collection.",
         }

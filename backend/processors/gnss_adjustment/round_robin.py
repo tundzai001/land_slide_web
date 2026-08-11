@@ -139,6 +139,8 @@ class RoundRobinAdjustmentManager:
     ROVER_RESTORE_TRANSPORT_ATTEMPTS = 6
     ROVER_RESTORE_RETRY_SECONDS = 2.0
     RTCM_ROUTE_RECOVERY_ATTEMPTS = 2
+    FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS = 15
+    FIXED_BASE_MOUNTPOINT_RELEASE_RETRY_SECONDS = 1.0
     OPTIONAL_BASE_RTCM_COMMANDS = (
         "rtcm1077 com2 1",
         "rtcm1127 com2 1",
@@ -206,6 +208,8 @@ class RoundRobinAdjustmentManager:
         # an ACK can safely cross that boundary.
         self._command_ack_lock = threading.Lock()
         self._command_ack_waiters: Dict[str, _CommandAckWaiter] = {}
+        self._gnss_stream_health_lock = threading.Lock()
+        self._gnss_stream_health: Dict[str, Dict[str, Any]] = {}
         self.running_tasks: Dict[int, asyncio.Task] = {}
         self.rover_llh_cache: Dict[str, Dict[str, float]] = {}
         self._sessions: Dict[int, dict] = {}
@@ -363,6 +367,188 @@ class RoundRobinAdjustmentManager:
             loop.call_soon_threadsafe(deliver)
             return True
         return bool(waiter and waiter.echo_seen)
+
+    def observe_gnss_payload(self, info: Dict[str, Any], payload: bytes) -> None:
+        """Remember what each receiver is actually publishing on its GNSS topic.
+
+        This is deliberately fed before UTF-8 decoding because RTCM is binary and
+        would otherwise disappear from the normal sensor pipeline.  The tracker is
+        passive; state-changing recovery is only performed by the adjustment
+        preflight, never by the general monitoring path.
+        """
+
+        station_code = str((info or {}).get("station_code") or "").strip()
+        key = self._command_station_key(station_code)
+        if not key or not payload:
+            return
+
+        raw = bytes(payload)
+        upper = raw.upper()
+        now = time.monotonic()
+        has_agrica = b"#AGRICA" in upper
+        has_gga = bool(re.search(rb"\$G[NP]GGA,", upper))
+        # A valid RTCM3 frame starts with D3 followed by a ten-bit payload length.
+        # A complete frame is preferred, but retaining a plausible fragmented
+        # preamble is important because MQTT/serial chunk boundaries are arbitrary.
+        has_rtcm = b"\xd3" in raw
+        for index, value in enumerate(raw):
+            if value != 0xD3 or index + 2 >= len(raw):
+                continue
+            frame_length = ((raw[index + 1] & 0x03) << 8) | raw[index + 2]
+            if 0 < frame_length <= 1023:
+                has_rtcm = True
+                break
+
+        with self._gnss_stream_health_lock:
+            state = dict(self._gnss_stream_health.get(key) or {})
+            state.update({
+                "station_code": station_code,
+                "station_id": (info or {}).get("station_id"),
+                "last_payload_monotonic": now,
+            })
+            if has_agrica:
+                state["last_agrica_monotonic"] = now
+            if has_gga:
+                state["last_gga_monotonic"] = now
+            if has_rtcm:
+                state["last_rtcm_monotonic"] = now
+            self._gnss_stream_health[key] = state
+
+    def get_gnss_stream_health(
+        self,
+        station_code: str,
+        *,
+        freshness_seconds: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Return a stable snapshot of the receiver's recent output profile."""
+
+        key = self._command_station_key(station_code)
+        with self._gnss_stream_health_lock:
+            state = dict(self._gnss_stream_health.get(key) or {})
+        now = time.monotonic()
+
+        def recent(field: str) -> bool:
+            value = state.get(field)
+            return value is not None and now - float(value) <= freshness_seconds
+
+        state.update({
+            "station_code": state.get("station_code") or str(station_code),
+            "payload_recent": recent("last_payload_monotonic"),
+            "agrica_recent": recent("last_agrica_monotonic"),
+            "gga_recent": recent("last_gga_monotonic"),
+            "rtcm_recent": recent("last_rtcm_monotonic"),
+        })
+        state["ready_as_rover"] = bool(
+            state["agrica_recent"]
+            and state["gga_recent"]
+            and not state["rtcm_recent"]
+        )
+        return state
+
+    async def ensure_rover_streams_ready(
+        self,
+        project_id: int,
+        *,
+        discovery_seconds: float = 5.0,
+        verify_seconds: float = 30.0,
+    ) -> List[Dict[str, Any]]:
+        """Inspect and self-heal every selected rover before seed collection.
+
+        Healthy receivers are left untouched. A silent/misconfigured receiver is
+        restored with the same ACK-verified ROVER profile used after a temporary
+        BASE rotation, then must prove fresh GGA + AGRICA output and RTCM silence.
+        """
+
+        session = self._sessions.get(int(project_id))
+        if session is None:
+            raise KeyError(f"no active adjustment session for project {project_id}")
+        rover_codes = list(dict.fromkeys(
+            str(code).strip()
+            for cluster in session.get("clusters", [])
+            for code in cluster.get("rovers", [])
+            if str(code).strip()
+        ))
+        if not rover_codes:
+            raise RuntimeError("adjustment preflight has no selected rover")
+
+        discovery_deadline = asyncio.get_running_loop().time() + max(0.0, discovery_seconds)
+        while asyncio.get_running_loop().time() < discovery_deadline:
+            if all(self.get_gnss_stream_health(code)["payload_recent"] for code in rover_codes):
+                break
+            await asyncio.sleep(0.25)
+
+        outcomes: List[Dict[str, Any]] = []
+        for rover_code in rover_codes:
+            before = self.get_gnss_stream_health(rover_code)
+            if before["ready_as_rover"]:
+                outcomes.append({
+                    "station_code": rover_code,
+                    "status": "ready",
+                    "reconfigured": False,
+                    "observed": {"agrica": True, "gga": True, "rtcm": False},
+                })
+                continue
+
+            reasons = []
+            if not before["payload_recent"]:
+                reasons.append("no recent GNSS payload")
+            if not before["agrica_recent"]:
+                reasons.append("AGRICA missing")
+            if not before["gga_recent"]:
+                reasons.append("GGA missing")
+            if before["rtcm_recent"]:
+                reasons.append("RTCM detected (receiver is in/still logging BASE output)")
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: preflight found {', '.join(reasons)}; restoring the verified ROVER output profile.",
+            )
+
+            client_info = await self._find_client_info(rover_code, project_id=project_id)
+            if not client_info or not str(client_info.get("Mountpoint") or "").strip():
+                raise RuntimeError(
+                    f"{rover_code}: cannot self-heal receiver because no active "
+                    "AICaster control session/mountpoint was found"
+                )
+            repair_started = time.monotonic()
+            await self._restore_rover_output_sequence(
+                rover_code=rover_code,
+                mountpoint=str(client_info["Mountpoint"]).strip(),
+                client_info=client_info,
+                commands=self._build_unicore_rover_config(
+                    restore_undulation=(self.rover_llh_cache.get(rover_code) or {}).get("undulation")
+                ),
+                project_id=project_id,
+            )
+
+            verify_deadline = asyncio.get_running_loop().time() + max(1.0, verify_seconds)
+            verified = None
+            while asyncio.get_running_loop().time() < verify_deadline:
+                candidate = self.get_gnss_stream_health(rover_code, freshness_seconds=5.0)
+                agrica_fresh = float(candidate.get("last_agrica_monotonic") or 0) > repair_started
+                gga_fresh = float(candidate.get("last_gga_monotonic") or 0) > repair_started
+                last_rtcm = float(candidate.get("last_rtcm_monotonic") or 0)
+                rtcm_quiet = last_rtcm <= repair_started or time.monotonic() - last_rtcm >= 3.0
+                if agrica_fresh and gga_fresh and rtcm_quiet:
+                    verified = candidate
+                    break
+                await asyncio.sleep(0.25)
+            if verified is None:
+                raise RuntimeError(
+                    f"{rover_code}: ROVER commands were acknowledged but live output did "
+                    f"not prove fresh GGA + AGRICA with RTCM stopped within {verify_seconds:g}s"
+                )
+            outcomes.append({
+                "station_code": rover_code,
+                "status": "recovered",
+                "reconfigured": True,
+                "reason": reasons,
+                "observed": {"agrica": True, "gga": True, "rtcm": False},
+            })
+            await self._emit_progress(
+                project_id,
+                f"{rover_code}: live stream verified as ROVER (fresh GGA + AGRICA, RTCM stopped).",
+            )
+        return outcomes
 
     def configure_project(self, project_id: int, clusters: List[dict]) -> None:
         """Start a new collection session using normalized cluster settings."""
@@ -3544,14 +3730,49 @@ class RoundRobinAdjustmentManager:
             ),
         )
         try:
-            await self._start_ntrip_route(
-                rover_code,
-                target_route_mountpoint,
-                host=target_route_host,
-                port=target_route_port,
-                password=target_route_password,
-            )
-            route_started = True
+            for release_attempt in range(
+                1, self.FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS + 1
+            ):
+                try:
+                    await self._start_ntrip_route(
+                        rover_code,
+                        target_route_mountpoint,
+                        host=target_route_host,
+                        port=target_route_port,
+                        password=target_route_password,
+                    )
+                    route_started = True
+                    break
+                except Exception as route_exc:
+                    mountpoint_busy = "mountpoint already in using" in str(route_exc).casefold()
+                    if (
+                        not mountpoint_busy
+                        or release_attempt >= self.FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS
+                    ):
+                        raise
+                    # configure-service confirms that the command was persisted,
+                    # not that AICaster has already closed the old SOURCE socket.
+                    # Keep the fixed base asleep and retry the temporary SOURCE
+                    # until that exact mountpoint is observably released.
+                    await self._emit_progress(
+                        project_id,
+                        (
+                            f"{rover_code}: fixed BASE accepted Sleep but AICaster still "
+                            f"holds {target_route_mountpoint}; waiting for mountpoint release "
+                            f"({release_attempt}/{self.FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS})."
+                        ),
+                    )
+                    try:
+                        await self._stop_ntrip_route(rover_code)
+                    except Exception as stop_exc:
+                        logger.warning(
+                            "Could not clear pending route for %s while waiting for mountpoint release: %s",
+                            rover_code,
+                            stop_exc,
+                        )
+                    await asyncio.sleep(
+                        self.FIXED_BASE_MOUNTPOINT_RELEASE_RETRY_SECONDS
+                    )
         except Exception as route_exc:
             if before_rover_restore:
                 recovery_result = before_rover_restore()

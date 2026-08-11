@@ -586,10 +586,16 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
 
     async def _handle_round_robin_progress(self, project_id: int, message: str):
         self.adjustment_message[project_id] = message
+        phase = str(self.adjustment_phase.get(project_id) or "").upper()
+        if phase not in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+            # Receiver health preflight runs inside the start request, before the
+            # persistent phase is installed. Do not mislabel those messages as
+            # FREE_NETWORK/solver work.
+            phase = "COLLECTING_BASELINE"
         await manager.broadcast({
             "type": "gnss_adjustment_progress",
             "project_id": project_id,
-            "phase": "FREE_NETWORK",
+            "phase": phase,
             "message": message,
         })
 

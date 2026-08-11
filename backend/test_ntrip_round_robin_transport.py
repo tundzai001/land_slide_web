@@ -76,6 +76,61 @@ class RtcmFilterTests(unittest.TestCase):
         self.assertIn("COM2-to-MQTT", diagnostics["likely_cause"])
 
 
+class RoverStreamHealthTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+
+    def test_observer_classifies_text_rover_and_binary_base_output(self):
+        info = {"station_code": "Dap1_1", "station_id": 11}
+        self.manager.observe_gnss_payload(
+            info,
+            b"$GNGGA,010203.00,2100.0,N,10500.0,E,4,20,0.5,10,M,0,M,,*00\r\n"
+            b"#AGRICA,COM2,0,0,0*12345678\r\n",
+        )
+        health = self.manager.get_gnss_stream_health("Dap1_1")
+        self.assertTrue(health["ready_as_rover"])
+        self.assertFalse(health["rtcm_recent"])
+
+        self.manager.observe_gnss_payload(info, _rtcm_frame(b"\x43\x20\x03"))
+        health = self.manager.get_gnss_stream_health("Dap1_1")
+        self.assertTrue(health["rtcm_recent"])
+        self.assertFalse(health["ready_as_rover"])
+
+    async def test_preflight_repairs_only_bad_stream_and_verifies_live_output(self):
+        self.manager.configure_project(7, [{
+            "stations": [11, 12],
+            "rovers": ["Dap1_1", "Dap1_2"],
+        }])
+        healthy = b"$GNGGA,1,2,3*00\r\n#AGRICA,COM2,0*12345678\r\n"
+        self.manager.observe_gnss_payload(
+            {"station_code": "Dap1_1", "station_id": 11}, healthy
+        )
+        self.manager.observe_gnss_payload(
+            {"station_code": "Dap1_2", "station_id": 12}, _rtcm_frame(b"\x43\x20\x03")
+        )
+        self.manager._find_client_info = AsyncMock(return_value={
+            "Mountpoint": "SinQuyen1",
+            "Username": "Dap1_2",
+            "receiverID": "1.4.10",
+            "CasterHost": "caster",
+            "CasterPort": 2101,
+        })
+        self.manager._emit_progress = AsyncMock()
+
+        async def restore(**_kwargs):
+            self.manager.observe_gnss_payload(
+                {"station_code": "Dap1_2", "station_id": 12}, healthy
+            )
+
+        self.manager._restore_rover_output_sequence = AsyncMock(side_effect=restore)
+        outcomes = await self.manager.ensure_rover_streams_ready(
+            7, discovery_seconds=0, verify_seconds=1
+        )
+
+        self.assertEqual([item["status"] for item in outcomes], ["ready", "recovered"])
+        self.manager._restore_rover_output_sequence.assert_awaited_once()
+
+
 class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await NtripPusherManager.stop_pusher("FANOUT")
@@ -169,6 +224,59 @@ class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_temporary_route_waits_for_fixed_mountpoint_release(self):
+        route_attempts = 0
+        events = []
+
+        async def route_start(*_args):
+            nonlocal route_attempts
+            route_attempts += 1
+            events.append(f"route-{route_attempts}")
+            if route_attempts < 3:
+                raise RuntimeError("Caster rejected SOURCE: ERROR - Mountpoint already in using")
+            return True
+
+        async def route_stop(_station_code):
+            events.append("route-stop")
+
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(),
+            route_start_callback=route_start,
+            route_stop_callback=route_stop,
+        )
+        manager.FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS = 3
+        manager.rover_llh_cache["Dap1_1"] = {"lat": 21.0, "lon": 105.0, "alt": 10.0}
+        manager._find_client_info = AsyncMock(return_value={
+            "Username": "Dap1_1",
+            "receiverID": "1.4.10",
+            "Mountpoint": "SinQuyen1",
+        })
+        manager._send_set_command = AsyncMock(return_value=True)
+
+        async def sleep_fixed():
+            events.append("fixed-sleep")
+
+        async def wake_fixed():
+            events.append("fixed-wake")
+            return {
+                "Username": "Dap1_1",
+                "receiverID": "1.4.10",
+                "Mountpoint": "SinQuyen1",
+            }
+
+        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+            await manager._set_rover_as_temporary_base(
+                "Dap1_1",
+                route_mountpoint="SinQuyen2,SinQuyen1",
+                before_route_start=sleep_fixed,
+                before_rover_restore=wake_fixed,
+            )
+
+        self.assertEqual(route_attempts, 3)
+        self.assertEqual(events.count("fixed-sleep"), 1)
+        self.assertEqual(events.count("fixed-wake"), 1)
+        self.assertLess(events.index("fixed-sleep"), events.index("route-1"))
+
     async def test_fixed_base_configures_host_selected_server_not_always_s1(self):
         class FakeResponse:
             status = 200

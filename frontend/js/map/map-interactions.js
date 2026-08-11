@@ -416,10 +416,11 @@ function setupEventListeners() {
             this.lastAnimationDrawAt = 0;
         },
         getRoverCount() {
-            if (Number.isFinite(this.roverCount) && this.roverCount >= 0) {
-                return Math.trunc(this.roverCount);
-            }
-            return Math.max(0, Object.keys(this.points || {}).filter(name => name !== 'BASE').length);
+            const actualCount = Object.keys(this.points || {}).filter(name => name !== 'BASE').length;
+            const declaredCount = Number.isFinite(this.roverCount)
+                ? Math.max(0, Math.trunc(this.roverCount))
+                : 0;
+            return Math.max(actualCount, declaredCount);
         },
         pruneToExpectedStations(expectedStationIds = [], stationIdByRoverName = {}) {
             const expected = new Set(
@@ -431,7 +432,9 @@ function setupEventListeners() {
 
             const keepPoint = name => {
                 if (name === 'BASE') return true;
-                const stationId = Number(stationIdByRoverName?.[name]);
+                const stationId = Number(
+                    stationIdByRoverName?.[name] ?? this.points?.[name]?.stationId
+                );
                 return !Number.isFinite(stationId) || expected.has(stationId);
             };
             const removedNames = new Set();
@@ -460,12 +463,53 @@ function setupEventListeners() {
             this.draw(performance.now());
             return true;
         },
-        addPoint(name, relX, relY, isBase = false) {
+        seedExpectedRovers(expectedRovers = []) {
+            if (!Array.isArray(expectedRovers) || expectedRovers.length === 0) return;
+            this.addPoint('BASE', 0, 0, true);
+            const radius = 100;
+            expectedRovers.forEach((rover, index) => {
+                const name = String(rover?.name || `Trạm ${rover?.stationId || index + 1}`);
+                if (this.points[name] && !this.points[name].placeholder) return;
+                const angle = (Math.PI * 2 * index / expectedRovers.length) - Math.PI / 2;
+                this.points[name] = {
+                    name,
+                    x: Math.cos(angle) * radius,
+                    y: Math.sin(angle) * radius,
+                    isBase: false,
+                    samples: 0,
+                    placeholder: true,
+                    stationId: Number(rover?.stationId),
+                };
+            });
+            this.roverCount = expectedRovers.length;
+            this.draw(performance.now());
+        },
+        addPoint(name, relX, relY, isBase = false, stationId = null) {
+            const numericStationId = Number(stationId);
+            const hasStationId = stationId !== null && stationId !== '' && Number.isFinite(numericStationId);
+            if (!this.points[name] && hasStationId) {
+                const priorEntry = Object.entries(this.points).find(([, point]) => (
+                    Number(point.stationId) === numericStationId
+                ));
+                if (priorEntry) {
+                    const [priorName, priorPoint] = priorEntry;
+                    delete this.points[priorName];
+                    priorPoint.name = name;
+                    this.points[name] = priorPoint;
+                }
+            }
             if (!this.points[name]) {
-                this.points[name] = { name, x: Number(relX) || 0, y: Number(relY) || 0, isBase, samples: 1 };
+                this.points[name] = { name, x: Number(relX) || 0, y: Number(relY) || 0, isBase, samples: 1, placeholder: false, stationId: hasStationId ? numericStationId : null };
                 if (isBase) this.basePoint = this.points[name];
             } else if (!isBase) {
                 const point = this.points[name];
+                if (point.placeholder) {
+                    point.x = Number(relX) || 0;
+                    point.y = Number(relY) || 0;
+                    point.samples = 1;
+                    point.placeholder = false;
+                    return;
+                }
                 point.samples = Number(point.samples || 1) + 1;
                 point.x += ((Number(relX) || 0) - point.x) / point.samples;
                 point.y += ((Number(relY) || 0) - point.y) / point.samples;
@@ -783,7 +827,7 @@ function setupEventListeners() {
                 ctx.fill();
                 ctx.beginPath();
                 ctx.arc(sp.x, sp.y, pt.isBase ? 8 : 6, 0, Math.PI * 2);
-                ctx.fillStyle = pt.isBase ? '#fb7185' : '#2dd4bf';
+                ctx.fillStyle = pt.isBase ? '#fb7185' : pt.placeholder ? '#64748b' : '#2dd4bf';
                 ctx.shadowColor = ctx.fillStyle;
                 ctx.shadowBlur = this.interactionActive ? 0 : 12;
                 ctx.fill();
@@ -794,6 +838,11 @@ function setupEventListeners() {
                 ctx.fillStyle = '#e6fffb';
                 ctx.font = "600 12px 'IBM Plex Mono', monospace";
                 ctx.fillText(pt.name, sp.x + 12, sp.y - 11);
+                if (pt.placeholder) {
+                    ctx.fillStyle = 'rgba(203,255,248,.48)';
+                    ctx.font = "9px 'IBM Plex Mono', monospace";
+                    ctx.fillText('CHỜ TRỊ ĐO', sp.x + 12, sp.y + 3);
+                }
             });
         }
     };
@@ -864,10 +913,13 @@ function setupEventListeners() {
                                     <div id="gnss-debug-summary" class="px-3 py-1 text-muted font-monospace border-bottom border-secondary" style="font-size: 0.72rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto; background: rgba(0,0,0,0.3);">WS: CONNECTING</div>
                                     <div id="gnss-debug-log" class="p-3 font-monospace flex-grow-1 text-light" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.8rem; line-height: 1.6;"></div>
                                 </div>
-                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium" style="display: none; position: relative; flex: 0 0 auto; max-height: min(34vh, 300px); overflow-y: auto;">
+                                <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium gnss-result-panel" style="display: none;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
                                     <div class="text-light opacity-75 font-monospace mb-2" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>Time: <span id="adj-val-time"></span></div>
-                                    <div class="d-flex gap-2 mb-2">
+                                    <div class="d-flex gap-2 mb-2 gnss-result-actions">
+                                        <button id="gnss-retry-adjustment-btn" type="button" class="btn btn-sm btn-primary px-3 py-2 shadow-sm fw-bold" style="border-radius: 7px; white-space: nowrap; display: none;">
+                                            <i class="bi bi-arrow-clockwise me-1"></i>Bình sai lại
+                                        </button>
                                         <button id="gnss-download-results-btn" class="btn btn-sm btn-success w-100 px-3 py-2 shadow-sm fw-bold" style="border-radius: 7px; letter-spacing: 0.4px;">
                                             <i class="bi bi-hourglass-split me-2"></i>Đang tạo file Excel...
                                         </button>
@@ -1023,6 +1075,17 @@ function setupEventListeners() {
             gnssAdjustmentDebugState.entriesGeneration += 1;
             gnssAdjustmentDebugState.autoScroll = true;
             addGnssAdjustmentDebug('UI', 'Đã xóa nhật ký debug.', 'info');
+        });
+        modal.querySelector('#gnss-retry-adjustment-btn')?.addEventListener('click', () => {
+            const projectId = Number(gnssAdjustmentDebugState.projectId || 0);
+            const stationIds = [...gnssAdjustmentDebugState.expectedStationIds];
+            if (!projectId) {
+                showAdjustmentError('Không thể chạy lại', 'Không xác định được dự án của phiên bình sai.');
+                return;
+            }
+            modal.querySelector('#adj-results-section')?.style.setProperty('display', 'none');
+            modal.classList.remove('gnss-result-visible');
+            window.requestGnssAdjustment?.(projectId, stationIds.length ? stationIds : undefined);
         });
         refreshGnssAdjustmentDebugUi();
         return modal;

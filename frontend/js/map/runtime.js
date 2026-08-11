@@ -151,6 +151,13 @@ function syncGnssExpectedStationIds(stationIds) {
         gnssAdjustmentDebugState.expectedStationIds,
         gnssAdjustmentDebugState.workflowStationIdByRoverName,
     );
+    const expectedRovers = gnssAdjustmentDebugState.expectedStationIds.map((stationId, index) => {
+        const station = allStations.find(item => Number(item.id) === Number(stationId));
+        const name = String(station?.station_code || station?.name || `Trạm ${stationId}`).trim();
+        gnssAdjustmentDebugState.workflowStationIdByRoverName[name] = Number(stationId);
+        return { stationId: Number(stationId), name, index };
+    });
+    window.gnssBoardState?.seedExpectedRovers?.(expectedRovers);
 }
 
 function isGnssAdjustmentExpectedStation(stationId) {

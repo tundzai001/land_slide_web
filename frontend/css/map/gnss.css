@@ -591,8 +591,32 @@
     max-width: 68vw;
     flex: 0 0 clamp(390px, 42vw, 680px);
     overflow: hidden;
+    min-height: 0;
     background: linear-gradient(180deg, #101820, #0c131a);
     box-shadow: -8px 0 28px rgba(0, 0, 0, 0.38);
+}
+
+#gnssTerminalModal .gnss-result-panel {
+    position: relative;
+    min-height: 0;
+    max-height: min(30dvh, 240px);
+    flex: 0 1 240px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+#gnssTerminalModal .gnss-result-actions {
+    position: sticky;
+    bottom: -1rem;
+    z-index: 3;
+    margin-inline: -0.35rem;
+    padding: 0.4rem 0.35rem 0.55rem;
+    background: linear-gradient(180deg, rgba(9, 39, 47, 0.2), #09272f 34%);
+}
+
+#gnssTerminalModal.gnss-result-visible .gnss-workflow-panel {
+    min-height: 120px;
 }
 
 #gnssTerminalModal.gnss-is-resizing #gnss-data-column,

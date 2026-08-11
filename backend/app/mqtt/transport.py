@@ -146,6 +146,9 @@ class MQTTTransportMixin:
                 if station_code:
                     from app.modules.ntrip_pusher import ntrip_manager
                     ntrip_manager.feed_data(station_code, msg.payload)
+                # Inspect the original bytes before text decoding. RTCM is binary
+                # and is intentionally discarded by the normal sensor pipeline.
+                self.round_robin_manager.observe_gnss_payload(info, msg.payload)
                     
             try:
                 if sensor_type == 'gnss':

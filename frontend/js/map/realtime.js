@@ -476,7 +476,7 @@ function handleRealtimeUpdate(message) {
             const origin = window.gnssBoardState.points[fromPoint] || window.gnssBoardState.points.BASE;
             const relX = origin.x + Number(message.baseline_neu?.[1] || 0);
             const relY = origin.y + Number(message.baseline_neu?.[0] || 0);
-            window.gnssBoardState.addPoint(message.rover_name, relX, relY, false);
+            window.gnssBoardState.addPoint(message.rover_name, relX, relY, false, message.station_id);
             window.gnssBoardState.addBaseline(fromPoint, message.rover_name, {
                 dn: message.baseline_neu[0],
                 de: message.baseline_neu[1],
@@ -532,6 +532,7 @@ function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
     const adjStatusEl = document.getElementById('adj-process-status');
     const adjTimeEl = document.getElementById('adj-val-time');
     const adjPointsList = document.getElementById('adj-points-list');
+    const retryButton = document.getElementById('gnss-retry-adjustment-btn');
 
     if (adjStatusEl) {
         adjStatusEl.innerHTML = failed
@@ -545,6 +546,14 @@ function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
         adjTimeEl.textContent = new Date(timestamp * 1000).toLocaleString();
     }
     if (adjResultsSection) adjResultsSection.style.display = 'block';
+    const terminalModal = document.getElementById('gnssTerminalModal');
+    terminalModal?.classList.add('gnss-result-visible');
+    if (retryButton) retryButton.style.display = failed || auditOnly ? 'inline-flex' : 'none';
+    if (failed) {
+        // A terminal error no longer needs two large live panes. Collapse Debug
+        // once to guarantee that the result actions remain visible and clickable.
+        terminalModal?.querySelector('#gnss-data-column')?.classList.add('gnss-debug-collapsed');
+    }
     if (adjPointsList) {
         adjPointsList.innerHTML = '';
         if (failed) {
