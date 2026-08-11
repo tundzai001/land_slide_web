@@ -1,4 +1,15 @@
 const { test, expect } = require('@playwright/test');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
+const mapPath = process.env.MAP_PATH || '/map';
+
+const gnssPanelCss = [
+  'frontend/css/theme-variables.css',
+  'frontend/css/shell.css',
+  'frontend/css/map/base.css',
+  'frontend/css/map/gnss.css',
+  'frontend/css/map-responsive.css',
+].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
 const viewports = [
   { name: '320x568', width: 320, height: 568 },
@@ -49,12 +60,47 @@ for (const viewport of viewports) {
 for (const viewport of viewports.slice(0, 5)) {
   test(`map shell responsive ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await page.goto('/map');
+    await page.goto(mapPath);
     await expect(page.locator('#map')).toBeVisible({ timeout: 30_000 });
     await assertViewportContract(page);
     if (viewport.width <= 900) {
       await expect(page.locator('#map-bottom-nav')).toBeVisible();
     }
+  });
+}
+
+for (const viewport of viewports) {
+  test(`GNSS panel remains viewport-bound ${viewport.name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const items = Array.from({ length: 24 }, (_, index) =>
+      `<div class="adv-item"><span class="adv-label">Value ${index + 1}</span><span class="adv-value">--</span></div>`
+    ).join('');
+    await page.setContent(`<!doctype html><html data-app-view="map"><head><style>${gnssPanelCss}</style></head><body>
+      <div id="app-root"><aside id="gnss-advanced-sidepanel" class="gnss-advanced-sidepanel active">
+        <header class="sidepanel-header"><h6>Advanced GNSS</h6><button class="sidepanel-close">x</button></header>
+        <div class="sidepanel-body"><div class="adv-column-left">${items}</div></div>
+      </aside></div></body></html>`);
+
+    const geometry = await page.locator('#gnss-advanced-sidepanel').evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const body = element.querySelector('.sidepanel-body');
+      return {
+        position: getComputedStyle(element).position,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        documentOverflow: document.documentElement.scrollHeight - innerHeight,
+        bodyOverflow: getComputedStyle(body).overflowY,
+        bodyCanScroll: body.scrollHeight > body.clientHeight,
+      };
+    });
+    expect(geometry.position).toBe('fixed');
+    expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(viewport.width + 1);
+    expect(geometry.bottom).toBeLessThanOrEqual(viewport.height + 1);
+    expect(geometry.documentOverflow).toBeLessThanOrEqual(1);
+    expect(geometry.bodyOverflow).toBe('auto');
+    if (viewport.height <= 1440) expect(geometry.bodyCanScroll).toBe(true);
   });
 }
 

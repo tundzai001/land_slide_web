@@ -46,6 +46,16 @@
     height: 100svh;
 }
 
+html[data-app-view="map"],
+html[data-app-view="map"] body,
+html[data-app-view="map"] #app-root {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
 .station-list-sidebar {
     top: calc(var(--map-navbar-h) + 8px);
     height: calc(100svh - var(--map-navbar-h) - 8px);
@@ -61,7 +71,8 @@
     top: calc(var(--map-navbar-h) + 8px);
     right: clamp(360px, 34vw, 560px);
     width: clamp(300px, 28vw, 420px);
-    max-height: calc(100svh - var(--map-navbar-h) - 32px);
+    height: calc(100svh - var(--map-navbar-h) - 32px);
+    max-height: none;
 }
 
 .gnss-advanced-sidepanel.expanded {
@@ -239,7 +250,8 @@
         left: max(12px, env(safe-area-inset-left));
         right: max(12px, env(safe-area-inset-right));
         width: auto;
-        max-height: min(42svh, 440px);
+        height: min(42svh, 440px);
+        max-height: none;
         border-radius: 14px;
         transform: translateY(-12px);
     }
