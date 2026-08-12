@@ -1970,10 +1970,10 @@ class RoundRobinAdjustmentManager:
         try:
             for cluster_index, cluster in enumerate(session["clusters"]):
                 candidates = self._fixed_base_candidates(cluster)
-                selected = candidates[0]
                 # A mixed request may still contain a legacy single-stream
                 # base alongside a dual-stream total cluster.
                 if not has_dual_selected_stream(cluster):
+                    selected = candidates[0]
                     self._lock_fixed_base_candidate(
                         cluster,
                         selected,
@@ -1981,33 +1981,68 @@ class RoundRobinAdjustmentManager:
                     )
                     continue
 
-                selected_match = self._cors_failover_stream(
-                    stations,
-                    station_name=selected.get("base_station"),
-                    serial=selected.get("base_serial"),
-                    server_id=selected.get("base_server_id"),
-                    host=selected.get("base_stream_host"),
-                    mountpoint=selected.get("base_stream_mp"),
-                )
-                if selected_match is None:
+                resolved_candidates: list[tuple[dict, tuple[dict, int]]] = []
+                for candidate in candidates:
+                    candidate_match = self._cors_failover_stream(
+                        stations,
+                        station_name=candidate.get("base_station"),
+                        serial=candidate.get("base_serial"),
+                        server_id=candidate.get("base_server_id"),
+                        host=candidate.get("base_stream_host"),
+                        mountpoint=candidate.get("base_stream_mp"),
+                    )
+                    if candidate_match is not None:
+                        resolved_candidates.append((candidate, candidate_match))
+
+                if not resolved_candidates:
                     raise RuntimeError(
                         f"{cluster.get('name', cluster_index + 1)}: could not resolve "
-                        "the selected CORS stream uniquely"
+                        "any configured CORS failover stream uniquely"
                     )
 
+                # Candidate order is primary then backup, but the primary may be
+                # offline while the backup receiver's S2 is already serving its
+                # mountpoint.  Select the first *online physical receiver* that
+                # can publish both reciprocal mountpoints for the common seed.
+                usable_candidates = []
+                online_candidates = []
+                for candidate, candidate_match in resolved_candidates:
+                    candidate_station, _ = candidate_match
+                    if not self._cors_station_is_online(candidate_station):
+                        continue
+                    online_candidates.append((candidate, candidate_match))
+                    service_config = candidate_station.get("service_config") or {}
+                    if all(
+                        bool(service_config.get(f"server{server_id}_enabled", False))
+                        and bool(str(service_config.get(f"mountpoint{server_id}") or "").strip())
+                        for server_id in (1, 2)
+                    ):
+                        usable_candidates.append((candidate, candidate_match))
+
+                if not online_candidates:
+                    names = ", ".join(
+                        str(candidate.get("base_station") or "unknown")
+                        for candidate, _ in resolved_candidates
+                    )
+                    raise RuntimeError(
+                        f"{cluster.get('name', cluster_index + 1)}: no configured "
+                        f"physical base is online ({names})"
+                    )
+                if not usable_candidates:
+                    names = ", ".join(
+                        str(candidate.get("base_station") or "unknown")
+                        for candidate, _ in online_candidates
+                    )
+                    raise RuntimeError(
+                        f"{cluster.get('name', cluster_index + 1)}: online physical base(s) "
+                        f"{names} must have both S1 and S2 enabled with explicit "
+                        "mountpoints before a common-base seed can start"
+                    )
+
+                selected, selected_match = usable_candidates[0]
                 selected_station, _ = selected_match
                 selected_serial = str(selected_station.get("serial") or "").strip()
                 selected_service_config = selected_station.get("service_config") or {}
-                if not all(
-                    bool(selected_service_config.get(f"server{server_id}_enabled", False))
-                    and bool(str(selected_service_config.get(f"mountpoint{server_id}") or "").strip())
-                    for server_id in (1, 2)
-                ):
-                    raise RuntimeError(
-                        f"{cluster.get('name', cluster_index + 1)}: selected physical base "
-                        f"{selected.get('base_station')} must have both S1 and S2 enabled "
-                        "with explicit mountpoints before a common-base seed can start"
-                    )
 
                 try:
                     selected_server_id = int(selected.get("base_server_id") or 1)

@@ -660,6 +660,52 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(configured[0][1]["server2_stream_active"])
         self.assertFalse(outcome[0]["opposite_online"])
 
+    async def test_seed_selects_online_backup_when_configured_primary_is_offline(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        offline_primary_config = {
+            "stream_on_demand": True, "stream_active": True,
+            "server1_enabled": True, "mountpoint1": "SinQuyen1",
+            "server1_stream_on_demand": False, "server1_stream_active": True,
+            "server2_enabled": True, "mountpoint2": "SinQuyen2",
+            "server2_stream_on_demand": True, "server2_stream_active": False,
+        }
+        online_backup_config = {
+            "stream_on_demand": False, "stream_active": True,
+            "server1_enabled": True, "mountpoint1": "SinQuyen2",
+            "server1_stream_on_demand": False, "server1_stream_active": True,
+            "server2_enabled": True, "mountpoint2": "SinQuyen1",
+            "server2_stream_on_demand": False, "server2_stream_active": True,
+        }
+        stations = [
+            {"serial": "SQ1", "name": "SinQuyen1", "status": "offline", "service_config": offline_primary_config},
+            {"serial": "SQ2", "name": "SinQuyen2", "status": "online", "service_config": online_backup_config},
+        ]
+        manager.configure_project(94, [{
+            "name": "Dam 1", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "fixed_base_candidates": [
+                {"role": "primary", "base_station": "SinQuyen1", "base_serial": "SQ1", "base_server_id": 1, "base_stream_mp": "SinQuyen1", "base_lat": 21.1, "base_lon": 105.0},
+                {"role": "backup", "base_station": "SinQuyen2", "base_serial": "SQ2", "base_server_id": 2, "base_stream_mp": "SinQuyen1", "base_lat": 21.0, "base_lon": 105.0},
+            ],
+        }])
+        configured = []
+
+        with patch.object(manager, "_cors_api_request_sync", return_value=stations), patch.object(
+            manager,
+            "_cors_configure_service_sync",
+            side_effect=lambda serial, cfg: configured.append((serial, cfg)) or {"status": "service_config_sent_and_saved"},
+        ):
+            outcome = await manager.prepare_common_fixed_base_seed(94)
+
+        self.assertEqual(outcome[0]["selected_base"], "SinQuyen2")
+        self.assertEqual(outcome[0]["opposite_base"], "SinQuyen1")
+        self.assertFalse(outcome[0]["opposite_online"])
+        self.assertEqual(
+            manager._sessions[94]["clusters"][0]["selected_fixed_base_candidate"]["role"],
+            "backup",
+        )
+        self.assertEqual(configured, [])
+
     async def test_single_fixed_base_seed_does_not_require_cors_topology_api(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         manager.configure_project(93, [{
