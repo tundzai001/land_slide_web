@@ -43,12 +43,12 @@ function updateUIVisibilityBasedOnLayers() {
     // Nếu chỉ xem phần cứu hộ, ẩn các info trạm
     if (!showStationMarkers && showRescueMarkers) {
         if (stationSidebar) {
-            stationSidebar.classList.add('hidden');
+            setStationListSidebarOpen(stationSidebar, false);
             stationSidebar.classList.add('force-hidden');
         }
 
-        if (detailSidebar) detailSidebar.classList.remove('active');
-        if (chartsPanel) chartsPanel.classList.remove('active');
+        setDetailSidebarOpen(detailSidebar, false);
+        setChartsPanelOpen(chartsPanel, false);
         if (longtermOverlay) longtermOverlay.classList.remove('active');
         if (alertBanner) alertBanner.classList.remove('show', 'level-warning', 'level-critical');
 
@@ -56,6 +56,7 @@ function updateUIVisibilityBasedOnLayers() {
     } else {
         if (stationSidebar) {
             stationSidebar.classList.remove('force-hidden');
+            setStationListSidebarOpen(stationSidebar, false);
         }
         document.body.classList.remove('rescue-mode-active');
     }

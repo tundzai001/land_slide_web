@@ -412,6 +412,7 @@ function handleRealtimeUpdate(message) {
             || Number(message.project_id) === gnssAdjustmentDebugState.projectId
         );
         if (belongsToActiveRun) {
+            applyGnssAdjustmentRoster(message.roster);
             if (Array.isArray(message.expected_station_ids)) {
                 syncGnssExpectedStationIds(message.expected_station_ids);
             }

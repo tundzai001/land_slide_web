@@ -399,7 +399,7 @@ function renderStationList(stations) {
                 selectStation(st.id);
                 if (window.innerWidth < 768) {
                     const sidebar = document.getElementById('station-list-sidebar');
-                    if (sidebar) sidebar.classList.add('hidden');
+                    setStationListSidebarOpen(sidebar, false);
                 }
             });
             container.appendChild(div);

@@ -130,6 +130,40 @@ class RoverStreamHealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["status"] for item in outcomes], ["ready", "recovered"])
         self.manager._restore_rover_output_sequence.assert_awaited_once()
 
+    async def test_preflight_can_exclude_uncontrollable_station_without_failing_run(self):
+        self.manager.configure_project(8, [{
+            "stations": [11, 12],
+            "rovers": ["Dap1_1", "Dap1_3"],
+        }])
+        healthy = b"$GNGGA,1,2,3*00\r\n#AGRICA,COM2,0*12345678\r\n"
+        self.manager.observe_gnss_payload(
+            {"station_code": "Dap1_1", "station_id": 11}, healthy
+        )
+        self.manager._find_client_info = AsyncMock(return_value=None)
+        self.manager._emit_progress = AsyncMock()
+
+        outcomes = await self.manager.ensure_rover_streams_ready(
+            8, discovery_seconds=0, verify_seconds=1, allow_unavailable=True
+        )
+
+        self.assertEqual(outcomes[0]["status"], "ready")
+        self.assertEqual(outcomes[1]["status"], "excluded_no_control_session")
+        self.assertEqual(outcomes[1]["station_code"], "Dap1_3")
+
+    async def test_pause_resume_keeps_session_and_observations(self):
+        self.manager.configure_project(9, [{
+            "stations": [11, 12],
+            "rovers": ["Dap1_1", "Dap1_2"],
+        }])
+        session = self.manager._sessions[9]
+        session["clusters"][0]["observations"].append("kept")
+
+        self.assertTrue(self.manager.pause_project(9))
+        self.assertEqual(session["control_state"], "PAUSED")
+        self.assertTrue(self.manager.resume_project(9))
+        self.assertEqual(session["control_state"], "RUNNING")
+        self.assertEqual(session["clusters"][0]["observations"], ["kept"])
+
 
 class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
@@ -620,6 +654,38 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(configured[0][1], other_config)
         self.assertEqual(configured[1][1], selected_config)
 
+    async def test_seed_reconciles_failover_pair_before_preparing_topology(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        cluster = {
+            "name": "Dam 1", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "base_station": "SinQuyen1",
+            "backup_base_station": "SinQuyen2",
+        }
+        manager.configure_project(96, [cluster])
+        calls = []
+
+        async def reconcile(clusters, *, stations=None):
+            calls.append(("reconcile", clusters[0]["name"]))
+            return []
+
+        async def prepare(project_id):
+            calls.append(("prepare", project_id))
+            return [{"state": "ready"}]
+
+        with patch.object(
+            manager,
+            "_reconcile_cors_failover_pairs_unlocked",
+            side_effect=reconcile,
+        ), patch.object(
+            manager,
+            "_prepare_common_fixed_base_seed_unlocked",
+            side_effect=prepare,
+        ):
+            outcome = await manager.prepare_common_fixed_base_seed(96)
+
+        self.assertEqual(calls, [("reconcile", "Dam 1"), ("prepare", 96)])
+        self.assertEqual(outcome, [{"state": "ready"}])
+
     async def test_seed_keeps_offline_counterpart_and_asserts_selected_s2(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
@@ -659,6 +725,53 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(configured[0][1]["server2_stream_on_demand"])
         self.assertTrue(configured[0][1]["server2_stream_active"])
         self.assertFalse(outcome[0]["opposite_online"])
+
+    async def test_seed_accepts_live_stream_metadata_when_public_config_omits_s2(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        stations = [
+            {
+                "serial": "SQ1", "name": "SinQuyen1", "status": "online",
+                "service_config": {
+                    "server1_enabled": True, "mountpoint1": "SinQuyen1",
+                    "server1_stream_on_demand": False, "server1_stream_active": True,
+                },
+                "streams": [
+                    {"server_id": 1, "enabled": True, "mountpoint": "SinQuyen1"},
+                    {"server_id": 2, "enabled": True, "mountpoint": "SinQuyen2"},
+                ],
+            },
+            {
+                "serial": "SQ2", "name": "SinQuyen2", "status": "online",
+                "service_config": {
+                    "server1_enabled": True, "mountpoint1": "SinQuyen2",
+                },
+                "streams": [
+                    {"server_id": 1, "enabled": True, "mountpoint": "SinQuyen2"},
+                    {"server_id": 2, "enabled": True, "mountpoint": "SinQuyen1"},
+                ],
+            },
+        ]
+        manager.configure_project(95, [{
+            "name": "Dam 1", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "fixed_base_candidates": [
+                {"role": "primary", "base_station": "SinQuyen1", "base_serial": "SQ1", "base_server_id": 1, "base_stream_mp": "SinQuyen1", "base_lat": 21.1, "base_lon": 105.0},
+                {"role": "backup", "base_station": "SinQuyen2", "base_serial": "SQ2", "base_server_id": 2, "base_stream_mp": "SinQuyen1", "base_lat": 21.0, "base_lon": 105.0},
+            ],
+        }])
+        configured = []
+
+        with patch.object(manager, "_cors_api_request_sync", return_value=stations), patch.object(
+            manager,
+            "_cors_configure_service_sync",
+            side_effect=lambda serial, cfg: configured.append((serial, cfg)) or {"status": "service_config_sent_and_saved"},
+        ):
+            outcome = await manager.prepare_common_fixed_base_seed(95)
+
+        self.assertEqual(outcome[0]["selected_base"], "SinQuyen1")
+        self.assertEqual([item[0] for item in configured], ["SQ2", "SQ1"])
+        self.assertTrue(configured[1][1]["server2_enabled"])
+        self.assertEqual(configured[1][1]["mountpoint2"], "SinQuyen2")
 
     async def test_seed_selects_online_backup_when_configured_primary_is_offline(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())

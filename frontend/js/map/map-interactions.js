@@ -7,21 +7,28 @@ function setupEventListeners() {
 
     // Hamburger → Toggle sidebar trái
     if (hamburgerBtn && stationSidebar) {
-        hamburgerBtn.addEventListener('click', () => {
-            if (currentMapMode === 'rescue') return;
-            const isHidden = stationSidebar.classList.contains('hidden') || stationSidebar.classList.contains('force-hidden');
-            if (isHidden) {
-                stationSidebar.classList.remove('hidden');
-                stationSidebar.classList.remove('force-hidden');
-            } else {
-                stationSidebar.classList.add('hidden');
+        hamburgerBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const shouldOpen = hamburgerBtn.getAttribute('aria-expanded') !== 'true';
+            if (shouldOpen && !showStationMarkers) {
+                const stationLayer = document.getElementById('layer-station');
+                if (stationLayer) {
+                    stationLayer.checked = true;
+                    stationLayer.dispatchEvent(new Event('change'));
+                }
             }
+            if (shouldOpen && window.matchMedia('(max-width: 900px)').matches) {
+                setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
+                setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
+            }
+            setStationListSidebarOpen(stationSidebar, shouldOpen);
         });
     }
 
     if (sidebarCloseTab && stationSidebar) {
         sidebarCloseTab.addEventListener('click', () => {
-            stationSidebar.classList.add('hidden');
+            setStationListSidebarOpen(stationSidebar, false);
         });
     }
 
@@ -64,8 +71,7 @@ function setupEventListeners() {
             stationSelectionSequence += 1;
             stationSelectionController?.abort();
             stationHistoryController?.abort();
-            detailSidebar.classList.remove('active');
-            detailSidebar.classList.remove('station-selecting');
+            setDetailSidebarOpen(detailSidebar, false);
             detailSidebar.setAttribute('aria-busy', 'false');
 
             // Đóng tất cả panels
@@ -73,17 +79,16 @@ function setupEventListeners() {
             const longtermOverlay = document.getElementById('longterm-overlay');
             const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
             if (chartsPanel) {
-                chartsPanel.classList.remove('active');
+                setChartsPanelOpen(chartsPanel, false);
                 destroyStationCharts();
             }
             if (longtermOverlay) longtermOverlay.classList.remove('active');
             stopLongTerm3DAnimations();
-            if (advSidepanel) advSidepanel.classList.remove('active');
+            setGnssAdvancedPanelOpen(advSidepanel, false);
 
             // Mở lại sidebar trái
             if (stationSidebar && currentMapMode !== 'rescue') {
-                stationSidebar.classList.remove('hidden');
-                stationSidebar.classList.remove('force-hidden');
+                setStationListSidebarOpen(stationSidebar, true);
             }
         });
     }
@@ -105,15 +110,22 @@ function setupEventListeners() {
 
     if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', async () => {
-            chartsPanel.classList.add('active');
+            const stationContext = document.getElementById('charts-station-context');
+            if (stationContext && currentStationData) {
+                stationContext.textContent = `${currentStationData.name} · ${currentStationData.station_code}`;
+            }
+            setChartsPanelOpen(chartsPanel, true);
+            if (window.matchMedia('(max-width: 900px)').matches) {
+                setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
+            }
 
             // Close advanced gnss panel if open
             const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
-            if (advSidepanel) advSidepanel.classList.remove('active');
+            setGnssAdvancedPanelOpen(advSidepanel, false);
 
             // Đóng sidebar trái khi mở biểu đồ
             if (stationSidebar) {
-                stationSidebar.classList.add('hidden');
+                setStationListSidebarOpen(stationSidebar, false);
                 stationSidebar.classList.add('force-hidden');
             }
 
@@ -166,17 +178,20 @@ function setupEventListeners() {
             e.stopPropagation();
             console.log('👆 [GNSS] GNSS Velocity card clicked');
             // Remove expanded mode when just opening from card
+            const wasActive = advSidepanel.classList.contains('active');
             advSidepanel.classList.remove('expanded');
-            advSidepanel.classList.toggle('active');
-            const isActive = advSidepanel.classList.contains('active');
+            setGnssAdvancedPanelOpen(advSidepanel, true);
 
             // ✅ ĐỒNG BỘ: Đóng Station Sidebar khi mở Advanced GNSS
-            if (isActive && stationSidebar) {
-                stationSidebar.classList.add('hidden');
-                loadLongTermAnalysis(); // Tải Theil-Sen vào cột trái
+            if (stationSidebar) {
+                setStationListSidebarOpen(stationSidebar, false);
             }
+            if (window.matchMedia('(max-width: 900px)').matches) {
+                setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
+            }
+            if (!wasActive) loadLongTermAnalysis();
 
-            console.log('✨ [GNSS] Sidepanel active:', isActive);
+            console.log('✨ [GNSS] Sidepanel active: true');
         });
     } else {
         console.warn('⚠️ [GNSS] Could not find gnssCard or advSidepanel', { gnssCard: !!gnssCard, advSidepanel: !!advSidepanel });
@@ -185,8 +200,7 @@ function setupEventListeners() {
     if (advCloseBtn && advSidepanel) {
         advCloseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            advSidepanel.classList.remove('active');
-            advSidepanel.classList.remove('expanded');
+            setGnssAdvancedPanelOpen(advSidepanel, false);
             const advColRight = advSidepanel.querySelector('.adv-column-right');
             if (advColRight) advColRight.style.display = 'none';
         });
@@ -194,7 +208,7 @@ function setupEventListeners() {
 
     if (closeChartsBtn && chartsPanel) {
         closeChartsBtn.addEventListener('click', () => {
-            chartsPanel.classList.remove('active');
+            setChartsPanelOpen(chartsPanel, false);
             destroyStationCharts();
 
             // Chỉ bỏ force-hidden, giữ hidden (sidebar vẫn đóng)
@@ -247,11 +261,11 @@ function setupEventListeners() {
     if (btnLongTerm && advSidepanel) {
         btnLongTerm.addEventListener('click', () => {
             advSidepanel.classList.remove('expanded');
-            advSidepanel.classList.add('active');
+            setGnssAdvancedPanelOpen(advSidepanel, true);
 
             // Đóng sidebar trái
             if (stationSidebar) {
-                stationSidebar.classList.add('hidden');
+                setStationListSidebarOpen(stationSidebar, false);
                 stationSidebar.classList.add('force-hidden');
             }
 
@@ -282,7 +296,7 @@ function setupEventListeners() {
             }
 
             // Open and Expand Advanced Sidepanel
-            advSidepanel.classList.add('active');
+            setGnssAdvancedPanelOpen(advSidepanel, true);
             
             // Expand to show right column
             const advColRight = advSidepanel.querySelector('.adv-column-right');
@@ -294,7 +308,7 @@ function setupEventListeners() {
             
             // Close left sidebar
             if (stationSidebar) {
-                stationSidebar.classList.add('hidden');
+                setStationListSidebarOpen(stationSidebar, false);
                 stationSidebar.classList.add('force-hidden');
             }
             
@@ -324,6 +338,7 @@ function setupEventListeners() {
         interactionActive: false,
         backgroundGradient: null,
         roverCount: 0,
+        layoutMode: 'live',
         init({ preserve = false } = {}) {
             this.canvas = document.getElementById('gnss-board-canvas');
             if (!this.canvas) return;
@@ -333,6 +348,7 @@ function setupEventListeners() {
                 this.baselines = [];
                 this.basePoint = null;
                 this.roverCount = 0;
+                this.layoutMode = 'live';
                 const tableBody = document.getElementById('gnss-baseline-table-body');
                 const tooltips = document.getElementById('gnss-board-tooltips');
                 if (tableBody) tableBody.innerHTML = '';
@@ -469,15 +485,23 @@ function setupEventListeners() {
             const radius = 100;
             expectedRovers.forEach((rover, index) => {
                 const name = String(rover?.name || `Trạm ${rover?.stationId || index + 1}`);
-                if (this.points[name] && !this.points[name].placeholder) return;
                 const angle = (Math.PI * 2 * index / expectedRovers.length) - Math.PI / 2;
+                if (this.points[name]) {
+                    this.points[name].layoutX = Math.cos(angle) * radius;
+                    this.points[name].layoutY = Math.sin(angle) * radius;
+                    this.points[name].excluded = Boolean(rover?.excluded);
+                    return;
+                }
                 this.points[name] = {
                     name,
                     x: Math.cos(angle) * radius,
                     y: Math.sin(angle) * radius,
+                    layoutX: Math.cos(angle) * radius,
+                    layoutY: Math.sin(angle) * radius,
                     isBase: false,
                     samples: 0,
                     placeholder: true,
+                    excluded: Boolean(rover?.excluded),
                     stationId: Number(rover?.stationId),
                 };
             });
@@ -579,10 +603,12 @@ function setupEventListeners() {
         },
         getProjection() {
             const values = Object.values(this.points);
-            const minX = Math.min(...values.map(item => item.x), 0);
-            const maxX = Math.max(...values.map(item => item.x), 0);
-            const minY = Math.min(...values.map(item => item.y), 0);
-            const maxY = Math.max(...values.map(item => item.y), 0);
+            const plotX = item => this.layoutMode === 'live' && Number.isFinite(item.layoutX) ? item.layoutX : item.x;
+            const plotY = item => this.layoutMode === 'live' && Number.isFinite(item.layoutY) ? item.layoutY : item.y;
+            const minX = Math.min(...values.map(plotX), 0);
+            const maxX = Math.max(...values.map(plotX), 0);
+            const minY = Math.min(...values.map(plotY), 0);
+            const maxY = Math.max(...values.map(plotY), 0);
             const padding = 90;
             const rangeX = Math.max(maxX - minX, 1);
             const rangeY = Math.max(maxY - minY, 1);
@@ -595,9 +621,11 @@ function setupEventListeners() {
             return { scale, centerX, centerY };
         },
         getScreenCoords(pt, projection = this.getProjection()) {
+            const x = this.layoutMode === 'live' && Number.isFinite(pt.layoutX) ? pt.layoutX : pt.x;
+            const y = this.layoutMode === 'live' && Number.isFinite(pt.layoutY) ? pt.layoutY : pt.y;
             return {
-                x: projection.centerX + (pt.x * projection.scale),
-                y: projection.centerY - (pt.y * projection.scale),
+                x: projection.centerX + (x * projection.scale),
+                y: projection.centerY - (y * projection.scale),
             };
         },
         fitToResult() {
@@ -657,6 +685,7 @@ function setupEventListeners() {
             this.points = {};
             this.baselines = [];
             this.basePoint = null;
+            this.layoutMode = 'result';
             const tbody = document.getElementById('gnss-baseline-table-body');
             const tooltips = document.getElementById('gnss-board-tooltips');
             if (tbody) tbody.innerHTML = '';
@@ -827,7 +856,7 @@ function setupEventListeners() {
                 ctx.fill();
                 ctx.beginPath();
                 ctx.arc(sp.x, sp.y, pt.isBase ? 8 : 6, 0, Math.PI * 2);
-                ctx.fillStyle = pt.isBase ? '#fb7185' : pt.placeholder ? '#64748b' : '#2dd4bf';
+                ctx.fillStyle = pt.isBase ? '#fb7185' : pt.excluded ? '#f59e0b' : pt.placeholder ? '#64748b' : '#2dd4bf';
                 ctx.shadowColor = ctx.fillStyle;
                 ctx.shadowBlur = this.interactionActive ? 0 : 12;
                 ctx.fill();
@@ -838,7 +867,11 @@ function setupEventListeners() {
                 ctx.fillStyle = '#e6fffb';
                 ctx.font = "600 12px 'IBM Plex Mono', monospace";
                 ctx.fillText(pt.name, sp.x + 12, sp.y - 11);
-                if (pt.placeholder) {
+                if (pt.excluded) {
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = "9px 'IBM Plex Mono', monospace";
+                    ctx.fillText('BỎ QUA · KIỂM TRA AICASTER', sp.x + 12, sp.y + 3);
+                } else if (pt.placeholder) {
                     ctx.fillStyle = 'rgba(203,255,248,.48)';
                     ctx.font = "9px 'IBM Plex Mono', monospace";
                     ctx.fillText('CHỜ TRỊ ĐO', sp.x + 12, sp.y + 3);
@@ -865,15 +898,28 @@ function setupEventListeners() {
             <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
                 <div class="modal-dialog modal-xl modal-dialog-centered gnss-terminal-dialog">
                     <div class="modal-content bg-dark text-light border-primary gnss-terminal-content">
-                        <div class="modal-header border-bottom border-secondary py-2">
-                            <h5 class="modal-title text-primary font-monospace" style="font-size: 1.1rem;">
-                                <i class="bi bi-cpu me-2"></i>GNSS Agent Calculation Board (Real-time)
-                            </h5>
-                            <div id="gnss-phase-indicator" class="ms-4 text-warning fw-bold font-monospace">Phase: WAITING</div>
+                        <div class="modal-header gnss-terminal-header">
+                            <div class="gnss-terminal-heading">
+                                <span class="gnss-terminal-eyebrow">NETWORK ADJUSTMENT</span>
+                                <h5 class="modal-title"><i class="bi bi-bezier2 me-2"></i>Bình sai mạng GNSS</h5>
+                            </div>
+                            <div id="gnss-phase-indicator" class="text-warning fw-bold font-monospace">Phase: WAITING</div>
+                            <div class="gnss-run-controls" role="group" aria-label="Điều khiển phiên bình sai">
+                                <button id="gnss-pause-adjustment-btn" type="button" class="btn btn-sm btn-outline-warning">
+                                    <i class="bi bi-pause-fill"></i><span>Tạm dừng</span>
+                                </button>
+                                <button id="gnss-resume-adjustment-btn" type="button" class="btn btn-sm btn-success" hidden>
+                                    <i class="bi bi-play-fill"></i><span>Tiếp tục</span>
+                                </button>
+                                <button id="gnss-stop-adjustment-btn" type="button" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-stop-fill"></i><span>Dừng hẳn</span>
+                                </button>
+                            </div>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" title="Thu nhỏ cửa sổ; tiến trình bình sai vẫn tiếp tục"></button>
                         </div>
                         <div class="modal-body p-0 d-flex flex-row gnss-terminal-body">
                             <div class="position-relative" id="gnss-board-container">
+                                <div id="gnss-roster-summary" class="gnss-roster-summary" aria-live="polite"></div>
                                 <canvas id="gnss-board-canvas" style="width: 100%; height: 100%; display: block; background: #06141b;"></canvas>
                                 <div id="gnss-board-tooltips" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
                             </div>
@@ -1076,6 +1122,24 @@ function setupEventListeners() {
             gnssAdjustmentDebugState.autoScroll = true;
             addGnssAdjustmentDebug('UI', 'Đã xóa nhật ký debug.', 'info');
         });
+        modal.querySelector('#gnss-pause-adjustment-btn')?.addEventListener('click', event => {
+            runGnssControlAction('pause', event.currentTarget);
+        });
+        modal.querySelector('#gnss-resume-adjustment-btn')?.addEventListener('click', event => {
+            runGnssControlAction('resume', event.currentTarget);
+        });
+        modal.querySelector('#gnss-stop-adjustment-btn')?.addEventListener('click', async event => {
+            const confirmation = await window.Swal.fire({
+                icon: 'warning',
+                title: 'Dừng hẳn phiên bình sai?',
+                text: 'Dữ liệu đang thu sẽ bị hủy và cấu hình Base cố định sẽ được khôi phục.',
+                showCancelButton: true,
+                confirmButtonText: 'Dừng hẳn',
+                cancelButtonText: 'Tiếp tục chạy',
+                confirmButtonColor: '#dc3545',
+            });
+            if (confirmation?.isConfirmed) runGnssControlAction('stop', event.currentTarget);
+        });
         modal.querySelector('#gnss-retry-adjustment-btn')?.addEventListener('click', () => {
             const projectId = Number(gnssAdjustmentDebugState.projectId || 0);
             const stationIds = [...gnssAdjustmentDebugState.expectedStationIds];
@@ -1109,8 +1173,12 @@ function setupEventListeners() {
                     : { title: args[0], text: args[1] };
                 const title = config.title || 'Thong bao';
                 const text = config.text || config.html || '';
+                if (config.showCancelButton) {
+                    return Promise.resolve({ isConfirmed: confirm(text ? `${title}: ${text}` : title) });
+                }
                 window.toast?.error?.(text || title);
                 alert(text ? `${title}: ${text}` : title);
+                return Promise.resolve({ isConfirmed: true });
             }
         };
     }
@@ -1129,6 +1197,44 @@ function setupEventListeners() {
             }
         }
         window.gnssBoardState?.fitToResult?.();
+    }
+
+    async function controlGnssAdjustment(action) {
+        const projectId = Number(gnssAdjustmentDebugState.projectId || 0);
+        if (!projectId) throw new Error('Không xác định được dự án của phiên bình sai.');
+        const options = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: projectId, base_mountpoint: '' }),
+        };
+        const response = window.authManager?.apiFetch
+            ? await window.authManager.apiFetch(`/api/admin/gnss/adjustment/${action}`, options)
+            : await fetch(`/api/admin/gnss/adjustment/${action}`, options);
+        if (!response?.ok) throw new Error(await readApiError(response));
+        return response.json();
+    }
+
+    async function runGnssControlAction(action, button) {
+        const originalHtml = button?.innerHTML;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>';
+        }
+        try {
+            const result = await controlGnssAdjustment(action);
+            const fallbackPhase = action === 'pause' ? 'PAUSED' : action === 'resume' ? 'FREE_NETWORK' : 'STOPPED';
+            setGnssAdjustmentPhase(result.phase || fallbackPhase, result.message || 'Đã cập nhật trạng thái phiên bình sai.');
+            addGnssAdjustmentDebug('CONTROL', action === 'pause'
+                ? 'Đã yêu cầu tạm dừng tại checkpoint an toàn.'
+                : action === 'resume'
+                    ? 'Đã tiếp tục từ checkpoint đang giữ.'
+                    : 'Đã dừng hẳn và khôi phục cấu hình Base.', 'success');
+        } catch (error) {
+            showAdjustmentError('Không thể điều khiển phiên bình sai', error.message);
+        } finally {
+            if (button) button.innerHTML = originalHtml;
+            refreshGnssAdjustmentDebugUi();
+        }
     }
 
         window.requestGnssAdjustment = async function(projectId, stationIds) {
@@ -1196,6 +1302,7 @@ function setupEventListeners() {
                 startResult = {};
             }
             if (Array.isArray(startResult.expected_station_ids)) {
+                applyGnssAdjustmentRoster(startResult.roster);
                 syncGnssExpectedStationIds(startResult.expected_station_ids);
             }
             if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
@@ -1294,6 +1401,7 @@ function setupEventListeners() {
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             closeSlideModelResultPopup();
+            setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
         }
     });
 

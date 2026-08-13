@@ -173,8 +173,9 @@ async function selectStation(stationId, options = {}) {
 
     const sidebar = document.getElementById('detail-sidebar');
     if (sidebar) {
+        sidebar.scrollTop = 0;
         sidebar.classList.add('station-selecting');
-        sidebar.classList.add('active');
+        setDetailSidebarOpen(sidebar, true);
         sidebar.setAttribute('aria-busy', 'true');
     }
     const stationSummary = allStations.find(station => Number(station.id) === Number(stationId));
@@ -725,15 +726,31 @@ function renderCharts(data) {
     console.log(`✅ [CHARTS] Rendered ${activeChartBoxIds.length} charts`);
 }
 
+function buildChartTimeLabels(history) {
+    const timestamps = (history || [])
+        .map(item => Number(item.timestamp) * 1000)
+        .filter(Number.isFinite);
+    const spanMs = timestamps.length > 1
+        ? Math.max(...timestamps) - Math.min(...timestamps)
+        : 0;
+    const showSeconds = spanMs > 0 && spanMs <= 10 * 60 * 1000;
+    return (history || []).map(item => {
+        const date = new Date(Number(item.timestamp) * 1000);
+        return date.toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            ...(showSeconds ? { second: '2-digit' } : {}),
+            hour12: false,
+        });
+    });
+}
+
 function renderChart(id, history, key, color, label) {
     const canvas = document.getElementById(id);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    const labels = (history || []).map(h => {
-        const date = new Date(h.timestamp * 1000);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    });
+    const labels = buildChartTimeLabels(history);
 
     const values = (history || []).map(h => {
         const val = h.data?.[key];
@@ -789,7 +806,7 @@ function renderChart(id, history, key, color, label) {
     }
     
     let gradient = ctx.createLinearGradient(0, 0, 0, 300);
-    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.5)`);
+    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.20)`);
     gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.0)`);
 
     charts[id] = new Chart(canvas, {
@@ -802,8 +819,8 @@ function renderChart(id, history, key, color, label) {
                 borderColor: color,
                 backgroundColor: gradient,
                 fill: true,
-                tension: 0.4,
-                borderWidth: 2,
+                tension: 0.28,
+                borderWidth: 2.25,
                 pointRadius: 0,
                 pointHoverRadius: 4,
                 pointBackgroundColor: color,
@@ -862,10 +879,7 @@ function renderImuChart(history) {
     const ctx = document.getElementById('chart-imu');
     if (!ctx) return;
 
-    const labels = (history || []).map(h => {
-        const date = new Date(h.timestamp * 1000);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    });
+    const labels = buildChartTimeLabels(history);
 
     const rollData = (history || []).map(h => parseFloat(h.data?.roll) || 0);
     const pitchData = (history || []).map(h => parseFloat(h.data?.pitch) || 0);

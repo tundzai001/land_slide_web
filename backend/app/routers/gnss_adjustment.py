@@ -42,6 +42,10 @@ class GnssAdjustmentStartRequest(BaseModel):
     selected_clusters: Optional[list[list[int | str]]] = None
 
 
+class GnssAdjustmentControlRequest(BaseModel):
+    project_id: int
+
+
 @router.get("/api/admin/gnss/adjustment/reports/{project_id}/{filename}")
 async def download_gnss_adjustment_report(
     project_id: int,
@@ -308,6 +312,8 @@ async def start_gnss_adjustment(
     try:
         if not hasattr(mqtt_service, "active_adjustment_clusters"):
             mqtt_service.active_adjustment_clusters = {}
+        if not hasattr(mqtt_service, "adjustment_run_rosters"):
+            mqtt_service.adjustment_run_rosters = {}
 
         project_result = await db.execute(
             select(model_config.Project).where(model_config.Project.id == req.project_id)
@@ -318,7 +324,7 @@ async def start_gnss_adjustment(
         check_operator_project_access(current_user, project.id)
 
         existing_phase = str(mqtt_service.adjustment_phase.get(req.project_id) or "").upper()
-        if existing_phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+        if existing_phase in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}:
             existing_clusters = mqtt_service.active_adjustment_clusters.get(req.project_id) or []
             expected_station_ids = sorted({
                 int(station_id)
@@ -331,6 +337,7 @@ async def start_gnss_adjustment(
                 "existing": True,
                 "phase": existing_phase,
                 "expected_station_ids": expected_station_ids,
+                "roster": mqtt_service.adjustment_run_rosters.get(req.project_id) or {},
                 "seed_status": seed_status,
                 "message": "Adjustment is already running; reopened the existing session.",
             }
@@ -357,6 +364,7 @@ async def start_gnss_adjustment(
                 for cluster in active_clusters
                 for station_id in cluster["stations"]
             }
+            selected_station_ids_snapshot = sorted(selected_station_ids)
             devices_result = await db.execute(
                 select(model_config.Device).where(
                     and_(
@@ -392,9 +400,41 @@ async def start_gnss_adjustment(
             try:
                 rover_preflight = (
                     await mqtt_service.round_robin_manager.ensure_rover_streams_ready(
-                        req.project_id
+                        req.project_id,
+                        allow_unavailable=True,
                     )
                 )
+                excluded_codes = {
+                    str(item.get("station_code") or "").casefold()
+                    for item in rover_preflight
+                    if str(item.get("status") or "").startswith("excluded_")
+                }
+                station_id_by_code = {
+                    str(code).casefold(): int(station_id)
+                    for cluster in active_clusters
+                    for station_id, code in zip(
+                        cluster.get("stations", []), cluster.get("rovers", []), strict=True
+                    )
+                }
+                skipped_uncontrollable_station_ids = sorted({
+                    station_id_by_code[code]
+                    for code in excluded_codes
+                    if code in station_id_by_code
+                })
+                if skipped_uncontrollable_station_ids:
+                    active_clusters, _ = _restrict_adjustment_clusters_to_online_stations(
+                        active_clusters,
+                        {
+                            int(station_id)
+                            for cluster in active_clusters
+                            for station_id in cluster.get("stations", [])
+                        } - set(skipped_uncontrollable_station_ids),
+                    )
+                    # Rebuild only the in-memory session. Any verified receiver
+                    # repair above is physical and remains in effect.
+                    mqtt_service.round_robin_manager.configure_project(
+                        req.project_id, active_clusters
+                    )
                 seed_topology = (
                     await mqtt_service.round_robin_manager.prepare_common_fixed_base_seed(
                         req.project_id
@@ -436,12 +476,23 @@ async def start_gnss_adjustment(
             for cluster in active_clusters
             for station_id in cluster["stations"]
         })
+        skipped_uncontrollable_station_ids = locals().get(
+            "skipped_uncontrollable_station_ids", []
+        )
+        roster = {
+            "selected_station_ids": selected_station_ids_snapshot,
+            "participating_station_ids": expected_station_ids,
+            "skipped_offline_station_ids": skipped_offline_station_ids,
+            "skipped_uncontrollable_station_ids": skipped_uncontrollable_station_ids,
+        }
+        mqtt_service.adjustment_run_rosters[req.project_id] = roster
         await ws_manager.broadcast({
             "type": "gnss_adjustment_progress",
             "project_id": req.project_id,
             "phase": "COLLECTING_BASELINE",
             "message": "Common fixed-base route is ready; waiting for source-verified #AGRICA baselines from every selected rover.",
             "expected_station_ids": expected_station_ids,
+            "roster": roster,
             "skipped_offline_station_ids": skipped_offline_station_ids,
             "rover_preflight": rover_preflight,
             "seed_topology": seed_topology,
@@ -451,6 +502,7 @@ async def start_gnss_adjustment(
             "status": "success",
             "phase": "COLLECTING_BASELINE",
             "expected_station_ids": expected_station_ids,
+            "roster": roster,
             "skipped_offline_station_ids": skipped_offline_station_ids,
             "rover_preflight": rover_preflight,
             "seed_topology": seed_topology,
@@ -477,7 +529,7 @@ async def get_gnss_adjustment_status(
         else None
     )
     seed_status = None
-    if phase in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+    if phase in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}:
         try:
             seed_status = mqtt_service.round_robin_manager.get_seed_collection_status(project_id)
         except (KeyError, ValueError):
@@ -486,10 +538,66 @@ async def get_gnss_adjustment_status(
         "project_id": project_id,
         "phase": phase,
         "message": message,
-        "running": phase in {"COLLECTING_BASELINE", "FREE_NETWORK"},
+        "running": phase in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"},
+        "paused": phase == "PAUSED",
+        "roster": getattr(mqtt_service, "adjustment_run_rosters", {}).get(project_id) or {},
         "seed_status": seed_status,
         "data": result,
     }
+
+
+@router.post("/api/admin/gnss/adjustment/pause")
+async def pause_gnss_adjustment(
+    req: GnssAdjustmentControlRequest,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+):
+    phase = str(mqtt_service.adjustment_phase.get(req.project_id) or "IDLE").upper()
+    if phase not in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Phiên bình sai chưa ở trạng thái có thể tạm dừng.",
+        )
+    if not mqtt_service.round_robin_manager.pause_project(req.project_id):
+        raise HTTPException(status_code=409, detail="Phiên bình sai không còn chạy.")
+    session = mqtt_service.round_robin_manager._sessions.get(req.project_id) or {}
+    session["phase_before_pause"] = phase
+    mqtt_service.adjustment_phase[req.project_id] = "PAUSED"
+    mqtt_service.adjustment_message[req.project_id] = (
+        "Đã yêu cầu tạm dừng; hệ thống sẽ dừng tại checkpoint an toàn kế tiếp."
+    )
+    await ws_manager.broadcast({
+        "type": "gnss_adjustment_progress",
+        "project_id": req.project_id,
+        "phase": "PAUSED",
+        "message": mqtt_service.adjustment_message[req.project_id],
+        "roster": getattr(mqtt_service, "adjustment_run_rosters", {}).get(req.project_id) or {},
+    })
+    return {"status": "success", "phase": "PAUSED"}
+
+
+@router.post("/api/admin/gnss/adjustment/resume")
+async def resume_gnss_adjustment(
+    req: GnssAdjustmentControlRequest,
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+):
+    if str(mqtt_service.adjustment_phase.get(req.project_id) or "").upper() != "PAUSED":
+        raise HTTPException(status_code=409, detail="Phiên bình sai không ở trạng thái tạm dừng.")
+    if not mqtt_service.round_robin_manager.resume_project(req.project_id):
+        raise HTTPException(status_code=409, detail="Phiên bình sai không còn chạy.")
+    session = mqtt_service.round_robin_manager._sessions.get(req.project_id) or {}
+    resumed_phase = str(session.pop("phase_before_pause", "FREE_NETWORK")).upper()
+    if resumed_phase not in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
+        resumed_phase = "FREE_NETWORK"
+    mqtt_service.adjustment_phase[req.project_id] = resumed_phase
+    mqtt_service.adjustment_message[req.project_id] = "Đã tiếp tục phiên bình sai từ checkpoint đã giữ."
+    await ws_manager.broadcast({
+        "type": "gnss_adjustment_progress",
+        "project_id": req.project_id,
+        "phase": resumed_phase,
+        "message": mqtt_service.adjustment_message[req.project_id],
+        "roster": getattr(mqtt_service, "adjustment_run_rosters", {}).get(req.project_id) or {},
+    })
+    return {"status": "success", "phase": resumed_phase}
 
 
 @router.post("/api/admin/gnss/adjustment/stop")
@@ -516,9 +624,10 @@ async def stop_gnss_adjustment(
 
         # Clear dynamic active adjustment clusters and phase
         mqtt_service.active_adjustment_clusters.pop(req.project_id, None)
-        mqtt_service.adjustment_phase.pop(req.project_id, None)
-        mqtt_service.adjustment_message.pop(req.project_id, None)
+        mqtt_service.adjustment_phase[req.project_id] = "STOPPED"
+        mqtt_service.adjustment_message[req.project_id] = "Phiên bình sai đã được dừng hẳn; cấu hình Base đã khôi phục."
         mqtt_service.adjustment_results.pop(req.project_id, None)
+        getattr(mqtt_service, "adjustment_run_rosters", {}).pop(req.project_id, None)
         mqtt_service.round_robin_manager.clear_project(req.project_id)
         logger.info(f"Cleared active adjustment clusters and phase for project {req.project_id}")
 
@@ -532,14 +641,27 @@ async def stop_gnss_adjustment(
         if req.caster_address:
             payload["caster_address"] = req.caster_address
 
-        if mqtt_service.client and mqtt_service.client.is_connected():
+        if not str(req.base_mountpoint or "").strip():
+            logger.info(
+                "Adjustment stop for project %s restored topology; no legacy wake mountpoint supplied",
+                req.project_id,
+            )
+        elif mqtt_service.client and mqtt_service.client.is_connected():
             mqtt_service.client.publish(topic, json.dumps(payload), qos=1)
             logger.info(f"Published adjustment stop command (wake Base RTCM): {payload}")
         else:
-            logger.warning(f"MQTT client not connected, failed to publish wake base command")
-            raise HTTPException(status_code=503, detail="MQTT broker connection unavailable")
+            # The authoritative topology restore above already completed. A
+            # missing legacy MQTT wake path must not turn a successful stop
+            # into an apparent failure for the operator.
+            logger.warning("MQTT unavailable; skipped optional legacy Base wake command")
 
-        return {"status": "success", "message": "Adjustment cycle stopped, Base stream woken up"}
+        await ws_manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": req.project_id,
+            "phase": "STOPPED",
+            "message": mqtt_service.adjustment_message[req.project_id],
+        })
+        return {"status": "success", "phase": "STOPPED", "message": "Adjustment cycle stopped; fixed Base topology restored"}
     except Exception as e:
         logger.error(f"Failed to stop GNSS adjustment cycle: {e}")
         if isinstance(e, HTTPException): raise e

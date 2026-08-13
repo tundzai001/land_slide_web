@@ -47,7 +47,7 @@ body {
     backdrop-filter: saturate(200%) blur(32px);
     -webkit-backdrop-filter: saturate(200%) blur(32px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    z-index: 1040;
+    z-index: 3000;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -105,6 +105,11 @@ body {
 .navbar-hamburger:hover {
     background: rgba(13, 110, 253, 0.12);
     color: var(--accent-primary);
+}
+
+.navbar-hamburger:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--accent-primary) 65%, transparent);
+    outline-offset: 2px;
 }
 
 /* === COMPACT LAYER TOGGLE SWITCH === */

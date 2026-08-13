@@ -99,6 +99,115 @@ let stationsFetchInFlight = false;
 let projectsFetchInFlight = false;
 let rescueMarkersFetchInFlight = false;
 let clusterRenderSignature = '';
+
+function setStationListSidebarOpen(sidebar, open) {
+    if (!sidebar) return;
+    sidebar.classList.toggle('hidden', !open);
+    sidebar.classList.toggle('active', open);
+    if (open) sidebar.classList.remove('force-hidden');
+    sidebar.setAttribute('aria-hidden', String(!open));
+    sidebar.style.setProperty('transform', open ? 'translateX(0)' : 'translateX(-100%)', 'important');
+    sidebar.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
+    sidebar.style.setProperty('opacity', open ? '1' : '0', 'important');
+    sidebar.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
+    document.getElementById('navbar-hamburger-btn')
+        ?.setAttribute('aria-expanded', String(open));
+}
+
+function setGnssAdvancedPanelOpen(sidepanel, open, { focusClose = false } = {}) {
+    if (!sidepanel) return;
+    const isMobile = window.matchMedia('(max-width: 900px)').matches;
+    const navbarBottom = document.querySelector('.top-navbar')
+        ?.getBoundingClientRect().bottom || 56;
+    const detailSidebar = document.getElementById('detail-sidebar');
+    const detailWidth = !isMobile && detailSidebar?.classList.contains('active')
+        ? Math.round(detailSidebar.getBoundingClientRect().width)
+        : 0;
+
+    sidepanel.classList.toggle('active', open);
+    if (!open) sidepanel.classList.remove('expanded');
+    sidepanel.setAttribute('aria-hidden', String(!open));
+    sidepanel.style.setProperty('position', 'fixed', 'important');
+
+    if (isMobile) {
+        const bottomNavigation = document.getElementById('map-bottom-nav');
+        const bottomOffset = bottomNavigation?.getBoundingClientRect().height || 0;
+        const edge = 10;
+        const top = Math.round(navbarBottom + edge);
+        sidepanel.style.setProperty('top', `${top}px`, 'important');
+        sidepanel.style.setProperty('right', `${edge}px`, 'important');
+        sidepanel.style.setProperty('bottom', `${bottomOffset + edge}px`, 'important');
+        sidepanel.style.setProperty('left', `${edge}px`, 'important');
+        sidepanel.style.setProperty('width', 'auto', 'important');
+        sidepanel.style.setProperty('height', 'auto', 'important');
+        sidepanel.style.setProperty('max-width', 'none', 'important');
+    } else {
+        const top = Math.round(navbarBottom + 10);
+        sidepanel.style.setProperty('top', `${top}px`, 'important');
+        sidepanel.style.setProperty('right', `${detailWidth + 20}px`, 'important');
+        sidepanel.style.setProperty('bottom', 'auto', 'important');
+        sidepanel.style.setProperty('left', 'auto', 'important');
+        sidepanel.style.removeProperty('width');
+        sidepanel.style.setProperty('height', `${Math.max(0, window.innerHeight - top - 10)}px`, 'important');
+        sidepanel.style.setProperty('max-width', `calc(100vw - ${detailWidth + 32}px)`, 'important');
+    }
+
+    sidepanel.style.setProperty(
+        'transform',
+        open ? 'translate(0, 0)' : (isMobile ? 'translateY(-16px)' : 'translateX(24px)'),
+        'important',
+    );
+    sidepanel.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
+    sidepanel.style.setProperty('opacity', open ? '1' : '0', 'important');
+    sidepanel.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
+
+    const trigger = document.getElementById('sensor-card-gnss');
+    trigger?.setAttribute('aria-expanded', String(open));
+    if (open && focusClose) {
+        requestAnimationFrame(() => sidepanel.querySelector('#gnss-sidepanel-close')?.focus());
+    }
+}
+
+function setDetailSidebarOpen(sidebar, open) {
+    if (!sidebar) return;
+    sidebar.classList.toggle('active', open);
+    if (!open) sidebar.classList.remove('station-selecting');
+    sidebar.setAttribute('aria-hidden', String(!open));
+    const isMobile = window.matchMedia('(max-width: 900px)').matches;
+    const closedTransform = isMobile
+        ? 'translateY(100%)'
+        : 'translateX(100%)';
+    sidebar.style.setProperty('position', 'fixed', 'important');
+    if (isMobile) {
+        const bottomNavigation = document.getElementById('map-bottom-nav');
+        const bottomOffset = bottomNavigation?.getBoundingClientRect().height || 0;
+        sidebar.style.setProperty('top', 'auto', 'important');
+        sidebar.style.setProperty('right', '0', 'important');
+        sidebar.style.setProperty('bottom', `${bottomOffset}px`, 'important');
+    } else {
+        const navbarBottom = document.querySelector('.top-navbar')
+            ?.getBoundingClientRect().bottom || 56;
+        const panelGap = 10;
+        const topOffset = Math.max(0, Math.round(navbarBottom + panelGap));
+        sidebar.style.setProperty('top', `${topOffset}px`, 'important');
+        sidebar.style.setProperty('right', `${panelGap}px`, 'important');
+        sidebar.style.setProperty('bottom', 'auto', 'important');
+        sidebar.style.setProperty('height', `${Math.max(0, window.innerHeight - topOffset - panelGap)}px`, 'important');
+    }
+    sidebar.style.setProperty('transform', open ? 'translate(0, 0)' : closedTransform, 'important');
+    sidebar.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
+    sidebar.style.setProperty('opacity', open ? '1' : '0', 'important');
+    sidebar.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
+}
+
+function setChartsPanelOpen(panel, open) {
+    if (!panel) return;
+    panel.classList.toggle('active', open);
+    panel.setAttribute('aria-hidden', String(!open));
+    document.getElementById('btn-show-charts')
+        ?.setAttribute('aria-expanded', String(open));
+    if (open) panel.querySelector('.charts-panel-content')?.scrollTo({ top: 0 });
+}
 let mapInteractionDepth = 0;
 let mapInteractionActive = false;
 let pendingStationsReload = false;
@@ -111,6 +220,9 @@ const gnssAdjustmentDebugState = {
     projectId: null,
     phase: 'WAITING',
     expectedStationIds: [],
+    rosterStationIds: [],
+    participatingStationIds: [],
+    excludedStationIds: [],
     baselineCount: 0,
     startedAt: null,
     wsStatus: 'CONNECTING',
@@ -145,19 +257,46 @@ function normalizeGnssStationIds(stationIds) {
         : [];
 }
 
-function syncGnssExpectedStationIds(stationIds) {
-    gnssAdjustmentDebugState.expectedStationIds = normalizeGnssStationIds(stationIds);
-    window.gnssBoardState?.pruneToExpectedStations?.(
-        gnssAdjustmentDebugState.expectedStationIds,
-        gnssAdjustmentDebugState.workflowStationIdByRoverName,
-    );
-    const expectedRovers = gnssAdjustmentDebugState.expectedStationIds.map((stationId, index) => {
+function gnssRoversFromStationIds(stationIds, excluded = new Set()) {
+    return normalizeGnssStationIds(stationIds).map((stationId, index) => {
         const station = allStations.find(item => Number(item.id) === Number(stationId));
         const name = String(station?.station_code || station?.name || `Trạm ${stationId}`).trim();
         gnssAdjustmentDebugState.workflowStationIdByRoverName[name] = Number(stationId);
-        return { stationId: Number(stationId), name, index };
+        return { stationId: Number(stationId), name, index, excluded: excluded.has(Number(stationId)) };
     });
-    window.gnssBoardState?.seedExpectedRovers?.(expectedRovers);
+}
+
+function syncGnssExpectedStationIds(stationIds) {
+    gnssAdjustmentDebugState.expectedStationIds = normalizeGnssStationIds(stationIds);
+    gnssAdjustmentDebugState.participatingStationIds = [...gnssAdjustmentDebugState.expectedStationIds];
+    const displayIds = gnssAdjustmentDebugState.rosterStationIds.length
+        ? gnssAdjustmentDebugState.rosterStationIds
+        : gnssAdjustmentDebugState.expectedStationIds;
+    window.gnssBoardState?.seedExpectedRovers?.(
+        gnssRoversFromStationIds(displayIds, new Set(gnssAdjustmentDebugState.excludedStationIds))
+    );
+}
+
+function applyGnssAdjustmentRoster(roster = {}) {
+    if (!roster || typeof roster !== 'object') return;
+    const selected = normalizeGnssStationIds(roster.selected_station_ids);
+    const participating = normalizeGnssStationIds(roster.participating_station_ids);
+    const excluded = normalizeGnssStationIds([
+        ...(roster.skipped_offline_station_ids || []),
+        ...(roster.skipped_uncontrollable_station_ids || []),
+        ...(roster.skipped_seed_station_ids || []),
+    ]);
+    if (selected.length && !gnssAdjustmentDebugState.rosterStationIds.length) {
+        gnssAdjustmentDebugState.rosterStationIds = selected;
+    }
+    if (participating.length) gnssAdjustmentDebugState.participatingStationIds = participating;
+    gnssAdjustmentDebugState.excludedStationIds = [...new Set(excluded)];
+    const displayIds = gnssAdjustmentDebugState.rosterStationIds.length
+        ? gnssAdjustmentDebugState.rosterStationIds
+        : (selected.length ? selected : participating);
+    window.gnssBoardState?.seedExpectedRovers?.(
+        gnssRoversFromStationIds(displayIds, new Set(gnssAdjustmentDebugState.excludedStationIds))
+    );
 }
 
 function isGnssAdjustmentExpectedStation(stationId) {
@@ -186,7 +325,7 @@ function scheduleGnssAdjustmentWorkflowRender() {
     });
 }
 
-const GNSS_ADJUSTMENT_RUNNING_PHASES = new Set(['WAITING', 'COLLECTING_BASELINE', 'FREE_NETWORK']);
+const GNSS_ADJUSTMENT_RUNNING_PHASES = new Set(['WAITING', 'COLLECTING_BASELINE', 'FREE_NETWORK', 'PAUSED']);
 
 function isGnssAdjustmentRunning(projectId = null) {
     if (!gnssAdjustmentDebugState.active) return false;
@@ -240,6 +379,7 @@ function phaseClassForGnssAdjustment(phase) {
     switch (String(phase || '').toUpperCase()) {
         case 'COLLECTING_BASELINE': return 'ms-4 text-info fw-bold font-monospace';
         case 'FREE_NETWORK': return 'ms-4 text-warning fw-bold font-monospace';
+        case 'PAUSED': return 'ms-4 text-warning fw-bold font-monospace';
         case 'COMPLETED': return 'ms-4 text-success fw-bold font-monospace';
         case 'FAILED_QUALITY_GATE': return 'ms-4 text-danger fw-bold font-monospace';
         case 'ERROR': return 'ms-4 text-danger fw-bold font-monospace';
@@ -590,6 +730,33 @@ function refreshGnssAdjustmentDebugUi() {
         indicator.className = phaseClassForGnssAdjustment(phaseName);
     }
 
+    const rosterCount = gnssAdjustmentDebugState.rosterStationIds.length;
+    const participantCount = gnssAdjustmentDebugState.participatingStationIds.length
+        || gnssAdjustmentDebugState.expectedStationIds.length;
+    const excludedCount = gnssAdjustmentDebugState.excludedStationIds.length;
+    const rosterSummary = document.getElementById('gnss-roster-summary');
+    if (rosterSummary) {
+        rosterSummary.innerHTML = `
+            <span><strong>${rosterCount || participantCount}</strong> trạm đã chọn</span>
+            <span class="is-active"><strong>${participantCount}</strong> tham gia</span>
+            <span class="${excludedCount ? 'is-warning' : ''}"><strong>${excludedCount}</strong> bỏ qua</span>
+            <small>Danh sách và vị trí hiển thị được khóa trong suốt phiên</small>
+        `;
+    }
+    const pauseButton = document.getElementById('gnss-pause-adjustment-btn');
+    const resumeButton = document.getElementById('gnss-resume-adjustment-btn');
+    const stopButton = document.getElementById('gnss-stop-adjustment-btn');
+    const phase = gnssAdjustmentDebugState.phase;
+    if (pauseButton) {
+        pauseButton.hidden = phase === 'PAUSED';
+        pauseButton.disabled = !['COLLECTING_BASELINE', 'FREE_NETWORK'].includes(phase);
+    }
+    if (resumeButton) {
+        resumeButton.hidden = phase !== 'PAUSED';
+        resumeButton.disabled = phase !== 'PAUSED';
+    }
+    if (stopButton) stopButton.disabled = !['COLLECTING_BASELINE', 'FREE_NETWORK', 'PAUSED'].includes(phase);
+
     const summary = document.getElementById('gnss-debug-summary');
     if (summary) {
         const elapsed = gnssAdjustmentDebugState.startedAt
@@ -729,7 +896,7 @@ function setGnssAdjustmentPhase(phase, message = '') {
         window.toast?.error?.(message || 'Quy trình bình sai đã dừng do lỗi.');
     }
     window.gnssBoardState?.draw?.(performance.now());
-    if (['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR', 'IDLE'].includes(gnssAdjustmentDebugState.phase)) {
+    if (['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR', 'IDLE', 'STOPPED'].includes(gnssAdjustmentDebugState.phase)) {
         if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
         gnssAdjustmentDebugState.statusPollId = null;
         if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
@@ -750,6 +917,7 @@ async function syncGnssAdjustmentStatus() {
         if (!response?.ok) return;
         const status = await response.json();
         if (Number(status.project_id) !== projectId) return;
+        applyGnssAdjustmentRoster(status.roster);
         let phase = String(status.phase || 'IDLE').toUpperCase();
         let message = String(status.message || '');
         if (phase === 'IDLE' && GNSS_ADJUSTMENT_RUNNING_PHASES.has(gnssAdjustmentDebugState.phase)) {
@@ -792,6 +960,9 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         projectId: Number(projectId) || null,
         phase: 'WAITING',
         expectedStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
+        rosterStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
+        participatingStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
+        excludedStationIds: [],
         baselineCount: 0,
         startedAt: Date.now(),
         wsStatus: wsConnection?.readyState === WebSocket.OPEN ? 'CONNECTED' : 'DISCONNECTED',
@@ -813,6 +984,9 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
     const pointsList = document.getElementById('adj-points-list');
     if (resultsSection) resultsSection.style.display = 'none';
     if (pointsList) pointsList.innerHTML = '';
+    if (gnssAdjustmentDebugState.rosterStationIds.length) {
+        syncGnssExpectedStationIds(gnssAdjustmentDebugState.participatingStationIds);
+    }
     syncGnssWorkflowProgress('WAITING', 'Đang mở API và kênh WebSocket cho phiên mới.');
     addGnssAdjustmentDebug('UI', 'Đã mở phiên debug Bình sai.', 'info');
     gnssAdjustmentDebugState.watchdogId = setInterval(() => {
@@ -1055,8 +1229,32 @@ function initialize() {
 
     const stationSidebar = document.getElementById('station-list-sidebar');
     if (stationSidebar) {
-        stationSidebar.classList.add('hidden');
+        setStationListSidebarOpen(stationSidebar, false);
     }
+
+    const detailSidebar = document.getElementById('detail-sidebar');
+    setDetailSidebarOpen(detailSidebar, false);
+    const gnssAdvancedSidepanel = document.getElementById('gnss-advanced-sidepanel');
+    setGnssAdvancedPanelOpen(gnssAdvancedSidepanel, false);
+    window.addEventListener('resize', () => {
+        if (detailSidebar) {
+            setDetailSidebarOpen(detailSidebar, detailSidebar.classList.contains('active'));
+        }
+        if (stationSidebar) {
+            setStationListSidebarOpen(
+                stationSidebar,
+                !stationSidebar.classList.contains('hidden')
+                    && !stationSidebar.classList.contains('force-hidden'),
+            );
+        }
+        if (gnssAdvancedSidepanel) {
+            setGnssAdvancedPanelOpen(
+                gnssAdvancedSidepanel,
+                gnssAdvancedSidepanel.classList.contains('active'),
+            );
+        }
+        map?.invalidateSize?.();
+    }, { passive: true });
 
     const toggleBtn = document.getElementById('toggle-list-btn');
     if (toggleBtn) {
@@ -1083,8 +1281,8 @@ function setupMobileMapNavigation() {
     if (!navigation || !stationSheet || !detailSheet) return;
 
     const closePrimarySheets = (except) => {
-        if (except !== stationSheet) stationSheet.classList.add('hidden');
-        if (except !== detailSheet) detailSheet.classList.remove('active');
+        if (except !== stationSheet) setStationListSidebarOpen(stationSheet, false);
+        if (except !== detailSheet) setDetailSidebarOpen(detailSheet, false);
     };
     navigation.addEventListener('click', (event) => {
         const button = event.target.closest('[data-map-action]');
@@ -1093,8 +1291,7 @@ function setupMobileMapNavigation() {
         navigation.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
         if (action === 'stations') {
             closePrimarySheets(stationSheet);
-            stationSheet.classList.remove('hidden', 'force-hidden');
-            stationSheet.classList.add('active');
+            setStationListSidebarOpen(stationSheet, true);
         } else if (action === 'layers') {
             closePrimarySheets();
             document.getElementById('layer-mode-toggle')?.click();

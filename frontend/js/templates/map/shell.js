@@ -4,7 +4,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <nav class="top-navbar">
         <div class="d-flex align-items-center gap-3">
             <!-- Hamburger Menu -->
-            <button class="navbar-hamburger" id="navbar-hamburger-btn" title="Danh sách trạm">
+            <button type="button" class="navbar-hamburger" id="navbar-hamburger-btn" title="Danh sách trạm"
+                aria-label="Mở danh sách trạm" aria-controls="station-list-sidebar" aria-expanded="false">
                 <i class="bi bi-list"></i>
             </button>
 
@@ -71,7 +72,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
     </div>
 
     <!-- LEFT SIDEBAR (Station List) -->
-    <div class="station-list-sidebar" id="station-list-sidebar">
+    <div class="station-list-sidebar" id="station-list-sidebar" role="complementary"
+        aria-label="Danh sách trạm" aria-hidden="true">
         <div class="sidebar-header">
             <h6><i class="bi bi-hdd-network me-2"></i>Station List</h6>
         </div>
@@ -124,10 +126,12 @@ window.LegacyTemplateParts['shell'] = String.raw`
         <span class="timeline-label opacity-50" style="font-size:0.65rem;">30 Ngày</span>
     </div>
 
-    <div class="gnss-advanced-sidepanel" id="gnss-advanced-sidepanel">
+    <div class="gnss-advanced-sidepanel" id="gnss-advanced-sidepanel" role="dialog"
+        aria-label="Thông tin GNSS nâng cao" aria-hidden="true">
         <div class="sidepanel-header">
             <h6><i class="bi bi-gear-wide-connected me-2"></i>Advanced GNSS & Network Adjustment</h6>
-            <button class="sidepanel-close" id="gnss-sidepanel-close"><i class="bi bi-x-lg"></i></button>
+            <button type="button" class="sidepanel-close" id="gnss-sidepanel-close"
+                aria-label="Đóng thông tin GNSS nâng cao"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="sidepanel-body">
             <div class="adv-column-left">

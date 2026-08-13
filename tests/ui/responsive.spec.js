@@ -32,6 +32,18 @@ const viewports = [
   { name: '3840x2160', width: 3840, height: 2160 }
 ];
 
+async function installLocalMapAssets(page) {
+  if (process.env.LOCAL_MAP_BUNDLE !== '1') return;
+  await page.route('**/assets/map.min.css*', route => route.fulfill({
+    contentType: 'text/css; charset=utf-8',
+    body: readFileSync(join(__dirname, '..', '..', 'frontend/dist/map.min.css')),
+  }));
+  await page.route('**/assets/map-app.min.js*', route => route.fulfill({
+    contentType: 'application/javascript; charset=utf-8',
+    body: readFileSync(join(__dirname, '..', '..', 'frontend/dist/map-app.min.js')),
+  }));
+}
+
 async function assertViewportContract(page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
@@ -103,6 +115,7 @@ for (const viewport of viewports.filter(({ width }) => [390, 768, 1366].includes
 for (const viewport of viewports.slice(0, 5)) {
   test(`map shell responsive ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize(viewport);
+    await installLocalMapAssets(page);
     await page.goto(mapPath);
     await expect(page.locator('#map')).toBeVisible({ timeout: 30_000 });
     await assertViewportContract(page);
@@ -111,6 +124,189 @@ for (const viewport of viewports.slice(0, 5)) {
     }
   });
 }
+
+test('desktop map sidebars open from hamburger and station selection', async ({ page }) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installLocalMapAssets(page);
+  await page.route('**/api/stations', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([{
+      id: 1,
+      name: 'Desktop test station',
+      station_code: 'DESKTOP-1',
+      status: 'online',
+      risk_level: 'LOW',
+      location: { lat: 21.5, lon: 104.5 },
+    }]),
+  }));
+  await page.route('**/api/stations/1/detail**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 1,
+      name: 'Desktop test station',
+      station_code: 'DESKTOP-1',
+      status: 'online',
+      risk_level: 'LOW',
+      sensors: {},
+    }),
+  }));
+  await page.goto(mapPath);
+  await expect(page.locator('#map')).toBeVisible({ timeout: 30_000 });
+
+  const stationSidebar = page.locator('#station-list-sidebar');
+  const hamburger = page.locator('#navbar-hamburger-btn');
+  await expect(stationSidebar).toHaveAttribute('aria-hidden', 'true');
+  await hamburger.click();
+  await expect(stationSidebar).toHaveAttribute('aria-hidden', 'false');
+  await expect(hamburger).toHaveAttribute('aria-expanded', 'true');
+  await expect(stationSidebar).toBeInViewport();
+
+  const firstMarker = page.locator('.leaflet-marker-pane .custom-map-marker').first();
+  await expect(firstMarker).toBeVisible();
+  await firstMarker.click();
+  const detailSidebar = page.locator('#detail-sidebar');
+  await expect(detailSidebar).toHaveClass(/active/);
+  await expect(detailSidebar).toHaveAttribute('aria-hidden', 'false');
+  const detailGeometry = await detailSidebar.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      inlineStyle: element.getAttribute('style'),
+      position: style.position,
+      inset: { top: style.top, right: style.right, bottom: style.bottom, left: style.left },
+      transform: style.transform,
+      translate: style.translate,
+      visibility: style.visibility,
+      opacity: style.opacity,
+      pointerEvents: style.pointerEvents,
+      offsetParent: element.offsetParent?.id || element.offsetParent?.className || null,
+    };
+  });
+  expect(detailGeometry.rect.y).toBeGreaterThanOrEqual(0);
+  expect(detailGeometry.rect.y).toBeLessThan(100);
+  expect(detailGeometry.rect.y + detailGeometry.rect.height).toBeLessThanOrEqual(769);
+  await expect(detailSidebar).toBeInViewport();
+
+  await hamburger.click();
+  await expect(stationSidebar).toHaveAttribute('aria-hidden', 'true');
+  await hamburger.click();
+  await expect(stationSidebar).toHaveAttribute('aria-hidden', 'false');
+  await expect(stationSidebar).toBeInViewport();
+
+  const gnssCard = page.locator('#sensor-card-gnss');
+  const gnssPanel = page.locator('#gnss-advanced-sidepanel');
+  await gnssCard.dblclick();
+  await expect(gnssPanel).toHaveClass(/active/);
+  await expect(gnssPanel).toHaveAttribute('aria-hidden', 'false');
+  await expect(gnssCard).toHaveAttribute('aria-expanded', 'true');
+  await expect(gnssPanel).toBeInViewport();
+  const gnssGeometry = await gnssPanel.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const close = element.querySelector('#gnss-sidepanel-close');
+    const closeRect = close.getBoundingClientRect();
+    const topElement = document.elementFromPoint(
+      closeRect.left + closeRect.width / 2,
+      closeRect.top + closeRect.height / 2,
+    );
+    const style = getComputedStyle(element);
+    return {
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      closeRect: { x: closeRect.x, y: closeRect.y, width: closeRect.width, height: closeRect.height },
+      display: style.display,
+      position: style.position,
+      zIndex: style.zIndex,
+      visibility: style.visibility,
+      opacity: style.opacity,
+      pointerEvents: style.pointerEvents,
+      topElement: `${topElement?.tagName || ''}#${topElement?.id || ''}.${topElement?.className || ''}`,
+      closeButtonOnTop: topElement?.closest('#gnss-sidepanel-close')?.id || '',
+    };
+  });
+  console.log('GNSS geometry:', gnssGeometry);
+  expect(gnssGeometry.rect.width).toBeGreaterThan(280);
+  expect(gnssGeometry.rect.height).toBeGreaterThan(300);
+  expect(gnssGeometry.closeButtonOnTop).toBe('gnss-sidepanel-close');
+  await page.locator('#gnss-sidepanel-close').click();
+  await expect(gnssPanel).toHaveAttribute('aria-hidden', 'true');
+
+  await page.locator('#btn-show-charts').click();
+  const chartsPanel = page.locator('#charts-panel');
+  await expect(chartsPanel).toHaveClass(/active/);
+  await expect(chartsPanel).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#charts-station-context')).toContainText('Desktop test station');
+  const panelGeometry = await page.evaluate(() => {
+    const chartRect = document.getElementById('charts-panel').getBoundingClientRect();
+    const detailRect = document.getElementById('detail-sidebar').getBoundingClientRect();
+    return {
+      chart: { left: chartRect.left, top: chartRect.top, right: chartRect.right, bottom: chartRect.bottom },
+      detail: { left: detailRect.left, top: detailRect.top, right: detailRect.right, bottom: detailRect.bottom },
+      overflow: document.documentElement.scrollWidth - innerWidth,
+    };
+  });
+  expect(panelGeometry.chart.left).toBeGreaterThanOrEqual(8);
+  expect(panelGeometry.chart.top).toBeGreaterThanOrEqual(56);
+  expect(panelGeometry.chart.right).toBeLessThanOrEqual(panelGeometry.detail.left - 8);
+  expect(panelGeometry.chart.bottom).toBeLessThanOrEqual(768);
+  expect(panelGeometry.overflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: 'test-results/map-layout-desktop.png' });
+  await page.locator('#close-charts-btn').click();
+  await expect(chartsPanel).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('mobile chart workspace replaces detail sheet without overflow', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installLocalMapAssets(page);
+  await page.route('**/api/stations', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([{
+      id: 1,
+      name: 'Mobile test station',
+      station_code: 'MOBILE-1',
+      status: 'online',
+      risk_level: 'LOW',
+      location: { lat: 21.5, lon: 104.5 },
+    }]),
+  }));
+  await page.route('**/api/stations/1/detail**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 1,
+      name: 'Mobile test station',
+      station_code: 'MOBILE-1',
+      status: 'online',
+      risk_level: 'LOW',
+      sensors: {},
+    }),
+  }));
+  await page.goto(mapPath);
+  await expect(page.locator('#map')).toBeVisible({ timeout: 30_000 });
+  await page.locator('.leaflet-marker-pane .custom-map-marker').first().click();
+  await expect(page.locator('#detail-sidebar')).toHaveClass(/active/);
+  await page.locator('#btn-show-charts').click();
+
+  const chartsPanel = page.locator('#charts-panel');
+  await expect(chartsPanel).toHaveClass(/active/);
+  await expect(page.locator('#detail-sidebar')).toHaveAttribute('aria-hidden', 'true');
+  const geometry = await chartsPanel.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      overflow: document.documentElement.scrollWidth - innerWidth,
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(8);
+  expect(geometry.top).toBeGreaterThanOrEqual(52);
+  expect(geometry.right).toBeLessThanOrEqual(390);
+  expect(geometry.bottom).toBeLessThanOrEqual(782);
+  expect(geometry.overflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: 'test-results/map-layout-mobile.png' });
+});
 
 for (const viewport of viewports) {
   test(`GNSS panel remains viewport-bound ${viewport.name}`, async ({ page }) => {

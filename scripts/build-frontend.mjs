@@ -73,18 +73,22 @@ const groups = {
   ]
 };
 
-async function concatenate(files) {
+async function concatenate(files, separator = '\n;\n') {
   const parts = [];
   for (const relativePath of files) {
     const source = await readFile(path.join(frontendRoot, relativePath), 'utf8');
     parts.push(`/* ${relativePath} */\n${source}`);
   }
-  return parts.join('\n;\n');
+  return parts.join(separator);
 }
 
 async function minify(outputName, files) {
   const loader = outputName.endsWith('.css') ? 'css' : 'js';
-  let source = (await concatenate(files)).replaceAll('__BUILD_VERSION__', buildVersion);
+  // A top-level semicolon is a valid JavaScript boundary, but in CSS it is
+  // parsed as part of the next selector and invalidates that complete rule.
+  // Several route-critical selectors are the first rule in their module.
+  const separator = loader === 'css' ? '\n' : '\n;\n';
+  let source = (await concatenate(files, separator)).replaceAll('__BUILD_VERSION__', buildVersion);
   if (outputName === 'map-app.min.js') {
     const jsxSource = await readFile(path.join(frontendRoot, 'js/react/station-list.jsx'), 'utf8');
     const jsx = await esbuild.transform(jsxSource, {

@@ -11,7 +11,7 @@ const StationListItem = memo(function StationListItem({ station }) {
     const select = () => {
         selectStation(station.id);
         if (window.innerWidth < 768) {
-            document.getElementById('station-list-sidebar')?.classList.add('hidden');
+            setStationListSidebarOpen(document.getElementById('station-list-sidebar'), false);
         }
     };
 

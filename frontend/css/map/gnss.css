@@ -12,7 +12,7 @@
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--glass-border);
     border-radius: 16px 0 0 16px;
-    z-index: 2000;
+    z-index: 1900;
     box-shadow: var(--glass-shadow);
     color: var(--text-primary);
     transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
@@ -57,7 +57,14 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px;
+    padding: 0;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
     transition: color 0.2s;
 }
 
@@ -547,15 +554,101 @@
     height: min(92dvh, 980px);
     min-height: min(680px, 92dvh);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
     border-color: rgba(44, 212, 255, 0.42) !important;
     border-radius: 16px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(94, 234, 212, 0.08);
 }
 
 #gnssTerminalModal .modal-header {
-    min-height: 52px;
-    gap: 12px;
-    background: linear-gradient(90deg, rgba(8, 29, 39, 0.98), rgba(20, 27, 35, 0.98));
+    min-height: 68px;
+    gap: 14px;
+    padding: 10px 14px;
+    background: linear-gradient(110deg, rgba(6, 24, 34, 0.99), rgba(16, 29, 38, 0.99));
+    border-bottom: 1px solid rgba(94, 234, 212, 0.16) !important;
+}
+
+#gnssTerminalModal .gnss-terminal-heading {
+    min-width: 220px;
+}
+
+#gnssTerminalModal .gnss-terminal-eyebrow {
+    display: block;
+    margin-bottom: 2px;
+    color: #5eead4;
+    font: 700 0.62rem/1.2 'IBM Plex Mono', monospace;
+    letter-spacing: 0.15em;
+}
+
+#gnssTerminalModal .gnss-run-controls {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 0 0 auto;
+}
+
+#gnssTerminalModal .gnss-run-controls .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding-inline: 12px;
+    border-radius: 9px;
+    font-weight: 700;
+    transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, opacity 180ms ease;
+}
+
+#gnssTerminalModal .gnss-run-controls .btn:focus-visible,
+#gnssTerminalModal .btn-close:focus-visible {
+    outline: 3px solid rgba(94, 234, 212, 0.55);
+    outline-offset: 2px;
+}
+
+#gnssTerminalModal .gnss-run-controls .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+#gnssTerminalModal .gnss-roster-summary {
+    position: absolute;
+    z-index: 4;
+    top: 78px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    max-width: calc(100% - 40px);
+    pointer-events: none;
+}
+
+#gnssTerminalModal .gnss-roster-summary span,
+#gnssTerminalModal .gnss-roster-summary small {
+    padding: 6px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 999px;
+    color: #cbd5e1;
+    background: rgba(5, 18, 25, 0.88);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(8px);
+    font: 600 0.68rem/1 'IBM Plex Mono', monospace;
+}
+
+#gnssTerminalModal .gnss-roster-summary .is-active {
+    color: #99f6e4;
+    border-color: rgba(45, 212, 191, 0.36);
+}
+
+#gnssTerminalModal .gnss-roster-summary .is-warning {
+    color: #fde68a;
+    border-color: rgba(245, 158, 11, 0.42);
+}
+
+#gnssTerminalModal .gnss-roster-summary small {
+    color: #94a3b8;
+    border-style: dashed;
 }
 
 #gnssTerminalModal .modal-title {
@@ -572,7 +665,8 @@
 }
 
 #gnssTerminalModal .gnss-terminal-body {
-    height: calc(100% - 52px);
+    height: auto;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
 }
@@ -705,11 +799,36 @@
         gap: 6px 10px;
     }
 
-    #gnssTerminalModal #gnss-phase-indicator {
+    #gnssTerminalModal .gnss-terminal-heading {
+        min-width: 0;
+        flex: 1 1 180px;
+    }
+
+    #gnssTerminalModal .gnss-run-controls {
         order: 3;
+        width: 100%;
+    }
+
+    #gnssTerminalModal .gnss-run-controls .btn {
+        flex: 1 1 0;
+        min-height: 44px;
+    }
+
+    #gnssTerminalModal #gnss-phase-indicator {
+        order: 4;
         width: 100%;
         margin-left: 0 !important;
         font-size: 0.72rem;
+    }
+
+    #gnssTerminalModal .gnss-roster-summary {
+        top: 14px;
+        left: 12px;
+        max-width: calc(100% - 24px);
+    }
+
+    #gnssTerminalModal .gnss-roster-summary small {
+        display: none;
     }
 
     #gnssTerminalModal .modal-body {
@@ -741,4 +860,14 @@
     }
 
     .gnss-flow-node.is-branch { margin-left: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #gnssTerminalModal *,
+    #gnss-adjustment-running-pill {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
 }

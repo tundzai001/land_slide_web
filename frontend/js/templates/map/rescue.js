@@ -346,7 +346,7 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                 </div>
 
                 <div id="dt-warning-overlay" style="display:none;">
-                    <div class="dt-warning-text">⚠ CẢNH BÁO SẠT LỞ ⚠</div>
+                    <div class="dt-warning-text"><i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i> CẢNH BÁO SẠT LỞ</div>
                     <div class="dt-warning-sub" id="dt-warning-fos">FoS = 0.95</div>
                 </div>
             </div>

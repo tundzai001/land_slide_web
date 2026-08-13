@@ -1,16 +1,13 @@
 window.LegacyTemplateParts ||= {};
 window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL SIDEBAR -->
-    <div class="detail-sidebar" id="detail-sidebar">
-        <button class="sidebar-close-btn" id="close-btn">
-            <i class="bi bi-x-lg"></i>
-        </button>
-        <div class="sidebar-header" style="padding: 12px 20px;">
+    <div class="detail-sidebar" id="detail-sidebar" aria-hidden="true">
+        <div class="sidebar-header detail-sidebar-header">
             <div class="d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-baseline gap-2">
+                <div class="detail-station-identity d-flex align-items-baseline gap-2">
                     <h5 id="st-name" class="mb-0" style="font-size: 1.1rem;">Station Name</h5>
                     <small class="text-muted" id="st-code">CODE</small>
                 </div>
-                <div class="d-flex gap-1">
+                <div class="detail-header-actions d-flex gap-1">
                     <button class="btn btn-sm btn-outline-secondary btn-qr-share" title="Chia sẻ QR"
                         onclick="if(currentStationData) window.showStationQR(currentStationData.location?.lat, currentStationData.location?.lon, currentStationData.name)">
                         <i class="bi bi-qr-code"></i>
@@ -18,6 +15,9 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                     <button class="btn btn-sm btn-outline-secondary btn-export-pdf" title="Xuất PDF"
                         onclick="window.exportStationPDF()">
                         <i class="bi bi-file-earmark-pdf"></i>
+                    </button>
+                    <button type="button" class="sidebar-close-btn" id="close-btn" aria-label="Đóng thông tin trạm">
+                        <i class="bi bi-x-lg"></i>
                     </button>
                 </div>
             </div>
@@ -36,7 +36,9 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                 <!-- COMPACT SENSOR DATA -->
                 <div class="sensor-compact">
                     <!-- GNSS -->
-                    <div class="sensor-item sensor-clickable" id="sensor-card-gnss" title="Xem chi tiết (Advanced)">
+                    <button type="button" class="sensor-item sensor-clickable" id="sensor-card-gnss"
+                        title="Xem chi tiết GNSS" aria-label="Mở thông tin GNSS nâng cao"
+                        aria-controls="gnss-advanced-sidepanel" aria-expanded="false">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity <i
                                     class="bi bi-info-circle ms-1 small opacity-50"></i></span>
@@ -48,7 +50,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         <div id="gnss-eval-summary" class="mt-1" style="display: none; font-size: 0.7rem; font-weight: 500;">
                             <!-- Đánh giá Theil-Sen Summary -->
                         </div>
-                    </div>
+                    </button>
 
                     <!-- Rain Intensity -->
                     <div class="sensor-item" id="sensor-card-rain">
@@ -97,17 +99,17 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                             <div class="imu-delta-grid">
                                 <div class="imu-delta-item">
                                     <span class="imu-delta-axis">Roll (X)</span>
-                                    <span class="imu-delta-hint">â† Trái / Phải â†’</span>
+                                    <span class="imu-delta-hint">← Trái / Phải →</span>
                                     <span class="imu-delta-num" id="val-imu-delta-roll">-- mm</span>
                                 </div>
                                 <div class="imu-delta-item">
                                     <span class="imu-delta-axis">Pitch (Y)</span>
-                                    <span class="imu-delta-hint">â†“ Trước / Sau â†‘</span>
+                                    <span class="imu-delta-hint">↓ Trước / Sau ↑</span>
                                     <span class="imu-delta-num" id="val-imu-delta-pitch">-- mm</span>
                                 </div>
                                 <div class="imu-delta-item">
                                     <span class="imu-delta-axis">Yaw (Z)</span>
-                                    <span class="imu-delta-hint">â†º Trái / Phải â†»</span>
+                                    <span class="imu-delta-hint">↺ Trái / Phải ↻</span>
                                     <span class="imu-delta-num" id="val-imu-delta-yaw">-- mm</span>
                                 </div>
                             </div>
@@ -139,7 +141,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
 
                 <!--ACTION BUTTONS -->
                 <div class="action-buttons">
-                    <button class="btn-action" id="btn-show-charts">
+                    <button class="btn-action" id="btn-show-charts" aria-controls="charts-panel" aria-expanded="false">
                         <i class="bi bi-graph-up me-2"></i>View Chart
                     </button>
                     <button class="btn-action w-100 secondary d-none" id="btn-long-term">
@@ -178,19 +180,26 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
     </div>
 
     <!--CENTER CHARTS PANEL (Tách biệt ở giữa màn hình) -->
-    <div class="charts-panel" id="charts-panel">
+    <div class="charts-panel" id="charts-panel" role="dialog" aria-label="Biểu đồ trạm" aria-hidden="true">
         <div class="charts-panel-header">
-            <h5><i class="bi bi-graph-up me-2"></i>Biểu đồ 24h</h5>
-            <button class="btn btn-sm btn-outline-light" id="close-charts-btn">
-                <i class="bi bi-chevron-right"></i>
+            <div class="charts-heading">
+                <div class="charts-heading-title">
+                    <i class="bi bi-activity" aria-hidden="true"></i>
+                    <h5>Biểu đồ quan trắc</h5>
+                    <span class="charts-period">24 giờ</span>
+                </div>
+                <p id="charts-station-context">Dữ liệu cảm biến của trạm đang chọn</p>
+            </div>
+            <button type="button" class="btn btn-sm" id="close-charts-btn" aria-label="Đóng biểu đồ">
+                <i class="bi bi-x-lg"></i>
             </button>
         </div>
 
         <div class="charts-panel-content">
             <!-- GNSS Chart -->
             <div class="chart-box" id="chart-box-gnss">
-                <div class="chart-title">📈 GNSS Velocity (24h)</div>
-                <div class="d-flex justify-content-around px-3 pb-2 pt-2 text-center border-bottom mb-2" style="background-color: var(--bg-secondary); border-radius: 6px;">
+                <div class="chart-title"><i class="bi bi-speedometer2"></i><span>Vận tốc GNSS</span></div>
+                <div class="chart-stat-grid">
                     <div class="flex-fill">
                         <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
                         <div class="fw-bold text-primary" id="stat-chart-gnss-latest">--</div>
@@ -208,23 +217,23 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         <div class="fw-bold text-info" id="stat-chart-gnss-avg">--</div>
                     </div>
                 </div>
-                <div style="height: 250px;">
+                <div class="chart-canvas-wrap">
                     <canvas id="chart-gnss"></canvas>
                 </div>
             </div>
 
             <!-- Rain Chart -->
             <div class="chart-box" id="chart-box-rain">
-                <div class="chart-title">🌧ï¸ Rain Intensity (24h)</div>
-                <div style="height: 250px;">
+                <div class="chart-title"><i class="bi bi-cloud-rain"></i><span>Cường độ mưa</span></div>
+                <div class="chart-canvas-wrap">
                     <canvas id="chart-rain"></canvas>
                 </div>
             </div>
 
             <!-- Water Chart -->
             <div class="chart-box" id="chart-box-water">
-                <div class="chart-title">🌊 Water Level (24h)</div>
-                <div class="d-flex justify-content-around px-3 pb-2 pt-2 text-center border-bottom mb-2" style="background-color: var(--bg-secondary); border-radius: 6px;">
+                <div class="chart-title"><i class="bi bi-water"></i><span>Mực nước</span></div>
+                <div class="chart-stat-grid">
                     <div class="flex-fill">
                         <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
                         <div class="fw-bold text-primary" id="stat-chart-water-latest">--</div>
@@ -242,7 +251,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         <div class="fw-bold text-info" id="stat-chart-water-avg">--</div>
                     </div>
                 </div>
-                <div style="height: 250px;">
+                <div class="chart-canvas-wrap">
                     <canvas id="chart-water"></canvas>
                 </div>
             </div>
@@ -250,18 +259,17 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
             <!-- IMU Chart (3-axis) -->
             <div class="chart-box" id="chart-box-imu">
                 <div class="chart-title d-flex justify-content-between align-items-center">
-                    <span>🧭 IMU Roll / Pitch / Yaw (24h)</span>
+                    <span><i class="bi bi-compass"></i> Góc nghiêng IMU</span>
                     <button class="btn btn-sm btn-outline-primary" id="btn-toggle-imu-3d"
-                        style="font-size: 0.7rem; padding: 2px 6px;">
-                        <i class="bi bi-box me-1"></i>3D View
+                        aria-label="Chuyển chế độ biểu đồ IMU 2D hoặc 3D">
+                        <i class="bi bi-box me-1"></i>3D
                     </button>
                 </div>
-                <div id="chart-imu-wrapper" style="height: 250px;">
+                <div id="chart-imu-wrapper" class="chart-canvas-wrap">
                     <canvas id="chart-imu"></canvas>
                 </div>
-                <div id="realtime-imu-3d-wrapper"
-                    style="height: 250px; display: none; position: relative; border-radius: 8px; overflow: hidden;">
-                    <div id="realtime-imu-3d-scene" style="width: 100%; height: 100%;"></div>
+                <div id="realtime-imu-3d-wrapper" class="chart-canvas-wrap chart-3d-wrap">
+                    <div id="realtime-imu-3d-scene"></div>
                 </div>
             </div>
 
