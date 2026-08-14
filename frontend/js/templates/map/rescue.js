@@ -9,8 +9,8 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
 
     <div class="modal fade" id="guestRescueModal" tabindex="-1" aria-labelledby="guestRescueModalLabel"
         aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-            <div class="modal-content glass-modal-content">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable rescue-request-dialog">
+            <div class="modal-content glass-modal-content rescue-request-modal">
                 <div class="modal-header">
                     <h5 class="modal-title" id="guestRescueModalLabel"><i class="bi bi-geo-alt-fill me-2"></i>Yêu cầu
                         cứu hộ</h5>

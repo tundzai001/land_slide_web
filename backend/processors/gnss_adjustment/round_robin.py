@@ -37,6 +37,8 @@ from .session import (
     _SafeRoverRotationSkip,
     _normalized_receiver_command,
     _receiver_response_result,
+    requires_common_base_handover,
+    RoundRobinSessionLifecycleMixin,
 )
 from .statistics import (
     _BASELINE_STD_REJECTION_THRESHOLD_M,
@@ -50,7 +52,7 @@ from .statistics import (
     _split_effective_sample_sessions,
 )
 
-class RoundRobinAdjustmentManager:
+class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
     """Collect base-to-rover and rover-to-rover baselines for the existing solver.
 
     The mathematical adjustment remains in ``gnss_adjustment.solver``.  This
@@ -75,6 +77,7 @@ class RoundRobinAdjustmentManager:
     # After the CORS pair has been forced onto one physical receiver, discard
     # the caster/rover handover interval before opening the common seed window.
     FIXED_BASE_HANDOVER_SETTLE_SECONDS = 5
+    FIXED_BASE_HANDOVER_VERIFY_SECONDS = 60
     STABILITY_WINDOW_SECONDS = 10
     STABILITY_MIN_SAMPLES_PER_WINDOW = 4
     STABILITY_MAX_SAMPLE_GAP_SECONDS = 5
@@ -218,6 +221,7 @@ class RoundRobinAdjustmentManager:
         self.rover_llh_cache: Dict[str, Dict[str, float]] = {}
         self._sessions: Dict[int, dict] = {}
         self._last_ingest_diagnostics: Dict[int, dict] = {}
+        self._ingest_warning_last_logged: Dict[tuple[int, int, int], float] = {}
         # UM980 AGRICA output can be split across MQTT payloads.  Buffers are
         # isolated per project/station so fragments from different rovers never
         # get concatenated.
@@ -577,65 +581,6 @@ class RoundRobinAdjustmentManager:
             )
         return outcomes
 
-    def configure_project(self, project_id: int, clusters: List[dict]) -> None:
-        """Start a new collection session using normalized cluster settings."""
-
-        prepared_clusters = []
-        assigned_station_ids: set[int] = set()
-        for raw_cluster in clusters or []:
-            if not isinstance(raw_cluster, dict):
-                continue
-            station_ids = []
-            for station_id in raw_cluster.get("stations", []):
-                try:
-                    station_ids.append(int(station_id))
-                except (TypeError, ValueError):
-                    continue
-            station_ids = list(dict.fromkeys(station_ids))
-            rover_codes = [str(code).strip() for code in raw_cluster.get("rovers", []) if str(code).strip()]
-
-            if len(station_ids) < 2:
-                raise ValueError("each GNSS adjustment cluster needs at least two stations")
-            if len(rover_codes) != len(station_ids):
-                raise ValueError("cluster station IDs and rover codes are inconsistent")
-            overlap = assigned_station_ids.intersection(station_ids)
-            if overlap:
-                raise ValueError(f"a station cannot belong to more than one active cluster: {sorted(overlap)}")
-            assigned_station_ids.update(station_ids)
-
-            cluster = dict(raw_cluster)
-            cluster["stations"] = station_ids
-            cluster["rovers"] = rover_codes
-            cluster["observations"] = []
-            prepared_clusters.append(cluster)
-
-        if not prepared_clusters:
-            raise ValueError("no valid GNSS adjustment clusters were supplied")
-
-        self.clear_project(project_id)
-        self._sessions[project_id] = {
-            "clusters": prepared_clusters,
-            "initial_clusters": copy.deepcopy(prepared_clusters),
-            "active_bases": {},
-            "seed_collection_steps": set(),
-            "seed_window_states": {},
-            "online_baseline_states": {},
-            "seed_station_reports": {},
-            "seed_started_monotonic": time.monotonic(),
-            "control_state": "RUNNING",
-            "resume_event": asyncio.Event(),
-        }
-        self._sessions[project_id]["resume_event"].set()
-
-    def clear_project(self, project_id: int) -> None:
-        task = self.running_tasks.pop(project_id, None)
-        if task and not task.done():
-            task.cancel()
-        self._sessions.pop(project_id, None)
-        self._last_ingest_diagnostics.pop(project_id, None)
-        for key in [key for key in self._agrica_fragment_buffers if key[0] == project_id]:
-            self._agrica_fragment_buffers.pop(key, None)
-
     def update_rover_llh(self, station_code: str, lat: float, lon: float, alt: float) -> None:
         if station_code:
             self.rover_llh_cache[station_code] = {"lat": lat, "lon": lon, "alt": alt}
@@ -875,6 +820,7 @@ class RoundRobinAdjustmentManager:
                     "position_type": int(observation.position_type),
                     "epoch_ts": int(observation.epoch_ts or 0),
                     "received_monotonic": time.monotonic(),
+                    "base_identity_verified": False,
                     "solver_eligible": False,
                     "reason": "awaiting baseline validation",
                 }
@@ -921,14 +867,23 @@ class RoundRobinAdjustmentManager:
                     int(observation.station_id)
                 ]["reason"] = base_diagnostic
                 ignored_reasons.append(base_diagnostic)
-                logger.warning(
-                    "Round-Robin project=%s cluster=%s station=%s: %s",
-                    project_id,
-                    cluster_index,
-                    station_id,
-                    base_diagnostic,
-                )
+                warning_key = (int(project_id), int(cluster_index), int(station_id))
+                now_monotonic = time.monotonic()
+                last_logged = self._ingest_warning_last_logged.get(warning_key, 0.0)
+                if (now_monotonic - last_logged) >= 30.0:
+                    self._ingest_warning_last_logged[warning_key] = now_monotonic
+                    logger.warning(
+                        "Round-Robin project=%s cluster=%s station=%s: %s",
+                        project_id,
+                        cluster_index,
+                        station_id,
+                        base_diagnostic,
+                    )
                 continue
+            session["seed_station_reports"][int(observation.station_id)].update({
+                "base_identity_verified": True,
+                "base_identity_diagnostic": base_diagnostic,
+            })
             session["clusters"][cluster_index]["observations"].append(
                 _CollectedObservation(
                     active_base,
@@ -1002,13 +957,6 @@ class RoundRobinAdjustmentManager:
     def get_last_ingest_diagnostic(self, project_id: int) -> Optional[dict]:
         diagnostic = self._last_ingest_diagnostics.get(project_id)
         return dict(diagnostic) if diagnostic else None
-
-    @staticmethod
-    def _cluster_index_for_station(session: dict, station_id: int) -> Optional[int]:
-        for index, cluster in enumerate(session["clusters"]):
-            if station_id in cluster["stations"]:
-                return index
-        return None
 
     def has_complete_seed_observations(self, project_id: int) -> bool:
         """All selected rovers must first be observed from the fixed CORS base."""
@@ -1404,46 +1352,6 @@ class RoundRobinAdjustmentManager:
         result["skipped_station_ids"] = sorted(set(skipped))
         return result
 
-    async def start_cycle(self, project_id: int) -> None:
-        if project_id in self.running_tasks:
-            # AGRICA seed payloads may race and all ask to start the same project.
-            # The existing task is authoritative; this is expected de-duplication,
-            # not an operational warning.
-            logger.debug("RoundRobin cycle already running for project %s", project_id)
-            return
-        if project_id not in self._sessions:
-            raise ValueError(f"project {project_id} has no configured adjustment session")
-        self.running_tasks[project_id] = asyncio.create_task(self._run_cycle(project_id))
-
-    def pause_project(self, project_id: int) -> bool:
-        """Pause at the next safe workflow checkpoint without losing observations."""
-        session = self._sessions.get(int(project_id))
-        task = self.running_tasks.get(int(project_id))
-        if session is None or (task is not None and task.done()):
-            return False
-        session["control_state"] = "PAUSED"
-        session["resume_event"].clear()
-        return True
-
-    def resume_project(self, project_id: int) -> bool:
-        session = self._sessions.get(int(project_id))
-        task = self.running_tasks.get(int(project_id))
-        if session is None or (task is not None and task.done()):
-            return False
-        session["control_state"] = "RUNNING"
-        session["resume_event"].set()
-        return True
-
-    async def _wait_for_run_permission(self, project_id: Optional[int]) -> None:
-        if project_id is None:
-            return
-        session = self._sessions.get(int(project_id))
-        if session is None or session.get("control_state") != "PAUSED":
-            return
-        event = session.get("resume_event")
-        if event is not None:
-            await event.wait()
-
     def _cors_api_request_sync(
         self,
         method: str,
@@ -1535,41 +1443,18 @@ class RoundRobinAdjustmentManager:
         return result
 
     @staticmethod
-    def _cors_service_config_with_server_mode(
+    def _cors_service_config_with_server_enabled(
         service_config: dict,
         server_id: Optional[int],
         *,
-        on_demand: bool,
+        enabled: bool,
     ) -> dict:
-        """Build the same mode payload as the existing CORS S1/S2 form."""
+        """Hard-enable or hard-disable CORS outputs without stream sleep modes."""
 
         cfg = copy.deepcopy(service_config or {})
-        global_on_demand = bool(cfg.get("stream_on_demand", False))
-        global_active = bool(cfg.get("stream_active", False))
-        
         target_sids = [1, 2] if server_id is None else [server_id]
         for sid in target_sids:
-            cfg[f"server{sid}_stream_on_demand"] = bool(on_demand)
-            cfg[f"server{sid}_stream_active"] = not bool(on_demand)
-
-        any_on_demand = False
-        any_can_push = False
-        for sid in (1, 2):
-            if not bool(cfg.get(f"server{sid}_enabled", False)):
-                continue
-            sid_on_demand = bool(
-                cfg.get(f"server{sid}_stream_on_demand", global_on_demand)
-            )
-            sid_active = bool(
-                cfg.get(f"server{sid}_stream_active", global_active)
-            )
-            if not sid_on_demand:
-                sid_active = True
-                cfg[f"server{sid}_stream_active"] = True
-            any_on_demand = any_on_demand or sid_on_demand
-            any_can_push = any_can_push or (not sid_on_demand) or sid_active
-        cfg["stream_on_demand"] = any_on_demand
-        cfg["stream_active"] = any_can_push
+            cfg[f"server{sid}_enabled"] = bool(enabled)
         return cfg
 
     @staticmethod
@@ -1633,7 +1518,7 @@ class RoundRobinAdjustmentManager:
             )
         return matches[0]
 
-    def _sleep_conflict_base_sync(self, serial: str) -> None:
+    def _disable_conflict_base_sync(self, serial: str) -> Optional[dict]:
         stations = self._cors_api_request_sync("GET", "/api/public/map-stations")
         if isinstance(stations, dict):
             stations = stations.get("value") or stations.get("items") or []
@@ -1644,30 +1529,26 @@ class RoundRobinAdjustmentManager:
             if station_serial.casefold() == serial.casefold():
                 cfg = station.get("service_config")
                 if not isinstance(cfg, dict):
-                    return
-                new_cfg = copy.deepcopy(cfg)
-                new_cfg["server1_stream_on_demand"] = True
-                new_cfg["server1_stream_active"] = False
-                new_cfg["server2_stream_on_demand"] = True
-                new_cfg["server2_stream_active"] = False
-                new_cfg["stream_on_demand"] = True
-                new_cfg["stream_active"] = False
-                self._cors_api_request_sync(
-                    "PUT",
-                    f"/api/admin/devices/{station_serial}/service-config",
-                    json=new_cfg,
+                    return None
+                original = copy.deepcopy(cfg)
+                new_cfg = self._cors_service_config_with_server_enabled(
+                    cfg,
+                    None,
+                    enabled=False,
                 )
-                return
-        logger.warning(f"Could not find conflict base with serial {serial} to sleep")
+                self._cors_configure_service_sync(station_serial, new_cfg)
+                return original
+        logger.warning(f"Could not find conflict base with serial {serial} to disable")
+        return None
 
-    async def _toggle_cors_fixed_base(
+    async def _set_cors_fixed_base_enabled(
         self,
         mountpoint: str,
-        sleep: bool,
+        enabled: bool,
         selected_host: str = "",
         selected_serial: str = "",
         selected_server_id: Optional[int] = None,
-        sleep_all_streams: bool = False,
+        all_streams: bool = False,
     ) -> None:
         if not mountpoint:
             return
@@ -1677,7 +1558,7 @@ class RoundRobinAdjustmentManager:
             str(selected_serial or "").strip().casefold(),
             int(selected_server_id) if selected_server_id not in (None, "") else 0,
         )
-        if sleep:
+        if not enabled:
             if snapshot_key in self._cors_fixed_base_snapshots:
                 return
             serial, server_id, original = await asyncio.to_thread(
@@ -1692,18 +1573,18 @@ class RoundRobinAdjustmentManager:
                 "server_id": server_id,
                 "service_config": copy.deepcopy(original),
             }
-            sleep_config = self._cors_service_config_with_server_mode(
+            disabled_config = self._cors_service_config_with_server_enabled(
                 original,
-                None if sleep_all_streams else server_id,
-                on_demand=True,
+                None if all_streams else server_id,
+                enabled=False,
             )
             await asyncio.to_thread(
                 self._cors_configure_service_sync,
                 serial,
-                sleep_config,
+                disabled_config,
             )
             logger.info(
-                "WEB CORS configure-service moved fixed base %s host=%s serial=%s S%s to On-Demand/Sleep",
+                "WEB CORS configure-service hard-disabled fixed base %s host=%s serial=%s S%s",
                 mountpoint,
                 selected_host,
                 serial,
@@ -1714,7 +1595,7 @@ class RoundRobinAdjustmentManager:
         snapshot = self._cors_fixed_base_snapshots.get(snapshot_key)
         if snapshot is None:
             logger.warning(
-                "No WEB CORS stream-mode snapshot exists for host=%s fixed base=%s",
+                "No WEB CORS hard-disable snapshot exists for host=%s fixed base=%s",
                 selected_host,
                 mountpoint,
             )
@@ -1764,20 +1645,8 @@ class RoundRobinAdjustmentManager:
         )
 
     @staticmethod
-    def _cors_stream_mode(service_config: dict, server_id: int) -> tuple[bool, bool]:
-        on_demand = bool(
-            service_config.get(
-                f"server{server_id}_stream_on_demand",
-                service_config.get("stream_on_demand", False),
-            )
-        )
-        active = bool(
-            service_config.get(
-                f"server{server_id}_stream_active",
-                service_config.get("stream_active", False),
-            )
-        )
-        return on_demand, active
+    def _cors_server_enabled(service_config: dict, server_id: int) -> bool:
+        return bool(service_config.get(f"server{server_id}_enabled", False))
 
     @staticmethod
     def _cors_effective_service_config(
@@ -1901,8 +1770,8 @@ class RoundRobinAdjustmentManager:
         """Keep each primary S1 / cross-station backup S2 pair mutually exclusive.
 
         Example: SinQuyen1/S1 normally owns mountpoint SinQuyen1.  If its
-        receiver is offline, SinQuyen2/S2 is switched from On-Demand/Sleep to
-        Always and feeds that same mountpoint.  Once SinQuyen1 is online again,
+        receiver is offline, SinQuyen2/S2 is hard-enabled and feeds that same
+        mountpoint. Once SinQuyen1 is online again,
         the backup is stopped before S1 is restored.
         """
 
@@ -1974,11 +1843,11 @@ class RoundRobinAdjustmentManager:
             if not primary_online:
                 desired_state = "BACKUP_ACTIVE"
                 backup_config = self._cors_effective_service_config(backup_station)
-                if self._cors_stream_mode(backup_config, backup_server_id) != (False, True):
-                    enabled_config = self._cors_service_config_with_server_mode(
+                if not self._cors_server_enabled(backup_config, backup_server_id):
+                    enabled_config = self._cors_service_config_with_server_enabled(
                         backup_config,
                         backup_server_id,
-                        on_demand=False,
+                        enabled=True,
                     )
                     await asyncio.to_thread(
                         self._cors_configure_service_sync,
@@ -1998,11 +1867,11 @@ class RoundRobinAdjustmentManager:
                 # Break-before-make on failback: never leave S1 and backup S2
                 # publishing the same mountpoint concurrently.
                 backup_config = self._cors_effective_service_config(backup_station)
-                if self._cors_stream_mode(backup_config, backup_server_id) != (True, False):
-                    disabled_config = self._cors_service_config_with_server_mode(
+                if self._cors_server_enabled(backup_config, backup_server_id):
+                    disabled_config = self._cors_service_config_with_server_enabled(
                         backup_config,
                         backup_server_id,
-                        on_demand=True,
+                        enabled=False,
                     )
                     await asyncio.to_thread(
                         self._cors_configure_service_sync,
@@ -2011,11 +1880,11 @@ class RoundRobinAdjustmentManager:
                     )
                     backup_station["service_config"] = disabled_config
                 primary_config = self._cors_effective_service_config(primary_station)
-                if self._cors_stream_mode(primary_config, primary_server_id) != (False, True):
-                    enabled_config = self._cors_service_config_with_server_mode(
+                if not self._cors_server_enabled(primary_config, primary_server_id):
+                    enabled_config = self._cors_service_config_with_server_enabled(
                         primary_config,
                         primary_server_id,
-                        on_demand=False,
+                        enabled=True,
                     )
                     await asyncio.to_thread(
                         self._cors_configure_service_sync,
@@ -2080,12 +1949,17 @@ class RoundRobinAdjustmentManager:
         session = self._sessions.get(project_id)
         if session is None:
             raise KeyError(f"no active adjustment session for project {project_id}")
+
         def has_dual_selected_stream(cluster: dict) -> bool:
+            # Ordinary clusters must keep their own configured/failover base so
+            # independent dam adjustments can run concurrently.  Only a total
+            # cluster intentionally moves every rover onto one common base.
+            if not requires_common_base_handover(cluster):
+                return False
             candidates = self._fixed_base_candidates(cluster)
             selected_config = candidates[0].get("base_service_config") or {}
             return len(candidates) >= 2 or all(
-                bool(selected_config.get(f"server{server_id}_enabled", False))
-                and bool(str(selected_config.get(f"mountpoint{server_id}") or "").strip())
+                bool(str(selected_config.get(f"mountpoint{server_id}") or "").strip())
                 for server_id in (1, 2)
             )
 
@@ -2157,8 +2031,7 @@ class RoundRobinAdjustmentManager:
                         candidate.get("base_service_config"),
                     )
                     if all(
-                        bool(service_config.get(f"server{server_id}_enabled", False))
-                        and bool(str(service_config.get(f"mountpoint{server_id}") or "").strip())
+                        bool(str(service_config.get(f"mountpoint{server_id}") or "").strip())
                         for server_id in (1, 2)
                     ):
                         usable_candidates.append((candidate, candidate_match))
@@ -2179,8 +2052,8 @@ class RoundRobinAdjustmentManager:
                     )
                     raise RuntimeError(
                         f"{cluster.get('name', cluster_index + 1)}: online physical base(s) "
-                        f"{names} must have both S1 and S2 enabled with explicit "
-                        "mountpoints before a common-base seed can start"
+                        f"{names} must have explicit mountpoints configured for both "
+                        "S1 and S2 before a common-base seed can start"
                     )
 
                 selected, selected_match = usable_candidates[0]
@@ -2201,7 +2074,6 @@ class RoundRobinAdjustmentManager:
                     .casefold()
                     for server_id in (1, 2)
                     if server_id != selected_server_id
-                    and bool(selected_service_config.get(f"server{server_id}_enabled", False))
                     and str(selected_service_config.get(f"mountpoint{server_id}") or "").strip()
                 }
                 physical_matches = []
@@ -2221,7 +2093,10 @@ class RoundRobinAdjustmentManager:
 
                 # Compatibility fallback for older project records where the
                 # selected station did not expose its reciprocal S2 metadata.
-                other = candidates[1] if len(candidates) >= 2 else {}
+                other = next(
+                    (candidate for candidate in candidates if candidate is not selected),
+                    {},
+                )
                 if len(physical_matches) != 1 and other:
                     target_serial = str(other.get("base_serial") or "").strip().casefold()
                     target_name = str(other.get("base_station") or "").strip().casefold()
@@ -2271,10 +2146,10 @@ class RoundRobinAdjustmentManager:
 
                 other_online = self._cors_station_is_online(other_station)
                 if other_online:
-                    other_disabled = self._cors_service_config_with_server_mode(
+                    other_disabled = self._cors_service_config_with_server_enabled(
                         self._cors_effective_service_config(other_station),
                         None,
-                        on_demand=True,
+                        enabled=False,
                     )
                     await asyncio.to_thread(
                         self._cors_configure_service_sync,
@@ -2287,10 +2162,10 @@ class RoundRobinAdjustmentManager:
                 # both enabled outputs on the chosen receiver. If it is offline,
                 # failover normally already made S2 active and this is a no-op.
                 selected_original = selected_service_config
-                selected_enabled = self._cors_service_config_with_server_mode(
+                selected_enabled = self._cors_service_config_with_server_enabled(
                     selected_original,
                     None,
-                    on_demand=False,
+                    enabled=True,
                 )
                 if selected_enabled != selected_original:
                     await asyncio.to_thread(
@@ -2304,7 +2179,7 @@ class RoundRobinAdjustmentManager:
                     cluster,
                     selected,
                     (
-                        f"selected {selected.get('base_station')} was forced onto both S1/S2; "
+                        f"selected {selected.get('base_station')} had both S1/S2 hard-enabled; "
                         f"opposite station {other_name} was "
                         f"{'online and stopped' if other_online else 'offline'} before seed"
                     ),
@@ -2325,11 +2200,57 @@ class RoundRobinAdjustmentManager:
                     "đang chờ RTCM chuyển nguồn ổn định trước khi thu baseline chung.",
                 )
                 await asyncio.sleep(self.FIXED_BASE_HANDOVER_SETTLE_SECONDS)
-                # No pre-handover fragment or observation may enter the seed.
+                # No pre-handover fragment or observation may prove the new
+                # source. Require fresh AGRICA evidence from every selected
+                # rover before exposing COLLECTING_BASELINE to the caller.
                 for cluster in session["clusters"]:
                     cluster["observations"].clear()
                     self._clear_cluster_fragment_buffers(project_id, cluster)
+                session["seed_station_reports"].clear()
+
+                verify_seconds = max(0.0, self.FIXED_BASE_HANDOVER_VERIFY_SECONDS)
+                if verify_seconds:
+                    expected_station_ids = {
+                        int(station_id)
+                        for cluster in session["clusters"]
+                        for station_id in cluster["stations"]
+                    }
+                    verification_deadline = time.monotonic() + verify_seconds
+                    while time.monotonic() < verification_deadline:
+                        reports = session.get("seed_station_reports", {})
+                        verified_station_ids = {
+                            int(station_id)
+                            for station_id, report in list(reports.items())
+                            if report.get("base_identity_verified") is True
+                        }
+                        if expected_station_ids <= verified_station_ids:
+                            break
+                        await asyncio.sleep(0.25)
+                    else:
+                        reports = session.get("seed_station_reports", {})
+                        pending = []
+                        for cluster in session["clusters"]:
+                            for station_id, rover_code in zip(
+                                cluster["stations"], cluster["rovers"], strict=True
+                            ):
+                                report = reports.get(int(station_id), {})
+                                if report.get("base_identity_verified") is not True:
+                                    pending.append(
+                                        f"{rover_code}: {report.get('reason') or 'no fresh AGRICA'}"
+                                    )
+                        raise RuntimeError(
+                            "common-base handover was not confirmed by every rover within "
+                            f"{verify_seconds:.0f}s; " + "; ".join(pending)
+                        )
+
+                # Verification epochs are transition evidence, not seed data.
+                for cluster in session["clusters"]:
+                    cluster["observations"].clear()
+                    self._clear_cluster_fragment_buffers(project_id, cluster)
+                session["seed_station_reports"].clear()
                 session["seed_started_monotonic"] = time.monotonic()
+                for outcome in outcomes:
+                    outcome["state"] = "COMMON_SELECTED_BASE_VERIFIED"
             return outcomes
         except Exception:
             await self._restore_common_fixed_base_topology_unlocked(project_id)
@@ -2373,15 +2294,14 @@ class RoundRobinAdjustmentManager:
         selected_host: str,
         selected_serial: str = "",
         selected_server_id: Optional[int] = None,
-        sleep_all_streams: bool = False,
     ) -> bool:
         """Reconnect every rover to the fixed BASE before the next rotation.
 
         Once a temporary pusher stops, rover NTRIP sessions disappear if the
-        configured fixed stream remains asleep.  A later rover therefore cannot
+        configured fixed stream remains disabled. A later rover therefore cannot
         receive its SET BASE command.  Restore the original stream, require new
         solver-eligible BASE observations from every rover, confirm the next
-        AICaster session, and only then put the fixed stream back to sleep.
+        AICaster session, and only then hard-disable the fixed server again.
         """
 
         start_index = len(cluster["observations"])
@@ -2399,9 +2319,9 @@ class RoundRobinAdjustmentManager:
                 "next temporary base."
             ),
         )
-        await self._toggle_cors_fixed_base(
+        await self._set_cors_fixed_base_enabled(
             mountpoint,
-            sleep=False,
+            enabled=True,
             selected_host=selected_host,
             **identity_kwargs,
         )
@@ -2806,6 +2726,7 @@ class RoundRobinAdjustmentManager:
 
     async def _run_cycle(self, project_id: int) -> None:
         suspended_bases: set[tuple[str, str, str, int]] = set()
+        disabled_conflict_bases: dict[str, dict] = {}
         cycle_error: Optional[Exception] = None
         try:
             session = self._sessions[project_id]
@@ -2937,8 +2858,8 @@ class RoundRobinAdjustmentManager:
                 if route_password is None:
                     route_password = self.source_password
                 
-                # Tạm chuyển Base cố định sang On-Demand/Sleep trước khi quay
-                # vòng các rover. Trạng thái gốc được phục hồi ở finally.
+                # Hard-disable the fixed Base immediately before each temporary
+                # rover route. The exact original service config is restored later.
                 base_stream_key = (
                     configured_base_host,
                     str(configured_mountpoint or ""),
@@ -2950,7 +2871,7 @@ class RoundRobinAdjustmentManager:
                     await self._emit_progress(
                         project_id,
                         f"Đã khóa topology Base cố định {configured_mountpoint}; giữ stream hoạt động "
-                        "qua preflight và chỉ Sleep ngay trước khi mở fanout BASE tạm.",
+                        "qua preflight và chỉ ngắt server ngay trước khi mở fanout BASE tạm.",
                     )
                     suspended_bases.add(base_stream_key)
                     # The actual break happens immediately before SOURCE fanout.
@@ -2969,15 +2890,22 @@ class RoundRobinAdjustmentManager:
                         if not cb_serial:
                             continue
                         
-                        cb_key = ("conflict", cb_serial)
-                        if cb_key not in suspended_bases:
+                        cb_key = cb_serial.casefold()
+                        if cb_key not in disabled_conflict_bases:
                             await self._emit_progress(
                                 project_id,
                                 f"Tắt trạm Base phụ thuộc {cb_name} (theo cấu hình Cụm Tổng) để tránh xung đột dữ liệu.",
                             )
-                            suspended_bases.add(cb_key)
                             try:
-                                await asyncio.to_thread(self._sleep_conflict_base_sync, cb_serial)
+                                original_config = await asyncio.to_thread(
+                                    self._disable_conflict_base_sync,
+                                    cb_serial,
+                                )
+                                if original_config is not None:
+                                    disabled_conflict_bases[cb_key] = {
+                                        "serial": cb_serial,
+                                        "service_config": original_config,
+                                    }
                                 await asyncio.sleep(2.0)
                             except Exception as e:
                                 logger.error(f"Failed to sleep conflict base {cb_name}: {e}")
@@ -3374,9 +3302,9 @@ class RoundRobinAdjustmentManager:
                                         "AICaster control session before SET ROVER."
                                     ),
                                 )
-                                await self._toggle_cors_fixed_base(
+                                await self._set_cors_fixed_base_enabled(
                                     str(configured_mountpoint),
-                                    sleep=False,
+                                    enabled=True,
                                     selected_host=configured_base_host,
                                     **fixed_base_identity_kwargs,
                                 )
@@ -3400,11 +3328,11 @@ class RoundRobinAdjustmentManager:
                                 )
 
                             async def sleep_fixed_base_before_temporary_route() -> None:
-                                await self._toggle_cors_fixed_base(
+                                await self._set_cors_fixed_base_enabled(
                                     str(configured_mountpoint),
-                                    sleep=True,
+                                    enabled=False,
                                     selected_host=configured_base_host,
-                                    sleep_all_streams=True,
+                                    all_streams=True,
                                     **fixed_base_identity_kwargs,
                                 )
 
@@ -3574,7 +3502,6 @@ class RoundRobinAdjustmentManager:
                                 next_rover=next_candidate,
                                 mountpoint=str(configured_mountpoint),
                                 selected_host=configured_base_host,
-                                sleep_all_streams=is_multi_mp,
                                 **fixed_base_identity_kwargs,
                             )
                             if reacquired:
@@ -3681,9 +3608,9 @@ class RoundRobinAdjustmentManager:
                         restore_identity_kwargs["selected_serial"] = selected_serial
                     if selected_server_id:
                         restore_identity_kwargs["selected_server_id"] = selected_server_id
-                    await self._toggle_cors_fixed_base(
+                    await self._set_cors_fixed_base_enabled(
                         mp,
-                        sleep=False,
+                        enabled=True,
                         selected_host=selected_host,
                         **restore_identity_kwargs,
                     )
@@ -3694,6 +3621,20 @@ class RoundRobinAdjustmentManager:
                 except Exception as e:
                     logger.error("Failed to restore fixed base %s in finally block: %s", mp, e)
                     restore_errors.append(f"{mp}: {e}")
+            for snapshot in reversed(list(disabled_conflict_bases.values())):
+                try:
+                    await asyncio.to_thread(
+                        self._cors_configure_service_sync,
+                        snapshot["serial"],
+                        copy.deepcopy(snapshot["service_config"]),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to restore conflict base %s in finally block: %s",
+                        snapshot["serial"],
+                        e,
+                    )
+                    restore_errors.append(f"{snapshot['serial']}: {e}")
             try:
                 await self.restore_common_fixed_base_topology(project_id)
             except Exception as e:
@@ -5777,7 +5718,9 @@ class RoundRobinAdjustmentManager:
             "type": "gnss_adjusted",
             "source": "AGRICA_ROUND_ROBIN",
             "adjustment_engine": "backend.processors.gnss_adjustment.adjust_network",
-            "project_id": project_id, "cluster_index": cluster_index,
+            "project_id": project_id,
+            "project_code": cluster.get("project_code"),
+            "cluster_index": cluster_index,
             "cluster_name": cluster.get("name"), "computed_at": int(time.time()),
             "base": {
                 "name": cluster.get("base_station") or "BASE", "fixed": True,

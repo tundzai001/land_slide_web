@@ -37,6 +37,14 @@ function initMap() {
         stationClusterGroup = createStationClusterGroup();
         map.addLayer(stationClusterGroup);
 
+        // Leaflet resolves path clicks by pane stacking. Aggregate project
+        // edges must stay below ordinary cluster edges when their geometry
+        // overlaps, otherwise the aggregate hitbox steals every click.
+        const totalClusterPane = map.createPane('gnssTotalClusterPane');
+        totalClusterPane.style.zIndex = '390';
+        const normalClusterPane = map.createPane('gnssNormalClusterPane');
+        normalClusterPane.style.zIndex = '410';
+
 
 
         const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -120,40 +128,60 @@ async function loadProjectsAndClusters() {
         projects.forEach(proj => {
             if (!proj.gnss_clusters || !Array.isArray(proj.gnss_clusters)) return;
             
-            proj.gnss_clusters.forEach(c => {
+            // Also render totals first for deterministic ordering in Canvas mode.
+            const orderedClusters = [...proj.gnss_clusters].sort((left, right) => (
+                Number(left?.cluster_type !== 'total') - Number(right?.cluster_type !== 'total')
+            ));
+            const drawableClusters = orderedClusters.map(c => {
                 const stationTokens = getClusterStationTokens(c);
                 const clusterMembers = stationTokens
                     .map(findStationByClusterToken)
                     .filter(station => station && hasValidLatLon(station.location));
                 const stationIds = clusterMembers.map(station => station.id);
-                
                 const isTotal = c.cluster_type === 'total';
-                if (clusterMembers.length < 2) return;
-                
-                const latlngs = [];
-                const clusterStations = [];
-                clusterMembers.forEach(st => {
-                    latlngs.push([Number(st.location.lat), Number(st.location.lon)]);
-                    clusterStations.push(st.name || st.station_code || String(st.id));
-                });
-                
+                return {
+                    config: c,
+                    isTotal,
+                    stationIds,
+                    stationIdSet: new Set(stationIds.map(Number)),
+                    stationNames: clusterMembers.map(st => st.name || st.station_code || String(st.id)),
+                    latlngs: clusterMembers.map(st => [Number(st.location.lat), Number(st.location.lon)]),
+                    label: String(c.name || (isTotal ? 'Cụm tổng' : 'Cụm quan trắc')),
+                };
+            }).filter(cluster => cluster.latlngs.length >= 2);
+
+            drawableClusters.forEach(cluster => {
+                const { isTotal, latlngs } = cluster;
                 if (latlngs.length >= 2) {
                     const multiLatLngs = []; for (let i = 0; i < latlngs.length; i++) { for (let j = i + 1; j < latlngs.length; j++) { multiLatLngs.push([latlngs[i], latlngs[j]]); } } const polyline = L.polyline(multiLatLngs, {
                         color: isTotal ? '#f43f5e' : colors[colorIdx % colors.length],
                         weight: isTotal ? 4 : 3,
                         opacity: isTotal ? 0.15 : 0.7,
-                        dashArray: isTotal ? '10, 20' : '5, 10'
+                        dashArray: isTotal ? '10, 20' : '5, 10',
+                        pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
                     });
                     
                     // Hitbox invisible polyline to make clicking easier
                     const hitbox = L.polyline(multiLatLngs, {
                         color: 'transparent',
                         weight: 20,
-                        opacity: 0
+                        opacity: 0,
+                        pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
                     });
 
                     const clickHandler = (e) => {
-                        showAdjustmentPopup(proj.id, isTotal ? `${proj.name} (Cụm Tổng)` : proj.name, stationIds, clusterStations, e.latlng);
+                        // A normal cluster and a total cluster can share the exact
+                        // same segment. Offer both at that point instead of letting
+                        // Leaflet's topmost canvas path make one unreachable.
+                        const choices = isTotal ? [cluster] : [
+                            cluster,
+                            ...drawableClusters.filter(candidate => (
+                                candidate.isTotal
+                                && candidate !== cluster
+                                && cluster.stationIds.every(id => candidate.stationIdSet.has(Number(id)))
+                            )),
+                        ];
+                        showAdjustmentPopup(proj.id, proj.name, choices, e.latlng);
                     };
 
                     polyline.on('click', clickHandler);
@@ -181,34 +209,45 @@ async function loadProjectsAndClusters() {
     }
 }
 
-function showAdjustmentPopup(projectId, projectName, stationIds, clusterStations, latlng) {
+function showAdjustmentPopup(projectId, projectName, clusters, latlng) {
     const leafletMap = getLeafletMap();
     if (!leafletMap) return;
-    
+
     const popupContent = document.createElement('div');
     popupContent.className = 'text-center p-2';
-    popupContent.innerHTML = `
-        <h6 class="mb-2 fw-bold" style="color: #10b981;">${projectName}</h6>
-        <div class="small mb-3 text-secondary">Cụm: ${clusterStations.join(', ')}</div>
-        <button class="btn btn-sm btn-success w-100" id="btn-start-adjustment-${projectId}">
-            <i class="bi bi-play-fill"></i> Bắt đầu Bình sai
-        </button>
-    `;
-    
+    const title = document.createElement('h6');
+    title.className = 'mb-2 fw-bold';
+    title.style.color = '#10b981';
+    title.textContent = projectName;
+    popupContent.appendChild(title);
+
+    const hint = document.createElement('div');
+    hint.className = 'small mb-2 text-secondary';
+    hint.textContent = clusters.length > 1
+        ? 'Đường này thuộc nhiều cụm. Chọn cụm cần bình sai:'
+        : 'Chọn để bắt đầu bình sai:';
+    popupContent.appendChild(hint);
+
+    const actions = document.createElement('div');
+    actions.className = 'd-grid gap-2';
+    clusters.forEach(cluster => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-sm w-100 ${cluster.isTotal ? 'btn-outline-danger' : 'btn-success'}`;
+        button.textContent = `${cluster.isTotal ? 'Cụm tổng' : 'Cụm'} · ${cluster.label}`;
+        button.title = cluster.stationNames.join(', ');
+        button.addEventListener('click', () => {
+            leafletMap.closePopup(popup);
+            requestGnssAdjustment(projectId, cluster.stationIds);
+        });
+        actions.appendChild(button);
+    });
+    popupContent.appendChild(actions);
+
     const popup = L.popup()
         .setLatLng(latlng)
         .setContent(popupContent)
         .openOn(leafletMap);
-        
-    setTimeout(() => {
-        const btn = document.getElementById(`btn-start-adjustment-${projectId}`);
-        if (btn) {
-            btn.addEventListener('click', () => {
-                leafletMap.closePopup(popup);
-                requestGnssAdjustment(projectId, stationIds);
-            });
-        }
-    }, 100);
 }
 
 async function loadStations() {

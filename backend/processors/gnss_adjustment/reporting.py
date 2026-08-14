@@ -4,6 +4,8 @@ import logging
 import math
 from pathlib import Path
 
+from app.services.adjustment_artifacts import adjustment_scope
+
 logger = logging.getLogger(__name__)
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -410,6 +412,8 @@ class AdjustmentReportMixin:
         timestamp: int,
         data: dict,
         raw_payload: str,
+        report_directory: str | Path | None = None,
+        report_scope_name: str | None = None,
     ):
         """Write the compact XLSX handed to users.
 
@@ -425,11 +429,14 @@ class AdjustmentReportMixin:
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
-        report_dir = os.path.join(str(BACKEND_DIR), "static", "adjustments")
+        report_dir = str(
+            report_directory
+            or os.path.join(str(BACKEND_DIR), "static", "adjustments")
+        )
         os.makedirs(report_dir, exist_ok=True)
         file_path = os.path.join(
             report_dir,
-            f"gnss_binh_sai_{project_id}_{timestamp}.xlsx",
+            f"gnss_binh_sai_{report_scope_name or project_id}_{timestamp}.xlsx",
         )
 
         workbook = openpyxl.Workbook()
@@ -1486,10 +1493,19 @@ class AdjustmentReportMixin:
         """Write the report files referenced by the GNSS adjustment interface."""
         import os
 
-        report_dir = os.path.join(str(BACKEND_DIR), "static", "adjustments")
+        report_root = BACKEND_DIR / "static" / "adjustments"
+        report_dir, project_slug, cluster_slug, scoped = adjustment_scope(
+            report_root,
+            project_id,
+            data.get("project_code"),
+            data.get("cluster_name"),
+        )
         os.makedirs(report_dir, exist_ok=True)
-        audit_name = f"gnss_adjustment_{project_id}_{timestamp}.json"
-        audit_path = os.path.join(report_dir, audit_name)
+        audit_name = (
+            f"gnss_adjustment_{project_slug}_{cluster_slug}_{timestamp}.json"
+            if scoped else f"gnss_adjustment_{project_id}_{timestamp}.json"
+        )
+        audit_path = os.path.join(str(report_dir), audit_name)
         try:
             with open(audit_path, "w", encoding="utf-8") as report_file:
                 json.dump(data, report_file, ensure_ascii=False, indent=2)
@@ -1500,10 +1516,22 @@ class AdjustmentReportMixin:
             raise OSError(f"Adjustment JSON was not created correctly: {audit_path}")
         logger.info("GNSS adjustment JSON written: %s (%s bytes)", audit_path, os.path.getsize(audit_path))
 
-        excel_path = self._append_adjustment_to_excel(project_id, timestamp, data, "")
+        excel_path = self._append_adjustment_to_excel(
+            project_id,
+            timestamp,
+            data,
+            "",
+            report_directory=report_dir,
+            report_scope_name=(
+                f"{project_slug}_{cluster_slug}" if scoped else None
+            ),
+        )
         if not excel_path:
             raise OSError("Adjustment Excel exporter did not return an output path")
-        report_api_prefix = f"/api/admin/gnss/adjustment/reports/{project_id}"
+        report_api_prefix = (
+            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}"
+            if scoped else f"/api/admin/gnss/adjustment/reports/{project_id}"
+        )
         excel_url = f"{report_api_prefix}/{os.path.basename(excel_path)}"
         return {
             "report_file_url": excel_url,

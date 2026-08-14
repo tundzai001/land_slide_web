@@ -25,13 +25,6 @@ async function bootstrapAdminManager() {
             const usernameEl = document.querySelector('.user-profile span');
             if (usernameEl) usernameEl.textContent = user.full_name || user.username;
 
-            if (user.role === 'admin') {
-                const systemTab = document.getElementById('system-tab');
-                if (systemTab) {
-                    systemTab.style.display = 'block';
-                    console.log('[ADMIN] System tab enabled');
-                }
-            }
         }
     } catch (e) {
         console.error('[ADMIN] Error updating admin UI:', e);

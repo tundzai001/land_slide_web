@@ -6,6 +6,19 @@ const gnssCss = readFileSync(
   join(__dirname, '..', '..', 'frontend/css/map/gnss.css'),
   'utf8',
 );
+const mapInteractionsSource = readFileSync(
+  join(__dirname, '..', '..', 'frontend/js/map/map-interactions.js'),
+  'utf8',
+);
+
+test('GNSS startup errors stay in the terminal instead of stacking a blocking alert', () => {
+  expect(mapInteractionsSource).toContain("terminalModal?.classList.contains('show')");
+  const startupCatch = mapInteractionsSource.match(
+    /catch \(error\) \{\s*console\.error\('Adjustment trigger error:'[\s\S]*?\n\s*\}/,
+  )?.[0] || '';
+  expect(startupCatch).toContain('showAdjustmentError');
+  expect(startupCatch).not.toContain('Swal.fire');
+});
 
 for (const viewport of [
   { name: 'desktop-1366x768', width: 1366, height: 768 },

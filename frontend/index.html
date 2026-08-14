@@ -1,62 +1,22 @@
 <!doctype html>
-<html lang="vi" data-theme="dark">
+<html lang="vi" data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="description" content="Hệ thống giám sát và cảnh báo sạt lở theo thời gian thực.">
+    <meta name="description" content="Nền tảng quan trắc, phân tích và cảnh báo sạt lở theo thời gian thực cho hạ tầng trọng yếu.">
+    <meta name="theme-color" content="#f7faf9">
     <meta name="color-scheme" content="dark light">
-    <title>Hệ thống cảnh báo sạt lở</title>
+    <title>Landslide Monitor — Quan trắc an toàn theo thời gian thực</title>
+    <script>document.documentElement.dataset.theme=localStorage.getItem('theme')==='dark'?'dark':'light'</script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/landing.min.css?v=__BUILD_VERSION__">
 </head>
 <body>
-    <a class="skip-link" href="#main">Bỏ qua đến nội dung chính</a>
-    <div class="site-backdrop" aria-hidden="true"></div>
-    <header class="site-header" id="site-header">
-        <a class="brand" href="/" aria-label="Landslide Monitor - Trang chủ"><span class="brand-mark">⌁</span><span>Landslide Monitor</span></a>
-        <nav class="desktop-nav" aria-label="Điều hướng chính">
-            <a href="/map">Bản đồ realtime</a><a href="#features">Tính năng</a><a href="#about">Giới thiệu</a>
-        </nav>
-        <div class="header-actions">
-            <button class="theme-button" id="theme-button" type="button" aria-label="Chuyển giao diện sáng">☼</button>
-            <a class="button button-secondary login-link" href="/login?return_to=/management" data-auth-link>Đăng nhập</a>
-            <button class="menu-button" id="menu-button" type="button" aria-expanded="false" aria-controls="mobile-menu"><span></span><span></span><span></span><span class="sr-only">Mở trình đơn</span></button>
-        </div>
-    </header>
-    <div class="mobile-menu" id="mobile-menu" hidden>
-        <nav aria-label="Điều hướng di động"><a href="/map">Bản đồ realtime</a><a href="#features">Tính năng</a><a href="#about">Giới thiệu</a><a href="/login?return_to=/management" data-auth-link>Đăng nhập quản trị</a></nav>
-    </div>
-
-    <main id="main">
-        <section class="hero" aria-labelledby="hero-title">
-            <div class="eyebrow"><span></span> Dữ liệu quan trắc trực tiếp</div>
-            <h1 id="hero-title">Cảnh báo sạt lở<br><em>chính xác và kịp thời</em></h1>
-            <p>Giám sát liên tục chuyển vị GNSS, lượng mưa, mực nước ngầm và độ nghiêng. Phát hiện sớm rủi ro để bảo vệ cộng đồng.</p>
-            <div class="hero-actions"><a class="button button-primary" href="/map">Mở bản đồ realtime <span aria-hidden="true">→</span></a><a class="button button-secondary" href="#features">Tìm hiểu hệ thống</a></div>
-            <div class="trust-row"><span>GNSS</span><span>MQTT</span><span>NTRIP</span><span>CORS</span></div>
-        </section>
-
-        <section class="summary" aria-labelledby="summary-title">
-            <div class="section-heading"><div><span class="overline">TỔNG QUAN HỆ THỐNG</span><h2 id="summary-title">Trạng thái mạng quan trắc</h2></div><p id="summary-updated">Đang cập nhật dữ liệu…</p></div>
-            <div class="summary-grid" id="summary-grid" aria-live="polite">
-                <article><span class="metric-icon teal">⌖</span><strong id="stations-total">—</strong><p>Tổng số trạm</p></article>
-                <article><span class="metric-icon green">●</span><strong id="stations-online">—</strong><p>Đang trực tuyến</p></article>
-                <article><span class="metric-icon amber">◷</span><strong id="stations-stale">—</strong><p>Dữ liệu chậm</p></article>
-                <article><span class="metric-icon gray">○</span><strong id="stations-offline">—</strong><p>Ngoại tuyến</p></article>
-            </div>
-        </section>
-
-        <section class="features" id="features" aria-labelledby="features-title">
-            <div class="section-heading centered"><div><span class="overline">QUY TRÌNH KHÉP KÍN</span><h2 id="features-title">Từ cảm biến đến cảnh báo trong vài giây</h2></div></div>
-            <div class="feature-grid">
-                <article><span class="feature-number">01</span><div class="feature-symbol">⌁</div><h3>Thu thập đa cảm biến</h3><p>Trạm GNSS, mưa, nước và IMU truyền dữ liệu liên tục qua MQTT.</p></article>
-                <article><span class="feature-number">02</span><div class="feature-symbol">◇</div><h3>Phân tích rủi ro</h3><p>Dữ liệu được tổng hợp để nhận diện chuyển vị và dấu hiệu bất thường.</p></article>
-                <article><span class="feature-number">03</span><div class="feature-symbol">△</div><h3>Cảnh báo tức thời</h3><p>Bản đồ realtime và hệ thống cứu hộ giúp điều phối phản ứng nhanh.</p></article>
-            </div>
-        </section>
-
-        <section class="about" id="about"><div><span class="overline">SẴN SÀNG 24/7</span><h2>Một góc nhìn thống nhất cho toàn bộ khu vực quan trắc.</h2></div><a class="button button-primary" href="/map">Xem dữ liệu trên bản đồ</a></section>
-    </main>
-    <footer><span>© 2026 Landslide Monitor</span><span>Hệ thống giám sát và cảnh báo sớm</span></footer>
+    <div id="landing-root"></div>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="/assets/landing.min.js?v=__BUILD_VERSION__"></script>
 </body>
 </html>

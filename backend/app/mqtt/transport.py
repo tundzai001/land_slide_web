@@ -10,6 +10,43 @@ logger = logging.getLogger(__name__)
 
 
 class MQTTTransportMixin:
+    def _track_background_task(self, coroutine):
+        task = self.loop.create_task(coroutine)
+        self._background_tasks.add(task)
+
+        def consume_result(done_task):
+            self._background_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            try:
+                done_task.result()
+            except Exception as exc:
+                if not self._stopping:
+                    logger.error("MQTT background task failed: %s", exc)
+
+        task.add_done_callback(consume_result)
+        return task
+
+    def _submit_threadsafe(self, coroutine, label: str):
+        if self._stopping or not self.loop or not self.loop.is_running():
+            coroutine.close()
+            return None
+        future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+        self._threadsafe_futures.add(future)
+
+        def consume_result(done_future):
+            self._threadsafe_futures.discard(done_future)
+            if done_future.cancelled():
+                return
+            try:
+                done_future.result()
+            except Exception as exc:
+                if not self._stopping:
+                    logger.error("MQTT async task %s failed: %s", label, exc)
+
+        future.add_done_callback(consume_result)
+        return future
+
     def _get_fwd_client(self, host: str, port: int, user: Optional[str], password: Optional[str]):
         """Get or create a persistent MQTT client for external forwarding."""
         key = (host, port, user, password)
@@ -179,11 +216,10 @@ class MQTTTransportMixin:
             if not decrypted_payload:
                 return
             
-            if self.loop and self.loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self.process_pipeline(info, decrypted_payload), 
-                    self.loop
-                )
+            self._submit_threadsafe(
+                self.process_pipeline(info, decrypted_payload),
+                "sensor-pipeline",
+            )
         except Exception as e:
             logger.error(f"Error in on_message: {e}")
 
@@ -221,9 +257,9 @@ class MQTTTransportMixin:
                     password = settings.NTRIP_PASSWORD
                 if station_code and mountpoint and host:
                     if self.loop and self.loop.is_running():
-                        asyncio.run_coroutine_threadsafe(
+                        self._submit_threadsafe(
                             ntrip_manager.start_pusher(station_code, host, port, mountpoint, password),
-                            self.loop
+                            "ntrip-route-start",
                         )
                 else:
                     logger.warning("[NTRIP COMMAND] Ignored start route missing station_code or mountpoint: %s", payload)
@@ -231,9 +267,9 @@ class MQTTTransportMixin:
                 station_code = payload.get("station_code")
                 if station_code:
                     if self.loop and self.loop.is_running():
-                        asyncio.run_coroutine_threadsafe(
+                        self._submit_threadsafe(
                             ntrip_manager.stop_pusher(station_code),
-                            self.loop
+                            "ntrip-route-stop",
                         )
         except Exception as e:
             logger.error(f"[NTRIP COMMAND] Error processing command: {e}")
@@ -342,26 +378,43 @@ class MQTTTransportMixin:
         logger.info("🚀 Starting MQTT Bridge inside FastAPI...")
         try:
             self.loop = asyncio.get_running_loop()
+            self._stopping = False
         except RuntimeError:
             logger.error("❌ No running event loop found!")
             return
 
         try:
-            if self.loop and self.loop.is_running():
-                self.loop.create_task(self.load_runtime_config_from_db())
-
             self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
             self.client.loop_start()
-            self.loop.create_task(self.reload_topics_from_db())
-            self.loop.create_task(self._flush_loop())  # ✅ Khởi động flush buffer
+            self._track_background_task(self.reload_topics_from_db())
+            self._track_background_task(self._flush_loop())  # ✅ Khởi động flush buffer
             logger.info("✅ MQTT Bridge started successfully.")
         except Exception as e:
             logger.error(f"❌ Failed to start MQTT Bridge: {e}")
 
-    def stop(self):
+    async def stop(self):
         logger.info("🛑 Stopping MQTT Bridge...")
-        self.client.loop_stop()
-        self.client.disconnect()
+        self._stopping = True
+        try:
+            self.client.loop_stop()
+            self.client.disconnect()
+        finally:
+            pending_futures = list(self._threadsafe_futures)
+            for future in pending_futures:
+                future.cancel()
+            if pending_futures:
+                await asyncio.gather(
+                    *(asyncio.wrap_future(future) for future in pending_futures),
+                    return_exceptions=True,
+                )
+
+            pending_tasks = list(self._background_tasks)
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            self._threadsafe_futures.clear()
+            self._background_tasks.clear()
 
     async def reset_gnss_origin(self, device_id: int):
         """Trigger origin reset for a specific GNSS device."""

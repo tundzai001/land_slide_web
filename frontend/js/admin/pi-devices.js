@@ -119,7 +119,7 @@ class AdminPiDevicesFeature extends window.AdminManager {
             const color = statusColors[c.status] || '#6b7280';
             let statusBadge = `<span class="badge" style="background:${color};color:#000;font-size:.72rem">â— ${statusLabels[c.status] || c.status}</span>`;
             if (c.is_locked) {
-                statusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+                statusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa"><i class="bi bi-lock-fill" aria-hidden="true"></i></span>`;
             }
             if (c.status === 'assigned') {
                 statusBadge += `<br><small class="pi-assign-detail">${c.station_name || ''}${c.project_name ? ' · ' + c.project_name : ''}</small>`;
@@ -184,7 +184,7 @@ class AdminPiDevicesFeature extends window.AdminManager {
             const pColor = statusColors[p.status] || '#6b7280';
             let pStatusBadge = `<span class="badge" style="background:${pColor};color:#000;font-size:.72rem">â— ${statusLabels[p.status] || p.status}</span>`;
             if (p.is_locked) {
-                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa">🔒</span>`;
+                pStatusBadge += ` <span class="badge bg-danger" style="font-size:.65rem" title="Thiết bị bị khóa"><i class="bi bi-lock-fill" aria-hidden="true"></i></span>`;
             }
 
             const nameLabel = `<strong>${p.name}</strong><br><small class="text-muted"><span class="badge bg-warning text-dark me-1" style="font-size:.6rem">Pi Hiện trường</span><span style="font-size:.6rem">(Chưa Gắn)</span></small>`;

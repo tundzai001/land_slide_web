@@ -1515,8 +1515,8 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         }
         toggle_calls = []
 
-        async def toggle(mountpoint, sleep, selected_host="", **_kwargs):
-            toggle_calls.append((mountpoint, sleep, selected_host))
+        async def toggle(mountpoint, enabled, selected_host="", **_kwargs):
+            toggle_calls.append((mountpoint, enabled, selected_host))
 
         async def add_fixed_epochs(_delay):
             if cluster["observations"]:
@@ -1536,7 +1536,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
                         )
                     )
 
-        manager._toggle_cors_fixed_base = AsyncMock(side_effect=toggle)
+        manager._set_cors_fixed_base_enabled = AsyncMock(side_effect=toggle)
         manager._find_client_info = AsyncMock(return_value={"Username": "R2"})
         module_name = RoundRobinAdjustmentManager.__module__
         with patch(f"{module_name}.asyncio.sleep", new=add_fixed_epochs):
@@ -1551,7 +1551,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             toggle_calls,
             [
-                ("FIXED", False, "caster.example"),
+                ("FIXED", True, "caster.example"),
             ],
         )
         self.assertGreaterEqual(manager._find_client_info.await_count, 2)
@@ -1581,7 +1581,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         manager.progress_callback = AsyncMock(
             side_effect=lambda _project_id, message: progress_messages.append(message)
         )
-        manager._toggle_cors_fixed_base = AsyncMock()
+        manager._set_cors_fixed_base_enabled = AsyncMock()
         manager._find_client_info = AsyncMock(return_value={"Username": "R2"})
 
         class FakeLoop:
@@ -1640,7 +1640,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(
             "extending adaptively" in message for message in progress_messages
         ))
-        self.assertEqual(manager._toggle_cors_fixed_base.await_count, 1)
+        self.assertEqual(manager._set_cors_fixed_base_enabled.await_count, 1)
 
     async def test_inter_rotation_missing_aicaster_session_skips_offline_rover(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
@@ -1652,7 +1652,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             "rovers": ["R1", "R2"],
             "observations": [],
         }
-        manager._toggle_cors_fixed_base = AsyncMock()
+        manager._set_cors_fixed_base_enabled = AsyncMock()
         manager._find_client_info = AsyncMock(return_value=None)
         progress_messages = []
         manager.progress_callback = AsyncMock(
@@ -1702,7 +1702,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             "rovers": ["R1", "R2"],
             "observations": [],
         }
-        manager._toggle_cors_fixed_base = AsyncMock()
+        manager._set_cors_fixed_base_enabled = AsyncMock()
         manager._find_client_info = AsyncMock(
             side_effect=RuntimeError("client table unavailable")
         )
@@ -1742,7 +1742,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             "rovers": ["R1", "R2"],
             "observations": [],
         }
-        manager._toggle_cors_fixed_base = AsyncMock()
+        manager._set_cors_fixed_base_enabled = AsyncMock()
         manager._find_client_info = AsyncMock(return_value={"Username": "R2"})
         progress_messages = []
         manager.progress_callback = AsyncMock(
@@ -1800,7 +1800,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         manager.INTER_ROTATION_REACQUIRE_TIMEOUT_SECONDS = 120
         manager.INTER_ROTATION_REACQUIRE_MAX_SECONDS = 120
         cluster = {"rovers": ["R1", "R2"], "observations": []}
-        manager._toggle_cors_fixed_base = AsyncMock()
+        manager._set_cors_fixed_base_enabled = AsyncMock()
         manager._find_client_info = AsyncMock(return_value={"Username": "R2"})
 
         class FakeLoop:
@@ -1838,7 +1838,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
             "rovers": ["R1", "R2"],
             "observations": [],
         }
-        manager._toggle_cors_fixed_base = AsyncMock()
+        manager._set_cors_fixed_base_enabled = AsyncMock()
         manager._find_client_info = AsyncMock(return_value=None)
         progress_messages = []
         manager.progress_callback = AsyncMock(
@@ -1953,10 +1953,10 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
 
         manager._set_rover_as_temporary_base = rotate
 
-        async def toggle_fixed_base(_mountpoint, sleep, selected_host=""):
-            events.append(("base-mode", "sleep" if sleep else "restored"))
+        async def toggle_fixed_base(_mountpoint, enabled, selected_host="", **_kwargs):
+            events.append(("base-server", "enabled" if enabled else "disabled"))
 
-        manager._toggle_cors_fixed_base = AsyncMock(side_effect=toggle_fixed_base)
+        manager._set_cors_fixed_base_enabled = AsyncMock(side_effect=toggle_fixed_base)
         manager._reacquire_fixed_base_between_rotations = AsyncMock()
         manager._build_cluster_result = Mock(return_value={"rover_count": 2})
 
@@ -1964,7 +1964,7 @@ class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
         with patch(f"{module_name}.asyncio.sleep", new=AsyncMock()):
             await manager._run_cycle(71)
 
-        restore_index = events.index(("base-mode", "restored"))
+        restore_index = events.index(("base-server", "enabled"))
         result_index = events.index(("result", "published"))
         self.assertLess(restore_index, result_index)
         self.assertEqual(

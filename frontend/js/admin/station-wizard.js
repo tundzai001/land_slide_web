@@ -4,6 +4,111 @@ class AdminStationWizardFeature extends window.AdminManager {
     // STATION WIZARD
     // =========================================================================
 
+    bindMqttTopicValidation() {
+        ['gnss', 'rain', 'water', 'imu'].forEach(type => {
+            const input = document.getElementById(`topic-${type}`);
+            if (!input || input.dataset.topicValidationBound === 'true') return;
+            input.dataset.topicValidationBound = 'true';
+            input.setAttribute('autocomplete', 'off');
+            input.addEventListener('input', () => {
+                this.validateMqttTopicsLocally();
+                clearTimeout(input._topicValidationTimer);
+                input._topicValidationTimer = setTimeout(() => this.validateMqttTopicInput(input), 250);
+            });
+            input.addEventListener('blur', () => this.validateMqttTopicInput(input));
+        });
+    }
+
+    getActiveMqttTopicInputs() {
+        return ['gnss', 'rain', 'water', 'imu']
+            .filter(type => document.getElementById(`edit-${type}`)?.checked)
+            .map(type => document.getElementById(`topic-${type}`))
+            .filter(Boolean);
+    }
+
+    setMqttTopicState(input, state, message = '') {
+        let feedback = input.parentElement?.querySelector('.mqtt-topic-feedback');
+        if (!feedback) {
+            feedback = document.createElement('div');
+            feedback.className = 'mqtt-topic-feedback';
+            input.insertAdjacentElement('afterend', feedback);
+        }
+        input.classList.toggle('is-invalid', state === 'invalid');
+        input.classList.toggle('is-valid', state === 'valid');
+        input.classList.toggle('is-validating', state === 'validating');
+        input.dataset.topicValid = state === 'valid' ? 'true' : (state === 'invalid' ? 'false' : '');
+        feedback.className = `mqtt-topic-feedback ${state}`;
+        feedback.textContent = message;
+    }
+
+    validateMqttTopicsLocally() {
+        const inputs = this.getActiveMqttTopicInputs();
+        const counts = new Map();
+        inputs.forEach(input => {
+            const topic = input.value.trim();
+            if (topic) counts.set(topic, (counts.get(topic) || 0) + 1);
+        });
+        let valid = true;
+        inputs.forEach(input => {
+            const topic = input.value.trim();
+            if (topic && counts.get(topic) > 1) {
+                this.setMqttTopicState(input, 'invalid', 'Topic này đang bị trùng trong biểu mẫu.');
+                valid = false;
+            } else if (!topic) {
+                this.setMqttTopicState(input, 'idle', '');
+            } else if (input.classList.contains('is-invalid')) {
+                this.setMqttTopicState(input, 'idle', '');
+            }
+        });
+        return valid;
+    }
+
+    async validateMqttTopicInput(input) {
+        if (!input || !this.getActiveMqttTopicInputs().includes(input)) return true;
+        const topic = input.value.trim();
+        if (!topic) {
+            this.setMqttTopicState(input, 'invalid', 'Hãy nhập MQTT topic.');
+            return false;
+        }
+        if (!this.validateMqttTopicsLocally() || input.classList.contains('is-invalid')) return false;
+
+        input._topicValidationController?.abort();
+        const controller = new AbortController();
+        input._topicValidationController = controller;
+        this.setMqttTopicState(input, 'validating', 'Đang kiểm tra topic...');
+        const params = new URLSearchParams({ topic });
+        if (this.currentStationId) params.set('exclude_station_id', this.currentStationId);
+        try {
+            const res = await fetch(`/api/admin/devices/topic-availability?${params}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                signal: controller.signal
+            });
+            if (!res.ok) throw new Error('Không thể kiểm tra topic');
+            const result = await res.json();
+            if (input.value.trim() !== topic) return false;
+            if (!result.available) {
+                const owner = result.conflict?.device_code ? ` (${result.conflict.device_code})` : '';
+                this.setMqttTopicState(input, 'invalid', `Topic đã được sử dụng${owner}.`);
+                return false;
+            }
+            this.setMqttTopicState(input, 'valid', 'Topic khả dụng.');
+            return true;
+        } catch (error) {
+            if (error.name === 'AbortError') return false;
+            this.setMqttTopicState(input, 'invalid', error.message);
+            return false;
+        }
+    }
+
+    async validateAllMqttTopics() {
+        if (!this.validateMqttTopicsLocally()) return false;
+        const inputs = this.getActiveMqttTopicInputs();
+        const results = await Promise.all(inputs.map(input => this.validateMqttTopicInput(input)));
+        const invalidIndex = results.findIndex(result => !result);
+        if (invalidIndex >= 0) inputs[invalidIndex]?.focus();
+        return invalidIndex < 0;
+    }
+
     openAddStationModal() {
         this.isEditMode = false;
         this.currentStationId = null;
@@ -97,6 +202,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         this.updateOriginActionButtons(false);
 
         this.highlightPreset(null);
+        this.bindMqttTopicValidation();
         this.updateWizardStep();
         if (this.stationModal) this.stationModal.show();
     }
@@ -453,6 +559,8 @@ class AdminStationWizardFeature extends window.AdminManager {
             document.getElementById('modal-title').textContent = `Chỉnh sửa: ${stationData.name}`;
 
             this.highlightPreset(cfg.active_preset);
+            this.bindMqttTopicValidation();
+            this.validateMqttTopicsLocally();
             this.updateWizardStep();
             if (this.stationModal) this.stationModal.show();
 

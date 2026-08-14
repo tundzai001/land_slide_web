@@ -156,8 +156,6 @@
             <button type="button" data-more><i class="bi bi-grid"></i><span>Thêm</span></button>
             <div class="admin-more-sheet" hidden>
                 <button type="button" data-tab="tab-users"><i class="bi bi-people"></i> Người dùng</button>
-                <button type="button" data-tab="tab-system"><i class="bi bi-gear"></i> Hệ thống</button>
-                <button type="button" data-theme-action><i class="bi bi-circle-half"></i> Đổi giao diện</button>
                 <button type="button" data-logout-action><i class="bi bi-box-arrow-right"></i> Đăng xuất</button>
             </div>`;
         const more = navigation.querySelector('.admin-more-sheet');
@@ -207,13 +205,13 @@
             window.__MAP_BUNDLE_LOADING__ = false;
             window.flushMapReadyQueue?.();
         } else {
+            document.documentElement.setAttribute('data-theme', 'light');
             await loadScript('/assets/admin-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.admin;
             setupAdminMobileNavigation();
             setupAdminResponsiveTables();
             await window.bootstrapAdminManager?.();
             window.bootstrapDatabaseManager?.();
-            window.bootstrapSystemManager?.();
         }
         setTimeout(() => window.authManager?.updateAuthUI?.(), 50);
     }

@@ -50,39 +50,39 @@ class AdminProjectsFeature extends window.AdminManager {
         }
 
         container.innerHTML = `
-            <div class="row g-3">
+            <div class="row g-4 management-project-grid">
                 ${this.projectsData.map(p => `
                     <div class="col-md-6 col-xl-4">
-                        <div class="card hover-lift project-card" style="cursor: pointer;" onclick="window.adminManager.loadStations(${p.id})">
-                            <div class="card-body position-relative" style="z-index: 2;">
+                        <article class="card project-card management-project-card h-100" onclick="window.adminManager.loadStations(${p.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.adminManager.loadStations(${p.id})}" tabindex="0" aria-label="Mở dự án ${p.name}">
+                            <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-start mb-3">
-                                    <div>
-                                        <h5 class="card-title mb-1 neon-text">
-                                            <i class="bi bi-folder-fill me-2"></i>
-                                            ${p.name}
-                                        </h5>
-                                        <small class="text-muted font-monospace">${p.project_code}</small>
+                                    <div class="d-flex align-items-center gap-3 min-w-0">
+                                        <span class="project-icon" aria-hidden="true"><i class="bi bi-diagram-3"></i></span>
+                                        <div class="min-w-0">
+                                            <h5 class="card-title mb-1 text-truncate">${p.name}</h5>
+                                            <small class="project-code">${p.project_code}</small>
+                                        </div>
                                     </div>
-                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary">${p.station_count || 0} STATION</span>
+                                    <span class="project-count"><strong>${p.station_count || 0}</strong> trạm</span>
                                 </div>
-                                ${p.description ? `<p class="text-muted small mb-0">${p.description}</p>` : ''}
-                                ${p.location ? `<p class="text-muted small mb-0 mt-2"><i class="bi bi-geo-alt"></i> ${typeof p.location === 'string' ? p.location : (p.location.address || p.location.source || `${p.location.lat ?? ''}, ${p.location.lon ?? ''}`)}</p>` : ''}
+                                <p class="project-description">${p.description || 'Chưa có mô tả cho dự án này.'}</p>
+                                ${p.location ? `<p class="project-location mb-0"><i class="bi bi-geo-alt" aria-hidden="true"></i><span>${typeof p.location === 'string' ? p.location : (p.location.address || p.location.source || `${p.location.lat ?? ''}, ${p.location.lon ?? ''}`)}</span></p>` : ''}
 
                             </div>
-                            <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-outline-primary flex-1" onclick="event.stopPropagation(); window.adminManager.loadStations(${p.id})">
-                                        <i class="bi bi-box-arrow-in-right me-1"></i> ACCESS
+                            <div class="card-footer">
+                                <div class="d-flex gap-2 align-items-center">
+                                    <button class="btn btn-sm btn-primary flex-grow-1" onclick="event.stopPropagation(); window.adminManager.loadStations(${p.id})">
+                                        Mở dự án <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); window.adminManager.openProjectConfigModal(${p.id})" title="Cấu hình dự án">
-                                        <i class="bi bi-gear-fill"></i>
+                                    <button class="btn btn-sm btn-outline-primary project-action-btn project-edit-btn" onclick="event.stopPropagation(); window.adminManager.openProjectConfigModal(${p.id})" title="Chỉnh sửa dự án" aria-label="Chỉnh sửa dự án ${p.name}">
+                                        <i class="bi bi-pencil-square" aria-hidden="true"></i><span>Chỉnh sửa</span>
                                     </button>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); window.adminManager.deleteProject(${p.id})">
-                                        <i class="bi bi-trash"></i>
+                                    <button class="btn btn-sm btn-outline-danger project-action-btn" onclick="event.stopPropagation(); window.adminManager.deleteProject(${p.id})" title="Xóa dự án" aria-label="Xóa dự án ${p.name}">
+                                        <i class="bi bi-trash" aria-hidden="true"></i>
                                     </button>
                                 </div>
                             </div>
-                        </div>
+                        </article>
                     </div>
                 `).join('')}
             </div>

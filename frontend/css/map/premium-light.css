@@ -1,0 +1,1412 @@
+/* ================================================================
+   AITOGY MAP — PRECISION LIGHT UI
+   Final map-specific layer. It intentionally overrides the legacy
+   glass/cyber skins without changing runtime IDs or interaction state.
+================================================================ */
+
+:root {
+    --map-canvas: #f5f7fa;
+    --map-surface: #ffffff;
+    --map-surface-subtle: #f7f9fc;
+    --map-surface-muted: #eef3f8;
+    --map-line: #e2e8f0;
+    --map-line-strong: #cbd5e1;
+    --map-text: #172033;
+    --map-text-soft: #42526a;
+    --map-muted: #68778d;
+    --map-blue: #2563eb;
+    --map-blue-dark: #1d4ed8;
+    --map-blue-soft: #eff6ff;
+    --map-teal: #0f9f8f;
+    --map-teal-soft: #ecfdf8;
+    --map-amber: #d97706;
+    --map-amber-soft: #fff8eb;
+    --map-danger: #dc3347;
+    --map-danger-dark: #bc2036;
+    --map-danger-soft: #fff1f2;
+    --map-radius-sm: 10px;
+    --map-radius: 14px;
+    --map-radius-lg: 20px;
+    --map-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 18px rgba(15, 23, 42, 0.05);
+    --map-shadow-panel: 0 20px 55px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.06);
+    --map-focus: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+body {
+    background: var(--map-canvas) !important;
+    color: var(--map-text);
+    font-family: Inter, "DM Sans", "Segoe UI", Arial, sans-serif;
+}
+
+body::before,
+body::after {
+    display: none !important;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: none !important;
+    box-shadow: var(--map-focus) !important;
+}
+
+/* ---------- Application bar ---------- */
+.top-navbar {
+    top: 10px !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    height: 60px !important;
+    padding: 0 14px !important;
+    color: var(--map-text) !important;
+    background: rgba(255, 255, 255, 0.96) !important;
+    border: 1px solid rgba(203, 213, 225, 0.88) !important;
+    border-radius: 18px !important;
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.1) !important;
+    backdrop-filter: blur(12px) saturate(130%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(130%) !important;
+}
+
+.top-navbar::before,
+.top-navbar::after {
+    display: none !important;
+}
+
+.navbar-hamburger,
+.top-navbar .btn-link,
+.map-ctrl-btn,
+.heatmap-toggle-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    padding: 0 !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 12px !important;
+    color: var(--map-text-soft) !important;
+    background: var(--map-surface) !important;
+    box-shadow: none !important;
+    transition: color 160ms ease, border-color 160ms ease, background 160ms ease !important;
+}
+
+.navbar-hamburger:hover,
+.top-navbar .btn-link:hover,
+.map-ctrl-btn:hover,
+.heatmap-toggle-btn:hover {
+    color: var(--map-blue) !important;
+    border-color: #b9cdf8 !important;
+    background: var(--map-blue-soft) !important;
+    transform: none !important;
+}
+
+.navbar-hamburger i {
+    font-size: 1.4rem;
+}
+
+.brand-text {
+    gap: 10px !important;
+    color: var(--map-text) !important;
+    font-size: 1rem !important;
+    font-weight: 750 !important;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+}
+
+.brand-text i {
+    display: inline-grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 11px;
+    color: #fff !important;
+    background: linear-gradient(145deg, #2563eb, #0f9f8f);
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
+}
+
+.top-navbar .btn-outline-primary,
+.top-navbar #auth-btn {
+    min-height: 40px;
+    padding: 0 14px !important;
+    border-radius: 11px !important;
+    font-size: 0.79rem !important;
+    font-weight: 700 !important;
+    box-shadow: none !important;
+}
+
+.top-navbar .btn-outline-primary {
+    color: var(--map-blue) !important;
+    border: 1px solid #c7d8fa !important;
+    background: var(--map-blue-soft) !important;
+}
+
+.top-navbar #auth-btn {
+    border: 1px solid var(--map-blue) !important;
+    background: var(--map-blue) !important;
+    color: #fff !important;
+}
+
+.top-navbar #auth-btn:hover,
+.top-navbar #auth-btn:active {
+    border-color: var(--map-blue-dark) !important;
+    background: var(--map-blue-dark) !important;
+    color: #fff !important;
+    transform: none !important;
+}
+
+.top-navbar #auth-btn i,
+.top-navbar #auth-btn span {
+    color: inherit !important;
+}
+
+.layer-toggle-switch {
+    height: 40px !important;
+    padding: 0 10px !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 12px !important;
+    background: var(--map-surface-subtle) !important;
+}
+
+/* ---------- Map canvas and controls ---------- */
+#map {
+    background: #dfe7ed !important;
+}
+
+.custom-map-controls {
+    right: 22px !important;
+    bottom: 96px !important;
+    gap: 4px !important;
+    padding: 6px !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 15px !important;
+    background: rgba(255, 255, 255, 0.96) !important;
+    box-shadow: var(--map-shadow-card) !important;
+    backdrop-filter: none !important;
+}
+
+.custom-map-controls .map-ctrl-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    border: 0 !important;
+}
+
+.custom-map-controls .heatmap-toggle-wrap {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    width: 44px;
+    height: 44px;
+}
+
+.custom-map-controls .heatmap-toggle-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    border: 0 !important;
+}
+
+.map-control-divider {
+    display: block;
+    width: 26px;
+    height: 1px;
+    margin: 1px auto;
+    background: var(--map-line);
+}
+
+.heatmap-toggle-btn.active {
+    color: #fff !important;
+    border-color: var(--map-amber) !important;
+    background: var(--map-amber) !important;
+}
+
+.timeline-slider-container,
+.map-floating-layer-panel {
+    color: var(--map-text) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: var(--map-radius) !important;
+    background: rgba(255, 255, 255, 0.97) !important;
+    box-shadow: var(--map-shadow-card) !important;
+    backdrop-filter: none !important;
+}
+
+.map-floating-layer-item:hover {
+    background: var(--map-surface-subtle) !important;
+    transform: none !important;
+}
+
+.map-floating-layer-item-info span,
+.map-floating-layer-header {
+    color: var(--map-text-soft) !important;
+}
+
+.leaflet-control-attribution,
+.leaflet-control-scale-line,
+.leaflet-bar,
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+    color: var(--map-text-soft) !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+}
+
+.leaflet-popup-content-wrapper {
+    border: 1px solid var(--map-line);
+    border-radius: var(--map-radius) !important;
+    box-shadow: var(--map-shadow-panel) !important;
+}
+
+/* ---------- Shared floating panels ---------- */
+.station-list-sidebar,
+.detail-sidebar,
+.charts-panel,
+.gnss-advanced-sidepanel {
+    color: var(--map-text) !important;
+    background: var(--map-surface) !important;
+    border: 1px solid var(--map-line) !important;
+    box-shadow: var(--map-shadow-panel) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+.station-list-sidebar,
+.detail-sidebar {
+    top: 82px !important;
+    bottom: 18px !important;
+    height: auto !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden !important;
+}
+
+.station-list-sidebar {
+    left: 12px !important;
+    width: 326px !important;
+    border-radius: var(--map-radius-lg) !important;
+}
+
+.detail-sidebar {
+    right: 12px !important;
+    width: min(430px, calc(100vw - 24px)) !important;
+    border-radius: var(--map-radius-lg) !important;
+}
+
+.sidebar-header,
+.detail-sidebar-header,
+.charts-panel-header,
+.gnss-advanced-sidepanel .sidepanel-header {
+    color: var(--map-text) !important;
+    background: var(--map-surface) !important;
+    border-bottom: 1px solid var(--map-line) !important;
+    box-shadow: none !important;
+}
+
+.station-list-sidebar > .sidebar-header {
+    padding: 20px 20px 14px !important;
+    border-radius: var(--map-radius-lg) var(--map-radius-lg) 0 0;
+}
+
+.sidebar-header h6,
+.charts-panel-header h5,
+.gnss-advanced-sidepanel .sidepanel-header h6 {
+    margin: 0 !important;
+    color: var(--map-text) !important;
+    font-size: 0.95rem !important;
+    font-weight: 760 !important;
+    letter-spacing: -0.015em !important;
+}
+
+.sidebar-header h6 i,
+.charts-panel-header h5 i,
+.gnss-advanced-sidepanel .sidepanel-header h6 i {
+    color: var(--map-blue) !important;
+}
+
+.sidebar-close-tab,
+.sidebar-close-btn,
+.sidepanel-close,
+#close-charts-btn {
+    display: inline-grid !important;
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+    place-items: center;
+    padding: 0 !important;
+    color: var(--map-muted) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 11px !important;
+    background: var(--map-surface) !important;
+    box-shadow: none !important;
+}
+
+.sidebar-close-tab {
+    top: 50% !important;
+    right: -1px !important;
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 52px !important;
+    border-right: 0 !important;
+    border-radius: 11px 0 0 11px !important;
+    transform: translateY(-50%) !important;
+    transition: color 160ms ease, border-color 160ms ease, background 160ms ease !important;
+}
+
+.sidebar-close-tab:hover,
+.sidebar-close-btn:hover,
+.sidepanel-close:hover,
+#close-charts-btn:hover {
+    color: var(--map-danger) !important;
+    border-color: #fecdd3 !important;
+    background: var(--map-danger-soft) !important;
+    transform: none !important;
+}
+
+.sidebar-close-tab:hover,
+.sidebar-close-tab:active {
+    width: 44px !important;
+    transform: translateY(-50%) !important;
+}
+
+.sidebar-close-tab:hover i {
+    transform: none !important;
+}
+
+.sidebar-search {
+    padding: 4px 16px 14px !important;
+    background: var(--map-surface) !important;
+}
+
+.sidebar-search .form-control,
+.glass-modal-content .form-control,
+.glass-modal-content .form-select,
+.glass-modal-content .input-group-text {
+    min-height: 42px;
+    color: var(--map-text) !important;
+    border: 1px solid var(--map-line-strong) !important;
+    border-radius: 10px !important;
+    background: var(--map-surface) !important;
+    box-shadow: none !important;
+}
+
+.sidebar-search .form-control:focus,
+.glass-modal-content .form-control:focus,
+.glass-modal-content .form-select:focus {
+    border-color: #80a8f5 !important;
+    box-shadow: var(--map-focus) !important;
+}
+
+.station-list-content {
+    min-height: 0;
+    flex: 1 1 auto;
+    padding: 2px 12px 16px !important;
+    overflow-y: auto !important;
+}
+
+.station-item,
+.station-item.station-item-react {
+    margin: 7px 0 !important;
+    padding: 13px 14px !important;
+    color: var(--map-text) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 13px !important;
+    background: var(--map-surface) !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease !important;
+}
+
+.station-item:hover {
+    border-color: #b9cdf8 !important;
+    background: var(--map-blue-soft) !important;
+    box-shadow: 0 5px 16px rgba(37, 99, 235, 0.08) !important;
+    transform: none !important;
+}
+
+.station-item.active,
+.station-item.selected {
+    border-color: #8db1f7 !important;
+    background: var(--map-blue-soft) !important;
+    box-shadow: inset 3px 0 0 var(--map-blue) !important;
+}
+
+.station-item-copy strong {
+    color: var(--map-text) !important;
+    font-weight: 720 !important;
+}
+
+.station-item-copy small {
+    color: var(--map-muted) !important;
+}
+
+/* ---------- Station detail ---------- */
+.detail-sidebar-header {
+    padding: 16px 16px 13px !important;
+    border-radius: var(--map-radius-lg) var(--map-radius-lg) 0 0;
+}
+
+.detail-station-identity {
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+#st-name {
+    color: var(--map-text) !important;
+    font-size: 1rem !important;
+    font-weight: 760 !important;
+    letter-spacing: -0.02em;
+}
+
+#st-code {
+    color: var(--map-muted) !important;
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.68rem;
+}
+
+.detail-header-actions .btn {
+    display: inline-grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    padding: 0 !important;
+    color: var(--map-muted) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 10px !important;
+    background: var(--map-surface) !important;
+}
+
+.detail-header-actions .btn:hover {
+    color: var(--map-blue) !important;
+    border-color: #b9cdf8 !important;
+    background: var(--map-blue-soft) !important;
+}
+
+.detail-sidebar .sidebar-content {
+    min-height: 0;
+    flex: 1 1 auto;
+    padding: 14px !important;
+    background: var(--map-surface-subtle) !important;
+    border-radius: 0 0 var(--map-radius-lg) var(--map-radius-lg);
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+}
+
+.status-bar {
+    min-height: 48px;
+    margin: 0 0 12px !important;
+    padding: 10px 13px !important;
+    color: var(--map-text-soft) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 12px !important;
+    background: var(--map-surface) !important;
+    box-shadow: none !important;
+}
+
+.status-label {
+    color: var(--map-muted) !important;
+    font-size: 0.72rem !important;
+    font-weight: 650 !important;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.status-badge,
+.sensor-offline-badge,
+.imu-offline-badge,
+.gnss-fix-badge {
+    padding: 4px 8px !important;
+    border: 1px solid transparent !important;
+    border-radius: 999px !important;
+    font-size: 0.62rem !important;
+    font-weight: 800 !important;
+    line-height: 1.1;
+    letter-spacing: 0.035em;
+}
+
+.sensor-offline-badge,
+.imu-offline-badge {
+    color: #667085 !important;
+    border-color: #d8dee8 !important;
+    background: #f1f4f8 !important;
+}
+
+.sensor-compact {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+}
+
+.sensor-item {
+    position: relative;
+    min-height: 124px !important;
+    padding: 14px !important;
+    color: var(--map-text) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: var(--map-radius) !important;
+    background: var(--map-surface) !important;
+    box-shadow: var(--map-shadow-card) !important;
+    backdrop-filter: none !important;
+    overflow: hidden;
+    transition: border-color 160ms ease, box-shadow 160ms ease !important;
+}
+
+.sensor-item::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: #b7c3d2;
+}
+
+.sensor-item::after {
+    display: none !important;
+}
+
+#sensor-card-gnss::before { background: var(--map-blue); }
+#sensor-card-rain::before { background: #0ea5e9; }
+#sensor-card-water::before { background: #0891b2; }
+#sensor-card-imu::before { background: var(--map-amber); }
+#battery-container::before { background: var(--map-teal); }
+
+.sensor-item:hover,
+.sensor-item.sensor-clickable:hover {
+    border-color: #b9cdf8 !important;
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08) !important;
+    transform: none !important;
+}
+
+.sensor-clickable {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+}
+
+.sensor-clickable:focus-visible {
+    border-color: var(--map-blue) !important;
+    box-shadow: var(--map-focus) !important;
+}
+
+.sensor-label {
+    margin: 0 0 12px !important;
+    color: var(--map-muted) !important;
+    font-size: 0.67rem !important;
+    font-weight: 750 !important;
+    line-height: 1.3;
+    letter-spacing: 0.045em !important;
+    text-transform: uppercase;
+}
+
+.sensor-label > span:first-child {
+    min-width: 0;
+}
+
+.sensor-label i {
+    color: var(--map-blue) !important;
+    opacity: 1 !important;
+}
+
+#sensor-card-rain .sensor-label i { color: #0ea5e9 !important; }
+#sensor-card-water .sensor-label i { color: #0891b2 !important; }
+#sensor-card-imu .sensor-label i { color: var(--map-amber) !important; }
+
+.sensor-value-large,
+.axis-num,
+.imu-delta-num,
+.adv-value,
+.chart-stat-grid .fw-bold {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.sensor-value-large {
+    color: var(--map-blue) !important;
+    font-size: 1.35rem !important;
+    font-weight: 760 !important;
+    letter-spacing: -0.035em;
+}
+
+.sensor-unit {
+    margin-left: 5px !important;
+    color: var(--map-muted) !important;
+    font-family: Inter, "Segoe UI", sans-serif;
+    font-size: 0.7rem !important;
+    font-weight: 550 !important;
+    letter-spacing: 0;
+}
+
+.sensor-full-width {
+    grid-column: 1 / -1 !important;
+}
+
+/* IMU is one coherent instrument, not a stack of nested cards. */
+#sensor-card-imu {
+    min-height: 250px !important;
+    padding: 15px 16px !important;
+}
+
+.imu-axes {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px !important;
+    margin: 0 0 14px !important;
+}
+
+.axis-value {
+    min-height: 67px;
+    padding: 10px 8px !important;
+    text-align: center;
+    border: 1px solid #e6ebf2 !important;
+    border-radius: 10px !important;
+    background: var(--map-surface-subtle) !important;
+    box-shadow: none !important;
+}
+
+.axis-label {
+    margin-bottom: 7px !important;
+    color: var(--map-muted) !important;
+    font-size: 0.58rem !important;
+    font-weight: 750 !important;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.axis-num {
+    color: var(--map-amber) !important;
+    font-size: 0.94rem !important;
+    font-weight: 750 !important;
+}
+
+#sensor-card-imu .border-top {
+    margin-top: 0 !important;
+    padding-top: 12px !important;
+    border-color: var(--map-line) !important;
+}
+
+.imu-delta-header {
+    margin-bottom: 8px !important;
+    color: var(--map-text-soft) !important;
+    font-size: 0.74rem !important;
+    font-weight: 720 !important;
+}
+
+.imu-delta-grid {
+    display: grid !important;
+    gap: 6px !important;
+}
+
+.imu-delta-item {
+    display: grid !important;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    min-height: 26px;
+}
+
+.imu-delta-axis {
+    color: var(--map-text-soft) !important;
+    font-size: 0.72rem !important;
+    font-weight: 680 !important;
+}
+
+.imu-delta-hint {
+    color: var(--map-muted) !important;
+    font-size: 0.68rem !important;
+}
+
+.imu-delta-num {
+    color: var(--map-text) !important;
+    font-size: 0.7rem !important;
+    font-weight: 750 !important;
+}
+
+#sensor-card-imu > .mt-1 {
+    margin-top: 10px !important;
+    padding-top: 10px !important;
+    opacity: 1 !important;
+}
+
+#sensor-card-imu > .mt-1 .small {
+    color: var(--map-muted) !important;
+}
+
+.sensor-item.sensor-alert-warning {
+    border-color: #f8cf83 !important;
+    background: var(--map-amber-soft) !important;
+}
+
+.sensor-item.sensor-alert-critical {
+    border-color: #f8a9b3 !important;
+    background: var(--map-danger-soft) !important;
+}
+
+.action-buttons {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px !important;
+    margin-top: 12px !important;
+}
+
+.btn-action {
+    min-height: 44px !important;
+    padding: 10px 12px !important;
+    color: var(--map-blue) !important;
+    border: 1px solid #bfd2f7 !important;
+    border-radius: 11px !important;
+    background: var(--map-blue-soft) !important;
+    box-shadow: none !important;
+    font-size: 0.78rem !important;
+    font-weight: 720 !important;
+    transition: background 160ms ease, border-color 160ms ease !important;
+}
+
+.btn-action:hover {
+    color: #fff !important;
+    border-color: var(--map-blue) !important;
+    background: var(--map-blue) !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+#btn-digital-twin {
+    color: var(--map-text-soft) !important;
+    border-color: var(--map-line-strong) !important;
+    background: var(--map-surface) !important;
+}
+
+#btn-digital-twin:hover {
+    color: #fff !important;
+    border-color: #334155 !important;
+    background: #334155 !important;
+}
+
+.siren-sidebar-control {
+    margin-top: 10px !important;
+    padding: 12px !important;
+    border: 1px solid #fecdd3 !important;
+    border-radius: 12px !important;
+    background: var(--map-danger-soft) !important;
+    box-shadow: none !important;
+}
+
+.siren-sidebar-control .btn {
+    min-height: 34px;
+    border-radius: 9px !important;
+}
+
+/* ---------- Charts ---------- */
+.charts-panel {
+    top: 82px !important;
+    bottom: 18px !important;
+    left: 12px !important;
+    right: 454px !important;
+    width: auto !important;
+    height: auto !important;
+    border-radius: var(--map-radius-lg) !important;
+}
+
+.charts-panel::before {
+    display: none !important;
+}
+
+.charts-panel-header {
+    min-height: 76px !important;
+    padding: 14px 18px !important;
+    border-radius: var(--map-radius-lg) var(--map-radius-lg) 0 0;
+}
+
+.charts-heading-title {
+    gap: 9px !important;
+}
+
+.charts-heading p,
+#charts-station-context {
+    margin: 4px 0 0 !important;
+    color: var(--map-muted) !important;
+    font-size: 0.72rem !important;
+}
+
+.charts-period {
+    color: var(--map-blue) !important;
+    border: 1px solid #c7d8fa !important;
+    border-radius: 999px !important;
+    background: var(--map-blue-soft) !important;
+}
+
+.charts-panel-content {
+    gap: 14px !important;
+    padding: 16px !important;
+    background: var(--map-surface-subtle) !important;
+}
+
+.charts-panel .chart-box {
+    padding: 18px !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: var(--map-radius) !important;
+    background: var(--map-surface) !important;
+    box-shadow: var(--map-shadow-card) !important;
+    backdrop-filter: none !important;
+}
+
+.charts-panel .chart-box:hover {
+    border-color: var(--map-line-strong) !important;
+    box-shadow: var(--map-shadow-card) !important;
+    transform: none !important;
+}
+
+.chart-title {
+    color: var(--map-text) !important;
+    font-weight: 720 !important;
+}
+
+.chart-stat-grid {
+    margin: 12px 0 16px !important;
+    padding: 12px !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 11px !important;
+    background: var(--map-surface-subtle) !important;
+}
+
+.chart-stat-grid .border-start {
+    border-color: var(--map-line) !important;
+}
+
+/* ---------- GNSS advanced ---------- */
+.gnss-advanced-sidepanel {
+    top: 82px !important;
+    right: 12px !important;
+    bottom: 18px !important;
+    height: auto !important;
+    border-radius: var(--map-radius-lg) !important;
+}
+
+.gnss-advanced-sidepanel .sidepanel-header {
+    min-height: 64px;
+    padding: 12px 16px !important;
+    border-radius: var(--map-radius-lg) var(--map-radius-lg) 0 0;
+}
+
+.gnss-advanced-sidepanel .sidepanel-body {
+    gap: 12px !important;
+    padding: 14px !important;
+    background: var(--map-surface-subtle) !important;
+}
+
+.gnss-advanced-sidepanel .adv-section {
+    margin-bottom: 11px !important;
+    padding: 14px !important;
+    color: var(--map-text) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 12px !important;
+    background: var(--map-surface) !important;
+    box-shadow: none !important;
+}
+
+.gnss-advanced-sidepanel .adv-section-title {
+    color: var(--map-text-soft) !important;
+    font-size: 0.68rem !important;
+    font-weight: 780 !important;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+}
+
+.gnss-advanced-sidepanel .adv-item {
+    border-color: var(--map-line) !important;
+    background: var(--map-surface-subtle) !important;
+}
+
+.gnss-advanced-sidepanel .adv-label,
+.gnss-advanced-sidepanel .adv-unit {
+    color: var(--map-muted) !important;
+}
+
+.gnss-advanced-sidepanel .adv-value {
+    color: var(--map-text) !important;
+}
+
+/* ---------- Rescue action and form ---------- */
+.rescue-fab {
+    right: 22px !important;
+    bottom: 26px !important;
+    height: 50px !important;
+    padding: 0 17px 0 8px !important;
+    gap: 7px !important;
+    border: 1px solid var(--map-danger-dark) !important;
+    border-radius: 14px !important;
+    background: var(--map-danger) !important;
+    box-shadow: 0 10px 28px rgba(220, 51, 71, 0.26) !important;
+    animation: none !important;
+    overflow: visible !important;
+}
+
+.rescue-fab:hover {
+    padding-right: 17px !important;
+    gap: 7px !important;
+    background: var(--map-danger-dark) !important;
+    box-shadow: 0 12px 32px rgba(220, 51, 71, 0.32) !important;
+    transform: translateY(-1px) !important;
+}
+
+.rescue-fab-icon {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 1rem !important;
+}
+
+.rescue-fab:hover .rescue-fab-icon {
+    transform: none !important;
+}
+
+.rescue-fab-label,
+.rescue-fab:hover .rescue-fab-label {
+    max-width: 190px !important;
+    padding-left: 0 !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+    font-size: 0.78rem !important;
+    font-weight: 750 !important;
+}
+
+#guestRescueModal .modal-dialog {
+    width: min(760px, calc(100vw - 28px));
+    max-width: 760px !important;
+    height: calc(100dvh - 28px);
+    min-height: 0;
+    margin: 14px auto;
+}
+
+#guestRescueModal {
+    z-index: 3200 !important;
+}
+
+body:has(#guestRescueModal.show) .modal-backdrop,
+.modal-backdrop.show {
+    z-index: 3190 !important;
+    opacity: 0.42 !important;
+}
+
+.glass-modal-content {
+    max-height: 100%;
+    color: var(--map-text) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 20px !important;
+    background: var(--map-surface) !important;
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24) !important;
+    backdrop-filter: none !important;
+    overflow: hidden;
+}
+
+.glass-modal-content .modal-header {
+    min-height: 72px;
+    padding: 16px 20px !important;
+    color: var(--map-text) !important;
+    border-bottom: 1px solid var(--map-line) !important;
+    background: var(--map-surface) !important;
+}
+
+.glass-modal-content .modal-title {
+    color: var(--map-text) !important;
+    font-size: 1.05rem !important;
+    font-weight: 780 !important;
+    letter-spacing: -0.02em;
+}
+
+.glass-modal-content .modal-title i {
+    display: inline-grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    color: var(--map-danger);
+    border-radius: 10px;
+    background: var(--map-danger-soft);
+}
+
+.glass-modal-content .modal-body {
+    padding: 18px 20px 22px !important;
+    background: var(--map-surface-subtle) !important;
+}
+
+.glass-modal-content .modal-body > h6 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 12px !important;
+    padding: 0 !important;
+    color: var(--map-text) !important;
+    border: 0 !important;
+    font-size: 0.78rem !important;
+    font-weight: 780 !important;
+    letter-spacing: 0.02em;
+}
+
+.glass-modal-content .modal-body > h6:first-child {
+    margin-top: 0 !important;
+}
+
+.glass-modal-content .modal-body > h6 i {
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    color: var(--map-blue);
+    border-radius: 8px;
+    background: var(--map-blue-soft);
+}
+
+.glass-modal-content .form-label {
+    margin-bottom: 6px !important;
+    color: var(--map-text-soft) !important;
+    font-size: 0.76rem !important;
+    font-weight: 680 !important;
+}
+
+.glass-modal-content .form-text,
+.glass-modal-content .text-muted {
+    color: var(--map-muted) !important;
+}
+
+.glass-modal-content .card {
+    border: 1px solid #cddbf1 !important;
+    border-radius: 14px !important;
+    background: var(--map-surface) !important;
+    box-shadow: var(--map-shadow-card) !important;
+}
+
+.glass-modal-content .card-body {
+    padding: 16px !important;
+    background: var(--map-surface) !important;
+}
+
+.glass-modal-content .btn-check + .btn {
+    min-height: 36px;
+    padding: 8px 12px;
+    border-radius: 9px !important;
+    font-size: 0.73rem;
+    font-weight: 680;
+}
+
+.glass-modal-content button[onclick="enablePickOnMap()"] {
+    min-height: 46px;
+    border: 1px solid var(--map-blue) !important;
+    border-radius: 10px !important;
+    background: var(--map-blue) !important;
+    box-shadow: none !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.02em;
+}
+
+.glass-modal-content .modal-footer {
+    padding: 14px 20px !important;
+    border-top: 1px solid var(--map-line) !important;
+    background: var(--map-surface) !important;
+}
+
+.glass-modal-content .modal-footer .btn {
+    min-height: 42px;
+    padding: 9px 16px;
+    border-radius: 10px !important;
+    font-size: 0.78rem;
+    font-weight: 720;
+    box-shadow: none !important;
+}
+
+.glass-modal-content #btn-guest-rescue-submit {
+    border-color: var(--map-danger) !important;
+    background: var(--map-danger) !important;
+}
+
+.rescue-popup {
+    color: var(--map-text) !important;
+    font-family: Inter, "Segoe UI", sans-serif;
+}
+
+.rescue-popup .btn {
+    min-height: 36px;
+    border-radius: 9px !important;
+    font-size: 0.72rem;
+    font-weight: 680;
+}
+
+/* ---------- Alert banner ---------- */
+.alert-banner {
+    top: 82px !important;
+    left: 50% !important;
+    width: min(680px, calc(100vw - 32px)) !important;
+    color: #7f1d1d !important;
+    border: 1px solid #fecaca !important;
+    border-radius: 14px !important;
+    background: #fff7f7 !important;
+    box-shadow: var(--map-shadow-panel) !important;
+}
+
+.alert-title,
+.alert-message,
+.alert-station {
+    color: #7f1d1d !important;
+}
+
+/* ---------- Mobile bottom navigation ---------- */
+.map-bottom-nav {
+    color: var(--map-muted) !important;
+    border: 1px solid var(--map-line) !important;
+    border-radius: 16px !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.13) !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+.map-bottom-nav button {
+    color: var(--map-muted) !important;
+}
+
+.map-bottom-nav button.active,
+.map-bottom-nav button:hover {
+    color: var(--map-blue) !important;
+    background: var(--map-blue-soft) !important;
+}
+
+/* ---------- Responsive composition ---------- */
+@media (max-width: 1180px) {
+    .detail-sidebar {
+        width: min(400px, calc(100vw - 24px)) !important;
+    }
+
+    .charts-panel {
+        right: 424px !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .top-navbar {
+        top: 8px !important;
+        left: 8px !important;
+        right: 8px !important;
+        height: 56px !important;
+        border-radius: 15px !important;
+    }
+
+    .brand-text span {
+        display: none;
+    }
+
+    .station-list-sidebar,
+    .detail-sidebar,
+    .charts-panel,
+    .gnss-advanced-sidepanel {
+        top: 74px !important;
+        bottom: 82px !important;
+    }
+
+    .station-list-sidebar {
+        left: 8px !important;
+        width: min(350px, calc(100vw - 16px)) !important;
+    }
+
+    .detail-sidebar {
+        right: 8px !important;
+        width: min(430px, calc(100vw - 16px)) !important;
+    }
+
+    .sidebar-close-btn,
+    .sidepanel-close,
+    #close-charts-btn,
+    .detail-header-actions .btn {
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+    }
+
+    .charts-panel {
+        left: 8px !important;
+        right: 8px !important;
+        width: auto !important;
+    }
+
+    .gnss-advanced-sidepanel {
+        right: 8px !important;
+        width: min(600px, calc(100vw - 16px)) !important;
+    }
+
+    .custom-map-controls,
+    .rescue-fab {
+        bottom: 88px !important;
+    }
+
+    .custom-map-controls {
+        display: none !important;
+    }
+
+    .rescue-fab {
+        right: 14px !important;
+    }
+
+    .map-bottom-nav {
+        display: grid !important;
+        left: 8px !important;
+        right: 8px !important;
+        bottom: 8px !important;
+        width: auto !important;
+    }
+}
+
+@media (max-width: 600px) {
+    .top-navbar {
+        padding: 0 9px !important;
+    }
+
+    .top-navbar > .d-flex {
+        gap: 7px !important;
+    }
+
+    .brand-text i,
+    .navbar-hamburger,
+    .top-navbar .btn-link {
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+    }
+
+    .top-navbar .btn-outline-primary {
+        width: 38px;
+        padding: 0 !important;
+        overflow: hidden;
+        font-size: 0 !important;
+    }
+
+    .top-navbar .btn-outline-primary i {
+        margin: 0 !important;
+        font-size: 0.9rem;
+    }
+
+    .layer-toggle-switch {
+        display: none !important;
+    }
+
+    .detail-sidebar .sidebar-content {
+        padding: 10px !important;
+    }
+
+    .sensor-compact {
+        grid-template-columns: 1fr !important;
+    }
+
+    .sensor-item,
+    .sensor-full-width {
+        grid-column: 1 !important;
+    }
+
+    .sensor-item {
+        min-height: 108px !important;
+    }
+
+    #sensor-card-imu {
+        min-height: 250px !important;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr !important;
+    }
+
+    .imu-delta-item {
+        grid-template-columns: 54px minmax(0, 1fr) auto;
+    }
+
+    .charts-panel-header {
+        min-height: 66px !important;
+        padding: 12px !important;
+    }
+
+    .charts-panel-content {
+        padding: 10px !important;
+    }
+
+    .charts-panel .chart-box {
+        padding: 12px !important;
+    }
+
+    .chart-stat-grid {
+        gap: 8px;
+        overflow-x: auto;
+    }
+
+    .rescue-fab {
+        width: 48px !important;
+        padding: 0 !important;
+        justify-content: center;
+        border-radius: 14px !important;
+    }
+
+    .rescue-fab-label {
+        display: none !important;
+    }
+
+    #guestRescueModal .modal-dialog {
+        width: calc(100vw - 16px);
+        height: calc(100dvh - 16px);
+        margin: 8px;
+    }
+
+    .glass-modal-content .modal-body,
+    .glass-modal-content .modal-header,
+    .glass-modal-content .modal-footer {
+        padding-left: 14px !important;
+        padding-right: 14px !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .top-navbar *,
+    .station-list-sidebar *,
+    .detail-sidebar *,
+    .charts-panel *,
+    .gnss-advanced-sidepanel *,
+    .rescue-fab {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+.gnss-cluster-results-list {
+    display: grid;
+    gap: 8px;
+}
+
+.gnss-cluster-result-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #d8e3f1;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.gnss-cluster-result-identity {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    color: #172033;
+}
+
+.gnss-cluster-result-identity span {
+    color: #61708a;
+    font-size: .75rem;
+}
+
+.gnss-cluster-result-downloads {
+    display: flex;
+    gap: 8px;
+}
+
+@media (max-width: 575.98px) {
+    .gnss-cluster-result-row { align-items: stretch; flex-direction: column; }
+    .gnss-cluster-result-downloads .btn { flex: 1; min-height: 44px; }
+}

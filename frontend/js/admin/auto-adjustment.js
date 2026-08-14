@@ -152,6 +152,23 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
             selectedClusters.push(parseInt(cb.value));
         });
 
+        const stationOwner = new Map();
+        const clusterRows = [...document.querySelectorAll('#project-gnss-clusters-container .cluster-row')];
+        for (const clusterIndex of selectedClusters) {
+            const row = clusterRows[clusterIndex];
+            if (!row) continue;
+            const clusterName = row.querySelector('.cluster-name')?.value.trim() || `Cụm ${clusterIndex + 1}`;
+            const stationCodes = [...row.querySelectorAll('.station-checkbox:checked')].map(item => item.value);
+            for (const stationCode of stationCodes) {
+                if (stationOwner.has(stationCode)) {
+                    throw new Error(
+                        `Không thể chạy song song “${stationOwner.get(stationCode)}” và “${clusterName}”: trùng trạm ${stationCode}.`
+                    );
+                }
+                stationOwner.set(stationCode, clusterName);
+            }
+        }
+
         return {
             enabled: true,
             interval_hours: interval,

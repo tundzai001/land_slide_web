@@ -118,33 +118,6 @@ class GNSSOriginResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class MqttConfig(BaseModel):
-    broker: str
-    port: int
-    user: Optional[str] = None
-    password: Optional[str] = None
-    topic_reload_interval: int = 60
-
-class ConfirmationConfig(BaseModel):
-    gnss: int
-    rain: int
-    water: int
-    imu: int
-
-class SaveIntervalsConfig(BaseModel):
-    gnss: int
-    rain: int
-    water: int
-    imu: int
-
-class SystemPasswordCheck(BaseModel):
-    password: str
-
-class SystemConfigPayload(BaseModel):
-    mqtt: MqttConfig
-    confirmation: ConfirmationConfig
-    save_intervals: SaveIntervalsConfig
-
 class NtripRouteStart(BaseModel):
     host: str = next(
         (item.strip() for item in settings.NTRIP_HOSTS.split(",") if item.strip()),

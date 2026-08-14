@@ -11,23 +11,59 @@ class AdminProjectConfigFeature extends window.AdminManager {
         this.currentProjectId = projectId;
         this.projectStationsData = [];
 
-        // 1. Fetch stations belonging to this project
+        const locationText = typeof project.location === 'string'
+            ? project.location
+            : (project.location?.address || project.location?.source || '');
+        document.getElementById('project-config-code').value = project.project_code || '';
+        document.getElementById('project-config-name').value = project.name || '';
+        document.getElementById('project-config-description').value = project.description || '';
+        document.getElementById('project-config-location').value = locationText;
+
+        document.getElementById('projectConfigModalTitle').textContent = `Chỉnh sửa dự án: ${project.name}`;
+        const clustersContainer = document.getElementById('project-gnss-clusters-container');
+        clustersContainer.innerHTML = `
+            <div class="project-config-skeleton" role="status" aria-live="polite">
+                <span class="visually-hidden">Đang tải cấu hình dự án</span>
+                <div class="skeleton-line skeleton-line-title"></div>
+                <div class="skeleton-line"></div>
+                <div class="skeleton-line skeleton-line-short"></div>
+            </div>`;
+
+        if (!this.projectConfigModal) {
+            this.projectConfigModal = new bootstrap.Modal(document.getElementById('projectConfigModal'));
+        }
+        this.projectConfigModal.show();
+
         try {
-            const res = await fetch(`/api/admin/projects/${projectId}/stations`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-            if (res.ok) {
-                this.projectStationsData = await res.json();
-            }
+            this._projectConfigCache ||= new Map();
+            const cached = this._projectConfigCache.get(projectId);
+            const cacheFresh = cached && Date.now() - cached.timestamp < 30000;
+            const stationsPromise = cacheFresh
+                ? Promise.resolve(cached.stations)
+                : fetch(`/api/admin/projects/${projectId}/stations?include_runtime=false`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                }).then(async res => {
+                    if (!res.ok) throw new Error('Không thể tải danh sách trạm');
+                    const stations = await res.json();
+                    this._projectConfigCache.set(projectId, { stations, timestamp: Date.now() });
+                    return stations;
+                });
+
+            const [stations] = await Promise.all([stationsPromise, this.fetchCorsStations()]);
+            if (this.currentProjectId !== projectId) return;
+            this.projectStationsData = stations;
         } catch (e) {
             console.error('Error fetching project stations:', e);
+            clustersContainer.innerHTML = `
+                <div class="project-config-error" role="alert">
+                    <i class="bi bi-exclamation-circle"></i>
+                    <div><strong>Không tải được cấu hình.</strong><span>${e.message}</span></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="window.adminManager.openProjectConfigModal(${projectId})">Thử lại</button>
+                </div>`;
+            return;
         }
-        // 2. Auto load CORS stations
-        await this.fetchCorsStations();
 
-        // 3. Populate Clusters
         const clusters = project.gnss_clusters || [];
-        const clustersContainer = document.getElementById('project-gnss-clusters-container');
         clustersContainer.innerHTML = '';
         
         if (clusters.length === 0) {
@@ -36,14 +72,6 @@ class AdminProjectConfigFeature extends window.AdminManager {
             clusters.forEach(c => this.addClusterRow(clustersContainer, c.name, c.description, c.base_station, c.stations, c.base_stream, c));
         }
 
-        document.getElementById('projectConfigModalTitle').textContent = `Cấu hình dự án: ${project.name}`;
-        
-        if (!this.projectConfigModal) {
-            this.projectConfigModal = new bootstrap.Modal(document.getElementById('projectConfigModal'));
-        }
-        this.projectConfigModal.show();
-
-        // 4. Load Auto-Adjustment config
         if (typeof this.loadAutoAdjustmentConfig === 'function') {
             this.loadAutoAdjustmentConfig(project);
         }
@@ -343,6 +371,16 @@ class AdminProjectConfigFeature extends window.AdminManager {
         const projectId = this.currentProjectId;
         if (!projectId) return;
 
+        const projectCode = document.getElementById('project-config-code')?.value.trim() || '';
+        const projectName = document.getElementById('project-config-name')?.value.trim() || '';
+        const projectDescription = document.getElementById('project-config-description')?.value.trim() || '';
+        const projectLocation = document.getElementById('project-config-location')?.value.trim() || '';
+        if (!projectCode || !projectName) {
+            window.toast?.error('Mã dự án và tên dự án không được để trống');
+            document.getElementById(!projectCode ? 'project-config-code' : 'project-config-name')?.focus();
+            return;
+        }
+
         // Collect Clusters
         const clusters = [];
         let clusterConfigError = '';
@@ -420,14 +458,21 @@ class AdminProjectConfigFeature extends window.AdminManager {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
+                    project_code: projectCode,
+                    name: projectName,
+                    description: projectDescription || null,
+                    location: projectLocation || null,
                     gnss_clusters: clusters,
                     auto_adjustment_config: typeof this.collectAutoAdjustmentConfig === 'function' ? this.collectAutoAdjustmentConfig() : undefined
                 })
             });
 
-            if (!res.ok) throw new Error('Lỗi lưu cấu hình dự án');
+            if (!res.ok) {
+                const error = await res.json().catch(() => ({}));
+                throw new Error(error.detail || 'Lỗi lưu cấu hình dự án');
+            }
 
-            window.toast?.success('✅ Đã lưu cấu hình dự án!');
+            window.toast?.success('Đã lưu thay đổi dự án');
             this.projectConfigModal.hide();
             await this.loadProjects();
         } catch (e) {

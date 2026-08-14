@@ -17,10 +17,12 @@ from ..models import config as model_config
 from ..models import data as model_data
 from ..models.pi_device import PiDevice
 from ..runtime import analyzer, mqtt_service
+from ..services.gnss_risk import map_gnss_daily_risk
 from ..services.gnss_rollup import _utc_day_start
 from ..services.access import get_optional_current_user_from_request, user_project_filter_ids
 from ..services.station_policy import check_operator_project_access, get_offline_threshold
 from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
+from ..services.mqtt_topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_mqtt_topic
 
 router = APIRouter(tags=["Stations"])
 logger = logging.getLogger(__name__)
@@ -229,6 +231,7 @@ async def get_stations_by_project(
     offset: Optional[int] = None,
     limit: Optional[int] = None,
     sort: Optional[str] = None,
+    include_runtime: bool = Query(True),
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.get_current_user)
@@ -248,9 +251,20 @@ async def get_stations_by_project(
         stmt = stmt.order_by(column.desc() if sort.startswith("-") else column.asc())
     result = await db_config.execute(stmt)
     stations = result.scalars().all()
-    devices_by_station, latest_by_key, _alerts_by_station = await _load_station_runtime_maps(
-        stations, db_config, db_data
-    )
+    if include_runtime:
+        devices_by_station, latest_by_key, _alerts_by_station = await _load_station_runtime_maps(
+            stations, db_config, db_data
+        )
+    else:
+        station_ids = [int(station.id) for station in stations]
+        devices_by_station = defaultdict(list)
+        if station_ids:
+            device_result = await db_config.execute(
+                select(model_config.Device).where(model_config.Device.station_id.in_(station_ids))
+            )
+            for device in device_result.scalars().all():
+                devices_by_station[int(device.station_id)].append(device)
+        latest_by_key = {}
 
     # Tính status động cho từng trạm
     current_time = int(time.time())
@@ -275,7 +289,9 @@ async def get_stations_by_project(
                 break
 
         offline_display_enabled = is_offline_display_enabled(station.config)
-        computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
+        computed_status = (
+            "online" if station_online else ("stale" if offline_display_enabled else "offline")
+        ) if include_runtime else str(station.status or "offline")
 
         devices_list = []
         for d in devices:
@@ -306,6 +322,26 @@ async def get_stations_by_project(
     set_pagination_headers(response, total=len(stations_with_status), offset=page_offset, limit=page_limit)
     return slice_rows(stations_with_status, page_offset, page_limit)
 
+
+@router.get("/api/admin/devices/topic-availability")
+async def get_mqtt_topic_availability(
+    topic: str = Query(..., min_length=1, max_length=255),
+    exclude_station_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+):
+    normalized = normalize_mqtt_topic(topic)
+    conflicts = await find_mqtt_topic_conflicts(db, [normalized], exclude_station_id)
+    conflict = conflicts[0] if conflicts else None
+    return {
+        "topic": normalized,
+        "available": conflict is None,
+        "conflict": None if conflict is None else {
+            "device_code": conflict.device_code,
+            "station_id": conflict.station_id,
+        },
+    }
+
 @router.post("/api/admin/projects/{project_id}/stations", response_model=schemas.StationResponse)
 async def create_station_in_project(
     project_id: int,
@@ -320,6 +356,22 @@ async def create_station_in_project(
         exist = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_data.station_code))
         if exist.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Mã trạm đã tồn tại")
+
+        requested_topics = [
+            normalize_mqtt_topic(info.get("topic"))
+            for info in (station_data.sensors or {}).values()
+            if isinstance(info, dict) and normalize_mqtt_topic(info.get("topic"))
+        ]
+        duplicates = duplicate_mqtt_topics(requested_topics)
+        if duplicates:
+            raise HTTPException(status_code=409, detail=f"MQTT topic bị trùng trong form: {', '.join(duplicates)}")
+        conflicts = await find_mqtt_topic_conflicts(db, requested_topics)
+        if conflicts:
+            conflict = conflicts[0]
+            raise HTTPException(
+                status_code=409,
+                detail=f"MQTT topic '{conflict.mqtt_topic}' đã được dùng bởi thiết bị {conflict.device_code}",
+            )
 
         # 2. TỰ ĐỘNG TÍNH TOẠ ĐỘ TRẠM
         final_location = calculate_station_location(station_data.sensors, station_data.location)
@@ -358,6 +410,9 @@ async def create_station_in_project(
         await db.commit()
         await db.refresh(new_station)
         return new_station
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Error creating station: {e}")
@@ -1030,7 +1085,7 @@ async def get_long_term_analysis(
             )
 
             trend = _trend_from_velocity_series([float(r.velocity_mm_day or 0.0) for r in rows])
-            derived_risk = _map_gnss_daily_risk(classification)
+            derived_risk = map_gnss_daily_risk(classification)
             max_row_risk = "LOW"
             for r in rows:
                 row_risk = str(r.risk_level or "LOW").upper()

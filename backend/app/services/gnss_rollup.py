@@ -10,22 +10,12 @@ from .. import config
 from ..database import DataSessionLocal
 from ..models import data as model_data
 from ..runtime import analyzer
+from .gnss_risk import map_gnss_daily_risk
 
 logger = logging.getLogger(__name__)
 
 def _utc_day_start(ts: int) -> int:
     return (int(ts) // 86400) * 86400
-
-
-def _map_gnss_daily_risk(classification: str) -> str:
-    cls_upper = str(classification or "").upper()
-    if any(c in cls_upper for c in ("EXTREMELY RAPID", "VERY RAPID", "RAPID")):
-        return "CRITICAL"
-    if "MODERATE" in cls_upper:
-        return "HIGH"
-    if "SLOW" in cls_upper:
-        return "MEDIUM"
-    return "LOW"
 
 
 async def _upsert_gnss_weekly_summary(station_id: int, ending_day_start_ts: int):
@@ -68,7 +58,7 @@ async def _upsert_gnss_weekly_summary(station_id: int, ending_day_start_ts: int)
             vel_mm_year,
             {}
         )
-        risk_level = _map_gnss_daily_risk(classification)
+        risk_level = map_gnss_daily_risk(classification)
         is_safe = risk_level in ("LOW", "MEDIUM")
 
         existing_res = await db_data.execute(
@@ -175,7 +165,7 @@ async def _finalize_gnss_station_day(station_id: int, day_start_ts: int, purge_r
                     velocity_mm_year,
                     {}
                 )
-                risk_level = _map_gnss_daily_risk(classification)
+                risk_level = map_gnss_daily_risk(classification)
                 is_safe = risk_level in ("LOW", "MEDIUM")
                 status = "success"
                 message = "Daily summary computed from raw GNSS records."
@@ -262,5 +252,4 @@ async def run_gnss_daily_rollup_daemon():
         except Exception as e:
             logger.error(f"❌ GNSS rollup daemon error: {e}", exc_info=True)
             await asyncio.sleep(30)
-
 

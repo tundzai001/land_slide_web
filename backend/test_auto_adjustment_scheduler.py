@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 import json
 import tempfile
@@ -54,6 +55,7 @@ class AutoAdjustmentSchedulerTests(unittest.IsolatedAsyncioTestCase):
                 return_value=_ConfigSession(project),
             ),
             patch.object(scheduler_service, "_start_normal_adjustment", start_adjustment),
+            patch.object(scheduler_service, "write_adjustment_run_status"),
         ):
             await scheduler_service.run_scheduled_adjustment(project.id)
 
@@ -61,6 +63,63 @@ class AutoAdjustmentSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(start_adjustment.await_args.args[0], project.id)
         self.assertEqual(start_adjustment.await_args.args[1], [["Dap4_2", "Dap4_1"]])
         self.assertIs(start_adjustment.await_args.args[2].project, project)
+        self.assertEqual(start_adjustment.await_args.kwargs["run_id"], -12002)
+        self.assertEqual(start_adjustment.await_args.kwargs["cluster_index"], 1)
+
+    async def test_selected_clusters_start_as_independent_parallel_runs(self):
+        project = SimpleNamespace(
+            id=3,
+            project_code="Sin_Quyen_2026",
+            auto_adjustment_config={"enabled": True, "selected_clusters": [0, 1]},
+            gnss_clusters=[
+                {"name": "Đập 1", "stations": [1, 2, 3]},
+                {"name": "Đập 4", "stations": [4, 5]},
+            ],
+        )
+        active_calls = 0
+        max_active_calls = 0
+
+        async def start_cluster(*_args, **_kwargs):
+            nonlocal active_calls, max_active_calls
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            await asyncio.sleep(0)
+            active_calls -= 1
+            return {"phase": "COLLECTING_BASELINE"}
+
+        with (
+            patch.object(
+                scheduler_service,
+                "ConfigSessionLocal",
+                return_value=_ConfigSession(project),
+            ),
+            patch.object(
+                scheduler_service,
+                "_start_normal_adjustment",
+                AsyncMock(side_effect=start_cluster),
+            ) as start_adjustment,
+            patch.object(
+                scheduler_service,
+                "write_adjustment_run_status",
+            ) as write_status,
+        ):
+            await scheduler_service.run_scheduled_adjustment(project.id)
+
+        self.assertEqual(start_adjustment.await_count, 2)
+        self.assertEqual(max_active_calls, 2)
+        self.assertEqual(
+            {call.kwargs["run_id"] for call in start_adjustment.await_args_list},
+            {-3001, -3002},
+        )
+        starting_calls = [
+            call for call in write_status.call_args_list
+            if call.kwargs["phase"] == "STARTING"
+        ]
+        self.assertEqual(len(starting_calls), 2)
+        self.assertEqual(
+            {call.kwargs["cluster_name"] for call in starting_calls},
+            {cluster["name"] for cluster in project.gnss_clusters},
+        )
 
     async def test_scheduled_start_failure_is_persisted_without_escaping_job(self):
         project = SimpleNamespace(
@@ -86,15 +145,17 @@ class AutoAdjustmentSchedulerTests(unittest.IsolatedAsyncioTestCase):
                     "_start_normal_adjustment",
                     AsyncMock(side_effect=RuntimeError("receiver did not enter rover mode")),
                 ),
+                patch.object(scheduler_service, "write_adjustment_run_status"),
             ):
                 await scheduler_service.run_scheduled_adjustment(project.id)
-                reports = list(Path(temp_dir).glob("gnss_adjustment_3_*.json"))
+                reports = list(Path(temp_dir).rglob("gnss_adjustment_*.json"))
                 self.assertEqual(len(reports), 1)
                 payload = json.loads(reports[0].read_text(encoding="utf-8"))
 
         self.assertEqual(payload["status"], "failed")
         self.assertEqual(payload["source"], "automatic_scheduler")
         self.assertEqual(payload["project_id"], project.id)
+        self.assertEqual(payload["cluster_name"], "dam")
         self.assertEqual(payload["context"]["stage"], "start_adjustment")
         self.assertIn("receiver did not enter rover mode", payload["error"]["message"])
 

@@ -42,11 +42,12 @@ const groups = {
   'map.min.css': [
     'css/map/base.css', 'css/map/station-panels.css', 'css/map/analysis.css',
     'css/map/effects-theme.css', 'css/map/tools.css', 'css/map/gnss.css',
-    'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css'
+    'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css',
+    'css/map/premium-light.css'
   ],
   'admin.min.css': [
-    'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/system-settings.css',
-    'css/admin/pi-wizard.css', 'css/admin-responsive.css'
+    'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/configuration.css',
+    'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/premium-light.css'
   ],
   'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js'],
   'map-app.min.js': [
@@ -69,7 +70,7 @@ const groups = {
     'js/admin/velocity.js', 'js/admin/origin.js', 'js/admin/provisioning.js',
     'js/admin/users.js', 'js/admin/pi-devices.js', 'js/admin/pi-center.js',
     'js/admin/auto-adjustment.js',
-    'js/admin/lifecycle.js', 'js/admin/bootstrap.js', 'js/db-manager.js', 'js/system-manager.js'
+    'js/admin/lifecycle.js', 'js/admin/bootstrap.js', 'js/db-manager.js'
   ]
 };
 
@@ -110,12 +111,26 @@ async function minify(outputName, files) {
   await writeFile(path.join(outputRoot, outputName), transformed.code, 'utf8');
 }
 
+async function buildLanding() {
+  const sessionSource = await readFile(path.join(frontendRoot, 'js/session-state.js'), 'utf8');
+  const jsxSource = await readFile(path.join(frontendRoot, 'js/landing.jsx'), 'utf8');
+  const transformed = await esbuild.transform(`${sessionSource}\n;\n${jsxSource}`, {
+    loader: 'jsx',
+    target: 'es2019',
+    minify: true,
+    minifyIdentifiers: false,
+    legalComments: 'none',
+    charset: 'utf8',
+  });
+  await writeFile(path.join(outputRoot, 'landing.min.js'), transformed.code, 'utf8');
+}
+
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
 
 await Promise.all(Object.entries(groups).map(([name, files]) => minify(name, files)));
 await Promise.all([
-  minify('landing.min.js', ['js/session-state.js', 'js/landing.js']),
+  buildLanding(),
   minify('app-runtime.min.js', ['js/session-state.js', 'js/app-runtime.js'])
 ]);
 

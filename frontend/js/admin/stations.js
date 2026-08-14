@@ -57,53 +57,49 @@ class AdminStationsFeature extends window.AdminManager {
         }
 
         container.innerHTML = `
-            <div class="row g-3">
+            <div class="row g-4 management-station-grid">
                 ${this.stationsData.map(s => {
                     const alertingDisabled = (s.config?.alerting?.enabled === false) || s.config?.alerting_enabled === false;
                     const offlineDisplayEnabled = (s.config?.offline_display?.enabled === true) || s.config?.offline_display_enabled === true;
                     const statusAccent = s.status === 'online' ? 'success' : (s.status === 'stale' ? 'warning' : 'secondary');
                     return `
-                    <div class="col-md-6">
-                        <div class="card hover-lift station-card">
-                            <div class="card-body position-relative" style="z-index: 2;">
+                    <div class="col-md-6 col-xl-4">
+                        <article class="card station-card management-station-card h-100">
+                            <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <div>
-                                        <h6 class="mb-1 fw-bold neon-text" style="color: var(--accent-${statusAccent})">
-                                            <i class="bi bi-broadcast-pin me-2"></i>
-                                            ${s.name}
-                                        </h6>
-                                        <small class="text-muted font-monospace">${s.station_code}</small>
-                                        ${alertingDisabled ? '<span class="badge bg-warning text-dark ms-2">Không cảnh báo</span>' : ''}
-                                        ${offlineDisplayEnabled ? '<span class="badge bg-info text-dark ms-2">Offline giám sát</span>' : ''}
+                                    <div class="d-flex gap-3 min-w-0">
+                                        <span class="station-icon is-${statusAccent}" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></span>
+                                        <div class="min-w-0">
+                                            <h6 class="mb-1 fw-bold text-truncate">${s.name}</h6>
+                                            <small class="project-code">${s.station_code}</small>
+                                        </div>
                                     </div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <span class="status-dot ${s.status === 'online' ? 'pulsing' : ''}"
-                                              style="background-color: var(--accent-${statusAccent})"></span>
-                                        <span class="small font-monospace text-uppercase" style="color: var(--accent-${statusAccent})">
-                                            ${s.status || 'OFFLINE'}
-                                        </span>
-                                    </div>
+                                    <span class="management-status is-${statusAccent}"><i class="bi bi-circle-fill" aria-hidden="true"></i>${s.status || 'offline'}</span>
+                                </div>
+                                <div class="station-tags">
+                                    ${alertingDisabled ? '<span class="station-tag is-warning"><i class="bi bi-bell-slash"></i> Không cảnh báo</span>' : ''}
+                                    ${offlineDisplayEnabled ? '<span class="station-tag is-info"><i class="bi bi-eye"></i> Theo dõi offline</span>' : ''}
                                 </div>
                                 ${s.location ? `
-                                    <div class="text-muted small mb-2 font-monospace">
-                                        <i class="bi bi-geo-alt me-1"></i>
-                                        LAT: ${s.location.lat?.toFixed(6)} | LON: ${s.location.lon?.toFixed(6)}
+                                    <div class="station-coordinate">
+                                        <i class="bi bi-geo-alt" aria-hidden="true"></i>
+                                        <span>${s.location.lat?.toFixed(6)}, ${s.location.lon?.toFixed(6)}</span>
                                     </div>
                                 ` : ''}
 
 
                             </div>
-                            <div class="card-footer bg-transparent border-top-0 position-relative" style="z-index: 2;">
+                            <div class="card-footer">
                                 <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-outline-primary flex-1" onclick="window.adminManager.editStation(${s.id})">
-                                        <i class="bi bi-pencil me-1"></i> CONFIGURE
+                                    <button class="btn btn-sm btn-primary flex-grow-1" onclick="window.adminManager.editStation(${s.id})">
+                                        <i class="bi bi-sliders me-1"></i> Cấu hình
                                     </button>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteStation(${s.id})">
+                                    <button class="btn btn-sm btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteStation(${s.id})" aria-label="Xóa trạm ${s.name}" title="Xóa trạm">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </div>
                             </div>
-                        </div>
+                        </article>
                     </div>
                 `;
                 }).join('')

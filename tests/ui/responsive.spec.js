@@ -9,15 +9,27 @@ const gnssPanelCss = [
   'frontend/css/map/base.css',
   'frontend/css/map/gnss.css',
   'frontend/css/map-responsive.css',
+  'frontend/css/map/premium-light.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
 const autoAdjustmentCss = [
   'frontend/css/theme-variables.css',
   'frontend/css/components.css',
   'frontend/css/admin/base.css',
-  'frontend/css/admin/system-settings.css',
+  'frontend/css/admin/configuration.css',
   'frontend/css/admin/pi-wizard.css',
   'frontend/css/admin-responsive.css',
+  'frontend/css/admin/premium-light.css',
+].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
+
+const mapControlsCss = [
+  'frontend/css/theme-variables.css',
+  'frontend/css/map/base.css',
+  'frontend/css/map/station-panels.css',
+  'frontend/css/map/tools.css',
+  'frontend/css/rescue-markers.css',
+  'frontend/css/map-responsive.css',
+  'frontend/css/map/premium-light.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
 const viewports = [
@@ -64,7 +76,7 @@ for (const viewport of viewports) {
   test(`landing responsive ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.goto('/');
-    await expect(page.locator('h1')).toContainText('Cảnh báo sạt lở');
+    await expect(page.locator('h1')).toContainText('Nhìn thấy chuyển động');
     await assertViewportContract(page);
     await expect(page).toHaveScreenshot(`landing-${viewport.name}-${testInfo.project.name}.png`, { fullPage: true });
   });
@@ -306,6 +318,81 @@ test('mobile chart workspace replaces detail sheet without overflow', async ({ p
   expect(geometry.bottom).toBeLessThanOrEqual(782);
   expect(geometry.overflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: 'test-results/map-layout-mobile.png' });
+});
+
+test('rescue request surface is light, readable and viewport-bound', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installLocalMapAssets(page);
+  await page.goto(mapPath);
+  await expect(page.locator('#map')).toBeVisible({ timeout: 30_000 });
+  await page.locator('#btn-guest-rescue').click();
+
+  const modal = page.locator('#guestRescueModal .modal-content');
+  await expect(modal).toBeVisible();
+  const contract = await modal.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const bodyStyle = getComputedStyle(element.querySelector('.modal-body'));
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      pageOverflow: document.documentElement.scrollWidth - innerWidth,
+      surface: style.backgroundColor,
+      bodySurface: bodyStyle.backgroundColor,
+    };
+  });
+  expect(contract.left).toBeGreaterThanOrEqual(8);
+  expect(contract.right).toBeLessThanOrEqual(390);
+  expect(contract.top).toBeGreaterThanOrEqual(0);
+  expect(contract.bottom).toBeLessThanOrEqual(844);
+  expect(contract.pageOverflow).toBeLessThanOrEqual(1);
+  expect(contract.surface).toBe('rgb(255, 255, 255)');
+  expect(contract.bodySurface).toBe('rgb(247, 249, 252)');
+  await page.screenshot({ path: 'test-results/map-rescue-mobile.png' });
+});
+
+test('desktop map controls remain stable, separated and readable', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.setContent(`<!doctype html><html data-theme="light" data-app-view="map"><head><style>${mapControlsCss}</style></head><body>
+    <nav class="top-navbar"><div></div><div><button id="auth-btn" class="btn btn-primary"><i></i><span>admin</span></button></div></nav>
+    <aside class="station-list-sidebar"><button class="sidebar-close-tab" aria-label="Thu gọn"><i></i></button></aside>
+    <div class="custom-map-controls">
+      <div class="heatmap-toggle-wrap"><button class="heatmap-toggle-btn" id="heatmap-toggle" aria-label="Heatmap"><i></i></button></div>
+      <span class="map-control-divider"></span>
+      <button class="map-ctrl-btn" id="map-zoom-in" aria-label="Phóng to"></button>
+      <button class="map-ctrl-btn" id="map-zoom-out" aria-label="Thu nhỏ"></button>
+    </div>
+    <button class="rescue-fab" id="btn-guest-rescue"><span class="rescue-fab-icon"></span><span class="rescue-fab-label">Yêu cầu cứu hộ</span></button>
+  </body></html>`);
+
+  const closeTab = page.locator('.sidebar-close-tab');
+  const beforeHover = await closeTab.boundingBox();
+  await closeTab.hover();
+  const afterHover = await closeTab.boundingBox();
+  expect(Math.abs(afterHover.y - beforeHover.y)).toBeLessThanOrEqual(0.5);
+  expect(afterHover.width).toBe(beforeHover.width);
+
+  const geometry = await page.evaluate(() => {
+    const rail = document.querySelector('.custom-map-controls').getBoundingClientRect();
+    const heat = document.querySelector('#heatmap-toggle').getBoundingClientRect();
+    const zoom = document.querySelector('#map-zoom-in').getBoundingClientRect();
+    const rescue = document.querySelector('#btn-guest-rescue').getBoundingClientRect();
+    const authStyle = getComputedStyle(document.querySelector('#auth-btn'));
+    return {
+      heatInsideRail: heat.top >= rail.top && heat.bottom <= rail.bottom,
+      heatZoomGap: zoom.top - heat.bottom,
+      railRescueGap: rail.top >= rescue.bottom ? rail.top - rescue.bottom : rescue.top - rail.bottom,
+      authColor: authStyle.color,
+      authBackground: authStyle.backgroundColor,
+    };
+  });
+  expect(geometry.heatInsideRail).toBe(true);
+  expect(geometry.heatZoomGap).toBeGreaterThanOrEqual(4);
+  expect(geometry.railRescueGap).toBeGreaterThanOrEqual(12);
+  expect(geometry.authColor).toBe('rgb(255, 255, 255)');
+  expect(geometry.authBackground).toBe('rgb(37, 99, 235)');
 });
 
 for (const viewport of viewports) {

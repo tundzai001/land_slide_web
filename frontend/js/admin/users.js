@@ -53,28 +53,27 @@ class AdminUsersFeature extends window.AdminManager {
             }
 
             return `
-            <tr class="glass-row">
+            <tr class="management-table-row">
                 <td class="font-monospace text-muted">#${u.id}</td>
-                <td><strong class="text-primary">${u.username}</strong></td>
-                <td class="text-white">${u.full_name || '--'}</td>
+                <td><strong class="management-primary-text">${u.username}</strong></td>
+                <td>${u.full_name || '--'}</td>
                 <td>${roleBadge(u.role)}${projectBadges}</td>
                 <td>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="status-dot ${u.is_active ? 'pulsing' : ''}"
-                              style="background-color: var(--accent-${u.is_active ? 'success' : 'secondary'})"></span>
-                        <span class="small font-monospace" style="color: var(--accent-${u.is_active ? 'success' : 'secondary'})">
-                            ${u.is_active ? 'ACTIVE' : 'LOCKED'}
+                        <span class="management-status ${u.is_active ? 'is-active' : 'is-locked'}">
+                            <i class="bi bi-${u.is_active ? 'check-circle' : 'lock'}" aria-hidden="true"></i>
+                            ${u.is_active ? 'Hoạt động' : 'Đã khóa'}
                         </span>
                     </div>
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        ${(u.role === 'operator' || u.role === 'viewer') ? `<button class="btn btn-outline-info" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="Gán dự án"><i class="bi bi-folder-plus"></i></button>` : ''}
+                        ${(u.role === 'operator' || u.role === 'viewer') ? `<button class="btn btn-outline-primary management-icon-btn" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="Gán dự án" aria-label="Gán dự án cho ${u.username}"><i class="bi bi-folder-plus"></i></button>` : ''}
                         ${u.username === 'admin' ? '' : `
-                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'}" onclick="window.adminManager.toggleUserStatus(${u.id}, '${u.username}', ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}">
+                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, '${u.username}', ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}" aria-label="${u.is_active ? 'Khóa' : 'Mở khóa'} ${u.username}">
                             <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
                         </button>
-                        <button class="btn btn-outline-danger" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')" title="Xóa tài khoản">
+                        <button class="btn btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')" title="Xóa tài khoản" aria-label="Xóa ${u.username}">
                             <i class="bi bi-trash"></i>
                         </button>
                         `}

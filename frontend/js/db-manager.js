@@ -355,8 +355,8 @@ class DatabaseManager {
         if (closeButton) closeButton.disabled = false;
         
         // Nạp danh sách Project
-        this.setExportSelectLoading('export-project-select', 'Dang tai danh sach du an...');
-        this.setExportSelectLoading('export-station-select', 'Chon du an de tai tram...');
+        this.setExportSelectLoading('export-project-select', 'Đang tải danh sách dự án...');
+        this.setExportSelectLoading('export-station-select', 'Chọn dự án để tải trạm...');
         
         modal.show();
 
@@ -437,7 +437,7 @@ class DatabaseManager {
                 : await this.fetchJson('/api/admin/projects');
             this.exportProjects = Array.isArray(projects) ? projects : [];
 
-            let html = '<option value="all">-- Tat ca Du an --</option>';
+            let html = '<option value="all">-- Tất cả Dự án --</option>';
             this.exportProjects.forEach(p => {
                 html += `<option value="${p.id}">${this.escapeHtml(p.project_code)} - ${this.escapeHtml(p.name || '')}</option>`;
             });
@@ -447,10 +447,10 @@ class DatabaseManager {
             await this.onExportProjectChange();
         } catch (e) {
             console.error('Error loading export projects:', e);
-            select.innerHTML = '<option value="all">Khong tai duoc danh sach du an</option>';
+            select.innerHTML = '<option value="all">Không tải được danh sách dự án</option>';
             select.disabled = true;
-            this.setExportSelectLoading('export-station-select', 'Khong tai duoc danh sach tram');
-            window.toast?.error('Khong the tai danh sach du an/tram de export');
+            this.setExportSelectLoading('export-station-select', 'Không tải được danh sách trạm');
+            window.toast?.error('Không thể tải danh sách dự án/trạm để xuất dữ liệu');
         }
     }
 
@@ -461,7 +461,7 @@ class DatabaseManager {
 
         const projectId = pSelect.value;
         const requestSeq = ++this.exportStationRequestSeq;
-        this.setExportSelectLoading('export-station-select', 'Dang tai danh sach tram...');
+        this.setExportSelectLoading('export-station-select', 'Đang tải danh sách trạm...');
 
         try {
             const stations = projectId && projectId !== 'all'
@@ -471,7 +471,7 @@ class DatabaseManager {
             if (requestSeq !== this.exportStationRequestSeq) return;
 
             this.exportStations = Array.isArray(stations) ? stations : [];
-            let html = '<option value="all">-- Tat ca Tram --</option>';
+            let html = '<option value="all">-- Tất cả Trạm --</option>';
             this.exportStations.forEach(s => {
                 html += `<option value="${s.id}">${this.escapeHtml(s.station_code)} - ${this.escapeHtml(s.name || s.station_name || '')}</option>`;
             });
@@ -480,9 +480,9 @@ class DatabaseManager {
         } catch (e) {
             console.error('Error loading export stations:', e);
             if (requestSeq !== this.exportStationRequestSeq) return;
-            sSelect.innerHTML = '<option value="all">Khong tai duoc danh sach tram</option>';
+            sSelect.innerHTML = '<option value="all">Không tải được danh sách trạm</option>';
             sSelect.disabled = true;
-            window.toast?.error('Khong the tai danh sach tram cho export');
+            window.toast?.error('Không thể tải danh sách trạm để xuất dữ liệu');
         }
     }
 
@@ -721,9 +721,17 @@ class DatabaseManager {
         // Reset input and error UI if modal exists
         const input = document.getElementById('clear-db-confirm-input');
         const error = document.getElementById('clear-db-error');
+        const submit = document.getElementById('clear-db-submit');
 
         if (input) input.value = '';
         if (error) error.style.display = 'none';
+        if (submit) submit.disabled = true;
+        document.querySelectorAll('#clearDatabaseModal .clear-db-option').forEach(option => option.classList.remove('is-selected'));
+
+        if (input && input.dataset.validationBound !== 'true') {
+            input.dataset.validationBound = 'true';
+            input.addEventListener('input', () => this.syncClearDatabaseConfirmation());
+        }
 
         const modalEl = document.getElementById('clearDatabaseModal');
         if (modalEl) {
@@ -741,6 +749,20 @@ class DatabaseManager {
         }
     }
 
+    syncClearDatabaseConfirmation() {
+        const input = document.getElementById('clear-db-confirm-input');
+        const submit = document.getElementById('clear-db-submit');
+        const error = document.getElementById('clear-db-error');
+        const value = input?.value.trim() || '';
+        const valid = value === 'XOA DATA' || value === 'FACTORY RESET';
+        if (submit) submit.disabled = !valid;
+        if (error) error.style.display = 'none';
+        input?.classList.toggle('is-valid', valid);
+        input?.classList.toggle('is-invalid', value.length > 0 && !valid);
+        document.querySelector('#clearDatabaseModal .is-data-only')?.classList.toggle('is-selected', value === 'XOA DATA');
+        document.querySelector('#clearDatabaseModal .is-factory-reset')?.classList.toggle('is-selected', value === 'FACTORY RESET');
+    }
+
     async confirmClearDatabase() {
         const input = document.getElementById('clear-db-confirm-input');
         const confirmText = input?.value.trim();
@@ -756,11 +778,19 @@ class DatabaseManager {
             apiEndpoint = '/api/admin/db/factory-reset';
         }
         else {
-            window.toast?.warning('⚠️ Cú pháp sai! Nhập "XOA DATA" hoặc "FACTORY RESET"');
+            const error = document.getElementById('clear-db-error');
+            if (error) error.style.display = 'flex';
+            input?.classList.add('is-invalid');
+            input?.focus();
             return;
         }
 
         try {
+            const submit = document.getElementById('clear-db-submit');
+            if (submit) {
+                submit.disabled = true;
+                submit.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Đang xử lý';
+            }
             const modal = bootstrap.Modal.getInstance(document.getElementById('clearDatabaseModal'));
             if (modal) modal.hide();
 
@@ -781,6 +811,10 @@ class DatabaseManager {
         } catch (e) {
             console.error(e);
             window.toast?.error('Lỗi: ' + e.message);
+        } finally {
+            const submit = document.getElementById('clear-db-submit');
+            if (submit) submit.innerHTML = '<i class="bi bi-trash3 me-1" aria-hidden="true"></i> Xác nhận xóa';
+            this.syncClearDatabaseConfirmation();
         }
     }
 

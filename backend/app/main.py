@@ -177,26 +177,27 @@ async def lifespan(app: FastAPI):
                         "No admin user exists; set BOOTSTRAP_ADMIN_PASSWORD once to create it"
                     )
 
+        # System Access was retired: purge browser-managed credentials and
+        # global runtime overrides left by older deployments. Server settings
+        # are now sourced only from the deployment environment.
         async with asyncio.timeout(10):
             async with ConfigSessionLocal() as db_config:
+                legacy_keys = {
+                    "system_password",
+                    "main_config",
+                    "confirmation_config",
+                    "save_intervals_config",
+                }
                 result = await db_config.execute(
-                    select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "system_password")
-                )
-                sys_pass_config = result.scalar_one_or_none()
-
-                if not sys_pass_config and config.settings.BOOTSTRAP_SYSTEM_PASSWORD:
-                    new_config = model_config.GlobalConfig(
-                        key="system_password",
-                        value=config.settings.BOOTSTRAP_SYSTEM_PASSWORD,
-                        updated_at=int(time.time()),
-                        updated_by="system_init"
+                    delete(model_config.GlobalConfig).where(
+                        model_config.GlobalConfig.key.in_(legacy_keys)
                     )
-                    db_config.add(new_config)
-                    await db_config.commit()
-                    logger.info("Bootstrap system password created")
-                elif not sys_pass_config:
+                )
+                await db_config.commit()
+                if result.rowcount:
                     logger.warning(
-                        "No system password exists; set BOOTSTRAP_SYSTEM_PASSWORD once to create it"
+                        "Removed %s retired System Access configuration record(s)",
+                        result.rowcount,
                     )
 
         mqtt_service.start()
@@ -229,10 +230,13 @@ async def lifespan(app: FastAPI):
             cors_failover_task.cancel()
             with suppress(asyncio.CancelledError):
                 await cors_failover_task
+        # Stop MQTT producers and await their DB work before disposing pools.
+        # Otherwise Paho callbacks can enqueue writes into closing asyncpg
+        # connections and leave unobserved Future exceptions behind.
+        await mqtt_service.stop()
         await auth_engine.dispose()
         await config_engine.dispose()
         await data_engine.dispose()
-        mqtt_service.stop()
         logger.info("✅ Shutdown complete")
 
 # ============================================================================

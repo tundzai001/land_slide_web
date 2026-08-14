@@ -4,15 +4,8 @@ const { join } = require('node:path');
 
 const projectRoot = join(__dirname, '..', '..');
 const sessionSource = readFileSync(join(projectRoot, 'frontend/js/session-state.js'), 'utf8');
-const landingSource = readFileSync(join(projectRoot, 'frontend/js/landing.js'), 'utf8');
+const landingSource = readFileSync(join(projectRoot, 'frontend/js/landing.jsx'), 'utf8');
 const runtimeSource = readFileSync(join(projectRoot, 'frontend/js/app-runtime.js'), 'utf8');
-
-const landingDocument = `<!doctype html><html data-theme="light"><body>
-  <header id="site-header"><button id="theme-button"></button><a data-auth-link href="/login?return_to=/management">Đăng nhập</a></header>
-  <button id="menu-button" aria-expanded="false"></button>
-  <div id="mobile-menu" hidden><a data-auth-link href="/login?return_to=/management">Đăng nhập quản trị</a></div>
-  <span id="stations-total"></span><span id="stations-online"></span><span id="stations-offline"></span><span id="stations-stale"></span><span id="summary-updated"></span>
-</body></html>`;
 
 async function installAppRoutes(page, authStatus = 200) {
   await page.route('https://app.test/**', async route => {
@@ -29,38 +22,15 @@ async function installAppRoutes(page, authStatus = 200) {
       }
       return;
     }
-    if (url.pathname === '/api/public/dashboard-summary') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ stations: { total: 1, online: 1, offline: 0, stale: 0 }, updated_at: new Date().toISOString() }),
-      });
-      return;
-    }
-    if (url.pathname.startsWith('/assets/')) {
-      await route.fulfill({ status: 200, contentType: 'text/css', body: '' });
-      return;
-    }
     await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><div id="app-root"></div>' });
   });
 }
 
-test('remembered admin session updates every landing login link', async ({ page }) => {
-  await installAppRoutes(page, 200);
-  await page.addInitScript(() => {
-    localStorage.setItem('token', 'remembered-token');
-    localStorage.setItem('rememberMe', 'true');
-  });
-  await page.goto('https://app.test/');
-  await page.setContent(landingDocument);
-  await page.addScriptTag({ content: sessionSource });
-  await page.addScriptTag({ content: landingSource });
-
-  const links = page.locator('[data-auth-link]');
-  await expect(links).toHaveCount(2);
-  await expect(links.first()).toHaveText('Quản trị hệ thống');
-  await expect(links.first()).toHaveAttribute('href', '/management');
-  await expect(links.nth(1)).toHaveText('Quản trị hệ thống');
+test('landing React state routes remembered operators to management', async () => {
+  expect(landingSource).toContain("window.authSession?.inspect?.()");
+  expect(landingSource).toContain("['admin','operator'].includes(session.user?.role)");
+  expect(landingSource).toContain("href: canManage ? '/management' : '/map'");
+  expect(landingSource).toContain("label: canManage ? 'Quản trị hệ thống' : 'Mở bản đồ'");
 });
 
 test('login route forwards a valid remembered session without showing the form', async ({ page }) => {

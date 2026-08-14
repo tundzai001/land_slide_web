@@ -21,6 +21,7 @@ from app.landslide_analyzer import LandslideAnalyzer
 from app.mqtt.persistence import MQTTPersistenceMixin
 from app.mqtt.transport import MQTTTransportMixin
 from app.services import adjustment_failure
+from app.services.adjustment_artifacts import write_adjustment_run_status
 
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
@@ -90,6 +91,8 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self.adjustment_message: Dict[int, str] = {}
         self.adjustment_results: Dict[int, dict] = {}
         self.active_adjustment_clusters: Dict[int, list] = {}  # {project_id: [[station_id, ...], ...]}
+        self.adjustment_run_contexts: Dict[int, dict] = {}
+        self.adjustment_cluster_results: Dict[int, Dict[int, dict]] = defaultdict(dict)
         # Khởi tạo RoundRobin Manager, trỏ Caster Host về cùng địa chỉ với MQTT Broker (thường chung server)
         ntrip_hosts = [
             host.strip()
@@ -145,6 +148,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self._alert_suppression_interval_seconds = 5.0
 
         self.loop = None
+        self._stopping = False
+        self._background_tasks = set()
+        self._threadsafe_futures = set()
 
     def _diag_should_log(self, key: str, interval_sec: int = 30) -> bool:
         now_ts = int(time.time())
@@ -153,44 +159,6 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             self._diag_last_log_ts[key] = now_ts
             return True
         return False
-
-    async def load_runtime_config_from_db(self):
-        """Load global system config (main_config) and apply as runtime defaults."""
-        try:
-            async with ConfigSessionLocal() as db:
-                res = await db.execute(
-                    select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
-                )
-                cfg_row = res.scalar_one_or_none()
-                if not cfg_row or not isinstance(cfg_row.value, dict):
-                    return
-
-                cfg = cfg_row.value
-                mqtt_cfg = cfg.get("mqtt", {}) or {}
-                confirm_cfg = cfg.get("confirmation", {}) or {}
-                intervals_cfg = cfg.get("save_intervals", {}) or {}
-
-                self.runtime_mqtt["broker"] = mqtt_cfg.get("broker", self.runtime_mqtt["broker"])
-                self.runtime_mqtt["port"] = int(mqtt_cfg.get("port", self.runtime_mqtt["port"]))
-                self.runtime_mqtt["user"] = mqtt_cfg.get("user", self.runtime_mqtt["user"])
-                if mqtt_cfg.get("password"):
-                    self.runtime_mqtt["password"] = mqtt_cfg.get("password")
-                self.runtime_mqtt["topic_reload_interval"] = int(
-                    mqtt_cfg.get("topic_reload_interval", self.runtime_mqtt["topic_reload_interval"])
-                )
-                self.topic_reload_interval = self.runtime_mqtt["topic_reload_interval"]
-
-                self.runtime_confirmation["gnss"] = int(confirm_cfg.get("gnss", self.runtime_confirmation["gnss"]))
-                self.runtime_confirmation["rain"] = int(confirm_cfg.get("rain", self.runtime_confirmation["rain"]))
-                self.runtime_confirmation["water"] = int(confirm_cfg.get("water", self.runtime_confirmation["water"]))
-                self.runtime_confirmation["imu"] = int(confirm_cfg.get("imu", self.runtime_confirmation["imu"]))
-
-                self.runtime_save_intervals["gnss"] = int(intervals_cfg.get("gnss", self.runtime_save_intervals["gnss"]))
-                self.runtime_save_intervals["rain"] = int(intervals_cfg.get("rain", self.runtime_save_intervals["rain"]))
-                self.runtime_save_intervals["water"] = int(intervals_cfg.get("water", self.runtime_save_intervals["water"]))
-                self.runtime_save_intervals["imu"] = int(intervals_cfg.get("imu", self.runtime_save_intervals["imu"]))
-        except Exception as e:
-            logger.error(f"Error loading runtime system config: {e}")
 
     def _apply_runtime_defaults_to_station_config(self, station_config: dict) -> dict:
         """Station config has priority; global system config is fallback."""
@@ -236,74 +204,10 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         except Exception as e:
             logger.warning(f"Could not reset alert state for station {station_id}: {e}")
 
-    def reload_config(self, config_dict: dict):
-        """Apply system config at runtime and reconnect MQTT with new credentials."""
-        try:
-            mqtt_cfg = (config_dict or {}).get("mqtt", {}) or {}
-            confirm_cfg = (config_dict or {}).get("confirmation", {}) or {}
-            intervals_cfg = (config_dict or {}).get("save_intervals", {}) or {}
-
-            old_signature = (
-                self.runtime_mqtt["broker"],
-                self.runtime_mqtt["port"],
-                self.runtime_mqtt["user"],
-                self.runtime_mqtt["password"],
-            )
-
-            self.runtime_mqtt["broker"] = mqtt_cfg.get("broker", self.runtime_mqtt["broker"])
-            self.runtime_mqtt["port"] = int(mqtt_cfg.get("port", self.runtime_mqtt["port"]))
-            self.runtime_mqtt["user"] = mqtt_cfg.get("user", self.runtime_mqtt["user"])
-            if mqtt_cfg.get("password"):
-                self.runtime_mqtt["password"] = mqtt_cfg.get("password")
-            self.runtime_mqtt["topic_reload_interval"] = int(
-                mqtt_cfg.get("topic_reload_interval", self.runtime_mqtt["topic_reload_interval"])
-            )
-            self.topic_reload_interval = self.runtime_mqtt["topic_reload_interval"]
-
-            self.runtime_confirmation["gnss"] = int(confirm_cfg.get("gnss", self.runtime_confirmation["gnss"]))
-            self.runtime_confirmation["rain"] = int(confirm_cfg.get("rain", self.runtime_confirmation["rain"]))
-            self.runtime_confirmation["water"] = int(confirm_cfg.get("water", self.runtime_confirmation["water"]))
-            self.runtime_confirmation["imu"] = int(confirm_cfg.get("imu", self.runtime_confirmation["imu"]))
-
-            self.runtime_save_intervals["gnss"] = int(intervals_cfg.get("gnss", self.runtime_save_intervals["gnss"]))
-            self.runtime_save_intervals["rain"] = int(intervals_cfg.get("rain", self.runtime_save_intervals["rain"]))
-            self.runtime_save_intervals["water"] = int(intervals_cfg.get("water", self.runtime_save_intervals["water"]))
-            self.runtime_save_intervals["imu"] = int(intervals_cfg.get("imu", self.runtime_save_intervals["imu"]))
-
-            new_signature = (
-                self.runtime_mqtt["broker"],
-                self.runtime_mqtt["port"],
-                self.runtime_mqtt["user"],
-                self.runtime_mqtt["password"],
-            )
-
-            if old_signature != new_signature:
-                logger.info("🔄 MQTT runtime config changed. Reconnecting with new credentials...")
-                try:
-                    self.client.loop_stop()
-                    self.client.disconnect()
-                except Exception:
-                    pass
-
-                self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-                if self.runtime_mqtt["user"]:
-                    self.client.username_pw_set(self.runtime_mqtt["user"], self.runtime_mqtt["password"])
-                self.client.on_connect = self.on_connect
-                self.client.on_message = self.on_message
-                self.client.on_disconnect = self.on_disconnect
-
-                self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
-                self.client.loop_start()
-
-            logger.info("✅ Runtime system config applied")
-        except Exception as e:
-            logger.error(f"❌ Failed to reload runtime config: {e}")
-
     async def reload_topics_from_db(self):
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
-                await self.load_runtime_config_from_db()
                 from app.models.config import Device, Station, Project
                 from sqlalchemy import select
                 
@@ -475,15 +379,82 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 logger.error(f"Error reloading topics: {e}")
             await asyncio.sleep(self.topic_reload_interval)
 
+    def _adjustment_run_context(self, run_id: int) -> dict:
+        context = dict(self.adjustment_run_contexts.get(int(run_id)) or {})
+        context.setdefault("run_id", int(run_id))
+        context.setdefault("project_id", int(run_id))
+        context.setdefault("project_code", "")
+        context.setdefault("cluster_name", "Cụm")
+        return context
+
+    def _refresh_project_adjustment_state(self, project_id: int) -> tuple[str, dict]:
+        contexts = [
+            context
+            for context in self.adjustment_run_contexts.values()
+            if int(context.get("project_id") or 0) == int(project_id)
+        ]
+        active = [
+            context for context in contexts
+            if context.get("status") in {"STARTING", "COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}
+        ]
+        if active:
+            statuses = {context.get("status") for context in active}
+            phase = "PAUSED" if statuses == {"PAUSED"} else (
+                "FREE_NETWORK" if "FREE_NETWORK" in statuses else "COLLECTING_BASELINE"
+            )
+        else:
+            terminal = {str(context.get("status") or "") for context in contexts}
+            failed = terminal.intersection({"ERROR", "FAILED_QUALITY_GATE"})
+            completed = "COMPLETED" in terminal
+            phase = "PARTIAL_FAILED" if failed and completed else (
+                "ERROR" if failed else "COMPLETED"
+            )
+        self.adjustment_phase[int(project_id)] = phase
+        results = self.adjustment_cluster_results.get(int(project_id), {})
+        ordered_results = sorted(
+            results.values(),
+            key=lambda item: (
+                item.get("cluster_index") is None,
+                int(item.get("cluster_index") or 0),
+                str(item.get("cluster_name") or ""),
+            ),
+        )
+        latest = ordered_results[-1] if ordered_results else {}
+        summary = {
+            **latest,
+            "project_id": int(project_id),
+            "phase": phase,
+            "cluster_results": ordered_results,
+        }
+        if ordered_results:
+            self.adjustment_results[int(project_id)] = summary
+        return phase, summary
+
     async def _handle_round_robin_adjustment_result(self, project_id: int, adjustment: dict):
         """Always persist audit reports; publish coordinates only after quality PASS."""
+        run_id = int(project_id)
+        run_context = self._adjustment_run_context(run_id)
+        public_project_id = int(run_context["project_id"])
+        cluster_name = str(
+            adjustment.get("cluster_name")
+            or run_context.get("cluster_name")
+            or "Cụm"
+        )
+        adjustment["project_id"] = public_project_id
+        adjustment["project_code"] = (
+            adjustment.get("project_code") or run_context.get("project_code")
+        )
+        adjustment["cluster_name"] = cluster_name
+        if run_context.get("cluster_index") is not None:
+            adjustment["cluster_index"] = int(run_context["cluster_index"])
+        adjustment["run_id"] = run_id
         current_timestamp = int(time.time())
         try:
-            report_urls = self._write_adjustment_reports(project_id, current_timestamp, adjustment)
+            report_urls = self._write_adjustment_reports(public_project_id, current_timestamp, adjustment)
         except Exception as exc:
             message = f"Bình sai đã tính xong nhưng không thể xuất JSON/XLSX: {exc}"
-            logger.error("Project %s: %s", project_id, message, exc_info=True)
-            await self._handle_round_robin_adjustment_error(project_id, message)
+            logger.error("Project %s run %s: %s", public_project_id, run_id, message, exc_info=True)
+            await self._handle_round_robin_adjustment_error(run_id, message)
             return
         adjustment.update(report_urls)
         quality_gate = adjustment.get("quality_gate") or {}
@@ -494,16 +465,30 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 "không lưu/publish tọa độ chính thức. "
                 f"{reasons or 'quality gate failed'}"
             )
-            self.adjustment_phase[project_id] = "FAILED_QUALITY_GATE"
-            self.adjustment_message[project_id] = message
-            self.adjustment_results[project_id] = adjustment
+            self.adjustment_phase[run_id] = "FAILED_QUALITY_GATE"
+            self.adjustment_message[run_id] = message
+            self.adjustment_run_contexts[run_id]["status"] = "FAILED_QUALITY_GATE"
+            write_adjustment_run_status(
+                public_project_id,
+                run_id=run_id,
+                phase="FAILED_QUALITY_GATE",
+                source=str(run_context.get("source") or "round_robin_runtime"),
+                project_code=str(adjustment.get("project_code") or run_context.get("project_code") or ""),
+                cluster_name=cluster_name,
+                cluster_index=run_context.get("cluster_index"),
+                context={"reasons": quality_gate.get("reasons") or []},
+            )
+            self.adjustment_cluster_results[public_project_id][run_id] = adjustment
+            phase, summary = self._refresh_project_adjustment_state(public_project_id)
             await manager.broadcast({
                 "type": "gnss_adjustment_progress",
-                "project_id": project_id,
-                "phase": "FAILED_QUALITY_GATE",
-                "message": message,
+                "project_id": public_project_id,
+                "run_id": run_id,
+                "cluster_name": cluster_name,
+                "phase": phase,
+                "message": f"{cluster_name}: {message}",
                 "timestamp": current_timestamp,
-                "data": adjustment,
+                "data": summary,
             })
             return
         interpretation_status = str(
@@ -514,9 +499,25 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             if interpretation_status == "PASS_WITH_WARNINGS" else
             "Connected GNSS network adjustment completed."
         )
-        self.adjustment_phase[project_id] = "COMPLETED"
-        self.adjustment_message[project_id] = completed_message
-        self.adjustment_results[project_id] = adjustment
+        self.adjustment_phase[run_id] = "COMPLETED"
+        self.adjustment_message[run_id] = completed_message
+        self.adjustment_run_contexts[run_id]["status"] = "COMPLETED"
+        write_adjustment_run_status(
+            public_project_id,
+            run_id=run_id,
+            phase="COMPLETED",
+            source=str(run_context.get("source") or "round_robin_runtime"),
+            project_code=str(adjustment.get("project_code") or run_context.get("project_code") or ""),
+            cluster_name=cluster_name,
+            cluster_index=run_context.get("cluster_index"),
+            context={
+                "audit_json_url": adjustment.get("audit_json_url"),
+                "excel_report_url": adjustment.get("excel_report_url"),
+            },
+        )
+        self.adjustment_cluster_results[public_project_id][run_id] = adjustment
+        phase, summary = self._refresh_project_adjustment_state(public_project_id)
+        self.adjustment_message[public_project_id] = f"{cluster_name}: {completed_message}"
 
         for point in adjustment.get("points", {}).values():
             station_id = point.get("station_id")
@@ -554,39 +555,82 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
 
         await manager.broadcast({
             "type": "gnss_adjustment_progress",
-            "project_id": project_id,
-            "phase": "COMPLETED",
-            "message": completed_message,
+            "project_id": public_project_id,
+            "run_id": run_id,
+            "cluster_name": cluster_name,
+            "phase": phase,
+            "message": f"{cluster_name}: {completed_message}",
             "timestamp": current_timestamp,
             # The UI may not currently be viewing one of the adjusted stations,
             # so publish the downloadable result on the project-level event too.
-            "data": adjustment,
+            "data": summary,
         })
 
     async def _handle_round_robin_adjustment_error(self, project_id: int, message: str):
-        self.adjustment_phase[project_id] = "ERROR"
-        self.adjustment_message[project_id] = message
+        run_id = int(project_id)
+        run_context = self._adjustment_run_context(run_id)
+        public_project_id = int(run_context["project_id"])
+        cluster_name = str(run_context.get("cluster_name") or "Cụm")
+        try:
+            await self.round_robin_manager.restore_common_fixed_base_topology(run_id)
+        except Exception as restore_exc:
+            logger.error(
+                "Could not restore fixed-base topology for run %s: %s",
+                run_id,
+                restore_exc,
+                exc_info=True,
+            )
+            message = f"{message}; topology restore failed: {restore_exc}"
+        self.adjustment_phase[run_id] = "ERROR"
+        self.adjustment_message[run_id] = message
+        if run_id in self.adjustment_run_contexts:
+            self.adjustment_run_contexts[run_id]["status"] = "ERROR"
+        write_adjustment_run_status(
+            public_project_id,
+            run_id=run_id,
+            phase="ERROR",
+            source=str(run_context.get("source") or "round_robin_runtime"),
+            project_code=str(run_context.get("project_code") or ""),
+            cluster_name=cluster_name,
+            cluster_index=run_context.get("cluster_index"),
+            context={"error": str(message)},
+        )
         failure_result = adjustment_failure.write_adjustment_failure_report(
-            project_id,
+            public_project_id,
             message,
             source="round_robin_runtime",
-            context={"phase": "FREE_NETWORK"},
+            project_code=str(run_context.get("project_code") or "") or None,
+            cluster_name=cluster_name,
+            context={
+                "phase": "FREE_NETWORK",
+                "run_id": run_id,
+                "cluster_index": run_context.get("cluster_index"),
+            },
         )
         if failure_result:
-            self.adjustment_results[project_id] = failure_result
+            failure_result["run_id"] = run_id
+            self.adjustment_cluster_results[public_project_id][run_id] = failure_result
         else:
-            self.adjustment_results.pop(project_id, None)
+            self.adjustment_cluster_results[public_project_id].pop(run_id, None)
+        phase, summary = self._refresh_project_adjustment_state(public_project_id)
+        self.adjustment_message[public_project_id] = f"{cluster_name}: {message}"
         await manager.broadcast({
             "type": "gnss_adjustment_progress",
-            "project_id": project_id,
-            "phase": "ERROR",
-            "message": message,
-            "data": failure_result,
+            "project_id": public_project_id,
+            "run_id": run_id,
+            "cluster_name": cluster_name,
+            "phase": phase,
+            "message": f"{cluster_name}: {message}",
+            "data": summary,
         })
 
     async def _handle_round_robin_progress(self, project_id: int, message: str):
-        self.adjustment_message[project_id] = message
-        phase = str(self.adjustment_phase.get(project_id) or "").upper()
+        run_id = int(project_id)
+        run_context = self._adjustment_run_context(run_id)
+        public_project_id = int(run_context["project_id"])
+        cluster_name = str(run_context.get("cluster_name") or "Cụm")
+        self.adjustment_message[run_id] = message
+        phase = str(self.adjustment_phase.get(run_id) or "").upper()
         if phase not in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}:
             # Receiver health preflight runs inside the start request, before the
             # persistent phase is installed. Do not mislabel those messages as
@@ -594,13 +638,46 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             phase = "COLLECTING_BASELINE"
         await manager.broadcast({
             "type": "gnss_adjustment_progress",
-            "project_id": project_id,
+            "project_id": public_project_id,
+            "run_id": run_id,
+            "cluster_name": cluster_name,
             "phase": phase,
-            "message": message,
+            "message": f"{cluster_name}: {message}",
         })
 
     async def process_pipeline(self, info: dict, raw_payload: str):
         if not info: return
+        adjustment_only = bool(info.get("_adjustment_only"))
+        public_project_id = int(
+            info.get("public_project_id")
+            or info.get("project_id")
+            or info.get("station_id")
+            or 0
+        )
+        if not adjustment_only and info.get("type") == "gnss":
+            station_id = int(info.get("station_id") or 0)
+            parallel_run_ids = [
+                int(run_id)
+                for run_id, context in list(self.adjustment_run_contexts.items())
+                if int(context.get("project_id") or 0) == public_project_id
+                and int(run_id) != public_project_id
+                and str(self.adjustment_phase.get(int(run_id)) or "").upper()
+                    in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}
+                and any(
+                    station_id in [int(value) for value in cluster.get("stations", [])]
+                    for cluster in self.active_adjustment_clusters.get(int(run_id), [])
+                )
+            ]
+            for run_id in parallel_run_ids:
+                await self.process_pipeline(
+                    {
+                        **info,
+                        "project_id": run_id,
+                        "public_project_id": public_project_id,
+                        "_adjustment_only": True,
+                    },
+                    raw_payload,
+                )
         active_clusters = self.active_adjustment_clusters.get(info.get("project_id"))
         if active_clusters is not None:
             info = {**info, "project_gnss_clusters": active_clusters}
@@ -616,7 +693,8 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         processed_data = None
 
         # Always refresh liveness on every message; do not depend on save interval.
-        await self._touch_online_heartbeat(device_id, station_id, current_timestamp)
+        if not adjustment_only:
+            await self._touch_online_heartbeat(device_id, station_id, current_timestamp)
         
         # 1. PROCESS DATA
         try:
@@ -626,6 +704,8 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 # fragments even though those fragments do not repeat the prefix.
                 proj_id = int(info.get("project_id") or info.get("station_id") or 0)
                 phase = self.adjustment_phase.get(proj_id)
+                if proj_id not in self.round_robin_manager._sessions:
+                    phase = None
                 has_pending_agrica = self.round_robin_manager.has_pending_agrica_fragment(
                     proj_id,
                     station_id,
@@ -799,7 +879,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                             if should_broadcast_diagnostic:
                                 await manager.broadcast({
                                     "type": "gnss_adjustment_debug",
-                                    "project_id": proj_id,
+                                    "project_id": public_project_id,
+                                    "run_id": proj_id,
+                                    "cluster_name": (self.adjustment_run_contexts.get(proj_id) or {}).get("cluster_name"),
                                     **diagnostic,
                                 })
                         for obs in valid_obs:
@@ -810,7 +892,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                                 )
                                 await manager.broadcast({
                                     "type": "gnss_baseline_collected",
-                                    "project_id": proj_id,
+                                    "project_id": public_project_id,
+                                    "run_id": proj_id,
+                                    "cluster_name": (self.adjustment_run_contexts.get(proj_id) or {}).get("cluster_name"),
                                     "station_id": station_id,
                                     "from": baseline_from,
                                     "rover_name": obs.rover_name,
@@ -845,9 +929,13 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                             if hasattr(self, "adjustment_run_rosters"):
                                 self.adjustment_run_rosters[proj_id] = roster
                             self.adjustment_phase[proj_id] = "FREE_NETWORK"
+                            if proj_id in self.adjustment_run_contexts:
+                                self.adjustment_run_contexts[proj_id]["status"] = "FREE_NETWORK"
                             await manager.broadcast({
                                 "type": "gnss_adjustment_progress",
-                                "project_id": proj_id,
+                                "project_id": public_project_id,
+                                "run_id": proj_id,
+                                "cluster_name": (self.adjustment_run_contexts.get(proj_id) or {}).get("cluster_name"),
                                 "phase": "FREE_NETWORK",
                                 "expected_station_ids": expected_station_ids,
                                 "roster": roster,
@@ -870,6 +958,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                             # The manager snapshots, sleeps and restores the selected
                             # CORS service atomically inside start_cycle().
                             await self.round_robin_manager.start_cycle(proj_id)
+
+                if adjustment_only:
+                    return
 
                 # Only process for GNSS position/status if payload actually contains GGA.
                 # This prevents pure AGRICA sentences from triggering fake NO_DATA statuses

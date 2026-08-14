@@ -73,12 +73,12 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                     </div>
 
                     <!-- IMU (3 axes) -->
-                    <div class="sensor-item sensor-full-width" id="sensor-card-imu">
+                    <div class="sensor-item sensor-full-width sensor-imu-instrument" id="sensor-card-imu">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-compass-fill me-1"></i>IMU (ROLL/PITCH/YAW)</span>
                             <span id="imu-offline-badge" class="imu-offline-badge" style="display:none;">OFFLINE</span>
                         </div>
-                        <div class="imu-axes">
+                        <div class="imu-axes" aria-label="Roll, pitch and yaw">
                             <div class="axis-value">
                                 <div class="axis-label">Roll</div>
                                 <div class="axis-num" id="val-imu-roll">--°</div>
@@ -94,7 +94,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         </div>
 
                         <!-- Delta values â€” hiển thị hướng lệch rõ ràng -->
-                        <div class="mt-2 pt-1 border-top">
+                        <div class="mt-2 pt-1 border-top imu-baseline-section">
                             <div class="imu-delta-header">Chuyển vị từ Baseline</div>
                             <div class="imu-delta-grid">
                                 <div class="imu-delta-item">
@@ -116,7 +116,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         </div>
 
                         <!-- Thêm khoảng cách dịch nghiêng -->
-                        <div class="mt-1 pt-1 border-top" style="opacity: 0.8;">
+                        <div class="mt-1 pt-1 border-top imu-drift-summary" style="opacity: 0.8;">
                             <div class="d-flex justify-content-between small px-1">
                                 <span style="font-size: 0.7rem;"><i class="bi bi-arrows-move me-1"></i>Độ lệch tâm
                                     (tùy chỉnh):</span>

@@ -336,7 +336,7 @@ class AdminManager {
             const link = item.querySelector('[data-tab]');
             if (link) {
                 const tab = link.getAttribute('data-tab');
-                if (['tab-users', 'tab-database', 'tab-system', 'tab-rescue'].includes(tab)) {
+                if (['tab-users', 'tab-database', 'tab-rescue'].includes(tab)) {
                     item.style.display = 'none';
                 }
             }

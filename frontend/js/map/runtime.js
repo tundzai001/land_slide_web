@@ -220,7 +220,9 @@ const gnssAdjustmentDebugState = {
     projectId: null,
     phase: 'WAITING',
     expectedStationIds: [],
+    expectedStationIdsByRun: {},
     rosterStationIds: [],
+    rostersByRun: {},
     participatingStationIds: [],
     excludedStationIds: [],
     baselineCount: 0,
@@ -266,8 +268,16 @@ function gnssRoversFromStationIds(stationIds, excluded = new Set()) {
     });
 }
 
-function syncGnssExpectedStationIds(stationIds) {
-    gnssAdjustmentDebugState.expectedStationIds = normalizeGnssStationIds(stationIds);
+function syncGnssExpectedStationIds(stationIds, runId = null) {
+    const normalized = normalizeGnssStationIds(stationIds);
+    if (runId !== null && runId !== undefined) {
+        gnssAdjustmentDebugState.expectedStationIdsByRun[String(runId)] = normalized;
+        gnssAdjustmentDebugState.expectedStationIds = [...new Set(
+            Object.values(gnssAdjustmentDebugState.expectedStationIdsByRun).flat()
+        )];
+    } else {
+        gnssAdjustmentDebugState.expectedStationIds = normalized;
+    }
     gnssAdjustmentDebugState.participatingStationIds = [...gnssAdjustmentDebugState.expectedStationIds];
     const displayIds = gnssAdjustmentDebugState.rosterStationIds.length
         ? gnssAdjustmentDebugState.rosterStationIds
@@ -277,8 +287,26 @@ function syncGnssExpectedStationIds(stationIds) {
     );
 }
 
-function applyGnssAdjustmentRoster(roster = {}) {
+function applyGnssAdjustmentRoster(roster = {}, runId = null) {
     if (!roster || typeof roster !== 'object') return;
+    if (Array.isArray(roster.runs)) {
+        roster.runs.forEach(item => applyGnssAdjustmentRoster(
+            item.roster || item,
+            item.run_id,
+        ));
+        return;
+    }
+    if (runId !== null && runId !== undefined) {
+        gnssAdjustmentDebugState.rostersByRun[String(runId)] = roster;
+        const rosters = Object.values(gnssAdjustmentDebugState.rostersByRun);
+        roster = {
+            selected_station_ids: rosters.flatMap(item => item.selected_station_ids || []),
+            participating_station_ids: rosters.flatMap(item => item.participating_station_ids || []),
+            skipped_offline_station_ids: rosters.flatMap(item => item.skipped_offline_station_ids || []),
+            skipped_uncontrollable_station_ids: rosters.flatMap(item => item.skipped_uncontrollable_station_ids || []),
+            skipped_seed_station_ids: rosters.flatMap(item => item.skipped_seed_station_ids || []),
+        };
+    }
     const selected = normalizeGnssStationIds(roster.selected_station_ids);
     const participating = normalizeGnssStationIds(roster.participating_station_ids);
     const excluded = normalizeGnssStationIds([
@@ -286,9 +314,7 @@ function applyGnssAdjustmentRoster(roster = {}) {
         ...(roster.skipped_uncontrollable_station_ids || []),
         ...(roster.skipped_seed_station_ids || []),
     ]);
-    if (selected.length && !gnssAdjustmentDebugState.rosterStationIds.length) {
-        gnssAdjustmentDebugState.rosterStationIds = selected;
-    }
+    if (selected.length) gnssAdjustmentDebugState.rosterStationIds = [...new Set(selected)];
     if (participating.length) gnssAdjustmentDebugState.participatingStationIds = participating;
     gnssAdjustmentDebugState.excludedStationIds = [...new Set(excluded)];
     const displayIds = gnssAdjustmentDebugState.rosterStationIds.length
@@ -382,6 +408,7 @@ function phaseClassForGnssAdjustment(phase) {
         case 'PAUSED': return 'ms-4 text-warning fw-bold font-monospace';
         case 'COMPLETED': return 'ms-4 text-success fw-bold font-monospace';
         case 'FAILED_QUALITY_GATE': return 'ms-4 text-danger fw-bold font-monospace';
+        case 'PARTIAL_FAILED': return 'ms-4 text-warning fw-bold font-monospace';
         case 'ERROR': return 'ms-4 text-danger fw-bold font-monospace';
         default: return 'ms-4 text-warning fw-bold font-monospace';
     }
@@ -532,7 +559,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
         return;
     }
 
-    if (normalizedPhase === 'ERROR' || normalizedPhase === 'FAILED_QUALITY_GATE') {
+    if (['ERROR', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(normalizedPhase)) {
         const current = [...gnssAdjustmentDebugState.workflowNodes].reverse().find(node => node.status === 'running');
         if (current) {
             current.status = 'error';
@@ -540,7 +567,11 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             gnssAdjustmentDebugState.workflowRevision += 1;
         } else {
             upsertGnssWorkflowNode('error', {
-                title: normalizedPhase === 'FAILED_QUALITY_GATE' ? 'Không đạt kiểm định chất lượng' : 'Quy trình bị dừng', detail: message || 'Máy chủ báo lỗi.', status: 'error', icon: 'bi-exclamation-triangle',
+                title: normalizedPhase === 'PARTIAL_FAILED'
+                    ? 'Một số cụm không hoàn tất'
+                    : normalizedPhase === 'FAILED_QUALITY_GATE'
+                    ? 'Không đạt kiểm định chất lượng'
+                    : 'Quy trình bị dừng', detail: message || 'Máy chủ báo lỗi.', status: normalizedPhase === 'PARTIAL_FAILED' ? 'warning' : 'error', icon: 'bi-exclamation-triangle',
             });
         }
         renderGnssAdjustmentWorkflow();
@@ -896,7 +927,7 @@ function setGnssAdjustmentPhase(phase, message = '') {
         window.toast?.error?.(message || 'Quy trình bình sai đã dừng do lỗi.');
     }
     window.gnssBoardState?.draw?.(performance.now());
-    if (['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR', 'IDLE', 'STOPPED'].includes(gnssAdjustmentDebugState.phase)) {
+    if (['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR', 'IDLE', 'STOPPED'].includes(gnssAdjustmentDebugState.phase)) {
         if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
         gnssAdjustmentDebugState.statusPollId = null;
         if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
@@ -928,7 +959,7 @@ async function syncGnssAdjustmentStatus() {
             setGnssAdjustmentPhase(phase, message || 'Đã đồng bộ trạng thái từ máy chủ.');
             addGnssAdjustmentDebug('SYNC', 'Đã khôi phục trạng thái qua API sau khi có thể bỏ lỡ WebSocket.', 'success');
         }
-        if (status.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR'].includes(phase)) {
+        if (status.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(phase)) {
             const resultMessage = {
                 sensor_type: 'gnss_adjusted',
                 timestamp: status.data.computed_at || Math.floor(Date.now() / 1000),
@@ -960,7 +991,9 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         projectId: Number(projectId) || null,
         phase: 'WAITING',
         expectedStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
+        expectedStationIdsByRun: {},
         rosterStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
+        rostersByRun: {},
         participatingStationIds: Array.isArray(stationIds) ? stationIds.map(Number).filter(Number.isFinite) : [],
         excludedStationIds: [],
         baselineCount: 0,

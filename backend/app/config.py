@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     DB_COMMAND_TIMEOUT_SECONDS: int = 30
     RUN_SCHEMA_BOOTSTRAP: bool = False
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
-    BOOTSTRAP_SYSTEM_PASSWORD: str = ""
     
     MQTT_BROKER: str = ""
     MQTT_PORT: int = 1883

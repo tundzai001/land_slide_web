@@ -72,62 +72,15 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
         </div>
     </div>
 
-    <div id="password-shield" class="password-shield" style="display: none;">
-        <div class="password-dialog">
-            <h4><i class="bi bi-shield-lock-fill me-2"></i>SYSTEM ACCESS</h4>
-            <p class="subtitle">
-                Nhập System Password để truy cập<br>
-                cài đặt toàn hệ thống
-            </p>
-
-            <div class="mb-3">
-                <input type="password" class="form-control" id="system-password-input" placeholder="â€¢â€¢â€¢â€¢" maxlength="20"
-                    autofocus>
-            </div>
-
-            <!-- Hint box -->
-            <div id="password-hint" class="password-hint" style="display: none;"></div>
-
-            <div class="d-flex gap-2 mt-3">
-                <button class="btn btn-secondary flex-1" onclick="window.systemManager.cancelPasswordCheck()">
-                    <i class="bi bi-x-circle me-1"></i> Hủy
-                </button>
-                <button class="btn btn-danger flex-1" onclick="window.systemManager.verifyPassword()">
-                    <i class="bi bi-shield-lock-fill me-1"></i> Xác nhận
-                </button>
-            </div>
-
-            <!-- Error message -->
-            <p class="text-center mt-3 mb-0 small" id="password-error"
-                style="display: none; color: var(--accent-danger);">
-                <i class="bi bi-exclamation-triangle-fill me-1"></i>
-                <span id="error-message">Sai mật khẩu!</span>
-            </p>
-        </div>
-    </div>
-
-    <!-- Scripts -->
-    
-    
-    
-    
-    
-    
-    
-
-    
-
-    
-
     <!-- MODAL TẢI DỮ LIỆU NÂNG CAO -->
     <div class="modal fade" id="exportExcelModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-xl export-dialog">
             <div class="modal-content export-shell">
                 <div class="modal-header export-header text-white">
                     <div>
-                        <div class="export-eyebrow">DATABASE ARCHIVE</div>
-                        <h5 class="modal-title mb-1"><i class="bi bi-box-arrow-down me-2"></i>Xuất dữ liệu hệ thống</h5>
-                        <div class="export-header-copy">Chọn phạm vi, dataset và theo dõi tác vụ chạy nền.</div>
+                        <div class="export-eyebrow">SAO LƯU DỮ LIỆU</div>
+                        <h5 class="modal-title mb-1"><i class="bi bi-box-arrow-down me-2"></i>Xuất dữ liệu</h5>
+                        <div class="export-header-copy">Chọn phạm vi và loại dữ liệu cần đóng gói. Tác vụ tiếp tục chạy khi cửa sổ được thu nhỏ.</div>
                     </div>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" title="Thu nhỏ; tác vụ export vẫn tiếp tục"></button>
                 </div>
@@ -259,26 +212,27 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
     
     <style>
         #exportExcelModal { --export-ink:#17332c; --export-green:#0d8f68; --export-line:#d9e5df; }
-        #exportExcelModal .export-dialog { max-width: 980px; }
+        #exportExcelModal .export-dialog { max-width: 1120px; }
         #exportExcelModal .export-shell { border:0; border-radius:18px; overflow:hidden; box-shadow:0 26px 80px rgba(17,47,38,.28); }
         #exportExcelModal .export-header { padding:18px 22px; border:0; background:linear-gradient(120deg,#0b3b32 0%,#0d6b53 58%,#12906c 100%); }
-        #exportExcelModal .export-header-copy { color:rgba(232,255,247,.72); font-size:.78rem; }
-        #exportExcelModal .export-eyebrow { font:700 .62rem/1.2 monospace; letter-spacing:.16em; opacity:.76; }
+        #exportExcelModal .export-header-copy { color:rgba(232,255,247,.82); font-size:.88rem; }
+        #exportExcelModal .export-eyebrow { font:700 .7rem/1.2 monospace; letter-spacing:.14em; opacity:.82; }
         #exportExcelModal .export-body { padding:18px; background:linear-gradient(145deg,#f4f8f6,#edf4f0); }
         #exportExcelModal .export-panel { padding:16px; border:1px solid var(--export-line); border-radius:14px; background:rgba(255,255,255,.9); }
-        #exportExcelModal .export-section-title { display:flex; align-items:center; gap:8px; margin-bottom:12px; color:var(--export-ink); font-size:.82rem; font-weight:750; text-transform:uppercase; letter-spacing:.04em; }
+        #exportExcelModal .export-section-title { display:flex; align-items:center; gap:9px; margin-bottom:14px; color:var(--export-ink); font-size:.9rem; font-weight:750; text-transform:uppercase; letter-spacing:.035em; }
         #exportExcelModal .export-section-title span { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; color:#fff; background:var(--export-green); font:700 .66rem monospace; }
-        #exportExcelModal .form-label { margin-bottom:5px; font-size:.72rem; font-weight:700; color:#557168!important; text-transform:uppercase; letter-spacing:.04em; }
-        #exportExcelModal .form-select, #exportExcelModal .form-control { min-height:38px; border-color:#ceddd6; border-radius:9px; font-size:.82rem; }
-        #exportExcelModal .export-item { min-height:48px; border-color:#dce8e2!important; background:#fff; transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease; }
-        #exportExcelModal .export-item:hover { transform:translateY(-1px); border-color:#41a786!important; box-shadow:0 7px 18px rgba(17,95,71,.08); }
+        #exportExcelModal .form-label { margin-bottom:6px; font-size:.78rem; font-weight:700; color:#557168!important; text-transform:uppercase; letter-spacing:.035em; }
+        #exportExcelModal .form-select, #exportExcelModal .form-control { min-height:44px; border-color:#ceddd6; border-radius:10px; font-size:.9rem; }
+        #exportExcelModal .export-item { min-height:60px; padding:10px 12px!important; border-color:#dce8e2!important; background:#fff; transition:border-color .16s ease,box-shadow .16s ease; }
+        #exportExcelModal .export-item:hover { transform:none; border-color:#41a786!important; box-shadow:0 7px 18px rgba(17,95,71,.08); }
         #exportExcelModal .export-item-accent { background:linear-gradient(100deg,#edfdf6,#f8fffc); border-color:#8fd6bc!important; }
         #exportExcelModal .export-item label { display:flex; flex-direction:column; line-height:1.15; color:#203b33; }
-        #exportExcelModal .export-item label strong { font-size:.8rem; }
-        #exportExcelModal .export-item label small { margin-top:4px; color:#789087; font-size:.68rem; }
-        #exportExcelModal #export-sensor-types { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; padding:8px 10px!important; margin:0 0 8px 26px!important; border-left:2px solid #b6ddce; background:#f8fbf9; border-radius:0 8px 8px 0; }
+        #exportExcelModal .export-item label strong { font-size:.9rem; }
+        #exportExcelModal .export-item label small { margin-top:5px; color:#6a8279; font-size:.76rem; line-height:1.35; }
+        #exportExcelModal .export-item .form-check-input, #exportExcelModal #export-sensor-types .form-check-input { width:20px!important; min-width:20px!important; height:20px!important; min-height:20px!important; margin:0 12px 0 0!important; flex:0 0 20px!important; }
+        #exportExcelModal #export-sensor-types { display:grid; grid-template-columns:1fr 1fr; gap:8px 18px; padding:12px 14px!important; margin:0 0 10px 32px!important; border-left:2px solid #b6ddce; background:#f8fbf9; border-radius:0 8px 8px 0; }
         #exportExcelModal #export-sensor-types>div { margin:0!important; }
-        #exportExcelModal .export-scope-note { padding:9px 11px; border-radius:9px; background:#edf5f1; color:#597269; font-size:.72rem; }
+        #exportExcelModal .export-scope-note { padding:11px 12px; border-radius:9px; background:#edf5f1; color:#506a61; font-size:.8rem; line-height:1.45; }
         #exportExcelModal .export-progress-card { padding:14px 16px; border:1px solid #b9ddcf; border-radius:13px; background:#fff; box-shadow:0 8px 22px rgba(18,99,73,.08); }
         #exportExcelModal .export-percent { color:var(--export-green); font:800 1.25rem monospace; }
         #exportExcelModal .export-progress-track { height:9px; border-radius:999px; background:#dfeae5; }
@@ -290,59 +244,57 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
     <!-- ============================================
      MODAL XÓA DATABASE (BẢO MẬT CAO)
 ============================================ -->
-    <div class="modal fade" id="clearDatabaseModal" tabindex="-1" data-bs-backdrop="static">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-danger">
-                <!-- Header màu đỏ cảnh báo -->
-                <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title">
-                        <i class="bi bi-exclamation-triangle-fill me-2"></i>VÙNG NGUY HIỂM
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-
-                <div class="modal-body">
-                    <div class="alert alert-warning border-warning">
-                        <i class="bi bi-radioactive me-2"></i>
-                        <strong>Cảnh báo:</strong> Hành động này không thể hoàn tác!
-                    </div>
-
-                    <p class="mb-2">Để xác nhận, vui lòng nhập chính xác lệnh tương ứng:</p>
-
-                    <div class="bg-light p-3 rounded border mb-3">
-                        <div class="d-flex align-items-center mb-2">
-                            <code class="fs-6 fw-bold text-dark me-2">XOA DATA</code>
-                            <span class="text-muted small">â†’ Xóa dữ liệu cảm biến (Sensor Data & Alerts). Giữ lại cấu
-                                hình Trạm/Thiết bị.</span>
-                        </div>
-                        <div class="d-flex align-items-center">
-                            <code class="fs-6 fw-bold text-danger me-2">FACTORY RESET</code>
-                            <span class="text-muted small">â†’ Xóa TRẮNG toàn bộ hệ thống (Project, Station, Device,
-                                Data...). Về trạng thái mới cài.</span>
+    <div class="modal fade" id="clearDatabaseModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered clear-db-dialog">
+            <div class="modal-content clear-db-shell">
+                <div class="modal-header clear-db-header">
+                    <div class="clear-db-title-wrap">
+                        <span class="clear-db-icon"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i></span>
+                        <div>
+                            <div class="clear-db-eyebrow">THAO TÁC KHÔNG THỂ HOÀN TÁC</div>
+                            <h5 class="modal-title">Xóa dữ liệu hệ thống</h5>
                         </div>
                     </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                </div>
 
-                    <div class="form-group">
-                        <label class="form-label small text-muted">Nhập lệnh xác nhận:</label>
-                        <input type="text" class="form-control form-control-lg border-danger text-danger fw-bold"
-                            id="clear-db-confirm-input" placeholder="Ví dụ: XOA DATA" autocomplete="off"
-                            style="letter-spacing: 1px;">
+                <div class="modal-body clear-db-body">
+                    <p class="clear-db-intro">Chọn mức xóa bằng cách nhập chính xác một trong hai lệnh dưới đây.</p>
+                    <div class="clear-db-options">
+                        <article class="clear-db-option is-data-only">
+                            <div class="clear-db-option-top">
+                                <code>XOA DATA</code>
+                                <span class="clear-db-severity">Giữ cấu hình</span>
+                            </div>
+                            <p>Xóa lịch sử cảm biến và cảnh báo. Dự án, trạm và thiết bị vẫn được giữ nguyên.</p>
+                        </article>
+                        <article class="clear-db-option is-factory-reset">
+                            <div class="clear-db-option-top">
+                                <code>FACTORY RESET</code>
+                                <span class="clear-db-severity">Xóa toàn bộ</span>
+                            </div>
+                            <p>Xóa dự án, trạm, thiết bị và toàn bộ dữ liệu để đưa hệ thống về trạng thái mới cài đặt.</p>
+                        </article>
                     </div>
 
-                    <!-- Thông báo lỗi khi nhập sai -->
-                    <div id="clear-db-error" class="text-danger small fw-bold mt-2"
-                        style="display: none; animation: fadeIn 0.3s;">
-                        <i class="bi bi-x-circle-fill me-1"></i> <span id="clear-db-error-message">Sai cú pháp!</span>
+                    <div class="clear-db-confirm-field">
+                        <label class="form-label" for="clear-db-confirm-input">Nhập lệnh xác nhận</label>
+                        <input type="text" class="form-control"
+                            id="clear-db-confirm-input" placeholder="XOA DATA hoặc FACTORY RESET" autocomplete="off"
+                            spellcheck="false" aria-describedby="clear-db-helper clear-db-error">
+                        <div id="clear-db-helper" class="form-text">Chữ hoa và khoảng trắng phải chính xác.</div>
+                    </div>
+
+                    <div id="clear-db-error" class="clear-db-error" role="alert" style="display:none;">
+                        <i class="bi bi-x-circle" aria-hidden="true"></i>
+                        <span id="clear-db-error-message">Lệnh xác nhận không hợp lệ.</span>
                     </div>
                 </div>
 
-                <div class="modal-footer bg-light">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                        <i class="bi bi-x-lg me-1"></i> Hủy bỏ
-                    </button>
-                    <!-- Nút này gọi hàm confirmClearDatabase trong JS -->
-                    <button type="button" class="btn btn-danger" onclick="window.dbManager.confirmClearDatabase()">
-                        <i class="bi bi-trash3-fill me-1"></i> XÁC NHẬN XÓA
+                <div class="modal-footer clear-db-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy bỏ</button>
+                    <button type="button" class="btn btn-danger" id="clear-db-submit" onclick="window.dbManager.confirmClearDatabase()" disabled>
+                        <i class="bi bi-trash3 me-1" aria-hidden="true"></i> Xác nhận xóa
                     </button>
                 </div>
             </div>

@@ -412,13 +412,13 @@ function handleRealtimeUpdate(message) {
             || Number(message.project_id) === gnssAdjustmentDebugState.projectId
         );
         if (belongsToActiveRun) {
-            applyGnssAdjustmentRoster(message.roster);
+            applyGnssAdjustmentRoster(message.roster, message.run_id);
             if (Array.isArray(message.expected_station_ids)) {
-                syncGnssExpectedStationIds(message.expected_station_ids);
+                syncGnssExpectedStationIds(message.expected_station_ids, message.run_id);
             }
             setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
             const resultPhase = String(message.phase || '').toUpperCase();
-            if (message.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR'].includes(resultPhase)) {
+            if (message.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(resultPhase)) {
                 const resultMessage = {
                     sensor_type: 'gnss_adjusted',
                     timestamp: message.timestamp || message.data.computed_at || Math.floor(Date.now() / 1000),
@@ -433,7 +433,7 @@ function handleRealtimeUpdate(message) {
                     'REPORT',
                     resultPhase === 'ERROR'
                         ? 'Đã ghi hồ sơ lỗi JSON; các lịch chạy tiếp theo vẫn được giữ nguyên.'
-                        : resultPhase === 'FAILED_QUALITY_GATE'
+                        : ['FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(resultPhase)
                         ? 'Hồ sơ audit đã sẵn sàng để tải; tọa độ không được publish.'
                         : 'Đã nhận liên kết tải JSON và XLSX.',
                     'success',
@@ -514,7 +514,7 @@ function isGnssAdjustmentResultRelevant(result, timestamp = null) {
         // While a new run is collecting/networking, never show an old cached
         // result panel. Project-level terminal events render either an official
         // result or a downloadable audit-only result.
-        if (!['COMPLETED', 'FAILED_QUALITY_GATE', 'ERROR'].includes(gnssAdjustmentDebugState.phase)) return false;
+        if (!['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(gnssAdjustmentDebugState.phase)) return false;
         const resultTimestamp = Number(timestamp || result.computed_at || result.epoch_ts || 0);
         const runStartedAt = Math.floor(Number(gnssAdjustmentDebugState.startedAt || 0) / 1000);
         if (runStartedAt && (!resultTimestamp || resultTimestamp < runStartedAt - 2)) {
@@ -527,7 +527,7 @@ function isGnssAdjustmentResultRelevant(result, timestamp = null) {
 function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
     if (!message?.data || !isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return false;
     const failed = String(message.data.status || '').toLowerCase() === 'failed'
-        || gnssAdjustmentDebugState.phase === 'ERROR';
+        || ['ERROR', 'PARTIAL_FAILED'].includes(gnssAdjustmentDebugState.phase);
     window.gnssBoardState?.loadAdjustmentResult?.(message.data);
     const adjResultsSection = document.getElementById('adj-results-section');
     const adjStatusEl = document.getElementById('adj-process-status');

@@ -320,6 +320,10 @@ class AdminStationPresetsFeature extends window.AdminManager {
         });
 
         if (hasError) return;
+        if (typeof this.validateAllMqttTopics === 'function' && !(await this.validateAllMqttTopics())) {
+            window.toast?.error('MQTT topic đang bị trùng hoặc chưa hợp lệ');
+            return;
+        }
         if (!this.confirmConfirmStepWarnings()) return;
 
         const finalRainWarningConfirm = parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
@@ -517,9 +521,13 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 body: JSON.stringify(payload)
             });
 
-            if (!res.ok) throw new Error('Lỗi lưu trạm');
+            if (!res.ok) {
+                const error = await res.json().catch(() => ({}));
+                throw new Error(error.detail || 'Lỗi lưu trạm');
+            }
 
             window.toast?.success('✅ Lưu thành công!');
+            this._projectConfigCache?.delete(Number(projectId));
             this.stationModal.hide();
             this.loadStations(projectId);
         } catch (e) {
@@ -539,6 +547,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
             if (!res.ok) throw new Error('Failed');
 
             window.toast?.success('✅ Xóa trạm thành công!');
+            this._projectConfigCache?.delete(Number(this.currentProjectId));
 
             if (this.stationModal) this.stationModal.hide();
             this.loadStations(this.currentProjectId);

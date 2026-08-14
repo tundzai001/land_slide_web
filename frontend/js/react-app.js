@@ -29,7 +29,7 @@ const ROUTE_STYLES = {
         '/css/admin/base.css?v=admin-css-split-1',
         '/css/admin/responsive.css?v=admin-css-split-1',
         '/css/admin/effects-theme.css?v=admin-css-split-1',
-        '/css/admin/system-settings.css?v=admin-css-split-1',
+        '/css/admin/configuration.css?v=management-premium-1',
         '/css/admin/pi-wizard.css?v=admin-css-split-1',
         '/css/admin-responsive.css?v=react-spa-12',
     ],
@@ -231,6 +231,7 @@ async function bootLegacyPage(view) {
     }
 
     if (view === 'admin') {
+        document.documentElement.setAttribute('data-theme', 'light');
         window.togglePasswordVisibility = function togglePasswordVisibility(inputId) {
             const input = document.getElementById(inputId);
             const button = input?.nextElementSibling?.querySelector?.('i');
@@ -243,10 +244,8 @@ async function bootLegacyPage(view) {
         await loadScript('/js/admin-manager.js?v=admin-split-1');
         await window.adminBundleReady;
         await loadScript('/js/db-manager.js?v=export-bg-2');
-        await loadScript('/js/system-manager.js?v=performance-1');
         await window.bootstrapAdminManager?.();
         window.bootstrapDatabaseManager?.();
-        window.bootstrapSystemManager?.();
         legacyBootedViews.add(view);
         navDebug('bootLegacyPage done', { view });
         fireLegacyReady();

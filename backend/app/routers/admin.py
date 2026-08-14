@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, desc, text, func, and_, or_
 from datetime import datetime, timedelta
 from openpyxl import Workbook
-from .. import schemas, auth, config
+from .. import schemas, auth
 from ..database import get_auth_db, get_config_db, get_data_db, ConfigSessionLocal, DataSessionLocal
 from ..models import auth as model_auth
 from ..models import config as model_config
@@ -213,6 +213,7 @@ async def provision_device(
 
         return {"status": "ok", "device_code": device.device_code, "station_id": device.station_id}
     except HTTPException:
+        await db.rollback()
         raise
     except Exception as e:
         await db.rollback()
@@ -1602,166 +1603,6 @@ async def clear_specific_table(
     except Exception as e:
         await data_db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-# ============================================================================
-# SYSTEM CONFIG VIEW
-# ============================================================================
-
-@router.get("/system-config")
-async def get_system_config(
-    db: AsyncSession = Depends(get_config_db), 
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
-):
-    # 1. Thử lấy từ DB
-    result = await db.execute(
-        select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
-    )
-    db_config = result.scalar_one_or_none()
-    
-    if db_config:
-        return db_config.value
-
-    # 2. Nếu DB chưa có, trả về mặc định từ file Settings
-    return {
-        "mqtt": {
-            "broker": config.settings.MQTT_BROKER,
-            "port": config.settings.MQTT_PORT,
-            "user": config.settings.MQTT_USER,
-            "password": config.settings.MQTT_PASSWORD,
-            "topic_reload_interval": config.settings.TOPIC_RELOAD_INTERVAL
-        },
-        "confirmation": {
-            "gnss": 3, "rain": 2, "water": 3, "imu": 1
-        },
-        "save_intervals": {
-            "gnss": config.settings.SAVE_INTERVAL_GNSS,
-            "rain": config.settings.SAVE_INTERVAL_RAIN,
-            "water": config.settings.SAVE_INTERVAL_WATER,
-            "imu": config.settings.SAVE_INTERVAL_IMU
-        }
-    }
-
-
-@router.get("/mqtt-status")
-async def get_mqtt_status(
-    db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
-):
-    """Trả về trạng thái MQTT runtime thực tế (không phải text cứng ở UI)."""
-    try:
-        from app.main import mqtt_service
-
-        res = await db.execute(
-            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
-        )
-        db_cfg = res.scalar_one_or_none()
-        config_source = "database" if db_cfg else "env"
-
-        return {
-            "connected": bool(mqtt_service.client.is_connected()),
-            "broker": mqtt_service.runtime_mqtt.get("broker", config.settings.MQTT_BROKER),
-            "port": int(mqtt_service.runtime_mqtt.get("port", config.settings.MQTT_PORT)),
-            "user": mqtt_service.runtime_mqtt.get("user", config.settings.MQTT_USER),
-            "topic_reload_interval": int(
-                mqtt_service.runtime_mqtt.get("topic_reload_interval", config.settings.TOPIC_RELOAD_INTERVAL)
-            ),
-            "config_source": config_source,
-        }
-    except Exception as e:
-        logger.error(f"❌ Error getting MQTT status: {e}")
-        raise HTTPException(status_code=500, detail="Cannot get MQTT runtime status")
-
-@router.put("/system-config")
-async def update_system_config(
-    config_in: schemas.SystemConfigPayload,
-    db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
-):
-    """
-    ✅ API MỚI: Lưu cấu hình hệ thống vào Database
-    Chỉ Admin mới gọi được API này (đã được check bởi require_permission)
-    """
-    try:
-        # Chuyển Pydantic model thành Dict
-        config_dict = config_in.dict()
-        
-        # Kiểm tra xem đã có record chưa
-        result = await db.execute(
-            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "main_config")
-        )
-        existing_config = result.scalar_one_or_none()
-        
-        if existing_config:
-            # Update
-            existing_config.value = config_dict
-            existing_config.updated_at = int(time.time())
-            existing_config.updated_by = current_user.username
-        else:
-            # Create new
-            new_config = model_config.GlobalConfig(
-                key="main_config",
-                value=config_dict,
-                updated_at=int(time.time()),
-                updated_by=current_user.username
-            )
-            db.add(new_config)
-            
-        await db.commit()
-        
-        # Áp dụng ngay cho service đang chạy để tránh lệch giữa UI và runtime.
-        try:
-            from app.main import mqtt_service
-            mqtt_service.reload_config(config_dict)
-        except Exception as reload_err:
-            logger.warning(f"⚠️ Saved config but runtime reload failed: {reload_err}")
-        
-        logger.info(f"✅ System config updated by {current_user.username}")
-        return {"status": "success", "message": "Configuration saved successfully"}
-        
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"❌ Error saving system config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# DEVICE PROVISIONING (Pending Devices)
-# ============================================================================
-
-
-# ============================================================================
-# SYSTEM PASSWORD VERIFICATION
-
-# ============================================================================
-@router.post("/verify-system-password")
-async def verify_system_password(
-    payload: schemas.SystemPasswordCheck,
-    db: AsyncSession = Depends(get_config_db), # ✅ Cần DB Session
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
-):
-    # Log yêu cầu gửi vào, chứa địa chỉ nguôn, username và method
-    #logger.info(f"Request from {payload.ip_address} - Method: {payload.method} - User: {current_user.username}")
-    # 1. Lấy mật khẩu từ DB
-    result = await db.execute(
-        select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "system_password")
-    )
-    config_record = result.scalar_one_or_none()
-    
-    if not config_record or not config_record.value:
-        raise HTTPException(status_code=503, detail="Mật khẩu hệ thống chưa được cấu hình")
-    stored_password = config_record.value
-    
-    # 2. So sánh
-    if payload.password == stored_password:
-        return {"status": "success", "message": "Access granted"}
-    
-    # Giả lập delay để chống brute-force
-    await asyncio.sleep(0.5)
-    raise HTTPException(status_code=403, detail="Mật khẩu hệ thống không đúng")
-
-# ============================================================================
-# STATION MANAGEMENT (Sử dụng Config DB)
-# ============================================================================
-
 @router.delete("/stations/{station_id}")
 async def delete_station(
     station_id: int,
@@ -1934,6 +1775,21 @@ async def update_station_config(
         # ✅ SYNC DEVICES từ sensors payload
         if 'sensors' in config_data and isinstance(config_data['sensors'], dict):
             sensors = config_data['sensors']
+            requested_topics = [
+                normalize_mqtt_topic(info.get('topic'))
+                for info in sensors.values()
+                if isinstance(info, dict) and normalize_mqtt_topic(info.get('topic'))
+            ]
+            duplicates = duplicate_mqtt_topics(requested_topics)
+            if duplicates:
+                raise HTTPException(status_code=409, detail=f"MQTT topic bị trùng trong form: {', '.join(duplicates)}")
+            conflicts = await find_mqtt_topic_conflicts(db, requested_topics, station_id)
+            if conflicts:
+                conflict = conflicts[0]
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"MQTT topic '{conflict.mqtt_topic}' đã được dùng bởi thiết bị {conflict.device_code}",
+                )
             logger.info(f"📋 [UPDATE] Station {station_id}: syncing sensors={list(sensors.keys())}")
             
             # 1. Get all existing devices
@@ -2038,8 +1894,9 @@ async def update_station_config(
         await db.commit()
         
         return {"status": "success", "message": f"Updated station {station_id}"}
-        
+
     except HTTPException:
+        await db.rollback()
         raise
     except Exception as e:
         await db.rollback()
@@ -2246,132 +2103,6 @@ async def fetch_live_gnss_origin(
 
 
 
-# ============================================================================
-# SYSTEM CONFIG - QUICK PRESETS
-# ============================================================================
-
-@router.post("/system-config/apply-preset")
-async def apply_system_preset(
-    preset_data: dict,  # {"preset": "conservative" | "balanced" | "sensitive"}
-    db: AsyncSession = Depends(get_config_db),
-    current_user = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
-):
-    """
-    ✅ Áp dụng preset cho hệ thống
-    - Conservative: Ít cảnh báo sai (5/3/5/2 xác nhận, 2h-2 ngày chu kỳ lưu)
-    - Balanced: Cân bằng (3/2/3/1 xác nhận, 1h-1 ngày chu kỳ lưu)
-    - Sensitive: Nhạy cảm (1 xác nhận, 30 phút-1 giờ chu kỳ lưu)
-    """
-    try:
-        preset_name = preset_data.get("preset")
-        
-        # ✅ ĐỊNH NGHĨA CÁC PRESET
-        presets = {
-            "conservative": {
-                "confirmation": {
-                    "gnss": 5,   # 5 lần mới báo
-                    "rain": 3,
-                    "water": 5,
-                    "imu": 2
-                },
-                "save_intervals": {
-                    "gnss": 172800,   # 2 ngày
-                    "rain": 7200,     # 2 giờ
-                    "water": 7200,
-                    "imu": 5184000    # 60 ngày
-                }
-            },
-            "balanced": {
-                "confirmation": {
-                    "gnss": 3,
-                    "rain": 2,
-                    "water": 3,
-                    "imu": 1
-                },
-                "save_intervals": {
-                    "gnss": 86400,    # 1 ngày
-                    "rain": 3600,     # 1 giờ
-                    "water": 3600,
-                    "imu": 2592000    # 30 ngày
-                }
-            },
-            "sensitive": {
-                "confirmation": {
-                    "gnss": 1,   # Báo ngay
-                    "rain": 1,
-                    "water": 1,
-                    "imu": 1
-                },
-                "save_intervals": {
-                    "gnss": 3600,     # 1 giờ
-                    "rain": 1800,     # 30 phút
-                    "water": 1800,
-                    "imu": 604800     # 7 ngày
-                }
-            }
-        }
-        
-        if preset_name not in presets:
-            raise HTTPException(status_code=400, detail="Invalid preset name")
-        
-        selected_preset = presets[preset_name]
-        
-        # ✅ LƯU VÀO DATABASE
-        from sqlalchemy import select
-        
-        # Update Confirmation Config
-        result = await db.execute(
-            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "confirmation_config")
-        )
-        confirm_config = result.scalar_one_or_none()
-        
-        if confirm_config:
-            confirm_config.value = selected_preset["confirmation"]
-            confirm_config.updated_at = int(time.time())
-        else:
-            db.add(model_config.GlobalConfig(
-                key="confirmation_config",
-                value=selected_preset["confirmation"],
-                updated_at=int(time.time()),
-                updated_by=current_user.username
-            ))
-        
-        # Update Save Intervals Config
-        result = await db.execute(
-            select(model_config.GlobalConfig).where(model_config.GlobalConfig.key == "save_intervals_config")
-        )
-        intervals_config = result.scalar_one_or_none()
-        
-        if intervals_config:
-            intervals_config.value = selected_preset["save_intervals"]
-            intervals_config.updated_at = int(time.time())
-        else:
-            db.add(model_config.GlobalConfig(
-                key="save_intervals_config",
-                value=selected_preset["save_intervals"],
-                updated_at=int(time.time()),
-                updated_by=current_user.username
-            ))
-        
-        await db.commit()
-        
-        logger.info(f"✅ Preset '{preset_name}' applied by {current_user.username}")
-        
-        return {
-            "status": "success",
-            "message": f"✅ Đã áp dụng preset: {preset_name}",
-            "config": selected_preset
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error applying preset: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
 # FACTORY RESET - XÓA TOÀN BỘ HỆ THỐNG
 # ============================================================================
 
@@ -2398,7 +2129,7 @@ async def factory_reset_database(
         # Thứ tự quan trọng: Xóa bảng con trước hoặc dùng CASCADE
         # gnss_origins phụ thuộc devices -> devices phụ thuộc stations -> stations phụ thuộc projects
         await config_db.execute(text("TRUNCATE TABLE gnss_origins, devices, stations, projects RESTART IDENTITY CASCADE"))
-        # Lưu ý: Không xóa bảng global_configs để giữ mật khẩu hệ thống
+        # Keep global_configs because other server-managed metadata may use it.
         await config_db.commit()
 
         logger.critical(f"🧨 FACTORY RESET executed by {current_user.username}")

@@ -344,6 +344,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             web_cors_api_token="cors-admin-token",
+            web_cors_api_base_url="https://cors.example",
         )
         requests = []
 
@@ -361,14 +362,14 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             }))
 
         with patch("urllib.request.urlopen", side_effect=urlopen):
-            await manager._toggle_cors_fixed_base(
+            await manager._set_cors_fixed_base_enabled(
                 "SinQuyen1",
-                sleep=True,
+                enabled=False,
                 selected_host="https://caster-two.example:2101",
             )
-            await manager._toggle_cors_fixed_base(
+            await manager._set_cors_fixed_base_enabled(
                 "SinQuyen1",
-                sleep=False,
+                enabled=True,
                 selected_host="caster-two.example",
             )
 
@@ -380,11 +381,11 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(requests[1][0].headers["Authorization"], "Bearer cors-admin-token")
         sleep_payload = json.loads(requests[1][0].data.decode())
-        self.assertFalse(sleep_payload["server1_stream_on_demand"])
-        self.assertTrue(sleep_payload["server1_stream_active"])
-        self.assertTrue(sleep_payload["server2_stream_on_demand"])
-        self.assertFalse(sleep_payload["server2_stream_active"])
-        self.assertTrue(sleep_payload["stream_on_demand"])
+        self.assertTrue(sleep_payload["server1_enabled"])
+        self.assertFalse(sleep_payload["server2_enabled"])
+        self.assertFalse(sleep_payload["server2_stream_on_demand"])
+        self.assertTrue(sleep_payload["server2_stream_active"])
+        self.assertFalse(sleep_payload["stream_on_demand"])
         self.assertTrue(sleep_payload["stream_active"])
         restored_payload = json.loads(requests[2][0].data.decode())
         self.assertEqual(restored_payload, original_config)
@@ -422,6 +423,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             web_cors_api_token="cors-admin-token",
+            web_cors_api_base_url="https://cors.example",
         )
         requests = []
 
@@ -446,16 +448,16 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             }))
 
         with patch("urllib.request.urlopen", side_effect=urlopen):
-            await manager._toggle_cors_fixed_base(
+            await manager._set_cors_fixed_base_enabled(
                 "SinQuyen1",
-                sleep=True,
+                enabled=False,
                 selected_host="caster.example",
                 selected_serial="SINQUYEN2-SERIAL",
                 selected_server_id=2,
             )
-            await manager._toggle_cors_fixed_base(
+            await manager._set_cors_fixed_base_enabled(
                 "SinQuyen1",
-                sleep=False,
+                enabled=True,
                 selected_host="caster.example",
                 selected_serial="SINQUYEN2-SERIAL",
                 selected_server_id=2,
@@ -467,10 +469,42 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         sleep_payload = json.loads(requests[1][0].data.decode())
-        self.assertTrue(sleep_payload["server2_stream_on_demand"])
-        self.assertFalse(sleep_payload["server2_stream_active"])
+        self.assertFalse(sleep_payload["server2_enabled"])
+        self.assertFalse(sleep_payload["server2_stream_on_demand"])
+        self.assertTrue(sleep_payload["server2_stream_active"])
         restored_payload = json.loads(requests[2][0].data.decode())
         self.assertEqual(restored_payload, backup_config)
+
+    async def test_conflict_base_is_hard_disabled_and_returns_exact_restore_snapshot(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        original = {
+            "server1_enabled": True,
+            "mountpoint1": "SinQuyen1",
+            "server1_stream_on_demand": False,
+            "server1_stream_active": True,
+            "server2_enabled": True,
+            "mountpoint2": "SinQuyen2",
+            "server2_stream_on_demand": True,
+            "server2_stream_active": False,
+        }
+        configured = []
+        with patch.object(
+            manager,
+            "_cors_api_request_sync",
+            return_value=[{"serial": "SQ1", "service_config": original}],
+        ), patch.object(
+            manager,
+            "_cors_configure_service_sync",
+            side_effect=lambda serial, cfg: configured.append((serial, cfg)),
+        ):
+            snapshot = manager._disable_conflict_base_sync("SQ1")
+
+        self.assertEqual(snapshot, original)
+        self.assertEqual(configured[0][0], "SQ1")
+        self.assertFalse(configured[0][1]["server1_enabled"])
+        self.assertFalse(configured[0][1]["server2_enabled"])
+        self.assertFalse(configured[0][1]["server1_stream_on_demand"])
+        self.assertTrue(configured[0][1]["server2_stream_on_demand"])
 
     async def test_cross_station_failover_switches_s2_both_directions(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
@@ -485,7 +519,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                     "mountpoint1": "SinQuyen1",
                     "server1_stream_on_demand": False,
                     "server1_stream_active": True,
-                    "server2_enabled": True,
+                    "server2_enabled": False,
                     "serverhost2": "caster.example",
                     "mountpoint2": "SinQuyen2",
                     "server2_stream_on_demand": True,
@@ -502,7 +536,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                     "mountpoint1": "SinQuyen2",
                     "server1_stream_on_demand": False,
                     "server1_stream_active": True,
-                    "server2_enabled": True,
+                    "server2_enabled": False,
                     "serverhost2": "caster.example",
                     "mountpoint2": "SinQuyen1",
                     "server2_stream_on_demand": True,
@@ -555,8 +589,9 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             ])
             self.assertEqual(len(configured), 1)
             self.assertEqual(configured[0][0], "SQ2-SERIAL")
-            self.assertFalse(configured[0][1]["server2_stream_on_demand"])
-            self.assertTrue(configured[0][1]["server2_stream_active"])
+            self.assertTrue(configured[0][1]["server2_enabled"])
+            self.assertTrue(configured[0][1]["server2_stream_on_demand"])
+            self.assertFalse(configured[0][1]["server2_stream_active"])
 
             stations[0]["status"] = "online"
             stations[1]["status"] = "offline"
@@ -574,20 +609,23 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "SQ2-SERIAL",
             "SQ1-SERIAL",
         ])
+        self.assertFalse(configured[0][1]["server2_enabled"])
         self.assertTrue(configured[0][1]["server2_stream_on_demand"])
         self.assertFalse(configured[0][1]["server2_stream_active"])
-        self.assertFalse(configured[1][1]["server2_stream_on_demand"])
-        self.assertTrue(configured[1][1]["server2_stream_active"])
+        self.assertTrue(configured[1][1]["server2_enabled"])
+        self.assertTrue(configured[1][1]["server2_stream_on_demand"])
+        self.assertFalse(configured[1][1]["server2_stream_active"])
 
     async def test_seed_forces_both_streams_to_selected_physical_base(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        manager.FIXED_BASE_HANDOVER_VERIFY_SECONDS = 0
         selected_config = {
             "server1_enabled": True,
             "mountpoint1": "SinQuyen2",
             "server1_stream_on_demand": False,
             "server1_stream_active": True,
-            "server2_enabled": True,
+            "server2_enabled": False,
             "mountpoint2": "SinQuyen1",
             "server2_stream_on_demand": True,
             "server2_stream_active": False,
@@ -619,7 +657,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             },
         ]
         manager.configure_project(91, [{
-            "name": "Cụm tổng", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "name": "Cụm tổng", "cluster_type": "total",
+            "stations": [1, 2], "rovers": ["R1", "R2"],
             "fixed_base_candidates": candidates,
         }])
         configured = []
@@ -633,10 +672,12 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         ):
             outcome = await manager.prepare_common_fixed_base_seed(91)
             self.assertEqual([item[0] for item in configured], ["SQ1", "SQ2"])
-            self.assertTrue(configured[0][1]["server1_stream_on_demand"])
-            self.assertTrue(configured[0][1]["server2_stream_on_demand"])
-            self.assertFalse(configured[1][1]["server1_stream_on_demand"])
-            self.assertFalse(configured[1][1]["server2_stream_on_demand"])
+            self.assertFalse(configured[0][1]["server1_enabled"])
+            self.assertFalse(configured[0][1]["server2_enabled"])
+            self.assertTrue(configured[1][1]["server1_enabled"])
+            self.assertTrue(configured[1][1]["server2_enabled"])
+            self.assertTrue(configured[1][1]["server2_stream_on_demand"])
+            self.assertFalse(configured[1][1]["server2_stream_active"])
             self.assertEqual(outcome[0]["selected_base"], "SinQuyen2")
             self.assertTrue(outcome[0]["opposite_online"])
             self.assertEqual(
@@ -689,10 +730,11 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_seed_keeps_offline_counterpart_and_asserts_selected_s2(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        manager.FIXED_BASE_HANDOVER_VERIFY_SECONDS = 0
         selected_config = {
             "server1_enabled": True, "mountpoint1": "SinQuyen2",
             "server1_stream_on_demand": False, "server1_stream_active": True,
-            "server2_enabled": True, "mountpoint2": "SinQuyen1",
+            "server2_enabled": False, "mountpoint2": "SinQuyen1",
             "server2_stream_on_demand": True, "server2_stream_active": False,
         }
         other_config = {
@@ -706,7 +748,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             {"serial": "SQ1", "name": "SinQuyen1", "status": "offline", "service_config": other_config},
         ]
         manager.configure_project(92, [{
-            "name": "Cụm tổng", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "name": "Cụm tổng", "cluster_type": "total",
+            "stations": [1, 2], "rovers": ["R1", "R2"],
             "fixed_base_candidates": [
                 {"role": "primary", "base_station": "SinQuyen2", "base_serial": "SQ2", "base_server_id": 1, "base_stream_mp": "SinQuyen2", "base_lat": 21.0, "base_lon": 105.0},
                 {"role": "backup", "base_station": "SinQuyen1", "base_serial": "SQ1", "base_server_id": 2, "base_stream_mp": "SinQuyen2", "base_lat": 21.1, "base_lon": 105.0},
@@ -722,13 +765,15 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             outcome = await manager.prepare_common_fixed_base_seed(92)
 
         self.assertEqual([item[0] for item in configured], ["SQ2"])
-        self.assertFalse(configured[0][1]["server2_stream_on_demand"])
-        self.assertTrue(configured[0][1]["server2_stream_active"])
+        self.assertTrue(configured[0][1]["server2_enabled"])
+        self.assertTrue(configured[0][1]["server2_stream_on_demand"])
+        self.assertFalse(configured[0][1]["server2_stream_active"])
         self.assertFalse(outcome[0]["opposite_online"])
 
     async def test_seed_accepts_live_stream_metadata_when_public_config_omits_s2(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        manager.FIXED_BASE_HANDOVER_VERIFY_SECONDS = 0
         stations = [
             {
                 "serial": "SQ1", "name": "SinQuyen1", "status": "online",
@@ -753,7 +798,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             },
         ]
         manager.configure_project(95, [{
-            "name": "Dam 1", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "name": "Dam 1", "cluster_type": "total",
+            "stations": [1, 2], "rovers": ["R1", "R2"],
             "fixed_base_candidates": [
                 {"role": "primary", "base_station": "SinQuyen1", "base_serial": "SQ1", "base_server_id": 1, "base_stream_mp": "SinQuyen1", "base_lat": 21.1, "base_lon": 105.0},
                 {"role": "backup", "base_station": "SinQuyen2", "base_serial": "SQ2", "base_server_id": 2, "base_stream_mp": "SinQuyen1", "base_lat": 21.0, "base_lon": 105.0},
@@ -769,13 +815,14 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             outcome = await manager.prepare_common_fixed_base_seed(95)
 
         self.assertEqual(outcome[0]["selected_base"], "SinQuyen1")
-        self.assertEqual([item[0] for item in configured], ["SQ2", "SQ1"])
-        self.assertTrue(configured[1][1]["server2_enabled"])
-        self.assertEqual(configured[1][1]["mountpoint2"], "SinQuyen2")
+        self.assertEqual([item[0] for item in configured], ["SQ2"])
+        self.assertFalse(configured[0][1]["server1_enabled"])
+        self.assertFalse(configured[0][1]["server2_enabled"])
 
     async def test_seed_selects_online_backup_when_configured_primary_is_offline(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         manager.FIXED_BASE_HANDOVER_SETTLE_SECONDS = 0
+        manager.FIXED_BASE_HANDOVER_VERIFY_SECONDS = 0
         offline_primary_config = {
             "stream_on_demand": True, "stream_active": True,
             "server1_enabled": True, "mountpoint1": "SinQuyen1",
@@ -795,7 +842,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             {"serial": "SQ2", "name": "SinQuyen2", "status": "online", "service_config": online_backup_config},
         ]
         manager.configure_project(94, [{
-            "name": "Dam 1", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "name": "Dam 1", "cluster_type": "total",
+            "stations": [1, 2], "rovers": ["R1", "R2"],
             "fixed_base_candidates": [
                 {"role": "primary", "base_station": "SinQuyen1", "base_serial": "SQ1", "base_server_id": 1, "base_stream_mp": "SinQuyen1", "base_lat": 21.1, "base_lon": 105.0},
                 {"role": "backup", "base_station": "SinQuyen2", "base_serial": "SQ2", "base_server_id": 2, "base_stream_mp": "SinQuyen1", "base_lat": 21.0, "base_lon": 105.0},
@@ -852,6 +900,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
             web_cors_api_token="cors-admin-token",
+            web_cors_api_base_url="https://cors.example",
         )
         map_response = type("MapResponse", (), {
             "status": 200,
@@ -873,9 +922,9 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[map_response, FakeResponse()],
         ):
             with self.assertRaisesRegex(RuntimeError, "did not confirm device"):
-                await manager._toggle_cors_fixed_base(
+                await manager._set_cors_fixed_base_enabled(
                     "SinQuyen1",
-                    sleep=True,
+                    enabled=False,
                     selected_host="caster-one.example",
                 )
 

@@ -230,8 +230,25 @@ async def update_project(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
+        if 'project_code' in project_data:
+            project_code = str(project_data['project_code'] or '').strip()
+            if not project_code:
+                raise HTTPException(status_code=422, detail="Mã dự án không được để trống")
+            duplicate = await db.execute(
+                select(model_config.Project).where(
+                    model_config.Project.project_code == project_code,
+                    model_config.Project.id != project_id,
+                )
+            )
+            if duplicate.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="Mã dự án đã được sử dụng")
+            project.project_code = project_code
+
         if 'name' in project_data:
-            project.name = project_data['name']
+            name = str(project_data['name'] or '').strip()
+            if not name:
+                raise HTTPException(status_code=422, detail="Tên dự án không được để trống")
+            project.name = name
         if 'description' in project_data:
             project.description = project_data['description']
         if 'location' in project_data:
@@ -267,6 +284,7 @@ async def update_project(
         }
 
     except HTTPException:
+        await db.rollback()
         raise
     except Exception as e:
         await db.rollback()

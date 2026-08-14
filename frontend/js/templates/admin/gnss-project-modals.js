@@ -71,14 +71,43 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
 
     <!-- Project Config Modal -->
     <div class="modal fade" id="projectConfigModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content project-config-modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="projectConfigModalTitle">Cấu hình dự án</h5>
+                    <h5 class="modal-title" id="projectConfigModalTitle">Chỉnh sửa dự án</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- CORS BASE CONFIG -->
+                    <section class="config-section project-profile-section mb-4">
+                        <div class="section-header">
+                            <i class="bi bi-building text-primary" aria-hidden="true"></i>
+                            <div>
+                                <h5>Thông tin dự án</h5>
+                                <p class="mb-0">Tên, mã nhận diện và mô tả hiển thị trong trang quản trị.</p>
+                            </div>
+                        </div>
+                        <div class="sensor-config-body">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label" for="project-config-code">Mã dự án <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="project-config-code" maxlength="100" autocomplete="off">
+                                    <div class="form-text">Mã duy nhất dùng để nhận diện dự án.</div>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label" for="project-config-name">Tên dự án <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="project-config-name" maxlength="255" autocomplete="off">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label" for="project-config-description">Mô tả</label>
+                                    <textarea class="form-control" id="project-config-description" rows="3" maxlength="1000" placeholder="Mô tả mục tiêu và phạm vi quan trắc"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label" for="project-config-location">Địa điểm</label>
+                                    <input type="text" class="form-control" id="project-config-location" maxlength="500" placeholder="Tỉnh, huyện hoặc khu vực triển khai">
+                                </div>
+                            </div>
+                        </div>
+                    </section>
 
 
                     <!-- GNSS CLUSTERS CONFIG -->
@@ -161,7 +190,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
                     <button type="button" class="btn btn-primary" onclick="window.adminManager.saveProjectConfig()">
-                        <i class="bi bi-save me-1"></i> Lưu cấu hình dự án
+                        <i class="bi bi-check2-circle me-1"></i> Lưu thay đổi
                     </button>
                 </div>
             </div>

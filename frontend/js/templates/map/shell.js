@@ -35,7 +35,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             <input type="checkbox" id="layer-station" class="d-none" checked>
             <input type="checkbox" id="layer-rescue" class="d-none" checked>
 
-            <button id="theme-toggle-btn" class="btn btn-link p-0"
+            <button id="theme-toggle-btn" class="btn btn-link p-0" aria-label="Chuyển giao diện sáng tối"
                 style="color: var(--text-primary); font-size: 1.2rem;">
                 <i class="bi bi-moon-stars-fill"></i>
             </button>
@@ -74,15 +74,16 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <!-- LEFT SIDEBAR (Station List) -->
     <div class="station-list-sidebar" id="station-list-sidebar" role="complementary"
         aria-label="Danh sách trạm" aria-hidden="true">
-        <div class="sidebar-header">
+        <div class="sidebar-header station-list-header">
             <h6><i class="bi bi-hdd-network me-2"></i>Station List</h6>
         </div>
 
-        <button class="sidebar-close-tab" id="sidebar-close-tab">
+        <button class="sidebar-close-tab" id="sidebar-close-tab" type="button"
+            aria-label="Thu gọn danh sách trạm" title="Thu gọn danh sách trạm">
             <i class="bi bi-chevron-left"></i>
         </button>
 
-        <div class="sidebar-search">
+        <div class="sidebar-search station-search-field">
             <input type="text" class="form-control form-control-sm" placeholder="Search station..." id="search-station">
         </div>
 
@@ -104,18 +105,18 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
     <!-- CUSTOM GLASS ZOOM CONTROLS (Bottom-Right) -->
     <div class="custom-map-controls">
-        <button class="map-ctrl-btn" id="map-zoom-in" title="Phóng to">
+        <div class="heatmap-toggle-wrap">
+            <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt Heatmap cứu hộ"
+                aria-label="Bật hoặc tắt heatmap cứu hộ">
+                <i class="bi bi-fire"></i>
+            </button>
+        </div>
+        <span class="map-control-divider" aria-hidden="true"></span>
+        <button class="map-ctrl-btn" id="map-zoom-in" title="Phóng to" aria-label="Phóng to bản đồ">
             <i class="bi bi-plus-lg"></i>
         </button>
-        <button class="map-ctrl-btn" id="map-zoom-out" title="Thu nhỏ">
+        <button class="map-ctrl-btn" id="map-zoom-out" title="Thu nhỏ" aria-label="Thu nhỏ bản đồ">
             <i class="bi bi-dash-lg"></i>
-        </button>
-    </div>
-
-    <!-- HEATMAP TOGGLE -->
-    <div class="heatmap-toggle-wrap">
-        <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt Heatmap cứu hộ">
-            <i class="bi bi-fire"></i>
         </button>
     </div>
 

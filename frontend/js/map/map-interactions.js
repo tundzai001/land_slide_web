@@ -641,6 +641,56 @@ function setupEventListeners() {
         },
         loadAdjustmentResult(result) {
             if (!result || typeof result !== 'object') return;
+            const clusterResults = Array.isArray(result.cluster_results)
+                ? result.cluster_results
+                : [];
+            const clusterList = document.getElementById('gnss-cluster-results-list');
+            if (clusterList) {
+                clusterList.replaceChildren();
+                clusterList.hidden = clusterResults.length <= 1;
+                for (const clusterResult of clusterResults) {
+                    const row = document.createElement('div');
+                    row.className = 'gnss-cluster-result-row';
+                    const identity = document.createElement('div');
+                    identity.className = 'gnss-cluster-result-identity';
+                    const title = document.createElement('strong');
+                    title.textContent = String(clusterResult.cluster_name || 'Cụm GNSS');
+                    const status = document.createElement('span');
+                    status.textContent = String(
+                        clusterResult.phase
+                        || clusterResult.quality_gate?.status
+                        || clusterResult.status
+                        || 'Đang xử lý'
+                    );
+                    identity.append(title, status);
+                    const actions = document.createElement('div');
+                    actions.className = 'gnss-cluster-result-downloads';
+                    for (const [label, url, icon] of [
+                        ['Excel', clusterResult.excel_report_url, 'bi-file-earmark-spreadsheet'],
+                        ['JSON', clusterResult.audit_json_url, 'bi-filetype-json'],
+                    ]) {
+                        if (!url) continue;
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'btn btn-sm btn-outline-primary';
+                        button.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i> ${label}`;
+                        button.addEventListener('click', async () => {
+                            try {
+                                await window.downloadAuthenticatedFile(
+                                    url,
+                                    String(url).split('/').pop()
+                                );
+                            } catch (error) {
+                                console.error('[GNSS] Cluster report download failed:', error);
+                                window.toast?.error?.(`Không tải được báo cáo ${title.textContent}.`);
+                            }
+                        });
+                        actions.appendChild(button);
+                    }
+                    row.append(identity, actions);
+                    clusterList.appendChild(row);
+                }
+            }
             const downloadBtn = document.getElementById('gnss-download-results-btn');
             const auditJsonBtn = document.getElementById('gnss-download-audit-json-btn');
             const reportUrl = String(result.report_file_url || '');
@@ -962,6 +1012,7 @@ function setupEventListeners() {
                                 <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium gnss-result-panel" style="display: none;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
                                     <div class="text-light opacity-75 font-monospace mb-2" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>Time: <span id="adj-val-time"></span></div>
+                                    <div id="gnss-cluster-results-list" class="gnss-cluster-results-list mb-2" hidden></div>
                                     <div class="d-flex gap-2 mb-2 gnss-result-actions">
                                         <button id="gnss-retry-adjustment-btn" type="button" class="btn btn-sm btn-primary px-3 py-2 shadow-sm fw-bold" style="border-radius: 7px; white-space: nowrap; display: none;">
                                             <i class="bi bi-arrow-clockwise me-1"></i>Bình sai lại
@@ -1157,6 +1208,14 @@ function setupEventListeners() {
     window.ensureGnssTerminalModal = ensureGnssTerminalModal;
 
     function showAdjustmentError(title, message) {
+        const terminalModal = document.getElementById('gnssTerminalModal');
+        if (terminalModal?.classList.contains('show')) {
+            setGnssAdjustmentPhase('ERROR', message || title);
+            addGnssAdjustmentDebug('UI', message || title, 'error');
+            window.toast?.error?.(message || title);
+            terminalModal.querySelector('#gnss-retry-adjustment-btn')?.focus?.();
+            return;
+        }
         if (window.Swal?.fire) {
             window.Swal.fire({ icon: 'error', title, text: message });
             return;
@@ -1331,13 +1390,7 @@ function setupEventListeners() {
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);
-            setGnssAdjustmentPhase('ERROR', error.message || 'Không thể khởi động Bình sai.');
-            addGnssAdjustmentDebug('API', error.message || 'Không thể khởi động Bình sai.', 'error');
-            Swal.fire({
-                icon: 'error',
-                title: 'Lỗi khởi chạy Bình sai',
-                text: error.message
-            });
+            showAdjustmentError('Lỗi khởi chạy Bình sai', error.message);
         }
     };
 
