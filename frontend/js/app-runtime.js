@@ -72,38 +72,63 @@
         root.innerHTML = `
         <main class="login-page">
             <section class="login-visual" aria-hidden="true">
-                <div class="login-brand"><span class="login-brand-icon">⌁</span><span>Landslide Monitor</span></div>
-                <div class="login-visual-copy"><div class="login-kicker">TRUNG TÂM GIÁM SÁT</div>
-                    <h1>Quản lý vận hành hệ thống quan trắc</h1>
-                    <p>Theo dõi trạm, cấu hình cảnh báo và phân quyền truy cập trong một giao diện duy nhất.</p>
+                <div class="login-brand">
+                    <span class="login-brand-icon"><i class="bi bi-activity"></i></span>
+                    <span>Landslide <small>Monitor</small></span>
+                </div>
+                <div class="login-network">
+                    <div class="login-network-label"><span></span> Hệ thống đang vận hành</div>
+                    <svg viewBox="0 0 720 420" role="presentation">
+                        <path class="login-contour" d="M-30 90C110 8 215 170 356 86s264-38 410 48M-42 156c132-76 252 92 388 5s267-43 418 31M-28 238c135-70 244 83 384 6s272-36 408 35M-18 326c143-60 248 69 388 8s260-30 392 27" />
+                        <path class="login-route login-route-a" d="M103 303 245 151 397 272 571 113" />
+                        <path class="login-route login-route-b" d="M245 151 522 329 571 113" />
+                        <g class="login-node"><circle cx="103" cy="303" r="9"/><circle cx="245" cy="151" r="9"/><circle cx="397" cy="272" r="9"/><circle cx="522" cy="329" r="9"/><circle cx="571" cy="113" r="9"/></g>
+                    </svg>
+                    <div class="login-signal-card"><span>Chuyển dịch hiện tại</span><strong>0.13 <small>mm/s</small></strong><em><i class="bi bi-check-circle-fill"></i> Trong ngưỡng an toàn</em></div>
+                </div>
+                <div class="login-visual-copy">
+                    <div class="login-kicker">Không gian điều hành</div>
+                    <h1>Nhìn rõ thay đổi.<br>Phản ứng đúng lúc.</h1>
+                    <p>Mỗi tín hiệu tại công trình được đặt trong đúng bối cảnh để đội ngũ vận hành đưa ra quyết định tự tin hơn.</p>
                 </div>
             </section>
             <section class="login-panel">
                 <div class="login-form-wrap">
-                    <div class="login-toolbar"><a href="/" class="login-back">← <span>Về trang chủ</span></a><button type="button" class="login-back" id="login-theme" aria-label="Đổi giao diện">◐</button></div>
+                    <div class="login-toolbar">
+                        <a href="/" class="login-back"><i class="bi bi-arrow-left"></i><span>Về trang chủ</span></a>
+                        <button type="button" class="login-theme" id="login-theme" aria-label="Đổi giao diện"><i class="bi bi-moon-stars"></i></button>
+                    </div>
                     <div class="login-card">
-                        <div class="login-card-head"><div class="login-icon">♙</div><div><h2>Đăng nhập</h2><p class="login-subtitle">Truy cập hệ thống giám sát</p></div></div>
+                        <div class="login-card-head">
+                            <div class="login-icon"><i class="bi bi-shield-lock"></i></div>
+                            <div class="login-heading-copy"><span>Cổng vận hành</span><h2>Chào mừng trở lại</h2><p class="login-subtitle">Đăng nhập để tiếp tục phiên giám sát.</p></div>
+                        </div>
                         <form id="login-form" class="login-form" novalidate>
-                            <label class="login-field" for="login-username"><span>Tài khoản</span><input id="login-username" name="username" autocomplete="username" required autofocus></label>
-                            <label class="login-field" for="login-password"><span>Mật khẩu</span><div class="login-password-row"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button id="toggle-password" type="button" aria-label="Hiện mật khẩu">◉</button></div></label>
-                            <label class="login-check"><input id="login-remember" type="checkbox" checked><span>Ghi nhớ đăng nhập</span></label>
-                            <div id="login-error" class="login-error" role="alert" hidden></div>
-                            <button id="login-submit" class="login-submit" type="submit">Đăng nhập</button>
+                            <label class="login-field" for="login-username"><span>Tài khoản</span><div class="login-input-shell"><i class="bi bi-person"></i><input id="login-username" name="username" autocomplete="username" placeholder="Nhập tài khoản" required autofocus></div></label>
+                            <label class="login-field" for="login-password"><span>Mật khẩu</span><div class="login-password-row"><i class="bi bi-key"></i><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" required><button id="toggle-password" type="button" aria-label="Hiện mật khẩu"><i class="bi bi-eye"></i></button></div></label>
+                            <label class="login-check"><input id="login-remember" type="checkbox" checked><span>Ghi nhớ đăng nhập trên thiết bị này</span></label>
+                            <div id="login-error" class="login-error" role="alert" hidden><i class="bi bi-exclamation-circle"></i><span></span></div>
+                            <button id="login-submit" class="login-submit" type="submit"><span>Đăng nhập</span><i class="bi bi-arrow-right"></i></button>
                         </form>
+                        <p class="login-security-note"><i class="bi bi-lock"></i> Phiên truy cập được bảo vệ và ghi nhận.</p>
                     </div>
                 </div>
             </section>
         </main>`;
         const password = document.getElementById('login-password');
-        document.getElementById('login-theme').addEventListener('click', () => {
+        const themeButton = document.getElementById('login-theme');
+        themeButton.querySelector('i').className = document.documentElement.dataset.theme === 'light' ? 'bi bi-moon-stars' : 'bi bi-sun';
+        themeButton.addEventListener('click', () => {
             const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
             document.documentElement.dataset.theme = next;
             localStorage.setItem('theme', next);
+            document.querySelector('#login-theme i').className = next === 'light' ? 'bi bi-moon-stars' : 'bi bi-sun';
         });
         document.getElementById('toggle-password').addEventListener('click', (event) => {
             const visible = password.type === 'text';
             password.type = visible ? 'password' : 'text';
             event.currentTarget.setAttribute('aria-label', visible ? 'Hiện mật khẩu' : 'Ẩn mật khẩu');
+            event.currentTarget.querySelector('i').className = visible ? 'bi bi-eye' : 'bi bi-eye-slash';
         });
         document.getElementById('login-form').addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -114,14 +139,14 @@
             username.removeAttribute('aria-invalid');
             password.removeAttribute('aria-invalid');
             if (!username.value.trim() || !password.value) {
-                error.textContent = 'Vui lòng nhập tài khoản và mật khẩu.';
+                error.querySelector('span').textContent = 'Vui lòng nhập tài khoản và mật khẩu.';
                 error.hidden = false;
                 (!username.value.trim() ? username : password).setAttribute('aria-invalid', 'true');
                 (!username.value.trim() ? username : password).focus();
                 return;
             }
             submit.disabled = true;
-            submit.textContent = 'Đang đăng nhập…';
+            submit.querySelector('span').textContent = 'Đang đăng nhập…';
             try {
                 const body = new URLSearchParams({username: username.value.trim(), password: password.value});
                 if (document.getElementById('login-remember').checked) body.set('scope', 'remember_me');
@@ -131,11 +156,11 @@
                 window.authSession.storeToken(data.access_token, document.getElementById('login-remember').checked);
                 location.replace(safeReturnTo());
             } catch (reason) {
-                error.textContent = reason.name === 'TimeoutError' ? 'Máy chủ phản hồi quá chậm. Vui lòng thử lại.' : reason.message;
+                error.querySelector('span').textContent = reason.name === 'TimeoutError' ? 'Máy chủ phản hồi quá chậm. Vui lòng thử lại.' : reason.message;
                 error.hidden = false;
             } finally {
                 submit.disabled = false;
-                submit.textContent = 'Đăng nhập';
+                submit.querySelector('span').textContent = 'Đăng nhập';
             }
         });
     }
@@ -225,6 +250,7 @@
                 return;
             }
             await loadStyle('/assets/login.min.css?v=__BUILD_VERSION__');
+            loadStyle(CDN.iconsCss).catch(() => {});
             renderLogin();
             return;
         }
