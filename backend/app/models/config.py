@@ -71,6 +71,7 @@ class GNSSOrigin(BaseConfig):
     num_points = Column(Integer, nullable=True)
     rotation_matrix = Column(JSON, nullable=True)
     ecef_origin = Column(JSON, nullable=True)
+    tracking_offset = Column(JSON, nullable=True) # [offset_e, offset_n, offset_u] meters
 
 class GlobalConfig(BaseConfig):
     __tablename__ = "global_configs"

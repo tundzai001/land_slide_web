@@ -280,6 +280,54 @@ class GnssFixedOnlyTests(unittest.TestCase):
         self.assertGreater(len(totals), 20)
         self.assertLess(max(totals) - min(totals), 0.01)
 
+    def test_horizontal_stale_cluster_reacquires_tracking(self):
+        """Verify trạm lệch ngang (offset2D > max_step) sau khi mất fix lâu (dt > 60s) vẫn reacquire thành công."""
+        processor = self._processor_without_db()
+        processor.filter_window_size = 30
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.v_enu_state = np.zeros(3)
+        processor.v_state_ready = False
+        processor.disp_enu_state = np.array([0.005, 0.0, 0.0])
+        processor.disp_state_ready = True
+        processor.peak_displacement_mm = 5.0
+        processor.last_significant_motion_ts = 0.0
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        timestamps = list(range(6)) + list(range(120, 127))
+        # Cụm điểm mới sau 120s lệch 24cm ngang (E) và 6cm đứng (U) giống trạm Sin Quyền trong log thực tế
+        positions = [np.array([0.001 * i, 0.0, 0.0]) for i in range(6)] + [
+            np.array([0.24 + (0.001 if i % 2 else -0.001), 0.0, 0.06])
+            for i in range(7)
+        ]
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            i = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + timestamps[i],
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            i = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + positions[i]
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        results = [processor._handle_processing("$GNGGA,TEST", 4, {}) for _ in positions]
+
+        self.assertIn("TRACKING_REACQUIRED", {result.get("status") for result in results if result})
+        self.assertAlmostEqual(float(processor.tracking_offset_enu[0]), 0.24, places=2)
+        self.assertLess(abs(float(processor.history[-1]["pos_enu"][0])), 0.01)
+        np.testing.assert_allclose(processor.disp_enu_state, [0.005, 0.0, 0.0])
+
 
 class GnssAuditTests(unittest.IsolatedAsyncioTestCase):
     def _bridge_without_clients(self):

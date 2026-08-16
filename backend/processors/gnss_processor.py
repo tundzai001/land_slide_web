@@ -171,8 +171,8 @@ class GNSSVelocityProcessor:
         centered_t = times - times[-1]
         intercept = np.median(positions - centered_t[:, None] * velocity, axis=0)
         residuals = positions - (intercept + centered_t[:, None] * velocity)
-        residual_2d = np.linalg.norm(residuals[:, :2], axis=1)
-        residual_rms_m = float(np.sqrt(np.mean(residual_2d ** 2)))
+        residual_3d = np.linalg.norm(residuals, axis=1)
+        residual_rms_m = float(np.sqrt(np.mean(residual_3d ** 2)))
         time_sxx = float(np.sum((times - np.mean(times)) ** 2))
         uncertainty_mm_s = (
             float(residual_rms_m / math.sqrt(time_sxx) * 1000.0)
@@ -181,7 +181,7 @@ class GNSSVelocityProcessor:
         return {
             'velocity': velocity,
             'residual_rms_mm': residual_rms_m * 1000.0,
-            'residual_mad_mm': float(np.median(np.abs(residual_2d - np.median(residual_2d))) * 1000.0),
+            'residual_mad_mm': float(np.median(np.abs(residual_3d - np.median(residual_3d))) * 1000.0),
             'uncertainty_mm_s': uncertainty_mm_s,
             'confidence_95_mm_s': uncertainty_mm_s * 1.96,
             'sample_count': int(len(samples)),
@@ -205,10 +205,29 @@ class GNSSVelocityProcessor:
             from sqlalchemy import select
             
             async with self.db_session_factory() as db:
-                result = await db.execute(
-                    select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
-                )
-                origin_record = result.scalar_one_or_none()
+                try:
+                    result = await db.execute(
+                        select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
+                    )
+                    origin_record = result.scalar_one_or_none()
+                except Exception as col_err:
+                    # Nếu DB chưa kịp migrate cột tracking_offset, query các cột cơ bản
+                    logger.warning(f"⚠️ Device {self.device_id}: Direct model select failed ({col_err}), attempting basic column select")
+                    result = await db.execute(
+                        select(
+                            GNSSOrigin.lat, GNSSOrigin.lon, GNSSOrigin.h,
+                            GNSSOrigin.rotation_matrix, GNSSOrigin.ecef_origin
+                        ).where(GNSSOrigin.device_id == self.device_id)
+                    )
+                    row = result.first()
+                    if row:
+                        origin_record = type('SimpleOrigin', (), {
+                            'lat': row[0], 'lon': row[1], 'h': row[2],
+                            'rotation_matrix': row[3], 'ecef_origin': row[4],
+                            'tracking_offset': None
+                        })()
+                    else:
+                        origin_record = None
             
             if origin_record:
                 # Validate dữ liệu trước khi dùng
@@ -220,6 +239,12 @@ class GNSSVelocityProcessor:
                         'R': np.array(origin_record.rotation_matrix),
                         'ecef': np.array(origin_record.ecef_origin)
                     }
+                    if getattr(origin_record, 'tracking_offset', None):
+                        try:
+                            self.tracking_offset_enu = np.array(origin_record.tracking_offset, dtype=float)
+                            logger.info(f"✅ [ASYNC LOAD] Loaded tracking offset for device {self.device_id}: {self.tracking_offset_enu}")
+                        except Exception as ex:
+                            logger.warning(f"⚠️ Device {self.device_id}: Failed to parse tracking offset: {ex}")
                     self.state = "ORIGIN_LOCKED"
                     logger.info(f"✅ [ASYNC LOAD] Loaded origin for device {self.device_id}: ({origin_record.lat}, {origin_record.lon})")
                 else:
@@ -244,6 +269,7 @@ class GNSSVelocityProcessor:
                 
                 rot_matrix = self.origin['R'].tolist() if hasattr(self.origin['R'], 'tolist') else self.origin['R']
                 ecef_origin = self.origin['ecef'].tolist() if hasattr(self.origin['ecef'], 'tolist') else self.origin['ecef']
+                tracking_offset_list = self.tracking_offset_enu.tolist() if hasattr(self.tracking_offset_enu, 'tolist') else list(self.tracking_offset_enu)
 
                 if existing:
                     # A monitoring origin is a permanent reference. Never overwrite it
@@ -255,6 +281,12 @@ class GNSSVelocityProcessor:
                         'R': np.array(existing.rotation_matrix),
                         'ecef': np.array(existing.ecef_origin),
                     }
+                    if getattr(existing, 'tracking_offset', None) and np.all(self.tracking_offset_enu == 0.0):
+                        try:
+                            self.tracking_offset_enu = np.array(existing.tracking_offset, dtype=float)
+                        except Exception:
+                            pass
+                    existing.tracking_offset = tracking_offset_list
                     self.state = "ORIGIN_LOCKED"
                     logger.warning(
                         f"[{self._log_prefix()}] Existing locked origin preserved; candidate origin discarded"
@@ -269,7 +301,8 @@ class GNSSVelocityProcessor:
                         spread_meters=0.0,
                         num_points=len(self.origin_candidates),
                         rotation_matrix=rot_matrix,
-                        ecef_origin=ecef_origin
+                        ecef_origin=ecef_origin,
+                        tracking_offset=tracking_offset_list
                     )
                     db.add(new_origin)
                 
@@ -548,6 +581,43 @@ class GNSSVelocityProcessor:
                     candidate_xy_spread <= self.max_step_distance_m
                     and candidate_u_spread <= self.max_step_vertical_m
                 )
+                candidate_stale_gap = bool(
+                    (self.reacquire_candidates[0]['ts'] - p_old['ts']) > 60.0
+                )
+
+                if persistent_offset and candidate_stale_gap:
+                    tracking_shift = candidate_center - p_old['pos_enu']
+                    self.tracking_offset_enu = (
+                        getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
+                        + tracking_shift
+                    )
+                    self.history.clear()
+                    self.history.extend({
+                        'ts': candidate['ts'],
+                        'pos_enu': candidate['pos_enu'] - tracking_shift,
+                    } for candidate in self.reacquire_candidates)
+                    self.reacquire_candidates.clear()
+                    self._consecutive_rejects = 0
+                    logger.info(
+                        f"[{self._log_prefix()}] Tracking reacquired after stale FIXED gap (dt={dt:.1f}s): "
+                        f"offset2d={candidate_offset_2d_m:.3f}m, offsetU={candidate_offset_u_m:.3f}m. "
+                        "Locked origin and last accepted displacement preserved."
+                    )
+                    try:
+                        import asyncio
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(self._save_origin_to_db())
+                    except Exception:
+                        pass
+
+                    return {
+                        "type": "gnss_status",
+                        "status": "TRACKING_REACQUIRED",
+                        "fix_quality": fix_quality,
+                        "fix_mode": self._fix_mode(fix_quality),
+                        "raw_payload": raw_payload or gngga_string,
+                        "message": "Stable RTK FIXED tracking reacquired after stale data gap"
+                    }
 
                 if persistent_offset and (ts - self._last_bad_fix_log_ts) >= 30.0:
                     logger.warning(
@@ -652,8 +722,13 @@ class GNSSVelocityProcessor:
             or abs(v_enu_stable[2] * 1000.0) > flag_z_mm_s
         )
         estimated_speed_mm_s = float(np.hypot(v_enu_stable[0], v_enu_stable[1]) * 1000.0)
+        estimated_speed_3d_mm_s = float(np.linalg.norm(v_enu_stable) * 1000.0)
+        velocity_noise_threshold_mm_s = max(
+            velocity_estimate['confidence_95_mm_s'],
+            0.15  # 0.15 mm/s baseline sensor noise floor for RTK FIXED
+        )
         velocity_significant = bool(
-            estimated_speed_mm_s > velocity_estimate['confidence_95_mm_s']
+            estimated_speed_3d_mm_s > velocity_noise_threshold_mm_s
         )
         self.v_enu_state = v_enu_stable.copy()
         self.v_state_ready = True
@@ -706,6 +781,7 @@ class GNSSVelocityProcessor:
             )
 
         speed_2d = float(np.hypot(v_enu_stable[0], v_enu_stable[1]))
+        speed_3d = float(np.linalg.norm(v_enu_stable))
         # Commit net displacement only after a stable time window. Once committed,
         # hold it inside the measured noise floor unless statistically significant
         # motion (or its short settling tail) is present. This eliminates the old
@@ -757,11 +833,11 @@ class GNSSVelocityProcessor:
 
         displacement_positions = np.array([sample['pos_enu'] for sample in displacement_history], dtype=float)
         displacement_candidate = np.median(displacement_positions, axis=0)
-        horizontal_residual_mm = (
-            np.linalg.norm(displacement_positions[:, :2] - displacement_candidate[:2], axis=1) * 1000.0
+        residual_3d_mm = (
+            np.linalg.norm(displacement_positions - displacement_candidate, axis=1) * 1000.0
         )
-        residual_median_mm = float(np.median(horizontal_residual_mm))
-        residual_mad_mm = float(np.median(np.abs(horizontal_residual_mm - residual_median_mm)))
+        residual_median_mm = float(np.median(residual_3d_mm))
+        residual_mad_mm = float(np.median(np.abs(residual_3d_mm - residual_median_mm)))
         displacement_noise_floor_mm = max(
             displacement_noise_floor_min_mm,
             residual_median_mm + 1.4826 * residual_mad_mm,

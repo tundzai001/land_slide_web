@@ -1676,8 +1676,9 @@ class LandslideAnalyzer:
             sample_ts = float(recent_data[-1].get('timestamp', 0.0) or 0.0)
             pos_e = latest.get('pos_e')
             pos_n = latest.get('pos_n')
+            pos_u = latest.get('pos_u', 0.0)
             if pos_e is not None and pos_n is not None and sample_ts > 0:
-                history.append({'ts': sample_ts, 'e': float(pos_e), 'n': float(pos_n)})
+                history.append({'ts': sample_ts, 'e': float(pos_e), 'n': float(pos_n), 'u': float(pos_u or 0.0)})
 
             if current_level in ["WARNING", "CRITICAL"] and len(history) >= 4:
                 motion_points = list(history)
@@ -1691,12 +1692,16 @@ class LandslideAnalyzer:
                     for i in range(1, len(motion_points)):
                         dx = motion_points[i]['e'] - motion_points[i - 1]['e']
                         dy = motion_points[i]['n'] - motion_points[i - 1]['n']
-                        step_lengths.append(math.hypot(dx, dy))
+                        du = motion_points[i].get('u', 0.0) - motion_points[i - 1].get('u', 0.0)
+                        step_lengths.append(math.sqrt(dx * dx + dy * dy + du * du))
 
                     if len(step_lengths) >= 3:
                         first = motion_points[0]
                         last = motion_points[-1]
-                        net_m = math.hypot(last['e'] - first['e'], last['n'] - first['n'])
+                        de = last['e'] - first['e']
+                        dn = last['n'] - first['n']
+                        du = last.get('u', 0.0) - first.get('u', 0.0)
+                        net_m = math.sqrt(de * de + dn * dn + du * du)
                         path_m = float(sum(step_lengths))
 
                         step_array = np.array(step_lengths, dtype=float)
@@ -1706,13 +1711,14 @@ class LandslideAnalyzer:
                         motion_significance = net_m / noise_envelope_m
                         directionality = net_m / max(path_m, 1e-9)
 
-                        # Chỉ suppress khi vừa net displacement nhỏ so với noise floor,
-                        # vừa quỹ đạo không có hướng rõ ràng.
+                        # Chỉ suppress khi vừa net displacement 3D nhỏ so với noise floor,
+                        # vừa quỹ đạo 3D không có hướng rõ ràng. Sụt lún đứng thuần túy (U)
+                        # vẫn có directionality cao và được phát hiện chính xác.
                         if motion_significance < max(3.0, math.sqrt(len(step_lengths))) and directionality < 0.5:
                             current_level = "INFO"
                             logger.debug(
-                                f"[GNSS-{station_id}] Jitter-suppressed: net={net_m*1000.0:.2f}mm, "
-                                f"path={path_m*1000.0:.2f}mm, noise={noise_envelope_m*1000.0:.2f}mm, "
+                                f"[GNSS-{station_id}] Jitter-suppressed: net3D={net_m*1000.0:.2f}mm, "
+                                f"path3D={path_m*1000.0:.2f}mm, noise={noise_envelope_m*1000.0:.2f}mm, "
                                 f"significance={motion_significance:.2f}, directionality={directionality:.2f}"
                             )
 

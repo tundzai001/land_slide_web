@@ -634,7 +634,7 @@ function updateRealtimeSensorValues(message) {
 
         //console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         if (velocityMmS !== null) {
-            animateValue('val-gnss-vel', velocityMmS, 4, 'mm/s');
+            setText('val-gnss-vel', velocityMmS.toFixed(4) + ' mm/s');
         }
 
         // Update Advanced Sidepanel fields if it exists and data is available
@@ -760,19 +760,20 @@ function updateRealtimeSensorValues(message) {
                 evalSummaryEl.style.display = 'block';
                 let trendHtml = '';
                 if (data.velocity_significant === true) {
-                    trendHtml = `<span class="text-warning"><i class="bi bi-arrow-right-circle-fill me-1"></i>Có chuyển dịch</span>`;
+                    trendHtml = `<span class="text-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Có chuyển dịch</span>`;
                 } else {
-                    trendHtml = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Ổn định</span>`;
+                    trendHtml = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Ổn định (Noise Floor)</span>`;
                 }
                 const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '0.00';
+                const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
                 evalSummaryEl.innerHTML = `
                     <div class="d-flex flex-column gap-1">
                         <div>${trendHtml}</div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc: <strong>${velStr} mm/s</strong>
+                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc: <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="opacity-75 font-monospace">(${ciStr})</span>` : ''}
                         </div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-funnel me-1"></i>Cửa sổ trượt: ${sampleCount} mẫu (${durationS}s)
+                            <i class="bi bi-funnel me-1"></i>Cửa sổ: ${sampleCount} mẫu (${durationS}s)
                         </div>
                     </div>
                 `;

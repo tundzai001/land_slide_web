@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "build": "f62dfbdec06c",
-  "generated_at": "2026-08-14T16:49:59.348Z",
+  "build": "6dec930885f3",
+  "generated_at": "2026-08-16T19:05:49.186Z",
   "assets": {
     "admin-app.min.js": {
       "bytes": 368667,
@@ -17,11 +17,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 15701,
-      "sha256": "ffd535c52e7d659ceceefb8235191aa15c8261db595a1433c08112a32dc9fc68"
+      "sha256": "960ae0a4977c48dc628737366a4bc5f20d9f68d5208b8df9e10544cc2fe4ab09"
     },
     "app.html": {
       "bytes": 944,
-      "sha256": "67f9eaa8fa450bac330199ac414b78347b83c29d8c46048d9eeb81ae1b0626a4"
+      "sha256": "0a3e641403969c57d1f405ffa1be8c69145103875008d2eae9d32598a4b0b481"
     },
     "digital-twin.min.js": {
       "bytes": 50359,
@@ -29,7 +29,7 @@
     },
     "index.html": {
       "bytes": 1297,
-      "sha256": "8ccbf3ce78a435d98ff19e1ad3452369e0542845011c15776a418c34b9d74434"
+      "sha256": "27ee3cc06a562896c6e11e7e2e269ba5532a2203f7a56480af22d84586cc366f"
     },
     "landing.min.css": {
       "bytes": 21572,
@@ -44,8 +44,8 @@
       "sha256": "0d25caed77e997783b2ede0ec72eab0eec794401c3e941f1a45fa469dbfde6bc"
     },
     "map-app.min.js": {
-      "bytes": 386492,
-      "sha256": "65d37ab0f99d960dd4936159c7f21b3c134b6359454c61900eeee283278e1e82"
+      "bytes": 386800,
+      "sha256": "2493f9caf95f7841de24d5a22e56eb66559e2e34444e76d847a5622e6239abcb"
     },
     "map.min.css": {
       "bytes": 118429,

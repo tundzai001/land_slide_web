@@ -252,11 +252,15 @@ function getGnssVelocity(gnssLatest) {
 
     const velE = toFinite(data.vel_e);
     const velN = toFinite(data.vel_n);
+    const velU = toFinite(data.vel_u);
     if (velE !== null && velN !== null) {
+        if (velU !== null) {
+            return Math.sqrt(Math.pow(velE, 2) + Math.pow(velN, 2) + Math.pow(velU, 2));
+        }
         return Math.sqrt(Math.pow(velE, 2) + Math.pow(velN, 2));
     }
 
-    for (const key of ['velocity_mm_s', 'speed_2d_mm_s', 'speed_mm_s']) {
+    for (const key of ['velocity_3d_mm_s', 'velocity_mm_s', 'speed_2d_mm_s', 'speed_mm_s']) {
         const value = toFinite(data[key]);
         if (value !== null) return value;
     }
