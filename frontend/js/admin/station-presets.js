@@ -15,9 +15,6 @@ class AdminStationPresetsFeature extends window.AdminManager {
         const buttons = document.querySelectorAll('.preset-btn');
         buttons.forEach(btn => {
             btn.classList.remove('active');
-            btn.style.opacity = '0.6';
-            btn.style.transform = 'scale(0.95)';
-            btn.style.boxShadow = 'none';
         });
 
         if (!this.activePreset || this.activePreset === 'custom') return;
@@ -26,9 +23,6 @@ class AdminStationPresetsFeature extends window.AdminManager {
         const activeBtn = document.getElementById(`btn-preset-${this.activePreset}`);
         if (activeBtn) {
             activeBtn.classList.add('active');
-            activeBtn.style.opacity = '1';
-            activeBtn.style.transform = 'scale(1)';
-            activeBtn.style.boxShadow = '0 0 15px currentColor';
         }
     }
 
@@ -559,10 +553,10 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
     async resetGnssOrigin(stationId) {
         if (!stationId || Number.isNaN(Number(stationId))) {
-            window.toast?.warning('Save station first before resetting GNSS origin');
+            window.toast?.warning('Save station first before calibrating GNSS offset');
             return;
         }
-        if (!confirm('Reset GNSS origin for this station? The system will collect fresh samples for around 1 minute.')) return;
+        if (!confirm('Calibrate GNSS tracking offset from the latest stable RTK FIXED minute? Origin coordinates will remain unchanged.')) return;
 
         const resetBtn = document.getElementById('btn-reset-origin');
         try {
@@ -579,53 +573,21 @@ class AdminStationPresetsFeature extends window.AdminManager {
             }
 
             const data = await res.json();
-            window.toast?.success(`Origin reset sent for ${data.reset_count} device(s)`);
-
-            // ✅ Xóa trắng các ô nhập liệu trên UI để người dùng thấy rõ hiệu ứng reset
-            const latEl = document.getElementById('origin-lat');
-            const lonEl = document.getElementById('origin-lon');
-            const hEl = document.getElementById('origin-h');
+            const calibration = data.calibrations?.[0];
+            const horizontalShiftMm = calibration
+                ? Math.hypot(calibration.shift_e_m, calibration.shift_n_m) * 1000
+                : 0;
+            window.toast?.success(`Calibrated ${data.calibrated_count} GNSS offset(s); origin unchanged`);
             const statusEl = document.getElementById('origin-status');
-
-            if (latEl) latEl.value = '';
-            if (lonEl) lonEl.value = '';
-            if (hEl) hEl.value = '';
             if (statusEl) {
-                statusEl.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Đang thu thập điểm gốc mới...';
-                statusEl.className = 'text-warning small';
+                statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> Offset calibrated (${horizontalShiftMm.toFixed(1)} mm horizontal); origin unchanged.`;
+                statusEl.className = 'text-success small';
             }
-
-            this.startOriginResetCountdown(60);
         } catch (e) {
-            window.toast?.error('Reset origin failed: ' + e.message);
+            window.toast?.error('Offset calibration failed: ' + e.message);
         } finally {
             if (resetBtn) resetBtn.disabled = false;
         }
-    }
-
-    startOriginResetCountdown(seconds = 60) {
-        const statusEl = document.getElementById('origin-status');
-        if (!statusEl) return;
-
-        if (this._originResetTimer) {
-            clearInterval(this._originResetTimer);
-            this._originResetTimer = null;
-        }
-
-        let remain = Math.max(1, Number(seconds) || 60);
-        statusEl.innerHTML = `<span class="text-warning">Collecting GNSS samples for new origin: ${remain}s</span>`;
-
-        this._originResetTimer = setInterval(() => {
-            remain -= 1;
-            if (remain > 0) {
-                statusEl.innerHTML = `<span class="text-warning">Collecting GNSS samples for new origin: ${remain}s</span>`;
-                return;
-            }
-
-            clearInterval(this._originResetTimer);
-            this._originResetTimer = null;
-            statusEl.innerHTML = '<span class="text-info">1 minute completed. Click "L?y t?a d?" to verify the new origin.</span>';
-        }, 1000);
     }
 
     updateOriginActionButtons(hasOrigin) {

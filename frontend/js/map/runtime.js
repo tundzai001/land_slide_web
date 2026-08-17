@@ -983,6 +983,35 @@ function startGnssAdjustmentStatusPolling() {
     gnssAdjustmentDebugState.statusPollId = setInterval(syncGnssAdjustmentStatus, 6000);
 }
 
+let gnssAdjustmentRestoreProjectId = null;
+
+async function restoreGnssAdjustmentStatus(projectId) {
+    projectId = Number(projectId || 0);
+    if (!projectId || isGnssAdjustmentRunning(projectId) || gnssAdjustmentRestoreProjectId === projectId) return;
+    gnssAdjustmentRestoreProjectId = projectId;
+    try {
+        const response = window.authManager?.apiFetch
+            ? await window.authManager.apiFetch(`/api/admin/gnss/adjustment/status?project_id=${encodeURIComponent(projectId)}`)
+            : await fetch(`/api/admin/gnss/adjustment/status?project_id=${encodeURIComponent(projectId)}`);
+        if (!response?.ok) return;
+        const status = await response.json();
+        if (!status.running) return;
+        const stationIds = (status.roster?.runs || [])
+            .flatMap(run => run.roster?.participating_station_ids || run.roster?.selected_station_ids || []);
+        resetGnssAdjustmentDebug({ projectId, stationIds });
+        applyGnssAdjustmentRoster(status.roster);
+        setGnssAdjustmentPhase(status.phase, status.message || 'Đã khôi phục phiên bình sai đang chạy từ máy chủ.');
+        addGnssAdjustmentDebug('SYNC', 'Đã nối lại phiên đang chạy sau khi tải lại trang.', 'success');
+        startGnssAdjustmentStatusPolling();
+        syncGnssAdjustmentStatus();
+    } catch (error) {
+        console.warn('[GNSS] Could not restore running adjustment:', error);
+    } finally {
+        gnssAdjustmentRestoreProjectId = null;
+    }
+}
+window.restoreGnssAdjustmentStatus = restoreGnssAdjustmentStatus;
+
 function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
     if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
     if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);

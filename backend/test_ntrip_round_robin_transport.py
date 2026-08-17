@@ -884,6 +884,23 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "CORS-A",
         )
 
+    async def test_ordinary_failover_cluster_waits_for_agrica_base_identity(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.configure_project(97, [{
+            "name": "Dam 1", "stations": [1, 2], "rovers": ["R1", "R2"],
+            "fixed_base_candidates": [
+                {"role": "primary", "base_station": "SinQuyen1", "base_lat": 21.1, "base_lon": 105.0},
+                {"role": "backup", "base_station": "SinQuyen2", "base_lat": 21.0, "base_lon": 105.0},
+            ],
+        }])
+
+        outcome = await manager.prepare_common_fixed_base_seed(97)
+
+        cluster = manager._sessions[97]["clusters"][0]
+        self.assertEqual(outcome, [])
+        self.assertIsNone(cluster["selected_fixed_base_candidate"])
+        self.assertIn("awaiting AGRICA", cluster["fixed_base_selection_diagnostic"])
+
     async def test_fixed_base_requires_configure_service_confirmation(self):
         class FakeResponse:
             status = 200

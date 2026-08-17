@@ -387,3 +387,962 @@
 .mobile-bottom-nav {
     display: none !important;
 }
+
+/* ========================================
+   STATION CONFIG WIZARD — POLISHED SHELL
+======================================== */
+#stationConfigModal {
+    --station-primary: var(--accent-primary, #0ea5e9);
+    --station-surface: var(--bg-secondary, #ffffff);
+    --station-subtle: var(--bg-tertiary, #f8fafc);
+    --station-border: var(--border-color, #dbe3ec);
+    --station-text: var(--text-primary, #0f172a);
+    --station-muted: var(--text-muted, #64748b);
+}
+
+#stationConfigModal .modal-dialog {
+    width: calc(100% - 32px);
+    max-width: 960px;
+    margin: 16px auto;
+}
+
+#stationConfigModal .modal-content {
+    max-height: calc(100dvh - 32px);
+    border: 1px solid color-mix(in srgb, var(--station-border) 88%, transparent);
+    border-radius: 20px;
+    background: var(--station-surface) !important;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.22), 0 4px 16px rgba(15, 23, 42, 0.08);
+}
+
+#stationConfigModal .modal-header {
+    min-height: 78px;
+    padding: 16px 24px;
+    background: var(--station-surface) !important;
+}
+
+#stationConfigModal .station-modal-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+#stationConfigModal .station-modal-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    border: 1px solid color-mix(in srgb, var(--station-primary) 25%, transparent);
+    border-radius: 12px;
+    color: var(--station-primary);
+    background: color-mix(in srgb, var(--station-primary) 9%, var(--station-surface));
+    font-size: 1.15rem;
+}
+
+#stationConfigModal .station-modal-eyebrow {
+    margin-bottom: 2px;
+    color: var(--station-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+#stationConfigModal .modal-title {
+    overflow: hidden;
+    color: var(--station-text) !important;
+    font-size: 1.05rem;
+    font-weight: 750;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#stationConfigModal .btn-close {
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    border-radius: 12px;
+    background-size: 13px;
+    opacity: 0.62;
+    transition: background-color 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
+}
+
+#stationConfigModal .btn-close:hover {
+    background-color: var(--station-subtle);
+    opacity: 1;
+}
+
+#stationConfigModal .btn-close:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 24%, transparent);
+}
+
+#stationConfigModal .wizard-steps-container {
+    padding: 14px 24px 16px;
+    background: var(--station-surface) !important;
+}
+
+#stationConfigModal .wizard-steps {
+    gap: 0;
+    margin: 0;
+}
+
+#stationConfigModal .wizard-steps::before {
+    top: 17px;
+    left: 12.5%;
+    right: 12.5%;
+    height: 1px;
+    background: var(--station-border);
+}
+
+#stationConfigModal .wizard-step {
+    min-width: 0;
+}
+
+#stationConfigModal .step-circle {
+    width: 34px;
+    height: 34px;
+    margin-bottom: 7px;
+    border: 1px solid var(--station-border);
+    background: var(--station-surface);
+    color: var(--station-muted);
+    font-size: 0.78rem;
+    font-weight: 750;
+    box-shadow: 0 0 0 5px var(--station-surface);
+    transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+#stationConfigModal .wizard-step.active .step-circle {
+    border-color: var(--station-primary);
+    background: var(--station-primary);
+    box-shadow: 0 0 0 5px var(--station-surface), 0 4px 12px color-mix(in srgb, var(--station-primary) 28%, transparent);
+}
+
+#stationConfigModal .wizard-step.completed .step-circle {
+    border-color: color-mix(in srgb, var(--station-primary) 42%, var(--station-border));
+    color: var(--station-primary);
+    background: color-mix(in srgb, var(--station-primary) 8%, var(--station-surface));
+}
+
+#stationConfigModal .step-label {
+    overflow: hidden;
+    color: var(--station-muted);
+    font-size: 0.76rem;
+    font-weight: 550;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#stationConfigModal .wizard-step.active .step-label,
+#stationConfigModal .wizard-step.completed .step-label {
+    color: var(--station-primary);
+    font-weight: 700;
+}
+
+#stationConfigModal .modal-body {
+    padding: 26px 28px 30px;
+    background: var(--station-subtle);
+    scrollbar-color: color-mix(in srgb, var(--station-muted) 45%, transparent) transparent;
+    scrollbar-width: thin;
+}
+
+#stationConfigModal .wizard-content.active {
+    animation: stationStepIn 220ms ease-out;
+}
+
+@keyframes stationStepIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+#stationConfigModal .station-step-intro,
+#stationConfigModal .station-options-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+#stationConfigModal .station-step-intro {
+    margin-bottom: 24px;
+}
+
+#stationConfigModal .station-step-kicker {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--station-primary);
+    font-size: 0.7rem;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+#stationConfigModal .station-step-intro h6,
+#stationConfigModal .station-options-heading h6 {
+    margin: 0;
+    color: var(--station-text);
+    font-size: 1rem;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+}
+
+#stationConfigModal .station-step-intro p,
+#stationConfigModal .station-options-heading p {
+    margin: 4px 0 0;
+    color: var(--station-muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+#stationConfigModal .station-required-note {
+    flex: 0 0 auto;
+    padding: 5px 9px;
+    border: 1px solid color-mix(in srgb, var(--accent-danger, #dc2626) 20%, transparent);
+    border-radius: 999px;
+    color: var(--accent-danger, #dc2626);
+    background: color-mix(in srgb, var(--accent-danger, #dc2626) 6%, var(--station-surface));
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+#stationConfigModal .station-basic-fields .form-label {
+    margin-bottom: 7px;
+    color: var(--station-text) !important;
+    font-size: 0.79rem;
+    font-weight: 700;
+}
+
+#stationConfigModal .station-basic-fields .form-control {
+    min-height: 48px;
+    padding: 11px 13px;
+    border-color: var(--station-border);
+    border-radius: 10px;
+    background: var(--station-surface);
+    font-size: 0.92rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+#stationConfigModal .station-basic-fields .form-control:hover {
+    border-color: color-mix(in srgb, var(--station-primary) 42%, var(--station-border));
+}
+
+#stationConfigModal .station-basic-fields .form-control:focus-visible {
+    outline: none;
+    border-color: var(--station-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 16%, transparent);
+}
+
+#stationConfigModal .form-text {
+    display: block;
+    margin-top: 7px;
+    color: var(--station-muted);
+    font-size: 0.73rem;
+    line-height: 1.45;
+}
+
+#stationConfigModal .station-options {
+    margin-top: 28px;
+    padding-top: 22px;
+    border-top: 1px solid var(--station-border);
+}
+
+#stationConfigModal .station-options-heading {
+    margin-bottom: 13px;
+}
+
+#stationConfigModal .station-option-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+#stationConfigModal .station-option-card {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 12px;
+    min-height: 104px;
+    margin: 0;
+    padding: 15px;
+    border: 1px solid var(--station-border);
+    border-radius: 14px;
+    color: var(--station-text);
+    background: var(--station-surface);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.035);
+    transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+#stationConfigModal .station-option-card:hover {
+    border-color: color-mix(in srgb, var(--station-primary) 44%, var(--station-border));
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+}
+
+#stationConfigModal .station-option-card:has(input:focus-visible) {
+    outline: none;
+    border-color: var(--station-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 16%, transparent);
+}
+
+#stationConfigModal .station-option-card:has(input:checked) {
+    border-color: color-mix(in srgb, var(--station-primary) 50%, var(--station-border));
+    background: color-mix(in srgb, var(--station-primary) 5%, var(--station-surface));
+}
+
+#stationConfigModal .station-option-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+    font-size: 1rem;
+}
+
+#stationConfigModal .station-option-icon-warning {
+    color: #a16207;
+    background: rgba(245, 158, 11, 0.11);
+}
+
+#stationConfigModal .station-option-icon-info {
+    color: #0369a1;
+    background: rgba(14, 165, 233, 0.1);
+}
+
+#stationConfigModal .station-option-copy {
+    min-width: 0;
+}
+
+#stationConfigModal .station-option-copy strong,
+#stationConfigModal .station-option-copy small {
+    display: block;
+}
+
+#stationConfigModal .station-option-copy strong {
+    margin-bottom: 4px;
+    color: var(--station-text);
+    font-size: 0.82rem;
+    font-weight: 750;
+    line-height: 1.35;
+}
+
+#stationConfigModal .station-option-copy small {
+    color: var(--station-muted);
+    font-size: 0.73rem;
+    line-height: 1.48;
+}
+
+#stationConfigModal .station-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 26px;
+}
+
+#stationConfigModal .station-switch input {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    opacity: 0;
+    cursor: pointer;
+}
+
+#stationConfigModal .station-switch-track {
+    position: absolute;
+    inset: 0;
+    border: 1px solid color-mix(in srgb, var(--station-muted) 36%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--station-muted) 20%, var(--station-surface));
+    transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+#stationConfigModal .station-switch-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+    transition: transform 180ms ease;
+}
+
+#stationConfigModal .station-switch input:checked + .station-switch-track {
+    border-color: var(--station-primary);
+    background: var(--station-primary);
+}
+
+#stationConfigModal .station-switch input:checked + .station-switch-track::after {
+    transform: translateX(18px);
+}
+
+#stationConfigModal .station-wizard-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 76px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--station-border);
+    background: var(--station-surface) !important;
+}
+
+#stationConfigModal .station-footer-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--station-muted);
+    font-size: 0.72rem;
+}
+
+#stationConfigModal .station-footer-meta i {
+    color: var(--accent-success, #16a34a);
+    font-size: 0.9rem;
+}
+
+#stationConfigModal .station-footer-actions .btn {
+    min-width: 112px;
+    min-height: 44px;
+    gap: 8px;
+    padding: 9px 16px;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+#stationConfigModal .station-footer-actions .btn:hover {
+    transform: none;
+}
+
+#stationConfigModal .station-footer-actions .btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 20%, transparent);
+}
+
+@media (max-width: 767.98px) {
+    #stationConfigModal .modal-dialog {
+        width: calc(100% - 16px);
+        margin: 8px auto;
+    }
+
+    #stationConfigModal .modal-content {
+        min-height: 0;
+        max-height: calc(100dvh - 16px);
+        border-radius: 16px;
+    }
+
+    #stationConfigModal .modal-header {
+        min-height: 70px;
+        padding: 12px 16px;
+    }
+
+    #stationConfigModal .station-modal-icon,
+    #stationConfigModal .station-modal-eyebrow {
+        display: none;
+    }
+
+    #stationConfigModal .wizard-steps-container {
+        padding: 12px 10px 14px;
+    }
+
+    #stationConfigModal .step-label {
+        max-width: 76px;
+        margin: 0 auto;
+        font-size: 0.66rem;
+        white-space: normal;
+    }
+
+    #stationConfigModal .modal-body {
+        padding: 22px 16px 26px;
+    }
+
+    #stationConfigModal .station-required-note {
+        display: none;
+    }
+
+    #stationConfigModal .station-option-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #stationConfigModal .station-wizard-footer {
+        padding: 12px 16px;
+    }
+
+    #stationConfigModal .station-footer-meta {
+        display: none;
+    }
+
+    #stationConfigModal .station-footer-actions {
+        width: 100%;
+    }
+
+    #stationConfigModal .station-footer-actions .btn {
+        flex: 1;
+    }
+}
+
+@media (max-width: 420px) {
+    #stationConfigModal .step-circle {
+        width: 30px;
+        height: 30px;
+        font-size: 0.72rem;
+    }
+
+    #stationConfigModal .wizard-steps::before {
+        top: 15px;
+    }
+
+    #stationConfigModal .step-label {
+        font-size: 0.61rem;
+    }
+
+    #stationConfigModal .station-option-card {
+        grid-template-columns: 38px minmax(0, 1fr) 44px;
+        padding: 13px;
+    }
+
+    #stationConfigModal .station-option-icon {
+        width: 38px;
+        height: 38px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #stationConfigModal *,
+    #stationConfigModal *::before,
+    #stationConfigModal *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+
+/* Station wizard — steps 2–4 */
+#stationConfigModal .station-step-status {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 10px;
+    border: 1px solid color-mix(in srgb, var(--station-primary) 22%, var(--station-border));
+    border-radius: 999px;
+    color: color-mix(in srgb, var(--station-primary) 86%, #0f172a);
+    background: color-mix(in srgb, var(--station-primary) 7%, var(--station-surface));
+    font-size: 0.7rem;
+    font-weight: 750;
+    white-space: nowrap;
+}
+
+#stationConfigModal .station-step-status-success {
+    border-color: rgba(22, 163, 74, 0.22);
+    color: #15803d;
+    background: rgba(22, 163, 74, 0.07);
+}
+
+#stationConfigModal .station-flow-hint,
+#stationConfigModal .station-inline-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 11px 13px;
+    border: 1px solid color-mix(in srgb, var(--station-primary) 18%, var(--station-border));
+    border-radius: 10px;
+    color: color-mix(in srgb, var(--station-text) 78%, var(--station-primary));
+    background: color-mix(in srgb, var(--station-primary) 5%, var(--station-surface));
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+#stationConfigModal .wizard-content[data-step="2"] > h6 {
+    margin: 22px 0 11px !important;
+    color: var(--station-text);
+    font-size: 0.77rem;
+    font-weight: 800;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+}
+
+#stationConfigModal .station-sensor-picker {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+#stationConfigModal .station-sensor-picker .form-check {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 54px;
+    margin: 0;
+    padding: 12px 13px 12px 54px;
+    border: 1px solid var(--station-border);
+    border-radius: 12px;
+    background: var(--station-surface);
+    cursor: pointer;
+    transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+#stationConfigModal .station-sensor-picker .form-check:hover {
+    border-color: color-mix(in srgb, var(--station-primary) 42%, var(--station-border));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+}
+
+#stationConfigModal .station-sensor-picker .form-check:has(input:checked) {
+    border-color: color-mix(in srgb, var(--station-primary) 58%, var(--station-border));
+    background: color-mix(in srgb, var(--station-primary) 5%, var(--station-surface));
+}
+
+#stationConfigModal .station-sensor-picker .form-check:has(input:focus-visible) {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 16%, transparent);
+}
+
+#stationConfigModal .station-sensor-picker .form-check-input {
+    position: absolute;
+    top: 50%;
+    left: 13px;
+    width: 32px !important;
+    height: 19px !important;
+    min-width: 32px !important;
+    min-height: 19px !important;
+    margin: 0 !important;
+    transform: translateY(-50%);
+    cursor: pointer;
+}
+
+#stationConfigModal .station-sensor-picker .form-check-label {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    color: var(--station-text);
+    font-size: 0.8rem;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+#stationConfigModal .sensor-config-section,
+#stationConfigModal .config-section {
+    overflow: hidden;
+    margin-bottom: 14px;
+    border: 1px solid var(--station-border) !important;
+    border-radius: 14px;
+    background: var(--station-surface) !important;
+    box-shadow: 0 3px 12px rgba(15, 23, 42, 0.035) !important;
+}
+
+#stationConfigModal .sensor-config-header,
+#stationConfigModal .section-header {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-height: 56px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--station-border);
+    color: var(--station-text);
+    background: color-mix(in srgb, var(--station-primary) 3%, var(--station-subtle));
+}
+
+#stationConfigModal .sensor-config-header > i {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: var(--station-surface);
+}
+
+#stationConfigModal .sensor-config-header span,
+#stationConfigModal .section-header h5 {
+    margin: 0;
+    color: var(--station-text);
+    font-size: 0.86rem;
+    font-weight: 780;
+}
+
+#stationConfigModal .section-header > div {
+    min-width: 0;
+}
+
+#stationConfigModal .section-header p {
+    margin: 3px 0 0;
+    color: var(--station-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+#stationConfigModal .sensor-config-body {
+    padding: 17px;
+}
+
+#stationConfigModal .sensor-config-body .form-label {
+    margin-bottom: 6px;
+    color: var(--station-text) !important;
+    font-size: 0.74rem !important;
+    font-weight: 700 !important;
+}
+
+#stationConfigModal .sensor-config-body .form-control,
+#stationConfigModal .sensor-config-body .form-select {
+    min-height: 44px;
+    border-color: var(--station-border);
+    border-radius: 9px;
+    color: var(--station-text);
+    background-color: var(--station-surface);
+    font-size: 0.8rem;
+}
+
+#stationConfigModal .sensor-config-body .form-control:focus,
+#stationConfigModal .sensor-config-body .form-select:focus {
+    border-color: var(--station-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 14%, transparent);
+}
+
+#stationConfigModal .sensor-config-body .btn {
+    min-height: 44px;
+    border-radius: 9px;
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+#stationConfigModal .coordinate-lock-box {
+    margin-top: 16px;
+    padding: 15px;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 11px;
+    background: rgba(245, 158, 11, 0.055);
+}
+
+#stationConfigModal .ios-toggle-wrap {
+    min-height: 44px;
+    border-radius: 9px;
+}
+
+#stationConfigModal #mqtt-empty-state {
+    margin-top: 12px;
+    padding: 38px 20px !important;
+    border: 1px dashed color-mix(in srgb, var(--station-muted) 32%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--station-muted) 3%, var(--station-surface));
+}
+
+#stationConfigModal .station-preset-panel {
+    padding: 16px;
+    border: 1px solid color-mix(in srgb, var(--station-primary) 20%, var(--station-border));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--station-primary) 4%, var(--station-surface));
+}
+
+#stationConfigModal .station-preset-panel > .d-flex:first-child {
+    align-items: flex-start !important;
+}
+
+#stationConfigModal .station-preset-panel .preset-btn {
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-areas: "icon title" ". description";
+    align-items: center;
+    justify-content: center;
+    column-gap: 5px;
+    row-gap: 1px;
+    min-height: 44px;
+    padding: 9px 14px;
+    border-width: 1px;
+    border-radius: 10px;
+    background: var(--station-surface);
+    font-size: 0.76rem;
+    font-weight: 750;
+    opacity: 1;
+    transform: none;
+    transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+#stationConfigModal .station-preset-panel .preset-btn > i {
+    grid-area: icon;
+    margin: 0 !important;
+}
+
+#stationConfigModal .station-preset-panel .preset-btn > strong {
+    grid-area: title;
+}
+
+#stationConfigModal .station-preset-panel .preset-btn > small {
+    grid-area: description;
+    margin: 0;
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+#stationConfigModal .station-preset-panel .preset-btn:hover {
+    transform: none;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
+}
+
+#stationConfigModal .station-preset-panel .preset-btn.active {
+    border-color: currentColor;
+    background: color-mix(in srgb, currentColor 8%, var(--station-surface));
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+#stationConfigModal .wizard-content[data-step="3"] .config-section {
+    margin-bottom: 14px !important;
+}
+
+#stationConfigModal .wizard-content[data-step="3"] .section-header > i {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: var(--station-surface);
+}
+
+#stationConfigModal .wizard-content[data-step="3"] .input-group .btn {
+    min-width: 44px;
+}
+
+#stationConfigModal .station-section-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    color: var(--station-primary);
+    background: color-mix(in srgb, var(--station-primary) 10%, var(--station-surface));
+}
+
+#stationConfigModal .station-section-icon-success {
+    color: #15803d;
+    background: rgba(22, 163, 74, 0.1);
+}
+
+#stationConfigModal .station-section-badge {
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding: 5px 9px;
+    border-radius: 999px;
+    color: #15803d;
+    background: rgba(22, 163, 74, 0.1);
+    font-size: 0.68rem;
+    font-weight: 750;
+}
+
+#stationConfigModal .station-storage-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 11px;
+    margin-top: 14px;
+}
+
+#stationConfigModal .station-storage-card {
+    display: block;
+    margin: 0;
+    padding: 13px;
+    border: 1px solid var(--station-border);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--station-muted) 2.5%, var(--station-surface));
+}
+
+#stationConfigModal .station-storage-card-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 9px;
+    color: var(--station-text);
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+#stationConfigModal .station-storage-card .input-group-text {
+    border-color: var(--station-border);
+    color: var(--station-muted);
+    background: var(--station-subtle);
+    font-size: 0.73rem;
+}
+
+#stationConfigModal .station-storage-card small {
+    display: block;
+    margin-top: 7px;
+    color: var(--station-muted);
+    font-size: 0.68rem;
+}
+
+#stationConfigModal .station-config-summary {
+    min-height: 64px;
+    padding: 13px;
+    border: 1px dashed color-mix(in srgb, var(--station-primary) 24%, var(--station-border));
+    border-radius: 10px;
+    color: var(--station-muted);
+    background: color-mix(in srgb, var(--station-primary) 3%, var(--station-surface));
+    font-size: 0.76rem;
+    line-height: 1.5;
+}
+
+#stationConfigModal .station-config-summary p:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-width: 767.98px) {
+    #stationConfigModal .station-step-intro {
+        gap: 12px;
+    }
+
+    #stationConfigModal .station-step-status {
+        display: none;
+    }
+
+    #stationConfigModal .station-sensor-picker,
+    #stationConfigModal .station-storage-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #stationConfigModal .sensor-config-body,
+    #stationConfigModal .station-preset-panel {
+        padding: 14px;
+    }
+
+    #stationConfigModal .station-preset-panel > .d-flex:first-child {
+        flex-direction: column;
+    }
+
+    #stationConfigModal .station-preset-panel .preset-btn {
+        flex: 1 1 calc(50% - 6px);
+    }
+}
+
+@media (max-width: 420px) {
+    #stationConfigModal .station-sensor-picker,
+    #stationConfigModal .station-storage-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #stationConfigModal .station-preset-panel .preset-btn {
+        flex-basis: 100%;
+        width: 100%;
+    }
+
+    #stationConfigModal .sensor-config-header,
+    #stationConfigModal .section-header {
+        padding: 12px 13px;
+    }
+
+    #stationConfigModal .station-section-badge {
+        display: none;
+    }
+}

@@ -21,6 +21,8 @@ class MQTTPersistenceMixin:
         "UNSTABLE_FIX",
         "INVALID_DATA",
         "PERSISTENT_OFFSET_QUARANTINED",
+        "UNVERIFIED_POSITION_SHIFT",
+        "UNTRUSTED_GEOMETRY",
         "REJECTED_MEASUREMENT",
     }
 

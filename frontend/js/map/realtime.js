@@ -629,12 +629,13 @@ function updateRealtimeSensorValues(message) {
 
     if (sensor_type === 'gnss' && data) {
         updateGnssFixBadge(data.fix_mode, data.fix_quality);
+        updateGnssIntegrityStatus(data);
 
         const velocityMmS = getGnssVelocity(data);
 
         //console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
         if (velocityMmS !== null) {
-            setText('val-gnss-vel', velocityMmS.toFixed(4) + ' mm/s');
+            setHTML('val-gnss-vel', `${velocityMmS.toFixed(4)}<span class="sensor-unit">mm/s</span>`);
         }
 
         // Update Advanced Sidepanel fields if it exists and data is available
@@ -684,6 +685,7 @@ function updateRealtimeSensorValues(message) {
                      displacement_noise_floor_mm: data.displacement_noise_floor_mm,
                      displacement_uncertainty_mm: data.displacement_uncertainty_mm,
                      displacement_sample_count: data.displacement_sample_count,
+                     integrity: data.integrity || data.data,
                      displacement_window_duration_s: data.displacement_window_duration_s,
                      num_sats: data.num_sats, hdop: data.hdop
                  });
@@ -719,7 +721,11 @@ function updateRealtimeSensorValues(message) {
             setText('adv-val-filt-ve', (data.vel_e || 0).toFixed(4));
             setText('adv-val-filt-vn', (data.vel_n || 0).toFixed(4));
             setText('adv-val-filt-vu', (data.vel_u || 0).toFixed(4));
-            setText('adv-val-filt-2d', velocityMmS !== null ? velocityMmS.toFixed(4) : '--');
+            const filteredSpeed2d = Number(data.speed_2d_mm_s);
+            setText(
+                'adv-val-filt-2d',
+                Number.isFinite(filteredSpeed2d) ? filteredSpeed2d.toFixed(4) : '--'
+            );
 
             // Advanced Panel - Displacement
             setText('adv-val-disp-total', (data.total_displacement_mm || 0).toFixed(2));
@@ -758,6 +764,19 @@ function updateRealtimeSensorValues(message) {
             const evalSummaryEl = document.getElementById('gnss-eval-summary');
             if (evalSummaryEl) {
                 evalSummaryEl.style.display = 'block';
+                const integrity = data.integrity || data.data;
+                const integrityState = String(integrity?.integrity_state || '').toUpperCase();
+                if (['REFERENCE_TRANSITION', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'].includes(integrityState)) {
+                    const shift2d = Number.isFinite(Number(integrity.shift_2d_m))
+                        ? `Δ2D ${Number(integrity.shift_2d_m).toFixed(3)} m` : '';
+                    const label = integrityState === 'REFERENCE_TRANSITION'
+                        ? `Đang kiểm tra reference ${integrity.candidate_count || 0}/${integrity.candidate_target || 6}`
+                        : integrityState === 'UNTRUSTED_GEOMETRY'
+                            ? 'RTK FIXED nhưng geometry không đạt ngưỡng monitoring'
+                            : `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
+                    evalSummaryEl.innerHTML = `<span class="text-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
+                    return;
+                }
                 let trendHtml = '';
                 if (data.velocity_significant === true) {
                     trendHtml = `<span class="text-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Có chuyển dịch</span>`;
@@ -770,10 +789,10 @@ function updateRealtimeSensorValues(message) {
                     <div class="d-flex flex-column gap-1">
                         <div>${trendHtml}</div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc: <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="opacity-75 font-monospace">(${ciStr})</span>` : ''}
+                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="opacity-75 font-monospace">(${ciStr})</span>` : ''}
                         </div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-funnel me-1"></i>Cửa sổ: ${sampleCount} mẫu (${durationS}s)
+                            <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)
                         </div>
                     </div>
                 `;

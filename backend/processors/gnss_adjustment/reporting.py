@@ -1499,7 +1499,9 @@ class AdjustmentReportMixin:
             project_id,
             data.get("project_code"),
             data.get("cluster_name"),
+            run_id=data.get("run_id"),
         )
+        run_url = f"/run-{int(data['run_id'])}" if data.get("run_id") is not None else ""
         os.makedirs(report_dir, exist_ok=True)
         audit_name = (
             f"gnss_adjustment_{project_slug}_{cluster_slug}_{timestamp}.json"
@@ -1529,7 +1531,7 @@ class AdjustmentReportMixin:
         if not excel_path:
             raise OSError("Adjustment Excel exporter did not return an output path")
         report_api_prefix = (
-            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}"
+            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}{run_url}"
             if scoped else f"/api/admin/gnss/adjustment/reports/{project_id}"
         )
         excel_url = f"{report_api_prefix}/{os.path.basename(excel_path)}"

@@ -374,3 +374,105 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
 @media (prefers-reduced-motion: reduce) {
     .skeleton-line { animation: none; }
 }
+
+/* Station wizard dark mode must override the light admin skin loaded above. */
+[data-theme="dark"] #stationConfigModal {
+    --station-surface: #111b27;
+    --station-subtle: #0b1420;
+    --station-border: #2b3a4d;
+    --station-text: #f1f5f9;
+    --station-muted: #a8b4c5;
+}
+
+[data-theme="dark"] #stationConfigModal .modal-content,
+[data-theme="dark"] #stationConfigModal .modal-header,
+[data-theme="dark"] #stationConfigModal .wizard-steps-container,
+[data-theme="dark"] #stationConfigModal .station-wizard-footer {
+    background: var(--station-surface) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .modal-body {
+    background: var(--station-subtle) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-modal-eyebrow,
+[data-theme="dark"] #stationConfigModal .station-step-intro p,
+[data-theme="dark"] #stationConfigModal .station-options-heading p,
+[data-theme="dark"] #stationConfigModal .form-text,
+[data-theme="dark"] #stationConfigModal .station-option-copy small,
+[data-theme="dark"] #stationConfigModal .station-footer-meta,
+[data-theme="dark"] #stationConfigModal .step-label {
+    color: var(--station-muted) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-basic-fields .form-control,
+[data-theme="dark"] #stationConfigModal .station-option-card {
+    border-color: var(--station-border) !important;
+    color: var(--station-text) !important;
+    background: var(--station-surface) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-option-icon-warning {
+    color: #fbbf24 !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-option-icon-info {
+    color: #38bdf8 !important;
+}
+
+[data-theme="dark"] #stationConfigModal .sensor-config-section,
+[data-theme="dark"] #stationConfigModal .config-section,
+[data-theme="dark"] #stationConfigModal .station-sensor-picker .form-check,
+[data-theme="dark"] #stationConfigModal .station-storage-card,
+[data-theme="dark"] #stationConfigModal .station-preset-panel {
+    border-color: var(--station-border) !important;
+    color: var(--station-text) !important;
+    background: var(--station-surface) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .sensor-config-header,
+[data-theme="dark"] #stationConfigModal .section-header,
+[data-theme="dark"] #stationConfigModal .station-storage-card .input-group-text {
+    border-color: var(--station-border) !important;
+    background: var(--station-subtle) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .sensor-config-body .form-control,
+[data-theme="dark"] #stationConfigModal .sensor-config-body .form-select,
+[data-theme="dark"] #stationConfigModal .station-config-summary {
+    border-color: var(--station-border) !important;
+    color: var(--station-text) !important;
+    background: var(--station-surface) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-sensor-picker .form-check:has(input:checked),
+[data-theme="dark"] #stationConfigModal .station-preset-panel .preset-btn.active {
+    background: color-mix(in srgb, var(--station-primary) 12%, var(--station-surface)) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-step-intro h6,
+[data-theme="dark"] #stationConfigModal .wizard-content[data-step="2"] > h6,
+[data-theme="dark"] #stationConfigModal .station-storage-card-title,
+[data-theme="dark"] #stationConfigModal .sensor-config-header span,
+[data-theme="dark"] #stationConfigModal .section-header h5 {
+    color: var(--station-text) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-step-kicker {
+    color: #38bdf8 !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-step-status-success {
+    border-color: rgba(74, 222, 128, .3) !important;
+    color: #86efac !important;
+    background: rgba(22, 163, 74, .12) !important;
+}
+
+[data-theme="dark"] #stationConfigModal .station-footer-actions .btn,
+[data-theme="dark"] #stationConfigModal .btn-close {
+    color: #fff !important;
+}
+
+[data-theme="dark"] #stationConfigModal .btn-close {
+    filter: invert(1) grayscale(1);
+}

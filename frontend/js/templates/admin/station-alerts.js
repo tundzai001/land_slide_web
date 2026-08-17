@@ -1,9 +1,17 @@
 window.LegacyTemplateParts ||= {};
 window.LegacyTemplateParts['station-alerts'] = String.raw`                <!-- STEP 3: NGƯỠNG CẢNH BÁO -->
-                <div class="wizard-content" data-step="3">
+                <div class="wizard-content" data-step="3" aria-labelledby="station-alerts-heading">
+                    <div class="station-step-intro">
+                        <div>
+                            <span class="station-step-kicker">Bước 3 / 4</span>
+                            <h6 id="station-alerts-heading">Ngưỡng &amp; xác nhận cảnh báo</h6>
+                            <p>Chọn cấu hình khởi điểm, sau đó tinh chỉnh từng ngưỡng theo điều kiện thực địa.</p>
+                        </div>
+                        <span class="station-step-status"><i class="bi bi-bell" aria-hidden="true"></i> Theo từng trạm</span>
+                    </div>
 
                     <!-- ✅ QUICK PRESETS CHO TRẠM -->
-                    <div class="mb-4 p-3 border rounded" style="background: rgba(14, 165, 233, 0.05);">
+                    <div class="station-preset-panel mb-4">
                         <h6 class="mb-2">
                             <i class="bi bi-lightning-charge-fill text-primary me-2"></i>
                             Quick Presets (Áp dụng cho trạm này)

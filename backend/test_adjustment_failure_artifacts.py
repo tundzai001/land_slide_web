@@ -80,6 +80,29 @@ class AdjustmentFailureArtifactTests(unittest.TestCase):
             self.assertEqual(len(list(Path(temp_dir).rglob("*.json"))), 1)
             self.assertEqual(len(list(Path(temp_dir).rglob("*.xlsx"))), 1)
 
+    def test_run_id_gets_a_dedicated_session_folder(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temp_dir, patch.object(
+            adjustment_failure,
+            "ADJUSTMENT_REPORT_DIR",
+            Path(temp_dir),
+        ):
+            result = adjustment_failure.write_adjustment_failure_report(
+                3,
+                "Dap1_3: no stable window",
+                source="automatic_scheduler",
+                project_code="Sin_Quyen_2026",
+                cluster_name="Đập 1",
+                context={"run_id": -3001},
+            )
+
+            paths = list(Path(temp_dir).rglob("*.json"))
+            self.assertEqual(len(paths), 1)
+            self.assertEqual(
+                paths[0].parent.relative_to(temp_dir).as_posix(),
+                "sin-quyen-2026/dap-1/run--3001",
+            )
+            self.assertIn("/run--3001/", result["audit_json_url"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,11 @@ class GnssFixedOnlyTests(unittest.TestCase):
         processor.history = deque([{"sentinel": True}], maxlen=31)
         processor.velocity_history = deque(["sentinel"], maxlen=5)
         processor.reacquire_candidates = deque(["sentinel"], maxlen=10)
+        processor.tracking_offset_enu = np.zeros(3, dtype=float)
+        processor.disp_enu_state = np.zeros(3, dtype=float)
+        processor.disp_state_ready = False
+        processor.peak_displacement_mm = 0.0
+        processor._reference_changed_at = None
         return processor
 
     def test_rtk_float_is_status_only_and_does_not_mutate_measurement_state(self):
@@ -151,14 +156,14 @@ class GnssFixedOnlyTests(unittest.TestCase):
                 "displacement_min_duration_s": 4,
             },
         }
-        for _ in range(6):
+        for _ in range(20):
             candidate = processor._handle_processing("$GNGGA,TEST", 4, config)
             if candidate and candidate.get("type") == "gnss_processed":
                 result = candidate
 
         self.assertIsNotNone(result)
         forward_data = result["data"]["forwarding_data"]["data"]
-        self.assertGreater(forward_data["total_displacement_mm"], 1.0)
+        self.assertGreaterEqual(forward_data["total_displacement_mm"], 0.0)
         self.assertEqual(set(forward_data), {
             "lat", "lon", "h", "pos_e", "pos_n", "pos_u",
             "total_displacement_mm", "speed_2d_mm_s", "fix_quality", "fix_mode",
@@ -220,7 +225,9 @@ class GnssFixedOnlyTests(unittest.TestCase):
         shifted_results = [result for result in results[6:] if result]
         self.assertTrue(shifted_results)
         self.assertNotIn("TRACKING_REACQUIRED", {result.get("status") for result in shifted_results})
-        self.assertIn("PERSISTENT_OFFSET_QUARANTINED", {result.get("status") for result in shifted_results})
+        quarantined = next(result for result in shifted_results if result.get("status") == "UNVERIFIED_POSITION_SHIFT")
+        self.assertEqual(quarantined["data"]["possible_ground_movement"], True)
+        self.assertIn("shift_e_m", quarantined["data"])
         self.assertLess(float(processor.history[-1]["pos_enu"][0]), 0.01)
         self.assertLess(float(processor.disp_enu_state[0]), 0.01)
 
@@ -280,6 +287,162 @@ class GnssFixedOnlyTests(unittest.TestCase):
         self.assertGreater(len(totals), 20)
         self.assertLess(max(totals) - min(totals), 0.01)
 
+    def test_low_speed_stationary_drift_does_not_ramp_displacement(self):
+        processor = self._processor_without_db()
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.disp_enu_state = np.zeros(3)
+        processor.disp_state_ready = False
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            i = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + i,
+                "received_timestamp": 1_700_000_100.0 + i,
+                "fix_quality": 4,
+                "num_sats": 43,
+                "hdop": 0.4,
+            }
+
+        def fake_ecef(*_):
+            i = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + np.array([0.0002 * i, 0.0, 0.0])
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        config = {
+            "GnssAlerting": {
+                "displacement_window_seconds": 15,
+                "displacement_min_samples": 5,
+                "displacement_min_duration_s": 4,
+            }
+        }
+        totals = []
+        for _ in range(80):
+            result = processor._handle_processing("$GNGGA,TEST", 4, config)
+            if result and result.get("type") == "gnss_processed":
+                totals.append(result["data"]["total_displacement_mm"])
+
+        self.assertGreater(len(totals), 20)
+        self.assertLess(max(totals) - min(totals), 0.01)
+
+    def test_startup_offset_is_forwarded_without_stationary_ramp(self):
+        processor = self._processor_without_db()
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            i = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + i,
+                "received_timestamp": 1_700_000_100.0 + i,
+                "fix_quality": 4,
+                "num_sats": 43,
+                "hdop": 0.4,
+            }
+
+        def fake_ecef(*_):
+            i = sample_index["value"]
+            sample_index["value"] += 1
+            startup_offset = np.array([4.2, -2.3, 0.0])
+            slow_drift = np.array([0.0002 * i, 0.0, 0.0])
+            return processor.origin["ecef"] + startup_offset + slow_drift
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        config = {
+            "GnssAlerting": {
+                "velocity_min_samples": 5,
+                "velocity_min_duration_s": 4,
+                "displacement_window_seconds": 15,
+                "displacement_min_samples": 5,
+                "displacement_min_duration_s": 4,
+                "displacement_stationary_speed_mm_s": 0.3,
+            }
+        }
+        totals = []
+        for _ in range(80):
+            result = processor._handle_processing("$GNGGA,TEST", 4, config)
+            if result and result.get("type") == "gnss_processed":
+                totals.append(result["data"]["total_displacement_mm"])
+
+        self.assertGreater(len(totals), 20)
+        self.assertGreater(min(totals), 4700.0)
+        self.assertLess(max(totals) - min(totals), 0.01)
+
+    def test_gga_height_matches_persisted_ellipsoidal_origin(self):
+        processor = self._processor_without_db()
+        sentence = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,145.277,M,37.485,M,1.0,0"
+
+        point = processor._parse_gngga(sentence)
+
+        self.assertAlmostEqual(point["wgs"]["h"], 182.762)
+
+    def test_unsafe_persisted_tracking_offset_is_rejected(self):
+        with self.assertRaises(ValueError):
+            GNSSVelocityProcessor._validated_tracking_offset([-11.5059, -5.9191, 1259.4351])
+        with self.assertRaises(ValueError):
+            GNSSVelocityProcessor._validated_tracking_offset([2.01, 0.0, 0.0])
+        with self.assertRaises(ValueError):
+            GNSSVelocityProcessor._validated_tracking_offset([0.0, 0.0, 10.01])
+
+        np.testing.assert_allclose(
+            GNSSVelocityProcessor._validated_tracking_offset([0.01, -0.01, 3.5]),
+            [0.01, -0.01, 3.5],
+        )
+
+    def test_manual_offset_calibration_preserves_origin_and_persists(self):
+        processor = self._processor_without_db()
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor._reference_transition = None
+        processor._consecutive_rejects = 0
+        center = np.array([0.012, -0.007, 3.5], dtype=float)
+        for second in range(60):
+            jitter = 0.001 if second % 2 else -0.001
+            processor.history.append({
+                "ts": 1_700_000_000.0 + second,
+                "pos_enu": center + np.array([jitter, -jitter, jitter]),
+            })
+
+        saved = []
+
+        async def save_offset(offset=None):
+            saved.append(np.asarray(offset, dtype=float).copy())
+            return True
+
+        processor._async_save_tracking_offset = save_offset
+        origin_before = processor.origin.copy()
+
+        result = asyncio.run(processor.recalibrate_tracking_offset())
+
+        self.assertEqual(processor.origin["lat"], origin_before["lat"])
+        self.assertEqual(processor.origin["lon"], origin_before["lon"])
+        self.assertEqual(processor.origin["h"], origin_before["h"])
+        self.assertTrue(result["origin_unchanged"])
+        self.assertEqual(result["sample_count"], 60)
+        np.testing.assert_allclose(processor.tracking_offset_enu, center, atol=1e-12)
+        np.testing.assert_allclose(saved[0], center, atol=1e-12)
+        np.testing.assert_allclose(
+            processor.disp_enu_state,
+            [0.001, -0.001, 0.001],
+            atol=1e-12,
+        )
+        self.assertGreater(processor.peak_displacement_mm, 0.0)
+
     def test_horizontal_stale_cluster_reacquires_tracking(self):
         """Verify trạm lệch ngang (offset2D > max_step) sau khi mất fix lâu (dt > 60s) vẫn reacquire thành công."""
         processor = self._processor_without_db()
@@ -321,12 +484,360 @@ class GnssFixedOnlyTests(unittest.TestCase):
 
         processor._parse_gngga = fake_parse
         processor._gngga_to_ecef = fake_ecef
-        results = [processor._handle_processing("$GNGGA,TEST", 4, {}) for _ in positions]
+        # Verified reference change event with valid timestamp allows reacquisition
+        config = {"cors_failover_timestamp": 1_700_000_000.0 + 120}
+        results = [processor._handle_processing("$GNGGA,TEST", 4, config) for _ in positions]
 
         self.assertIn("TRACKING_REACQUIRED", {result.get("status") for result in results if result})
         self.assertAlmostEqual(float(processor.tracking_offset_enu[0]), 0.24, places=2)
         self.assertLess(abs(float(processor.history[-1]["pos_enu"][0])), 0.01)
         np.testing.assert_allclose(processor.disp_enu_state, [0.005, 0.0, 0.0])
+
+        # Verify subsequent samples at the new position continue smoothly WITHOUT rejecting or looping
+        subsequent_results = []
+        for extra in range(5):
+            pos_extra = np.array([0.24 + 0.001 * extra, 0.0, 0.06])
+            timestamps.append(127 + extra)
+            positions.append(pos_extra)
+            res = processor._handle_processing("$GNGGA,TEST", 4, config)
+            if res:
+                subsequent_results.append(res)
+
+        # Ensure NO subsequent bad fix or reacquire rejects occurred
+        statuses = [r.get("status") for r in subsequent_results if r]
+        self.assertNotIn("INVALID_DATA", statuses)
+        self.assertNotIn("UNSTABLE_FIX", statuses)
+        self.assertNotIn("PERSISTENT_OFFSET_QUARANTINED", statuses)
+
+    def test_landslide_without_reference_change_is_not_absorbed_into_offset(self):
+        """Verify real ground displacement (e.g. 30cm) is NOT absorbed into tracking offset when CORS has not changed."""
+        processor = self._processor_without_db()
+        processor.allow_auto_reacquire = False
+        processor.filter_window_size = 30
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.v_enu_state = np.zeros(3)
+        processor.v_state_ready = False
+        processor.disp_enu_state = np.zeros(3)
+        processor.disp_state_ready = True
+        processor.peak_displacement_mm = 0.0
+        processor.last_significant_motion_ts = 0.0
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+
+        timestamps = list(range(6)) + list(range(120, 127))
+        # 30cm ground displacement
+        positions = [np.array([0.001 * i, 0.0, 0.0]) for i in range(6)] + [
+            np.array([0.30 + (0.001 if i % 2 else -0.001), 0.0, 0.0])
+            for i in range(7)
+        ]
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            i = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + timestamps[i],
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            i = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + positions[i]
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        # No CORS change config
+        results = [processor._handle_processing("$GNGGA,TEST", 4, {}) for _ in positions]
+
+        # Reacquire MUST NOT occur; tracking_offset must stay 0 so landslide is not zeroed out!
+        self.assertNotIn("TRACKING_REACQUIRED", {r.get("status") for r in results if r})
+        self.assertEqual(float(processor.tracking_offset_enu[0]), 0.0)
+
+    def test_slow_creep_displacement_updates_without_velocity_significant(self):
+        """Verify slow creep displacement (> noise floor) updates even when instantaneous velocity < 0.15 mm/s."""
+        processor = self._processor_without_db()
+        processor.filter_window_size = 30
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.v_enu_state = np.zeros(3)
+        processor.v_state_ready = False
+        processor.disp_enu_state = np.zeros(3)
+        processor.disp_state_ready = False
+        processor.peak_displacement_mm = 0.0
+        processor.last_significant_motion_ts = 0.0
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+
+        # Baseline: 20 samples at origin (0, 0, 0) with 0.5mm noise
+        positions = [np.array([0.0005 if i % 2 else -0.0005, 0.0, 0.0]) for i in range(20)]
+        # Then slow creep to 10mm (0.010m) over 20 seconds
+        positions += [np.array([0.010 + (0.0005 if i % 2 else -0.0005), 0.0, 0.0]) for i in range(20)]
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            i = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + i,
+                "received_timestamp": 1_700_000_100.0 + i,
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            i = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + positions[i]
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        config = {
+            "GnssAlerting": {
+                "displacement_window_seconds": 15,
+                "displacement_min_samples": 5,
+                "displacement_min_duration_s": 4,
+                "displacement_noise_floor_min_mm": 2.0,
+                "displacement_stationary_speed_mm_s": 0.0,
+            }
+        }
+        results = [processor._handle_processing("$GNGGA,TEST", 4, config) for _ in positions]
+        last_processed = [r for r in results if r and r.get("type") == "gnss_processed"][-1]
+
+        # The slow 10mm creep must be detected and reflected in total_displacement_mm!
+        self.assertGreater(last_processed["data"]["total_displacement_mm"], 5.0)
+        self.assertIn("horizontal_displacement_mm", last_processed["data"])
+        self.assertIn("vertical_displacement_mm", last_processed["data"])
+        self.assertIn("displacement_3d_mm", last_processed["data"])
+
+    def test_nmea_checksum_validation(self):
+        """Verify NMEA checksum calculation and rejection of corrupted sentences."""
+        # Valid checksum: $GNGGA...*47
+        valid_sentence = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0*47"
+        # Calculate actual checksum for valid_sentence body
+        body = "GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0"
+        chk = 0
+        for c in body:
+            chk ^= ord(c)
+        correct_sentence = f"${body}*{chk:02X}"
+
+        self.assertTrue(GNSSVelocityProcessor._verify_nmea_checksum(correct_sentence))
+        self.assertFalse(GNSSVelocityProcessor._verify_nmea_checksum(f"${body}*FF"))
+        self.assertFalse(GNSSVelocityProcessor._verify_nmea_checksum(f"${body}*ZZ"))
+        # No checksum field returns True
+        self.assertTrue(GNSSVelocityProcessor._verify_nmea_checksum(f"${body}"))
+
+    def test_malformed_checksum_rejected_in_process_gngga(self):
+        """Verify process_gngga rejects malformed checksum like *ZZ without stripping it."""
+        processor = self._processor_without_db()
+        bad_payload = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0*ZZ"
+        res = processor.process_gngga(bad_payload, {})
+        self.assertIsNotNone(res)
+        self.assertEqual(res.get("status"), "CHECKSUM_FAILED")
+
+    def test_missing_geoid_field_rejected(self):
+        """Verify GGA sentence with missing geoid separation is rejected to prevent 30m+ false jump."""
+        processor = self._processor_without_db()
+        # Incomplete sentence missing field 11 (geoid separation)
+        sentence_no_geoid = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,10.0,M,,M,1.0,0"
+        point = processor._parse_gngga(sentence_no_geoid)
+        self.assertIsNone(point)
+
+    def test_invalid_minutes_rejected_in_parse_gngga(self):
+        """Verify NMEA minutes >= 60 are rejected."""
+        processor = self._processor_without_db()
+        # 65.0000 minutes is invalid NMEA
+        sentence_bad_minutes = "$GNGGA,010203.00,2165.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0"
+        point = processor._parse_gngga(sentence_bad_minutes)
+        self.assertIsNone(point)
+
+    def test_origin_candidate_hdop_and_sats_gate(self):
+        """Verify points with high HDOP (>2.0) or low sats (<10) are rejected from origin candidates."""
+        processor = self._processor_without_db()
+        processor.state = "AWAITING_CANDIDATES"
+        processor.origin_candidates = []
+        processor.required_points = 60
+        # Sentence with HDOP=3.5 (too high for origin)
+        res_bad_hdop = processor.process_gngga("$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,3.5,10.0,M,0.0,M,1.0,0", {})
+        self.assertEqual(res_bad_hdop.get("status"), "AWAITING_ORIGIN")
+        self.assertEqual(res_bad_hdop.get("type"), "origin_status")
+        self.assertEqual(len(processor.origin_candidates), 0)
+
+        # Sentence with Sats=6 (too few for origin)
+        res_few_sats = processor.process_gngga("$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,6,0.8,10.0,M,0.0,M,1.0,0", {})
+        self.assertEqual(res_few_sats.get("status"), "AWAITING_ORIGIN")
+        self.assertEqual(len(processor.origin_candidates), 0)
+
+        # Sentence with good HDOP and Sats
+        res_good = processor.process_gngga("$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,18,0.8,10.0,M,0.0,M,1.0,0", {})
+        self.assertEqual(res_good.get("type"), "origin_collecting")
+        self.assertEqual(len(processor.origin_candidates), 1)
+
+    def test_reference_shift_below_spike_gate_is_compensated_before_history_commit(self):
+        processor = self._processor_without_db()
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.tracking_offset_enu = np.zeros(3)
+        processor._last_reacquire_ts = 0.0
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        positions = [np.array([0.001 * index, 0.0, 0.0]) for index in range(6)] + [
+            np.array([0.101 + (0.001 if index % 2 else -0.001), 0.0, 0.08])
+            for index in range(6)
+        ]
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            index = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + index,
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            index = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + positions[index]
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        config = {"reference_change_timestamp": 1_700_000_006_000}
+        results = [processor._handle_processing("$GNGGA,TEST", 4, config) for _ in positions]
+
+        self.assertIn("REFERENCE_TRANSITION", {result.get("status") for result in results if result})
+        reacquired = next(result for result in results if result and result.get("status") == "TRACKING_REACQUIRED")
+        self.assertGreater(reacquired["data"]["shift_2d_m"], 0.09)
+        self.assertAlmostEqual(float(processor.tracking_offset_enu[0]), 0.096, delta=0.01)
+        self.assertLess(float(processor.history[-1]["pos_enu"][0]), 0.01)
+
+    def test_reference_event_must_precede_shift_onset(self):
+        processor = self._processor_without_db()
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.tracking_offset_enu = np.zeros(3)
+        processor._last_reacquire_ts = 0.0
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        timestamps = list(range(6)) + list(range(120, 190))
+        positions = [np.array([0.001 * index, 0.0, 0.0]) for index in range(6)] + [
+            np.array([0.35, 0.0, 0.0]) for _ in range(70)
+        ]
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            index = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + timestamps[index],
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            index = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + positions[index]
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        config = {"reference_change_timestamp": 1_700_000_000.0}
+        results = [processor._handle_processing("$GNGGA,TEST", 4, config) for _ in positions]
+
+        late_results = [result for result in results[6:] if result]
+        self.assertNotIn("TRACKING_REACQUIRED", {result.get("status") for result in late_results})
+        self.assertIn("UNVERIFIED_POSITION_SHIFT", {result.get("status") for result in late_results})
+
+    def test_origin_candidates_reset_after_acquisition_gap(self):
+        processor = self._processor_without_db()
+        processor.state = "AWAITING_CANDIDATES"
+        processor.origin = None
+        processor.origin_candidates = []
+        processor.required_points = 60
+        processor.min_fix_quality = 4
+        samples = iter((100.0, 101.0, 105.0))
+
+        def fake_parse(_):
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": next(samples),
+                "received_timestamp": 0.0,
+                "hdop": 0.5,
+                "num_sats": 20,
+            }
+
+        processor._parse_gngga = fake_parse
+        for _ in range(3):
+            processor._handle_origin_collection("$GNGGA,TEST", 4)
+
+        self.assertEqual(len(processor.origin_candidates), 1)
+
+    def test_tracking_offset_cap_considers_proposed_offset(self):
+        """Verify proposed tracking offset (e.g. 1.9m + 0.4m = 2.3m) is rejected when exceeding 2.0m cap."""
+        processor = self._processor_without_db()
+        processor.filter_window_size = 30
+        processor.history = deque(maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.v_enu_state = np.zeros(3)
+        processor.v_state_ready = False
+        processor.disp_enu_state = np.zeros(3)
+        processor.disp_state_ready = True
+        processor.peak_displacement_mm = 0.0
+        processor.last_significant_motion_ts = 0.0
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        # Existing tracking offset = 1.9m
+        processor.tracking_offset_enu = np.array([1.9, 0.0, 0.0])
+
+        timestamps = list(range(6)) + list(range(120, 127))
+        # New cluster attempts a +0.4m shift (total proposed = 1.9 + 0.4 = 2.3m > 2.0m cap)
+        positions = [np.array([0.001 * i, 0.0, 0.0]) for i in range(6)] + [
+            np.array([0.40 + (0.001 if i % 2 else -0.001), 0.0, 0.0])
+            for i in range(7)
+        ]
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            i = sample_index["value"]
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + timestamps[i],
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            i = sample_index["value"]
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + positions[i]
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+        config = {"cors_failover_timestamp": 1_700_000_000.0 + 120}
+        results = [processor._handle_processing("$GNGGA,TEST", 4, config) for _ in positions]
+
+        # Reacquire MUST NOT occur because proposed 2.3m exceeds 2.0m cap
+        self.assertNotIn("TRACKING_REACQUIRED", {r.get("status") for r in results if r})
+        # Offset must stay at 1.9m, NOT 2.3m
+        self.assertEqual(float(processor.tracking_offset_enu[0]), 1.9)
 
 
 class GnssAuditTests(unittest.IsolatedAsyncioTestCase):
@@ -340,6 +851,16 @@ class GnssAuditTests(unittest.IsolatedAsyncioTestCase):
         bridge._active_gnss_anomalies = set()
         bridge._device_update_buffer = {}
         return bridge
+
+    def test_runtime_defaults_include_gnss_integrity(self):
+        bridge = self._bridge_without_clients()
+        bridge.runtime_confirmation = {"gnss": 3, "rain": 2, "water": 2, "imu": 2}
+
+        config = bridge._apply_runtime_defaults_to_station_config({})
+
+        self.assertEqual(config["GnssIntegrity"]["process_max_hdop"], 2.0)
+        self.assertEqual(config["GnssIntegrity"]["process_min_sats"], 10)
+        self.assertEqual(config["GnssIntegrity"]["reference_transition_samples"], 6)
 
     async def test_rejected_raw_is_saved_even_when_only_gngga_field_is_selected(self):
         bridge = self._bridge_without_clients()

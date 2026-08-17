@@ -417,11 +417,11 @@ class MQTTTransportMixin:
             self._background_tasks.clear()
 
     async def reset_gnss_origin(self, device_id: int):
-        """Trigger origin reset for a specific GNSS device."""
+        """Calibrate tracking offset while preserving the survey origin."""
         proc_key = f"device_{device_id}"
         processor = self.processors_cache.get(proc_key)
-        if processor and hasattr(processor, 'reset_origin'):
-            processor.reset_origin()
-            logger.info(f"🎯 [BRIDGE] Triggered origin reset for device {device_id}")
-            return True
-        return False
+        if processor and hasattr(processor, "recalibrate_tracking_offset"):
+            result = await processor.recalibrate_tracking_offset()
+            logger.info(f"🎯 [BRIDGE] Calibrated tracking offset for device {device_id}")
+            return result
+        return None

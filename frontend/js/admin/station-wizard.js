@@ -38,6 +38,8 @@ class AdminStationWizardFeature extends window.AdminManager {
         input.classList.toggle('is-validating', state === 'validating');
         input.dataset.topicValid = state === 'valid' ? 'true' : (state === 'invalid' ? 'false' : '');
         feedback.className = `mqtt-topic-feedback ${state}`;
+        feedback.setAttribute('role', state === 'invalid' ? 'alert' : 'status');
+        feedback.setAttribute('aria-live', 'polite');
         feedback.textContent = message;
     }
 
@@ -577,6 +579,9 @@ class AdminStationWizardFeature extends window.AdminManager {
         scope.querySelectorAll('.wizard-step').forEach(step => {
             const stepNum = parseInt(step.dataset.step);
             step.classList.toggle('active', stepNum === this.currentStep);
+            step.classList.toggle('completed', stepNum < this.currentStep);
+            if (stepNum === this.currentStep) step.setAttribute('aria-current', 'step');
+            else step.removeAttribute('aria-current');
         });
 
         scope.querySelectorAll('.wizard-content').forEach(content => {

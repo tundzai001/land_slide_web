@@ -419,6 +419,49 @@ function updateGnssFixBadge(fixMode, fixQuality) {
     badge.textContent = text;
 }
 
+function updateGnssIntegrityStatus(payload) {
+    const integrity = payload?.integrity || payload?.data || payload;
+    if (!integrity?.integrity_state) return;
+
+    const section = document.getElementById('gnss-integrity-section');
+    const badge = document.getElementById('gnss-integrity-badge');
+    const shiftGrid = document.getElementById('gnss-integrity-shift-grid');
+    if (!section || !badge) return;
+
+    const state = String(integrity.integrity_state).toUpperCase();
+    const presentation = {
+        TRACKING_NORMAL: ['normal', 'THEO DÕI BÌNH THƯỜNG'],
+        REFERENCE_TRANSITION: ['transition', 'ĐANG KIỂM TRA MỐC'],
+        TRACKING_REACQUIRED: ['reacquired', 'ĐÃ BÙ MỐC THAM CHIẾU'],
+        UNVERIFIED_POSITION_SHIFT: ['unverified', 'DỊCH CHUYỂN CHƯA XÁC MINH'],
+        UNTRUSTED_GEOMETRY: ['geometry', 'LOẠI DO HÌNH HỌC'],
+    }[state] || ['unknown', state.replaceAll('_', ' ')];
+    const metric = (value, suffix = 'm') => Number.isFinite(Number(value)) ? `${Number(value).toFixed(3)} ${suffix}` : '--';
+    const eventTs = Number(integrity.reference_event_timestamp);
+    const normalTracking = state === 'TRACKING_NORMAL';
+
+    section.dataset.state = presentation[0];
+    badge.textContent = presentation[1];
+    setText(
+        'gnss-integrity-message',
+        normalTracking
+            ? 'Tọa độ đạt điều kiện theo dõi; chưa có sự kiện mốc hoặc dịch chuyển cần bù.'
+            : payload?.message || integrity.message || 'Đang cập nhật đánh giá toàn vẹn GNSS.'
+    );
+    if (shiftGrid) shiftGrid.hidden = normalTracking;
+    setText('gnss-shift-e', metric(integrity.shift_e_m));
+    setText('gnss-shift-n', metric(integrity.shift_n_m));
+    setText('gnss-shift-u', metric(integrity.shift_u_m));
+    setText('gnss-shift-mag', Number.isFinite(Number(integrity.shift_2d_m))
+        ? `${metric(integrity.shift_2d_m)} / ${metric(integrity.shift_3d_m)}` : '--');
+    setText('gnss-shift-spread', Number.isFinite(Number(integrity.spread_xy_m))
+        ? `${metric(integrity.spread_xy_m)} / ${metric(integrity.spread_u_m)}` : '--');
+    setText('gnss-shift-duration', Number.isFinite(Number(integrity.duration_s)) ? `${Number(integrity.duration_s).toFixed(1)} s` : '--');
+    setText('gnss-reference-event', integrity.reference_event_verified
+        ? `Đã xác minh${Number.isFinite(eventTs) ? ` · ${new Date(eventTs * 1000).toLocaleTimeString('vi-VN')}` : ''}`
+        : integrity.possible_ground_movement ? 'Chưa xác minh · có thể là chuyển vị đất' : 'Không có');
+}
+
 function updateImuOfflineBadge(isOnline) {
     const badge = document.getElementById('imu-offline-badge');
     if (!badge) return;
@@ -454,6 +497,7 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
     const stationId = data.id;
+    window.restoreGnssAdjustmentStatus?.(data.project_id);
     const imuApiTs = Number(data.sensors?.imu?.latest_timestamp || 0);
     const imuRealtimeTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
     const latestSensorTs = getLatestSensorTimestamp(data);
@@ -491,6 +535,7 @@ function updateSidebarUI(data) {
     // kể cả khi sensor offline (tránh bị mất chữ khi refresh)
     // API trả data flat trên gnssLatest, WS cache lưu dưới gnssLatest.data
     const adv = gnssLatest?.data || gnssLatest;
+    updateGnssIntegrityStatus(adv);
     if (adv && adv.adv_x !== undefined) {
         // Vị trí hiện tại: Lat/Lon/Alt từ GNGGA
         setText('adv-val-lat', (adv.lat || 0).toFixed(6));

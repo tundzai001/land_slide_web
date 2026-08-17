@@ -1207,6 +1207,13 @@ function setupEventListeners() {
     }
     window.ensureGnssTerminalModal = ensureGnssTerminalModal;
 
+    function showGnssTerminalModal(modal) {
+        bootstrap.Modal.getOrCreateInstance(modal, {
+            backdrop: false,
+            focus: false,
+        }).show();
+    }
+
     function showAdjustmentError(title, message) {
         const terminalModal = document.getElementById('gnssTerminalModal');
         if (terminalModal?.classList.contains('show')) {
@@ -1307,7 +1314,7 @@ function setupEventListeners() {
 
         if (isGnssAdjustmentRunning(projectId)) {
             const existingModal = ensureGnssTerminalModal();
-            bootstrap.Modal.getOrCreateInstance(existingModal).show();
+            showGnssTerminalModal(existingModal);
             addGnssAdjustmentDebug('UI', 'Đã mở lại phiên Bình sai đang chạy; tiến trình không bị khởi động lại.', 'success');
             return;
         }
@@ -1319,7 +1326,10 @@ function setupEventListeners() {
             if (!window.bootstrap?.Modal) {
                 throw new Error('Bootstrap Modal chua san sang');
             }
-            terminalModal = bootstrap.Modal.getOrCreateInstance(terminalModalEl);
+            terminalModal = bootstrap.Modal.getOrCreateInstance(terminalModalEl, {
+                backdrop: false,
+                focus: false,
+            });
             terminalModal.show();
             resetGnssAdjustmentDebug({ projectId, stationIds });
             addGnssAdjustmentDebug('API', `Đang gọi API khởi động cho dự án #${projectId}.`, 'info');

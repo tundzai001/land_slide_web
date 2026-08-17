@@ -40,7 +40,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         title="Xem chi tiết GNSS" aria-label="Mở thông tin GNSS nâng cao"
                         aria-controls="gnss-advanced-sidepanel" aria-expanded="false">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-geo-alt-fill me-1"></i>GNSS Velocity <i
+                            <span title="Vận tốc 3D Theil-Sen trong cửa sổ thời gian, không phải vận tốc tức thời"><i class="bi bi-geo-alt-fill me-1"></i>Vận tốc GNSS (3D) <i
                                     class="bi bi-info-circle ms-1 small opacity-50"></i></span>
                             <span id="gnss-fix-badge" class="gnss-fix-badge GNSS_UNKNOWN">NO DATA</span>
                             <span id="gnss-offline-badge" class="sensor-offline-badge"

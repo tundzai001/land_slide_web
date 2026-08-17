@@ -138,10 +138,10 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
     AGRICA_COMMAND_BURST_COUNT = 6
     RTCM_COMMAND_BURST_COUNT = 3
     COMMAND_BURST_INTERVAL_SECONDS = 0.25
-    PREFLIGHT_CONNECTION_ATTEMPTS = 2
+    PREFLIGHT_CONNECTION_ATTEMPTS = 1
     ROVER_RESTORE_TRANSPORT_ATTEMPTS = 6
     ROVER_RESTORE_RETRY_SECONDS = 2.0
-    RTCM_ROUTE_RECOVERY_ATTEMPTS = 2
+    RTCM_ROUTE_RECOVERY_ATTEMPTS = 1
     FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS = 15
     FIXED_BASE_MOUNTPOINT_RELEASE_RETRY_SECONDS = 1.0
     OPTIONAL_BASE_RTCM_COMMANDS = (
@@ -452,6 +452,34 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
             and not state["rtcm_recent"]
         )
         return state
+
+    def get_adjustment_diagnostics(self, project_id: int) -> Dict[str, Any]:
+        """Return JSON-safe runtime evidence for a failed adjustment run."""
+        session = self._sessions.get(int(project_id)) or {}
+        rover_codes = list(dict.fromkeys(
+            str(rover).strip()
+            for cluster in session.get("clusters", [])
+            for rover in cluster.get("rovers", [])
+            if str(rover).strip()
+        ))
+        return {
+            "run_id": int(project_id),
+            "captured_at": int(time.time()),
+            "clusters": [
+                {
+                    "name": str(cluster.get("name") or "Cụm"),
+                    "rovers": list(cluster.get("rovers") or []),
+                    "active_base": (session.get("active_bases") or {}).get(index),
+                }
+                for index, cluster in enumerate(session.get("clusters", []))
+            ],
+            "stream_health": {
+                rover: self.get_gnss_stream_health(rover)
+                for rover in rover_codes
+            },
+            "seed_status": self.get_seed_collection_status(int(project_id)),
+            "last_ingest_diagnostic": self.get_last_ingest_diagnostic(int(project_id)),
+        }
 
     async def ensure_rover_streams_ready(
         self,
@@ -1455,6 +1483,10 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
         target_sids = [1, 2] if server_id is None else [server_id]
         for sid in target_sids:
             cfg[f"server{sid}_enabled"] = bool(enabled)
+            cfg[f"server{sid}_stream_active"] = bool(enabled)
+            cfg[f"server{sid}_stream_on_demand"] = False
+        cfg["stream_active"] = bool(enabled)
+        cfg["stream_on_demand"] = False
         return cfg
 
     @staticmethod
@@ -1552,6 +1584,13 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
     ) -> None:
         if not mountpoint:
             return
+        if not enabled:
+            logger.info(
+                "Keeping fixed base %s host=%s always active; no CORS sleep transition",
+                mountpoint,
+                selected_host,
+            )
+            return
         snapshot_key = (
             self._normalize_stream_host(selected_host),
             str(mountpoint).strip().casefold(),
@@ -1600,10 +1639,15 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                 mountpoint,
             )
             return
+        always_active_config = self._cors_service_config_with_server_enabled(
+            snapshot["service_config"],
+            None if all_streams else snapshot.get("server_id"),
+            enabled=True,
+        )
         await asyncio.to_thread(
             self._cors_configure_service_sync,
             snapshot["serial"],
-            copy.deepcopy(snapshot["service_config"]),
+            always_active_config,
         )
         self._cors_fixed_base_snapshots.pop(snapshot_key, None)
         logger.info(
@@ -1965,11 +2009,18 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
 
         if not any(has_dual_selected_stream(cluster) for cluster in session["clusters"]):
             for cluster in session["clusters"]:
-                self._lock_fixed_base_candidate(
-                    cluster,
-                    self._fixed_base_candidates(cluster)[0],
-                    "configured fixed base selected before seed collection",
-                )
+                candidates = self._fixed_base_candidates(cluster)
+                if len(candidates) == 1:
+                    self._lock_fixed_base_candidate(
+                        cluster,
+                        candidates[0],
+                        "configured fixed base selected before seed collection",
+                    )
+                else:
+                    cluster["selected_fixed_base_candidate"] = None
+                    cluster["fixed_base_selection_diagnostic"] = (
+                        "awaiting AGRICA confirmation of the active primary/backup base"
+                    )
             return []
         raw_stations = await asyncio.to_thread(
             self._cors_api_request_sync,
@@ -1988,12 +2039,17 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                 # A mixed request may still contain a legacy single-stream
                 # base alongside a dual-stream total cluster.
                 if not has_dual_selected_stream(cluster):
-                    selected = candidates[0]
-                    self._lock_fixed_base_candidate(
-                        cluster,
-                        selected,
-                        "configured fixed base selected before seed collection",
-                    )
+                    if len(candidates) == 1:
+                        self._lock_fixed_base_candidate(
+                            cluster,
+                            candidates[0],
+                            "configured fixed base selected before seed collection",
+                        )
+                    else:
+                        cluster["selected_fixed_base_candidate"] = None
+                        cluster["fixed_base_selection_diagnostic"] = (
+                            "awaiting AGRICA confirmation of the active primary/backup base"
+                        )
                     continue
 
                 resolved_candidates: list[tuple[dict, tuple[dict, int]]] = []

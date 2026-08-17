@@ -168,6 +168,7 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         cfg["alerting"] = alerting_cfg
 
         gnss_cfg = dict(cfg.get("GnssAlerting", {}) or {})
+        gnss_integrity_cfg = dict(cfg.get("GnssIntegrity", cfg.get("gnss_integrity", {})) or {})
         rain_cfg = dict(cfg.get("RainAlerting", {}) or {})
         water_cfg = dict(cfg.get("Water", {}) or {})
         imu_cfg = dict(cfg.get("ImuAlerting", {}) or {})
@@ -175,6 +176,13 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         gnss_cfg.setdefault("gnss_confirm_steps", self.runtime_confirmation["gnss"])
         gnss_cfg.setdefault("gnss_warning_confirm_steps", self.runtime_confirmation["gnss"])
         gnss_cfg.setdefault("gnss_critical_confirm_steps", max(1, self.runtime_confirmation["gnss"] - 1))
+        gnss_integrity_cfg.setdefault("process_max_hdop", 2.0)
+        gnss_integrity_cfg.setdefault("process_min_sats", 10)
+        gnss_integrity_cfg.setdefault("origin_max_gap_s", 2.0)
+        gnss_integrity_cfg.setdefault("reference_event_alignment_s", 30.0)
+        gnss_integrity_cfg.setdefault("reference_transition_samples", 6)
+        gnss_integrity_cfg.setdefault("reacquire_max_spread_xy_m", 0.03)
+        gnss_integrity_cfg.setdefault("reacquire_max_spread_u_m", 0.05)
         rain_cfg.setdefault("rain_confirm_steps", self.runtime_confirmation["rain"])
         rain_cfg.setdefault("rain_warning_confirm_steps", self.runtime_confirmation["rain"])
         rain_cfg.setdefault("rain_critical_confirm_steps", max(1, self.runtime_confirmation["rain"] - 1))
@@ -186,6 +194,7 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         imu_cfg.setdefault("imu_critical_confirm_steps", max(1, self.runtime_confirmation["imu"] - 1))
 
         cfg["GnssAlerting"] = gnss_cfg
+        cfg["GnssIntegrity"] = gnss_integrity_cfg
         cfg["RainAlerting"] = rain_cfg
         cfg["Water"] = water_cfg
         cfg["ImuAlerting"] = imu_cfg
@@ -571,6 +580,7 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         run_context = self._adjustment_run_context(run_id)
         public_project_id = int(run_context["project_id"])
         cluster_name = str(run_context.get("cluster_name") or "Cụm")
+        diagnostics = self.round_robin_manager.get_adjustment_diagnostics(run_id)
         try:
             await self.round_robin_manager.restore_common_fixed_base_topology(run_id)
         except Exception as restore_exc:
@@ -593,7 +603,7 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             project_code=str(run_context.get("project_code") or ""),
             cluster_name=cluster_name,
             cluster_index=run_context.get("cluster_index"),
-            context={"error": str(message)},
+            context={"error": str(message), "diagnostics": diagnostics},
         )
         failure_result = adjustment_failure.write_adjustment_failure_report(
             public_project_id,
@@ -605,6 +615,7 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 "phase": "FREE_NETWORK",
                 "run_id": run_id,
                 "cluster_index": run_context.get("cluster_index"),
+                "diagnostics": diagnostics,
             },
         )
         if failure_result:
@@ -985,10 +996,11 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                             "fix_quality": res.get('fix_quality'),
                             "fix_mode": res.get('fix_mode'),
                             "message": res.get('message'),
-                            "raw_payload": res.get('raw_payload', '')
+                            "raw_payload": res.get('raw_payload', ''),
+                            "data": res.get('data'),
                         }
                         
-                        if res.get('status') == 'INVALID_DATA':
+                        if res.get('status') in {'INVALID_DATA', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'}:
                             # Immediate buffering for anomalies
                             anomaly_record = {
                                 "station_id": station_id,

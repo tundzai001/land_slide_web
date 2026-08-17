@@ -32,11 +32,14 @@ def write_adjustment_failure_report(
         project_id,
         project_code,
         cluster_name,
+        run_id=(context or {}).get("run_id"),
     )
     report_name = (
         f"gnss_adjustment_{project_slug}_{cluster_slug}_{filename_timestamp}.json"
         if scoped else f"gnss_adjustment_{int(project_id)}_{filename_timestamp}.json"
     )
+    run_id = (context or {}).get("run_id")
+    run_url = f"/run-{int(run_id)}" if run_id is not None else ""
     report_path = report_dir / report_name
     temporary_path = report_path.with_suffix(".json.tmp")
     payload: dict[str, Any] = {
@@ -51,7 +54,7 @@ def write_adjustment_failure_report(
         "error": {"type": error_type, "message": error_message},
         "context": dict(context or {}),
         "audit_json_url": (
-            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}/{report_name}"
+            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}{run_url}/{report_name}"
             if scoped else
             f"/api/admin/gnss/adjustment/reports/{int(project_id)}/{report_name}"
         ),

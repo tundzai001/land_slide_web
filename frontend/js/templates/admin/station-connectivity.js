@@ -1,13 +1,23 @@
 window.LegacyTemplateParts ||= {};
 window.LegacyTemplateParts['station-connectivity'] = String.raw`                        <!-- STEP 2: MQTT & TỌA ĐỘ -->
-                        <div class="wizard-content" data-step="2">
-                            <div class="alert alert-info small mb-3">
+                        <div class="wizard-content" data-step="2" aria-labelledby="station-connectivity-heading">
+                            <div class="station-step-intro">
+                                <div>
+                                    <span class="station-step-kicker">Bước 2 / 4</span>
+                                    <h6 id="station-connectivity-heading">Kết nối &amp; định vị</h6>
+                                    <p>Chọn cảm biến đang sử dụng, cấu hình MQTT và kiểm tra tọa độ lắp đặt.</p>
+                                </div>
+                                <span class="station-step-status"><i class="bi bi-shield-check" aria-hidden="true"></i> Kiểm tra tại chỗ</span>
+                            </div>
+                            <div class="alert alert-info small mb-3 station-flow-hint">
                                 <i class="bi bi-info-circle me-1"></i>
-                                Chọn thiết bị â†’ Nhập MQTT Topic â†’ Cấu hình tọa độ (nếu cần)
+                                Chọn cảm biến <i class="bi bi-chevron-right mx-1" aria-hidden="true"></i>
+                                Nhập MQTT Topic <i class="bi bi-chevron-right mx-1" aria-hidden="true"></i>
+                                Kiểm tra tọa độ
                             </div>
 
                             <h6 class="mb-3">1. Chọn thiết bị cần kích hoạt:</h6>
-                            <div class="d-flex flex-wrap gap-3 mb-4 p-3 border rounded">
+                            <div class="station-sensor-picker mb-4">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="edit-gnss">
                                     <label class="form-check-label" for="edit-gnss"><i
@@ -120,7 +130,7 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                                 <button type="button" class="btn btn-sm btn-outline-warning"
                                                     id="btn-reset-origin"
                                                     onclick="window.adminManager.resetGnssOrigin(window.adminManager.currentStationId)">
-                                                    <i class="bi bi-arrow-counterclockwise me-1"></i> Đặt lại điểm gốc
+                                                    <i class="bi bi-crosshair me-1"></i> Hiệu chuẩn offset
                                                 </button>
                                                 <button type="button" class="btn btn-sm btn-warning"
                                                     id="btn-fetch-origin"

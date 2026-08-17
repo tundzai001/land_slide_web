@@ -1,4 +1,36 @@
 /* GNSS ADVANCED SIDEPANEL */
+.gnss-integrity-section {
+    border-left: 3px solid var(--accent-info, #0ea5e9);
+}
+
+.gnss-integrity-section[data-state="unverified"],
+.gnss-integrity-section[data-state="geometry"] {
+    border-left-color: var(--accent-warning, #f59e0b);
+}
+
+.gnss-integrity-section[data-state="transition"] {
+    border-left-color: var(--accent-info, #0ea5e9);
+}
+
+.gnss-integrity-section[data-state="reacquired"] {
+    border-left-color: var(--accent-success, #10b981);
+}
+
+.gnss-integrity-badge {
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.2rem 0.45rem;
+    background: var(--surface-secondary, rgba(148, 163, 184, 0.18));
+}
+
+.gnss-integrity-message {
+    font-size: 0.75rem;
+    line-height: 1.35;
+    margin: 0.35rem 0 0.6rem;
+}
+
 .gnss-advanced-sidepanel {
     position: fixed !important;
     top: 64px;

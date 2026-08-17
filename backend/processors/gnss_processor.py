@@ -16,15 +16,14 @@ A_WGS84 = 6378137.0
 F_WGS84 = 1 / 298.257223563
 E2_WGS84 = 2 * F_WGS84 - F_WGS84**2
 
-def haversine_3d(lat1, lon1, h1, lat2, lon2, h2):
+def haversine_2d(lat1, lon1, lat2, lon2):
     R = 6371000
     lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(math.radians, [lat1, lon1, lat2, lon2])
     dlon = lon2_rad - lon1_rad
     dlat = lat2_rad - lat1_rad
     a_val = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
     c = 2 * math.atan2(math.sqrt(a_val), math.sqrt(1 - a_val))
-    distance_2d = R * c
-    return math.sqrt(distance_2d**2 + (h2 - h1)**2)
+    return R * c
 
 class GNSSVelocityProcessor:
     """
@@ -35,8 +34,9 @@ class GNSSVelocityProcessor:
         self,
         device_id: int,
         db_session_factory,
-        required_points=5,
-        max_spread_m=5.0,
+        required_points=60,
+        max_spread_m=0.5,
+        origin_max_u_spread_m=1.0,
         filter_window_size=30,
         min_fix_quality=4,
         # Sanity gate: reject fix nếu thiết bị claim nhảy > X mét trong 1 sample.
@@ -46,16 +46,25 @@ class GNSSVelocityProcessor:
         # Vertical jump gate (U-axis) to reject unrealistic altitude spikes.
         max_step_vertical_m=0.15,
         context_label: str = None,
+        allow_auto_reacquire: bool = False,
     ):
         self.device_id = device_id
         self.db_session_factory = db_session_factory
         self.context_label = context_label or f"device_id={device_id}"
-        self.required_points = 60  # Increased for stability (approx 1 min at 1Hz)
-        self.max_spread_m = max_spread_m
+        self.required_points = max(int(required_points), 10) if required_points is not None else 60
+        self.max_spread_m = float(max_spread_m)
+        self.origin_max_xy_spread_m = float(max_spread_m)
+        self.origin_max_u_spread_m = float(origin_max_u_spread_m)
         self.min_fix_quality = min_fix_quality
         self.filter_window_size = filter_window_size
         self.max_step_distance_m = float(max_step_distance_m)
         self.max_step_vertical_m = float(max_step_vertical_m)
+        self.allow_auto_reacquire = bool(allow_auto_reacquire)
+        self._reference_changed_at = None
+        self._reference_change_source = None
+        self._last_handled_reference_event_ts = None
+        self._reference_transition = None
+        self._last_origin_candidate_ts = None
 
         # State
         self.state = "AWAITING_CANDIDATES"
@@ -66,9 +75,6 @@ class GNSSVelocityProcessor:
         # Retain enough accepted FIXED samples for time-based windows. The old
         # 31-sample deque made the displacement median cycle too quickly.
         self.history = deque(maxlen=max(filter_window_size + 1, 1200))
-        # Recent per-sample velocities. Keep this short so speed_2d remains instantaneous
-        # and does not ramp because of a long sliding window or EMA state.
-        self.velocity_history = deque(maxlen=5)
         self.reacquire_candidates = deque(maxlen=10)
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
@@ -76,7 +82,8 @@ class GNSSVelocityProcessor:
         self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.disp_state_ready = False
         self.peak_displacement_mm = 0.0
-        self.last_significant_motion_ts = 0.0
+        self.tracking_offset_enu = np.zeros(3, dtype=float)
+        self._last_reacquire_ts = 0.0
 
         self.stats = {
             'total_processed': 0,
@@ -89,8 +96,218 @@ class GNSSVelocityProcessor:
         logger.info(
             f"GNSS Processor init for {self._log_prefix()}: "
             f"fix_required={min_fix_quality}, window={filter_window_size}, "
-            f"max_step={self.max_step_distance_m}m"
+            f"max_step={self.max_step_distance_m}m, auto_reacquire={self.allow_auto_reacquire}"
         )
+
+    def mark_reference_changed(self, timestamp: float = None, source: str = None):
+        """Signal that CORS base / datum reference changed; allows tracking reacquire within time window."""
+        self._reference_changed_at = timestamp or time.time()
+        self._reference_change_source = source
+        logger.info(f"[{self._log_prefix()}] Reference frame change marked (source: {source})")
+
+    def is_reference_changed_recently(self, current_ts: float, window_s: float = 300.0) -> bool:
+        """Check if a reference change occurred within window_s seconds."""
+        changed_at = getattr(self, '_reference_changed_at', None)
+        if changed_at is None:
+            return False
+        delta_s = current_ts - changed_at
+        return 0.0 <= delta_s <= window_s
+
+    @staticmethod
+    def _normalize_epoch_timestamp(value) -> Optional[float]:
+        try:
+            timestamp = float(value)
+            return timestamp / 1000.0 if timestamp > 1e11 else timestamp
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _validated_tracking_offset(value):
+        offset = np.asarray(value, dtype=float)
+        if (
+            offset.shape != (3,)
+            or not np.all(np.isfinite(offset))
+            or np.linalg.norm(offset[:2]) > 2.0
+            or abs(offset[2]) > 10.0
+        ):
+            raise ValueError(f"invalid persisted tracking offset: {offset}")
+        return offset
+
+    def _integrity_config(self, station_config: Dict) -> Dict[str, float]:
+        config = (station_config or {}).get("GnssIntegrity") or (station_config or {}).get("gnss_integrity") or {}
+
+        def number(name, default, minimum):
+            try:
+                return max(float(config.get(name, default)), minimum)
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "process_max_hdop": number("process_max_hdop", 2.0, 0.1),
+            "process_min_sats": int(number("process_min_sats", 10, 1)),
+            "origin_max_gap_s": number("origin_max_gap_s", 2.0, 0.1),
+            "reference_event_alignment_s": number("reference_event_alignment_s", 30.0, 1.0),
+            "reference_transition_samples": max(6, min(int(number("reference_transition_samples", 6, 1)), 10)),
+            "reacquire_max_spread_xy_m": number("reacquire_max_spread_xy_m", 0.03, 0.001),
+            "reacquire_max_spread_u_m": number("reacquire_max_spread_u_m", 0.05, 0.001),
+        }
+
+    def _reference_event(self, station_config: Dict):
+        config = station_config or {}
+        events = [
+            (config.get("reference_change_timestamp"), "reference_change_timestamp"),
+            (config.get("cors_failover_timestamp"), "cors_failover_timestamp"),
+            (config.get("allow_tracking_reacquire_timestamp"), "allow_tracking_reacquire_timestamp"),
+            (getattr(self, "_reference_changed_at", None), getattr(self, "_reference_change_source", "local")),
+        ]
+        valid = [
+            (timestamp, source)
+            for value, source in events
+            if (timestamp := self._normalize_epoch_timestamp(value)) is not None
+        ]
+        return max(valid, default=(None, None), key=lambda event: event[0])
+
+    def _consume_reference_event(self, event_ts: float):
+        self._last_handled_reference_event_ts = event_ts
+        if self._normalize_epoch_timestamp(getattr(self, "_reference_changed_at", None)) == event_ts:
+            self._reference_changed_at = None
+            self._reference_change_source = None
+
+    @staticmethod
+    def _shift_data(
+        tracking_shift,
+        candidate_xy_spread: float,
+        candidate_u_spread: float,
+        duration_s: float,
+        reference_event_verified: bool,
+        possible_ground_movement: bool,
+        reference_event_ts: float = None,
+        shift_started_at: float = None,
+    ) -> Dict[str, Any]:
+        shift = np.asarray(tracking_shift, dtype=float)
+        return {
+            "integrity_state": "UNVERIFIED_POSITION_SHIFT",
+            "position_quality_reliable": not possible_ground_movement,
+            "shift_e_m": float(shift[0]),
+            "shift_n_m": float(shift[1]),
+            "shift_u_m": float(shift[2]),
+            "shift_2d_m": float(np.hypot(shift[0], shift[1])),
+            "shift_3d_m": float(np.linalg.norm(shift)),
+            "spread_xy_m": float(candidate_xy_spread),
+            "spread_u_m": float(candidate_u_spread),
+            "duration_s": float(duration_s),
+            "reference_event_verified": bool(reference_event_verified),
+            "possible_ground_movement": bool(possible_ground_movement),
+            "reference_event_timestamp": reference_event_ts,
+            "shift_started_at": shift_started_at,
+        }
+
+    def _handle_reference_transition(self, ts, pos_enu, fix_quality, station_config, raw_payload):
+        """Quarantine post-reference samples before they can affect tracking history."""
+        integrity_cfg = self._integrity_config(station_config)
+        transition = getattr(self, "_reference_transition", None)
+        event_ts, event_source = self._reference_event(station_config)
+
+        if transition is None:
+            if (
+                event_ts is None
+                or event_ts == getattr(self, "_last_handled_reference_event_ts", None)
+                or not self.history
+                or not 0.0 <= ts - event_ts <= integrity_cfg["reference_event_alignment_s"]
+            ):
+                return None
+            transition = {
+                "event_ts": event_ts,
+                "event_source": event_source,
+                "started_at": ts,
+                "pre_position": self.history[-1]["pos_enu"].copy(),
+                "candidates": deque(maxlen=integrity_cfg["reference_transition_samples"]),
+            }
+            self._reference_transition = transition
+            logger.info(
+                f"[{self._log_prefix()}] Reference transition started from {event_source}; "
+                "quarantining post-event FIXED samples"
+            )
+
+        transition["candidates"].append({"ts": ts, "pos_enu": pos_enu.copy()})
+        candidate_count = len(transition["candidates"])
+        target_count = transition["candidates"].maxlen
+        if candidate_count < target_count:
+            return {
+                "type": "gnss_status",
+                "status": "REFERENCE_TRANSITION",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": raw_payload,
+                "data": {
+                    "integrity_state": "REFERENCE_TRANSITION",
+                    "candidate_count": candidate_count,
+                    "candidate_target": target_count,
+                    "reference_event_verified": True,
+                    "reference_event_timestamp": transition["event_ts"],
+                },
+                "message": f"Reference transition: quarantining FIXED samples {candidate_count}/{target_count}",
+            }
+
+        candidates = list(transition["candidates"])
+        positions = np.array([candidate["pos_enu"] for candidate in candidates], dtype=float)
+        center = np.median(positions, axis=0)
+        xy_spread = float(np.max(np.linalg.norm(positions[:, :2] - center[:2], axis=1)))
+        u_spread = float(np.max(np.abs(positions[:, 2] - center[2])))
+        tracking_shift = center - transition["pre_position"]
+        duration_s = ts - transition["started_at"]
+        stable = (
+            xy_spread <= integrity_cfg["reacquire_max_spread_xy_m"]
+            and u_spread <= integrity_cfg["reacquire_max_spread_u_m"]
+        )
+        offset_too_large = bool(np.hypot(*tracking_shift[:2]) > 0.5 or abs(tracking_shift[2]) > 1.0)
+        proposed_offset = getattr(self, "tracking_offset_enu", np.zeros(3, dtype=float)) + tracking_shift
+        accumulated_too_much = bool(np.linalg.norm(proposed_offset) > 2.0)
+        in_cooldown = bool(ts - getattr(self, "_last_reacquire_ts", 0.0) < 300.0)
+        data = self._shift_data(
+            tracking_shift, xy_spread, u_spread, duration_s, True,
+            not (stable and not offset_too_large and not accumulated_too_much and not in_cooldown),
+            transition["event_ts"], transition["started_at"],
+        )
+        self._reference_transition = None
+        self._consume_reference_event(transition["event_ts"])
+
+        if stable and not offset_too_large and not accumulated_too_much and not in_cooldown:
+            data["integrity_state"] = "TRACKING_REACQUIRED"
+            data["position_quality_reliable"] = True
+            self.tracking_offset_enu = proposed_offset
+            self._last_reacquire_ts = ts
+            self.history.clear()
+            self.history.extend({
+                "ts": candidate["ts"],
+                "pos_enu": candidate["pos_enu"] - tracking_shift,
+            } for candidate in candidates)
+            self.reacquire_candidates.clear()
+            self._consecutive_rejects = 0
+            try:
+                import asyncio
+                asyncio.get_running_loop().create_task(self._async_save_tracking_offset())
+            except RuntimeError:
+                pass
+            return {
+                "type": "gnss_status",
+                "status": "TRACKING_REACQUIRED",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": raw_payload,
+                "data": data,
+                "message": "Verified reference shift compensated; locked displacement preserved",
+            }
+
+        return {
+            "type": "gnss_status",
+            "status": "UNVERIFIED_POSITION_SHIFT",
+            "fix_quality": fix_quality,
+            "fix_mode": self._fix_mode(fix_quality),
+            "raw_payload": raw_payload,
+            "data": data,
+            "message": "Reference transition was not stable enough to compensate; last trusted position preserved",
+        }
 
     def set_context(self, context_label: str):
         if context_label:
@@ -110,14 +327,17 @@ class GNSSVelocityProcessor:
         self.origin_candidates = []
         self.state = "AWAITING_CANDIDATES"
         self.history = deque(maxlen=max(self.filter_window_size + 1, 1200))
-        self.velocity_history = deque(maxlen=5)
         self.reacquire_candidates = deque(maxlen=10)
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
         self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.disp_state_ready = False
         self.peak_displacement_mm = 0.0
-        self.last_significant_motion_ts = 0.0
+        self.tracking_offset_enu = np.zeros(3, dtype=float)
+        self._last_reacquire_ts = 0.0
+        self._last_handled_reference_event_ts = None
+        self._reference_transition = None
+        self._last_origin_candidate_ts = None
         self.last_process_time = 0
         logger.info(f"🔄 [GNSS] Origin reset for device {self.device_id}")
         return True
@@ -153,6 +373,26 @@ class GNSSVelocityProcessor:
             return min((same_day - 86400, same_day, same_day + 86400), key=lambda ts: abs(ts - received_ts))
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _verify_nmea_checksum(sentence: str) -> bool:
+        """Validate NMEA XOR checksum if present (*XX). Returns True if valid or if no checksum field."""
+        if not sentence or '*' not in sentence:
+            return True
+        try:
+            body, chk = sentence.rsplit('*', 1)
+            if '$' in body:
+                body = body[body.find('$') + 1:]
+            chk_str = chk.strip()[:2]
+            if len(chk_str) < 2 or not all(c in '0123456789ABCDEFabcdef' for c in chk_str):
+                return False
+            expected = int(chk_str, 16)
+            computed = 0
+            for char in body:
+                computed ^= ord(char)
+            return computed == expected
+        except (ValueError, IndexError):
+            return False
 
     @staticmethod
     def _robust_velocity_estimate(samples):
@@ -241,10 +481,10 @@ class GNSSVelocityProcessor:
                     }
                     if getattr(origin_record, 'tracking_offset', None):
                         try:
-                            self.tracking_offset_enu = np.array(origin_record.tracking_offset, dtype=float)
+                            self.tracking_offset_enu = self._validated_tracking_offset(origin_record.tracking_offset)
                             logger.info(f"✅ [ASYNC LOAD] Loaded tracking offset for device {self.device_id}: {self.tracking_offset_enu}")
                         except Exception as ex:
-                            logger.warning(f"⚠️ Device {self.device_id}: Failed to parse tracking offset: {ex}")
+                            logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
                     self.state = "ORIGIN_LOCKED"
                     logger.info(f"✅ [ASYNC LOAD] Loaded origin for device {self.device_id}: ({origin_record.lat}, {origin_record.lon})")
                 else:
@@ -271,6 +511,7 @@ class GNSSVelocityProcessor:
                 ecef_origin = self.origin['ecef'].tolist() if hasattr(self.origin['ecef'], 'tolist') else self.origin['ecef']
                 tracking_offset_list = self.tracking_offset_enu.tolist() if hasattr(self.tracking_offset_enu, 'tolist') else list(self.tracking_offset_enu)
 
+                is_new_origin = False
                 if existing:
                     # A monitoring origin is a permanent reference. Never overwrite it
                     # from a later collection/race/restart.
@@ -283,15 +524,15 @@ class GNSSVelocityProcessor:
                     }
                     if getattr(existing, 'tracking_offset', None) and np.all(self.tracking_offset_enu == 0.0):
                         try:
-                            self.tracking_offset_enu = np.array(existing.tracking_offset, dtype=float)
-                        except Exception:
-                            pass
-                    existing.tracking_offset = tracking_offset_list
+                            self.tracking_offset_enu = self._validated_tracking_offset(existing.tracking_offset)
+                        except Exception as ex:
+                            logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
                     self.state = "ORIGIN_LOCKED"
                     logger.warning(
                         f"[{self._log_prefix()}] Existing locked origin preserved; candidate origin discarded"
                     )
                 else:
+                    is_new_origin = True
                     new_origin = GNSSOrigin(
                         device_id=self.device_id,
                         lat=self.origin['lat'],
@@ -312,7 +553,7 @@ class GNSSVelocityProcessor:
                 dev_res = await db.execute(select(Device.station_id).where(Device.id == self.device_id))
                 station_id = dev_res.scalar_one_or_none()
                 
-                if station_id:
+                if station_id and is_new_origin:
                     st_res = await db.execute(select(Station).where(Station.id == station_id))
                     station = st_res.scalar_one_or_none()
                     if station:
@@ -330,7 +571,8 @@ class GNSSVelocityProcessor:
                         logger.info(f"🔄 Synced origin to Station {station_id} config")
 
                 await db.commit()
-                logger.info(f"💾 Saved new origin for device {self.device_id} to DB")
+                if is_new_origin:
+                    logger.info(f"💾 Saved NEW origin for device {self.device_id} to DB (first-time lock)")
 
                 # 3. ✅ Phát tín hiệu WebSocket để UI tự động cập nhật số mới
                 if station_id:
@@ -348,12 +590,103 @@ class GNSSVelocityProcessor:
         except Exception as e:
             logger.error(f"❌ Error saving origin to DB: {e}", exc_info=True)
 
+    async def _async_save_tracking_offset(self, offset=None):
+        """Persist current tracking_offset to DB without modifying origin coordinates."""
+        try:
+            from app.models.config import GNSSOrigin
+            from sqlalchemy import select
+            
+            offset_value = np.asarray(
+                self.tracking_offset_enu if offset is None else offset,
+                dtype=float,
+            )
+
+            async with self.db_session_factory() as db:
+                result = await db.execute(
+                    select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
+                )
+                existing = result.scalar_one_or_none()
+                if existing:
+                    existing.tracking_offset = offset_value.tolist()
+                    await db.commit()
+                    logger.info(f"💾 Persisted updated tracking offset for device {self.device_id} to DB: {offset_value}")
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error persisting tracking offset for device {self.device_id}: {e}")
+            return False
+
+    async def recalibrate_tracking_offset(self):
+        """Re-zero displacement from a stable FIXED window without changing origin."""
+        if self.state != "ORIGIN_LOCKED" or self.origin is None:
+            raise ValueError("GNSS origin is not locked")
+
+        sample_count = 60
+        samples = list(self.history)[-sample_count:]
+        if len(samples) < sample_count:
+            raise ValueError(f"Need {sample_count} accepted RTK FIXED samples; have {len(samples)}")
+
+        duration_s = float(samples[-1]["ts"] - samples[0]["ts"])
+        if duration_s < 45.0:
+            raise ValueError(f"Stable window is too short ({duration_s:.1f}s); need at least 45s")
+
+        positions = np.asarray([sample["pos_enu"] for sample in samples], dtype=float)
+        center = np.median(positions, axis=0)
+        residuals = positions - center
+        spread_2d_m = float(np.max(np.linalg.norm(residuals[:, :2], axis=1)))
+        spread_u_m = float(np.max(np.abs(residuals[:, 2])))
+        config = self._integrity_config({})
+        if (
+            spread_2d_m > float(config["reacquire_max_spread_xy_m"])
+            or spread_u_m > float(config["reacquire_max_spread_u_m"])
+        ):
+            raise ValueError(
+                "RTK FIXED samples are not stable enough "
+                f"(2D spread {spread_2d_m * 1000:.1f}mm, "
+                f"vertical spread {spread_u_m * 1000:.1f}mm)"
+            )
+
+        old_offset = self.tracking_offset_enu.copy()
+        proposed_offset = self._validated_tracking_offset(old_offset + center)
+        if not await self._async_save_tracking_offset(proposed_offset):
+            raise RuntimeError("Could not persist GNSS tracking offset")
+
+        self.tracking_offset_enu = proposed_offset
+        for sample in self.history:
+            sample["pos_enu"] = np.asarray(sample["pos_enu"], dtype=float) - center
+
+        calibrated_positions = np.asarray(
+            [sample["pos_enu"] for sample in list(self.history)[-sample_count:]],
+            dtype=float,
+        )
+        # Keep the newest measured residual; never synthesize a zero payload.
+        self.disp_enu_state = calibrated_positions[-1].copy()
+        self.disp_state_ready = True
+        self.peak_displacement_mm = float(np.linalg.norm(self.disp_enu_state[:2]) * 1000.0)
+        self._reference_transition = None
+        self._consecutive_rejects = 0
+        self.reacquire_candidates.clear()
+
+        return {
+            "device_id": self.device_id,
+            "sample_count": sample_count,
+            "duration_s": duration_s,
+            "spread_2d_mm": spread_2d_m * 1000.0,
+            "spread_u_mm": spread_u_m * 1000.0,
+            "shift_e_m": float(center[0]),
+            "shift_n_m": float(center[1]),
+            "shift_u_m": float(center[2]),
+            "old_tracking_offset": old_offset.tolist(),
+            "new_tracking_offset": proposed_offset.tolist(),
+            "origin_unchanged": True,
+        }
+
     def process_gngga(self, raw_payload: str, station_config: Dict = None) -> Optional[Dict[str, Any]]:
         status_type = 'origin_status' if self.state == "AWAITING_CANDIDATES" else 'gnss_status'
         try:
             # Extract câu GGA từ bất kỳ vị trí nào trong string.
-            # Chịu được wrapper text (bytearray repr, prefix bytes, v.v.)
-            gga_match = re.search(r'\$G[NP]GGA,[^\r\n*]*(?:\*[0-9A-Fa-f]{2})?', raw_payload or '')
+            # Lấy trọn vẹn câu GGA để validate checksum chính xác (không strip *XX)
+            gga_match = re.search(r'\$G[NP]GGA,[^\r\n]+', raw_payload or '')
             if not gga_match:
                 return {
                     "type": status_type,
@@ -364,6 +697,21 @@ class GNSSVelocityProcessor:
                 }
 
             payload = gga_match.group(0).strip()
+            # Cắt gọn phần sau checksum nếu có byte rác
+            if '*' in payload:
+                star_idx = payload.find('*')
+                payload = payload[:star_idx + 3]
+
+            # Verify NMEA checksum if present
+            if '*' in payload and not self._verify_nmea_checksum(payload):
+                return {
+                    "type": status_type,
+                    "status": "CHECKSUM_FAILED",
+                    "fix_quality": None,
+                    "fix_mode": "UNKNOWN",
+                    "message": "NMEA checksum verification failed"
+                }
+
             parts = payload.split(',')
             if len(parts) < 10:
                 return {
@@ -387,7 +735,7 @@ class GNSSVelocityProcessor:
             fix_quality = int(parts[6]) if parts[6] else 0
             
             if self.state == "AWAITING_CANDIDATES":
-                return self._handle_origin_collection(payload, fix_quality)
+                return self._handle_origin_collection(payload, fix_quality, station_config)
             elif self.state == "ORIGIN_LOCKED":
                 return self._handle_processing(payload, fix_quality, station_config, raw_payload)
             
@@ -403,21 +751,51 @@ class GNSSVelocityProcessor:
                 "message": "Failed to parse GGA payload"
             }
 
-    def _handle_origin_collection(self, gngga_string, fix_quality):
-        # Chỉ lock origin khi RTK FIXED (fix=4)
-        if fix_quality != 4:
+    def _handle_origin_collection(self, gngga_string, fix_quality, station_config: Dict = None):
+        # Origin candidates must be one uninterrupted RTK-quality acquisition epoch.
+        required_fix = getattr(self, "min_fix_quality", 4)
+        if fix_quality != required_fix:
             self.stats['low_quality_rejected'] += 1
+            self.origin_candidates.clear()
+            self._last_origin_candidate_ts = None
             return {
                 "type": "origin_status",
                 "status": "WAITING_FOR_QUALITY",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
-                "message": f"Waiting RTK FIXED (fix=4), current={fix_quality} ({self._fix_mode(fix_quality)})"
+                "message": f"Waiting required fix={required_fix}, current={fix_quality} ({self._fix_mode(fix_quality)})"
             }
 
         point = self._parse_gngga(gngga_string)
         if not point: return None
-        
+
+        # Filter poor satellite geometry from immutable origin candidates
+        integrity_cfg = self._integrity_config(station_config)
+        ORIGIN_MAX_HDOP = integrity_cfg["process_max_hdop"]
+        ORIGIN_MIN_SATS = integrity_cfg["process_min_sats"]
+        if point.get('hdop', 99.9) > ORIGIN_MAX_HDOP or point.get('num_sats', 0) < ORIGIN_MIN_SATS:
+            self.origin_candidates.clear()
+            self._last_origin_candidate_ts = None
+            return {
+                "type": "origin_status",
+                "status": "AWAITING_ORIGIN",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": gngga_string,
+                "message": f"Waiting for quality baseline (HDOP={point.get('hdop')} max {ORIGIN_MAX_HDOP}, Sats={point.get('num_sats')} min {ORIGIN_MIN_SATS})"
+            }
+
+        candidate_ts = point.get("gga_timestamp") or point.get("received_timestamp") or time.time()
+        max_gap_s = integrity_cfg["origin_max_gap_s"]
+        last_candidate_ts = getattr(self, "_last_origin_candidate_ts", None)
+        if last_candidate_ts is not None and (
+            candidate_ts <= last_candidate_ts or candidate_ts - last_candidate_ts > max_gap_s
+        ):
+            self.origin_candidates.clear()
+            logger.info(
+                f"[{self._log_prefix()}] Origin candidate epoch reset after {candidate_ts - last_candidate_ts:.1f}s gap"
+            )
+        self._last_origin_candidate_ts = candidate_ts
         self.origin_candidates.append(point['wgs'])
         
         if len(self.origin_candidates) >= self.required_points:
@@ -425,16 +803,23 @@ class GNSSVelocityProcessor:
             lons = [p['lon'] for p in self.origin_candidates]
             hs = [p['h'] for p in self.origin_candidates]
             
-            center_lat = np.mean(lats)
-            center_lon = np.mean(lons)
-            center_h = np.mean(hs)
+            center_lat = float(np.median(lats))
+            center_lon = float(np.median(lons))
+            center_h = float(np.median(hs))
             
-            max_dist = max(
-                haversine_3d(center_lat, center_lon, center_h, p['lat'], p['lon'], p['h']) 
+            max_dist_xy = max(
+                haversine_2d(center_lat, center_lon, p['lat'], p['lon']) 
+                for p in self.origin_candidates
+            )
+            max_dist_u = max(
+                abs(p['h'] - center_h)
                 for p in self.origin_candidates
             )
 
-            if max_dist <= self.max_spread_m:
+            max_xy = getattr(self, 'origin_max_xy_spread_m', getattr(self, 'max_spread_m', 0.5))
+            max_u = getattr(self, 'origin_max_u_spread_m', 1.0)
+
+            if max_dist_xy <= max_xy and max_dist_u <= max_u:
                 self.origin = {
                     'lat': center_lat, 
                     'lon': center_lon, 
@@ -443,7 +828,10 @@ class GNSSVelocityProcessor:
                     'ecef': self._gngga_to_ecef(center_lat, center_lon, center_h)
                 }
                 self.state = "ORIGIN_LOCKED"
-                logger.info(f"ORIGIN LOCKED (Device {self.device_id}): ({center_lat:.6f}, {center_lon:.6f}), Spread: {max_dist:.3f}m")
+                logger.info(
+                    f"ORIGIN LOCKED (Device {self.device_id}): ({center_lat:.6f}, {center_lon:.6f}, {center_h:.3f}m), "
+                    f"Spread XY: {max_dist_xy:.3f}m (max={max_xy}m), U: {max_dist_u:.3f}m (max={max_u}m)"
+                )
                 
                 # ✅ Save Async
                 import asyncio
@@ -463,10 +851,11 @@ class GNSSVelocityProcessor:
                 }
             else:
                 self.origin_candidates.clear()
+                self._last_origin_candidate_ts = None
                 self.stats['origin_resets'] += 1
                 return {
                     "type": "origin_reset",
-                    "message": f"Spread too high ({max_dist:.2f}m > {self.max_spread_m}m)"
+                    "message": f"Spread too high (XY={max_dist_xy:.3f}m > {max_xy}m, U={max_dist_u:.3f}m > {max_u}m)"
                 }
         
         return {
@@ -478,14 +867,15 @@ class GNSSVelocityProcessor:
     def _handle_processing(self, gngga_string, fix_quality, station_config: Dict = None, raw_payload: str = None):
         # Millimetre-level monitoring must use RTK FIXED exclusively. FLOAT and all
         # other modes are status-only and cannot mutate measurement state.
-        if fix_quality != 4:
+        required_fix = getattr(self, "min_fix_quality", 4)
+        if fix_quality != required_fix:
             self.stats['low_quality_rejected'] += 1
             return {
                 "type": "gnss_status",
                 "status": "UNTRUSTED_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
-                "message": f"Measurement rejected: RTK FIXED (fix=4) required, current={fix_quality} ({self._fix_mode(fix_quality)})"
+                "message": f"Measurement rejected: fix={required_fix} required, current={fix_quality} ({self._fix_mode(fix_quality)})"
             }
         
         # Flag: only RTK FIXED is trusted for alerting analysis
@@ -495,6 +885,29 @@ class GNSSVelocityProcessor:
         if not point:
             return None
 
+        integrity_cfg = self._integrity_config(station_config)
+        if (
+            point.get("hdop", 99.9) > integrity_cfg["process_max_hdop"]
+            or point.get("num_sats", 0) < integrity_cfg["process_min_sats"]
+        ):
+            self.stats['low_quality_rejected'] += 1
+            return {
+                "type": "gnss_status",
+                "status": "UNTRUSTED_GEOMETRY",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": raw_payload or gngga_string,
+                "data": {
+                    "integrity_state": "UNTRUSTED_GEOMETRY",
+                    "position_quality_reliable": False,
+                    "hdop": point.get("hdop"),
+                    "num_sats": point.get("num_sats"),
+                    "max_hdop": integrity_cfg["process_max_hdop"],
+                    "min_sats": integrity_cfg["process_min_sats"],
+                },
+                "message": "Measurement rejected: RTK FIXED geometry below monitoring threshold",
+            }
+
         received_ts = time.time()
         ts = point.get('gga_timestamp') or received_ts
         ecef_coords = self._gngga_to_ecef(
@@ -502,10 +915,19 @@ class GNSSVelocityProcessor:
             point['wgs']['lon'],
             point['wgs']['h']
         )
-        pos_enu = self.origin['R'] @ (ecef_coords - self.origin['ecef'])
-        if not np.all(np.isfinite(pos_enu)):
+        pos_enu_raw = self.origin['R'] @ (ecef_coords - self.origin['ecef'])
+        if not np.all(np.isfinite(pos_enu_raw)):
             logger.warning(f"Non-finite ENU position rejected (device {self.device_id})")
             return None
+
+        # Subtract tracking_offset_enu so that the reacquired baseline reference is applied to every incoming sample
+        pos_enu = pos_enu_raw - getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
+
+        reference_result = self._handle_reference_transition(
+            ts, pos_enu, fix_quality, station_config, raw_payload or gngga_string,
+        )
+        if reference_result is not None:
+            return reference_result
 
         self.history.append({
             'ts': ts,
@@ -558,6 +980,8 @@ class GNSSVelocityProcessor:
         stale_reference = dt > 60.0
 
         if is_spike:
+            if not self.reacquire_candidates:
+                self._shift_started_at = ts
             self._consecutive_rejects += 1
             self.stats['spike_rejected'] += 1
             self.history.pop()
@@ -570,6 +994,7 @@ class GNSSVelocityProcessor:
             persistent_offset = False
             candidate_offset_2d_m = None
             candidate_offset_u_m = None
+            shift_data = None
             if len(self.reacquire_candidates) >= 6:
                 candidate_positions = np.array([c['pos_enu'] for c in self.reacquire_candidates], dtype=float)
                 candidate_center = np.median(candidate_positions, axis=0)
@@ -578,19 +1003,72 @@ class GNSSVelocityProcessor:
                 candidate_offset_2d_m = float(np.linalg.norm(candidate_center[:2] - p_old['pos_enu'][:2]))
                 candidate_offset_u_m = float(abs(candidate_center[2] - p_old['pos_enu'][2]))
                 persistent_offset = bool(
-                    candidate_xy_spread <= self.max_step_distance_m
-                    and candidate_u_spread <= self.max_step_vertical_m
+                    candidate_xy_spread <= integrity_cfg["reacquire_max_spread_xy_m"]
+                    and candidate_u_spread <= integrity_cfg["reacquire_max_spread_u_m"]
                 )
-                candidate_stale_gap = bool(
-                    (self.reacquire_candidates[0]['ts'] - p_old['ts']) > 60.0
+                persistent_shift_duration_s = ts - getattr(self, "_shift_started_at", ts)
+                persistent_shift_duration_ok = persistent_shift_duration_s >= 60.0
+
+                # ── Guard: reject reacquire for unrealistic offsets ──
+                # A real tracking shift (e.g. GNSS base station switchover) is
+                # typically < 0.5 m horizontal and < 1.0 m vertical. Offsets of
+                # 3+ metres are systematic datum/geoid issues that must NOT be
+                # absorbed — doing so creates an infinite reacquire loop.
+                REACQUIRE_MAX_OFFSET_2D_M = 0.5
+                REACQUIRE_MAX_OFFSET_U_M = 1.0
+                # Maximum accumulated tracking offset before we stop absorbing.
+                TRACKING_OFFSET_CAP_M = 2.0
+                # Minimum interval between successive reacquires to prevent cycling.
+                REACQUIRE_COOLDOWN_S = 300.0  # 5 minutes
+
+                offset_too_large = bool(
+                    candidate_offset_2d_m > REACQUIRE_MAX_OFFSET_2D_M
+                    or candidate_offset_u_m > REACQUIRE_MAX_OFFSET_U_M
+                )
+                current_tracking_offset = getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
+                tracking_shift = candidate_center - p_old['pos_enu']
+                proposed_tracking_offset = current_tracking_offset + tracking_shift
+                accumulated_too_much = bool(
+                    np.linalg.norm(proposed_tracking_offset) > TRACKING_OFFSET_CAP_M
+                )
+                last_reacquire_ts = getattr(self, '_last_reacquire_ts', 0.0)
+                in_cooldown = bool(ts - last_reacquire_ts < REACQUIRE_COOLDOWN_S)
+
+                ref_ts, _ = self._reference_event(station_config)
+                event_aligned = bool(
+                    ref_ts is not None
+                    and 0.0 <= getattr(self, "_shift_started_at", ts) - ref_ts
+                    <= integrity_cfg["reference_event_alignment_s"]
                 )
 
-                if persistent_offset and candidate_stale_gap:
-                    tracking_shift = candidate_center - p_old['pos_enu']
-                    self.tracking_offset_enu = (
-                        getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
-                        + tracking_shift
-                    )
+                # Reacquire compensation requires the event to align with shift onset,
+                # not merely to be recent when the stable cluster is confirmed.
+                reacquire_allowed = bool(
+                    event_aligned
+                    or getattr(self, "allow_auto_reacquire", False)
+                )
+                shift_data = self._shift_data(
+                    tracking_shift, candidate_xy_spread, candidate_u_spread,
+                    persistent_shift_duration_s, event_aligned, not reacquire_allowed,
+                    ref_ts, getattr(self, "_shift_started_at", ts),
+                )
+
+                if (
+                    persistent_offset
+                    and persistent_shift_duration_ok
+                    and not offset_too_large
+                    and not accumulated_too_much
+                    and not in_cooldown
+                    and reacquire_allowed
+                ):
+                    shift_data["integrity_state"] = "TRACKING_REACQUIRED"
+                    shift_data["position_quality_reliable"] = True
+                    self.tracking_offset_enu = proposed_tracking_offset
+                    self._last_reacquire_ts = ts
+                    # Consume the reference change event once successfully absorbed
+                    self._reference_changed_at = None
+                    self._reference_change_source = None
+                    self._last_handled_reference_event_ts = ref_ts
                     self.history.clear()
                     self.history.extend({
                         'ts': candidate['ts'],
@@ -599,15 +1077,15 @@ class GNSSVelocityProcessor:
                     self.reacquire_candidates.clear()
                     self._consecutive_rejects = 0
                     logger.info(
-                        f"[{self._log_prefix()}] Tracking reacquired after stale FIXED gap (dt={dt:.1f}s): "
+                        f"[{self._log_prefix()}] Tracking reacquired after verified reference shift (duration={persistent_shift_duration_s:.1f}s): "
                         f"offset2d={candidate_offset_2d_m:.3f}m, offsetU={candidate_offset_u_m:.3f}m. "
                         "Locked origin and last accepted displacement preserved."
                     )
                     try:
                         import asyncio
                         loop = asyncio.get_running_loop()
-                        loop.create_task(self._save_origin_to_db())
-                    except Exception:
+                        loop.create_task(self._async_save_tracking_offset())
+                    except RuntimeError:
                         pass
 
                     return {
@@ -616,8 +1094,33 @@ class GNSSVelocityProcessor:
                         "fix_quality": fix_quality,
                         "fix_mode": self._fix_mode(fix_quality),
                         "raw_payload": raw_payload or gngga_string,
-                        "message": "Stable RTK FIXED tracking reacquired after stale data gap"
+                        "data": self._shift_data(
+                            tracking_shift, candidate_xy_spread, candidate_u_spread,
+                            persistent_shift_duration_s, event_aligned, False,
+                            ref_ts, getattr(self, "_shift_started_at", ts),
+                        ),
+                        "message": "Stable RTK FIXED tracking reacquired after verified reference shift"
                     }
+
+                if persistent_offset and persistent_shift_duration_ok and (offset_too_large or accumulated_too_much or in_cooldown or not reacquire_allowed):
+                    # Log why reacquire was refused (only once per 60s to reduce spam).
+                    if not hasattr(self, '_last_reacquire_refused_log_ts'):
+                        self._last_reacquire_refused_log_ts = 0.0
+                    if (ts - self._last_reacquire_refused_log_ts) >= 60.0:
+                        self._last_reacquire_refused_log_ts = ts
+                        reasons = []
+                        if offset_too_large:
+                            reasons.append(f"offset too large (2d={candidate_offset_2d_m:.3f}m max={REACQUIRE_MAX_OFFSET_2D_M}m, U={candidate_offset_u_m:.3f}m max={REACQUIRE_MAX_OFFSET_U_M}m)")
+                        if accumulated_too_much:
+                            reasons.append(f"proposed tracking offset {np.linalg.norm(proposed_tracking_offset):.3f}m exceeds cap {TRACKING_OFFSET_CAP_M}m")
+                        if in_cooldown:
+                            reasons.append(f"cooldown active ({ts - last_reacquire_ts:.0f}s < {REACQUIRE_COOLDOWN_S:.0f}s)")
+                        if not reacquire_allowed:
+                            reasons.append("reference change not confirmed; possible real ground movement")
+                        logger.warning(
+                            f"[{self._log_prefix()}] Reacquire REFUSED: {'; '.join(reasons)}. "
+                            "Origin and displacement remain frozen at last accepted values."
+                        )
 
                 if persistent_offset and (ts - self._last_bad_fix_log_ts) >= 30.0:
                     logger.warning(
@@ -643,13 +1146,14 @@ class GNSSVelocityProcessor:
                 )
             return {
                 "type": "gnss_status",
-                "status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "INVALID_DATA",
-                "sub_status": "PERSISTENT_OFFSET_QUARANTINED" if persistent_offset else "UNSTABLE_FIX",
+                "status": "UNVERIFIED_POSITION_SHIFT" if persistent_offset else "INVALID_DATA",
+                "sub_status": "UNVERIFIED_POSITION_SHIFT" if persistent_offset else "UNSTABLE_FIX",
                 "fix_quality": fix_quality,
                 "fix_mode": self._fix_mode(fix_quality),
                 "raw_payload": raw_payload or gngga_string,
+                "data": shift_data,
                 "message": (
-                    f"Shifted FIXED cluster quarantined: offset2d={candidate_offset_2d_m:.3f}m "
+                    f"Unverified shifted FIXED cluster: offset2d={candidate_offset_2d_m:.3f}m "
                     f"offsetU={candidate_offset_u_m:.3f}m; last trusted position preserved"
                     if persistent_offset else
                     f"Velocity skipped: rejected jump step2d={step_2d_m:.3f}m "
@@ -659,6 +1163,7 @@ class GNSSVelocityProcessor:
 
         # Good sample accepted — reset consecutive reject counter
         self._consecutive_rejects = 0
+        self._shift_started_at = None
         self.reacquire_candidates.clear()
 
         gnss_alert_cfg = (station_config or {}).get("GnssAlerting", {}) if isinstance(station_config, dict) else {}
@@ -721,7 +1226,6 @@ class GNSSVelocityProcessor:
             or abs(v_enu_stable[1] * 1000.0) > flag_xy_mm_s
             or abs(v_enu_stable[2] * 1000.0) > flag_z_mm_s
         )
-        estimated_speed_mm_s = float(np.hypot(v_enu_stable[0], v_enu_stable[1]) * 1000.0)
         estimated_speed_3d_mm_s = float(np.linalg.norm(v_enu_stable) * 1000.0)
         velocity_noise_threshold_mm_s = max(
             velocity_estimate['confidence_95_mm_s'],
@@ -781,7 +1285,6 @@ class GNSSVelocityProcessor:
             )
 
         speed_2d = float(np.hypot(v_enu_stable[0], v_enu_stable[1]))
-        speed_3d = float(np.linalg.norm(v_enu_stable))
         # Commit net displacement only after a stable time window. Once committed,
         # hold it inside the measured noise floor unless statistically significant
         # motion (or its short settling tail) is present. This eliminates the old
@@ -803,10 +1306,12 @@ class GNSSVelocityProcessor:
         except Exception:
             displacement_noise_floor_min_mm = 2.0
         try:
-            displacement_settle_s = max(float(gnss_alert_cfg.get("displacement_settle_seconds", 30.0)), 0.0)
+            displacement_stationary_speed_mm_s = max(
+                float(gnss_alert_cfg.get("displacement_stationary_speed_mm_s", 0.3)),
+                0.0,
+            )
         except Exception:
-            displacement_settle_s = 30.0
-
+            displacement_stationary_speed_mm_s = 0.3
         displacement_history = [
             sample for sample in self.history
             if sample['ts'] >= (self.history[-1]['ts'] - displacement_window_s)
@@ -848,27 +1353,21 @@ class GNSSVelocityProcessor:
         )
 
         displacement_updated = False
+        horizontal_speed_mm_s = speed_2d * 1000.0
+        motion_confirmed = horizontal_speed_mm_s > displacement_stationary_speed_mm_s
         if not self.disp_state_ready:
+            # Publish the real displacement from the locked origin after the
+            # first stable window; stationary gating only controls later drift.
             self.disp_enu_state = displacement_candidate.copy()
             self.disp_state_ready = True
             displacement_updated = True
         else:
-            # A rolling median can move by millimetres even when a receiver is
-            # perfectly stationary. Only advance the published displacement
-            # while the robust velocity is significant (or during its short
-            # settling tail) and the candidate moved beyond the measured noise.
-            if velocity_reliable and velocity_significant:
-                self.last_significant_motion_ts = ts
-            settling_motion = bool(
-                self.last_significant_motion_ts
-                and (ts - self.last_significant_motion_ts) <= displacement_settle_s
-            )
+            # Advance published displacement only after motion clears the
+            # stationary-speed gate and moves beyond the measured noise floor.
             candidate_step_mm = float(
                 np.linalg.norm(displacement_candidate - self.disp_enu_state) * 1000.0
             )
-            if (
-                (velocity_reliable and velocity_significant) or settling_motion
-            ) and candidate_step_mm > displacement_noise_floor_mm:
+            if motion_confirmed and candidate_step_mm > displacement_noise_floor_mm:
                 alpha = 0.15
                 self.disp_enu_state = (
                     (1.0 - alpha) * self.disp_enu_state
@@ -916,13 +1415,31 @@ class GNSSVelocityProcessor:
             'gga_utc': point.get('gga_utc'),
             'gga_timestamp': point.get('gga_timestamp'),
             'received_timestamp': point.get('received_timestamp'),
+            'raw_lat': point['wgs']['lat'],
+            'raw_lon': point['wgs']['lon'],
+            'raw_h': point['wgs']['h'],
             'lat': point['wgs']['lat'],
             'lon': point['wgs']['lon'],
             'h': point['wgs']['h'],
+            'raw_pos_e': float(pos_enu_raw[0] * 100.0),
+            'raw_pos_n': float(pos_enu_raw[1] * 100.0),
+            'raw_pos_u': float(pos_enu_raw[2] * 100.0),
+            'candidate_pos_e': float(displacement_candidate[0] * 100.0),
+            'candidate_pos_n': float(displacement_candidate[1] * 100.0),
+            'candidate_pos_u': float(displacement_candidate[2] * 100.0),
+            'candidate_horizontal_displacement_mm': float(np.hypot(displacement_candidate[0], displacement_candidate[1]) * 1000.0),
+            'candidate_vertical_displacement_mm': float(abs(displacement_candidate[2]) * 1000.0),
+            'candidate_displacement_3d_mm': float(np.linalg.norm(displacement_candidate) * 1000.0),
             'pos_e': f_pos_e_cm,
             'pos_n': f_pos_n_cm,
             'pos_u': f_pos_u_cm,
+            'tracking_offset_e_m': float(getattr(self, 'tracking_offset_enu', np.zeros(3))[0]),
+            'tracking_offset_n_m': float(getattr(self, 'tracking_offset_enu', np.zeros(3))[1]),
+            'tracking_offset_u_m': float(getattr(self, 'tracking_offset_enu', np.zeros(3))[2]),
             'total_displacement_mm': total_displacement_mm,
+            'horizontal_displacement_mm': total_displacement_2d_mm,
+            'vertical_displacement_mm': vertical_displacement_mm,
+            'displacement_3d_mm': total_displacement_3d_mm,
             'peak_displacement_mm': self.peak_displacement_mm,
             'displacement_updated': displacement_updated,
             'displacement_window_duration_s': displacement_duration_s,
@@ -952,14 +1469,16 @@ class GNSSVelocityProcessor:
             'fix_mode': self._fix_mode(point['fix_quality']),
             'num_sats': point['num_sats'],
             'hdop': point['hdop'],
+            'integrity': {
+                'integrity_state': 'TRACKING_NORMAL',
+                'position_quality_reliable': True,
+                'hdop': point['hdop'],
+                'num_sats': point['num_sats'],
+            },
         }
 
         if forwarding_enabled and n_vn is not None:
             # Chuyển Origin sang VN2000 để nhất quán với lat/lon/h nếu đang dùng VN2000
-            n_vn_origin, e_vn_origin, h_vn_origin = VN2000Converter.wgs84_to_vn2000(
-                self.origin['lat'], self.origin['lon'], self.origin['h'],
-                custom_params=custom_datum
-            )
             result_data.update({
                 'vn2000_n': n_vn,
                 'vn2000_e': e_vn,
@@ -1019,21 +1538,48 @@ class GNSSVelocityProcessor:
             if len(parts) < 10: return None
                 
             lat_str, lon_str = parts[2], parts[4]
-            lat_dir, lon_dir = parts[3], parts[5]
+            lat_dir, lon_dir = parts[3].upper() if parts[3] else '', parts[5].upper() if parts[5] else ''
             
             if not lat_str or not lon_str: return None
+            if lat_dir not in ('N', 'S') or lon_dir not in ('E', 'W'): return None
 
-            # NMEA GGA field 9 is orthometric height (MSL), not ellipsoidal height.
-            # VN2000 conversion expects ellipsoidal h, so use: h = altitude_msl + geoid_separation.
-            altitude_msl = float(parts[9]) if parts[9] else 0.0
-            geoid_sep = float(parts[11]) if len(parts) > 11 and parts[11] else 0.0
+            # Persisted origins and ECEF use ellipsoidal height.
+            if len(parts) <= 9 or not parts[9]:
+                return None
+            try:
+                altitude_msl = float(parts[9])
+            except (ValueError, TypeError):
+                return None
+
+            # Check geoid separation (field 11): if missing or empty, reject to prevent 30m+ false jump
+            if len(parts) <= 11 or not parts[11]:
+                return None
+            try:
+                geoid_sep = float(parts[11])
+            except (ValueError, TypeError):
+                return None
+
             h = altitude_msl + geoid_sep
             
-            lat = float(lat_str[:2]) + float(lat_str[2:]) / 60.0
+            try:
+                lat_deg = int(lat_str[:2])
+                lat_min = float(lat_str[2:])
+                lon_deg = int(lon_str[:3])
+                lon_min = float(lon_str[3:])
+            except (ValueError, IndexError):
+                return None
+
+            if not (0.0 <= lat_min < 60.0 and 0.0 <= lon_min < 60.0):
+                return None
+
+            lat = float(lat_deg) + lat_min / 60.0
             if lat_dir == 'S': lat = -lat
             
-            lon = float(lon_str[:3]) + float(lon_str[3:]) / 60.0
+            lon = float(lon_deg) + lon_min / 60.0
             if lon_dir == 'W': lon = -lon
+
+            if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                return None
                 
             received_ts = time.time()
             gga_timestamp = self._gga_epoch_seconds(parts[1], received_ts) if parts[1] else None

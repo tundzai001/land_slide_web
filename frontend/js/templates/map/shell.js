@@ -176,9 +176,26 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     </div>
                 </div>
 
+                <div class="adv-section gnss-integrity-section" id="gnss-integrity-section" data-state="unknown">
+                    <div class="adv-section-title d-flex justify-content-between align-items-center gap-2">
+                        <span><i class="bi bi-shield-check me-1"></i>Toàn vẹn GNSS & mốc tham chiếu</span>
+                        <span class="gnss-integrity-badge" id="gnss-integrity-badge" role="status">NO DATA</span>
+                    </div>
+                    <p class="gnss-integrity-message" id="gnss-integrity-message">Chưa có đánh giá toàn vẹn GNSS.</p>
+                    <div class="row g-2 small" id="gnss-integrity-shift-grid">
+                        <div class="col-4"><span class="adv-label">Dịch Đông</span><div id="gnss-shift-e">--</div></div>
+                        <div class="col-4"><span class="adv-label">Dịch Bắc</span><div id="gnss-shift-n">--</div></div>
+                        <div class="col-4"><span class="adv-label">Dịch cao</span><div id="gnss-shift-u">--</div></div>
+                        <div class="col-6"><span class="adv-label">Độ lớn 2D / 3D</span><div id="gnss-shift-mag">--</div></div>
+                        <div class="col-6"><span class="adv-label">Độ phân tán XY / U</span><div id="gnss-shift-spread">--</div></div>
+                        <div class="col-6"><span class="adv-label">Thời lượng</span><div id="gnss-shift-duration">--</div></div>
+                        <div class="col-6"><span class="adv-label">Sự kiện mốc</span><div id="gnss-reference-event">--</div></div>
+                    </div>
+                </div>
+
                 <!-- Nhóm 3: Vận tốc THÔ (Raw - trước lọc) -->
                 <div class="adv-section">
-                    <div class="adv-section-title text-secondary"><i class="bi bi-speedometer me-1"></i>Vận tốc thô (Raw)</div>
+                    <div class="adv-section-title text-secondary"><i class="bi bi-speedometer me-1"></i>Vận tốc thô</div>
                     <div class="row g-2">
                         <div class="col-6">
                             <div class="adv-item">
@@ -200,7 +217,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
-                                <span class="adv-label">Speed 2D</span>
+                                <span class="adv-label">Tốc độ 2D</span>
                                 <div class="adv-value-row"><span class="adv-value text-secondary fw-bold" id="adv-val-raw-2d">--</span></div>
                             </div>
                         </div>
@@ -231,7 +248,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
-                                <span class="adv-label">Speed 2D</span>
+                                <span class="adv-label">Tốc độ 2D</span>
                                 <div class="adv-value-row"><span class="adv-value text-info fw-bold" id="adv-val-filt-2d">--</span></div>
                             </div>
                         </div>
@@ -289,7 +306,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         </div>
                     </div>
                     <div class="adv-item mt-1">
-                        <span class="adv-label">Cửa sổ / Thời lượng</span>
+                        <span class="adv-label">Cửa sổ chuyển vị (độc lập với cửa sổ vận tốc)</span>
                         <div class="adv-value-row"><span class="adv-value" id="adv-val-disp-window">--</span><span class="adv-unit"> mẫu</span> · <span class="adv-value" id="adv-val-disp-dur">--</span><span class="adv-unit">s</span></div>
                     </div>
                 </div>
@@ -320,7 +337,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <div class="adv-value-row"><span class="adv-value" style="font-size: 0.75rem;" id="adv-val-method">Theil-Sen</span></div>
                     </div>
                     <div class="adv-item">
-                        <span class="adv-label">Cửa sổ phân tích:</span>
+                        <span class="adv-label">Cửa sổ vận tốc (để tính Theil-Sen):</span>
                         <div class="adv-value-row">
                             <span class="adv-value" style="font-size: 0.75rem;"><span id="adv-val-samples">--</span> mẫu (<span id="adv-val-duration">--</span>s)</span>
                         </div>
@@ -338,7 +355,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         </div>
                     </div>
                     <div class="adv-item">
-                        <span class="adv-label">Uncertainty:</span>
+                        <span class="adv-label">Độ bất định:</span>
                         <div class="adv-value-row">
                             <span class="adv-value text-danger fw-bold" id="adv-val-uncert">&plusmn; --</span><span class="adv-unit">mm/s</span>
                         </div>

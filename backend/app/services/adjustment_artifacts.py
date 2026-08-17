@@ -25,12 +25,16 @@ def adjustment_scope(
     project_id: int,
     project_code: str | None = None,
     cluster_name: str | None = None,
+    run_id: int | None = None,
 ) -> tuple[Path, str, str, bool]:
     project_slug = artifact_slug(project_code, f"project-{int(project_id)}")
     cluster_slug = artifact_slug(cluster_name, "project-run")
     scoped = bool(str(project_code or "").strip() and str(cluster_name or "").strip())
+    report_dir = root / project_slug / cluster_slug if scoped else root
+    if run_id is not None:
+        report_dir = report_dir / f"run-{int(run_id)}"
     return (
-        root / project_slug / cluster_slug if scoped else root,
+        report_dir,
         project_slug,
         cluster_slug,
         scoped,
@@ -60,6 +64,7 @@ def write_adjustment_run_status(
         project_id,
         project_code,
         cluster_name,
+        run_id=run_id,
     )
     payload: dict[str, Any] = {
         "status": str(phase).upper(),
@@ -73,7 +78,7 @@ def write_adjustment_run_status(
         "updated_at": int(time.time()),
         "context": dict(context or {}),
         "status_url": (
-            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}/run_status.json"
+            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}/run-{int(run_id)}/run_status.json"
         ),
     }
     report_path = report_dir / "run_status.json"

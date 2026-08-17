@@ -31,6 +31,11 @@ from ..models import auth as model_auth
 from ..models import config as model_config
 from ..models import data as model_data
 from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
+from ..services.mqtt_topics import (
+    duplicate_mqtt_topics,
+    find_mqtt_topic_conflicts,
+    normalize_mqtt_topic,
+)
 import math
 import json
 import uuid
@@ -231,11 +236,43 @@ async def reset_gnss_origin(
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
-    """Locked monitoring origins are immutable by design."""
-    raise HTTPException(
-        status_code=409,
-        detail="GNSS origin is permanently locked and cannot be reset",
+    """Calibrate device tracking offsets; survey origins remain immutable."""
+    from ..runtime import mqtt_service
+
+    result = await db.execute(
+        select(model_config.Device).where(
+            model_config.Device.station_id == station_id,
+            model_config.Device.device_type == "gnss",
+            model_config.Device.is_active.is_(True),
+        )
     )
+    devices = result.scalars().all()
+    if not devices:
+        raise HTTPException(status_code=404, detail="No active GNSS device found")
+
+    calibrations = []
+    try:
+        for device in devices:
+            calibration = await mqtt_service.reset_gnss_origin(device.id)
+            if calibration is not None:
+                calibrations.append(calibration)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if not calibrations:
+        raise HTTPException(
+            status_code=409,
+            detail="GNSS processor is not ready; wait for live RTK FIXED data",
+        )
+
+    return {
+        "status": "tracking_offset_calibrated",
+        "station_id": station_id,
+        "calibrated_count": len(calibrations),
+        "reset_count": len(calibrations),
+        "origin_unchanged": True,
+        "calibrations": calibrations,
+    }
 
 
 # -------------------------
@@ -406,6 +443,15 @@ def get_default_station_config():
             "gnss_critical_confirm_steps": 2,
             "gnss_confirm_steps": 3,
             "gnss_degraded_timeout": 300
+        },
+        "GnssIntegrity": {
+            "process_max_hdop": 2.0,
+            "process_min_sats": 10,
+            "origin_max_gap_s": 2.0,
+            "reference_event_alignment_s": 30.0,
+            "reference_transition_samples": 6,
+            "reacquire_max_spread_xy_m": 0.03,
+            "reacquire_max_spread_u_m": 0.05
         },
         # Nhóm cảnh báo Mưa
         "RainAlerting": {
@@ -733,7 +779,7 @@ async def export_database_csv(
                             if d.sensor_type == 'gnss_audit':
                                 data_dict = d.data if isinstance(d.data, dict) else {}
                                 is_abnormal = False
-                                suspicious = ["NON_MONOTONIC_GGA_TIME", "UNSTABLE_FIX", "PERSISTENT_OFFSET_QUARANTINED"]
+                                suspicious = ["NON_MONOTONIC_GGA_TIME", "UNSTABLE_FIX", "PERSISTENT_OFFSET_QUARANTINED", "UNVERIFIED_POSITION_SHIFT", "UNTRUSTED_GEOMETRY"]
                                 if data_dict.get("reason") in suspicious:
                                     is_abnormal = True
                                 elif data_dict.get("record_kind") == "forward":
@@ -1362,7 +1408,7 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             if d.sensor_type == 'gnss_audit':
                                 data_dict = d.data if isinstance(d.data, dict) else {}
                                 is_abnormal = False
-                                suspicious = ["NON_MONOTONIC_GGA_TIME", "UNSTABLE_FIX", "PERSISTENT_OFFSET_QUARANTINED"]
+                                suspicious = ["NON_MONOTONIC_GGA_TIME", "UNSTABLE_FIX", "PERSISTENT_OFFSET_QUARANTINED", "UNVERIFIED_POSITION_SHIFT", "UNTRUSTED_GEOMETRY"]
                                 if data_dict.get("reason") in suspicious:
                                     is_abnormal = True
                                 elif data_dict.get("record_kind") == "forward":
