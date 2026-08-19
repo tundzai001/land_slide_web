@@ -31,11 +31,13 @@ class ExcelExportHelpersTests(unittest.TestCase):
             tables=["gnss_adjustments"],
             project_ids=[3],
             station_ids=[9],
+            cluster_indices=[1],
         )
 
         self.assertEqual(request.tables, ["gnss_adjustments"])
         self.assertEqual(request.project_ids, [3])
         self.assertEqual(request.station_ids, [9])
+        self.assertEqual(request.cluster_indices, [1])
 
     def test_sheet_names_are_valid_unique_and_within_excel_limit(self):
         used = set()

@@ -475,6 +475,64 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         restored_payload = json.loads(requests[2][0].data.decode())
         self.assertEqual(restored_payload, backup_config)
 
+    async def test_backup_s2_route_disables_both_outputs_on_backup_receiver(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        primary_config = {
+            "server1_enabled": True,
+            "mountpoint1": "SinQuyen1",
+        }
+        backup_config = {
+            "server1_enabled": True,
+            "serverhost1": "caster.example",
+            "mountpoint1": "SinQuyen2",
+            "server2_enabled": True,
+            "serverhost2": "caster.example",
+            "mountpoint2": "SinQuyen1",
+        }
+        configured = []
+
+        with patch.object(
+            manager,
+            "_cors_api_request_sync",
+            return_value=[
+                {
+                    "serial": "SINQUYEN1-SERIAL",
+                    "service_config": primary_config,
+                },
+                {
+                    "serial": "SINQUYEN2-SERIAL",
+                    "service_config": backup_config,
+                },
+            ],
+        ), patch.object(
+            manager,
+            "_cors_configure_service_sync",
+            side_effect=lambda serial, cfg: configured.append((serial, cfg)),
+        ):
+            await manager._set_cors_fixed_base_enabled(
+                "SinQuyen1",
+                enabled=False,
+                selected_host="caster.example",
+                selected_serial="SINQUYEN2-SERIAL",
+                selected_server_id=2,
+                all_streams=True,
+            )
+            await manager._set_cors_fixed_base_enabled(
+                "SinQuyen1",
+                enabled=True,
+                selected_host="caster.example",
+                selected_serial="SINQUYEN2-SERIAL",
+                selected_server_id=2,
+            )
+
+        self.assertEqual([serial for serial, _ in configured], [
+            "SINQUYEN2-SERIAL",
+            "SINQUYEN2-SERIAL",
+        ])
+        self.assertFalse(configured[0][1]["server1_enabled"])
+        self.assertFalse(configured[0][1]["server2_enabled"])
+        self.assertEqual(configured[1][1], backup_config)
+
     async def test_conflict_base_is_hard_disabled_and_returns_exact_restore_snapshot(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
         original = {
@@ -900,6 +958,83 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome, [])
         self.assertIsNone(cluster["selected_fixed_base_candidate"])
         self.assertIn("awaiting AGRICA", cluster["fixed_base_selection_diagnostic"])
+
+    async def test_ordinary_cluster_locks_backup_from_cors_topology_api(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        manager.configure_project(98, [{
+            "name": "Dam 1",
+            "stations": [1, 2],
+            "rovers": ["R1", "R2"],
+            "base_station": "SinQuyen1",
+            "base_serial": "SQ1",
+            "base_server_id": 1,
+            "base_stream_host": "caster.example",
+            "base_stream_mp": "SinQuyen1",
+            "backup_base_station": "SinQuyen2",
+            "backup_base_serial": "SQ2",
+            "backup_base_server_id": 2,
+            "backup_base_stream_host": "caster.example",
+            "backup_base_stream_mp": "SinQuyen1",
+            "fixed_base_candidates": [
+                {
+                    "role": "primary",
+                    "base_station": "SinQuyen1",
+                    "base_serial": "SQ1",
+                    "base_server_id": 1,
+                    "base_stream_host": "caster.example",
+                    "base_stream_mp": "SinQuyen1",
+                    "base_lat": 21.1,
+                    "base_lon": 105.0,
+                },
+                {
+                    "role": "backup",
+                    "base_station": "SinQuyen2",
+                    "base_serial": "SQ2",
+                    "base_server_id": 2,
+                    "base_stream_host": "caster.example",
+                    "base_stream_mp": "SinQuyen1",
+                    "base_lat": 21.0,
+                    "base_lon": 105.0,
+                },
+            ],
+        }])
+        stations = [
+            {
+                "serial": "SQ1",
+                "name": "SinQuyen1",
+                "status": "offline",
+                "service_config": {
+                    "server1_enabled": True,
+                    "serverhost1": "caster.example",
+                    "mountpoint1": "SinQuyen1",
+                },
+            },
+            {
+                "serial": "SQ2",
+                "name": "SinQuyen2",
+                "status": "online",
+                "service_config": {
+                    "server2_enabled": True,
+                    "serverhost2": "caster.example",
+                    "mountpoint2": "SinQuyen1",
+                },
+            },
+        ]
+
+        with patch.object(
+            manager,
+            "_cors_api_request_sync",
+            return_value=stations,
+        ):
+            outcome = await manager.prepare_common_fixed_base_seed(98)
+
+        cluster = manager._sessions[98]["clusters"][0]
+        self.assertEqual(outcome, [])
+        self.assertEqual(cluster["selected_fixed_base_candidate"]["role"], "backup")
+        self.assertEqual(cluster["base_station"], "SinQuyen2")
+        self.assertEqual(cluster["base_serial"], "SQ2")
+        self.assertEqual(cluster["base_server_id"], 2)
+        self.assertIn("CORS topology API confirmed backup", cluster["fixed_base_selection_diagnostic"])
 
     async def test_fixed_base_requires_configure_service_confirmation(self):
         class FakeResponse:

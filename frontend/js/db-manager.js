@@ -450,6 +450,7 @@ class DatabaseManager {
             select.innerHTML = '<option value="all">Không tải được danh sách dự án</option>';
             select.disabled = true;
             this.setExportSelectLoading('export-station-select', 'Không tải được danh sách trạm');
+            this.setExportSelectLoading('export-cluster-select', 'Không tải được danh sách cụm');
             window.toast?.error('Không thể tải danh sách dự án/trạm để xuất dữ liệu');
         }
     }
@@ -457,11 +458,18 @@ class DatabaseManager {
     async onExportProjectChange() {
         const pSelect = document.getElementById('export-project-select');
         const sSelect = document.getElementById('export-station-select');
-        if (!pSelect || !sSelect) return;
+        const cSelect = document.getElementById('export-cluster-select');
+        if (!pSelect || !sSelect || !cSelect) return;
 
         const projectId = pSelect.value;
         const requestSeq = ++this.exportStationRequestSeq;
         this.setExportSelectLoading('export-station-select', 'Đang tải danh sách trạm...');
+        const project = this.exportProjects.find(p => String(p.id) === String(projectId));
+        const clusters = Array.isArray(project?.gnss_clusters) ? project.gnss_clusters : [];
+        cSelect.innerHTML = '<option value="all">-- Tất cả Cụm --</option>' + clusters.map((cluster, index) =>
+            `<option value="${index}">${this.escapeHtml(cluster?.name || `Cụm ${index + 1}`)}</option>`
+        ).join('');
+        cSelect.disabled = !projectId || projectId === 'all' || clusters.length === 0;
 
         try {
             const stations = projectId && projectId !== 'all'
@@ -510,11 +518,13 @@ class DatabaseManager {
             // Lấy các filters
             const projectId = document.getElementById('export-project-select')?.value;
             const stationId = document.getElementById('export-station-select')?.value;
+            const clusterIndex = document.getElementById('export-cluster-select')?.value;
             const startDate = document.getElementById('export-start-date')?.value;
             const endDate = document.getElementById('export-end-date')?.value;
             
             const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId)] : null;
             const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId)] : null;
+            const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [parseInt(clusterIndex)] : null;
             const selectedStation = stationIds
                 ? this.exportStations.find(s => String(s.id) === String(stationIds[0]))
                 : null;
@@ -535,6 +545,7 @@ class DatabaseManager {
                 tables: uniqueTables,
                 project_ids: effectiveProjectIds,
                 station_ids: stationIds,
+                cluster_indices: clusterIndices,
                 sensor_types: sensorTypes,
                 start_date: startDate || null,
                 end_date: endDate || null

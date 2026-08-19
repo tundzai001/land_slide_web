@@ -546,7 +546,7 @@ function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
         const timestamp = Number(message.timestamp || message.data.computed_at || Date.now() / 1000);
         adjTimeEl.textContent = new Date(timestamp * 1000).toLocaleString();
     }
-    if (adjResultsSection) adjResultsSection.style.display = 'block';
+    if (adjResultsSection) adjResultsSection.style.display = 'flex';
     const terminalModal = document.getElementById('gnssTerminalModal');
     terminalModal?.classList.add('gnss-result-visible');
     if (retryButton) retryButton.style.display = failed || auditOnly ? 'inline-flex' : 'none';

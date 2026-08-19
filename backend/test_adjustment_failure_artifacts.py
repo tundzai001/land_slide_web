@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from openpyxl import load_workbook
+
 from app.services import adjustment_failure
 
 _REPORTING_SPEC = importlib.util.spec_from_file_location(
@@ -41,6 +43,7 @@ class AdjustmentFailureArtifactTests(unittest.TestCase):
 
             paths = list(Path(temp_dir).rglob("*.json"))
             self.assertEqual(len(paths), 2)
+            self.assertEqual(len(list(Path(temp_dir).rglob("*.xlsx"))), 2)
             self.assertEqual(
                 {path.parent.relative_to(temp_dir).as_posix() for path in paths},
                 {"sin-quyen-2026/dap-1", "sin-quyen-2026/dap-4"},
@@ -73,14 +76,15 @@ class AdjustmentFailureArtifactTests(unittest.TestCase):
             urls = _Writer()._write_adjustment_reports(3, 1786636800, {
                 "project_code": "Sin_Quyen_2026",
                 "cluster_name": "Đập 1",
+                "run_id": -3001,
             })
 
-            self.assertIn("/sin-quyen-2026/dap-1/", urls["audit_json_url"])
-            self.assertIn("/sin-quyen-2026/dap-1/", urls["excel_report_url"])
+            self.assertIn("/sin-quyen-2026/dap-1/2026-08-13/", urls["audit_json_url"])
+            self.assertIn("/sin-quyen-2026/dap-1/2026-08-13/", urls["excel_report_url"])
             self.assertEqual(len(list(Path(temp_dir).rglob("*.json"))), 1)
             self.assertEqual(len(list(Path(temp_dir).rglob("*.xlsx"))), 1)
 
-    def test_run_id_gets_a_dedicated_session_folder(self):
+    def test_automatic_run_uses_a_date_folder_without_status_json(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temp_dir, patch.object(
             adjustment_failure,
             "ADJUSTMENT_REPORT_DIR",
@@ -98,10 +102,67 @@ class AdjustmentFailureArtifactTests(unittest.TestCase):
             paths = list(Path(temp_dir).rglob("*.json"))
             self.assertEqual(len(paths), 1)
             self.assertEqual(
-                paths[0].parent.relative_to(temp_dir).as_posix(),
-                "sin-quyen-2026/dap-1/run--3001",
+                paths[0].parent.parent.relative_to(temp_dir).as_posix(),
+                "sin-quyen-2026/dap-1",
             )
-            self.assertIn("/run--3001/", result["audit_json_url"])
+            self.assertRegex(paths[0].parent.name, r"^\d{4}-\d{2}-\d{2}$")
+            self.assertNotIn("run--3001", result["audit_json_url"])
+            self.assertTrue(result["excel_report_url"].endswith(".xlsx"))
+
+    def test_manual_run_also_uses_a_readable_date_folder(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temp_dir, patch.object(
+            adjustment_failure,
+            "ADJUSTMENT_REPORT_DIR",
+            Path(temp_dir),
+        ):
+            result = adjustment_failure.write_adjustment_failure_report(
+                3,
+                "manual preflight failed",
+                source="manual",
+                project_code="Sin_Quyen_2026",
+                cluster_name="Đập 1",
+                context={"run_id": 3},
+            )
+
+            report_path = next(Path(temp_dir).rglob("*.json"))
+            self.assertRegex(report_path.parent.name, r"^\d{4}-\d{2}-\d{2}$")
+            self.assertNotIn("run-3", result["audit_json_url"])
+
+    def test_failure_xlsx_contains_reason_diagnostics_and_raw_gnss(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temp_dir, patch.object(
+            adjustment_failure,
+            "ADJUSTMENT_REPORT_DIR",
+            Path(temp_dir),
+        ):
+            result = adjustment_failure.write_adjustment_failure_report(
+                3,
+                "Position Type 1; requires 4 or 7",
+                source="round_robin_runtime",
+                project_code="Sin_Quyen_2026",
+                cluster_name="Đập 1",
+                context={
+                    "run_id": -3001,
+                    "diagnostics": {"raw_gnss": [{
+                        "epoch_ts": 1786636800,
+                        "station_id": 4,
+                        "rover": "Dap1_4",
+                        "position_type": 1,
+                        "base": "BASE",
+                        "solver_eligible": False,
+                        "reason": "requires RTK Fixed",
+                        "raw_payload": "#AGRICA,RAW-CHECK*00",
+                    }]},
+                },
+            )
+
+            workbook = load_workbook(next(Path(temp_dir).rglob("*.xlsx")), read_only=True)
+            try:
+                self.assertEqual(workbook.sheetnames, ["LOI_BINH_SAI", "RAW_GNSS", "CHAN_DOAN"])
+                self.assertEqual(workbook["RAW_GNSS"]["D2"].value, 1)
+                self.assertEqual(workbook["RAW_GNSS"]["H2"].value, "#AGRICA,RAW-CHECK*00")
+            finally:
+                workbook.close()
+            self.assertIn(".xlsx", result["report_file_url"])
 
 
 if __name__ == "__main__":

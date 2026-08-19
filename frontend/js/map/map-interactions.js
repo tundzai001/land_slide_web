@@ -805,13 +805,7 @@ function setupEventListeners() {
             }
             ctx.stroke();
 
-            ctx.fillStyle = '#7dd3c7';
-            ctx.font = "600 13px 'IBM Plex Mono', monospace";
-            ctx.fillText('GNSS NETWORK SOLVER', 24, 30);
-            ctx.fillStyle = 'rgba(203,255,248,.55)';
-            ctx.font = "11px 'IBM Plex Mono', monospace";
-            ctx.fillText(`${gnssAdjustmentDebugState.phase}  ·  ${this.baselines.length} cạnh  ·  ${gnssAdjustmentDebugState.baselineCount} trị đo`, 24, 49);
-            ctx.fillText(`${this.getRoverCount()} rover + 1 BASE`, 24, 66);
+
 
             if (Object.keys(this.points).length === 0) {
                 const centerX = width / 2;
@@ -863,6 +857,29 @@ function setupEventListeners() {
             Object.values(this.points).forEach(point => {
                 screenCoords[point.name] = this.getScreenCoords(point, projection);
             });
+            ctx.save();
+            if (this.basePoint) {
+                ctx.setLineDash([4, 8]);
+                ctx.strokeStyle = 'rgba(148,163,184,0.15)';
+                ctx.lineWidth = 1;
+                ctx.shadowBlur = 0;
+                Object.values(this.points).forEach((pt) => {
+                    if (pt.isBase) return;
+                    const hasBaseline = this.baselines.some(b => (b.from === pt.name || b.to === pt.name) && (b.from === 'BASE' || b.to === 'BASE'));
+                    if (!hasBaseline) {
+                        const sp1 = screenCoords[this.basePoint.name];
+                        const sp2 = screenCoords[pt.name];
+                        if (sp1 && sp2) {
+                            ctx.beginPath();
+                            ctx.moveTo(sp1.x, sp1.y);
+                            ctx.lineTo(sp2.x, sp2.y);
+                            ctx.stroke();
+                        }
+                    }
+                });
+            }
+            ctx.restore();
+
             ctx.save();
             ctx.setLineDash([12, 8]);
             ctx.strokeStyle = 'rgba(45,212,191,.9)';
@@ -927,6 +944,20 @@ function setupEventListeners() {
                     ctx.fillText('CHỜ TRỊ ĐO', sp.x + 12, sp.y + 3);
                 }
             });
+
+            ctx.save();
+            ctx.fillStyle = 'rgba(6, 20, 27, 0.75)';
+            ctx.beginPath();
+            ctx.roundRect(16, 16, 280, 68, 6);
+            ctx.fill();
+            ctx.fillStyle = '#7dd3c7';
+            ctx.font = "600 13px 'IBM Plex Mono', monospace";
+            ctx.fillText('GNSS NETWORK SOLVER', 32, 36);
+            ctx.fillStyle = 'rgba(203,255,248,.55)';
+            ctx.font = "11px 'IBM Plex Mono', monospace";
+            ctx.fillText(`${gnssAdjustmentDebugState.phase}  ·  ${this.baselines.length} cạnh  ·  ${gnssAdjustmentDebugState.baselineCount} trị đo`, 32, 55);
+            ctx.fillText(`${this.getRoverCount()} rover + 1 BASE`, 32, 72);
+            ctx.restore();
         }
     };
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import timedelta, timezone
 from types import SimpleNamespace
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -9,11 +10,17 @@ from sqlalchemy.future import select
 from app.database import ConfigSessionLocal
 from app.models.config import Project
 from app.services import adjustment_failure
-from app.services.adjustment_artifacts import write_adjustment_run_status
 
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7), "Asia/Ho_Chi_Minh")
+ACTIVE_ADJUSTMENT_STATUSES = {
+    "STARTING",
+    "COLLECTING_BASELINE",
+    "FREE_NETWORK",
+    "PAUSED",
+}
 
 
 async def _start_normal_adjustment(
@@ -164,14 +171,14 @@ async def run_scheduled_adjustment(project_id: int):
                 context
                 for context in getattr(mqtt_service, "adjustment_run_contexts", {}).values()
                 if int(context.get("project_id") or 0) == int(project_id)
-                and context.get("status")
-                    in {"STARTING", "COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}
+                and context.get("status") in ACTIVE_ADJUSTMENT_STATUSES
             ]
             if active_existing:
                 logger.warning(
-                    "Scheduled project %s skipped because adjustment runs remain active: %s",
+                    "⚠ Scheduled project %s SKIPPED — adjustment runs remain active: %s (statuses: %s)",
                     project_code,
                     [context.get("cluster_name") for context in active_existing],
+                    [context.get("status") for context in active_existing],
                 )
                 return
             for old_run_id, old_context in list(
@@ -196,16 +203,6 @@ async def run_scheduled_adjustment(project_id: int):
                     "source": "automatic_scheduler",
                     "status": "STARTING",
                 }
-                write_adjustment_run_status(
-                    int(project_id),
-                    run_id=cluster_run["run_id"],
-                    phase="STARTING",
-                    source="automatic_scheduler",
-                    project_code=project_code,
-                    cluster_name=cluster_run["cluster_name"],
-                    cluster_index=cluster_run["cluster_index"],
-                    context={"stations": cluster_run["stations"]},
-                )
 
             async def start_cluster(cluster_run: dict):
                 try:
@@ -223,20 +220,6 @@ async def run_scheduled_adjustment(project_id: int):
                         cluster_run["cluster_name"],
                         cluster_run["run_id"],
                         response.get("phase"),
-                    )
-                    write_adjustment_run_status(
-                        int(project_id),
-                        run_id=cluster_run["run_id"],
-                        phase=str(response.get("phase") or "COLLECTING_BASELINE"),
-                        source="automatic_scheduler",
-                        project_code=project_code,
-                        cluster_name=cluster_run["cluster_name"],
-                        cluster_index=cluster_run["cluster_index"],
-                        context={
-                            "stations": cluster_run["stations"],
-                            "expected_station_ids": response.get("expected_station_ids", []),
-                            "roster": response.get("roster", {}),
-                        },
                     )
                     return response
                 except Exception as exc:
@@ -263,19 +246,6 @@ async def run_scheduled_adjustment(project_id: int):
                     mqtt_service.adjustment_run_contexts[
                         cluster_run["run_id"]
                     ]["status"] = "ERROR"
-                    write_adjustment_run_status(
-                        int(project_id),
-                        run_id=cluster_run["run_id"],
-                        phase="ERROR",
-                        source="automatic_scheduler",
-                        project_code=project_code,
-                        cluster_name=cluster_run["cluster_name"],
-                        cluster_index=cluster_run["cluster_index"],
-                        context={
-                            "stations": cluster_run["stations"],
-                            "error": str(exc),
-                        },
-                    )
                     if failure_result is not None:
                         failure_result["run_id"] = cluster_run["run_id"]
                         mqtt_service.adjustment_cluster_results[int(project_id)][
@@ -283,9 +253,9 @@ async def run_scheduled_adjustment(project_id: int):
                         ] = failure_result
                     return None
 
-            # Independent project clusters own independent manager sessions.
-            # Handover preparation may serialize its CORS writes, but collection
-            # and solver cycles then run concurrently.
+            # Disjoint clusters own different receivers/mountpoints, so start
+            # every selected cluster at the scheduled instant. The topology
+            # manager keeps its short hardware reconfiguration section locked.
             await asyncio.gather(*(start_cluster(item) for item in cluster_runs))
             refresh = getattr(mqtt_service, "_refresh_project_adjustment_state", None)
             if callable(refresh):
@@ -293,6 +263,15 @@ async def run_scheduled_adjustment(project_id: int):
 
     except Exception as e:
         logger.error(f"Error in scheduled auto-adjustment for project {project_id}: {e}", exc_info=True)
+        # Clean up any STARTING contexts that were registered before the failure
+        if 'cluster_runs' in locals() and 'mqtt_service' in locals():
+            for cluster_run in cluster_runs:
+                run_id = cluster_run["run_id"]
+                context = getattr(mqtt_service, "adjustment_run_contexts", {}).get(run_id)
+                if context and context.get("status") == "STARTING":
+                    getattr(mqtt_service, "adjustment_run_contexts", {}).pop(run_id, None)
+                    getattr(mqtt_service, "active_adjustment_clusters", {}).pop(run_id, None)
+                    getattr(mqtt_service, "adjustment_phase", {}).pop(run_id, None)
         adjustment_failure.write_adjustment_failure_report(
             project_id,
             e,
@@ -331,7 +310,11 @@ async def reload_scheduler():
                             job_id = f"auto_adj_{project.id}_{hour}_{minute}"
                             scheduler.add_job(
                                 run_scheduled_adjustment,
-                                CronTrigger(hour=hour, minute=minute),
+                                CronTrigger(
+                                    hour=hour,
+                                    minute=minute,
+                                    timezone=VIETNAM_TIMEZONE,
+                                ),
                                 id=job_id,
                                 args=[project.id],
                                 replace_existing=True,

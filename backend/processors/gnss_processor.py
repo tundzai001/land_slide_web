@@ -1,4 +1,5 @@
 # backend/processors/gnss_processor.py
+import asyncio
 import re
 import calendar
 import numpy as np
@@ -616,19 +617,57 @@ class GNSSVelocityProcessor:
             logger.error(f"❌ Error persisting tracking offset for device {self.device_id}: {e}")
             return False
 
-    async def recalibrate_tracking_offset(self):
-        """Re-zero displacement from a stable FIXED window without changing origin."""
+    async def recalibrate_tracking_offset(
+        self,
+        *,
+        minimum_samples: int = 60,
+        minimum_duration_s: float = 60.0,
+        timeout_s: float = 120.0,
+        poll_interval_s: float = 0.25,
+    ):
+        """Collect a fresh stable FIXED window and re-zero displacement."""
         if self.state != "ORIGIN_LOCKED" or self.origin is None:
             raise ValueError("GNSS origin is not locked")
+        if getattr(self, "_offset_calibration_in_progress", False):
+            raise ValueError("GNSS offset calibration is already in progress")
 
-        sample_count = 60
-        samples = list(self.history)[-sample_count:]
-        if len(samples) < sample_count:
-            raise ValueError(f"Need {sample_count} accepted RTK FIXED samples; have {len(samples)}")
+        minimum_samples = max(2, int(minimum_samples))
+        minimum_duration_s = max(0.0, float(minimum_duration_s))
+        timeout_s = max(minimum_duration_s, float(timeout_s))
+        poll_interval_s = max(0.01, float(poll_interval_s))
+        started_after_ts = float(self.history[-1]["ts"]) if self.history else -math.inf
+        old_offset = self.tracking_offset_enu.copy()
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        self._offset_calibration_in_progress = True
+        try:
+            while True:
+                samples = [
+                    sample
+                    for sample in self.history
+                    if float(sample["ts"]) > started_after_ts
+                ]
+                duration_s = (
+                    float(samples[-1]["ts"] - samples[0]["ts"])
+                    if len(samples) >= 2
+                    else 0.0
+                )
+                if (
+                    len(samples) >= minimum_samples
+                    and duration_s >= minimum_duration_s
+                ):
+                    break
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise ValueError(
+                        "Timed out collecting fresh RTK FIXED samples "
+                        f"({len(samples)}/{minimum_samples} samples, "
+                        f"{duration_s:.1f}/{minimum_duration_s:.1f}s)"
+                    )
+                await asyncio.sleep(poll_interval_s)
+        finally:
+            self._offset_calibration_in_progress = False
 
-        duration_s = float(samples[-1]["ts"] - samples[0]["ts"])
-        if duration_s < 45.0:
-            raise ValueError(f"Stable window is too short ({duration_s:.1f}s); need at least 45s")
+        if not np.allclose(self.tracking_offset_enu, old_offset):
+            raise ValueError("GNSS tracking reference changed during calibration; retry")
 
         positions = np.asarray([sample["pos_enu"] for sample in samples], dtype=float)
         center = np.median(positions, axis=0)
@@ -646,7 +685,6 @@ class GNSSVelocityProcessor:
                 f"vertical spread {spread_u_m * 1000:.1f}mm)"
             )
 
-        old_offset = self.tracking_offset_enu.copy()
         proposed_offset = self._validated_tracking_offset(old_offset + center)
         if not await self._async_save_tracking_offset(proposed_offset):
             raise RuntimeError("Could not persist GNSS tracking offset")
@@ -656,7 +694,7 @@ class GNSSVelocityProcessor:
             sample["pos_enu"] = np.asarray(sample["pos_enu"], dtype=float) - center
 
         calibrated_positions = np.asarray(
-            [sample["pos_enu"] for sample in list(self.history)[-sample_count:]],
+            [sample["pos_enu"] for sample in samples],
             dtype=float,
         )
         # Keep the newest measured residual; never synthesize a zero payload.
@@ -669,7 +707,7 @@ class GNSSVelocityProcessor:
 
         return {
             "device_id": self.device_id,
-            "sample_count": sample_count,
+            "sample_count": len(samples),
             "duration_s": duration_s,
             "spread_2d_mm": spread_2d_m * 1000.0,
             "spread_u_mm": spread_u_m * 1000.0,
@@ -678,6 +716,9 @@ class GNSSVelocityProcessor:
             "shift_u_m": float(center[2]),
             "old_tracking_offset": old_offset.tolist(),
             "new_tracking_offset": proposed_offset.tolist(),
+            "new_tracking_offset_2d_mm": float(
+                np.linalg.norm(proposed_offset[:2]) * 1000.0
+            ),
             "origin_unchanged": True,
         }
 

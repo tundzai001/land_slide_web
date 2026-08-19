@@ -556,11 +556,16 @@ class AdminStationPresetsFeature extends window.AdminManager {
             window.toast?.warning('Save station first before calibrating GNSS offset');
             return;
         }
-        if (!confirm('Calibrate GNSS tracking offset from the latest stable RTK FIXED minute? Origin coordinates will remain unchanged.')) return;
+        if (!confirm('Collect a new stable RTK FIXED window for 60 seconds and calibrate the tracking offset? Origin coordinates will remain unchanged.')) return;
 
         const resetBtn = document.getElementById('btn-reset-origin');
+        const statusEl = document.getElementById('origin-status');
         try {
             if (resetBtn) resetBtn.disabled = true;
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Collecting new RTK FIXED samples for 60 seconds...';
+                statusEl.className = 'text-info small';
+            }
 
             const res = await fetch(`/api/admin/gnss/reset-origin/${stationId}`, {
                 method: 'POST',
@@ -577,10 +582,10 @@ class AdminStationPresetsFeature extends window.AdminManager {
             const horizontalShiftMm = calibration
                 ? Math.hypot(calibration.shift_e_m, calibration.shift_n_m) * 1000
                 : 0;
+            const totalOffsetMm = calibration?.new_tracking_offset_2d_mm || 0;
             window.toast?.success(`Calibrated ${data.calibrated_count} GNSS offset(s); origin unchanged`);
-            const statusEl = document.getElementById('origin-status');
             if (statusEl) {
-                statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> Offset calibrated (${horizontalShiftMm.toFixed(1)} mm horizontal); origin unchanged.`;
+                statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> Applied ${horizontalShiftMm.toFixed(1)} mm; total tracking offset ${totalOffsetMm.toFixed(1)} mm. Origin unchanged.`;
                 statusEl.className = 'text-success small';
             }
         } catch (e) {

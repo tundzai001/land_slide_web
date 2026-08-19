@@ -384,7 +384,10 @@ class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):
             await bridge._handle_round_robin_adjustment_result(17, adjustment)
 
         self.assertEqual(bridge.adjustment_phase[17], "FAILED_QUALITY_GATE")
-        self.assertIs(bridge.adjustment_results[17], adjustment)
+        self.assertIs(
+            bridge.adjustment_results[17]["cluster_results"][0],
+            adjustment,
+        )
         self.assertEqual(bridge._sensor_buffer, [])
         bridge._upsert_latest_sensor_cache.assert_not_awaited()
         bridge._write_adjustment_reports.assert_called_once()

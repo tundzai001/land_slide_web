@@ -1,10 +1,11 @@
 """GNSS adjustment audit, Excel, and human-readable report generation."""
+import datetime
 import json
 import logging
 import math
 from pathlib import Path
 
-from app.services.adjustment_artifacts import adjustment_scope
+from app.services.adjustment_artifacts import VIETNAM_TIMEZONE, adjustment_scope
 
 logger = logging.getLogger(__name__)
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -434,9 +435,14 @@ class AdjustmentReportMixin:
             or os.path.join(str(BACKEND_DIR), "static", "adjustments")
         )
         os.makedirs(report_dir, exist_ok=True)
+        filename_timestamp = (
+            datetime.datetime.fromtimestamp(timestamp, VIETNAM_TIMEZONE)
+            .strftime("%Y-%m-%d_%H-%M-%S")
+            if report_scope_name else timestamp
+        )
         file_path = os.path.join(
             report_dir,
-            f"gnss_binh_sai_{report_scope_name or project_id}_{timestamp}.xlsx",
+            f"gnss_binh_sai_{report_scope_name or project_id}_{filename_timestamp}.xlsx",
         )
 
         workbook = openpyxl.Workbook()
@@ -1500,11 +1506,12 @@ class AdjustmentReportMixin:
             data.get("project_code"),
             data.get("cluster_name"),
             run_id=data.get("run_id"),
+            timestamp=timestamp,
         )
-        run_url = f"/run-{int(data['run_id'])}" if data.get("run_id") is not None else ""
         os.makedirs(report_dir, exist_ok=True)
         audit_name = (
-            f"gnss_adjustment_{project_slug}_{cluster_slug}_{timestamp}.json"
+            f"gnss_adjustment_{project_slug}_{cluster_slug}_"
+            f"{datetime.datetime.fromtimestamp(timestamp, VIETNAM_TIMEZONE).strftime('%Y-%m-%d_%H-%M-%S')}.json"
             if scoped else f"gnss_adjustment_{project_id}_{timestamp}.json"
         )
         audit_path = os.path.join(str(report_dir), audit_name)
@@ -1531,7 +1538,8 @@ class AdjustmentReportMixin:
         if not excel_path:
             raise OSError("Adjustment Excel exporter did not return an output path")
         report_api_prefix = (
-            f"/api/admin/gnss/adjustment/reports/{project_slug}/{cluster_slug}{run_url}"
+            f"/api/admin/gnss/adjustment/reports/"
+            f"{report_dir.relative_to(report_root).as_posix()}"
             if scoped else f"/api/admin/gnss/adjustment/reports/{project_id}"
         )
         excel_url = f"{report_api_prefix}/{os.path.basename(excel_path)}"

@@ -138,10 +138,10 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
     AGRICA_COMMAND_BURST_COUNT = 6
     RTCM_COMMAND_BURST_COUNT = 3
     COMMAND_BURST_INTERVAL_SECONDS = 0.25
-    PREFLIGHT_CONNECTION_ATTEMPTS = 1
+    PREFLIGHT_CONNECTION_ATTEMPTS = 2
     ROVER_RESTORE_TRANSPORT_ATTEMPTS = 6
     ROVER_RESTORE_RETRY_SECONDS = 2.0
-    RTCM_ROUTE_RECOVERY_ATTEMPTS = 1
+    RTCM_ROUTE_RECOVERY_ATTEMPTS = 2
     FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS = 15
     FIXED_BASE_MOUNTPOINT_RELEASE_RETRY_SECONDS = 1.0
     OPTIONAL_BASE_RTCM_COMMANDS = (
@@ -462,6 +462,36 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
             for rover in cluster.get("rovers", [])
             if str(rover).strip()
         ))
+        raw_gnss = []
+        seen_raw = set()
+        for cluster in session.get("clusters", []):
+            for record in cluster.get("observations", []):
+                observation = record.observation
+                raw_payload = str(observation.raw or "")
+                seen_raw.add(raw_payload)
+                raw_gnss.append({
+                    "epoch_ts": int(observation.epoch_ts or 0),
+                    "station_id": int(observation.station_id),
+                    "rover": str(observation.rover_name),
+                    "position_type": observation.position_type,
+                    "base": str(record.base_name),
+                    "solver_eligible": bool(record.solver_eligible),
+                    "reason": "; ".join(record.quality_flags or ()),
+                    "raw_payload": raw_payload,
+                })
+        for report in (session.get("seed_station_reports") or {}).values():
+            raw_payload = str(report.get("raw_payload") or "")
+            if raw_payload and raw_payload not in seen_raw:
+                raw_gnss.append({
+                    "epoch_ts": report.get("epoch_ts"),
+                    "station_id": report.get("station_id"),
+                    "rover": report.get("rover"),
+                    "position_type": report.get("position_type"),
+                    "base": None,
+                    "solver_eligible": bool(report.get("solver_eligible")),
+                    "reason": report.get("reason"),
+                    "raw_payload": raw_payload,
+                })
         return {
             "run_id": int(project_id),
             "captured_at": int(time.time()),
@@ -479,6 +509,7 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
             },
             "seed_status": self.get_seed_collection_status(int(project_id)),
             "last_ingest_diagnostic": self.get_last_ingest_diagnostic(int(project_id)),
+            "raw_gnss": raw_gnss,
         }
 
     async def ensure_rover_streams_ready(
@@ -847,6 +878,9 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                 ] = {
                     "position_type": int(observation.position_type),
                     "epoch_ts": int(observation.epoch_ts or 0),
+                    "station_id": int(observation.station_id),
+                    "rover": str(observation.rover_name),
+                    "raw_payload": str(observation.raw or ""),
                     "received_monotonic": time.monotonic(),
                     "base_identity_verified": False,
                     "solver_eligible": False,
@@ -1483,10 +1517,6 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
         target_sids = [1, 2] if server_id is None else [server_id]
         for sid in target_sids:
             cfg[f"server{sid}_enabled"] = bool(enabled)
-            cfg[f"server{sid}_stream_active"] = bool(enabled)
-            cfg[f"server{sid}_stream_on_demand"] = False
-        cfg["stream_active"] = bool(enabled)
-        cfg["stream_on_demand"] = False
         return cfg
 
     @staticmethod
@@ -1584,13 +1614,6 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
     ) -> None:
         if not mountpoint:
             return
-        if not enabled:
-            logger.info(
-                "Keeping fixed base %s host=%s always active; no CORS sleep transition",
-                mountpoint,
-                selected_host,
-            )
-            return
         snapshot_key = (
             self._normalize_stream_host(selected_host),
             str(mountpoint).strip().casefold(),
@@ -1639,15 +1662,10 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                 mountpoint,
             )
             return
-        always_active_config = self._cors_service_config_with_server_enabled(
-            snapshot["service_config"],
-            None if all_streams else snapshot.get("server_id"),
-            enabled=True,
-        )
         await asyncio.to_thread(
             self._cors_configure_service_sync,
             snapshot["serial"],
-            always_active_config,
+            copy.deepcopy(snapshot["service_config"]),
         )
         self._cors_fixed_base_snapshots.pop(snapshot_key, None)
         logger.info(
@@ -1974,7 +1992,38 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                 if isinstance(cluster, dict) and cluster.get("backup_base_station")
             ]
             if failover_clusters:
-                await self._reconcile_cors_failover_pairs_unlocked(failover_clusters)
+                failover_outcomes = await self._reconcile_cors_failover_pairs_unlocked(
+                    failover_clusters
+                )
+                for cluster, outcome in zip(
+                    failover_clusters,
+                    failover_outcomes,
+                ):
+                    role = {
+                        "PRIMARY_ACTIVE": "primary",
+                        "BACKUP_ACTIVE": "backup",
+                    }.get(str(outcome.get("state") or ""))
+                    if role is None:
+                        continue
+                    selected = next(
+                        (
+                            candidate
+                            for candidate in self._fixed_base_candidates(cluster)
+                            if str(candidate.get("role") or "").casefold() == role
+                        ),
+                        None,
+                    )
+                    if selected is not None:
+                        self._lock_fixed_base_candidate(
+                            cluster,
+                            selected,
+                            (
+                                f"CORS topology API confirmed {role} route active: "
+                                f"{selected.get('base_station')}/S"
+                                f"{selected.get('base_server_id')} -> "
+                                f"{selected.get('base_stream_mp')}"
+                            ),
+                        )
             return await self._prepare_common_fixed_base_seed_unlocked(project_id)
 
     async def _prepare_common_fixed_base_seed_unlocked(
@@ -2016,7 +2065,7 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                         candidates[0],
                         "configured fixed base selected before seed collection",
                     )
-                else:
+                elif not cluster.get("selected_fixed_base_candidate"):
                     cluster["selected_fixed_base_candidate"] = None
                     cluster["fixed_base_selection_diagnostic"] = (
                         "awaiting AGRICA confirmation of the active primary/backup base"
@@ -2045,7 +2094,7 @@ class RoundRobinAdjustmentManager(RoundRobinSessionLifecycleMixin):
                             candidates[0],
                             "configured fixed base selected before seed collection",
                         )
-                    else:
+                    elif not cluster.get("selected_fixed_base_candidate"):
                         cluster["selected_fixed_base_candidate"] = None
                         cluster["fixed_base_selection_diagnostic"] = (
                             "awaiting AGRICA confirmation of the active primary/backup base"

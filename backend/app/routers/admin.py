@@ -12,6 +12,7 @@ import logging
 import re
 import time
 import zipfile
+from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 import paho.mqtt.client as mqtt
@@ -51,6 +52,7 @@ class ExportExcelRequest(BaseModel):
     tables: List[str]  # projects, stations, devices, sensor_data, gnss_adjustments, alerts
     project_ids: Optional[List[int]] = None
     station_ids: Optional[List[int]] = None
+    cluster_indices: Optional[List[int]] = None
     sensor_types: Optional[List[str]] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -252,10 +254,10 @@ async def reset_gnss_origin(
 
     calibrations = []
     try:
-        for device in devices:
-            calibration = await mqtt_service.reset_gnss_origin(device.id)
-            if calibration is not None:
-                calibrations.append(calibration)
+        results = await asyncio.gather(*(
+            mqtt_service.reset_gnss_origin(device.id) for device in devices
+        ))
+        calibrations = [result for result in results if result is not None]
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -1269,8 +1271,11 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             )
                         )
                         unique_adjustments: Dict[tuple, dict] = {}
+                        cluster_filter = set(request.cluster_indices or [])
                         for record in adjustment_result.scalars().all():
                             payload = record.data if isinstance(record.data, dict) else {}
+                            if cluster_filter and payload.get("cluster_index") not in cluster_filter:
+                                continue
                             payload_project_id = int(payload.get("project_id") or 0)
                             key = (
                                 payload_project_id,
@@ -1284,10 +1289,51 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             })
                             item["record_ids"].append(int(record.id))
 
+                        # Failed runs are not published as gnss_adjusted database
+                        # rows; their JSON/XLSX files are the durable source.
+                        report_root = Path(__file__).resolve().parents[2] / "static" / "adjustments"
+                        try:
+                            start_filter_ts = int(datetime.strptime(request.start_date, "%Y-%m-%d").timestamp()) if request.start_date else None
+                            end_filter_ts = int(datetime.strptime(f"{request.end_date} 23:59:59", "%Y-%m-%d %H:%M:%S").timestamp()) if request.end_date else None
+                        except ValueError:
+                            start_filter_ts = end_filter_ts = None
+                        for audit_path in report_root.rglob("gnss_adjustment_*.json"):
+                            try:
+                                payload = json.loads(audit_path.read_text(encoding="utf-8"))
+                            except (OSError, ValueError):
+                                continue
+                            if str(payload.get("status") or "").lower() != "failed":
+                                continue
+                            payload_project_id = int(payload.get("project_id") or 0)
+                            computed_at = int(payload.get("computed_at") or payload.get("timestamp") or 0)
+                            if project_filter and payload_project_id not in project_filter:
+                                continue
+                            if cluster_filter and payload.get("cluster_index") not in cluster_filter:
+                                continue
+                            if start_filter_ts is not None and computed_at < start_filter_ts:
+                                continue
+                            if end_filter_ts is not None and computed_at > end_filter_ts:
+                                continue
+                            context_stations = {
+                                int(value) for value in (payload.get("context") or {}).get("stations", [])
+                                if str(value).isdigit()
+                            }
+                            if station_filter and context_stations and not station_filter.intersection(context_stations):
+                                continue
+                            key = (payload_project_id, payload.get("cluster_index"), computed_at, str(audit_path))
+                            unique_adjustments[key] = {
+                                "payload": payload,
+                                "timestamp": computed_at,
+                                "record_ids": [],
+                                "audit_path": audit_path,
+                                "excel_path": audit_path.with_suffix(".xlsx"),
+                            }
+
                         adjustment_rows_by_project: Dict[str, List[List[Any]]] = {}
                         adjustment_headers = [
                             "database_record_ids", "time", "computed_at", "project_id",
                             "project_code", "cluster_index", "cluster_name", "source",
+                            "status", "error_type", "error_message",
                             "station_ids", "station_codes", "rover_count", "base_name",
                             "base_lat", "base_lon", "base_h", "observation_baselines",
                             "averaged_baselines", "independent_loops", "degrees_of_freedom",
@@ -1305,7 +1351,11 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                 int(point.get("station_id"))
                                 for point in points.values()
                                 if isinstance(point, dict) and point.get("station_id") is not None
-                            })
+                            }.union({
+                                int(value)
+                                for value in (payload.get("context") or {}).get("stations", [])
+                                if str(value).isdigit()
+                            }))
                             station_codes = [
                                 all_station_mapping.get(station_id, {}).get(
                                     "station_code", f"station_{station_id}"
@@ -1321,26 +1371,36 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                 payload.get("cluster_name") or f"cluster_{payload.get('cluster_index', 0)}",
                                 "cluster",
                             )
-                            run_stem = f"{computed_at}_{cluster_label}"
-                            folder = f"gnss_adjustments/{safe_project}"
+                            readable_time = (
+                                datetime.fromtimestamp(computed_at).strftime("%Y-%m-%d_%H-%M-%S")
+                                if computed_at else "unknown-time"
+                            )
+                            run_stem = f"{readable_time}_{cluster_label}"
+                            if item.get("audit_path"):
+                                run_stem += f"_{Path(item['audit_path']).stem.rsplit('_', 1)[-1]}"
+                            folder = f"gnss_adjustments/{safe_project}/{cluster_label}"
                             archive.writestr(
                                 f"{folder}/{run_stem}.json",
                                 json.dumps(payload, ensure_ascii=False, indent=2),
                             )
                             excel_url = payload.get("excel_report_url")
-                            if isinstance(excel_url, str) and excel_url:
-                                excel_name = os.path.basename(excel_url.split("?", 1)[0])
-                                excel_path = os.path.abspath(os.path.join(
-                                    os.path.dirname(__file__), "..", "..", "static", "adjustments", excel_name
-                                ))
-                                if os.path.isfile(excel_path):
-                                    archive.write(excel_path, f"{folder}/{run_stem}.xlsx")
+                            excel_path = item.get("excel_path")
+                            if not excel_path and isinstance(excel_url, str) and excel_url:
+                                report_prefix = "/api/admin/gnss/adjustment/reports/"
+                                if report_prefix in excel_url:
+                                    candidate = (report_root / excel_url.split(report_prefix, 1)[1].split("?", 1)[0]).resolve()
+                                    excel_path = candidate if candidate.is_relative_to(report_root.resolve()) else None
+                            if excel_path and Path(excel_path).is_file():
+                                archive.write(excel_path, f"{folder}/{run_stem}.xlsx")
 
                             adjustment_rows_by_project.setdefault(safe_project, []).append([
                                 ";".join(map(str, sorted(item["record_ids"]))),
                                 datetime.fromtimestamp(computed_at).strftime('%Y-%m-%d %H:%M:%S') if computed_at else None,
                                 computed_at, project_id, project_code,
                                 payload.get("cluster_index"), payload.get("cluster_name"), payload.get("source"),
+                                payload.get("status") or payload.get("phase"),
+                                (payload.get("error") or {}).get("type"),
+                                (payload.get("error") or {}).get("message"),
                                 ";".join(map(str, station_ids)), ";".join(station_codes),
                                 payload.get("rover_count"), base.get("name"), base.get("lat"),
                                 base.get("lon"), base.get("h"),

@@ -20,6 +20,7 @@ from ..database import get_config_db
 from ..models import auth as model_auth
 from ..models import config as model_config
 from ..runtime import mqtt_service
+from ..services import adjustment_failure
 from ..services.station_policy import check_operator_project_access, get_offline_threshold
 from ..services.adjustment_artifacts import artifact_slug
 from ..websocket import manager as ws_manager
@@ -96,19 +97,20 @@ async def download_gnss_adjustment_report(
     )
 
 
-@router.get("/api/admin/gnss/adjustment/reports/{project_code}/{cluster_name}/{filename}")
+@router.get("/api/admin/gnss/adjustment/reports/{project_code}/{cluster_name}/{path:path}")
 async def download_scoped_gnss_adjustment_report(
     project_code: str,
     cluster_name: str,
-    filename: str,
+    path: str,
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(
         auth.require_permission(auth.Permission.EDIT_STATIONS)
     ),
 ):
     """Download a human-scoped project/cluster artifact."""
+    filename = Path(path).name
     if (
-        Path(filename).name != filename
+        not filename
         or Path(filename).suffix.lower() not in {".json", ".xlsx"}
         or artifact_slug(project_code, "") != project_code
         or artifact_slug(cluster_name, "") != cluster_name
@@ -129,8 +131,14 @@ async def download_scoped_gnss_adjustment_report(
 
     report_root = ADJUSTMENT_REPORT_DIR.resolve()
     scope_root = (report_root / project_code / cluster_name).resolve()
-    report_path = (scope_root / filename).resolve()
-    if report_path.parent != scope_root or not report_path.is_file():
+    report_path = (scope_root / path).resolve()
+    
+    try:
+        report_path.relative_to(scope_root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        
+    if not report_path.is_file():
         raise HTTPException(status_code=404, detail="Adjustment report not found")
 
     extension = report_path.suffix.lower()
@@ -309,6 +317,7 @@ def _restrict_adjustment_clusters_to_online_stations(
 
     active_clusters = []
     excluded_station_ids = []
+    diagnostics = []
     for source in clusters:
         station_rover_pairs = list(zip(source["stations"], source["rovers"], strict=True))
         included = [
@@ -321,6 +330,11 @@ def _restrict_adjustment_clusters_to_online_stations(
             for station_id, _ in station_rover_pairs
             if int(station_id) not in online_station_ids
         )
+        diagnostics.append(
+            f"{source.get('name') or 'cluster'}: "
+            f"online={[str(rover) for _, rover in included]}, "
+            f"offline={[str(rover) for station_id, rover in station_rover_pairs if int(station_id) not in online_station_ids]}"
+        )
         if len(included) < 2:
             continue
         cluster = dict(source)
@@ -329,8 +343,38 @@ def _restrict_adjustment_clusters_to_online_stations(
         active_clusters.append(cluster)
 
     if not active_clusters:
-        raise ValueError("fewer than two online GNSS rovers are available in the selected cluster")
+        raise ValueError(
+            "fewer than two online GNSS rovers are available in the selected cluster; "
+            + "; ".join(diagnostics)
+        )
     return active_clusters, sorted(set(excluded_station_ids))
+
+
+def _streaming_gnss_station_ids(
+    clusters: list[dict],
+    stations_by_id: dict[int, Any],
+) -> set[int]:
+    """Return stations with a recent MQTT payload, independent of DB flush timing."""
+
+    online = set()
+    for cluster in clusters:
+        for station_id, rover_code in zip(
+            cluster.get("stations", []),
+            cluster.get("rovers", []),
+            strict=True,
+        ):
+            station_id = int(station_id)
+            station = stations_by_id.get(station_id)
+            if station is None:
+                continue
+            threshold = get_offline_threshold(station.config, "gnss")
+            health = mqtt_service.round_robin_manager.get_gnss_stream_health(
+                str(rover_code),
+                freshness_seconds=float(threshold),
+            )
+            if health.get("payload_recent"):
+                online.add(station_id)
+    return online
 
 
 @router.get("/api/admin/gnss/aicaster-users")
@@ -456,6 +500,17 @@ async def start_gnss_adjustment(
                 threshold = get_offline_threshold(station.config, "gnss")
                 if last_seen and now_ts - last_seen < threshold:
                     online_station_ids.add(int(device.station_id))
+            live_mqtt_station_ids = _streaming_gnss_station_ids(
+                active_clusters,
+                stations_by_id,
+            )
+            db_stale_but_streaming = live_mqtt_station_ids - online_station_ids
+            if db_stale_but_streaming:
+                logger.info(
+                    "GNSS adjustment online check recovered live MQTT station IDs absent from DB/buffer: %s",
+                    sorted(db_stale_but_streaming),
+                )
+            online_station_ids.update(live_mqtt_station_ids)
             active_clusters, skipped_offline_station_ids = (
                 _restrict_adjustment_clusters_to_online_stations(
                     active_clusters,
@@ -601,6 +656,40 @@ async def start_gnss_adjustment(
         }
     except Exception as e:
         logger.error(f"Failed to start GNSS adjustment cycle: {e}")
+        if (
+            str(req.source or "manual") != "automatic_scheduler"
+            and "project" in locals()
+            and project is not None
+            and not (isinstance(e, HTTPException) and e.status_code in {401, 403, 404})
+        ):
+            session_id = int(locals().get("session_id") or req.project_id)
+            diagnostics = mqtt_service.round_robin_manager.get_adjustment_diagnostics(
+                session_id
+            )
+            adjustment_failure.write_adjustment_failure_report(
+                int(project.id),
+                e.detail if isinstance(e, HTTPException) else e,
+                source=str(req.source or "manual"),
+                project_code=str(project.project_code or f"project-{project.id}"),
+                cluster_name=(
+                    str(active_clusters[0].get("name") or "Cụm")
+                    if "active_clusters" in locals() and len(active_clusters) == 1
+                    else "Nhiều cụm"
+                ),
+                context={
+                    "stage": "start_adjustment",
+                    "run_id": session_id,
+                    "cluster_index": req.cluster_index,
+                    "stations": locals().get("selected_station_ids_snapshot", []),
+                    "skipped_offline_station_ids": locals().get(
+                        "skipped_offline_station_ids", []
+                    ),
+                    "skipped_uncontrollable_station_ids": locals().get(
+                        "skipped_uncontrollable_station_ids", []
+                    ),
+                    "diagnostics": diagnostics,
+                },
+            )
         if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=500, detail=str(e))
 

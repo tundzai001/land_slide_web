@@ -412,10 +412,9 @@ class GnssFixedOnlyTests(unittest.TestCase):
         processor._consecutive_rejects = 0
         center = np.array([0.012, -0.007, 3.5], dtype=float)
         for second in range(60):
-            jitter = 0.001 if second % 2 else -0.001
             processor.history.append({
                 "ts": 1_700_000_000.0 + second,
-                "pos_enu": center + np.array([jitter, -jitter, jitter]),
+                "pos_enu": np.array([9.0, 9.0, 9.0]),
             })
 
         saved = []
@@ -427,13 +426,29 @@ class GnssFixedOnlyTests(unittest.TestCase):
         processor._async_save_tracking_offset = save_offset
         origin_before = processor.origin.copy()
 
-        result = asyncio.run(processor.recalibrate_tracking_offset())
+        async def calibrate_with_fresh_samples():
+            task = asyncio.create_task(processor.recalibrate_tracking_offset(
+                minimum_samples=3,
+                minimum_duration_s=2.0,
+                timeout_s=1.0,
+                poll_interval_s=0.001,
+            ))
+            await asyncio.sleep(0)
+            for second in range(3):
+                jitter = (second - 1) * 0.001
+                processor.history.append({
+                    "ts": 1_700_000_060.0 + second,
+                    "pos_enu": center + np.array([jitter, -jitter, jitter]),
+                })
+            return await task
+
+        result = asyncio.run(calibrate_with_fresh_samples())
 
         self.assertEqual(processor.origin["lat"], origin_before["lat"])
         self.assertEqual(processor.origin["lon"], origin_before["lon"])
         self.assertEqual(processor.origin["h"], origin_before["h"])
         self.assertTrue(result["origin_unchanged"])
-        self.assertEqual(result["sample_count"], 60)
+        self.assertEqual(result["sample_count"], 3)
         np.testing.assert_allclose(processor.tracking_offset_enu, center, atol=1e-12)
         np.testing.assert_allclose(saved[0], center, atol=1e-12)
         np.testing.assert_allclose(

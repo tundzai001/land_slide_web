@@ -21,7 +21,6 @@ from app.landslide_analyzer import LandslideAnalyzer
 from app.mqtt.persistence import MQTTPersistenceMixin
 from app.mqtt.transport import MQTTTransportMixin
 from app.services import adjustment_failure
-from app.services.adjustment_artifacts import write_adjustment_run_status
 
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
@@ -389,11 +388,17 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             await asyncio.sleep(self.topic_reload_interval)
 
     def _adjustment_run_context(self, run_id: int) -> dict:
+        if not hasattr(self, "adjustment_run_contexts"):
+            self.adjustment_run_contexts = {}
+        if not hasattr(self, "adjustment_cluster_results"):
+            self.adjustment_cluster_results = defaultdict(dict)
         context = dict(self.adjustment_run_contexts.get(int(run_id)) or {})
         context.setdefault("run_id", int(run_id))
         context.setdefault("project_id", int(run_id))
         context.setdefault("project_code", "")
         context.setdefault("cluster_name", "Cụm")
+        self.adjustment_run_contexts.setdefault(int(run_id), context)
+        self.adjustment_cluster_results.setdefault(int(context["project_id"]), {})
         return context
 
     def _refresh_project_adjustment_state(self, project_id: int) -> tuple[str, dict]:
@@ -416,7 +421,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             failed = terminal.intersection({"ERROR", "FAILED_QUALITY_GATE"})
             completed = "COMPLETED" in terminal
             phase = "PARTIAL_FAILED" if failed and completed else (
-                "ERROR" if failed else "COMPLETED"
+                "FAILED_QUALITY_GATE" if terminal == {"FAILED_QUALITY_GATE"} else (
+                    "ERROR" if failed else "COMPLETED"
+                )
             )
         self.adjustment_phase[int(project_id)] = phase
         results = self.adjustment_cluster_results.get(int(project_id), {})
@@ -477,16 +484,6 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
             self.adjustment_phase[run_id] = "FAILED_QUALITY_GATE"
             self.adjustment_message[run_id] = message
             self.adjustment_run_contexts[run_id]["status"] = "FAILED_QUALITY_GATE"
-            write_adjustment_run_status(
-                public_project_id,
-                run_id=run_id,
-                phase="FAILED_QUALITY_GATE",
-                source=str(run_context.get("source") or "round_robin_runtime"),
-                project_code=str(adjustment.get("project_code") or run_context.get("project_code") or ""),
-                cluster_name=cluster_name,
-                cluster_index=run_context.get("cluster_index"),
-                context={"reasons": quality_gate.get("reasons") or []},
-            )
             self.adjustment_cluster_results[public_project_id][run_id] = adjustment
             phase, summary = self._refresh_project_adjustment_state(public_project_id)
             await manager.broadcast({
@@ -511,19 +508,6 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self.adjustment_phase[run_id] = "COMPLETED"
         self.adjustment_message[run_id] = completed_message
         self.adjustment_run_contexts[run_id]["status"] = "COMPLETED"
-        write_adjustment_run_status(
-            public_project_id,
-            run_id=run_id,
-            phase="COMPLETED",
-            source=str(run_context.get("source") or "round_robin_runtime"),
-            project_code=str(adjustment.get("project_code") or run_context.get("project_code") or ""),
-            cluster_name=cluster_name,
-            cluster_index=run_context.get("cluster_index"),
-            context={
-                "audit_json_url": adjustment.get("audit_json_url"),
-                "excel_report_url": adjustment.get("excel_report_url"),
-            },
-        )
         self.adjustment_cluster_results[public_project_id][run_id] = adjustment
         phase, summary = self._refresh_project_adjustment_state(public_project_id)
         self.adjustment_message[public_project_id] = f"{cluster_name}: {completed_message}"
@@ -595,16 +579,6 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self.adjustment_message[run_id] = message
         if run_id in self.adjustment_run_contexts:
             self.adjustment_run_contexts[run_id]["status"] = "ERROR"
-        write_adjustment_run_status(
-            public_project_id,
-            run_id=run_id,
-            phase="ERROR",
-            source=str(run_context.get("source") or "round_robin_runtime"),
-            project_code=str(run_context.get("project_code") or ""),
-            cluster_name=cluster_name,
-            cluster_index=run_context.get("cluster_index"),
-            context={"error": str(message), "diagnostics": diagnostics},
-        )
         failure_result = adjustment_failure.write_adjustment_failure_report(
             public_project_id,
             message,
