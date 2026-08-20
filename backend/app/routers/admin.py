@@ -1380,9 +1380,11 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             run_stem = f"{readable_time}_{cluster_label}"
                             if item.get("audit_path"):
                                 run_stem += f"_{Path(item['audit_path']).stem.rsplit('_', 1)[-1]}"
-                            folder = f"gnss_adjustments/{safe_project}/{cluster_label}"
+                            # Keep each adjustment run self-contained: the timestamp
+                            # is a folder containing its JSON audit and XLSX report.
+                            run_folder = f"gnss_adjustments/{safe_project}/{cluster_label}/{run_stem}"
                             archive.writestr(
-                                f"{folder}/{run_stem}.json",
+                                f"{run_folder}/{run_stem}.json",
                                 json.dumps(payload, ensure_ascii=False, indent=2),
                             )
                             excel_url = payload.get("excel_report_url")
@@ -1393,7 +1395,7 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                     candidate = (report_root / excel_url.split(report_prefix, 1)[1].split("?", 1)[0]).resolve()
                                     excel_path = candidate if candidate.is_relative_to(report_root.resolve()) else None
                             if excel_path and Path(excel_path).is_file():
-                                archive.write(excel_path, f"{folder}/{run_stem}.xlsx")
+                                archive.write(excel_path, f"{run_folder}/{run_stem}.xlsx")
                             elif str(payload.get("status") or "").lower() == "failed":
                                 # Older failure JSON files may predate the XLSX writer.
                                 # Keep the export contract stable by generating the
@@ -1402,7 +1404,7 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                 with tempfile.TemporaryDirectory(prefix="adjustment_export_") as temp_dir:
                                     fallback_path = Path(temp_dir) / f"{run_stem}.xlsx"
                                     _write_failure_workbook(fallback_path, payload)
-                                    archive.write(fallback_path, f"{folder}/{run_stem}.xlsx")
+                                    archive.write(fallback_path, f"{run_folder}/{run_stem}.xlsx")
 
                             adjustment_rows_by_project.setdefault(safe_project, []).append([
                                 ";".join(map(str, sorted(item["record_ids"]))),
