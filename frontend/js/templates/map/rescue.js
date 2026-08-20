@@ -216,7 +216,10 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
             <div class="dt-header-left">
                 <div class="dt-logo">
                     <div class="dt-logo-icon"><i class="bi bi-tsunami"></i></div>
-                    <span class="dt-logo-text">LS-RAPID Digital Twin</span>
+                    <span class="dt-logo-copy">
+                        <small>LS-RAPID</small>
+                        <strong class="dt-logo-text">Mô phỏng sạt lở 3D</strong>
+                    </span>
                 </div>
                 <div class="dt-status-badge" id="sim-status-badge">
                     <span class="dt-status-dot"></span>
@@ -230,13 +233,13 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                 </div>
             </div>
             <div class="dt-header-right">
-                <button class="dt-btn-icon" id="btn-toggle-panel" title="Toggle Panel">
+                <button class="dt-btn-icon" id="btn-toggle-panel" title="Ẩn hoặc hiện bảng tham số" aria-label="Ẩn hoặc hiện bảng tham số">
                     <i class="bi bi-layout-sidebar"></i>
                 </button>
-                <button class="dt-btn-icon" id="btn-fullscreen-dt" title="Fullscreen">
+                <button class="dt-btn-icon" id="btn-fullscreen-dt" title="Toàn màn hình" aria-label="Mở toàn màn hình">
                     <i class="bi bi-arrows-fullscreen"></i>
                 </button>
-                <button class="dt-btn-back" id="btn-close-dt" style="cursor:pointer; background:rgba(244,63,94,0.1); border-color:rgba(244,63,94,0.3); color:#f43f5e;">
+                <button class="dt-btn-back" id="btn-close-dt">
                     <i class="bi bi-x-lg"></i> Đóng 3D
                 </button>
             </div>
@@ -296,9 +299,20 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                     </div>
                 </div>
 
-                <div class="dt-panel-actions">
-                    <button id="btn-run-simulation" class="dt-btn-primary"><i class="bi bi-play-fill"></i> Chạy Mô phỏng</button>
-                    <button id="btn-reset-simulation" class="dt-btn-secondary"><i class="bi bi-arrow-counterclockwise"></i> Đặt lại</button>
+                <div class="dt-run-card" id="dt-run-card" data-state="ready">
+                    <div class="dt-run-context">
+                        <span class="dt-run-eyebrow">Kịch bản đang dùng</span>
+                        <strong id="dt-station-context">Kịch bản độc lập</strong>
+                        <small id="dt-station-context-detail">Chưa gắn dữ liệu từ trạm quan trắc</small>
+                    </div>
+                    <div class="dt-run-status-line" role="status" aria-live="polite">
+                        <i class="bi bi-check-circle-fill"></i>
+                        <span id="dt-run-status-text">Sẵn sàng chạy mô phỏng</span>
+                    </div>
+                    <div class="dt-panel-actions">
+                        <button id="btn-run-simulation" class="dt-btn-primary"><i class="bi bi-play-fill"></i> Chạy mô phỏng</button>
+                        <button id="btn-reset-simulation" class="dt-btn-secondary"><i class="bi bi-arrow-counterclockwise"></i> Đặt lại tham số</button>
+                    </div>
                 </div>
             </aside>
 

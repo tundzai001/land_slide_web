@@ -1,0 +1,278 @@
+/* Digital Twin workspace — navigation entry and simulation run states. */
+
+.map-simulation-nav {
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent-primary) 32%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent-primary) 9%, var(--bg-primary));
+    color: var(--accent-primary);
+    font-weight: 700;
+    white-space: nowrap;
+    transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.map-simulation-nav:hover,
+.map-simulation-nav:focus-visible {
+    border-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-primary));
+    color: var(--accent-primary);
+}
+
+.map-simulation-nav:focus-visible,
+.dt-overlay-container button:focus-visible,
+.dt-overlay-container input:focus-visible,
+.dt-overlay-container select:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--dt-accent) 42%, transparent);
+    outline-offset: 2px;
+}
+
+.map-simulation-nav:disabled {
+    cursor: wait;
+    opacity: .65;
+}
+
+.dt-overlay-container #dt-header {
+    height: 60px;
+    padding-inline: 20px;
+    background: rgba(7, 15, 27, .94);
+    box-shadow: 0 8px 28px rgba(2, 8, 23, .2);
+}
+
+.dt-logo-copy {
+    display: grid;
+    line-height: 1.1;
+}
+
+.dt-logo-copy small,
+.dt-run-eyebrow {
+    color: var(--dt-accent);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+}
+
+.dt-logo-copy .dt-logo-text {
+    font-size: 14px;
+    letter-spacing: 0;
+}
+
+.dt-overlay-container .dt-btn-icon,
+.dt-overlay-container .dt-btn-back {
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+}
+
+.dt-overlay-container .dt-btn-back {
+    justify-content: center;
+    padding-inline: 14px;
+    border-color: rgba(244, 63, 94, .34);
+    background: rgba(244, 63, 94, .1);
+    color: #fb7185;
+}
+
+.dt-overlay-container .dt-btn-back:hover {
+    border-color: #fb7185;
+    background: rgba(244, 63, 94, .18);
+    color: #fecdd3;
+}
+
+.dt-overlay-container #dt-main {
+    height: calc(100dvh - 60px);
+    margin-top: 60px;
+}
+
+.dt-overlay-container #dt-panel {
+    width: 336px;
+    min-width: 336px;
+    padding: 16px;
+    gap: 8px;
+}
+
+.dt-overlay-container #dt-panel.dt-panel-closed {
+    margin-left: -336px;
+}
+
+.dt-run-card {
+    margin-top: 8px;
+    padding: 14px;
+    border: 1px solid rgba(45, 212, 191, .24);
+    border-radius: 14px;
+    background: linear-gradient(145deg, rgba(45, 212, 191, .09), rgba(15, 23, 42, .58));
+    box-shadow: 0 14px 32px rgba(2, 8, 23, .22);
+}
+
+.dt-run-context {
+    display: grid;
+    gap: 4px;
+}
+
+.dt-run-context strong {
+    color: var(--dt-text);
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+.dt-run-context small {
+    color: var(--dt-text-dim);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.dt-run-status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    margin-top: 12px;
+    padding: 9px 10px;
+    border: 1px solid rgba(148, 163, 184, .16);
+    border-radius: 10px;
+    background: rgba(2, 8, 23, .32);
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.dt-run-status-line i {
+    color: var(--dt-accent);
+    flex: 0 0 auto;
+}
+
+.dt-run-card[data-state="running"] .dt-run-status-line {
+    border-color: rgba(56, 189, 248, .3);
+    background: rgba(14, 116, 144, .14);
+    color: #e0f2fe;
+}
+
+.dt-run-card[data-state="running"] .dt-run-status-line i {
+    color: #38bdf8;
+    animation: dt-run-spin 1s linear infinite;
+}
+
+.dt-run-card[data-state="complete"] .dt-run-status-line {
+    border-color: rgba(34, 197, 94, .32);
+    background: rgba(22, 101, 52, .16);
+    color: #dcfce7;
+}
+
+.dt-run-card[data-state="stopped"] .dt-run-status-line {
+    border-color: rgba(245, 158, 11, .3);
+    background: rgba(146, 64, 14, .14);
+    color: #fef3c7;
+}
+
+.dt-run-card .dt-panel-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 0;
+}
+
+.dt-run-card .dt-btn-primary,
+.dt-run-card .dt-btn-secondary {
+    min-height: 44px;
+    padding: 10px 12px;
+    margin: 0;
+    font-size: 12px;
+}
+
+.dt-run-card .dt-btn-secondary {
+    width: auto;
+    white-space: nowrap;
+}
+
+@keyframes dt-run-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+    .top-navbar #btn-digital-twin {
+        width: 44px;
+        min-width: 44px;
+        padding-inline: 0;
+        overflow: hidden;
+        color: transparent;
+        white-space: nowrap;
+    }
+
+    .top-navbar #btn-digital-twin i {
+        margin: 0 !important;
+        color: var(--accent-primary);
+    }
+
+    .top-navbar #btn-digital-twin .spinner-border {
+        color: var(--accent-primary);
+    }
+}
+
+@media (max-width: 768px) {
+    .dt-overlay-container #dt-header {
+        height: 56px;
+        padding-inline: 10px;
+    }
+
+    .dt-overlay-container #dt-main {
+        height: calc(100dvh - 56px);
+        margin-top: 56px;
+    }
+
+    .dt-overlay-container #dt-panel {
+        width: min(336px, calc(100vw - 24px));
+        min-width: min(336px, calc(100vw - 24px));
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+
+    .dt-header-center,
+    .dt-status-badge {
+        display: none;
+    }
+
+    .dt-logo-copy small {
+        display: none;
+    }
+
+    .dt-logo-copy .dt-logo-text {
+        font-size: 12px;
+    }
+
+    .dt-overlay-container .dt-btn-back {
+        width: 44px;
+        padding: 0;
+        overflow: hidden;
+        color: transparent;
+        white-space: nowrap;
+    }
+
+    .dt-overlay-container .dt-btn-back i {
+        margin: 0;
+        color: #fb7185;
+    }
+}
+
+@media (max-width: 430px) {
+    .dt-logo-copy .dt-logo-text {
+        display: none;
+    }
+
+    .dt-run-card .dt-panel-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .dt-run-card .dt-btn-secondary {
+        width: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .map-simulation-nav,
+    .dt-overlay-container button,
+    .dt-run-status-line i {
+        animation: none !important;
+        transition: none !important;
+    }
+}

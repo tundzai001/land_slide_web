@@ -145,7 +145,10 @@ function setupEventListeners() {
     if (btnDigitalTwin) {
         btnDigitalTwin.addEventListener('click', async () => {
             if (typeof window.openDigitalTwin !== 'function') {
+                const originalContent = btnDigitalTwin.innerHTML;
                 btnDigitalTwin.disabled = true;
+                btnDigitalTwin.setAttribute('aria-busy', 'true');
+                btnDigitalTwin.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Đang tải 3D';
                 try {
                     await window.loadFeatureLibrary?.('digital-twin');
                 } catch (error) {
@@ -154,6 +157,8 @@ function setupEventListeners() {
                     return;
                 } finally {
                     btnDigitalTwin.disabled = false;
+                    btnDigitalTwin.removeAttribute('aria-busy');
+                    btnDigitalTwin.innerHTML = originalContent;
                 }
             }
             if (currentStationData) {
@@ -162,6 +167,8 @@ function setupEventListeners() {
                 const h24 = rainData ? (rainData.rain_24h || rainData.rain_last_24h || rainData.value || 0) : 0;
                 window.openDigitalTwin({
                     id: currentStationData.id,
+                    name: currentStationData.name || currentStationData.station_name || currentStationData.code,
+                    code: currentStationData.code || currentStationData.station_code,
                     rain: { h24: parseFloat(h24) }
                 });
             } else {

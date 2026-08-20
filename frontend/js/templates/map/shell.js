@@ -14,6 +14,11 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <span>Landslide Monitor</span>
             </a>
 
+            <button type="button" id="btn-digital-twin" class="btn btn-sm map-simulation-nav"
+                aria-label="Mở mô phỏng sạt lở 3D">
+                <i class="bi bi-boxes me-1"></i> Mô phỏng 3D
+            </button>
+
             <a href="/management" id="admin-nav-btn" class="btn btn-sm btn-outline-primary"
                 style="display: none;">
                 <i class="bi bi-gear me-1"></i> Quản trị

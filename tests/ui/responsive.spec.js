@@ -11,6 +11,7 @@ const gnssPanelCss = [
   'frontend/css/map-responsive.css',
   'frontend/css/map/premium-light.css',
   'frontend/css/map/operations-polish.css',
+  'frontend/css/map/digital-twin-workspace.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
 const autoAdjustmentCss = [
@@ -32,6 +33,7 @@ const mapControlsCss = [
   'frontend/css/map-responsive.css',
   'frontend/css/map/premium-light.css',
   'frontend/css/map/operations-polish.css',
+  'frontend/css/map/digital-twin-workspace.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
 const viewports = [

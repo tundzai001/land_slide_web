@@ -147,9 +147,6 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                     <button class="btn-action w-100 secondary d-none" id="btn-long-term">
                         <i class="bi bi-calendar-range me-2"></i>Analysis
                     </button>
-                    <button class="btn-action" id="btn-digital-twin" style="background: linear-gradient(135deg, #f43f5e, #e11d48); color: white; border: none; text-decoration: none; text-align: center;">
-                        <i class="bi bi-globe-americas me-2"></i>Mô phỏng 3D
-                    </button>
                 </div>
 
                 <!-- SIREN CONTROL (in sidebar) -->

@@ -314,6 +314,32 @@ class SimulationController {
 
         // Initial FoS
         this._updateFoS();
+        this._setRunUi('ready', 'Sẵn sàng chạy mô phỏng');
+    }
+
+    _setRunUi(state, message) {
+        const card = document.getElementById('dt-run-card');
+        const status = document.getElementById('dt-run-status-text');
+        const statusIcon = card?.querySelector('.dt-run-status-line i');
+
+        if (card) card.dataset.state = state;
+        if (status) status.textContent = message;
+        if (statusIcon) {
+            statusIcon.className = state === 'running'
+                ? 'bi bi-arrow-repeat'
+                : state === 'complete'
+                    ? 'bi bi-check-circle-fill'
+                    : 'bi bi-circle-fill';
+        }
+    }
+
+    _setRunButton(running) {
+        const btnRun = document.getElementById('btn-run-simulation');
+        if (!btnRun) return;
+        btnRun.innerHTML = running
+            ? '<i class="bi bi-stop-fill"></i> Dừng mô phỏng'
+            : '<i class="bi bi-play-fill"></i> Chạy mô phỏng';
+        btnRun.classList.toggle('running', running);
     }
 
     // ─── FoS CALCULATION ────────────────────────────────────────────
@@ -376,9 +402,8 @@ class SimulationController {
         this.state = SimState.STABLE;
 
         // Update UI
-        const btnRun = document.getElementById('btn-run-simulation');
-        btnRun.innerHTML = '<i class="bi bi-stop-fill"></i> Dừng Mô phỏng';
-        btnRun.classList.add('running');
+        this._setRunButton(true);
+        this._setRunUi('running', 'Đang tính toán diễn biến sườn dốc');
 
         const playIcon = document.querySelector('#btn-tl-play i');
         playIcon.className = 'bi bi-pause-fill';
@@ -405,9 +430,8 @@ class SimulationController {
         this.isPaused = false;
         this.state = SimState.STABLE;
 
-        const btnRun = document.getElementById('btn-run-simulation');
-        btnRun.innerHTML = '<i class="bi bi-play-fill"></i> Chạy Mô phỏng';
-        btnRun.classList.remove('running');
+        this._setRunButton(false);
+        this._setRunUi('stopped', 'Đã dừng — có thể chỉnh tham số và chạy lại');
 
         document.getElementById('dt-warning-overlay').style.display = 'none';
         document.getElementById('dt-damage-stats').style.display = 'none';
@@ -448,6 +472,7 @@ class SimulationController {
         document.getElementById('tl-time').textContent = '00h00m';
 
         this._updateFoS();
+        this._setRunUi('ready', 'Đã đặt lại — sẵn sàng chạy mô phỏng');
     }
 
     // ─── MAIN ANIMATION LOOP ────────────────────────────────────────
@@ -501,9 +526,12 @@ class SimulationController {
 
         // Auto-stop when reaching the time limit
         if (this.simTime >= this.maxSimTime) {
-            this.isPaused = true;
+            this.isRunning = false;
+            this.isPaused = false;
             const playIcon = document.querySelector('#btn-tl-play i');
             if (playIcon) playIcon.className = 'bi bi-play-fill';
+            this._setRunButton(false);
+            this._setRunUi('complete', 'Mô phỏng đã hoàn tất theo thời lượng đã chọn');
         }
     }
 
@@ -702,6 +730,13 @@ window.openDigitalTwin = async function(stationData) {
 
     // Map station data to simulation params if provided
     if (stationData) {
+        const context = document.getElementById('dt-station-context');
+        const contextDetail = document.getElementById('dt-station-context-detail');
+        if (context) context.textContent = stationData.name || stationData.code || `Trạm #${stationData.id}`;
+        if (contextDetail) {
+            const code = stationData.code ? `Mã ${stationData.code}` : `ID ${stationData.id}`;
+            contextDetail.textContent = `${code} · Đã nạp dữ liệu mưa 24 giờ`;
+        }
         if (stationData.rain) {
             const rainInput = document.getElementById('param-rainfall');
             if (rainInput) {
@@ -710,6 +745,11 @@ window.openDigitalTwin = async function(stationData) {
                 rainInput.dispatchEvent(new Event('input'));
             }
         }
+    } else {
+        const context = document.getElementById('dt-station-context');
+        const contextDetail = document.getElementById('dt-station-context-detail');
+        if (context) context.textContent = 'Kịch bản độc lập';
+        if (contextDetail) contextDetail.textContent = 'Chưa gắn dữ liệu từ trạm quan trắc';
     }
 };
 
