@@ -1,8 +1,8 @@
 # Frontend module layout
 
-The React CDN shell in `js/react-app.js` lazy-loads only the assets required by
-the active route. Keep the listed order when adding modules because the legacy
-features still share a global runtime while they are migrated incrementally.
+The production shell in `js/app-runtime.js` loads the compiled bundle required
+by the active route. Keep the build order in `scripts/build-frontend.mjs` when
+adding modules because the feature files still share a global browser runtime.
 
 ## Map
 
@@ -17,7 +17,7 @@ features still share a global runtime while they are migrated incrementally.
   `js/map/guest-rescue.js`
 - Optional tools: `js/map/tools.js`
 
-Map styles live under `css/map/` in cascade order and are loaded by the SPA.
+Map styles live under `css/map/` in the cascade order declared by the build.
 
 ## Administration
 
@@ -27,14 +27,14 @@ Map styles live under `css/map/` in cascade order and are loaded by the SPA.
   Pi devices, provisioning, and lifecycle)
 - Final bootstrap: `js/admin/bootstrap.js`
 
-Admin styles live under `css/admin/` in cascade order and are loaded by the SPA.
+Admin styles live under `css/admin/` in the cascade order declared by the build.
 
 ## Templates
 
 Map and admin template partials live under `js/templates/map/` and
 `js/templates/admin/`; their small route aggregators are `map-template.js` and
-`admin-template.js`. The SPA owns the template registry.
+`admin-template.js`. The runtime owns the template registry.
 
-Do not load feature files directly from HTML. Add them to the relevant manifest
-in `js/react-app.js`, `js/map-main.js`, or `js/admin-manager.js` so loading,
-cache-busting, and initialization order stay deterministic.
+Do not load feature files directly from HTML. Add them to the relevant group in
+`scripts/build-frontend.mjs` so loading, cache-busting, and initialization order
+stay deterministic.

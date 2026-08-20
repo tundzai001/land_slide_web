@@ -134,8 +134,8 @@ function Story() {
 
 const METRICS = [['total','Toàn mạng','điểm được quản lý'],['online','Đang trực tuyến','đang gửi dữ liệu'],['stale','Cần chú ý','luồng dữ liệu chậm'],['offline','Ngoại tuyến','chưa có tín hiệu']];
 
-function NetworkSummary({ summary, updated }) {
-  return <section className="network-section" id="network" aria-labelledby="network-title"><div className="section-intro reveal"><div><span className="overline">BỨC TRANH ĐANG DIỄN RA</span><h2 id="network-title">Không phải một bản báo cáo.<br/>Là trạng thái ngay lúc này.</h2></div><p className="updated"><span></span>{updated}</p></div><div className="metric-grid" aria-live="polite">{METRICS.map(([key,label,copy]) => <article className={`metric-card metric-${key} reveal`} key={key}><span>{label}</span><strong id={`stations-${key}`}>{summary[key]}</strong><p>{copy}</p></article>)}</div></section>;
+function NetworkSummary({ summary, updated, state, onRetry }) {
+  return <section className="network-section" id="network" aria-labelledby="network-title"><div className="section-intro reveal"><div><span className="overline">BỨC TRANH ĐANG DIỄN RA</span><h2 id="network-title">Không phải một bản báo cáo.<br/>Là trạng thái ngay lúc này.</h2></div><div className={`updated updated-${state}`} role="status" aria-live="polite"><span></span><span>{updated}</span>{state === 'error' && <button type="button" onClick={onRetry}>Thử lại</button>}</div></div><div className="metric-grid" aria-live="polite" aria-busy={state === 'loading'}>{METRICS.map(([key,label,copy]) => <article className={`metric-card metric-${key} reveal`} key={key}><span>{label}</span><strong id={`stations-${key}`}>{summary[key]}</strong><p>{copy}</p></article>)}</div></section>;
 }
 
 function FinalCta({ authLink }) {
@@ -145,6 +145,8 @@ function FinalCta({ authLink }) {
 function App() {
   const [summary, setSummary] = useState({ total:'—', online:'—', stale:'—', offline:'—' });
   const [updated, setUpdated] = useState('Đang cập nhật dữ liệu…');
+  const [summaryState, setSummaryState] = useState('loading');
+  const [summaryRequest, setSummaryRequest] = useState(0);
   const [authLink, setAuthLink] = useState({ href:'/login?return_to=/management', label:'Đăng nhập' });
 
   useEffect(() => {
@@ -158,7 +160,8 @@ function App() {
         const format = new Intl.NumberFormat('vi-VN');
         setSummary(Object.fromEntries(['total','online','stale','offline'].map(key => [key, format.format(data.stations?.[key] || 0)])));
         setUpdated(`Cập nhật ${new Intl.DateTimeFormat('vi-VN',{dateStyle:'short',timeStyle:'short'}).format(new Date(data.updated_at))}`);
-      } catch (_) { if (active) setUpdated('Chưa thể cập nhật dữ liệu'); }
+        setSummaryState('ready');
+      } catch (_) { if (active) { setUpdated('Mất kết nối dữ liệu trực tiếp'); setSummaryState('error'); } }
     })();
     window.authSession?.inspect?.().then(session => {
       if (!active || session?.status !== 'authenticated') return;
@@ -166,7 +169,7 @@ function App() {
       setAuthLink({ href: canManage ? '/management' : '/map', label: canManage ? 'Quản trị hệ thống' : 'Mở bản đồ' });
     });
     return () => { active = false; };
-  }, []);
+  }, [summaryRequest]);
 
   useEffect(() => {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) {
@@ -180,7 +183,7 @@ function App() {
     return () => observer.disconnect();
   }, []);
 
-  return <><a className="skip-link" href="#main">Bỏ qua đến nội dung chính</a><Header authLink={authLink}/><main id="main"><Hero/><Story/><NetworkSummary summary={summary} updated={updated}/><FinalCta authLink={authLink}/></main><footer className="site-footer"><Brand footer/><p>Quan trắc liên tục để hành động sớm hơn.</p><span>© 2026 Aitogy</span></footer></>;
+  return <><a className="skip-link" href="#main">Bỏ qua đến nội dung chính</a><Header authLink={authLink}/><main id="main"><Hero/><Story/><NetworkSummary summary={summary} updated={updated} state={summaryState} onRetry={() => { setSummaryState('loading'); setUpdated('Đang cập nhật dữ liệu…'); setSummaryRequest(value => value + 1); }}/><FinalCta authLink={authLink}/></main><footer className="site-footer"><Brand footer/><p>Quan trắc liên tục để hành động sớm hơn.</p><span>© 2026 Aitogy</span></footer></>;
 }
 
 ReactDOM.createRoot(document.getElementById('landing-root')).render(<App />);

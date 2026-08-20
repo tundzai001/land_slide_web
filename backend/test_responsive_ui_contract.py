@@ -70,7 +70,7 @@ class ResponsiveUiContractTests(unittest.TestCase):
     def test_landing_uses_summary_endpoint_without_runtime_jsx_compiler(self):
         frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
         landing = (frontend_dir / "index.html").read_text(encoding="utf-8")
-        script = (frontend_dir / "js" / "landing.js").read_text(encoding="utf-8")
+        script = (frontend_dir / "js" / "landing.jsx").read_text(encoding="utf-8")
         app_shell = (frontend_dir / "app.html").read_text(encoding="utf-8")
         self.assertIn("/api/public/dashboard-summary", script)
         self.assertNotIn("tailwindcss", landing)

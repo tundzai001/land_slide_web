@@ -107,7 +107,7 @@
                             <label class="login-field" for="login-username"><span>Tài khoản</span><div class="login-input-shell"><i class="bi bi-person"></i><input id="login-username" name="username" autocomplete="username" placeholder="Nhập tài khoản" required autofocus></div></label>
                             <label class="login-field" for="login-password"><span>Mật khẩu</span><div class="login-password-row"><i class="bi bi-key"></i><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" required><button id="toggle-password" type="button" aria-label="Hiện mật khẩu"><i class="bi bi-eye"></i></button></div></label>
                             <label class="login-check"><input id="login-remember" type="checkbox" checked><span>Ghi nhớ đăng nhập trên thiết bị này</span></label>
-                            <div id="login-error" class="login-error" role="alert" hidden><i class="bi bi-exclamation-circle"></i><span></span></div>
+                            <div id="login-error" class="login-error" role="alert" aria-live="assertive" hidden><i class="bi bi-exclamation-circle"></i><span></span></div>
                             <button id="login-submit" class="login-submit" type="submit"><span>Đăng nhập</span><i class="bi bi-arrow-right"></i></button>
                         </form>
                         <p class="login-security-note"><i class="bi bi-lock"></i> Phiên truy cập được bảo vệ và ghi nhận.</p>
@@ -146,7 +146,9 @@
                 return;
             }
             submit.disabled = true;
+            submit.setAttribute('aria-busy', 'true');
             submit.querySelector('span').textContent = 'Đang đăng nhập…';
+            submit.querySelector('i').className = 'spinner-border spinner-border-sm';
             try {
                 const body = new URLSearchParams({username: username.value.trim(), password: password.value});
                 if (document.getElementById('login-remember').checked) body.set('scope', 'remember_me');
@@ -160,7 +162,9 @@
                 error.hidden = false;
             } finally {
                 submit.disabled = false;
+                submit.removeAttribute('aria-busy');
                 submit.querySelector('span').textContent = 'Đăng nhập';
+                submit.querySelector('i').className = 'bi bi-arrow-right';
             }
         });
     }
@@ -228,7 +232,6 @@
             window.__MAP_BUNDLE_LOADING__ = false;
             window.flushMapReadyQueue?.();
         } else {
-            document.documentElement.setAttribute('data-theme', 'light');
             await loadScript('/assets/admin-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.admin;
             setupAdminMobileNavigation();

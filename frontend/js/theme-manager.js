@@ -91,7 +91,7 @@ class ThemeManager {
         if (!this.toggleButton && !navToggle && !miniToggle) {
             const button = document.createElement('button');
             button.className = 'theme-toggle';
-            button.setAttribute('aria-label', 'Toggle theme');
+            button.setAttribute('aria-label', 'Chuyển giao diện sáng tối');
             button.innerHTML = '<i class="bi bi-sun-fill"></i>';
             button.onclick = () => this.toggle();
 

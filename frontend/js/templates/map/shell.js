@@ -16,7 +16,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
             <a href="/management" id="admin-nav-btn" class="btn btn-sm btn-outline-primary"
                 style="display: none;">
-                <i class="bi bi-stars me-1"></i> Management
+                <i class="bi bi-grid-1x2 me-1"></i> Quản trị
             </a>
         </div>
 
@@ -35,14 +35,13 @@ window.LegacyTemplateParts['shell'] = String.raw`
             <input type="checkbox" id="layer-station" class="d-none" checked>
             <input type="checkbox" id="layer-rescue" class="d-none" checked>
 
-            <button id="theme-toggle-btn" class="btn btn-link p-0" aria-label="Chuyển giao diện sáng tối"
-                style="color: var(--text-primary); font-size: 1.2rem;">
+            <button id="theme-toggle-btn" class="map-icon-button" aria-label="Chuyển giao diện sáng tối">
                 <i class="bi bi-moon-stars-fill"></i>
             </button>
 
             <!-- Auth Button -->
             <button id="auth-btn" class="btn btn-primary btn-sm">
-                <i class="bi bi-person-circle me-1"></i> Account
+                <i class="bi bi-person-circle me-1"></i> Tài khoản
             </button>
         </div>
     </nav>
@@ -54,17 +53,17 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <i class="bi bi-exclamation-triangle-fill"></i>
             </div>
             <div class="alert-details">
-                <h4 class="alert-title" id="alert-title">CRITICAL ALERT!</h4>
+                <h4 class="alert-title" id="alert-title">CẢNH BÁO NGHIÊM TRỌNG</h4>
                 <div class="alert-info-line">
-                    <span class="alert-station" id="alert-station">Station: Loading...</span>
-                    <span class="alert-message" id="alert-message"> â€¢ Message...</span>
+                    <span class="alert-station" id="alert-station">Trạm: Đang xác định…</span>
+                    <span class="alert-message" id="alert-message">Chưa có mô tả cảnh báo.</span>
                 </div>
             </div>
             <div class="alert-actions">
                 <button class="btn-alert-follow" id="btn-alert-follow">
-                    <i class="bi bi-geo-alt-fill me-1"></i> Track
+                    <i class="bi bi-geo-alt-fill me-1"></i> Theo dõi
                 </button>
-                <button class="btn-alert-dismiss" id="btn-alert-dismiss">
+                <button class="btn-alert-dismiss" id="btn-alert-dismiss" aria-label="Ẩn cảnh báo">
                     <i class="bi bi-x-lg"></i>
                 </button>
             </div>
@@ -75,7 +74,10 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <div class="station-list-sidebar" id="station-list-sidebar" role="complementary"
         aria-label="Danh sách trạm" aria-hidden="true">
         <div class="sidebar-header station-list-header">
-            <h6><i class="bi bi-hdd-network me-2"></i>Station List</h6>
+            <div>
+                <span class="map-panel-eyebrow">MẠNG QUAN TRẮC</span>
+                <h6><i class="bi bi-hdd-network me-2"></i>Danh sách trạm</h6>
+            </div>
         </div>
 
         <button class="sidebar-close-tab" id="sidebar-close-tab" type="button"
@@ -84,7 +86,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
         </button>
 
         <div class="sidebar-search station-search-field">
-            <input type="text" class="form-control form-control-sm" placeholder="Search station..." id="search-station">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input type="search" class="form-control form-control-sm" placeholder="Tìm tên hoặc mã trạm…" id="search-station" aria-label="Tìm trạm">
         </div>
 
         <div class="station-list-content" id="station-list-container">
@@ -95,6 +98,12 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <!-- MAP -->
     <div id="map">
     </div>
+
+    <aside class="map-status-legend" aria-label="Chú giải trạng thái trạm">
+        <span><i class="status-dot is-online"></i>Trực tuyến</span>
+        <span><i class="status-dot is-stale"></i>Mất tín hiệu</span>
+        <span><i class="status-dot is-offline"></i>Ngoại tuyến</span>
+    </aside>
 
     <nav class="map-bottom-nav" id="map-bottom-nav" aria-label="Điều hướng bản đồ">
         <button type="button" data-map-action="stations"><i class="bi bi-hdd-network"></i><span>Trạm</span></button>
@@ -130,7 +139,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <div class="gnss-advanced-sidepanel" id="gnss-advanced-sidepanel" role="dialog"
         aria-label="Thông tin GNSS nâng cao" aria-hidden="true">
         <div class="sidepanel-header">
-            <h6><i class="bi bi-gear-wide-connected me-2"></i>Advanced GNSS & Network Adjustment</h6>
+            <h6><i class="bi bi-gear-wide-connected me-2"></i>GNSS nâng cao &amp; bình sai mạng</h6>
             <button type="button" class="sidepanel-close" id="gnss-sidepanel-close"
                 aria-label="Đóng thông tin GNSS nâng cao"><i class="bi bi-x-lg"></i></button>
         </div>

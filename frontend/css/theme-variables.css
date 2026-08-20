@@ -4,51 +4,45 @@
 
 :root {
     /* === DEFAULT: LIGHT MODE === */
-    --bg-primary: #ffffff;
-    --bg-primary-rgb: 255, 255, 255;
-    --bg-secondary: #fdfdfd;
-    --bg-secondary-rgb: 253, 253, 253;
-    --bg-tertiary: #f1f5f9;
-    --bg-tertiary-rgb: 241, 245, 249;
+    --bg-primary: #f4f8f7;
+    --bg-primary-rgb: 244, 248, 247;
+    --bg-secondary: #ffffff;
+    --bg-secondary-rgb: 255, 255, 255;
+    --bg-tertiary: #eef5f4;
+    --bg-tertiary-rgb: 238, 245, 244;
     --bg-overlay: rgba(255, 255, 255, 0.85);
 
     /* Glassmorphism - Light */
     --glass-bg: rgba(255, 255, 255, 0.75);
-    --glass-border: rgba(0, 0, 0, 0.08);
-    --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+    --glass-border: rgba(15, 118, 110, 0.13);
+    --glass-shadow: 0 12px 36px rgba(15, 42, 46, 0.10);
 
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-muted: #94a3b8;
+    --text-primary: #0f2a2e;
+    --text-secondary: #526b70;
+    --text-muted: #70878b;
 
-    --border-color: rgba(0, 0, 0, 0.08);
-    --border-light: rgba(0, 0, 0, 0.04);
+    --border-color: #d5e3e1;
+    --border-light: #e5eeec;
 
-    /* Accent Colors - Blue Ocean Vibe */
-    --accent-primary: #0ea5e9;
-    /* Sky blue */
-    --accent-secondary: #3b82f6;
-    /* Blue */
-    --accent-success: #10b981;
-    /* Emerald */
-    --accent-warning: #f59e0b;
-    /* Amber */
-    --accent-warning-rgb: 245, 158, 11;
-    --accent-danger: #ef4444;
-    /* Red */
-    --accent-info: #06b6d4;
-    /* Cyan */
+    /* Operational semantic colors */
+    --accent-primary: #0f766e;
+    --accent-secondary: #0d9488;
+    --accent-success: #15803d;
+    --accent-warning: #b45309;
+    --accent-warning-rgb: 180, 83, 9;
+    --accent-danger: #b91c1c;
+    --accent-info: #2563eb;
 
     /* Gradients */
-    --gradient-hero: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
-    --gradient-card: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-    --gradient-button: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);
+    --gradient-hero: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+    --gradient-card: linear-gradient(145deg, #ffffff 0%, #f5faf9 100%);
+    --gradient-button: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
 
     /* Shadows - Light Mode */
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
-    --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.15);
+    --shadow-sm: 0 2px 8px rgba(15, 42, 46, 0.06);
+    --shadow-md: 0 8px 24px rgba(15, 42, 46, 0.09);
+    --shadow-lg: 0 16px 42px rgba(15, 42, 46, 0.13);
+    --shadow-xl: 0 24px 70px rgba(15, 42, 46, 0.17);
 
     /* Transitions */
     --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -57,8 +51,8 @@
 
     /* === TYPOGRAPHY & SPACING (CONSISTENT ACROSS THEMES) === */
     /* Typography */
-    --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-mono: 'Courier New', monospace;
+    --font-base: 'DM Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
 
     /* Spacing - Consistent across themes */
     --spacing-xs: 4px;
@@ -106,57 +100,41 @@
 
 /* === DARK MODE OVERRIDE === */
 [data-theme="dark"] {
-    /* === TECHNO / FUTURISTIC DARK MODE === */
-    --bg-primary: #020617;
-    --bg-primary-rgb: 2, 6, 23;
-    /* Slate 950 */
-    --bg-secondary: #0f172a;
-    --bg-secondary-rgb: 15, 23, 42;
-    /* Slate 900 */
-    --bg-tertiary: #1e293b;
-    --bg-tertiary-rgb: 30, 41, 59;
-    /* Slate 800 */
-    --bg-overlay: rgba(2, 6, 23, 0.8);
+    --bg-primary: #071a1c;
+    --bg-primary-rgb: 7, 26, 28;
+    --bg-secondary: #0b2427;
+    --bg-secondary-rgb: 11, 36, 39;
+    --bg-tertiary: #123034;
+    --bg-tertiary-rgb: 18, 48, 52;
+    --bg-overlay: rgba(7, 26, 28, 0.86);
 
     /* Glassmorphism - Dark */
-    --glass-bg: rgba(15, 23, 42, 0.8);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    --glass-bg: rgba(11, 36, 39, 0.88);
+    --glass-border: rgba(167, 193, 190, 0.18);
+    --glass-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
 
-    --text-primary: #f8fafc;
-    /* Slate 50 */
-    --text-secondary: #94a3b8;
-    /* Slate 400 */
-    --text-muted: #64748b;
-    /* Slate 500 */
+    --text-primary: #f0fdfa;
+    --text-secondary: #a7c1be;
+    --text-muted: #83a09d;
 
-    --border-color: rgba(255, 255, 255, 0.1);
-    --border-light: rgba(255, 255, 255, 0.05);
+    --border-color: #29494c;
+    --border-light: #1d3b3e;
 
-    /* Techno Accents */
-    --accent-primary: #00F2FF;
-    /* Neon Cyan */
-    --accent-secondary: #39FF14;
-    /* Safety Green */
-    --accent-info: #00F2FF;
-    /* Cyan alias */
-    --accent-success: #39FF14;
-    /* Green alias */
+    --accent-primary: #2dd4bf;
+    --accent-secondary: #5eead4;
+    --accent-info: #60a5fa;
+    --accent-success: #4ade80;
     --accent-warning: #fbbf24;
-    /* Amber 400 */
     --accent-warning-rgb: 251, 191, 36;
-    --accent-danger: #FF003C;
-    /* Cyber Red */
+    --accent-danger: #fb7185;
 
-    /* Glow Shadows */
-    --shadow-sm: 0 0 10px rgba(0, 242, 255, 0.1);
-    --shadow-md: 0 0 20px rgba(0, 242, 255, 0.15);
-    --shadow-lg: 0 0 30px rgba(0, 242, 255, 0.2);
-    --shadow-xl: 0 0 50px rgba(0, 242, 255, 0.3);
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.24);
+    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.30);
+    --shadow-xl: 0 26px 72px rgba(0, 0, 0, 0.38);
 
-    --gradient-card: linear-gradient(145deg, rgba(11, 18, 25, 0.9) 0%, rgba(5, 10, 15, 0.95) 100%);
-    --gradient-button: linear-gradient(90deg, #00C6FF 0%, #0072FF 100%);
-    /* Electric Blue Gradient */
+    --gradient-card: linear-gradient(145deg, #0b2427 0%, #071a1c 100%);
+    --gradient-button: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
 }
 
 /* Smooth font rendering for light mode */
@@ -188,7 +166,21 @@ body.theme-switching * {
 body {
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-family: var(--font-base);
+}
+
+:where(button, a, input, select, textarea, [role="button"]):focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--accent-primary) 38%, transparent);
+    outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
 
 /* === SCROLLBAR STYLING === */
