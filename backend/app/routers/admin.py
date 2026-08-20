@@ -37,10 +37,12 @@ from ..services.mqtt_topics import (
     find_mqtt_topic_conflicts,
     normalize_mqtt_topic,
 )
+from ..services.adjustment_failure import _write_failure_workbook
 import math
 import json
 import uuid
 import os
+import tempfile
 
 EXPORT_TASKS: Dict[str, dict] = {}
 EXPORT_LOCK = asyncio.Lock()
@@ -1392,6 +1394,15 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                     excel_path = candidate if candidate.is_relative_to(report_root.resolve()) else None
                             if excel_path and Path(excel_path).is_file():
                                 archive.write(excel_path, f"{folder}/{run_stem}.xlsx")
+                            elif str(payload.get("status") or "").lower() == "failed":
+                                # Older failure JSON files may predate the XLSX writer.
+                                # Keep the export contract stable by generating the
+                                # diagnostic workbook on demand instead of silently
+                                # shipping a JSON-only failure.
+                                with tempfile.TemporaryDirectory(prefix="adjustment_export_") as temp_dir:
+                                    fallback_path = Path(temp_dir) / f"{run_stem}.xlsx"
+                                    _write_failure_workbook(fallback_path, payload)
+                                    archive.write(fallback_path, f"{folder}/{run_stem}.xlsx")
 
                             adjustment_rows_by_project.setdefault(safe_project, []).append([
                                 ";".join(map(str, sorted(item["record_ids"]))),
