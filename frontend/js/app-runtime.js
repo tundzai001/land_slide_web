@@ -193,8 +193,6 @@
             const tab = button.dataset.tab;
             if (tab) {
                 window.adminManager?.switchTab(tab, button);
-                if (tab === 'tab-pi') window.adminManager?.loadPiDevices?.();
-                if (tab === 'tab-rescue') window.adminManager?.loadRescueRequests?.();
                 navigation.querySelectorAll(':scope > button').forEach(item => item.classList.toggle('active', item === button));
                 more.hidden = true;
             }

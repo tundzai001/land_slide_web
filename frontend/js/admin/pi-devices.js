@@ -8,7 +8,6 @@ class AdminPiDevicesFeature extends window.AdminManager {
         if (!isAuto && body) body.innerHTML = '<div class="ops-loading"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Đang đồng bộ thiết bị…</span></div>';
         if (!isAuto && syncButton) {
             syncButton.disabled = true;
-            syncButton.dataset.label = syncButton.innerHTML;
             syncButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang đồng bộ';
         }
         try {
@@ -34,7 +33,7 @@ class AdminPiDevicesFeature extends window.AdminManager {
         } finally {
             if (!isAuto && syncButton) {
                 syncButton.disabled = false;
-                syncButton.innerHTML = syncButton.dataset.label || '<i class="bi bi-arrow-clockwise me-1"></i>Đồng bộ';
+                syncButton.innerHTML = '<i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Đồng bộ';
             }
         }
     }

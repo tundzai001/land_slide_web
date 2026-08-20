@@ -37,14 +37,14 @@ window.LegacyTemplateParts['shell'] = String.raw`
             </div>
             <div class="nav-item">
                 <a class="nav-link" href="#" data-tab="tab-pi"
-                    onclick="window.adminManager?.switchTab('tab-pi', this); window.adminManager?.loadPiDevices()">
+                    onclick="window.adminManager?.switchTab('tab-pi', this)">
                     <i class="bi bi-cpu-fill" style="color:#0ea5e9"></i>
                     <span>Pi Devices</span>
                 </a>
             </div>
             <div class="nav-item">
                 <a class="nav-link" href="#" data-tab="tab-rescue"
-                    onclick="window.adminManager?.switchTab('tab-rescue', this); window.adminManager?.loadRescueRequests()">
+                    onclick="window.adminManager?.switchTab('tab-rescue', this)">
                     <i class="bi bi-life-preserver" style="color:#ef4444"></i>
                     <span>Cứu hộ</span>
                 </a>

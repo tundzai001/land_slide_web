@@ -89,6 +89,7 @@ test('Pi Devices is localized, filterable and responsive', async ({ page }) => {
   await page.addScriptTag({ content: source('frontend/js/admin/pi-device-actions.js') });
   await page.evaluate(() => {
     window.adminManager = Object.create(window.AdminManager.prototype);
+    window.adminManager.token = 'test-token';
     window.adminManager.currentUserRole = 'admin';
     const now = Math.floor(Date.now() / 1000);
     const devices = [
@@ -99,10 +100,19 @@ test('Pi Devices is localized, filterable and responsive', async ({ page }) => {
     window.adminManager._updatePiSummary(devices);
     window.adminManager._renderPiGrid(devices);
     window.adminManager._ensurePiActionBar();
+    window.piFetchCount = 0;
+    window.fetch = async () => {
+      window.piFetchCount += 1;
+      return new Response(JSON.stringify(devices), { status: 200 });
+    };
   });
 
   await expect(page.locator('#tab-pi')).toContainText('Quản lý thiết bị Pi');
   await expect(page.locator('.pi-grid-row')).toHaveCount(2);
+  await page.locator('[data-tab="tab-pi"]').click();
+  await expect.poll(() => page.evaluate(() => window.piFetchCount)).toBe(1);
+  await expect(page.locator('#pi-sync-button')).toBeEnabled();
+  await expect(page.locator('#pi-sync-button')).toHaveText('Đồng bộ');
   await expect(page.locator('.pi-device-list')).not.toContainText('â—');
   await expect(page.locator('.pi-device-list')).not.toContainText('â€”');
   await expect(page.locator('.pi-connection.is-offline')).toContainText('Mất kết nối');
