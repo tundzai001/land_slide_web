@@ -102,6 +102,9 @@ function setupEventListeners() {
             filterStations(e.target.value);
         });
     }
+    document.getElementById('station-status-filter')?.addEventListener('change', () => {
+        filterStations(searchInput?.value || '');
+    });
 
     // ✅ NEW: Xem biểu đồ - Mở panel giữa màn hình
     const btnShowCharts = document.getElementById('btn-show-charts');

@@ -342,9 +342,14 @@ function handleRealtimeUpdate(message) {
         if (listBadge) {
             listBadge.className = `badge station-status ${getRiskBadgeClass(riskUi.className)}`;
             listBadge.innerText = getStationListRiskLabel(riskUi.normalized);
-            if (listBadge.closest('.station-item')) {
-                listBadge.closest('.station-item').dataset.state = riskUi.normalized.toLowerCase();
+            const listItem = listBadge.closest('.station-item');
+            if (listItem) {
+                listItem.dataset.state = riskUi.normalized.toLowerCase();
+                listItem.dataset.connection = riskUi.normalized === 'OFFLINE'
+                    ? 'offline'
+                    : riskUi.normalized === 'STALE' ? 'stale' : 'online';
             }
+            filterStations(document.getElementById('search-station')?.value || '');
 
             listBadge.style.transition = '0.3s';
             listBadge.style.transform = 'scale(1.2)';

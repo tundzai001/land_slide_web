@@ -16,7 +16,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
             <a href="/management" id="admin-nav-btn" class="btn btn-sm btn-outline-primary"
                 style="display: none;">
-                <i class="bi bi-grid-1x2 me-1"></i> Quản trị
+                <i class="bi bi-gear me-1"></i> Quản trị
             </a>
         </div>
 
@@ -87,8 +87,21 @@ window.LegacyTemplateParts['shell'] = String.raw`
             <input type="search" class="form-control form-control-sm" placeholder="Tìm tên hoặc mã trạm…" id="search-station" aria-label="Tìm trạm">
         </div>
 
+        <div class="station-filter-bar">
+            <label for="station-status-filter"><i class="bi bi-funnel" aria-hidden="true"></i><span class="visually-hidden">Lọc trạng thái trạm</span>
+                <select id="station-status-filter" aria-label="Lọc trạng thái trạm">
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="online">Trực tuyến</option>
+                    <option value="alert">Đang cảnh báo</option>
+                    <option value="offline">Mất kết nối</option>
+                </select>
+            </label>
+            <span id="station-filter-result" role="status">0 trạm</span>
+        </div>
+
         <div class="station-list-content" id="station-list-container">
             <!-- Station list here -->
+            <div class="station-filter-empty" id="station-filter-empty" hidden><i class="bi bi-search"></i><span>Không có trạm phù hợp</span></div>
         </div>
     </div>
 

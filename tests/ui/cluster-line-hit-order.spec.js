@@ -6,6 +6,14 @@ const stationsSource = readFileSync(
   join(__dirname, '..', '..', 'frontend/js/map/stations.js'),
   'utf8',
 );
+const uiAlertsSource = readFileSync(
+  join(__dirname, '..', '..', 'frontend/js/map/ui-alerts.js'),
+  'utf8',
+);
+const operationsCss = readFileSync(
+  join(__dirname, '..', '..', 'frontend/css/map/operations-polish.css'),
+  'utf8',
+);
 
 test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }) => {
   await page.setContent('<div id="map"></div>');
@@ -121,7 +129,14 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
 });
 
 test('station list updates existing rows with localized connection state', async ({ page }) => {
-  await page.setContent('<div id="station-list-container"></div>');
+  await page.setContent(`
+    <aside style="width:326px">
+      <div class="sidebar-search station-search-field"><i></i><input class="form-control" id="search-station"></div>
+      <div class="station-filter-bar"><select id="station-status-filter"><option value="all">Tất cả</option><option value="offline">Mất kết nối</option></select><span id="station-filter-result"></span></div>
+      <div class="station-list-content" id="station-list-container"><div id="station-filter-empty" hidden></div></div>
+    </aside>
+  `);
+  await page.addStyleTag({ content: operationsCss });
   await page.evaluate(() => {
     window.escapeHtml = value => String(value);
     window.selectStation = () => {};
@@ -131,17 +146,37 @@ test('station list updates existing rows with localized connection state', async
       : { normalized: 'LOW', className: 'LOW' };
   });
   await page.addScriptTag({ content: stationsSource });
+  await page.addScriptTag({ content: uiAlertsSource });
 
   const result = await page.evaluate(() => {
     renderStationList([{ id: 1, name: 'Đập 1 số 1', station_code: 'Dap1_1', status: 'online' }]);
-    renderStationList([{ id: 1, name: 'Đập 1 số 1', station_code: 'Dap1_1', status: 'stale' }]);
+    renderStationList([
+      { id: 1, name: 'Đập 1 số 1', station_code: 'Dap1_1', status: 'stale' },
+      { id: 2, name: 'Đập 1 số 2', station_code: 'Dap1_2', status: 'online' },
+    ]);
+    document.getElementById('station-status-filter').value = 'offline';
+    filterStations('');
     const row = document.querySelector('.station-item');
     return {
       count: document.querySelectorAll('.station-item').length,
+      visible: document.querySelectorAll('.station-item:not([hidden])').length,
+      summary: document.getElementById('station-filter-result').textContent,
+      rowWidth: Math.round(row.getBoundingClientRect().width),
+      listWidth: Math.round(document.getElementById('station-list-container').getBoundingClientRect().width - 20),
+      searchPadding: parseFloat(getComputedStyle(document.getElementById('search-station')).paddingLeft),
       state: row.dataset.state,
       label: row.querySelector('.station-status').textContent,
     };
   });
 
-  expect(result).toEqual({ count: 1, state: 'stale', label: 'Mất tín hiệu' });
+  expect(result).toEqual({
+    count: 2,
+    visible: 1,
+    summary: '1 trạm',
+    rowWidth: result.listWidth,
+    listWidth: result.listWidth,
+    searchPadding: 42,
+    state: 'stale',
+    label: 'Mất tín hiệu',
+  });
 });

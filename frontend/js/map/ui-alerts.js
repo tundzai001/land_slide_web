@@ -149,6 +149,7 @@ function flashUpdate(el) {
 
 function filterStations(searchTerm) {
     const term = String(searchTerm || '').trim().toLocaleLowerCase('vi');
+    const statusFilter = document.getElementById('station-status-filter')?.value || 'all';
     if (window.renderReactStationList) {
         const filtered = !term ? allStations : allStations.filter(station => (
             `${station.name || ''} ${station.station_code || ''}`
@@ -160,10 +161,22 @@ function filterStations(searchTerm) {
     }
 
     const items = document.querySelectorAll('.station-item');
+    let visibleCount = 0;
     items.forEach(item => {
         const text = item.textContent.toLocaleLowerCase('vi');
-        item.style.display = text.includes(term) ? 'flex' : 'none';
+        const state = item.dataset.state;
+        const connection = item.dataset.connection;
+        const matchesStatus = statusFilter === 'all'
+            || (statusFilter === 'online' && connection === 'online')
+            || (statusFilter === 'alert' && ['medium', 'critical'].includes(state))
+            || (statusFilter === 'offline' && ['offline', 'stale'].includes(connection));
+        item.hidden = !text.includes(term) || !matchesStatus;
+        if (!item.hidden) visibleCount += 1;
     });
+    const result = document.getElementById('station-filter-result');
+    if (result) result.textContent = `${visibleCount} trạm`;
+    const empty = document.getElementById('station-filter-empty');
+    if (empty) empty.hidden = visibleCount !== 0;
 }
 
 // =========================================================================

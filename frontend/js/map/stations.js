@@ -413,6 +413,7 @@ function renderStationList(stations) {
                 if (badge.textContent.trim() !== riskLabel) badge.textContent = riskLabel;
             }
             div.dataset.state = riskUi.normalized.toLowerCase();
+            div.dataset.connection = getStationListConnection(st, riskUi);
             div.setAttribute('aria-label', `${st.name}: ${riskLabel}`);
             const name = div.querySelector('.station-item-name');
             const code = div.querySelector('.station-item-code');
@@ -424,6 +425,7 @@ function renderStationList(stations) {
             div.className = 'station-item';
             div.dataset.stationId = st.id;
             div.dataset.state = riskUi.normalized.toLowerCase();
+            div.dataset.connection = getStationListConnection(st, riskUi);
             div.setAttribute('aria-label', `${st.name}: ${riskLabel}`);
             div.innerHTML = `
                 <span class="station-state-mark" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></span>
@@ -444,6 +446,9 @@ function renderStationList(stations) {
             container.appendChild(div);
         }
     });
+    if (typeof filterStations === 'function') {
+        filterStations(document.getElementById('search-station')?.value || '');
+    }
 }
 
 function getStationListRiskLabel(level) {
@@ -454,6 +459,12 @@ function getStationListRiskLabel(level) {
         STALE: 'Mất tín hiệu',
         OFFLINE: 'Ngoại tuyến',
     }[level] || 'An toàn';
+}
+
+function getStationListConnection(station, riskUi) {
+    if (riskUi.normalized === 'OFFLINE') return 'offline';
+    if (riskUi.normalized === 'STALE') return 'stale';
+    return String(station.status || '').toLowerCase() === 'offline' ? 'offline' : 'online';
 }
 
 function getRiskBadgeClass(level) {
