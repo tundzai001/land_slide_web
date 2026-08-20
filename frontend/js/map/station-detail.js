@@ -163,6 +163,13 @@ async function selectStation(stationId, options = {}) {
         return;
     }
 
+    document.querySelectorAll('.station-item[data-station-id]').forEach(item => {
+        const selected = Number(item.dataset.stationId) === Number(stationId);
+        item.classList.toggle('selected', selected);
+        if (selected) item.setAttribute('aria-current', 'true');
+        else item.removeAttribute('aria-current');
+    });
+
     const { skipZoom = false, skipSiren = false, skipBannerRestore = false } = options;
     const selectionId = ++stationSelectionSequence;
     stationSelectionController?.abort();

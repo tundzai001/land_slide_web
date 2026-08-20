@@ -23,6 +23,7 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
     };
     window.stationClusterGroup = null;
     window.currentTileLayer = null;
+    window.tileUrls = [];
     window.TILE_URLS = { light: 'light', dark: 'dark' };
     window.TILE_OPTIONS = { light: {}, dark: {} };
     window.beginMapInteraction = () => {};
@@ -49,7 +50,7 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
     window.L = {
       map() { return fakeMap; },
       layerGroup() { return {}; },
-      tileLayer() { return { addTo() { return this; } }; },
+      tileLayer(url) { window.tileUrls.push(url); return { addTo() { return this; } }; },
       polyline(_points, options) {
         const line = {
           options,
@@ -92,6 +93,7 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
         Object.entries(window.createdPanes).map(([name, pane]) => [name, pane.style.zIndex]),
       ),
       pathPanes: window.createdPolylines.map(line => line.options.pane),
+      tileUrls: window.tileUrls,
     };
   });
 
@@ -105,6 +107,7 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
     'gnssNormalClusterPane',
     'gnssNormalClusterPane',
   ]);
+  expect(result.tileUrls).toEqual(['light']);
 
   const overlap = await page.evaluate(() => {
     window.createdPolylines[2].handlers.click({ latlng: { lat: 1.5, lng: 1.5 } });
@@ -115,4 +118,30 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
   });
   expect(overlap.labels).toEqual(['Cụm · Dap 1', 'Cụm tổng · Ca 2 dap']);
   expect(overlap.requests).toEqual([{ projectId: 7, stationIds: [1, 2, 3] }]);
+});
+
+test('station list updates existing rows with localized connection state', async ({ page }) => {
+  await page.setContent('<div id="station-list-container"></div>');
+  await page.evaluate(() => {
+    window.escapeHtml = value => String(value);
+    window.selectStation = () => {};
+    window.setStationListSidebarOpen = () => {};
+    window.getRiskPresentation = (_risk, status) => status === 'stale'
+      ? { normalized: 'STALE', className: 'STALE' }
+      : { normalized: 'LOW', className: 'LOW' };
+  });
+  await page.addScriptTag({ content: stationsSource });
+
+  const result = await page.evaluate(() => {
+    renderStationList([{ id: 1, name: 'Đập 1 số 1', station_code: 'Dap1_1', status: 'online' }]);
+    renderStationList([{ id: 1, name: 'Đập 1 số 1', station_code: 'Dap1_1', status: 'stale' }]);
+    const row = document.querySelector('.station-item');
+    return {
+      count: document.querySelectorAll('.station-item').length,
+      state: row.dataset.state,
+      label: row.querySelector('.station-status').textContent,
+    };
+  });
+
+  expect(result).toEqual({ count: 1, state: 'stale', label: 'Mất tín hiệu' });
 });

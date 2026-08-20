@@ -22,14 +22,11 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
         <div class="d-flex align-items-center gap-3">
             <!-- Compact Layer Toggle Switch -->
-            <div class="layer-toggle-switch" title="Chế độ hiển thị">
-                <i class="bi bi-hdd-network-fill layer-toggle-icon" id="icon-layer-station"></i>
-                <label class="toggle-switch-track">
-                    <input type="checkbox" id="layer-mode-toggle">
-                    <span class="toggle-switch-thumb"></span>
-                </label>
-                <i class="bi bi-exclamation-diamond-fill layer-toggle-icon text-rescue" id="icon-layer-rescue"></i>
-            </div>
+            <label class="layer-toggle-switch" aria-label="Chế độ hiển thị bản đồ">
+                <input type="checkbox" id="layer-mode-toggle" class="layer-mode-input">
+                <span class="layer-mode-option station-mode" id="icon-layer-station"><i class="bi bi-broadcast-pin"></i><span>Trạm</span></span>
+                <span class="layer-mode-option rescue-mode" id="icon-layer-rescue"><i class="bi bi-life-preserver"></i><span>Cứu hộ</span></span>
+            </label>
 
             <!-- Hidden checkboxes for JS compatibility -->
             <input type="checkbox" id="layer-station" class="d-none" checked>

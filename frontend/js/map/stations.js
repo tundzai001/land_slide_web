@@ -2,13 +2,12 @@
 // OTHER FUNCTIONS
 // =====================================================
 
-function switchMapTiles(theme) {
+function switchMapTiles() {
     if (!map) return;
-    const key = theme === 'dark' ? 'dark' : 'light';
     if (currentTileLayer) {
         map.removeLayer(currentTileLayer);
     }
-    currentTileLayer = L.tileLayer(TILE_URLS[key], TILE_OPTIONS[key]).addTo(map);
+    currentTileLayer = L.tileLayer(TILE_URLS.light, TILE_OPTIONS.light).addTo(map);
 }
 
 function createStationClusterGroup() {
@@ -47,13 +46,8 @@ function initMap() {
 
 
 
-        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-        switchMapTiles(currentTheme);
-
-        // Auto-switch tiles on theme change
-        window.addEventListener('themeChanged', (e) => {
-            switchMapTiles(e.detail?.theme || document.documentElement.getAttribute('data-theme'));
-        });
+        // Keep the same Google imagery in both UI themes. Theme only changes controls.
+        switchMapTiles();
 
         console.log('✅ [MAP] Leaflet map initialized');
     } catch (error) {
@@ -407,32 +401,38 @@ function renderStationList(stations) {
     stations.forEach(st => {
         const riskUi = getRiskPresentation(st.risk_level, st.status);
         const badgeClass = getRiskBadgeClass(riskUi.className);
+        const riskLabel = getStationListRiskLabel(riskUi.normalized);
         
-        let div = container.querySelector(`div[data-station-id="${st.id}"]`);
+        let div = container.querySelector(`[data-station-id="${st.id}"]`);
         
         if (div) {
             const badge = div.querySelector('.badge');
             if (badge) {
-                const targetClass = `badge ${badgeClass}`;
+                const targetClass = `badge station-status ${badgeClass}`;
                 if (badge.className !== targetClass) badge.className = targetClass;
-                if (badge.textContent.trim() !== riskUi.display) badge.textContent = riskUi.display;
+                if (badge.textContent.trim() !== riskLabel) badge.textContent = riskLabel;
             }
+            div.dataset.state = riskUi.normalized.toLowerCase();
+            div.setAttribute('aria-label', `${st.name}: ${riskLabel}`);
+            const name = div.querySelector('.station-item-name');
+            const code = div.querySelector('.station-item-code');
+            if (name) name.textContent = st.name;
+            if (code) code.textContent = st.station_code || 'Chưa có mã';
         } else {
             div = document.createElement('button');
             div.type = 'button';
             div.className = 'station-item';
             div.dataset.stationId = st.id;
-            div.setAttribute('aria-label', `${st.name}: ${riskUi.display}`);
+            div.dataset.state = riskUi.normalized.toLowerCase();
+            div.setAttribute('aria-label', `${st.name}: ${riskLabel}`);
             div.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="fw-bold" style="color: var(--text-primary)">${st.name}</div>
-                        <small style="color: var(--text-secondary)">${st.station_code}</small>
-                    </div>
-                    <span id="list-badge-${st.id}" class="badge ${badgeClass}">
-                        ${riskUi.display}
-                    </span>
-                </div>
+                <span class="station-state-mark" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></span>
+                <span class="station-item-copy">
+                    <strong class="station-item-name">${escapeHtml(st.name)}</strong>
+                    <small class="station-item-code">${escapeHtml(st.station_code || 'Chưa có mã')}</small>
+                </span>
+                <span id="list-badge-${st.id}" class="badge station-status ${badgeClass}">${riskLabel}</span>
+                <i class="bi bi-chevron-right station-item-chevron" aria-hidden="true"></i>
             `;
             div.addEventListener('click', () => {
                 selectStation(st.id);
@@ -444,6 +444,16 @@ function renderStationList(stations) {
             container.appendChild(div);
         }
     });
+}
+
+function getStationListRiskLabel(level) {
+    return {
+        LOW: 'An toàn',
+        MEDIUM: 'Cảnh báo',
+        CRITICAL: 'Nguy hiểm',
+        STALE: 'Mất tín hiệu',
+        OFFLINE: 'Ngoại tuyến',
+    }[level] || 'An toàn';
 }
 
 function getRiskBadgeClass(level) {

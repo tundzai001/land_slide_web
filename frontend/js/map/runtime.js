@@ -1066,20 +1066,12 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
 }
 
 const TILE_URLS = {
-    light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
 };
 const TILE_OPTIONS = {
     light: {
         maxZoom: 20,
         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-        updateWhenIdle: true,
-        updateWhenZooming: false,
-        keepBuffer: 2,
-    },
-    dark: {
-        maxZoom: 20,
-        subdomains: ['a', 'b', 'c', 'd'],
         updateWhenIdle: true,
         updateWhenZooming: false,
         keepBuffer: 2,
