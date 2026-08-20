@@ -148,188 +148,78 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
             <!-- TAB 3: DATABASE -->
             <div class="tab-pane fade" id="tab-database">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h4><i class="bi bi-database me-2"></i>Quản lý Database</h4>
-
-                    <!-- UPDATED BUTTONS -->
-                    <div class="btn-group">
-                        <button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-                        </button>
-
-                        <!-- EXCEL EXPORT -->
-                        <button class="btn btn-outline-success" onclick="window.dbManager.exportToExcel()">
-                            <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
-                        </button>
-
-                        <!-- CLEAR DATABASE -->
-                        <button class="btn btn-outline-danger" onclick="window.dbManager.clearDatabase()">
-                            <i class="bi bi-trash3 me-1"></i>Xóa DB
-                        </button>
+                <header class="ops-page-header">
+                    <div><span class="ops-eyebrow">DATA OPERATIONS</span><h4><i class="bi bi-database me-2"></i>Data Explorer</h4><p>Kiểm tra cấu hình, dữ liệu cảm biến và cảnh báo trong cùng một workspace.</p></div>
+                    <div class="ops-header-actions">
+                        <button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
+                        <button class="btn btn-success" onclick="window.dbManager.exportToExcel()"><i class="bi bi-box-arrow-down me-1"></i>Xuất dữ liệu</button>
+                        <button class="btn btn-outline-danger" onclick="window.dbManager.clearDatabase()"><i class="bi bi-trash3 me-1"></i>Xóa dữ liệu</button>
                     </div>
-                </div>
+                </header>
 
-                <!-- Filter & Search -->
-                <div class="card mb-3">
-                    <div class="card-body">
-                        <div class="row g-3">
-                            <div class="col-md-3">
-                                <select class="form-select" id="db-filter-table"
-                                    onchange="window.dbManager.applyFilter()">
-                                    <option value="all">Tất cả bảng</option>
-                                    <option value="stations">Stations</option>
-                                    <option value="devices">Devices</option>
-                                    <option value="sensor_data">Sensor Data</option>
-                                    <option value="alerts">Alerts</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6">
-                                <input type="text" class="form-control" id="db-search" placeholder="Tìm kiếm..."
-                                    oninput="window.dbManager.applyFilter()">
-                            </div>
-                            <div class="col-md-3">
-                                <select class="form-select" id="db-limit" onchange="window.dbManager.applyFilter()">
-                                    <option value="50">50 dòng</option>
-                                    <option value="100" selected>100 dòng</option>
-                                    <option value="500">500 dòng</option>
-                                    <option value="1000">1000 dòng</option>
-                                </select>
-                            </div>
+                <section class="ops-kpi-grid" aria-label="Tổng quan database">
+                    <article class="ops-kpi is-blue"><span>Trạm</span><strong id="stat-stations">--</strong><i class="bi bi-broadcast-pin" aria-hidden="true"></i></article>
+                    <article class="ops-kpi is-green"><span>Thiết bị</span><strong id="stat-devices">--</strong><i class="bi bi-cpu" aria-hidden="true"></i></article>
+                    <article class="ops-kpi is-cyan"><span>Dữ liệu cảm biến</span><strong id="stat-data">--</strong><i class="bi bi-activity" aria-hidden="true"></i></article>
+                    <article class="ops-kpi is-amber"><span>Cảnh báo</span><strong id="stat-alerts">--</strong><i class="bi bi-bell" aria-hidden="true"></i></article>
+                </section>
+
+                <section class="db-explorer" aria-label="Trình duyệt dữ liệu">
+                    <nav class="db-dataset-rail" aria-label="Chọn dataset">
+                        <div class="db-rail-heading">Datasets</div>
+                        <button class="db-dataset active" data-dataset="stations" onclick="window.dbManager.selectDataset('stations', this)"><i class="bi bi-broadcast-pin"></i><span>Trạm</span><b id="db-count-stations">--</b></button>
+                        <button class="db-dataset" data-dataset="devices" onclick="window.dbManager.selectDataset('devices', this)"><i class="bi bi-cpu"></i><span>Thiết bị</span><b id="db-count-devices">--</b></button>
+                        <button class="db-dataset" data-dataset="sensor_data" onclick="window.dbManager.selectDataset('sensor_data', this)"><i class="bi bi-activity"></i><span>Cảm biến</span><b id="db-count-sensor_data">--</b></button>
+                        <button class="db-dataset" data-dataset="alerts" onclick="window.dbManager.selectDataset('alerts', this)"><i class="bi bi-bell"></i><span>Cảnh báo</span><b id="db-count-alerts">--</b></button>
+                    </nav>
+                    <div class="db-workspace">
+                        <div class="db-toolbar">
+                            <div class="db-current-dataset"><span id="db-current-icon"><i class="bi bi-broadcast-pin"></i></span><div><strong id="db-current-title">Trạm</strong><small id="db-current-meta">Đang tải dữ liệu…</small></div></div>
+                            <label class="ops-search" for="db-search"><i class="bi bi-search"></i><input type="search" id="db-search" placeholder="Tìm trong dataset…" oninput="window.dbManager.applyFilter()"></label>
+                            <select class="form-select" id="db-sort" aria-label="Sắp xếp dữ liệu" onchange="window.dbManager.changeSort(this.value)"><option value="-id">Mới nhất</option><option value="id">Cũ nhất</option></select>
+                            <select class="form-select" id="db-limit" aria-label="Số dòng mỗi trang" onchange="window.dbManager.changePageSize(this.value)"><option value="25">25 dòng</option><option value="50" selected>50 dòng</option><option value="100">100 dòng</option></select>
                         </div>
+                        <div class="custom-table db-table-wrap">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead id="db-table-head"><tr><th>ID</th><th>Thông tin chính</th><th>Trạng thái</th><th>Thời gian</th><th aria-label="Thao tác"></th></tr></thead>
+                                <tbody id="db-table-body"><tr><td colspan="5" class="text-center py-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Đang tải dữ liệu…</p></td></tr></tbody>
+                            </table>
+                        </div>
+                        <footer class="ops-pagination"><span id="db-page-summary">0 bản ghi</span><div><button class="btn btn-outline-secondary" id="db-page-prev" onclick="window.dbManager.changePage(-1)" aria-label="Trang trước"><i class="bi bi-chevron-left"></i></button><span id="db-page-number">Trang 1</span><button class="btn btn-outline-secondary" id="db-page-next" onclick="window.dbManager.changePage(1)" aria-label="Trang sau"><i class="bi bi-chevron-right"></i></button></div></footer>
                     </div>
-                </div>
+                </section>
 
-                <!-- Database Viewer -->
-                <div class="custom-table" style="max-height: 600px; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0">
-                        <thead id="db-table-head" class="sticky-top">
-                            <tr>
-                                <th style="width: 80px;">ID</th>
-                                <th style="width: 120px;">Table</th>
-                                <th>Data Preview</th>
-                                <th style="width: 150px;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="db-table-body">
-                            <tr>
-                                <td colspan="4" class="text-center py-4">
-                                    <div class="spinner-border text-primary"></div>
-                                    <p class="mt-2 text-muted">Đang tải...</p>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Stats -->
-                <div class="row g-3 mt-3">
-                    <div class="col-md-3">
-                        <div class="card bg-primary text-white">
-                            <div class="card-body">
-                                <h6 class="mb-1">Stations</h6>
-                                <h3 id="stat-stations" class="mb-0">--</h3>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card bg-success text-white">
-                            <div class="card-body">
-                                <h6 class="mb-1">Devices</h6>
-                                <h3 id="stat-devices" class="mb-0">--</h3>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card bg-info text-white">
-                            <div class="card-body">
-                                <h6 class="mb-1">Sensor Data</h6>
-                                <h3 id="stat-data" class="mb-0">--</h3>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card bg-warning text-white">
-                            <div class="card-body">
-                                <h6 class="mb-1">Active Alerts</h6>
-                                <h3 id="stat-alerts" class="mb-0">--</h3>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div class="ops-drawer-backdrop" id="db-inspector-backdrop" onclick="window.dbManager.closeInspector()"></div>
+                <aside class="ops-drawer" id="db-inspector" aria-hidden="true" aria-labelledby="db-inspector-title">
+                    <header><div><span class="ops-eyebrow">RECORD INSPECTOR</span><h5 id="db-inspector-title">Chi tiết bản ghi</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.dbManager.closeInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header>
+                    <div id="db-inspector-content" class="ops-drawer-body"></div>
+                    <footer id="db-inspector-actions" class="ops-drawer-footer"></footer>
+                </aside>
             </div>
 
             <!-- TAB: RESCUE -->
             <div class="tab-pane fade" id="tab-rescue">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <div>
-                        <h4 class="mb-1" style="font-weight:700;">
-                            <i class="bi bi-life-preserver me-2" style="color:#ef4444"></i>QUẢN LÝ CỨU HỘ
-                        </h4>
-                        <small class="text-muted">Danh sách yêu cầu cứu hộ khẩn cấp.</small>
+                <header class="ops-page-header rescue-header">
+                    <div><span class="ops-eyebrow">INCIDENT RESPONSE</span><h4><i class="bi bi-life-preserver me-2"></i>Điều phối cứu hộ</h4><p>Ưu tiên yêu cầu đang chờ và giữ đầy đủ ngữ cảnh khi xử lý.</p></div>
+                    <button type="button" class="btn btn-primary" onclick="window.adminManager?.loadRescueRequests()"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới queue</button>
+                </header>
+                <section class="ops-kpi-grid" aria-label="Tổng quan yêu cầu cứu hộ">
+                    <article class="ops-kpi is-blue"><span>Tổng trường hợp</span><strong id="rescue-count-total">0</strong><i class="bi bi-inboxes"></i></article>
+                    <article class="ops-kpi is-red"><span>Đang chờ</span><strong id="rescue-count-pending">0</strong><i class="bi bi-exclamation-triangle"></i></article>
+                    <article class="ops-kpi is-green"><span>Đã xử lý</span><strong id="rescue-count-resolved">0</strong><i class="bi bi-check2-circle"></i></article>
+                    <article class="ops-kpi is-slate"><span>Từ chối</span><strong id="rescue-count-rejected">0</strong><i class="bi bi-slash-circle"></i></article>
+                </section>
+                <section class="rescue-console">
+                    <div class="rescue-toolbar">
+                        <div class="rescue-status-tabs" role="group" aria-label="Lọc trạng thái"><button class="active" data-status="pending" onclick="window.adminManager?.setRescueStatus('pending', this)">Đang chờ</button><button data-status="all" onclick="window.adminManager?.setRescueStatus('all', this)">Tất cả</button><button data-status="resolved" onclick="window.adminManager?.setRescueStatus('resolved', this)">Đã xử lý</button><button data-status="rejected" onclick="window.adminManager?.setRescueStatus('rejected', this)">Từ chối</button></div>
+                        <label class="ops-search" for="rescue-search"><i class="bi bi-search"></i><input type="search" id="rescue-search" placeholder="Tên, số điện thoại, nội dung…" oninput="window.adminManager?.scheduleRescueSearch()"></label>
+                        <select class="form-select" id="rescue-sort" aria-label="Sắp xếp cứu hộ" onchange="window.adminManager?.changeRescueSort(this.value)"><option value="oldest">Chờ lâu nhất</option><option value="newest">Mới nhất</option></select>
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-primary"
-                        onclick="window.adminManager?.loadRescueRequests()">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-                    </button>
-                </div>
-                <div class="alert alert-info py-2 small mb-3">
-                    Guest có thể gửi vị trí GPS + thông tin cứu hộ từ web map. Admin xử lý tại đây.
-                </div>
-                <div class="row g-2 mb-3">
-                    <div class="col-6 col-md-3">
-                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
-                            <div class="card-body py-2 px-3">
-                                <div class="small text-muted">Tổng trường hợp</div>
-                                <div class="fw-bold fs-5" id="rescue-count-total">0</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
-                            <div class="card-body py-2 px-3">
-                                <div class="small text-muted">Đang chờ</div>
-                                <div class="fw-bold fs-5 text-danger" id="rescue-count-pending">0</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
-                            <div class="card-body py-2 px-3">
-                                <div class="small text-muted">Đã xong</div>
-                                <div class="fw-bold fs-5 text-success" id="rescue-count-resolved">0</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="card border-0 shadow-sm" style="background: var(--bg-tertiary);">
-                            <div class="card-body py-2 px-3">
-                                <div class="small text-muted">Từ chối</div>
-                                <div class="fw-bold fs-5 text-secondary" id="rescue-count-rejected">0</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="custom-table" style="max-height: 600px; overflow-y: auto;">
-                    <table class="table table-hover table-sm align-middle mb-0" id="rescue-requests-table">
-                        <thead class="sticky-top">
-                            <tr>
-                                <th>ID</th>
-                                <th>Thời gian</th>
-                                <th>Người gửi</th>
-                                <th>Liên hệ</th>
-                                <th>Vị trí</th>
-                                <th>Nội dung</th>
-                                <th>Trạng thái</th>
-                                <th>Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody id="rescue-requests-body">
-                            <tr>
-                                <td colspan="8" class="text-muted text-center py-4">Chưa có dữ liệu</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                    <div id="rescue-requests-body" class="rescue-queue" aria-live="polite"><div class="ops-empty"><div class="spinner-border text-primary"></div><p>Đang tải yêu cầu cứu hộ…</p></div></div>
+                    <footer class="ops-pagination"><span id="rescue-page-summary">0 yêu cầu</span><div><button class="btn btn-outline-secondary" id="rescue-page-prev" onclick="window.adminManager?.changeRescuePage(-1)" aria-label="Trang trước"><i class="bi bi-chevron-left"></i></button><span id="rescue-page-number">Trang 1</span><button class="btn btn-outline-secondary" id="rescue-page-next" onclick="window.adminManager?.changeRescuePage(1)" aria-label="Trang sau"><i class="bi bi-chevron-right"></i></button></div></footer>
+                </section>
+                <div class="ops-drawer-backdrop" id="rescue-inspector-backdrop" onclick="window.adminManager?.closeRescueInspector()"></div>
+                <aside class="ops-drawer rescue-drawer" id="rescue-inspector" aria-hidden="true" aria-labelledby="rescue-inspector-title"><header><div><span class="ops-eyebrow">CASE DETAIL</span><h5 id="rescue-inspector-title">Chi tiết cứu hộ</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.adminManager?.closeRescueInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header><div id="rescue-inspector-content" class="ops-drawer-body"></div><footer id="rescue-inspector-actions" class="ops-drawer-footer"></footer></aside>
             </div>
 
             <!-- TAB 5: PI DEVICES -->

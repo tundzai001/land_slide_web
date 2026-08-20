@@ -31,6 +31,9 @@ class AdminManager {
         // Data cache
         this.projectsData = null;
         this.stationsData = null;
+        this.rescueState = { status: 'pending', q: '', sort: 'created_at', offset: 0, limit: 25, total: 0, rows: [] };
+        this.rescueSearchTimer = null;
+        this.selectedRescueRequest = null;
 
         // Velocity classification (Cruden & Varnes)
         this.velocityConfig = [
@@ -387,16 +390,25 @@ class AdminManager {
     async loadRescueRequests(silent = false) {
         const body = document.getElementById('rescue-requests-body');
         if (!body) return;
+        if (!silent) body.innerHTML = '<div class="ops-loading"><span class="spinner-border spinner-border-sm"></span><span>Đang tải queue cứu hộ…</span></div>';
         try {
-            const res = await fetch('/api/admin/rescue-requests?limit=100', {
+            const state = this.rescueState;
+            const query = new URLSearchParams({ offset: String(state.offset), limit: String(state.limit), sort: state.sort });
+            if (state.status !== 'all') query.set('status', state.status);
+            if (state.q) query.set('q', state.q);
+            const res = await fetch(`/api/admin/rescue-requests?${query}`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const rows = await res.json();
+            state.rows = rows || [];
+            state.total = Number(res.headers.get('X-Total-Count') || state.rows.length);
             this.renderRescueRequests(rows || []);
+            this.renderRescuePagination();
+            this.fetchRescueCounts();
         } catch (e) {
             if (!silent) window.toast?.error('Không tải được danh sách rescue requests');
-            body.innerHTML = '<tr><td colspan="8" class="text-danger">Lỗi tải dữ liệu rescue requests</td></tr>';
+            body.innerHTML = `<div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được queue</strong><p>${this.escapeHtml?.(e.message) || e.message}</p><button class="btn btn-outline-primary" onclick="window.adminManager.loadRescueRequests()">Thử lại</button></div>`;
             console.error('loadRescueRequests error:', e);
         }
     }
@@ -405,10 +417,8 @@ class AdminManager {
         const body = document.getElementById('rescue-requests-body');
         if (!body) return;
 
-        this.updateRescueSummary(rows);
-
         if (!Array.isArray(rows) || rows.length === 0) {
-            body.innerHTML = '<tr><td colspan="8" class="text-muted">Chưa có yêu cầu cứu hộ</td></tr>';
+            body.innerHTML = '<div class="ops-empty"><i class="bi bi-shield-check"></i><strong>Queue đang trống</strong><p>Không có yêu cầu phù hợp với bộ lọc hiện tại.</p></div>';
             return;
         }
 
@@ -418,10 +428,6 @@ class AdminManager {
 
         body.innerHTML = rows.map(r => {
             const ts = r.created_at ? new Date(r.created_at * 1000).toLocaleString('vi-VN') : '--';
-            const mapsLink = Number.isFinite(Number(r.latitude)) && Number.isFinite(Number(r.longitude))
-                ? `<a href="https://maps.google.com/?q=${r.latitude},${r.longitude}" target="_blank" rel="noopener">${Number(r.latitude).toFixed(6)}, ${Number(r.longitude).toFixed(6)}</a>`
-                : '--';
-
             const rescueTypeLabelMap = {
                 can_cuu_ho: 'Cần cứu hộ',
                 can_nhu_yeu_pham: 'Cần nhu yếu phẩm',
@@ -430,79 +436,114 @@ class AdminManager {
             };
             const rescueType = String(r.rescue_type || '').toLowerCase();
             const rescueTypeLabel = rescueTypeLabelMap[rescueType] || '--';
-            const sourceLink = String(r.source_link || '').trim();
-            const isSafeSourceLink = /^https?:\/\//i.test(sourceLink);
-            const sourceLinkHtml = (sourceLink && isSafeSourceLink)
-                ? `<a href="${esc(sourceLink)}" target="_blank" rel="noopener">Mở link nguồn</a>`
-                : '<span class="text-muted">--</span>';
             const provinceCity = String(r.province_city || '').trim() || '--';
-            const imageUrl = String(r.image_url || r.image_data_url || '').trim();
-            const protectedImageUrl = /^\/api\/admin\/rescue-images\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(imageUrl)
-                ? imageUrl
-                : '';
-            const imageHtml = protectedImageUrl
-                ? `<img data-auth-src="${esc(protectedImageUrl)}" alt="rescue-evidence" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ddd;">`
-                : '<span class="text-muted">--</span>';
-
-            const detailCellHtml = `
-                <div class="small mb-1"><strong>Mô tả:</strong> ${esc(r.message || '--')}</div>
-                <div class="small mb-1"><strong>Phân loại:</strong> ${esc(rescueTypeLabel)}</div>
-                <div class="small mb-1"><strong>Tỉnh/TP:</strong> ${esc(provinceCity)}</div>
-                <div class="small mb-1"><strong>Nguồn:</strong> ${sourceLinkHtml}</div>
-                <div class="small"><strong>Ảnh:</strong> ${imageHtml}</div>
-            `;
-
-            const statusBadge = r.status === 'resolved'
-                ? '<span class="badge bg-success">resolved</span>'
-                : r.status === 'rejected'
-                    ? '<span class="badge bg-secondary">rejected</span>'
-                    : '<span class="badge bg-danger">pending</span>';
-
-            const actionBtns = r.status === 'pending'
-                ? `<div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-outline-success" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'resolved')">Done</button>
-                        <button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${r.id}, 'rejected')">Reject</button>
-                   </div>`
-                : `<button class="btn btn-sm btn-outline-danger" onclick="window.adminManager.deleteRescueRequest(${r.id})">
-                        <i class="bi bi-trash me-1"></i>Xóa
-                   </button>`;
-
-            return `<tr>
-                <td>${r.id}</td>
-                <td>${esc(ts)}</td>
-                <td>${esc(r.requester_name || '--')}</td>
-                <td>${esc(r.phone || '--')}</td>
-                <td>${mapsLink}</td>
-                <td>${detailCellHtml}</td>
-                <td>${statusBadge}</td>
-                <td>${actionBtns}</td>
-            </tr>`;
+            const urgency = this.getRescueUrgency(r);
+            return `<article class="rescue-case ${urgency.className}" tabindex="0" onclick="window.adminManager.openRescueInspector(${r.id})" onkeydown="if(event.key==='Enter') window.adminManager.openRescueInspector(${r.id})">
+                <div class="rescue-case-priority"><span>${esc(urgency.label)}</span><small>${esc(this.formatRescueAge(r.created_at))}</small></div>
+                <div class="rescue-case-main"><div class="rescue-case-title"><strong>${esc(rescueTypeLabel)}</strong><span>#${r.id}</span></div><p>${esc(r.message || 'Không có mô tả')}</p><div class="rescue-case-meta"><span><i class="bi bi-person"></i>${esc(r.requester_name || 'Ẩn danh')}</span><span><i class="bi bi-telephone"></i>${esc(r.phone || 'Không có SĐT')}</span><span><i class="bi bi-geo-alt"></i>${esc(provinceCity)}</span></div></div>
+                <div class="rescue-case-end"><time>${esc(ts)}</time><span class="management-status ${r.status === 'resolved' ? 'is-success' : r.status === 'rejected' ? 'is-secondary' : 'is-warning'}">${r.status === 'resolved' ? 'Đã xử lý' : r.status === 'rejected' ? 'Từ chối' : 'Đang chờ'}</span><button class="management-icon-btn btn btn-outline-secondary" aria-label="Mở case #${r.id}"><i class="bi bi-chevron-right"></i></button></div>
+            </article>`;
         }).join('');
-        void window.hydrateAuthenticatedImages?.(body);
     }
 
-    updateRescueSummary(rows) {
-        const totalEl = document.getElementById('rescue-count-total');
-        const pendingEl = document.getElementById('rescue-count-pending');
-        const resolvedEl = document.getElementById('rescue-count-resolved');
-        const rejectedEl = document.getElementById('rescue-count-rejected');
+    getRescueUrgency(row) {
+        if (row.status !== 'pending') return { label: 'Đã đóng', className: 'is-closed' };
+        const ageSeconds = Math.max(0, Date.now() / 1000 - Number(row.created_at || 0));
+        const urgentType = ['can_cuu_ho', 'can_cuu_ho_xe'].includes(String(row.rescue_type || '').toLowerCase());
+        if (urgentType && ageSeconds >= 1800) return { label: 'Khẩn cấp', className: 'is-critical' };
+        if (urgentType || ageSeconds >= 3600) return { label: 'Ưu tiên cao', className: 'is-high' };
+        if (String(row.rescue_type || '').toLowerCase() === 'can_nhu_yeu_pham') return { label: 'Ưu tiên vừa', className: 'is-medium' };
+        return { label: 'Thông thường', className: 'is-normal' };
+    }
 
-        const safeRows = Array.isArray(rows) ? rows : [];
-        const counts = safeRows.reduce((acc, row) => {
-            const status = String(row?.status || '').toLowerCase();
-            if (status === 'pending') acc.pending += 1;
-            else if (status === 'resolved') acc.resolved += 1;
-            else if (status === 'rejected') acc.rejected += 1;
-            return acc;
-        }, { pending: 0, resolved: 0, rejected: 0 });
+    formatRescueAge(timestamp) {
+        const minutes = Math.max(0, Math.floor((Date.now() / 1000 - Number(timestamp || 0)) / 60));
+        if (minutes < 1) return 'Vừa gửi';
+        if (minutes < 60) return `Chờ ${minutes} phút`;
+        const hours = Math.floor(minutes / 60);
+        return hours < 24 ? `Chờ ${hours} giờ` : `Chờ ${Math.floor(hours / 24)} ngày`;
+    }
 
-        if (totalEl) totalEl.textContent = String(safeRows.length);
-        if (pendingEl) pendingEl.textContent = String(counts.pending);
-        if (resolvedEl) resolvedEl.textContent = String(counts.resolved);
-        if (rejectedEl) rejectedEl.textContent = String(counts.rejected);
+    async fetchRescueCounts() {
+        try {
+            const statuses = ['pending', 'resolved', 'rejected'];
+            const counts = await Promise.all(statuses.map(async status => {
+                const res = await fetch(`/api/admin/rescue-requests?status=${status}&limit=1`, { headers: { 'Authorization': `Bearer ${this.token}` } });
+                return Number(res.headers.get('X-Total-Count') || 0);
+            }));
+            const values = { pending: counts[0], resolved: counts[1], rejected: counts[2] };
+            values.total = counts.reduce((sum, value) => sum + value, 0);
+            Object.entries(values).forEach(([key, value]) => { const el = document.getElementById(`rescue-count-${key}`); if (el) el.textContent = value.toLocaleString('vi-VN'); });
+        } catch (error) {
+            console.warn('fetchRescueCounts error:', error);
+        }
+    }
+
+    setRescueStatus(status, button) {
+        this.rescueState.status = status;
+        this.rescueState.offset = 0;
+        document.querySelectorAll('.rescue-status-tabs button').forEach(el => el.classList.toggle('active', el === button));
+        this.loadRescueRequests();
+    }
+
+    scheduleRescueSearch() {
+        clearTimeout(this.rescueSearchTimer);
+        this.rescueSearchTimer = setTimeout(() => {
+            this.rescueState.q = document.getElementById('rescue-search')?.value.trim() || '';
+            this.rescueState.offset = 0;
+            this.loadRescueRequests();
+        }, 250);
+    }
+
+    changeRescueSort(value) {
+        this.rescueState.sort = value === 'newest' ? '-created_at' : 'created_at';
+        this.rescueState.offset = 0;
+        this.loadRescueRequests();
+    }
+
+    changeRescuePage(direction) {
+        const next = this.rescueState.offset + direction * this.rescueState.limit;
+        if (next < 0 || next >= this.rescueState.total) return;
+        this.rescueState.offset = next;
+        this.loadRescueRequests();
+    }
+
+    renderRescuePagination() {
+        const state = this.rescueState;
+        const start = state.total ? state.offset + 1 : 0;
+        const end = Math.min(state.offset + state.rows.length, state.total);
+        document.getElementById('rescue-page-summary').textContent = `Hiển thị ${start}–${end} / ${state.total}`;
+        document.getElementById('rescue-page-number').textContent = `Trang ${Math.floor(state.offset / state.limit) + 1}`;
+        document.getElementById('rescue-page-prev').disabled = state.offset === 0;
+        document.getElementById('rescue-page-next').disabled = state.offset + state.limit >= state.total;
+    }
+
+    openRescueInspector(id) {
+        const row = this.rescueState.rows.find(item => Number(item.id) === Number(id));
+        if (!row) return;
+        this.selectedRescueRequest = row;
+        const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+        const imageUrl = /^\/api\/admin\/rescue-images\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(String(row.image_url || '')) ? row.image_url : '';
+        const mapUrl = `https://maps.google.com/?q=${encodeURIComponent(`${row.latitude},${row.longitude}`)}`;
+        const urgency = this.getRescueUrgency(row);
+        document.getElementById('rescue-inspector-title').textContent = `Yêu cầu #${row.id}`;
+        document.getElementById('rescue-inspector-content').innerHTML = `<section class="drawer-summary"><span class="rescue-priority ${urgency.className}">${esc(urgency.label)}</span><h6>${esc(row.requester_name || 'Người gửi ẩn danh')}</h6><p>${esc(row.phone || 'Không có số điện thoại')} · ${esc(this.formatRescueAge(row.created_at))}</p></section>${imageUrl ? `<img class="rescue-evidence" data-auth-src="${esc(imageUrl)}" alt="Ảnh hiện trường của yêu cầu #${row.id}">` : ''}<dl class="drawer-facts"><div><dt>Loại yêu cầu</dt><dd>${esc(row.rescue_type || '--')}</dd></div><div><dt>Khu vực</dt><dd>${esc(row.province_city || '--')}</dd></div><div><dt>Tọa độ</dt><dd><a href="${mapUrl}" target="_blank" rel="noopener">${Number(row.latitude).toFixed(6)}, ${Number(row.longitude).toFixed(6)}</a></dd></div><div><dt>Độ chính xác GPS</dt><dd>${row.accuracy_m ? `±${Number(row.accuracy_m).toFixed(1)} m` : '--'}</dd></div></dl><section class="drawer-message"><span>Mô tả</span><p>${esc(row.message || '--')}</p></section><label class="form-label" for="rescue-admin-note">Ghi chú xử lý</label><textarea class="form-control" id="rescue-admin-note" rows="4" maxlength="500" placeholder="Ghi lại kết quả liên hệ hoặc lý do xử lý…">${esc(row.admin_note || '')}</textarea>`;
+        document.getElementById('rescue-inspector-actions').innerHTML = row.status === 'pending' ? `<button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${row.id}, 'rejected')">Từ chối</button><button class="btn btn-success" onclick="window.adminManager.updateRescueRequestStatus(${row.id}, 'resolved')"><i class="bi bi-check2-circle me-1"></i>Đánh dấu đã xử lý</button>` : `<button class="btn btn-outline-danger" onclick="window.adminManager.deleteRescueRequest(${row.id})"><i class="bi bi-trash3 me-1"></i>Xóa case</button>`;
+        document.getElementById('rescue-inspector').classList.add('open');
+        document.getElementById('rescue-inspector').setAttribute('aria-hidden', 'false');
+        document.getElementById('rescue-inspector-backdrop').classList.add('show');
+        document.querySelector('#rescue-inspector > header button')?.focus();
+        void window.hydrateAuthenticatedImages?.(document.getElementById('rescue-inspector-content'));
+    }
+
+    closeRescueInspector() {
+        document.getElementById('rescue-inspector')?.classList.remove('open');
+        document.getElementById('rescue-inspector')?.setAttribute('aria-hidden', 'true');
+        document.getElementById('rescue-inspector-backdrop')?.classList.remove('show');
     }
 
     async updateRescueRequestStatus(requestId, status) {
+        if (status === 'rejected' && !window.confirm(`Từ chối yêu cầu cứu hộ #${requestId}?`)) return;
         try {
             const res = await fetch(`/api/admin/rescue-requests/${requestId}`, {
                 method: 'PATCH',
@@ -510,10 +551,11 @@ class AdminManager {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify({ status })
+                body: JSON.stringify({ status, admin_note: document.getElementById('rescue-admin-note')?.value.trim() || null })
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             window.toast?.success(`Rescue request #${requestId} -> ${status}`);
+            this.closeRescueInspector();
             await this.loadRescueRequests(true);
         } catch (e) {
             window.toast?.error('Cập nhật trạng thái rescue request thất bại');
@@ -539,6 +581,7 @@ class AdminManager {
             }
 
             window.toast?.success(`Đã xóa rescue request #${requestId}`);
+            this.closeRescueInspector();
             await this.loadRescueRequests(true);
         } catch (e) {
             window.toast?.error(`Xóa rescue request thất bại: ${e.message}`);

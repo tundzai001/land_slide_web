@@ -7,6 +7,13 @@ class DatabaseManager {
         this.token = window.authSession?.getToken() || null;
         this.allData = [];
         this.filteredData = [];
+        this.currentDataset = 'stations';
+        this.offset = 0;
+        this.limit = 50;
+        this.total = 0;
+        this.sort = '-id';
+        this.searchTimer = null;
+        this.selectedRecord = null;
         this.currentEditModal = null;
         this.exportProjects = [];
         this.exportStations = [];
@@ -54,143 +61,105 @@ class DatabaseManager {
     }
 
     async loadAllData() {
-        console.log('📡 [DB MANAGER] Loading all database records...');
-
         const tbody = document.getElementById('db-table-body');
-        if (tbody) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="4" class="text-center py-4">
-                        <div class="spinner-border text-primary"></div>
-                        <p class="mt-2">Đang tải dữ liệu...</p>
-                    </td>
-                </tr>
-            `;
-        }
-
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="5"><div class="ops-loading"><span class="spinner-border spinner-border-sm" role="status"></span><span>Đang tải dataset…</span></div></td></tr>';
+        document.getElementById('db-current-meta').textContent = 'Đang đồng bộ dữ liệu…';
         try {
-            // Tải dữ liệu song song
-            const [stations, devices, sensorData, alerts] = await Promise.all([
-                this.fetchTable('stations'),
-                this.fetchTable('devices'),
-                this.fetchTable('sensor-data'),
-                this.fetchTable('alerts')
-            ]);
-
-            // Gộp dữ liệu và đánh dấu bảng nguồn (_table)
-            this.allData = [
-                ...stations.map(s => ({ ...s, _table: 'stations' })),
-                ...devices.map(d => ({ ...d, _table: 'devices' })),
-                ...sensorData.map(sd => ({ ...sd, _table: 'sensor_data' })),
-                ...alerts.map(a => ({ ...a, _table: 'alerts' }))
-            ];
-
-            // Cập nhật số liệu thống kê từ server (nhanh, chính xác)
-            this.fetchStats();
-
-            this.applyFilter();
-
-            console.log(`✅ [DB MANAGER] Loaded ${this.allData.length} records`);
-
+            await Promise.all([this.fetchCurrentDataset(), this.fetchStats()]);
         } catch (e) {
-            console.error('❌ [DB MANAGER] Error loading data:', e);
-            if (tbody) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" class="text-center py-4">
-                            <i class="bi bi-exclamation-triangle text-danger fs-1"></i>
-                            <p class="text-danger mt-2">Lỗi tải dữ liệu: ${e.message}</p>
-                        </td>
-                    </tr>
-                `;
-            }
-            window.toast?.error('Không thể tải database');
+            console.error('[DB MANAGER] load error:', e);
+            tbody.innerHTML = `<tr><td colspan="5"><div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được dữ liệu</strong><p>${this.escapeHtml(e.message)}</p><button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()">Thử lại</button></div></td></tr>`;
         }
     }
 
-    async fetchTable(endpoint) {
-        try {
-            const res = await fetch(`/api/admin/db/${endpoint}`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
+    datasetConfig(dataset = this.currentDataset) {
+        return {
+            stations: { endpoint: 'stations', title: 'Trạm', icon: 'bi-broadcast-pin' },
+            devices: { endpoint: 'devices', title: 'Thiết bị', icon: 'bi-cpu' },
+            sensor_data: { endpoint: 'sensor-data', title: 'Dữ liệu cảm biến', icon: 'bi-activity' },
+            alerts: { endpoint: 'alerts', title: 'Cảnh báo', icon: 'bi-bell' }
+        }[dataset];
+    }
 
-            if (!res.ok) {
-                console.warn(`⚠️ Failed to load ${endpoint}: ${res.status}`);
-                return [];
-            }
-
-            return await res.json();
-        } catch (e) {
-            console.error(`❌ Error fetching ${endpoint}:`, e);
-            return [];
-        }
+    async fetchCurrentDataset() {
+        const config = this.datasetConfig();
+        const query = new URLSearchParams({ offset: String(this.offset), limit: String(this.limit), sort: this.sort });
+        const search = document.getElementById('db-search')?.value.trim() || '';
+        if (search && ['stations', 'devices'].includes(this.currentDataset)) query.set('q', search);
+        const res = await fetch(`/api/admin/db/${config.endpoint}?${query}`, { headers: { 'Authorization': `Bearer ${this.token}` } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const rows = await res.json();
+        this.total = Number(res.headers.get('X-Total-Count') || rows.length || 0);
+        this.allData = rows.map(row => ({ ...row, _table: this.currentDataset }));
+        this.filteredData = search && !['stations', 'devices'].includes(this.currentDataset)
+            ? this.allData.filter(row => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
+            : this.allData;
+        this.renderTable();
     }
 
     applyFilter() {
-        const tableFilter = document.getElementById('db-filter-table')?.value || 'all';
-        const searchTerm = document.getElementById('db-search')?.value.toLowerCase() || '';
-        const limit = parseInt(document.getElementById('db-limit')?.value || '100');
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => { this.offset = 0; this.loadAllData(); }, 250);
+    }
 
-        let filtered = tableFilter === 'all'
-            ? this.allData
-            : this.allData.filter(item => item._table === tableFilter);
+    selectDataset(dataset, button) {
+        if (!this.datasetConfig(dataset)) return;
+        this.currentDataset = dataset;
+        this.offset = 0;
+        document.querySelectorAll('.db-dataset').forEach(el => el.classList.toggle('active', el === button));
+        const config = this.datasetConfig();
+        document.getElementById('db-current-title').textContent = config.title;
+        document.getElementById('db-current-icon').innerHTML = `<i class="bi ${config.icon}"></i>`;
+        document.getElementById('db-search').value = '';
+        document.getElementById('db-search').placeholder = ['stations', 'devices'].includes(dataset)
+            ? 'Tìm trong toàn bộ dataset…'
+            : 'Lọc các bản ghi trên trang này…';
+        this.closeInspector();
+        this.loadAllData();
+    }
 
-        if (searchTerm) {
-            filtered = filtered.filter(item => {
-                const searchable = JSON.stringify(item).toLowerCase();
-                return searchable.includes(searchTerm);
-            });
-        }
+    changeSort(value) {
+        this.sort = value === 'id' ? 'id' : '-id';
+        this.offset = 0;
+        this.loadAllData();
+    }
 
-        this.filteredData = filtered.slice(0, limit);
-        this.renderTable();
+    changePageSize(value) {
+        this.limit = Math.max(25, Math.min(100, Number(value) || 50));
+        this.offset = 0;
+        this.loadAllData();
+    }
+
+    changePage(direction) {
+        const nextOffset = this.offset + direction * this.limit;
+        if (nextOffset < 0 || nextOffset >= this.total) return;
+        this.offset = nextOffset;
+        this.loadAllData();
     }
 
     renderTable() {
         const tbody = document.getElementById('db-table-body');
         if (!tbody) return;
 
-        if (this.filteredData.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="4" class="text-center py-4">
-                        <i class="bi bi-inbox fs-1 text-muted"></i>
-                        <p class="text-muted mt-2 font-monospace">NO_DATA_FOUND</p>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tbody.innerHTML = this.filteredData.map(item => {
-            const badgeColor = this.getTableBadgeColor(item._table);
-            const previewData = this.getPreviewData(item);
-
-            return `
-                <tr class="db-row font-monospace" style="font-size: 0.9rem;">
-                    <td class="text-muted">#${item.id}</td>
-                    <td><span class="badge ${badgeColor} bg-opacity-10 border border-${badgeColor.replace('bg-', '')} text-${badgeColor.replace('bg-', '')}">${item._table.toUpperCase()}</span></td>
-                    <td>
-                        <div class="terminal-text" style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary);">
-                            <span class="text-muted me-2">>></span>${previewData}
-                        </div>
-                    </td>
-                    <td>
-                        <div class="btn-group btn-group-sm opacity-50 hover-opacity-100">
-                            <button class="btn btn-outline-secondary border-0" onclick="window.dbManager.viewRecord('${item._table}', ${item.id})" title="VIEW">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                            <button class="btn btn-outline-secondary border-0" onclick="window.dbManager.editRecord('${item._table}', ${item.id})" title="EDIT">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-outline-danger border-0" onclick="window.dbManager.deleteRecord('${item._table}', ${item.id})" title="DELETE">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `;
+        if (!this.filteredData.length) tbody.innerHTML = '<tr><td colspan="5"><div class="ops-empty"><i class="bi bi-inbox"></i><strong>Không có bản ghi phù hợp</strong><p>Thử đổi từ khóa hoặc dataset.</p></div></td></tr>';
+        else tbody.innerHTML = this.filteredData.map(item => {
+            const status = this.getRecordStatus(item);
+            return `<tr class="db-row" tabindex="0" onclick="window.dbManager.viewRecord('${item._table}', ${item.id})" onkeydown="if(event.key==='Enter') window.dbManager.viewRecord('${item._table}', ${item.id})">
+                <td><span class="db-id">#${item.id}</span></td>
+                <td><strong class="db-primary">${this.escapeHtml(this.getPreviewData(item))}</strong><small>${this.escapeHtml(this.getRecordSecondary(item))}</small></td>
+                <td><span class="management-status ${status.className}"><i class="bi bi-circle-fill"></i>${this.escapeHtml(status.label)}</span></td>
+                <td><span class="db-time">${this.escapeHtml(this.getRecordTime(item))}</span></td>
+                <td><button class="management-icon-btn btn btn-outline-secondary" onclick="event.stopPropagation();window.dbManager.viewRecord('${item._table}', ${item.id})" aria-label="Xem bản ghi #${item.id}"><i class="bi bi-chevron-right"></i></button></td>
+            </tr>`;
         }).join('');
+        const start = this.total ? this.offset + 1 : 0;
+        const end = Math.min(this.offset + this.allData.length, this.total);
+        document.getElementById('db-current-meta').textContent = `${this.total.toLocaleString('vi-VN')} bản ghi`;
+        document.getElementById('db-page-summary').textContent = `Hiển thị ${start}–${end} / ${this.total.toLocaleString('vi-VN')}`;
+        document.getElementById('db-page-number').textContent = `Trang ${Math.floor(this.offset / this.limit) + 1}`;
+        document.getElementById('db-page-prev').disabled = this.offset === 0;
+        document.getElementById('db-page-next').disabled = this.offset + this.limit >= this.total;
     }
 
     getTableBadgeColor(table) {
@@ -205,26 +174,44 @@ class DatabaseManager {
 
     getPreviewData(item) {
         if (item._table === 'stations') {
-            return `${item.station_code} - ${item.name} (${item.status})`;
+            return `${item.station_code || '--'} · ${item.name || 'Trạm chưa đặt tên'}`;
         }
         if (item._table === 'devices') {
-            return `${item.device_code} - ${item.device_type} - Topic: ${item.mqtt_topic || 'N/A'}`;
+            return `${item.device_code || '--'} · ${item.name || item.device_type || 'Thiết bị'}`;
         }
         if (item._table === 'sensor_data') {
-            const timestamp = new Date(item.timestamp * 1000).toLocaleString('vi-VN');
-            return `[${timestamp}] ${item.sensor_type}: ${JSON.stringify(item.data).substring(0, 100)}...`;
+            return `${String(item.sensor_type || 'sensor').toUpperCase()} · Trạm #${item.station_id ?? '--'}`;
         }
         if (item._table === 'alerts') {
-            return `[${item.level}] ${item.category}: ${item.message}`;
+            return `${item.category || 'Cảnh báo'} · ${item.message || '--'}`;
         }
-        return JSON.stringify(item).substring(0, 100);
+        return `Bản ghi #${item.id}`;
+    }
+
+    getRecordSecondary(item) {
+        if (item._table === 'devices') return item.mqtt_topic || item.device_type || 'Không có MQTT topic';
+        if (item._table === 'sensor_data') return JSON.stringify(item.data || {}).slice(0, 110);
+        if (item._table === 'alerts') return `Trạm #${item.station_id ?? '--'} · ${item.level || '--'}`;
+        return `Dự án #${item.project_id ?? '--'} · ${item.location || 'Chưa có vị trí'}`;
+    }
+
+    getRecordStatus(item) {
+        if (item._table === 'alerts') return item.is_resolved ? { label: 'Đã xử lý', className: 'is-success' } : { label: item.level || 'Đang mở', className: 'is-warning' };
+        if (item._table === 'devices') return item.is_active ? { label: 'Hoạt động', className: 'is-success' } : { label: 'Tạm dừng', className: 'is-secondary' };
+        if (item._table === 'stations') return String(item.status).toLowerCase() === 'online' ? { label: 'Online', className: 'is-success' } : { label: item.status || 'Chưa rõ', className: 'is-secondary' };
+        return { label: 'Đã nhận', className: 'is-active' };
+    }
+
+    getRecordTime(item) {
+        const timestamp = item.timestamp || item.last_data_time || item.last_update || item.updated_at || item.created_at;
+        if (!timestamp) return '--';
+        const millis = Number(timestamp) > 1e12 ? Number(timestamp) : Number(timestamp) * 1000;
+        return new Date(millis).toLocaleString('vi-VN');
     }
 
     updateStats(stats) {
-        document.getElementById('stat-stations').textContent = stats.stations;
-        document.getElementById('stat-devices').textContent = stats.devices;
-        document.getElementById('stat-data').textContent = stats.sensor_data;
-        document.getElementById('stat-alerts').textContent = stats.alerts;
+        const mapping = { stations: ['stat-stations', 'db-count-stations'], devices: ['stat-devices', 'db-count-devices'], sensor_data: ['stat-data', 'db-count-sensor_data'], alerts: ['stat-alerts', 'db-count-alerts'] };
+        Object.entries(mapping).forEach(([key, ids]) => ids.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = Number(stats[key] || 0).toLocaleString('vi-VN'); }));
     }
 
     async fetchStats() {
@@ -248,12 +235,33 @@ class DatabaseManager {
     viewRecord(table, id) {
         const record = this.allData.find(r => r._table === table && r.id === id);
         if (!record) return;
+        this.selectedRecord = record;
+        document.getElementById('db-inspector-title').textContent = `${this.datasetConfig(table)?.title || table} #${id}`;
+        document.getElementById('db-inspector-content').innerHTML = `<section class="drawer-summary"><span class="management-status ${this.getRecordStatus(record).className}">${this.escapeHtml(this.getRecordStatus(record).label)}</span><h6>${this.escapeHtml(this.getPreviewData(record))}</h6><p>${this.escapeHtml(this.getRecordSecondary(record))}</p></section><div class="drawer-section-title"><span>RAW JSON</span><button class="btn btn-sm btn-outline-secondary" onclick="window.dbManager.copyCurrentRecord()"><i class="bi bi-copy me-1"></i>Sao chép</button></div><pre class="json-inspector">${this.escapeHtml(JSON.stringify(record, null, 2))}</pre>`;
+        const editButton = ['stations', 'devices'].includes(table)
+            ? `<button class="btn btn-primary" onclick="window.dbManager.editRecord('${table}', ${id})"><i class="bi bi-pencil me-1"></i>Chỉnh sửa</button>`
+            : '';
+        document.getElementById('db-inspector-actions').innerHTML = `<button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${table}', ${id})"><i class="bi bi-trash3 me-1"></i>Xóa</button>${editButton}`;
+        document.getElementById('db-inspector').classList.add('open');
+        document.getElementById('db-inspector').setAttribute('aria-hidden', 'false');
+        document.getElementById('db-inspector-backdrop').classList.add('show');
+        document.querySelector('#db-inspector > header button')?.focus();
+    }
 
-        const formatted = JSON.stringify(record, null, 2);
-        alert(`Record từ bảng "${table}" (ID: ${id})\n\n${formatted}`);
+    closeInspector() {
+        document.getElementById('db-inspector')?.classList.remove('open');
+        document.getElementById('db-inspector')?.setAttribute('aria-hidden', 'true');
+        document.getElementById('db-inspector-backdrop')?.classList.remove('show');
+    }
+
+    async copyCurrentRecord() {
+        if (!this.selectedRecord) return;
+        await navigator.clipboard.writeText(JSON.stringify(this.selectedRecord, null, 2));
+        window.toast?.success('Đã sao chép JSON');
     }
 
     editRecord(table, id) {
+        if (!['stations', 'devices'].includes(table)) return;
         const record = this.allData.find(r => r._table === table && r.id === id);
         if (!record) {
             window.toast?.error('Không tìm thấy record');
@@ -294,6 +302,7 @@ class DatabaseManager {
 
             window.toast?.success('✅ Cập nhật thành công!');
             this.currentEditModal.hide();
+            this.closeInspector();
             this.loadAllData();
 
         } catch (e) {
@@ -316,6 +325,7 @@ class DatabaseManager {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
             window.toast?.success('✅ Đã xóa!');
+            this.closeInspector();
             this.loadAllData();
 
         } catch (e) {
