@@ -14,9 +14,22 @@ from ..models import auth as model_auth
 from ..models import config as model_config
 from ..models import data as model_data
 from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
+from ..services.station_policy import get_offline_threshold
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _device_runtime_state(device, station, now_ts: int) -> dict:
+    threshold = get_offline_threshold(station.config or {}, device.device_type)
+    last_data_time = int(device.last_data_time or 0)
+    age_seconds = max(0, now_ts - last_data_time) if last_data_time else None
+    is_online = bool(device.is_active and last_data_time and age_seconds < threshold)
+    return {
+        "effective_status": "online" if is_online else "offline",
+        "age_seconds": age_seconds,
+        "offline_threshold_seconds": threshold,
+    }
 
 # ============================================================================
 # DATABASE MANAGEMENT ENDPOINTS (cho Admin Panel)
@@ -80,8 +93,6 @@ async def admin_get_all_stations(
             query = query.where(or_(model_config.Station.name.ilike(pattern), model_config.Station.station_code.ilike(pattern)))
         if project_id is not None:
             query = query.where(model_config.Station.project_id == project_id)
-        if status:
-            query = query.where(model_config.Station.status == status)
         sort_fields = {"id": model_config.Station.id, "name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
         if sort:
             field = sort.lstrip("-")
@@ -91,21 +102,35 @@ async def admin_get_all_stations(
             query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
         result = await db.execute(query)
         stations = result.scalars().all()
-        rows = [
-            {
+        devices = list((await db.execute(select(model_config.Device))).scalars().all())
+        devices_by_station = {}
+        for device in devices:
+            devices_by_station.setdefault(device.station_id, []).append(device)
+        now_ts = int(time.time())
+        rows = []
+        for s in stations:
+            active_devices = [device for device in devices_by_station.get(s.id, []) if device.is_active]
+            runtime_states = [_device_runtime_state(device, s, now_ts) for device in active_devices]
+            latest_data_time = max([int(device.last_data_time or 0) for device in active_devices] + [int(s.last_update or 0)])
+            effective_status = "online" if any(state["effective_status"] == "online" for state in runtime_states) else "offline"
+            row = {
                 "id": s.id,
                 "station_code": s.station_code,
                 "name": s.name,
                 "project_id": s.project_id,
                 "location": s.location,
-                "status": s.status,
-                "last_update": s.last_update,
+                "status": effective_status,
+                "stored_status": s.status,
+                "last_update": latest_data_time,
+                "age_seconds": max(0, now_ts - latest_data_time) if latest_data_time else None,
+                "online_device_count": sum(state["effective_status"] == "online" for state in runtime_states),
+                "active_device_count": len(active_devices),
                 "config": s.config,
                 "created_at": s.created_at,
                 "updated_at": s.updated_at
             }
-            for s in stations
-        ]
+            if not status or effective_status == status.lower():
+                rows.append(row)
         page_offset, page_limit = normalize_page(offset, limit)
         set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
         return slice_rows(rows, page_offset, page_limit)
@@ -122,6 +147,7 @@ async def admin_get_all_devices(
     q: Optional[str] = None,
     station_id: Optional[int] = None,
     is_active: Optional[bool] = None,
+    connection_status: Optional[str] = None,
     offset: Optional[int] = None,
     limit: Optional[int] = None,
     sort: Optional[str] = None,
@@ -147,8 +173,18 @@ async def admin_get_all_devices(
             query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
         result = await db.execute(query)
         devices = result.scalars().all()
-        rows = [
-            {
+        station_rows = list((await db.execute(select(model_config.Station))).scalars().all())
+        stations_by_id = {station.id: station for station in station_rows}
+        now_ts = int(time.time())
+        rows = []
+        for d in devices:
+            station = stations_by_id.get(d.station_id)
+            runtime = _device_runtime_state(d, station, now_ts) if station else {
+                "effective_status": "offline",
+                "age_seconds": None,
+                "offline_threshold_seconds": 300,
+            }
+            row = {
                 "id": d.id,
                 "device_code": d.device_code,
                 "name": d.name,
@@ -162,8 +198,9 @@ async def admin_get_all_devices(
                 "created_at": d.created_at,
                 "updated_at": d.updated_at
             }
-            for d in devices
-        ]
+            row.update(runtime)
+            if not connection_status or runtime["effective_status"] == connection_status.lower():
+                rows.append(row)
         page_offset, page_limit = normalize_page(offset, limit)
         set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
         return slice_rows(rows, page_offset, page_limit)

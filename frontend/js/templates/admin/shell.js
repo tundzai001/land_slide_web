@@ -84,11 +84,11 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
             <!-- TAB 1: USERS -->
             <div class="tab-pane fade show active" id="tab-users">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h4>Danh sách Người dùng</h4>
-                    <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
-                        <i class="bi bi-person-plus me-2"></i>Thêm user
-                    </button>
+                <header class="ops-page-header"><div><span class="ops-eyebrow">ACCESS CONTROL</span><h4><i class="bi bi-people me-2"></i>Quản lý người dùng</h4><p>Tài khoản, vai trò và phạm vi dự án được cấp quyền.</p></div><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-person-plus me-2"></i>Thêm người dùng</button></header>
+                <div class="user-toolbar">
+                    <label class="ops-search" for="user-search"><i class="bi bi-search"></i><input type="search" id="user-search" placeholder="Tìm tài khoản hoặc họ tên…" oninput="window.adminManager?.scheduleUserFilter()"></label>
+                    <select class="form-select" id="user-role-filter" aria-label="Lọc theo vai trò" onchange="window.adminManager?.loadUsers()"><option value="">Tất cả vai trò</option><option value="admin">Admin</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select>
+                    <select class="form-select" id="user-status-filter" aria-label="Lọc theo trạng thái" onchange="window.adminManager?.loadUsers()"><option value="">Mọi trạng thái</option><option value="true">Hoạt động</option><option value="false">Đã khóa</option></select>
                 </div>
 
                 <div class="custom-table">
@@ -176,6 +176,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <div class="db-toolbar">
                             <div class="db-current-dataset"><span id="db-current-icon"><i class="bi bi-broadcast-pin"></i></span><div><strong id="db-current-title">Trạm</strong><small id="db-current-meta">Đang tải dữ liệu…</small></div></div>
                             <label class="ops-search" for="db-search"><i class="bi bi-search"></i><input type="search" id="db-search" placeholder="Tìm trong dataset…" oninput="window.dbManager.applyFilter()"></label>
+                            <div id="db-context-filters" class="db-context-filters" aria-label="Bộ lọc dataset"></div>
                             <select class="form-select" id="db-sort" aria-label="Sắp xếp dữ liệu" onchange="window.dbManager.changeSort(this.value)"><option value="-id">Mới nhất</option><option value="id">Cũ nhất</option></select>
                             <select class="form-select" id="db-limit" aria-label="Số dòng mỗi trang" onchange="window.dbManager.changePageSize(this.value)"><option value="25">25 dòng</option><option value="50" selected>50 dòng</option><option value="100">100 dòng</option></select>
                         </div>

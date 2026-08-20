@@ -84,6 +84,12 @@ class UserCreate(UserBase):
     password: str
     assigned_projects: List[int] = []
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None
+    assigned_projects: Optional[List[int]] = None
+
 class UserResponse(UserBase):
     id: int
     is_active: bool

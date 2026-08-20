@@ -596,6 +596,45 @@ async def create_user(
     await db.refresh(new_user)
     return new_user
 
+
+@router.put("/users/{user_id}", response_model=schemas.UserResponse)
+async def update_user(
+    user_id: int,
+    payload: schemas.UserUpdate,
+    db: AsyncSession = Depends(get_auth_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+):
+    user = (
+        await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
+    ).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    role = payload.role or user.role
+    if role not in {"admin", "operator", "viewer"}:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if user.username == "admin" and role != "admin":
+        raise HTTPException(status_code=400, detail="Cannot change the primary admin role")
+    if user.id == current_user.id and role != current_user.role:
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
+
+    if payload.full_name is not None:
+        user.full_name = payload.full_name.strip() or None
+    user.role = role
+    user.assigned_projects = (
+        list(dict.fromkeys(payload.assigned_projects or []))
+        if role in {"operator", "viewer"}
+        else []
+    )
+    if payload.password:
+        if len(payload.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must contain at least 6 characters")
+        user.hashed_password = await auth.get_password_hash(payload.password)
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: int,

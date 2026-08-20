@@ -5,8 +5,17 @@ class AdminUsersFeature extends window.AdminManager {
     // =========================================================================
 
     async loadUsers() {
+        const tbody = document.getElementById('user-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6"><div class="ops-loading"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Đang tải người dùng…</span></div></td></tr>';
         try {
-            const res = await fetch('/api/admin/users', {
+            const query = new URLSearchParams({ sort: 'username', limit: '500' });
+            const q = document.getElementById('user-search')?.value.trim() || '';
+            const role = document.getElementById('user-role-filter')?.value || '';
+            const active = document.getElementById('user-status-filter')?.value || '';
+            if (q) query.set('q', q);
+            if (role) query.set('role', role);
+            if (active) query.set('is_active', active);
+            const res = await fetch(`/api/admin/users?${query}`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
 
@@ -18,10 +27,21 @@ class AdminUsersFeature extends window.AdminManager {
             if (!res.ok) throw new Error('Failed to load users');
 
             const users = await res.json();
+            this.usersData = users;
             this.renderUsers(users);
         } catch (e) {
             console.error('Error loading users:', e);
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6"><div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được người dùng</strong><button class="btn btn-outline-primary" onclick="window.adminManager.loadUsers()">Thử lại</button></div></td></tr>';
         }
+    }
+
+    scheduleUserFilter() {
+        clearTimeout(this.userSearchTimer);
+        this.userSearchTimer = setTimeout(() => this.loadUsers(), 250);
+    }
+
+    escapeUserValue(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
     }
 
     renderUsers(users) {
@@ -46,17 +66,17 @@ class AdminUsersFeature extends window.AdminManager {
             let projectBadges = '';
             if ((u.role === 'operator' || u.role === 'viewer') && u.assigned_projects && u.assigned_projects.length > 0) {
                 projectBadges = `<br><small class="text-muted">Dự án: ${u.assigned_projects.map(
-                    pid => `<span class="badge bg-dark text-info border border-info" style="font-size:.65rem">${this.getProjectName(pid)}</span>`
+                    pid => `<span class="user-project-badge">${this.escapeUserValue(this.getProjectName(pid))}</span>`
                 ).join(' ')}</small>`;
             } else if (u.role === 'viewer') {
-                projectBadges = `<br><small class="text-muted">Dự án: <span class="badge bg-dark text-success border border-success" style="font-size:.65rem">Tất cả</span></small>`;
+                projectBadges = `<br><small class="text-muted">Dự án: <span class="user-project-badge">Tất cả</span></small>`;
             }
 
             return `
             <tr class="management-table-row">
                 <td class="font-monospace text-muted">#${u.id}</td>
-                <td><strong class="management-primary-text">${u.username}</strong></td>
-                <td>${u.full_name || '--'}</td>
+                <td><strong class="management-primary-text">${this.escapeUserValue(u.username)}</strong></td>
+                <td>${this.escapeUserValue(u.full_name || '--')}</td>
                 <td>${roleBadge(u.role)}${projectBadges}</td>
                 <td>
                     <div class="d-flex align-items-center gap-2">
@@ -68,12 +88,12 @@ class AdminUsersFeature extends window.AdminManager {
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        ${(u.role === 'operator' || u.role === 'viewer') ? `<button class="btn btn-outline-primary management-icon-btn" onclick="window.adminManager.showAssignProjectsModal(${u.id}, '${u.username}')" title="Gán dự án" aria-label="Gán dự án cho ${u.username}"><i class="bi bi-folder-plus"></i></button>` : ''}
+                        <button class="btn btn-outline-primary management-icon-btn" onclick="window.adminManager.showEditUserModal(${u.id})" title="Sửa cấu hình" aria-label="Sửa cấu hình ${this.escapeUserValue(u.username)}"><i class="bi bi-sliders"></i></button>
                         ${u.username === 'admin' ? '' : `
-                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, '${u.username}', ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}" aria-label="${u.is_active ? 'Khóa' : 'Mở khóa'} ${u.username}">
+                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}" aria-label="${u.is_active ? 'Khóa' : 'Mở khóa'} ${this.escapeUserValue(u.username)}">
                             <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
                         </button>
-                        <button class="btn btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteUser(${u.id}, '${u.username}')" title="Xóa tài khoản" aria-label="Xóa ${u.username}">
+                        <button class="btn btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteUser(${u.id})" title="Xóa tài khoản" aria-label="Xóa ${this.escapeUserValue(u.username)}">
                             <i class="bi bi-trash"></i>
                         </button>
                         `}
@@ -81,6 +101,75 @@ class AdminUsersFeature extends window.AdminManager {
                 </td>
             </tr>
         `}).join('');
+    }
+
+    async showEditUserModal(userId) {
+        const user = (this.usersData || []).find(item => Number(item.id) === Number(userId));
+        if (!user) return;
+        document.getElementById('edit-user-id').value = user.id;
+        document.getElementById('edit-user-username').value = user.username || '';
+        document.getElementById('edit-user-fullname').value = user.full_name || '';
+        document.getElementById('edit-user-password').value = '';
+        const roleSelect = document.getElementById('edit-user-role');
+        roleSelect.value = user.role || 'viewer';
+        roleSelect.disabled = user.username === 'admin';
+
+        const container = document.getElementById('edit-user-projects');
+        container.innerHTML = '<span class="text-muted small">Đang tải dự án…</span>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('editUserModal')).show();
+        try {
+            const res = await fetch('/api/admin/projects', { headers: { 'Authorization': `Bearer ${this.token}` } });
+            if (!res.ok) throw new Error('Không tải được dự án');
+            const projects = await res.json();
+            const assigned = new Set(user.assigned_projects || []);
+            container.innerHTML = projects.length ? projects.map(project => `<label class="user-project-option"><input type="checkbox" value="${project.id}" ${assigned.has(project.id) ? 'checked' : ''}><span><strong>${this.escapeUserValue(project.name || project.project_code)}</strong><small>${this.escapeUserValue(project.project_code || `#${project.id}`)}</small></span></label>`).join('') : '<span class="text-muted small">Chưa có dự án</span>';
+        } catch (error) {
+            container.innerHTML = `<span class="text-danger small">${this.escapeUserValue(error.message)}</span>`;
+        }
+        this.syncEditUserProjectVisibility();
+    }
+
+    syncEditUserProjectVisibility() {
+        const role = document.getElementById('edit-user-role')?.value;
+        const group = document.getElementById('edit-user-project-group');
+        if (group) group.hidden = !['operator', 'viewer'].includes(role);
+    }
+
+    async saveUserConfiguration() {
+        const userId = Number(document.getElementById('edit-user-id').value);
+        const role = document.getElementById('edit-user-role').value;
+        const password = document.getElementById('edit-user-password').value;
+        if (password && password.length < 6) {
+            window.toast?.warning('Mật khẩu mới phải có ít nhất 6 ký tự');
+            document.getElementById('edit-user-password').focus();
+            return;
+        }
+        const assignedProjects = [...document.querySelectorAll('#edit-user-projects input:checked')].map(input => Number(input.value));
+        const button = document.getElementById('save-user-config-btn');
+        const originalButtonHtml = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang lưu…';
+        try {
+            const res = await fetch(`/api/admin/users/${userId}`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    full_name: document.getElementById('edit-user-fullname').value.trim(),
+                    role,
+                    password: password || null,
+                    assigned_projects: ['operator', 'viewer'].includes(role) ? assignedProjects : [],
+                }),
+            });
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+            bootstrap.Modal.getInstance(document.getElementById('editUserModal'))?.hide();
+            window.toast?.success('Đã cập nhật cấu hình người dùng');
+            await this.loadUsers();
+        } catch (error) {
+            window.toast?.error(error.message);
+        } finally {
+            button.disabled = false;
+            button.innerHTML = originalButtonHtml;
+        }
     }
 
     async createUser() {
@@ -127,7 +216,8 @@ class AdminUsersFeature extends window.AdminManager {
         }
     }
 
-    async deleteUser(userId, username) {
+    async deleteUser(userId) {
+        const username = (this.usersData || []).find(user => Number(user.id) === Number(userId))?.username || `#${userId}`;
         if (!confirm(`Xóa người dùng ${username}?`)) return;
         try {
             const res = await fetch(`/api/admin/users/${userId}`, {
@@ -146,7 +236,8 @@ class AdminUsersFeature extends window.AdminManager {
         }
     }
 
-    async toggleUserStatus(userId, username, isActive) {
+    async toggleUserStatus(userId, isActive) {
+        const username = (this.usersData || []).find(user => Number(user.id) === Number(userId))?.username || `#${userId}`;
         const action = isActive ? 'mở khóa' : 'khóa';
         if (!confirm(`Bạn có chắc muốn ${action} người dùng ${username}?`)) return;
         try {

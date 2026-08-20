@@ -14,6 +14,8 @@ class DatabaseManager {
         this.sort = '-id';
         this.searchTimer = null;
         this.selectedRecord = null;
+        this.filters = {};
+        this.filterOptions = { projects: [], stations: [] };
         this.currentEditModal = null;
         this.exportProjects = [];
         this.exportStations = [];
@@ -57,7 +59,24 @@ class DatabaseManager {
         }
 
         console.log('✅ [DB MANAGER] Initialized');
+        this.renderContextFilters();
+        void this.loadFilterOptions();
         if (this.exportTaskId) this.startExportPolling(this.exportTaskId);
+    }
+
+    async loadFilterOptions() {
+        try {
+            const headers = { 'Authorization': `Bearer ${this.token}` };
+            const [projectsRes, stationsRes] = await Promise.all([
+                fetch('/api/admin/projects', { headers }),
+                fetch('/api/admin/db/stations?limit=1000&sort=station_code', { headers }),
+            ]);
+            this.filterOptions.projects = projectsRes.ok ? await projectsRes.json() : [];
+            this.filterOptions.stations = stationsRes.ok ? await stationsRes.json() : [];
+            this.renderContextFilters();
+        } catch (error) {
+            console.warn('[DB MANAGER] filter options unavailable:', error);
+        }
     }
 
     async loadAllData() {
@@ -87,6 +106,9 @@ class DatabaseManager {
         const query = new URLSearchParams({ offset: String(this.offset), limit: String(this.limit), sort: this.sort });
         const search = document.getElementById('db-search')?.value.trim() || '';
         if (search && ['stations', 'devices'].includes(this.currentDataset)) query.set('q', search);
+        Object.entries(this.filters).forEach(([key, value]) => {
+            if (value !== '' && value != null) query.set(key, value);
+        });
         const res = await fetch(`/api/admin/db/${config.endpoint}?${query}`, { headers: { 'Authorization': `Bearer ${this.token}` } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const rows = await res.json();
@@ -107,6 +129,7 @@ class DatabaseManager {
         if (!this.datasetConfig(dataset)) return;
         this.currentDataset = dataset;
         this.offset = 0;
+        this.filters = {};
         document.querySelectorAll('.db-dataset').forEach(el => el.classList.toggle('active', el === button));
         const config = this.datasetConfig();
         document.getElementById('db-current-title').textContent = config.title;
@@ -115,7 +138,48 @@ class DatabaseManager {
         document.getElementById('db-search').placeholder = ['stations', 'devices'].includes(dataset)
             ? 'Tìm trong toàn bộ dataset…'
             : 'Lọc các bản ghi trên trang này…';
+        this.renderContextFilters();
         this.closeInspector();
+        this.loadAllData();
+    }
+
+    filterSelect(label, key, options) {
+        const value = this.filters[key] ?? '';
+        return `<label class="db-filter-field"><span>${this.escapeHtml(label)}</span><select class="form-select" onchange="window.dbManager.setContextFilter('${key}', this.value)">${options.map(option => `<option value="${this.escapeHtml(option.value)}" ${String(option.value) === String(value) ? 'selected' : ''}>${this.escapeHtml(option.label)}</option>`).join('')}</select></label>`;
+    }
+
+    renderContextFilters() {
+        const container = document.getElementById('db-context-filters');
+        if (!container) return;
+        const projectOptions = [{ value: '', label: 'Tất cả dự án' }, ...this.filterOptions.projects.map(project => ({ value: project.id, label: project.name || project.project_code }))];
+        const stationOptions = [{ value: '', label: 'Tất cả trạm' }, ...this.filterOptions.stations.map(station => ({ value: station.id, label: station.station_code || station.name }))];
+        const filters = {
+            stations: [
+                this.filterSelect('Dự án', 'project_id', projectOptions),
+                this.filterSelect('Kết nối', 'status', [{ value: '', label: 'Mọi trạng thái' }, { value: 'online', label: 'Online' }, { value: 'offline', label: 'Offline' }]),
+            ],
+            devices: [
+                this.filterSelect('Trạm', 'station_id', stationOptions),
+                this.filterSelect('Kết nối', 'connection_status', [{ value: '', label: 'Mọi kết nối' }, { value: 'online', label: 'Online' }, { value: 'offline', label: 'Offline' }]),
+                this.filterSelect('Cấu hình', 'is_active', [{ value: '', label: 'Bật và tắt' }, { value: 'true', label: 'Đang bật' }, { value: 'false', label: 'Đã tắt' }]),
+            ],
+            sensor_data: [
+                this.filterSelect('Trạm', 'station_id', stationOptions),
+                this.filterSelect('Loại sensor', 'sensor_type', [{ value: '', label: 'Tất cả sensor' }, ...['gnss', 'imu', 'rain', 'water', 'gnss_audit', 'gnss_adjusted'].map(value => ({ value, label: value.toUpperCase() }))]),
+            ],
+            alerts: [
+                this.filterSelect('Trạm', 'station_id', stationOptions),
+                this.filterSelect('Mức độ', 'level', [{ value: '', label: 'Mọi mức độ' }, ...['INFO', 'WARNING', 'CRITICAL'].map(value => ({ value, label: value }))]),
+                this.filterSelect('Xử lý', 'is_resolved', [{ value: '', label: 'Tất cả cảnh báo' }, { value: 'false', label: 'Đang mở' }, { value: 'true', label: 'Đã xử lý' }]),
+            ],
+        };
+        container.innerHTML = (filters[this.currentDataset] || []).join('');
+    }
+
+    setContextFilter(key, value) {
+        if (value === '') delete this.filters[key];
+        else this.filters[key] = value;
+        this.offset = 0;
         this.loadAllData();
     }
 
@@ -192,13 +256,19 @@ class DatabaseManager {
         if (item._table === 'devices') return item.mqtt_topic || item.device_type || 'Không có MQTT topic';
         if (item._table === 'sensor_data') return JSON.stringify(item.data || {}).slice(0, 110);
         if (item._table === 'alerts') return `Trạm #${item.station_id ?? '--'} · ${item.level || '--'}`;
-        return `Dự án #${item.project_id ?? '--'} · ${item.location || 'Chưa có vị trí'}`;
+        const location = item.location && typeof item.location === 'object'
+            ? item.location.name || item.location.address || ([item.location.lat, item.location.lon].every(Number.isFinite) ? `${item.location.lat}, ${item.location.lon}` : 'Chưa có vị trí')
+            : item.location || 'Chưa có vị trí';
+        return `Dự án #${item.project_id ?? '--'} · ${location}`;
     }
 
     getRecordStatus(item) {
         if (item._table === 'alerts') return item.is_resolved ? { label: 'Đã xử lý', className: 'is-success' } : { label: item.level || 'Đang mở', className: 'is-warning' };
-        if (item._table === 'devices') return item.is_active ? { label: 'Hoạt động', className: 'is-success' } : { label: 'Tạm dừng', className: 'is-secondary' };
-        if (item._table === 'stations') return String(item.status).toLowerCase() === 'online' ? { label: 'Online', className: 'is-success' } : { label: item.status || 'Chưa rõ', className: 'is-secondary' };
+        if (item._table === 'devices') {
+            if (!item.is_active) return { label: 'Đã tắt', className: 'is-secondary' };
+            return item.effective_status === 'online' ? { label: 'Online', className: 'is-success' } : { label: 'Offline', className: 'is-offline' };
+        }
+        if (item._table === 'stations') return String(item.status).toLowerCase() === 'online' ? { label: 'Online', className: 'is-success' } : { label: 'Offline', className: 'is-offline' };
         return { label: 'Đã nhận', className: 'is-active' };
     }
 

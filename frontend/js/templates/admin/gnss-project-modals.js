@@ -228,7 +228,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                                 <option value="admin">Admin</option>
                             </select>
                         </div>
-                        <div class="mb-3" id="project-assign-group" style="display:none">
+                        <div class="mb-3" id="project-assign-group">
                             <label class="form-label">Gán dự án <small class="text-muted">(Operator/Viewer, Viewer không chọn = tất cả)</small></label>
                             <div id="project-checkbox-list" class="project-checkbox-list"
                                 style="max-height:200px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;padding:10px">
@@ -242,6 +242,29 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                     <button type="button" class="btn btn-gradient" onclick="window.adminManager.createUser()">Tạo tài
                         khoản</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Configuration Modal -->
+    <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div><span class="ops-eyebrow">USER CONFIGURATION</span><h5 class="modal-title mt-1" id="editUserModalLabel">Sửa cấu hình người dùng</h5></div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-user-id">
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label" for="edit-user-username">Tài khoản</label><input class="form-control" id="edit-user-username" readonly></div>
+                        <div class="col-md-6"><label class="form-label" for="edit-user-fullname">Họ tên</label><input class="form-control" id="edit-user-fullname"></div>
+                        <div class="col-md-6"><label class="form-label" for="edit-user-role">Vai trò</label><select class="form-select" id="edit-user-role" onchange="window.adminManager?.syncEditUserProjectVisibility()"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option></select></div>
+                        <div class="col-md-6"><label class="form-label" for="edit-user-password">Mật khẩu mới</label><input type="password" class="form-control" id="edit-user-password" minlength="6" autocomplete="new-password" placeholder="Để trống nếu không đổi"><small class="form-text">Tối thiểu 6 ký tự khi thay đổi.</small></div>
+                    </div>
+                    <section class="user-project-scope mt-4" id="edit-user-project-group"><div><strong>Phạm vi dự án</strong><small>Chọn các dự án mà người dùng được phép truy cập.</small></div><div id="edit-user-projects" class="project-checkbox-list"><span class="text-muted small">Đang tải dự án…</span></div></section>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-primary" id="save-user-config-btn" onclick="window.adminManager?.saveUserConfiguration()"><i class="bi bi-check2-circle me-1"></i>Lưu cấu hình</button></div>
             </div>
         </div>
     </div>
