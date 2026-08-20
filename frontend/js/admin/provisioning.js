@@ -55,7 +55,7 @@ class AdminProvisioningFeature extends window.AdminManager {
                         <div class="mb-2">
                             <label class="form-label small fw-bold mb-1">License:</label>
                             <div id="license-display-${d.device_code}" class="font-monospace text-muted small">
-                                ${d.config?.license ? '<span class="text-success">✅ ' + d.config.license + '</span>' : '<span class="text-warning">⚠ï¸ Chưa có license</span>'}
+                                ${d.config?.license ? '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>' + d.config.license + '</span>' : '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>Chưa có license</span>'}
                             </div>
                         </div>
                     </div>

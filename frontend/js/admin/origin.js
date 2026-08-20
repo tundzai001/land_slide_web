@@ -61,7 +61,7 @@ class AdminOriginFeature extends window.AdminManager {
                     // Existing origin -> verification only, do NOT overwrite locked origin fields
                     const deltaM = this.computeGeoDistanceMeters(currentLat, currentLon, result.lat, result.lon);
                     const deltaH = Number.isFinite(currentH) ? (result.h - currentH) : 0;
-                    statusEl.innerHTML = `<span class="text-info">â„¹ Live check: Î”xy=${deltaM.toFixed(3)}m, Î”h=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
+                    statusEl.innerHTML = `<span class="text-info"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Kiểm tra trực tiếp: Δxy=${deltaM.toFixed(3)}m, Δh=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
                     window.toast?.info('Đã kiểm tra live GNSS. Origin hiện tại không bị ghi đè.');
                 }
             } else {

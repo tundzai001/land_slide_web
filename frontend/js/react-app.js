@@ -43,8 +43,9 @@ const ROUTE_TEMPLATES = {
         '/js/templates/map/rescue.js?v=template-split-1',
         '/js/templates/map-template.js?v=template-split-1',
     ],
-    admin: [
-        '/js/templates/admin/shell.js?v=template-split-1',
+admin: [
+'/js/templates/admin/pi-devices.js?v=template-split-2',
+'/js/templates/admin/shell.js?v=template-split-1',
         '/js/templates/admin/gnss-project-modals.js?v=template-split-1',
         '/js/templates/admin/station-wizard-shell.js?v=template-split-1',
         '/js/templates/admin/station-basic.js?v=template-split-1',

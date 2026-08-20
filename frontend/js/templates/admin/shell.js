@@ -79,7 +79,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <!-- Main Content -->
     <div class="admin-main">
 
-        <!-- Tab Content (no horizontal tabs â€” sidebar handles switching) -->
+        <!-- Tab Content (no horizontal tabs — sidebar handles switching) -->
         <div class="tab-content" id="admin-tab-content">
 
             <!-- TAB 1: USERS -->
@@ -223,146 +223,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <aside class="ops-drawer rescue-drawer" id="rescue-inspector" aria-hidden="true" aria-labelledby="rescue-inspector-title"><header><div><span class="ops-eyebrow">CASE DETAIL</span><h5 id="rescue-inspector-title">Chi tiết cứu hộ</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.adminManager?.closeRescueInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header><div id="rescue-inspector-content" class="ops-drawer-body"></div><footer id="rescue-inspector-actions" class="ops-drawer-footer"></footer></aside>
             </div>
 
-            <!-- TAB 5: PI DEVICES -->
-            <div class="tab-pane fade" id="tab-pi">
-
-                <!-- Header -->
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <div>
-                        <h4 class="mb-1" style="font-weight:700;letter-spacing:.5px">
-                            <i class="bi bi-broadcast me-2" style="color:#0ea5e9"></i>DEVICE MANAGEMENT
-                        </h4>
-                        <small class="text-muted">Monitor and configure connected Pi sensor nodes.</small>
-                    </div>
-                    <div class="d-flex gap-2 align-items-center">
-                        <div class="input-group input-group-sm" style="width:200px">
-                            <span class="input-group-text"
-                                style="background:var(--bg-tertiary);border-color:var(--border-color)">
-                                <i class="bi bi-search" style="color:var(--text-muted)"></i>
-                            </span>
-                            <input type="text" class="form-control form-control-sm" placeholder="Search ID..."
-                                id="pi-search-input" oninput="window.adminManager._filterPiGrid(this.value)"
-                                style="min-height:34px">
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="window.adminManager.loadPiDevices()">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Sync
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary" id="pi-select-toggle"
-                            onclick="window.adminManager.togglePiSelectMode()">
-                            <i class="bi bi-check2-square me-1"></i>Chọn
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Summary Cards -->
-                <div class="row g-3 mb-4" id="pi-summary-cards" style="align-items:stretch">
-                    <div class="col-md-4 d-flex">
-                        <div class="card w-100" style="border-color:#f59e0b33">
-                            <div class="card-body py-3 d-flex justify-content-between align-items-center">
-                                <div>
-                                    <div class="text-uppercase fw-bold small" style="color:#f59e0b;letter-spacing:1px">
-                                        PENDING ACTIVATION</div>
-                                    <div class="d-flex align-items-baseline gap-1">
-                                        <span id="pi-pending-count"
-                                            style="font-size:2rem;font-weight:800;line-height:1">0</span>
-                                        <span class="text-muted small">nodes</span>
-                                    </div>
-                                    <small id="pi-pending-desc" class="text-muted">No devices awaiting handshake</small>
-                                </div>
-                                <i class="bi bi-hourglass-split" style="font-size:2rem;color:#f59e0b44"></i>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4 d-flex">
-                        <div class="card w-100" style="border-color:#22c55e33">
-                            <div class="card-body py-3 d-flex justify-content-between align-items-center">
-                                <div>
-                                    <div class="text-uppercase fw-bold small" style="color:#22c55e;letter-spacing:1px">
-                                        ACTIVATED · UNASSIGNED</div>
-                                    <div class="d-flex align-items-baseline gap-1">
-                                        <span id="pi-activated-count"
-                                            style="font-size:2rem;font-weight:800;line-height:1">0</span>
-                                        <span class="text-muted small">nodes</span>
-                                    </div>
-                                    <small class="text-muted">System optimized. No idle units.</small>
-                                </div>
-                                <i class="bi bi-check-circle" style="font-size:2rem;color:#22c55e44"></i>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4 d-flex">
-                        <div class="card w-100" style="border-color:#0ea5e933">
-                            <div class="card-body py-3 d-flex justify-content-between align-items-center">
-                                <div>
-                                    <div class="text-uppercase fw-bold small" style="color:#0ea5e9;letter-spacing:1px">
-                                        ASSIGNED TO STATION</div>
-                                    <div class="d-flex align-items-baseline gap-1">
-                                        <span id="pi-assigned-count"
-                                            style="font-size:2rem;font-weight:800;line-height:1">0</span>
-                                        <span class="text-muted small">nodes</span>
-                                    </div>
-                                </div>
-                                <i class="bi bi-broadcast-pin" style="font-size:2rem;color:#0ea5e944"></i>
-                            </div>
-                            <div
-                                style="height:3px;background:linear-gradient(90deg,#0ea5e9,#06b6d4);border-radius:0 0 12px 12px">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Active Grid / Table -->
-                <div class="card">
-                    <div class="card-body p-0">
-                        <div class="d-flex justify-content-between align-items-center px-3 py-2"
-                            style="border-bottom:1px solid var(--border-color)">
-                            <span class="fw-bold small text-uppercase" style="letter-spacing:1px">
-                                <i class="bi bi-grid-3x3 me-1"></i>ACTIVE GRID
-                            </span>
-                            <div class="d-flex gap-3 small">
-                                <span><i class="bi bi-circle-fill me-1"
-                                        style="color:#22c55e;font-size:.5rem"></i>Online</span>
-                                <span><i class="bi bi-circle-fill me-1"
-                                        style="color:#ef4444;font-size:.5rem"></i>Offline</span>
-                            </div>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table mb-0">
-                                <thead>
-                                    <tr>
-                                        <th style="width:40px"></th>
-                                        <th>DEVICE ID / NAME</th>
-                                        <th>SERIAL</th>
-                                        <th>STATUS</th>
-                                        <th>LAST PING</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="pi-grid-body">
-                                    <tr>
-                                        <td colspan="5" class="text-center text-muted py-4">Loading...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="d-flex justify-content-between align-items-center px-3 py-2"
-                            style="border-top:1px solid var(--border-color)">
-                            <small id="pi-grid-info" class="text-muted">Showing 0 entries</small>
-                            <nav>
-                                <ul class="pagination pagination-sm mb-0" id="pi-grid-pagination"></ul>
-                            </nav>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Hidden legacy elements for badge compatibility -->
-                <span id="pi-pending-badge" style="display:none">0</span>
-                <span id="pi-activated-badge" style="display:none">0</span>
-                <span id="pi-assigned-badge" style="display:none">0</span>
-                <div id="pi-pending-list" style="display:none"></div>
-                <div id="pi-activated-list" style="display:none"></div>
-                <div id="pi-assigned-list" style="display:none"></div>
-
-            </div>
+${window.LegacyTemplateParts['pi-devices'] || ''}
 
         </div>
     </div>

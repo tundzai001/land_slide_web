@@ -240,7 +240,7 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
 .user-project-scope #edit-user-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 230px; overflow-y: auto; padding: 4px; }
 .user-project-option { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px; border: 1px solid #d8e2ec; border-radius: 10px; background: #f9fbfd; cursor: pointer; }
 .user-project-option:hover { border-color: #9fb9d2; background: #f1f6fa; }
-.user-project-option input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--admin-primary); }
+.user-project-option input { width: 18px !important; height: 18px !important; min-width: 18px !important; min-height: 18px !important; flex: 0 0 18px; margin: 0 !important; accent-color: var(--admin-primary); }
 .user-project-option span { display: grid; min-width: 0; }
 .user-project-option strong, .user-project-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-project-option strong { color: var(--admin-text); font-size: .8rem; }

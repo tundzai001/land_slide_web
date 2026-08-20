@@ -1,0 +1,65 @@
+/* Pi Devices uses the same operations language as Database and Rescue. */
+.pi-kpi-grid .ops-kpi small { display: block; max-width: calc(100% - 42px); margin-top: 7px; color: var(--admin-muted); font-size: .7rem; line-height: 1.35; }
+.pi-console { overflow: hidden; border: 1px solid var(--admin-border); border-radius: var(--admin-radius); background: #fff; box-shadow: var(--admin-shadow); }
+.pi-toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--admin-border); }
+.pi-toolbar .ops-search { min-width: min(100%, 300px); }
+.pi-filter-field { display: flex; align-items: center; gap: 9px; }
+.pi-filter-field > span { color: var(--admin-muted); font-size: .7rem; font-weight: 750; text-transform: uppercase; }
+.pi-filter-field .form-select { min-width: 180px; min-height: 44px; font-size: .82rem; }
+.pi-list-head, .pi-device-row { display: grid; grid-template-columns: minmax(280px, 1.6fr) minmax(160px, .75fr) minmax(160px, .75fr) minmax(150px, .7fr); align-items: center; gap: 16px; }
+.pi-list-head { padding: 11px 16px; color: #607087; background: #f7f9fc; font-size: .68rem; font-weight: 800; letter-spacing: .055em; text-transform: uppercase; }
+.pi-device-list { min-height: 92px; }
+.pi-device-row { position: relative; min-height: 76px; padding: 13px 16px; border-top: 1px solid #edf1f6; transition: background-color .18s ease, box-shadow .18s ease; }
+.pi-device-row:first-child { border-top: 0; }
+.pi-device-row[hidden] { display: none !important; }
+.pi-device-row:hover { background: #f8fbff; box-shadow: inset 3px 0 var(--admin-primary); }
+.pi-device-row.is-selected { background: #edf4fb; box-shadow: inset 3px 0 var(--admin-primary); }
+.pi-device-identity { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.pi-device-select { display: none; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; margin: -5px 0; border-radius: 10px; cursor: pointer; }
+.pi-device-select.is-visible { display: grid; }
+.pi-device-select input, .user-project-option input { width: 18px !important; height: 18px !important; min-width: 18px !important; min-height: 18px !important; margin: 0 !important; accent-color: var(--admin-primary); }
+.pi-device-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; color: var(--admin-primary); background: #eaf1f7; }
+.pi-device-name { min-width: 0; }
+.pi-device-name strong { display: block; overflow: hidden; color: var(--admin-text); font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
+.pi-device-name small { display: block; margin-top: 3px; color: var(--admin-muted); font-size: .7rem; }
+.pi-device-serial { width: max-content; max-width: 100%; overflow: hidden; padding: 5px 8px; border-radius: 7px; color: #415169; background: #f1f4f8; font: 700 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.pi-device-status, .pi-connection { display: inline-flex; align-items: center; gap: 6px; width: max-content; padding: 6px 9px; border-radius: 999px; font-size: .7rem; font-weight: 750; }
+.pi-device-status.is-pending { color: #885f00; background: #fff5d7; }
+.pi-device-status.is-activated { color: #137a47; background: #e9f8ef; }
+.pi-device-status.is-assigned { color: #155a8a; background: #e8f3fb; }
+.pi-device-status.is-locked { color: #a12b37; background: #fdecef; }
+.pi-connection.is-online { color: #137a47; background: #e9f8ef; }
+.pi-connection.is-offline { color: #687587; background: #eef1f5; }
+.pi-connection i, .pi-console-footer i { font-size: .55rem; }
+.pi-console-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 10px 16px; border-top: 1px solid var(--admin-border); color: var(--admin-muted); font-size: .72rem; }
+.pi-console-footer .is-online { color: #18a561; }
+.pi-console-footer .is-offline { color: #a7b0bd; }
+.pi-child-list { grid-column: 1 / -1; display: grid; gap: 7px; margin: 0 0 0 53px; }
+.pi-child-device { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 7px 10px; border: 1px solid #e4eaf1; border-radius: 9px; background: #fafbfd; }
+.pi-child-device strong { color: #344258; font-size: .74rem; }
+.pi-child-device small { color: var(--admin-muted); font-size: .68rem; }
+.pi-child-device .btn { margin-left: auto; }
+.pi-action-bar { position: fixed; z-index: 50; left: 50%; bottom: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: calc(100vw - 28px); padding: 10px 12px; border: 1px solid #344258; border-radius: 14px; background: #172033; box-shadow: 0 18px 50px rgba(15, 23, 42, .28); transform: translate(-50%, calc(100% + 40px)); transition: transform .22s ease; }
+.pi-action-bar.is-visible { transform: translate(-50%, 0); }
+.pi-action-bar > span { margin-right: 4px; color: #d7e0eb; font-size: .78rem; font-weight: 700; }
+.pi-action-bar .btn { min-height: 40px; }
+.pi-action-bar [hidden] { display: none !important; }
+
+@media (max-width: 900px) {
+    .pi-list-head { display: none; }
+    .pi-device-list { display: grid; gap: 10px; padding: 10px; background: #f7f9fc; }
+    .pi-device-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-height: 0; padding: 14px; border: 1px solid var(--admin-border) !important; border-radius: 12px; background: #fff; }
+    .pi-device-row > .pi-device-serial { grid-column: 1; }
+    .pi-device-row > .pi-device-status { grid-column: 2; grid-row: 1; }
+    .pi-device-row > .pi-connection { grid-column: 2; grid-row: 2; }
+    .pi-child-list { margin-left: 0; }
+}
+@media (max-width: 575.98px) {
+    .pi-toolbar, .pi-filter-field { align-items: stretch; flex-direction: column; }
+    .pi-toolbar .ops-search, .pi-filter-field .form-select { width: 100%; }
+    .pi-device-row { grid-template-columns: 1fr; }
+    .pi-device-row > .pi-device-serial, .pi-device-row > .pi-device-status, .pi-device-row > .pi-connection { grid-column: 1; grid-row: auto; }
+    .pi-console-footer { align-items: flex-start; flex-direction: column; }
+    .pi-action-bar { right: 10px; bottom: 10px; left: 10px; max-width: none; transform: translateY(calc(100% + 30px)); }
+    .pi-action-bar.is-visible { transform: translateY(0); }
+}

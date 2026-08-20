@@ -330,7 +330,7 @@ class AdminManager {
         }
     }
 
-    /** Apply operator restrictions â€” hide Users/DB/System tabs, but allow editing stations in assigned projects */
+    /** Apply operator restrictions — hide Users/DB/System tabs, but allow editing stations in assigned projects */
     applyOperatorRestrictions() {
         console.log('🔧 Applying operator restrictions');
 
