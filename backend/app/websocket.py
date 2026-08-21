@@ -27,6 +27,7 @@ class ConnectionManager:
         "gnss_adjustment_progress": "adjustment",
         "gnss_adjustment_step": "adjustment",
         "origin_locked_event": "adjustment",
+        "gnss_offset_calibration_progress": "adjustment",
     }
 
     def __init__(self):

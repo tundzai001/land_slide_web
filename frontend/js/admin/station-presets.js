@@ -576,21 +576,13 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
         const resetBtn = document.getElementById('btn-reset-origin');
         const statusEl = document.getElementById('origin-status');
-        const calibrationDurationMs = 60_000;
-        const startedAt = performance.now();
-        const renderProgress = () => {
-            if (!statusEl) return;
-            const remaining = Math.max(0, Math.ceil((calibrationDurationMs - (performance.now() - startedAt)) / 1000));
-            statusEl.innerHTML = remaining > 0
-                ? `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu mẫu RTK FIXED… còn <strong>${remaining}s</strong>`
-                : '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đã đủ 60 giây, đang chờ backend hoàn tất…';
-            statusEl.className = 'text-info small';
-        };
         try {
             if (resetBtn) resetBtn.disabled = true;
-            clearInterval(this._gnssCalibrationTimer);
-            renderProgress();
-            this._gnssCalibrationTimer = setInterval(renderProgress, 250);
+            this._gnssCalibrationInProgress = true;
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Backend đang chuẩn bị thu mẫu RTK FIXED…';
+                statusEl.className = 'text-info small';
+            }
 
             const res = await fetch(`/api/admin/gnss/reset-origin/${stationId}`, {
                 method: 'POST',
@@ -623,8 +615,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
         } catch (e) {
             window.toast?.error('Offset calibration failed: ' + e.message);
         } finally {
-            clearInterval(this._gnssCalibrationTimer);
-            this._gnssCalibrationTimer = null;
+            this._gnssCalibrationInProgress = false;
             if (resetBtn) resetBtn.disabled = false;
         }
     }

@@ -258,7 +258,7 @@ async def reset_gnss_origin(
     calibrations = []
     try:
         results = await asyncio.gather(*(
-            mqtt_service.reset_gnss_origin(device.id) for device in devices
+            mqtt_service.reset_gnss_origin(device.id, station_id=station_id) for device in devices
         ))
         calibrations = [result for result in results if result is not None]
     except (ValueError, RuntimeError) as exc:

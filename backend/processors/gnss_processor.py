@@ -620,6 +620,7 @@ class GNSSVelocityProcessor:
     async def recalibrate_tracking_offset(
         self,
         *,
+        station_id: Optional[int] = None,
         minimum_samples: int = 60,
         minimum_duration_s: float = 60.0,
         timeout_s: float = 120.0,
@@ -639,6 +640,7 @@ class GNSSVelocityProcessor:
         old_offset = self.tracking_offset_enu.copy()
         deadline = asyncio.get_running_loop().time() + timeout_s
         self._offset_calibration_in_progress = True
+        last_progress_second = -1
         try:
             while True:
                 samples = [
@@ -651,6 +653,36 @@ class GNSSVelocityProcessor:
                     if len(samples) >= 2
                     else 0.0
                 )
+                progress_second = int(min(duration_s, minimum_duration_s))
+                if progress_second != last_progress_second:
+                    last_progress_second = progress_second
+                    progress = {
+                        "type": "gnss_offset_calibration_progress",
+                        "station_id": station_id,
+                        "device_id": self.device_id,
+                        "data": {
+                            "phase": "collecting",
+                            "sample_count": len(samples),
+                            "minimum_samples": minimum_samples,
+                            "duration_s": round(duration_s, 1),
+                            "minimum_duration_s": minimum_duration_s,
+                            "remaining_s": max(0.0, minimum_duration_s - duration_s),
+                        },
+                    }
+                    logger.info(
+                        "[GNSS CALIBRATION] device=%s station=%s samples=%s/%s duration=%.1fs/%.1fs",
+                        self.device_id,
+                        station_id,
+                        len(samples),
+                        minimum_samples,
+                        duration_s,
+                        minimum_duration_s,
+                    )
+                    try:
+                        from app.websocket import manager
+                        await manager.broadcast(progress)
+                    except Exception as exc:
+                        logger.debug("GNSS calibration progress broadcast failed: %s", exc)
                 if (
                     len(samples) >= minimum_samples
                     and duration_s >= minimum_duration_s
@@ -697,6 +729,21 @@ class GNSSVelocityProcessor:
             [sample["pos_enu"] for sample in samples],
             dtype=float,
         )
+        try:
+            from app.websocket import manager
+            await manager.broadcast({
+                "type": "gnss_offset_calibration_progress",
+                "station_id": station_id,
+                "device_id": self.device_id,
+                "data": {
+                    "phase": "complete",
+                    "sample_count": len(samples),
+                    "duration_s": round(duration_s, 1),
+                    "remaining_s": 0.0,
+                },
+            })
+        except Exception as exc:
+            logger.debug("GNSS calibration completion broadcast failed: %s", exc)
         # Keep the newest measured residual; never synthesize a zero payload.
         self.disp_enu_state = calibrated_positions[-1].copy()
         self.disp_state_ready = True

@@ -133,6 +133,23 @@ class AdminManager {
                     }
 
                     window.toast?.success('Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+                } else if (message.type === 'gnss_offset_calibration_progress' &&
+                    (message.station_id == null || message.station_id == this.currentStationId)) {
+                    const progress = message.data || {};
+                    const statusEl = document.getElementById('origin-status');
+                    if (statusEl && this._gnssCalibrationInProgress) {
+                        if (progress.phase === 'complete') {
+                            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Backend đã thu đủ mẫu và áp dụng offset.</span>';
+                            statusEl.className = 'text-success small';
+                        } else {
+                            const duration = Number(progress.duration_s || 0).toFixed(1);
+                            const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));
+                            const sampleCount = Number(progress.sample_count || 0);
+                            const minimumSamples = Number(progress.minimum_samples || 60);
+                            statusEl.innerHTML = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Backend đang thu RTK FIXED… ${duration}s · ${sampleCount}/${minimumSamples} mẫu · còn ${remaining}s`;
+                            statusEl.className = 'text-info small';
+                        }
+                    }
                 } else if (message.type === 'gnss_adjustment_step') {
                     const step = message.data;
                     const terminal = document.getElementById('gnss-terminal-output');
