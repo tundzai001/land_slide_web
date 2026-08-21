@@ -541,6 +541,152 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
     .ops-drawer, .ops-drawer-backdrop, .db-dataset, .rescue-case { transition: none; }
 }
 
+/* Admin dark skin: premium-light is shared by both themes, so every light-only
+   surface below needs an explicit dark counterpart. Keep this block last. */
+[data-theme="dark"] {
+    --admin-canvas: #0b141c;
+    --admin-surface: #111f2b;
+    --admin-surface-muted: #172936;
+    --admin-border: #2b4353;
+    --admin-text: #e7f0f7;
+    --admin-muted: #a8bac8;
+    --admin-primary: #60a5fa;
+    --admin-primary-dark: #3b82f6;
+    --admin-shadow: 0 12px 34px rgba(0, 0, 0, .28);
+}
+
+[data-theme="dark"] html[data-app-view="admin"],
+[data-theme="dark"] html[data-app-view="admin"] body,
+[data-theme="dark"] body.admin-page,
+[data-theme="dark"] .admin-wrapper,
+[data-theme="dark"] .admin-main {
+    background: var(--admin-canvas) !important;
+    color: var(--admin-text) !important;
+}
+
+[data-theme="dark"] .admin-navbar,
+[data-theme="dark"] .admin-sidebar,
+[data-theme="dark"] .content-header,
+[data-theme="dark"] .user-profile,
+[data-theme="dark"] .breadcrumb,
+[data-theme="dark"] .user-toolbar,
+[data-theme="dark"] .card,
+[data-theme="dark"] .custom-table,
+[data-theme="dark"] .modal-content {
+    background: var(--admin-surface) !important;
+    color: var(--admin-text) !important;
+    border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"] .admin-navbar h5,
+[data-theme="dark"] #admin-tab-content h4,
+[data-theme="dark"] #admin-tab-content h5,
+[data-theme="dark"] #admin-tab-content h6,
+[data-theme="dark"] .management-primary-text,
+[data-theme="dark"] .management-project-card .card-title,
+[data-theme="dark"] .custom-table .table,
+[data-theme="dark"] .custom-table .table tbody td {
+    color: var(--admin-text) !important;
+}
+
+[data-theme="dark"] .admin-sidebar .nav-link {
+    color: var(--admin-muted) !important;
+}
+
+[data-theme="dark"] .admin-sidebar .nav-link:hover {
+    color: var(--admin-text) !important;
+    background: #1b3444 !important;
+}
+
+[data-theme="dark"] .admin-sidebar .nav-link.active {
+    color: #dbeafe !important;
+    background: #193b58 !important;
+    border-color: #32658c !important;
+}
+
+[data-theme="dark"] .theme-toggle-mini,
+[data-theme="dark"] .avatar-circle {
+    background: #172936 !important;
+    color: #bfdbfe !important;
+    border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"] .custom-table .table thead th {
+    background: #172936 !important;
+    color: #b8c9d8 !important;
+    border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"] .custom-table .table tbody tr,
+[data-theme="dark"] .custom-table .table tbody tr:hover {
+    background: var(--admin-surface) !important;
+    border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"] .custom-table .table tbody tr:hover {
+    background: #162d3b !important;
+}
+
+[data-theme="dark"] .management-status {
+    background: #243746 !important;
+    color: #c8d6e2 !important;
+}
+
+[data-theme="dark"] .management-status.is-active,
+[data-theme="dark"] .management-status.is-success,
+[data-theme="dark"] .management-status.is-online {
+    background: #123d35 !important;
+    color: #86efac !important;
+}
+
+[data-theme="dark"] .management-status.is-warning,
+[data-theme="dark"] .management-status.is-stale {
+    background: #4a3710 !important;
+    color: #fcd34d !important;
+}
+
+[data-theme="dark"] .management-status.is-secondary,
+[data-theme="dark"] .management-status.is-offline,
+[data-theme="dark"] .management-status.is-locked {
+    background: #293845 !important;
+    color: #c0ceda !important;
+}
+
+[data-theme="dark"] .user-project-badge,
+[data-theme="dark"] .project-count,
+[data-theme="dark"] .station-tag,
+[data-theme="dark"] .station-icon,
+[data-theme="dark"] .user-project-option {
+    background: #1a3040 !important;
+    color: #c7d8e6 !important;
+    border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"] .user-project-option:hover {
+    background: #214257 !important;
+}
+
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .input-group-text {
+    background: #0e1b25 !important;
+    color: var(--admin-text) !important;
+    border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"] .form-control::placeholder {
+    color: #8297a8 !important;
+}
+
+[data-theme="dark"] .form-label,
+[data-theme="dark"] .text-muted,
+[data-theme="dark"] .project-description,
+[data-theme="dark"] .project-location,
+[data-theme="dark"] .project-code,
+[data-theme="dark"] .station-coordinate {
+    color: var(--admin-muted) !important;
+}
+
 /* Station wizard dark mode must override the light admin skin loaded above. */
 [data-theme="dark"] #stationConfigModal {
     --station-surface: #111b27;
