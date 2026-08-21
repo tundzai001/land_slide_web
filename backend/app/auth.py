@@ -53,6 +53,7 @@ class Permission:
     MANAGE_USERS = "manage_users"
     EDIT_STATIONS = "edit_stations"
     VIEW_STATIONS = "view_stations"
+    MANAGE_SIMULATIONS = "manage_simulations"
 
 # --- Password Hashing ---
 async def get_password_hash(password: str) -> str:
@@ -102,7 +103,7 @@ async def get_current_user(
 # --- Phân quyền ---
 def get_user_permissions(user):
     if user.role == Role.ADMIN:
-        return [Permission.MANAGE_USERS, Permission.EDIT_STATIONS, Permission.VIEW_STATIONS]
+        return [Permission.MANAGE_USERS, Permission.EDIT_STATIONS, Permission.VIEW_STATIONS, Permission.MANAGE_SIMULATIONS]
     if user.role == Role.OPERATOR:
         return [Permission.EDIT_STATIONS, Permission.VIEW_STATIONS]
     if user.role == Role.VIEWER:

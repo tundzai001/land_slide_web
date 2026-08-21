@@ -61,6 +61,27 @@ window.LegacyTemplateParts['station-storage'] = String.raw`                <!-- 
                         </div>
                     </section>
 
+                    <section class="config-section mb-4" aria-labelledby="station-simulation-profile-title">
+                        <div class="section-header"><span class="station-section-icon"><i class="bi bi-boxes" aria-hidden="true"></i></span><div><h5 id="station-simulation-profile-title">Hồ sơ mô phỏng sườn dốc</h5><p>Thông số địa chất dùng khi chạy mô phỏng từ dữ liệu trạm</p></div><span class="station-section-badge">Engineering</span></div>
+                        <div class="sensor-config-body">
+                            <div class="station-inline-note"><i class="bi bi-info-circle"></i><span>Đây là hồ sơ giả định của trạm. Cảm biến chỉ cập nhật mưa, mực nước và gia tốc; không tự suy đoán địa chất.</span></div>
+                            <div class="station-storage-grid simulation-profile-grid">
+                                <label class="station-storage-card"><span class="station-storage-card-title">Lực dính c′</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-cohesion" value="15" min="0" max="200" step="0.1"><span class="input-group-text">kPa</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Góc ma sát φ′</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-friction" value="30" min="1" max="60" step="0.1"><span class="input-group-text">°</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Trọng lượng riêng γ</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-unit-weight" value="18" min="5" max="30" step="0.1"><span class="input-group-text">kN/m³</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Chiều sâu mặt trượt</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-slip-depth" value="5" min="0.5" max="50" step="0.1"><span class="input-group-text">m</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Góc dốc</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-slope" value="25" min="1" max="70" step="0.1"><span class="input-group-text">°</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Hệ số thấm Kₛ</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-ks" value="0.000015" min="0.000000001" max="0.01" step="0.000001"><span class="input-group-text">m/s</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Độ rỗng</span><input type="number" class="form-control" id="sim-profile-porosity" value="0.25" min="0.05" max="0.7" step="0.01"></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">ru nền</span><input type="number" class="form-control" id="sim-profile-base-ru" value="0" min="0" max="0.6" step="0.01"></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Mực nước khô</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-water-dry" value="0" step="0.01"><span class="input-group-text">m</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Mực nước bão hòa</span><span class="input-group"><input type="number" class="form-control" id="sim-profile-water-saturated" value="1" step="0.01"><span class="input-group-text">m</span></span></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Nhà trong mô hình</span><input type="number" class="form-control" id="sim-profile-houses" value="40" min="0" max="2000"></label>
+                                <label class="station-storage-card"><span class="station-storage-card-title">Cây trong mô hình</span><input type="number" class="form-control" id="sim-profile-trees" value="300" min="0" max="10000"></label>
+                            </div>
+                        </div>
+                    </section>
+
                     <section class="config-section station-review-panel mb-4" aria-labelledby="station-review-title">
                         <div class="section-header">
                             <span class="station-section-icon"><i class="bi bi-clipboard2-check" aria-hidden="true"></i></span>

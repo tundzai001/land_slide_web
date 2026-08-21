@@ -24,6 +24,8 @@ class DatabaseManager {
         this.exportTaskState = null;
         this.exportPollTimer = null;
         this.exportDownloadStarted = false;
+        this.datasetLoadSequence = 0;
+        this.datasetRequestController = null;
 
         if (!this.token) {
             window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
@@ -82,11 +84,16 @@ class DatabaseManager {
     async loadAllData() {
         const tbody = document.getElementById('db-table-body');
         if (!tbody) return;
+        const loadSequence = ++this.datasetLoadSequence;
+        this.datasetRequestController?.abort();
+        this.datasetRequestController = new AbortController();
         tbody.innerHTML = '<tr><td colspan="5"><div class="ops-loading"><span class="spinner-border spinner-border-sm" role="status"></span><span>Đang tải dataset…</span></div></td></tr>';
         document.getElementById('db-current-meta').textContent = 'Đang đồng bộ dữ liệu…';
         try {
-            await Promise.all([this.fetchCurrentDataset(), this.fetchStats()]);
+            await this.fetchCurrentDataset(this.datasetRequestController.signal);
+            if (loadSequence === this.datasetLoadSequence) this.fetchStats();
         } catch (e) {
+            if (e.name === 'AbortError' || loadSequence !== this.datasetLoadSequence) return;
             console.error('[DB MANAGER] load error:', e);
             tbody.innerHTML = `<tr><td colspan="5"><div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được dữ liệu</strong><p>${this.escapeHtml(e.message)}</p><button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()">Thử lại</button></div></td></tr>`;
         }
@@ -97,11 +104,13 @@ class DatabaseManager {
             stations: { endpoint: 'stations', title: 'Trạm', icon: 'bi-broadcast-pin' },
             devices: { endpoint: 'devices', title: 'Thiết bị', icon: 'bi-cpu' },
             sensor_data: { endpoint: 'sensor-data', title: 'Dữ liệu cảm biến', icon: 'bi-activity' },
+            gnss_adjustments: { endpoint: 'sensor-data', title: 'Kết quả bình sai GNSS', icon: 'bi-crosshair2' },
             alerts: { endpoint: 'alerts', title: 'Cảnh báo', icon: 'bi-bell' }
+            ,simulations: { endpoint: 'simulations', title: 'Kết quả mô phỏng', icon: 'bi-boxes' }
         }[dataset];
     }
 
-    async fetchCurrentDataset() {
+    async fetchCurrentDataset(signal) {
         const config = this.datasetConfig();
         const query = new URLSearchParams({ offset: String(this.offset), limit: String(this.limit), sort: this.sort });
         const search = document.getElementById('db-search')?.value.trim() || '';
@@ -109,7 +118,8 @@ class DatabaseManager {
         Object.entries(this.filters).forEach(([key, value]) => {
             if (value !== '' && value != null) query.set(key, value);
         });
-        const res = await fetch(`/api/admin/db/${config.endpoint}?${query}`, { headers: { 'Authorization': `Bearer ${this.token}` } });
+        if (this.currentDataset === 'gnss_adjustments') query.set('sensor_type', 'gnss_adjusted');
+        const res = await fetch(`/api/admin/db/${config.endpoint}?${query}`, { headers: { 'Authorization': `Bearer ${this.token}` }, signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const rows = await res.json();
         this.total = Number(res.headers.get('X-Total-Count') || rows.length || 0);
@@ -167,10 +177,19 @@ class DatabaseManager {
                 this.filterSelect('Trạm', 'station_id', stationOptions),
                 this.filterSelect('Loại sensor', 'sensor_type', [{ value: '', label: 'Tất cả sensor' }, ...['gnss', 'imu', 'rain', 'water', 'gnss_audit', 'gnss_adjusted'].map(value => ({ value, label: value.toUpperCase() }))]),
             ],
+            gnss_adjustments: [
+                this.filterSelect('Trạm', 'station_id', stationOptions),
+            ],
             alerts: [
                 this.filterSelect('Trạm', 'station_id', stationOptions),
                 this.filterSelect('Mức độ', 'level', [{ value: '', label: 'Mọi mức độ' }, ...['INFO', 'WARNING', 'CRITICAL'].map(value => ({ value, label: value }))]),
                 this.filterSelect('Xử lý', 'is_resolved', [{ value: '', label: 'Tất cả cảnh báo' }, { value: 'false', label: 'Đang mở' }, { value: 'true', label: 'Đã xử lý' }]),
+            ],
+            simulations: [
+                this.filterSelect('Dự án', 'project_id', projectOptions),
+                this.filterSelect('Trạm', 'station_id', stationOptions),
+                this.filterSelect('Trạng thái', 'status', [{ value: '', label: 'Mọi trạng thái' }, ...['completed', 'running', 'failed', 'stopped', 'interrupted'].map(value => ({ value, label: value }))]),
+                this.filterSelect('Nguồn', 'mode', [{ value: '', label: 'Mọi nguồn' }, { value: 'manual', label: 'Nhập tay' }, { value: 'station_snapshot', label: 'Dữ liệu trạm' }]),
             ],
         };
         container.innerHTML = (filters[this.currentDataset] || []).join('');
@@ -214,7 +233,7 @@ class DatabaseManager {
                 <td><strong class="db-primary">${this.escapeHtml(this.getPreviewData(item))}</strong><small>${this.escapeHtml(this.getRecordSecondary(item))}</small></td>
                 <td><span class="management-status ${status.className}"><i class="bi bi-circle-fill"></i>${this.escapeHtml(status.label)}</span></td>
                 <td><span class="db-time">${this.escapeHtml(this.getRecordTime(item))}</span></td>
-                <td><button class="management-icon-btn btn btn-outline-secondary" onclick="event.stopPropagation();window.dbManager.viewRecord('${item._table}', ${item.id})" aria-label="Xem bản ghi #${item.id}"><i class="bi bi-chevron-right"></i></button></td>
+                <td><div class="d-flex gap-1 justify-content-end"><button class="management-icon-btn btn btn-outline-danger" onclick="event.stopPropagation();window.dbManager.deleteRecord('${item._table}', ${item.id})" aria-label="Xóa bản ghi #${item.id}"><i class="bi bi-trash3"></i></button><button class="management-icon-btn btn btn-outline-secondary" onclick="event.stopPropagation();window.dbManager.viewRecord('${item._table}', ${item.id})" aria-label="Xem bản ghi #${item.id}"><i class="bi bi-chevron-right"></i></button></div></td>
             </tr>`;
         }).join('');
         const start = this.total ? this.offset + 1 : 0;
@@ -231,7 +250,9 @@ class DatabaseManager {
             'stations': 'bg-primary',
             'devices': 'bg-success',
             'sensor_data': 'bg-info',
+            'gnss_adjustments': 'bg-info',
             'alerts': 'bg-warning'
+            ,'simulations': 'bg-info'
         };
         return colors[table] || 'bg-secondary';
     }
@@ -243,19 +264,21 @@ class DatabaseManager {
         if (item._table === 'devices') {
             return `${item.device_code || '--'} · ${item.name || item.device_type || 'Thiết bị'}`;
         }
-        if (item._table === 'sensor_data') {
+        if (['sensor_data', 'gnss_adjustments'].includes(item._table)) {
             return `${String(item.sensor_type || 'sensor').toUpperCase()} · Trạm #${item.station_id ?? '--'}`;
         }
         if (item._table === 'alerts') {
             return `${item.category || 'Cảnh báo'} · ${item.message || '--'}`;
         }
+        if (item._table === 'simulations') return item.display_name || `Mô phỏng #${item.id}`;
         return `Bản ghi #${item.id}`;
     }
 
     getRecordSecondary(item) {
         if (item._table === 'devices') return item.mqtt_topic || item.device_type || 'Không có MQTT topic';
-        if (item._table === 'sensor_data') return JSON.stringify(item.data || {}).slice(0, 110);
+        if (['sensor_data', 'gnss_adjustments'].includes(item._table)) return JSON.stringify(item.data || {}).slice(0, 110);
         if (item._table === 'alerts') return `Trạm #${item.station_id ?? '--'} · ${item.level || '--'}`;
+        if (item._table === 'simulations') return `${item.station_code || item.project_code || 'Kịch bản thủ công'} · ${item.summary?.classification || item.mode}`;
         const location = item.location && typeof item.location === 'object'
             ? item.location.name || item.location.address || ([item.location.lat, item.location.lon].every(Number.isFinite) ? `${item.location.lat}, ${item.location.lon}` : 'Chưa có vị trí')
             : item.location || 'Chưa có vị trí';
@@ -264,6 +287,7 @@ class DatabaseManager {
 
     getRecordStatus(item) {
         if (item._table === 'alerts') return item.is_resolved ? { label: 'Đã xử lý', className: 'is-success' } : { label: item.level || 'Đang mở', className: 'is-warning' };
+        if (item._table === 'simulations') return { label: item.status, className: item.status === 'completed' ? 'is-success' : ['failed', 'interrupted'].includes(item.status) ? 'is-offline' : 'is-warning' };
         if (item._table === 'devices') {
             if (!item.is_active) return { label: 'Đã tắt', className: 'is-secondary' };
             return item.effective_status === 'online' ? { label: 'Online', className: 'is-success' } : { label: 'Offline', className: 'is-offline' };
@@ -280,7 +304,7 @@ class DatabaseManager {
     }
 
     updateStats(stats) {
-        const mapping = { stations: ['stat-stations', 'db-count-stations'], devices: ['stat-devices', 'db-count-devices'], sensor_data: ['stat-data', 'db-count-sensor_data'], alerts: ['stat-alerts', 'db-count-alerts'] };
+        const mapping = { stations: ['stat-stations', 'db-count-stations'], devices: ['stat-devices', 'db-count-devices'], sensor_data: ['stat-data', 'db-count-sensor_data'], gnss_adjustments: ['db-count-gnss_adjustments'], alerts: ['stat-alerts', 'db-count-alerts'], simulations: ['db-count-simulations'] };
         Object.entries(mapping).forEach(([key, ids]) => ids.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = Number(stats[key] || 0).toLocaleString('vi-VN'); }));
     }
 
@@ -311,7 +335,8 @@ class DatabaseManager {
         const editButton = ['stations', 'devices'].includes(table)
             ? `<button class="btn btn-primary" onclick="window.dbManager.editRecord('${table}', ${id})"><i class="bi bi-pencil me-1"></i>Chỉnh sửa</button>`
             : '';
-        document.getElementById('db-inspector-actions').innerHTML = `<button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${table}', ${id})"><i class="bi bi-trash3 me-1"></i>Xóa</button>${editButton}`;
+        const downloadButton = table === 'simulations' ? `<button class="btn btn-primary" onclick="window.dbManager.downloadSimulation(${id})"><i class="bi bi-download me-1"></i>Tải báo cáo</button>` : '';
+        document.getElementById('db-inspector-actions').innerHTML = `${downloadButton}<button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${table}', ${id})"><i class="bi bi-trash3 me-1"></i>Xóa</button>${editButton}`;
         document.getElementById('db-inspector').classList.add('open');
         document.getElementById('db-inspector').setAttribute('aria-hidden', 'false');
         document.getElementById('db-inspector-backdrop').classList.add('show');
@@ -322,6 +347,21 @@ class DatabaseManager {
         document.getElementById('db-inspector')?.classList.remove('open');
         document.getElementById('db-inspector')?.setAttribute('aria-hidden', 'true');
         document.getElementById('db-inspector-backdrop')?.classList.remove('show');
+    }
+
+    async downloadSimulation(id) {
+        try {
+            const response = await fetch(`/api/simulations/runs/${id}/bundle`, { headers: { 'Authorization': `Bearer ${this.token}` } });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const href = URL.createObjectURL(await response.blob());
+            const link = document.createElement('a');
+            link.href = href;
+            link.download = `simulation_${id}.zip`;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(href), 1000);
+        } catch (error) {
+            window.toast?.error('Không thể tải báo cáo mô phỏng');
+        }
     }
 
     async copyCurrentRecord() {
@@ -387,7 +427,8 @@ class DatabaseManager {
         }
 
         try {
-            const res = await fetch(`/api/admin/db/${table}/${id}`, {
+            const apiTable = table === 'gnss_adjustments' ? 'sensor-data' : table;
+            const res = await fetch(`/api/admin/db/${apiTable}/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
@@ -587,6 +628,7 @@ class DatabaseManager {
             if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
             if (document.getElementById('export-gnss-adjustments')?.checked) tables.push('gnss_adjustments');
             if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
+            if (document.getElementById('export-simulations')?.checked) tables.push('simulations');
             const uniqueTables = [...new Set(tables)];
 
             // Kiểm tra
@@ -722,6 +764,7 @@ class DatabaseManager {
         const startButton = document.getElementById('btn-export-start');
         const failed = state.status === 'error' || state.status === 'failed';
         const completed = state.status === 'completed';
+        const downloading = state.status === 'downloading';
         if (progressContainer) progressContainer.style.display = 'block';
         if (progressBar) {
             progressBar.style.width = `${percent}%`;
@@ -729,13 +772,13 @@ class DatabaseManager {
             progressBar.style.background = failed ? '#dc5a5a' : '';
         }
         if (progressPercent) progressPercent.textContent = `${percent}%`;
-        if (progressText) progressText.textContent = failed ? 'Export thất bại' : completed ? 'Export hoàn tất' : 'Đang export dữ liệu';
+        if (progressText) progressText.textContent = failed ? 'Export thất bại' : downloading ? 'Đang chuẩn bị tải xuống' : completed ? 'Export hoàn tất' : 'Đang export dữ liệu';
         if (progressDetail) progressDetail.textContent = state.error || state.message || 'Đang xử lý...';
         if (startButton) startButton.disabled = !failed && !completed;
         const pillTitle = pill.querySelector('.export-pill-title');
         const pillDetail = pill.querySelector('.export-pill-detail');
         const spinner = pill.querySelector('.export-pill-spinner');
-        if (pillTitle) pillTitle.textContent = failed ? 'Export gặp lỗi' : completed ? 'Export hoàn tất' : `Đang export · ${percent}%`;
+        if (pillTitle) pillTitle.textContent = failed ? 'Export gặp lỗi' : downloading ? 'Đang chuẩn bị tải xuống' : completed ? 'Export hoàn tất' : `Đang export · ${percent}%`;
         if (pillDetail) pillDetail.textContent = state.error || state.message || 'Nhấn để mở chi tiết';
         if (spinner) spinner.style.animationPlayState = failed || completed ? 'paused' : 'running';
     }
@@ -754,6 +797,12 @@ class DatabaseManager {
                 if (this.exportTaskState.status === 'completed') {
                     clearInterval(this.exportPollTimer);
                     this.exportPollTimer = null;
+                    this.exportTaskState = {
+                        ...this.exportTaskState,
+                        status: 'downloading',
+                        message: 'File đã tạo xong, đang chuẩn bị tải xuống...'
+                    };
+                    this.renderExportTaskState();
                     await this.downloadCompletedExport(taskId, this.exportTaskState);
                 } else if (['error', 'failed'].includes(this.exportTaskState.status)) {
                     clearInterval(this.exportPollTimer);

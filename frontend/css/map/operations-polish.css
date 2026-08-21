@@ -1,4 +1,77 @@
 /* Operational polish: compact controls, legible status and consistent map overlays. */
+
+/* Keep the map tiles untouched, but let every map chrome surface follow the
+   global theme. premium-light.css is intentionally loaded before this file. */
+html[data-theme="dark"] {
+    --map-canvas: #071a1c;
+    --map-surface: #0b2427;
+    --map-surface-subtle: #123034;
+    --map-surface-muted: #183b3e;
+    --map-line: #29494c;
+    --map-line-strong: #3b6265;
+    --map-text: #f0fdfa;
+    --map-text-soft: #c2d8d5;
+    --map-muted: #8eaaa6;
+    --map-blue: #2dd4bf;
+    --map-blue-dark: #5eead4;
+    --map-blue-soft: rgba(45, 212, 191, 0.14);
+    --map-teal: #2dd4bf;
+    --map-teal-soft: rgba(45, 212, 191, 0.12);
+    --map-danger-soft: rgba(251, 113, 133, 0.14);
+    --map-shadow-card: 0 2px 10px rgba(0, 0, 0, 0.2);
+    --map-shadow-panel: 0 20px 55px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+
+html[data-theme="dark"] .top-navbar {
+    color: var(--map-text) !important;
+    background: rgba(11, 36, 39, 0.94) !important;
+    border-color: var(--map-line) !important;
+    box-shadow: var(--map-shadow-card) !important;
+}
+
+html[data-theme="dark"] .custom-map-controls,
+html[data-theme="dark"] .timeline-slider-container,
+html[data-theme="dark"] .map-floating-layer-panel {
+    background: rgba(11, 36, 39, 0.96) !important;
+    border-color: var(--map-line) !important;
+}
+
+html[data-theme="dark"] .leaflet-control-attribution,
+html[data-theme="dark"] .leaflet-control-scale-line,
+html[data-theme="dark"] .leaflet-bar,
+html[data-theme="dark"] .leaflet-popup-content-wrapper,
+html[data-theme="dark"] .leaflet-popup-tip {
+    color: var(--map-text-soft) !important;
+    background: rgba(11, 36, 39, 0.96) !important;
+    border-color: var(--map-line) !important;
+}
+
+html[data-theme="dark"] .navbar-hamburger,
+html[data-theme="dark"] .top-navbar .btn-link,
+html[data-theme="dark"] .map-ctrl-btn,
+html[data-theme="dark"] .heatmap-toggle-btn,
+html[data-theme="dark"] .sidebar-close-tab,
+html[data-theme="dark"] .sidebar-close-btn,
+html[data-theme="dark"] .sidepanel-close,
+html[data-theme="dark"] #close-charts-btn {
+    color: var(--map-text-soft) !important;
+    background: var(--map-surface) !important;
+    border-color: var(--map-line) !important;
+}
+
+html[data-theme="dark"] .top-navbar .btn-outline-primary {
+    color: var(--map-blue) !important;
+    border-color: var(--map-line-strong) !important;
+    background: var(--map-blue-soft) !important;
+}
+
+html[data-theme="dark"] .station-item:hover,
+html[data-theme="dark"] .station-item.active,
+html[data-theme="dark"] .station-item.selected {
+    background: var(--map-surface-subtle) !important;
+    border-color: var(--map-line-strong) !important;
+}
+
 .top-navbar {
     border-bottom: 1px solid var(--border-color);
     box-shadow: var(--shadow-sm);

@@ -53,25 +53,35 @@ async def get_database_stats(
         count_devices = await config_db.execute(select(func.count()).select_from(model_config.Device))
         num_devices = count_devices.scalar()
 
-        # Đếm Sensor Data (Total)
-        count_data = await data_db.execute(select(func.count()).select_from(model_data.SensorData))
-        num_data = count_data.scalar()
+        # Count both sensor totals in one scan. The old implementation scanned
+        # the 800k+ row table twice and made the admin dashboard prone to 504s.
+        sensor_counts = await data_db.execute(
+            select(model_data.SensorData.sensor_type, func.count())
+            .group_by(model_data.SensorData.sensor_type)
+        )
+        counts_by_type = {sensor_type: int(count or 0) for sensor_type, count in sensor_counts.all()}
+        num_data = sum(counts_by_type.values())
+        num_adjustments = counts_by_type.get("gnss_adjusted", 0)
 
         # Đếm Active Alerts (Chưa xử lý)
         count_alerts = await data_db.execute(
             select(func.count()).select_from(model_data.Alert).where(model_data.Alert.is_resolved == False)
         )
         num_alerts = count_alerts.scalar()
+        count_simulations = await data_db.execute(select(func.count()).select_from(model_data.SimulationRun))
+        num_simulations = count_simulations.scalar()
 
         return {
             "stations": num_stations,
             "devices": num_devices,
             "sensor_data": num_data,
-            "alerts": num_alerts
+            "gnss_adjustments": num_adjustments,
+            "alerts": num_alerts,
+            "simulations": num_simulations
         }
     except Exception as e:
         logger.error(f"Stats error: {e}")
-        return {"stations": 0, "devices": 0, "sensor_data": 0, "alerts": 0}
+        return {"stations": 0, "devices": 0, "sensor_data": 0, "gnss_adjustments": 0, "alerts": 0, "simulations": 0}
 
 @router.get("/api/admin/db/stations")
 async def admin_get_all_stations(
@@ -311,6 +321,40 @@ async def admin_get_alerts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/admin/db/simulations")
+async def admin_get_simulations(
+    response: Response,
+    offset: int = 0,
+    limit: int = 100,
+    project_id: Optional[int] = None,
+    station_id: Optional[int] = None,
+    status: Optional[str] = None,
+    mode: Optional[str] = None,
+    sort: str = "-id",
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS)),
+):
+    query = select(model_data.SimulationRun)
+    if project_id is not None:
+        query = query.where(model_data.SimulationRun.project_id == project_id)
+    if station_id is not None:
+        query = query.where(model_data.SimulationRun.station_id == station_id)
+    if status:
+        query = query.where(model_data.SimulationRun.status == status)
+    if mode:
+        query = query.where(model_data.SimulationRun.mode == mode)
+    fields = {"id": model_data.SimulationRun.id, "created_at": model_data.SimulationRun.created_at}
+    field = sort.lstrip("-")
+    if field not in fields:
+        raise HTTPException(status_code=422, detail="Unsupported sort field")
+    page_offset, page_limit = normalize_page(offset, limit, max_limit=500)
+    total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
+    column = fields[field]
+    rows = (await db.execute(query.order_by(column.desc() if sort.startswith("-") else column.asc()).offset(page_offset).limit(page_limit))).scalars().all()
+    set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
+    return [{"id": row.id, "display_name": row.display_name, "project_id": row.project_id, "project_code": row.project_code, "station_id": row.station_id, "station_code": row.station_code, "mode": row.mode, "status": row.status, "progress": row.progress, "summary": row.summary, "warnings": row.warnings, "engine_version": row.engine_version, "created_by_username": row.created_by_username, "created_at": row.created_at, "finished_at": row.finished_at} for row in rows]
+
+
 # ============================================================================
 # UPDATE/DELETE ENDPOINTS
 # ============================================================================
@@ -455,6 +499,27 @@ async def admin_delete_alert(
         )
         await db.commit()
         return {"status": "success"}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/admin/db/simulations/{record_id}")
+async def admin_delete_simulation(
+    record_id: int,
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+):
+    try:
+        result = await db.execute(
+            delete(model_data.SimulationRun).where(model_data.SimulationRun.id == record_id)
+        )
+        if not result.rowcount:
+            raise HTTPException(status_code=404, detail="Simulation not found")
+        await db.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

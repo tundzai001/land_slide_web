@@ -38,6 +38,7 @@ from ..services.mqtt_topics import (
     normalize_mqtt_topic,
 )
 from ..services.adjustment_failure import _write_failure_workbook
+from ..services.simulation_reports import build_json as build_simulation_json, build_pdf as build_simulation_pdf, build_xlsx as build_simulation_xlsx
 import math
 import json
 import uuid
@@ -1023,7 +1024,7 @@ async def start_export_database_excel(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Bắt đầu tác vụ xuất Excel chạy ngầm."""
-    allowed = {'projects', 'stations', 'devices', 'sensor_data', 'gnss_adjustments', 'alerts'}
+    allowed = {'projects', 'stations', 'devices', 'sensor_data', 'gnss_adjustments', 'alerts', 'simulations'}
     selected = [table for table in request.tables if table in allowed]
     if not selected:
         raise HTTPException(status_code=400, detail="No valid export table selected")
@@ -1253,6 +1254,24 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                     if 'alerts' in selected:
                         count_q = select(func.count()).select_from(alert_query.subquery())
                         total_expected_data += await data_db.scalar(count_q) or 0
+
+                    simulation_query = select(model_data.SimulationRun)
+                    if project_filter:
+                        simulation_query = simulation_query.where(model_data.SimulationRun.project_id.in_(project_filter))
+                    if station_filter:
+                        simulation_query = simulation_query.where(model_data.SimulationRun.station_id.in_(station_filter))
+                    if request.start_date:
+                        try:
+                            simulation_query = simulation_query.where(model_data.SimulationRun.created_at >= int(datetime.strptime(request.start_date, '%Y-%m-%d').timestamp()))
+                        except ValueError:
+                            pass
+                    if request.end_date:
+                        try:
+                            simulation_query = simulation_query.where(model_data.SimulationRun.created_at <= int(datetime.strptime(f"{request.end_date} 23:59:59", '%Y-%m-%d %H:%M:%S').timestamp()))
+                        except ValueError:
+                            pass
+                    if 'simulations' in selected:
+                        total_expected_data += await data_db.scalar(select(func.count()).select_from(simulation_query.subquery())) or 0
                     
                     if total_expected_data == 0 and not any(t in selected for t in ['projects', 'stations', 'devices']):
                         EXPORT_TASKS[task_id]["status"] = "error"
@@ -1305,16 +1324,37 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
 
                     if 'gnss_adjustments' in selected:
                         EXPORT_TASKS[task_id]["message"] = "Đang đóng gói kết quả bình sai GNSS theo dự án/cụm..."
-                        adjustment_result = await data_db.execute(
-                            adjustment_query.order_by(
+                        # Do not materialize every ORM row at once. Adjustment
+                        # payloads can be large and the old SELECT + scalars().all()
+                        # routinely exceeded asyncpg's command timeout.
+                        adjustment_result = await data_db.stream(
+                            adjustment_query.with_only_columns(
+                                model_data.SensorData.id,
+                                model_data.SensorData.timestamp,
+                                model_data.SensorData.data,
+                            ).order_by(
                                 model_data.SensorData.timestamp,
                                 model_data.SensorData.id,
+                            ).execution_options(
+                                stream_results=True,
+                                yield_per=500,
                             )
                         )
                         unique_adjustments: Dict[tuple, dict] = {}
                         cluster_filter = set(request.cluster_indices or [])
-                        for record in adjustment_result.scalars().all():
-                            payload = record.data if isinstance(record.data, dict) else {}
+                        async for record in adjustment_result:
+                            record_id, record_timestamp, record_data = record
+                            records_processed += 1
+                            if records_processed % 100 == 0:
+                                EXPORT_TASKS[task_id]["percent"] = min(
+                                    99,
+                                    int((records_processed / total_expected_data) * 99),
+                                ) if total_expected_data else 50
+                                EXPORT_TASKS[task_id]["message"] = (
+                                    f"Đang đọc {records_processed}/{total_expected_data} kết quả bình sai..."
+                                )
+                                await asyncio.sleep(0)
+                            payload = record_data if isinstance(record_data, dict) else {}
                             if cluster_filter and payload.get("cluster_index") not in cluster_filter:
                                 continue
                             payload_project_id = int(payload.get("project_id") or 0)
@@ -1325,10 +1365,11 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             )
                             item = unique_adjustments.setdefault(key, {
                                 "payload": payload,
-                                "timestamp": int(record.timestamp or 0),
+                                "timestamp": int(record_timestamp or 0),
                                 "record_ids": [],
                             })
-                            item["record_ids"].append(int(record.id))
+                            item["record_ids"].append(int(record_id))
+                        await adjustment_result.close()
 
                         # Failed runs are not published as gnss_adjusted database
                         # rows; their JSON/XLSX files are the durable source.
@@ -1480,9 +1521,6 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                         if not adjustment_rows_by_project:
                             summary_rows.append(["GNSS_ADJUSTMENTS", 0, exported_at, "FILTERED"])
                         total_records += adjustment_count
-                        records_processed += sum(
-                            len(item["record_ids"]) for item in unique_adjustments.values()
-                        )
 
                     sensor_headers = [
                         "id", "time", "timestamp", "project_code", "station_code", "station_id",
@@ -1655,6 +1693,26 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                 summary_rows.append([dataset, count, exported_at, "FULL"])
                         else:
                             summary_rows.append(["ALERTS", 0, exported_at, "FULL"])
+
+                    if 'simulations' in selected:
+                        EXPORT_TASKS[task_id]["message"] = "Đang dựng báo cáo mô phỏng từ database..."
+                        runs = (await data_db.execute(simulation_query.order_by(model_data.SimulationRun.created_at, model_data.SimulationRun.id))).scalars().all()
+                        for run in runs:
+                            project_component = _zip_component(run.project_code, "MANUAL")
+                            station_component = _zip_component(run.station_code, "manual")
+                            created_label = datetime.fromtimestamp(run.created_at).strftime("%Y-%m-%d_%H-%M-%S")
+                            folder = f"simulations/{project_component}/{station_component}/{created_label}_{_zip_component(run.display_name, f'run_{run.id}')}"
+                            pdf_data, xlsx_data, json_data = await asyncio.gather(
+                                asyncio.to_thread(build_simulation_pdf, run),
+                                asyncio.to_thread(build_simulation_xlsx, run),
+                                asyncio.to_thread(build_simulation_json, run),
+                            )
+                            archive.writestr(f"{folder}/report.pdf", pdf_data)
+                            archive.writestr(f"{folder}/results.xlsx", xlsx_data)
+                            archive.writestr(f"{folder}/data.json", json_data)
+                            total_records += 1
+                            records_processed += 1
+                        summary_rows.append(["SIMULATIONS", len(runs), exported_at, "FILTERED"])
 
                     summary_rows.append(["TOTAL", total_records, exported_at, "FULL"])
                     add_csv("EXPORT_SUMMARY.csv", ["dataset", "record_count", "exported_at", "scope"], summary_rows)

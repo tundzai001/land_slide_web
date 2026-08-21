@@ -1,5 +1,5 @@
 #backend/app/models/data.py
-from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index
+from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index, Text
 from app.database import BaseData
 
 class SensorData(BaseData):
@@ -134,3 +134,45 @@ class RescueRequest(BaseData):
     admin_note = Column(String, nullable=True)
     handled_by = Column(String, nullable=True)
     handled_at = Column(BigInteger, nullable=True)
+
+
+class SimulationRun(BaseData):
+    """Auditable, reproducible result of one landslide scenario."""
+
+    __tablename__ = "simulation_runs"
+    __table_args__ = (
+        Index("ix_simulation_runs_project_created", "project_id", "created_at"),
+        Index("ix_simulation_runs_station_created", "station_id", "created_at"),
+        Index("ix_simulation_runs_status_created", "status", "created_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    display_name = Column(String(240), nullable=False)
+    created_by_user_id = Column(Integer, nullable=False, index=True)
+    created_by_username = Column(String(150), nullable=False)
+    project_id = Column(Integer, nullable=True)
+    project_code = Column(String(80), nullable=True)
+    project_name = Column(String(255), nullable=True)
+    station_id = Column(Integer, nullable=True)
+    station_code = Column(String(80), nullable=True)
+    station_name = Column(String(255), nullable=True)
+    mode = Column(String(32), nullable=False)
+    status = Column(String(24), nullable=False, default="queued")
+    progress = Column(Integer, nullable=False, default=0)
+    engine_version = Column(String(32), nullable=False)
+    schema_version = Column(Integer, nullable=False, default=1)
+    seed = Column(BigInteger, nullable=False)
+    sim_duration_seconds = Column(Integer, nullable=False)
+    parameters = Column(JSON, nullable=False)
+    parameter_sources = Column(JSON, nullable=False, default=dict)
+    sensor_snapshot = Column(JSON, nullable=False, default=dict)
+    time_series = Column(JSON, nullable=False, default=list)
+    events = Column(JSON, nullable=False, default=list)
+    summary = Column(JSON, nullable=False, default=dict)
+    terrain_profile = Column(JSON, nullable=False, default=list)
+    warnings = Column(JSON, nullable=False, default=list)
+    error_detail = Column(Text, nullable=True)
+    created_at = Column(BigInteger, nullable=False)
+    started_at = Column(BigInteger, nullable=True)
+    finished_at = Column(BigInteger, nullable=True)
+    updated_at = Column(BigInteger, nullable=False)

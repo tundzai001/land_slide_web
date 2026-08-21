@@ -44,7 +44,7 @@ const groups = {
     'css/map/effects-theme.css', 'css/map/tools.css', 'css/map/gnss.css',
     'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css',
     'css/map/premium-light.css', 'css/map/operations-polish.css',
-    'css/map/digital-twin-workspace.css'
+    'css/map/digital-twin-workspace.css', 'css/map/digital-twin-results.css'
   ],
   'admin.min.css': [
     'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/configuration.css',

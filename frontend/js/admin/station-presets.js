@@ -407,6 +407,22 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
         const config = {
             active_preset: this.activePreset || '',
+            simulation_profile: {
+                version: 1,
+                cohesion_kpa: parseFloat(document.getElementById('sim-profile-cohesion')?.value || 15),
+                friction_angle_deg: parseFloat(document.getElementById('sim-profile-friction')?.value || 30),
+                unit_weight_kn_m3: parseFloat(document.getElementById('sim-profile-unit-weight')?.value || 18),
+                slip_depth_m: parseFloat(document.getElementById('sim-profile-slip-depth')?.value || 5),
+                slope_angle_deg: parseFloat(document.getElementById('sim-profile-slope')?.value || 25),
+                saturated_conductivity_m_s: parseFloat(document.getElementById('sim-profile-ks')?.value || 0.000015),
+                porosity: parseFloat(document.getElementById('sim-profile-porosity')?.value || 0.25),
+                base_pore_pressure_ratio: parseFloat(document.getElementById('sim-profile-base-ru')?.value || 0),
+                water_level_dry_m: parseFloat(document.getElementById('sim-profile-water-dry')?.value || 0),
+                water_level_saturated_m: parseFloat(document.getElementById('sim-profile-water-saturated')?.value || 1),
+                base_seismic_coeff: 0,
+                house_count: parseInt(document.getElementById('sim-profile-houses')?.value || 40),
+                tree_count: parseInt(document.getElementById('sim-profile-trees')?.value || 300),
+            },
             alerting: {
                 enabled: !document.getElementById('station-alerting-disabled')?.checked
             },

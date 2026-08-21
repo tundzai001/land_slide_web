@@ -174,7 +174,9 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <button class="db-dataset active" data-dataset="stations" onclick="window.dbManager.selectDataset('stations', this)"><i class="bi bi-broadcast-pin"></i><span>Trạm</span><b id="db-count-stations">--</b></button>
                         <button class="db-dataset" data-dataset="devices" onclick="window.dbManager.selectDataset('devices', this)"><i class="bi bi-cpu"></i><span>Thiết bị</span><b id="db-count-devices">--</b></button>
                         <button class="db-dataset" data-dataset="sensor_data" onclick="window.dbManager.selectDataset('sensor_data', this)"><i class="bi bi-activity"></i><span>Cảm biến</span><b id="db-count-sensor_data">--</b></button>
+                        <button class="db-dataset" data-dataset="gnss_adjustments" onclick="window.dbManager.selectDataset('gnss_adjustments', this)"><i class="bi bi-crosshair2"></i><span>Bình sai GNSS</span><b id="db-count-gnss_adjustments">--</b></button>
                         <button class="db-dataset" data-dataset="alerts" onclick="window.dbManager.selectDataset('alerts', this)"><i class="bi bi-bell"></i><span>Cảnh báo</span><b id="db-count-alerts">--</b></button>
+                        <button class="db-dataset" data-dataset="simulations" onclick="window.dbManager.selectDataset('simulations', this)"><i class="bi bi-boxes"></i><span>Mô phỏng</span><b id="db-count-simulations">--</b></button>
                     </nav>
                     <div class="db-workspace">
                         <div class="db-toolbar">

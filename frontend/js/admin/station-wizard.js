@@ -318,6 +318,19 @@ class AdminStationWizardFeature extends window.AdminManager {
                 offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
             }
             this.currentStationConfig = cfg;
+            const simulationProfile = cfg.simulation_profile || {};
+            const simulationFields = {
+                'sim-profile-cohesion': ['cohesion_kpa', 15], 'sim-profile-friction': ['friction_angle_deg', 30],
+                'sim-profile-unit-weight': ['unit_weight_kn_m3', 18], 'sim-profile-slip-depth': ['slip_depth_m', 5],
+                'sim-profile-slope': ['slope_angle_deg', 25], 'sim-profile-ks': ['saturated_conductivity_m_s', 0.000015],
+                'sim-profile-porosity': ['porosity', 0.25], 'sim-profile-base-ru': ['base_pore_pressure_ratio', 0],
+                'sim-profile-water-dry': ['water_level_dry_m', 0], 'sim-profile-water-saturated': ['water_level_saturated_m', 1],
+                'sim-profile-houses': ['house_count', 40], 'sim-profile-trees': ['tree_count', 300],
+            };
+            Object.entries(simulationFields).forEach(([id, [key, fallback]]) => {
+                const input = document.getElementById(id);
+                if (input) input.value = simulationProfile[key] ?? fallback;
+            });
             this.loadAICasterUsers(
                 cfg.gnss_aicaster_user || cfg.gnss_aicaster_client || {}
             );

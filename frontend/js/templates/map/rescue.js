@@ -233,6 +233,9 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                 </div>
             </div>
             <div class="dt-header-right">
+                <button class="dt-btn-back" id="btn-dt-history" title="Lịch sử mô phỏng">
+                    <i class="bi bi-clock-history"></i> Lịch sử
+                </button>
                 <button class="dt-btn-icon" id="btn-toggle-panel" title="Ẩn hoặc hiện bảng tham số" aria-label="Ẩn hoặc hiện bảng tham số">
                     <i class="bi bi-layout-sidebar"></i>
                 </button>
@@ -247,6 +250,15 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
 
         <div id="dt-main">
             <aside id="dt-panel" class="dt-panel-open">
+                <div class="dt-mode-switch" role="group" aria-label="Nguồn thông số mô phỏng">
+                    <button type="button" class="active" data-simulation-mode="manual"><i class="bi bi-sliders"></i><span>Nhập thông số</span></button>
+                    <button type="button" data-simulation-mode="station_snapshot"><i class="bi bi-broadcast-pin"></i><span>Dữ liệu trạm</span></button>
+                </div>
+                <div id="dt-station-source" class="dt-source-card" hidden>
+                    <div><span>TRẠM ĐANG CHỌN</span><strong id="dt-source-name">Chưa chọn trạm</strong><small id="dt-source-freshness">Chọn một trạm trên bản đồ trước khi chạy</small></div>
+                    <button type="button" id="btn-dt-live-evaluate" class="dt-btn-secondary"><i class="bi bi-activity"></i> Kiểm tra live</button>
+                    <div id="dt-live-result" role="status" aria-live="polite"></div>
+                </div>
                 <div class="dt-panel-section">
                     <div class="dt-section-header"><i class="bi bi-layers-half"></i><span>Thông số Địa chất</span></div>
                     <div class="dt-param-group">
@@ -269,6 +281,23 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                         <label class="dt-param-label"><span>Góc dốc Î² (°)</span><output id="val-slope-angle">25</output></label>
                         <input type="range" id="param-slope-angle" min="10" max="60" value="25" step="1" class="dt-slider">
                     </div>
+                </div>
+
+                <div class="dt-panel-section">
+                    <div class="dt-section-header"><i class="bi bi-droplet-half"></i><span>Thủy lực &amp; ngưỡng</span></div>
+                    <div class="dt-param-group">
+                        <label class="dt-param-label"><span>Hệ số thấm K<sub>s</sub> (×10⁻⁵ m/s)</span><output id="val-ks">1.5</output></label>
+                        <input type="range" id="param-ks" min="0.1" max="100" value="1.5" step="0.1" class="dt-slider">
+                    </div>
+                    <div class="dt-param-group">
+                        <label class="dt-param-label"><span>Độ rỗng</span><output id="val-porosity">0.25</output></label>
+                        <input type="range" id="param-porosity" min="0.05" max="0.7" value="0.25" step="0.01" class="dt-slider">
+                    </div>
+                    <div class="dt-threshold-grid">
+                        <label><span>FoS cảnh báo</span><input type="number" id="param-fos-warning" min="1" max="3" step="0.1" value="1.5"><output id="val-fos-warning">1.5</output></label>
+                        <label><span>FoS nguy hiểm</span><input type="number" id="param-fos-critical" min="0.1" max="1.5" step="0.1" value="1.0"><output id="val-fos-critical">1.0</output></label>
+                    </div>
+                    <label class="dt-select-field" for="param-sim-duration"><span>Thời lượng kịch bản</span><select id="param-sim-duration"><option value="3600">1 giờ</option><option value="21600">6 giờ</option><option value="43200">12 giờ</option><option value="86400" selected>24 giờ</option><option value="259200">72 giờ</option><option value="604800">168 giờ</option></select><output id="val-sim-duration">24h</output></label>
                 </div>
 
                 <div class="dt-panel-section">
@@ -364,6 +393,11 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                     <div class="dt-warning-sub" id="dt-warning-fos">FoS = 0.95</div>
                 </div>
             </div>
+
+            <aside id="dt-results" class="dt-results" aria-hidden="true" aria-label="Kết quả mô phỏng">
+                <header><div><span class="dt-result-eyebrow">KẾT QUẢ PHÂN TÍCH</span><h3 id="dt-result-title">Kết quả mô phỏng</h3></div><button type="button" id="btn-close-dt-results" class="dt-btn-icon" aria-label="Đóng kết quả"><i class="bi bi-x-lg"></i></button></header>
+                <div id="dt-results-content" class="dt-results-content"></div>
+            </aside>
         </div>
     </div>
 

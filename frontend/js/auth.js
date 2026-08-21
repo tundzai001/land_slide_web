@@ -268,6 +268,9 @@ class AuthManager {
                 }
             }
 
+            const simulationBtn = document.getElementById('btn-digital-twin');
+            if (simulationBtn) simulationBtn.style.display = this.user.role === 'admin' ? 'inline-flex' : 'none';
+
             // Show data analysis buttons for authenticated users (viewer, admin, operator)
             const btnLongTerm = document.getElementById('btn-long-term');
             if (btnLongTerm) {
@@ -304,6 +307,9 @@ class AuthManager {
             if (adminNavBtn) {
                 adminNavBtn.style.display = 'none';
             }
+
+            const simulationBtn = document.getElementById('btn-digital-twin');
+            if (simulationBtn) simulationBtn.style.display = 'none';
 
             // Hide data analysis buttons for unauthenticated users (guests)
             const btnLongTerm = document.getElementById('btn-long-term');

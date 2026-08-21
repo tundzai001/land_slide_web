@@ -39,6 +39,11 @@ class SimulationController {
         this.simTime = 0;          // seconds of sim elapsed
         this.simSpeed = 5;
         this.maxSimTime = 86400;   // 24 hours of real-world time (seconds)
+        this.inputMode = 'manual';
+        this.stationData = null;
+        this.currentRun = null;
+        this.resultSeries = null;
+        this._backendPending = false;
         // Time scale: how many real-world seconds pass per 1 wall-clock second
         // At 1x: 1 wall-second = 60 real-seconds (1 minute)
         // At 10x: 1 wall-second = 600 real-seconds (10 minutes) 
@@ -151,7 +156,7 @@ class SimulationController {
             'param-seismic':       { key: 'seismicCoeff',       output: 'val-seismic' },
             'param-houses':        { key: 'houseCount',         output: 'val-houses' },
             'param-trees':         { key: 'treeCount',          output: 'val-trees' },
-            'param-ks':            { key: 'ks_scaled',          output: 'val-ks' },
+            'param-ks':            { key: 'ks',                 output: 'val-ks', scale: 1e-5 },
             'param-porosity':      { key: 'porosity',           output: 'val-porosity' },
         };
 
@@ -167,7 +172,7 @@ class SimulationController {
 
             el.addEventListener('input', () => {
                 const val = parseFloat(el.value);
-                this.params[cfg.key] = val;
+                this.params[cfg.key] = cfg.scale ? val * cfg.scale : val;
                 if (out) out.textContent = val;
 
                 // Live update FoS when not sliding
@@ -184,10 +189,6 @@ class SimulationController {
                 if (cfg.key === 'houseCount' || cfg.key === 'treeCount' || cfg.key === 'slopeAngle') {
                     if (cfg.key === 'houseCount') this.envBuilder.houseCount = val;
                     if (cfg.key === 'treeCount') this.envBuilder.treeCount = val;
-
-                    if (cfg.key === 'ks_scaled') {
-                        this.params.ks = val * 1e-5;
-                    }
 
                     if (!this.isRunning || this.state === SimState.STABLE) {
                         
@@ -249,7 +250,7 @@ class SimulationController {
         // Run / Stop button
         const btnRun = document.getElementById('btn-run-simulation');
         btnRun.addEventListener('click', () => {
-            if (this.isRunning) {
+            if (this.isRunning || this._backendPending) {
                 this.stop();
             } else {
                 this.start();
@@ -311,6 +312,13 @@ class SimulationController {
                 document.getElementById('dt-report-overlay').style.display = 'none';
             });
         }
+
+        document.querySelectorAll('[data-simulation-mode]').forEach(button => {
+            button.addEventListener('click', () => this._setInputMode(button.dataset.simulationMode));
+        });
+        document.getElementById('btn-dt-live-evaluate')?.addEventListener('click', () => this._evaluateLive());
+        document.getElementById('btn-dt-history')?.addEventListener('click', () => this._showHistory());
+        document.getElementById('btn-close-dt-results')?.addEventListener('click', () => this._toggleResults(false));
 
         // Initial FoS
         this._updateFoS();
@@ -395,37 +403,43 @@ class SimulationController {
     }
 
     // ─── SIMULATION CONTROL ─────────────────────────────────────────
-    start() {
-        this.isRunning = true;
-        this.isPaused = false;
-        this.simTime = 0;
-        this.state = SimState.STABLE;
-
-        // Update UI
-        this._setRunButton(true);
-        this._setRunUi('running', 'Đang tính toán diễn biến sườn dốc');
-
-        const playIcon = document.querySelector('#btn-tl-play i');
-        playIcon.className = 'bi bi-pause-fill';
-        
-        // Auto-collapse left panel to make room for simulation
-        const panel = document.getElementById('dt-panel');
-        if (panel && panel.classList.contains('dt-panel-open')) {
-            panel.classList.remove('dt-panel-open');
-            panel.classList.add('dt-panel-closed');
-            setTimeout(() => this.sceneManager.onResize(), 350);
+    async start() {
+        if (this._backendPending) return;
+        if (this.inputMode === 'station_snapshot' && !this.stationData?.id) {
+            this._setRunUi('stopped', 'Hãy chọn một trạm trên bản đồ trước khi chạy');
+            return;
         }
-
-        // Reset damage stats
-        this.damageStats = { housesDestroyed: 0, treesDestroyed: 0, velocity: 0, volume: 0 };
-        this._maxVelocity = 0;
-        this._reportShown = false;
-
-        // Reset physics engine state
-        this.physics.reset();
+        this.isRunning = false;
+        this.isPaused = false;
+        this.resultSeries = null;
+        this._backendPending = true;
+        this._setRunButton(true);
+        this._setRunUi('running', 'Backend đang tính chuỗi diễn biến…');
+        try {
+            const duration = Number(document.getElementById('param-sim-duration')?.value || 86400);
+            const payload = {
+                mode: this.inputMode,
+                station_id: this.inputMode === 'station_snapshot' ? this.stationData.id : null,
+                duration_hours: Math.round(duration / 3600),
+                parameters: this._backendParameters(),
+            };
+            const response = await this._api('/api/simulations/runs', { method: 'POST', body: JSON.stringify(payload) });
+            this.currentRun = response;
+            await this._pollRun(response.id);
+        } catch (error) {
+            console.error('[SIMULATION] backend run failed:', error);
+            this._setRunUi('stopped', `Không chạy được: ${error.message}`);
+            this._setRunButton(false);
+        } finally {
+            this._backendPending = false;
+        }
     }
 
     stop() {
+        if (this._backendPending && this.currentRun?.id) {
+            void this._api(`/api/simulations/runs/${this.currentRun.id}/stop`, { method: 'POST' }).catch(() => {});
+        }
+        this._backendPending = false;
         this.isRunning = false;
         this.isPaused = false;
         this.state = SimState.STABLE;
@@ -450,6 +464,7 @@ class SimulationController {
             'param-cohesion': 15, 'param-friction': 30, 'param-unit-weight': 18,
             'param-slip-depth': 5, 'param-slope-angle': 25, 'param-rainfall': 0,
             'param-pore-pressure': 0, 'param-seismic': 0,
+            'param-houses': 40, 'param-trees': 300,
             'param-fos-warning': 1.5, 'param-fos-critical': 1.0,
             'param-ks': 1.5, 'param-porosity': 0.25
         };
@@ -465,6 +480,9 @@ class SimulationController {
         this.destruction.reset();
         this.weather.setRainIntensity(0);
         this._totalDisplacement = 0;
+        this.resultSeries = null;
+        this.currentRun = null;
+        this._toggleResults(false);
         this.terrainGen.deformTerrain(0); // Reset terrain shape
 
         // Reset timeline
@@ -499,6 +517,10 @@ class SimulationController {
 
     // ─── SIMULATION STEP ────────────────────────────────────────────
     _simulationStep(delta) {
+        if (this.resultSeries?.length) {
+            this._playbackStep(delta);
+            return;
+        }
         // Real-world dt: timeScaleBase * simSpeed * wall-clock delta
         // e.g. at 5x speed: 60 * 5 = 300 real-seconds per wall-second
         const realDt = delta * this.timeScaleBase * this.simSpeed;
@@ -688,6 +710,236 @@ class SimulationController {
         }
     }
 
+    _backendParameters() {
+        if (this.inputMode === 'station_snapshot') return {};
+        return {
+            cohesion: this.params.cohesion, friction_angle: this.params.frictionAngle,
+            unit_weight: this.params.unitWeight, slip_depth: this.params.slipDepth,
+            slope_angle: this.params.slopeAngle, rainfall: this.params.rainfall,
+            pore_pressure_ratio: this.params.porePressureRatio, seismic_coeff: this.params.seismicCoeff,
+            house_count: this.params.houseCount, tree_count: this.params.treeCount,
+            ks: this.params.ks, porosity: this.params.porosity,
+            fos_warning: this.fosThresholds.warning, fos_critical: this.fosThresholds.critical,
+        };
+    }
+
+    async _api(url, options = {}) {
+        const headers = new Headers(options.headers || {});
+        if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+        const response = window.apiClient
+            ? await window.apiClient(url, { ...options, headers, timeout: 30000 })
+            : await fetch(url, { ...options, headers });
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || `HTTP ${response.status}`);
+        }
+        return response.json();
+    }
+
+    async _pollRun(runId) {
+        while (this._backendPending) {
+            const run = await this._api(`/api/simulations/runs/${runId}`, { requestKey: `simulation-${runId}` });
+            this.currentRun = run;
+            this._setRunUi('running', run.status === 'queued' ? 'Đang chờ bộ tính toán…' : `Đang tính toán · ${run.progress || 0}%`);
+            if (!['queued', 'running'].includes(run.status)) {
+                if (run.status === 'completed') this._loadResult(run);
+                else {
+                    this._setRunButton(false);
+                    this._setRunUi('stopped', run.error || `Lần chạy kết thúc với trạng thái ${run.status}`);
+                    this._renderResults(run);
+                    this._toggleResults(true);
+                }
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    _setInputMode(mode) {
+        this.inputMode = mode === 'station_snapshot' ? 'station_snapshot' : 'manual';
+        document.querySelectorAll('[data-simulation-mode]').forEach(button => button.classList.toggle('active', button.dataset.simulationMode === this.inputMode));
+        const stationSource = document.getElementById('dt-station-source');
+        if (stationSource) stationSource.hidden = this.inputMode !== 'station_snapshot';
+        document.querySelectorAll('#dt-panel input, #dt-panel select').forEach(field => {
+            if (field.id === 'param-sim-duration') return;
+            field.disabled = this.inputMode === 'station_snapshot';
+        });
+        this._updateStationContext();
+    }
+
+    _updateStationContext() {
+        const name = this.stationData ? `${this.stationData.name || 'Trạm'} · ${this.stationData.code || ''}` : 'Chưa chọn trạm';
+        const sourceName = document.getElementById('dt-source-name');
+        const sourceFreshness = document.getElementById('dt-source-freshness');
+        if (sourceName) sourceName.textContent = name;
+        if (sourceFreshness) sourceFreshness.textContent = this.stationData ? 'Backend sẽ chụp dữ liệu mới nhất khi bấm chạy' : 'Chọn một trạm trên bản đồ trước khi chạy';
+        const context = document.getElementById('dt-station-context');
+        const detail = document.getElementById('dt-station-context-detail');
+        if (context) context.textContent = this.inputMode === 'station_snapshot' ? name : 'Kịch bản độc lập';
+        if (detail) detail.textContent = this.inputMode === 'station_snapshot' ? 'Thông số cảm biến được xác thực tại backend' : 'Các giá trị đang được nhập thủ công';
+    }
+
+    async _evaluateLive() {
+        const target = document.getElementById('dt-live-result');
+        if (!this.stationData?.id) {
+            if (target) target.textContent = 'Chưa chọn trạm.';
+            return;
+        }
+        if (target) target.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Đang đọc cảm biến…';
+        try {
+            const result = await this._api(`/api/simulations/stations/${this.stationData.id}/evaluation`, { requestKey: 'simulation-live' });
+            if (target) target.innerHTML = `<strong>FoS ${Number(result.fos).toFixed(2)} · ${this._escape(result.classification)}</strong><small>${result.warnings.length ? this._escape(`${result.warnings.length} cảnh báo dữ liệu`) : 'Dữ liệu đủ để đánh giá'}</small>`;
+            this._displayFoS(Number(result.fos));
+        } catch (error) {
+            if (target) target.textContent = error.message;
+        }
+    }
+
+    _loadResult(run) {
+        this.currentRun = run;
+        this.resultSeries = run.time_series || [];
+        this.maxSimTime = Number(run.duration_seconds || run.time_series?.at(-1)?.time_s || 86400);
+        this.simTime = 0;
+        this.state = SimState.STABLE;
+        this.isRunning = this.resultSeries.length > 0;
+        this.isPaused = false;
+        this._setRunButton(this.isRunning);
+        this._setRunUi('complete', 'Backend đã tính xong · đang phát lại kết quả');
+        this._renderResults(run);
+        this._toggleResults(true);
+        const icon = document.querySelector('#btn-tl-play i');
+        if (icon) icon.className = 'bi bi-pause-fill';
+    }
+
+    _playbackStep(delta) {
+        this.simTime = Math.min(this.maxSimTime, this.simTime + delta * this.timeScaleBase * this.simSpeed);
+        let index = Math.floor(this.simTime / this.maxSimTime * Math.max(0, this.resultSeries.length - 1));
+        while (index + 1 < this.resultSeries.length && this.resultSeries[index + 1].time_s <= this.simTime) index += 1;
+        const row = this.resultSeries[Math.min(index, this.resultSeries.length - 1)];
+        if (!row) return;
+        this._displayFoS(Number(row.fos));
+        this.state = SimState[row.state] || SimState.STABLE;
+        document.getElementById('tl-progress').style.width = `${Math.min(100, this.simTime / this.maxSimTime * 100)}%`;
+        const hours = Math.floor(this.simTime / 3600);
+        const minutes = Math.floor((this.simTime % 3600) / 60);
+        document.getElementById('tl-time').textContent = `${String(hours).padStart(2, '0')}h${String(minutes).padStart(2, '0')}m`;
+        const damage = document.getElementById('dt-damage-stats');
+        if (damage) damage.style.display = ['SLIDING', 'DEPOSITED'].includes(row.state) ? 'block' : 'none';
+        const values = { 'dmg-houses': row.houses_affected, 'dmg-trees': row.trees_affected, 'dmg-velocity': Number(row.velocity_m_s).toFixed(1), 'dmg-volume': Math.round(row.volume_m3) };
+        Object.entries(values).forEach(([id, value]) => { const element = document.getElementById(id); if (element) element.textContent = value; });
+        if (row.state === 'SLIDING') {
+            const angle = (this.currentRun.parameters?.slope_angle || 25) * Math.PI / 180;
+            const x = -30 + Number(row.runout_m) * Math.cos(angle);
+            const front = new THREE.Vector3(x, this.terrainGen.getHeightAt(x, 0) + 1, 0);
+            this.particles.emitDebris(front, Number(row.velocity_m_s), Math.min(delta, 0.05));
+            this.terrainGen.deformTerrain(Number(row.runout_m));
+        }
+        if (this.simTime >= this.maxSimTime) {
+            this.isRunning = false;
+            this._setRunButton(false);
+            this._setRunUi('complete', 'Đã phát hết kết quả mô phỏng');
+            const icon = document.querySelector('#btn-tl-play i');
+            if (icon) icon.className = 'bi bi-play-fill';
+        }
+    }
+
+    _toggleResults(open) {
+        const panel = document.getElementById('dt-results');
+        panel?.classList.toggle('open', open);
+        panel?.setAttribute('aria-hidden', String(!open));
+        setTimeout(() => this.sceneManager?.onResize(), 260);
+    }
+
+    _escape(value) {
+        const element = document.createElement('div');
+        element.textContent = value == null ? '' : String(value);
+        return element.innerHTML;
+    }
+
+    _chartSvg(series, key, label, thresholdLines = []) {
+        if (!series?.length) return '<div class="dt-empty-result">Không có dữ liệu.</div>';
+        const sampled = series.filter((_row, index) => index % Math.max(1, Math.ceil(series.length / 240)) === 0 || index === series.length - 1);
+        const values = sampled.map(row => Number(row[key]) || 0);
+        const minimum = Math.min(...values, ...thresholdLines);
+        const maximum = Math.max(...values, ...thresholdLines, minimum + 0.001);
+        const points = values.map((value, index) => `${(index / Math.max(1, values.length - 1) * 100).toFixed(2)},${(42 - (value - minimum) / (maximum - minimum) * 36).toFixed(2)}`).join(' ');
+        const thresholds = thresholdLines.map(value => { const y = 42 - (value - minimum) / (maximum - minimum) * 36; return `<line x1="0" y1="${y}" x2="100" y2="${y}" class="threshold"/><text x="98" y="${y - 1}">${value}</text>`; }).join('');
+        return `<figure class="dt-chart-card"><figcaption><strong>${this._escape(label)}</strong><span>${minimum.toFixed(2)} – ${maximum.toFixed(2)}</span></figcaption><svg viewBox="0 0 100 46" role="img" aria-label="${this._escape(label)} theo thời gian">${thresholds}<polyline points="${points}"/></svg></figure>`;
+    }
+
+    _profileSvg(profile, summary) {
+        if (!profile?.length) return '<div class="dt-empty-result">Không có mặt cắt địa hình.</div>';
+        const maxElevation = Math.max(...profile.map(point => Number(point.elevation_m) || 0), 1);
+        const line = key => profile.map(point => `${(Number(point.x_m) / 120 * 100).toFixed(2)},${(44 - Number(point[key]) / maxElevation * 38).toFixed(2)}`).join(' ');
+        const stopX = Math.min(100, Number(summary?.runout_m || 0) / 120 * 100);
+        return `<figure class="dt-chart-card dt-profile-chart"><figcaption><strong>Mặt cắt và đường trượt 2D</strong><span>Điểm dừng ${this._escape(summary?.runout_m || 0)} m</span></figcaption><svg viewBox="0 0 100 48" role="img" aria-label="Mặt cắt sườn dốc và mặt trượt"><polyline class="terrain" points="${line('elevation_m')}"/><polyline class="slip" points="${line('slip_elevation_m')}"/><line class="stop" x1="${stopX}" y1="4" x2="${stopX}" y2="45"/></svg></figure>`;
+    }
+
+    _renderResults(run) {
+        const content = document.getElementById('dt-results-content');
+        if (!content) return;
+        document.getElementById('dt-result-title').textContent = run.display_name || 'Kết quả mô phỏng';
+        const summary = run.summary || {};
+        const incomplete = run.status !== 'completed' ? '<div class="dt-incomplete"><i class="bi bi-exclamation-triangle"></i> Kết quả không hoàn tất</div>' : '';
+        const stats = [
+            ['FoS nhỏ nhất', summary.minimum_fos ?? '--'], ['Vận tốc cực đại', `${summary.max_velocity_m_s ?? 0} m/s`],
+            ['Quãng trượt', `${summary.runout_m ?? 0} m`], ['Thể tích cuối', `${Math.round(summary.final_volume_m3 || 0)} m³`],
+            ['Nhà ảnh hưởng', summary.houses_affected ?? 0], ['Cây ảnh hưởng', summary.trees_affected ?? 0],
+        ];
+        const charts = [
+            this._chartSvg(run.time_series, 'fos', 'Hệ số an toàn FoS', [1, 1.5]),
+            this._chartSvg(run.time_series, 'cumulative_rain_mm', 'Lượng mưa tích lũy'),
+            this._chartSvg(run.time_series, 'pore_pressure_ratio', 'Áp lực nước lỗ rỗng ru'),
+            this._chartSvg(run.time_series, 'velocity_m_s', 'Vận tốc khối trượt'),
+            this._chartSvg(run.time_series, 'runout_m', 'Quãng đường trượt'),
+            this._chartSvg(run.time_series, 'houses_affected', 'Nhà trong vùng ảnh hưởng'),
+        ].join('');
+        const events = (run.events || []).map(event => `<li><time>${(Number(event.time_s) / 3600).toFixed(2)}h</time><div><strong>${this._escape(event.state)}</strong><span>${this._escape(event.label)}</span></div></li>`).join('') || '<li>Không có sự kiện chuyển trạng thái.</li>';
+        const warnings = (run.warnings || []).length ? `<section class="dt-data-warnings"><strong><i class="bi bi-database-exclamation"></i> Cảnh báo dữ liệu</strong><ul>${run.warnings.map(item => `<li>${this._escape(item)}</li>`).join('')}</ul></section>` : '';
+        const sourceRows = Object.entries(run.parameters || {}).map(([key, value]) => `<tr><th>${this._escape(key.replaceAll('_', ' '))}</th><td>${this._escape(value)}</td><td>${this._escape(run.parameter_sources?.[key] || 'Mặc định hệ thống')}</td></tr>`).join('');
+        const sensors = Object.entries(run.sensor_snapshot || {});
+        const sensorRows = sensors.map(([type, snapshot]) => `<tr><th>${this._escape(type)}</th><td>${snapshot.is_online && !snapshot.is_fallback ? 'Hợp lệ' : 'Không sử dụng'}</td><td>${snapshot.timestamp ? new Date(snapshot.timestamp * 1000).toLocaleString('vi-VN') : '--'}</td></tr>`).join('');
+        const provenance = `<section class="dt-result-section"><div class="dt-result-section-title"><h4>Dữ liệu và phương pháp</h4><span>Engine ${this._escape(run.engine_version || '--')}</span></div><div class="dt-run-meta"><span>Chế độ</span><strong>${run.mode === 'station_snapshot' ? 'Ảnh chụp dữ liệu trạm' : 'Nhập thông số'}</strong><span>Trạm</span><strong>${this._escape(run.station_name || run.station_code || 'Không gắn trạm')}</strong><span>Seed tái lập</span><strong>${this._escape(run.seed ?? '--')}</strong></div><div class="dt-table-wrap"><table class="dt-provenance-table"><caption>Nguồn của từng tham số đầu vào</caption><thead><tr><th>Tham số</th><th>Giá trị</th><th>Nguồn</th></tr></thead><tbody>${sourceRows}</tbody></table></div>${sensors.length ? `<div class="dt-table-wrap"><table class="dt-provenance-table"><caption>Tình trạng dữ liệu cảm biến tại thời điểm chạy</caption><thead><tr><th>Cảm biến</th><th>Sử dụng</th><th>Thời điểm</th></tr></thead><tbody>${sensorRows}</tbody></table></div>` : ''}</section>`;
+        content.innerHTML = `${incomplete}<section class="dt-result-hero"><span>KẾT LUẬN MÔ PHỎNG</span><h4>${this._escape(summary.classification || run.status)}</h4><p>Kết quả kịch bản, không phải chứng thư địa kỹ thuật.</p></section><div class="dt-result-stats">${stats.map(([label, value]) => `<div><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>`).join('')}</div><section class="dt-result-section"><div class="dt-result-section-title"><h4>Biến thiên theo thời gian</h4><span>${run.time_series?.length || 0} mẫu</span></div>${charts}</section><section class="dt-result-section"><div class="dt-result-section-title"><h4>Mặt cắt sườn dốc</h4></div>${this._profileSvg(run.terrain_profile, summary)}</section><section class="dt-result-section"><div class="dt-result-section-title"><h4>Sự kiện</h4></div><ol class="dt-event-list">${events}</ol></section>${provenance}${warnings}<div class="dt-export-bar"><button data-export="pdf"><i class="bi bi-file-earmark-pdf"></i> PDF</button><button data-export="xlsx"><i class="bi bi-file-earmark-excel"></i> XLSX</button><button data-export="json"><i class="bi bi-braces"></i> JSON</button><button class="primary" data-export="bundle"><i class="bi bi-file-zip"></i> Tải trọn bộ</button></div>`;
+        content.querySelectorAll('[data-export]').forEach(button => button.addEventListener('click', () => this._download(button.dataset.export)));
+    }
+
+    async _download(format) {
+        if (!this.currentRun?.id) return;
+        const url = format === 'bundle' ? `/api/simulations/runs/${this.currentRun.id}/bundle` : `/api/simulations/runs/${this.currentRun.id}/export?format=${format}`;
+        const response = window.apiClient ? await window.apiClient(url, { timeout: 60000 }) : await fetch(url);
+        if (!response.ok) return window.toast?.error?.('Không thể tạo file báo cáo.');
+        const blob = await response.blob();
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = href;
+        const readableName = String(this.currentRun.display_name || `Mô phỏng ${this.currentRun.id}`)
+            .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+            .replace(/\s+/g, ' ')
+            .trim();
+        anchor.download = `${readableName}.${format === 'bundle' ? 'zip' : format}`;
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(href), 1000);
+    }
+
+    async _showHistory() {
+        this._toggleResults(true);
+        const content = document.getElementById('dt-results-content');
+        document.getElementById('dt-result-title').textContent = 'Lịch sử mô phỏng';
+        content.innerHTML = '<div class="dt-history-loading"><span class="spinner-border"></span> Đang tải lịch sử…</div>';
+        try {
+            const runs = await this._api('/api/simulations/runs?limit=50', { requestKey: 'simulation-history' });
+            content.innerHTML = `<div class="dt-history-list">${runs.map(run => `<button type="button" data-run-id="${run.id}"><span class="dt-history-state ${this._escape(run.status)}"></span><div><strong>${this._escape(run.display_name)}</strong><small>${this._escape(run.summary?.classification || run.status)} · ${new Date(run.created_at * 1000).toLocaleString('vi-VN')}</small></div><i class="bi bi-chevron-right"></i></button>`).join('') || '<div class="dt-empty-result">Chưa có lần mô phỏng nào.</div>'}</div>`;
+            content.querySelectorAll('[data-run-id]').forEach(button => button.addEventListener('click', async () => {
+                const run = await this._api(`/api/simulations/runs/${button.dataset.runId}`);
+                this.currentRun = run;
+                this._renderResults(run);
+            }));
+        } catch (error) {
+            content.innerHTML = `<div class="dt-empty-result">${this._escape(error.message)}</div>`;
+        }
+    }
+
     dispose() {
         this.stop();
         this._isInitialized = false;
@@ -725,32 +977,12 @@ window.openDigitalTwin = async function(stationData) {
         window.digitalTwin._isInitialized = true;
         window.digitalTwin.clock.start();
         window.digitalTwin.sceneManager.onResize();
+        if (window.digitalTwin._animationFrameId) cancelAnimationFrame(window.digitalTwin._animationFrameId);
         window.digitalTwin._animate();
     }
 
-    // Map station data to simulation params if provided
-    if (stationData) {
-        const context = document.getElementById('dt-station-context');
-        const contextDetail = document.getElementById('dt-station-context-detail');
-        if (context) context.textContent = stationData.name || stationData.code || `Trạm #${stationData.id}`;
-        if (contextDetail) {
-            const code = stationData.code ? `Mã ${stationData.code}` : `ID ${stationData.id}`;
-            contextDetail.textContent = `${code} · Đã nạp dữ liệu mưa 24 giờ`;
-        }
-        if (stationData.rain) {
-            const rainInput = document.getElementById('param-rainfall');
-            if (rainInput) {
-                // Approximate 24h rain to mm/h intensity
-                rainInput.value = Math.min(stationData.rain.h24 / 24, 200);
-                rainInput.dispatchEvent(new Event('input'));
-            }
-        }
-    } else {
-        const context = document.getElementById('dt-station-context');
-        const contextDetail = document.getElementById('dt-station-context-detail');
-        if (context) context.textContent = 'Kịch bản độc lập';
-        if (contextDetail) contextDetail.textContent = 'Chưa gắn dữ liệu từ trạm quan trắc';
-    }
+    window.digitalTwin.stationData = stationData || null;
+    window.digitalTwin._setInputMode(stationData ? 'station_snapshot' : 'manual');
 };
 
 window.closeDigitalTwin = function() {

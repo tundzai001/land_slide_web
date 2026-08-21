@@ -65,6 +65,7 @@ from .routers import gnss_adjustment as gnss_adjustment_router
 from .routers import projects as projects_router
 from .routers import rescue as rescue_router
 from .routers import stations as stations_router
+from .routers import simulations as simulations_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
@@ -150,55 +151,68 @@ async def lifespan(app: FastAPI):
                     await conn.run_sync(metadata.create_all)
                 logger.info("Database schema bootstrap complete: %s", label)
 
-        # 4. Tạo Admin mặc định
-        async with asyncio.timeout(10):
-            async with AuthSessionLocal() as db_auth:
-                result = await db_auth.execute(
-                    select(model_auth.User).where(model_auth.User.username == "admin")
-                )
-                admin_user = result.scalar_one_or_none()
+        try:
+            interrupted = await simulations_router.recover_interrupted_runs()
+            if interrupted:
+                logger.warning("Marked %s unfinished simulation run(s) as interrupted", interrupted)
 
-                if not admin_user and config.settings.BOOTSTRAP_ADMIN_PASSWORD:
-                    hashed_password = await auth.get_password_hash(
-                        config.settings.BOOTSTRAP_ADMIN_PASSWORD
+            # 4. Tạo Admin mặc định
+            async with asyncio.timeout(10):
+                async with AuthSessionLocal() as db_auth:
+                    result = await db_auth.execute(
+                        select(model_auth.User).where(model_auth.User.username == "admin")
                     )
-                    new_admin = model_auth.User(
-                        username="admin",
-                        hashed_password=hashed_password,
-                        role="admin",
-                        full_name="Administrator",
-                        is_active=True
-                    )
-                    db_auth.add(new_admin)
-                    await db_auth.commit()
-                    logger.info("Bootstrap admin user created")
-                elif not admin_user:
-                    logger.warning(
-                        "No admin user exists; set BOOTSTRAP_ADMIN_PASSWORD once to create it"
-                    )
+                    admin_user = result.scalar_one_or_none()
 
-        # System Access was retired: purge browser-managed credentials and
-        # global runtime overrides left by older deployments. Server settings
-        # are now sourced only from the deployment environment.
-        async with asyncio.timeout(10):
-            async with ConfigSessionLocal() as db_config:
-                legacy_keys = {
-                    "system_password",
-                    "main_config",
-                    "confirmation_config",
-                    "save_intervals_config",
-                }
-                result = await db_config.execute(
-                    delete(model_config.GlobalConfig).where(
-                        model_config.GlobalConfig.key.in_(legacy_keys)
+                    if not admin_user and config.settings.BOOTSTRAP_ADMIN_PASSWORD:
+                        hashed_password = await auth.get_password_hash(
+                            config.settings.BOOTSTRAP_ADMIN_PASSWORD
+                        )
+                        new_admin = model_auth.User(
+                            username="admin",
+                            hashed_password=hashed_password,
+                            role="admin",
+                            full_name="Administrator",
+                            is_active=True
+                        )
+                        db_auth.add(new_admin)
+                        await db_auth.commit()
+                        logger.info("Bootstrap admin user created")
+                    elif not admin_user:
+                        logger.warning(
+                            "No admin user exists; set BOOTSTRAP_ADMIN_PASSWORD once to create it"
+                        )
+
+            # System Access was retired: purge browser-managed credentials and
+            # global runtime overrides left by older deployments. Server settings
+            # are now sourced only from the deployment environment.
+            async with asyncio.timeout(10):
+                async with ConfigSessionLocal() as db_config:
+                    legacy_keys = {
+                        "system_password",
+                        "main_config",
+                        "confirmation_config",
+                        "save_intervals_config",
+                    }
+                    result = await db_config.execute(
+                        delete(model_config.GlobalConfig).where(
+                            model_config.GlobalConfig.key.in_(legacy_keys)
+                        )
                     )
-                )
-                await db_config.commit()
-                if result.rowcount:
-                    logger.warning(
-                        "Removed %s retired System Access configuration record(s)",
-                        result.rowcount,
-                    )
+                    await db_config.commit()
+                    if result.rowcount:
+                        logger.warning(
+                            "Removed %s retired System Access configuration record(s)",
+                            result.rowcount,
+                        )
+        except Exception as exc:
+            # Keep liveness available while /api/health/ready reports the
+            # unavailable databases as degraded. A transient DB outage must not
+            # make the whole HTTP process exit during startup.
+            logger.warning(
+                "Database startup tasks skipped; service is degraded until DB recovers: %s",
+                exc,
+            )
 
         mqtt_service.start()
         logger.info("✓ Background MQTT Service started")
@@ -287,6 +301,7 @@ app.include_router(gnss_adjustment_router.router)
 app.include_router(projects_router.router)
 app.include_router(rescue_router.router)
 app.include_router(stations_router.router)
+app.include_router(simulations_router.router)
 
 # ── Anti-cache middleware for frontend assets ──
 app.add_middleware(VersionedAssetCacheMiddleware)

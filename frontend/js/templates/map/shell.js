@@ -15,7 +15,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             </a>
 
             <button type="button" id="btn-digital-twin" class="btn btn-sm map-simulation-nav"
-                aria-label="Mở mô phỏng sạt lở 3D">
+                aria-label="Mở mô phỏng sạt lở 3D" style="display:none">
                 <i class="bi bi-boxes me-1"></i> Mô phỏng 3D
             </button>
 

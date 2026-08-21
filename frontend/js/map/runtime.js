@@ -942,7 +942,8 @@ async function syncGnssAdjustmentStatus() {
     gnssAdjustmentDebugState.statusPollInFlight = true;
     try {
         const url = `/api/admin/gnss/adjustment/status?project_id=${encodeURIComponent(projectId)}`;
-        const response = window.authManager?.apiFetch
+        const response = window.authManager?.isAuthenticated?.()
+            && window.authManager?.apiFetch
             ? await window.authManager.apiFetch(url)
             : await fetch(url);
         if (!response?.ok) return;
@@ -990,7 +991,8 @@ async function restoreGnssAdjustmentStatus(projectId) {
     if (!projectId || isGnssAdjustmentRunning(projectId) || gnssAdjustmentRestoreProjectId === projectId) return;
     gnssAdjustmentRestoreProjectId = projectId;
     try {
-        const response = window.authManager?.apiFetch
+        const response = window.authManager?.isAuthenticated?.()
+            && window.authManager?.apiFetch
             ? await window.authManager.apiFetch(`/api/admin/gnss/adjustment/status?project_id=${encodeURIComponent(projectId)}`)
             : await fetch(`/api/admin/gnss/adjustment/status?project_id=${encodeURIComponent(projectId)}`);
         if (!response?.ok) return;
