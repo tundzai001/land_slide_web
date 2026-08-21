@@ -239,7 +239,7 @@ async def provision_device(
 async def reset_gnss_origin(
     station_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     """Calibrate device tracking offsets; survey origins remain immutable."""
     from ..runtime import mqtt_service

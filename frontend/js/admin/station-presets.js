@@ -569,31 +569,47 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
     async resetGnssOrigin(stationId) {
         if (!stationId || Number.isNaN(Number(stationId))) {
-            window.toast?.warning('Save station first before calibrating GNSS offset');
+            window.toast?.warning('Hãy lưu trạm trước khi hiệu chuẩn offset GNSS');
             return;
         }
-        if (!confirm('Collect a new stable RTK FIXED window for 60 seconds and calibrate the tracking offset? Origin coordinates will remain unchanged.')) return;
+        if (!confirm('Thu mẫu RTK FIXED ổn định trong 60 giây để hiệu chuẩn offset? Tọa độ gốc sẽ được giữ nguyên.')) return;
 
         const resetBtn = document.getElementById('btn-reset-origin');
         const statusEl = document.getElementById('origin-status');
+        const calibrationDurationMs = 60_000;
+        const startedAt = performance.now();
+        const renderProgress = () => {
+            if (!statusEl) return;
+            const remaining = Math.max(0, Math.ceil((calibrationDurationMs - (performance.now() - startedAt)) / 1000));
+            statusEl.innerHTML = remaining > 0
+                ? `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu mẫu RTK FIXED… còn <strong>${remaining}s</strong>`
+                : '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đã đủ 60 giây, đang chờ backend hoàn tất…';
+            statusEl.className = 'text-info small';
+        };
         try {
             if (resetBtn) resetBtn.disabled = true;
-            if (statusEl) {
-                statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Collecting new RTK FIXED samples for 60 seconds...';
-                statusEl.className = 'text-info small';
-            }
+            clearInterval(this._gnssCalibrationTimer);
+            renderProgress();
+            this._gnssCalibrationTimer = setInterval(renderProgress, 250);
 
             const res = await fetch(`/api/admin/gnss/reset-origin/${stationId}`, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${this.token}` }
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                cache: 'no-store',
             });
 
+            const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.detail || 'Unknown error');
+                if (res.status === 401) {
+                    await window.authManager?.handleUnauthorizedResponse?.('gnss-calibration');
+                    throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại');
+                }
+                if (res.status === 403) {
+                    throw new Error('Tài khoản không có quyền hiệu chuẩn trạm này');
+                }
+                throw new Error(data.detail || `Backend trả về HTTP ${res.status}`);
             }
 
-            const data = await res.json();
             const calibration = data.calibrations?.[0];
             const horizontalShiftMm = calibration
                 ? Math.hypot(calibration.shift_e_m, calibration.shift_n_m) * 1000
@@ -607,6 +623,8 @@ class AdminStationPresetsFeature extends window.AdminManager {
         } catch (e) {
             window.toast?.error('Offset calibration failed: ' + e.message);
         } finally {
+            clearInterval(this._gnssCalibrationTimer);
+            this._gnssCalibrationTimer = null;
             if (resetBtn) resetBtn.disabled = false;
         }
     }
