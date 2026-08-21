@@ -137,10 +137,11 @@ class AdminManager {
                     (message.station_id == null || message.station_id == this.currentStationId)) {
                     const progress = message.data || {};
                     const statusEl = document.getElementById('origin-status');
-                    if (statusEl && this._gnssCalibrationInProgress) {
+                    if (statusEl && (this._gnssCalibrationInProgress || progress.phase === 'complete')) {
                         if (progress.phase === 'complete') {
                             statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Backend đã thu đủ mẫu và áp dụng offset.</span>';
                             statusEl.className = 'text-success small';
+                            this._gnssCalibrationInProgress = false;
                         } else {
                             const duration = Number(progress.duration_s || 0).toFixed(1);
                             const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));

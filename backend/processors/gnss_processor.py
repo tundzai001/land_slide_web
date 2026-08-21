@@ -731,7 +731,7 @@ class GNSSVelocityProcessor:
         )
         try:
             from app.websocket import manager
-            await manager.broadcast({
+            completion_message = {
                 "type": "gnss_offset_calibration_progress",
                 "station_id": station_id,
                 "device_id": self.device_id,
@@ -741,7 +741,9 @@ class GNSSVelocityProcessor:
                     "duration_s": round(duration_s, 1),
                     "remaining_s": 0.0,
                 },
-            })
+            }
+            # Do not hold the HTTP calibration response on a stale browser socket.
+            asyncio.create_task(manager.broadcast(completion_message))
         except Exception as exc:
             logger.debug("GNSS calibration completion broadcast failed: %s", exc)
         # Keep the newest measured residual; never synthesize a zero payload.
