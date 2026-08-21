@@ -140,6 +140,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         document.getElementById('origin-lon').value = '';
         document.getElementById('origin-h').value = '';
         document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
+        this.resetGnssCalibrationResult?.();
         this.updateOriginActionButtons(false);
 
         // Reset sub-sensor coordinates
@@ -214,6 +215,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             this.isEditMode = true;
             this.currentStationId = stationId;
             this.currentStep = 1;
+            this.resetGnssCalibrationResult?.();
             if (this._originResetTimer) {
                 clearInterval(this._originResetTimer);
                 this._originResetTimer = null;

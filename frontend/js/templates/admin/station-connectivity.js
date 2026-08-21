@@ -139,6 +139,19 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                                 </button>
                                             </div>
                                         </div>
+                                        <div id="gnss-offset-result" class="gnss-offset-result" hidden>
+                                            <div class="gnss-offset-result-heading">
+                                                <span><i class="bi bi-activity me-1" aria-hidden="true"></i>Kết quả offset tracking</span>
+                                                <small>Backend đã lưu</small>
+                                            </div>
+                                            <div class="gnss-offset-grid">
+                                                <div><span>Offset E</span><strong id="gnss-offset-e">—</strong><small>mm</small></div>
+                                                <div><span>Offset N</span><strong id="gnss-offset-n">—</strong><small>mm</small></div>
+                                                <div><span>Offset U</span><strong id="gnss-offset-u">—</strong><small>mm</small></div>
+                                                <div><span>Tổng 2D</span><strong id="gnss-offset-2d">—</strong><small>mm</small></div>
+                                            </div>
+                                            <div class="gnss-offset-meta"><span id="gnss-offset-samples">— mẫu</span><span id="gnss-offset-duration">—</span><span>Origin không đổi</span></div>
+                                        </div>
                                     </div>
 
                                     <!-- ✅ GNSS EXTERNAL FORWARDING CONFIG -->

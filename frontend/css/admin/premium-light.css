@@ -230,6 +230,30 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
 .management-status.is-offline,
 .management-status.is-locked { background: #eef1f5; color: #596579; }
 .management-icon-btn { width: 44px; min-width: 44px; padding-inline: 0 !important; }
+.gnss-offset-result {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #b8dfd0;
+    border-radius: 12px;
+    background: #f3fbf7;
+}
+.gnss-offset-result-heading,
+.gnss-offset-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gnss-offset-result-heading { margin-bottom: 9px; color: #176b53; font-size: .76rem; font-weight: 800; }
+.gnss-offset-result-heading small { color: #4e806f; font-size: .67rem; font-weight: 650; }
+.gnss-offset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.gnss-offset-grid > div { padding: 8px 9px; border: 1px solid #d4ebe1; border-radius: 9px; background: #fff; }
+.gnss-offset-grid span, .gnss-offset-grid small { display: block; color: #66877a; font-size: .63rem; }
+.gnss-offset-grid strong { display: inline-block; margin: 3px 3px 0 0; color: #123f34; font: 800 .88rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.gnss-offset-meta { margin-top: 9px; color: #5e8173; font-size: .66rem; }
+[data-theme="dark"] .gnss-offset-result { border-color: #285b50; background: #102b28; }
+[data-theme="dark"] .gnss-offset-result-heading { color: #86efac; }
+[data-theme="dark"] .gnss-offset-result-heading small,
+[data-theme="dark"] .gnss-offset-meta,
+[data-theme="dark"] .gnss-offset-grid span,
+[data-theme="dark"] .gnss-offset-grid small { color: #9dc7b7; }
+[data-theme="dark"] .gnss-offset-grid > div { border-color: #31594f; background: #173832; }
+[data-theme="dark"] .gnss-offset-grid strong { color: #d1fae5; }
 .user-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; padding: 14px; border: 1px solid var(--admin-border); border-radius: 12px; background: #fff; box-shadow: var(--admin-shadow); }
 .user-toolbar .ops-search { min-width: min(100%, 280px); }
 .user-toolbar .form-select { width: auto; min-width: 150px; min-height: 44px; }

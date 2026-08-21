@@ -607,6 +607,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 ? Math.hypot(calibration.shift_e_m, calibration.shift_n_m) * 1000
                 : 0;
             const totalOffsetMm = calibration?.new_tracking_offset_2d_mm || 0;
+            this.renderGnssCalibrationResult(calibration);
             window.toast?.success(`Calibrated ${data.calibrated_count} GNSS offset(s); origin unchanged`);
             if (statusEl) {
                 statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> Applied ${horizontalShiftMm.toFixed(1)} mm; total tracking offset ${totalOffsetMm.toFixed(1)} mm. Origin unchanged.`;
@@ -618,6 +619,28 @@ class AdminStationPresetsFeature extends window.AdminManager {
             this._gnssCalibrationInProgress = false;
             if (resetBtn) resetBtn.disabled = false;
         }
+    }
+
+    renderGnssCalibrationResult(calibration) {
+        const box = document.getElementById('gnss-offset-result');
+        if (!box || !calibration) return;
+        const formatMm = value => (Number(value || 0) * 1000).toFixed(3);
+        const set = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+        set('gnss-offset-e', formatMm(calibration.shift_e_m));
+        set('gnss-offset-n', formatMm(calibration.shift_n_m));
+        set('gnss-offset-u', formatMm(calibration.shift_u_m));
+        set('gnss-offset-2d', Number(calibration.new_tracking_offset_2d_mm || 0).toFixed(3));
+        set('gnss-offset-samples', `${calibration.sample_count || 0} mẫu`);
+        set('gnss-offset-duration', `${Number(calibration.duration_s || 0).toFixed(1)} giây`);
+        box.hidden = false;
+    }
+
+    resetGnssCalibrationResult() {
+        const box = document.getElementById('gnss-offset-result');
+        if (box) box.hidden = true;
     }
 
     updateOriginActionButtons(hasOrigin) {
