@@ -1,6 +1,6 @@
 /* Pi Devices uses the same operations language as Database and Rescue. */
 .pi-kpi-grid .ops-kpi small { display: block; max-width: calc(100% - 42px); margin-top: 7px; color: var(--admin-muted); font-size: .7rem; line-height: 1.35; }
-.pi-console { overflow: hidden; border: 1px solid var(--admin-border); border-radius: var(--admin-radius); background: #fff; box-shadow: var(--admin-shadow); }
+.pi-console { overflow: hidden; border: 1px solid var(--admin-border); border-radius: var(--admin-radius); background: var(--admin-surface); box-shadow: var(--admin-shadow); }
 .pi-toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--admin-border); }
 .pi-toolbar .ops-search { min-width: min(100%, 300px); }
 .pi-filter-field { display: flex; align-items: center; gap: 9px; }
@@ -22,7 +22,7 @@
 .pi-device-name { min-width: 0; }
 .pi-device-name strong { display: block; overflow: hidden; color: var(--admin-text); font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
 .pi-device-name small { display: block; margin-top: 3px; color: var(--admin-muted); font-size: .7rem; }
-.pi-device-serial { width: max-content; max-width: 100%; overflow: hidden; padding: 5px 8px; border-radius: 7px; color: #415169; background: #f1f4f8; font: 700 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.pi-device-serial { width: max-content; max-width: 100%; overflow: hidden; padding: 5px 8px; border-radius: 7px; color: var(--admin-text); background: var(--admin-surface-muted); font: 700 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .pi-device-status, .pi-connection { display: inline-flex; align-items: center; gap: 6px; width: max-content; padding: 6px 9px; border-radius: 999px; font-size: .7rem; font-weight: 750; }
 .pi-device-status.is-pending { color: #885f00; background: #fff5d7; }
 .pi-device-status.is-activated { color: #137a47; background: #e9f8ef; }
@@ -47,8 +47,8 @@
 
 @media (max-width: 900px) {
     .pi-list-head { display: none; }
-    .pi-device-list { display: grid; gap: 10px; padding: 10px; background: #f7f9fc; }
-    .pi-device-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-height: 0; padding: 14px; border: 1px solid var(--admin-border) !important; border-radius: 12px; background: #fff; }
+    .pi-device-list { display: grid; gap: 10px; padding: 10px; background: var(--admin-surface-muted); }
+    .pi-device-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-height: 0; padding: 14px; border: 1px solid var(--admin-border) !important; border-radius: 12px; background: var(--admin-surface); }
     .pi-device-row > .pi-device-serial { grid-column: 1; }
     .pi-device-row > .pi-device-status { grid-column: 2; grid-row: 1; }
     .pi-device-row > .pi-connection { grid-column: 2; grid-row: 2; }

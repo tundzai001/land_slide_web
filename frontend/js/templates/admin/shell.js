@@ -7,44 +7,51 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
     <!-- Sidebar -->
     <div class="admin-sidebar">
-        <div class="sidebar-brand" style="cursor:pointer" onclick="window.location.href='/?view=map'"
+        <div class="sidebar-brand" role="link" tabindex="0" onclick="window.location.href='/map'" onkeydown="if(event.key==='Enter') window.location.href='/map'"
             title="Về trang bản đồ">
-            <h4><i class="bi bi-map me-2"></i>Map</h4>
-            <small class="text-muted">Bản đồ</small>
+            <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
+            <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
         </div>
 
         <nav>
             <div class="nav-item">
                 <a class="nav-link active" href="#" data-tab="tab-users"
-                    onclick="window.adminManager?.switchTab('tab-users', this)">
+                    onclick="event.preventDefault(); window.adminManager?.switchTab('tab-users', this)">
                     <i class="bi bi-people"></i>
                     <span>Người dùng</span>
                 </a>
             </div>
             <div class="nav-item">
                 <a class="nav-link" href="#" data-tab="tab-projects"
-                    onclick="window.adminManager?.switchTab('tab-projects', this)">
+                    onclick="event.preventDefault(); window.adminManager?.switchTab('tab-projects', this)">
                     <i class="bi bi-folder"></i>
                     <span>Dự án</span>
                 </a>
             </div>
             <div class="nav-item">
                 <a class="nav-link" href="#" data-tab="tab-database"
-                    onclick="window.adminManager?.switchTab('tab-database', this)">
+                    onclick="event.preventDefault(); window.adminManager?.switchTab('tab-database', this)">
                     <i class="bi bi-database"></i>
                     <span>Database</span>
                 </a>
             </div>
             <div class="nav-item">
+                <a class="nav-link" href="#" data-tab="tab-simulations"
+                    onclick="event.preventDefault(); window.adminManager?.switchTab('tab-simulations', this)">
+                    <i class="bi bi-boxes"></i>
+                    <span>Simulation audit</span>
+                </a>
+            </div>
+            <div class="nav-item">
                 <a class="nav-link" href="#" data-tab="tab-pi"
-                    onclick="window.adminManager?.switchTab('tab-pi', this)">
+                    onclick="event.preventDefault(); window.adminManager?.switchTab('tab-pi', this)">
                     <i class="bi bi-cpu-fill" style="color:#0ea5e9"></i>
                     <span>Pi Devices</span>
                 </a>
             </div>
             <div class="nav-item">
                 <a class="nav-link" href="#" data-tab="tab-rescue"
-                    onclick="window.adminManager?.switchTab('tab-rescue', this)">
+                    onclick="event.preventDefault(); window.adminManager?.switchTab('tab-rescue', this)">
                     <i class="bi bi-life-preserver" style="color:#ef4444"></i>
                     <span>Cứu hộ</span>
                 </a>
@@ -202,6 +209,18 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     <div id="db-inspector-content" class="ops-drawer-body"></div>
                     <footer id="db-inspector-actions" class="ops-drawer-footer"></footer>
                 </aside>
+            </div>
+
+            <!-- TAB: SIMULATION AUDIT -->
+            <div class="tab-pane fade" id="tab-simulations" data-private-permission="MANAGE_SIMULATIONS">
+                <header class="ops-page-header simulation-audit-header">
+                    <div><span class="ops-eyebrow">REPRODUCIBLE ANALYSIS</span><h4><i class="bi bi-boxes me-2"></i>Simulation audit</h4><p>Theo dõi trạng thái, tham số nguồn và kết quả mô phỏng Digital Twin mà không thay đổi physics hiện có.</p></div>
+                    <button type="button" class="btn btn-outline-primary" onclick="window.adminManager?.loadSimulationRuns(true)"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
+                </header>
+                <section class="simulation-audit-workspace" aria-live="polite">
+                    <div class="simulation-audit-toolbar"><span id="simulation-audit-meta">Đang tải nhật ký…</span><span class="simulation-audit-note"><i class="bi bi-shield-check me-1"></i>Chỉ admin có quyền chạy, dừng, chạy lại và xuất báo cáo.</span></div>
+                    <div id="simulation-audit-list" class="simulation-audit-list"><div class="ops-empty"><div class="spinner-border text-primary"></div><p>Đang tải nhật ký mô phỏng…</p></div></div>
+                </section>
             </div>
 
             <!-- TAB: RESCUE -->

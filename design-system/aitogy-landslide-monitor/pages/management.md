@@ -1,5 +1,7 @@
 # Management overrides
 
-- Preserve the approved sidebar, page hierarchy and dataset workflows.
-- Density is high; controls remain 44px tall while tables and metadata stay compact.
-- Changes are limited to theme consistency, responsive behavior, loading/error recovery and accessibility regressions.
+- Preserve Users, Projects/Stations/Wizard, Database, Pi Devices, Rescue, exports, confirmation flows, permissions, APIs and schemas.
+- Full presentation reskin is allowed without changing information architecture or workflow.
+- Desktop uses an icon + label rail; tablet uses a compact rail; mobile order is Projects, Pi, Rescue, Data, More.
+- Density is high, controls remain at least 44px tall, and tables/metadata stay compact.
+- `switchTab()` is the only active-state source across desktop/mobile, history, focus and `aria-current`.

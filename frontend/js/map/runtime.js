@@ -15,6 +15,8 @@ let allStations = [];
 let stationSelectionController = null;
 let stationSelectionSequence = 0;
 let stationHistoryController = null;
+let longTermRequestController = null;
+let longTermRequestSequence = 0;
 const stationDetailCache = new Map();
 const stationHistoryCache = new Map();
 const STATION_DETAIL_CACHE_MS = 15000;
@@ -27,6 +29,19 @@ let wsReconnectAttempt = 0;
 let latestRealtimeSensorTs = {}; // key: `${stationId}_${sensorType}` -> unix timestamp
 const pendingRealtimeSensorUi = new Map();
 let realtimeSensorUiFrameId = null;
+
+function normalizeEpochMs(value) {
+    if (value === null || value === undefined || value === '') return NaN;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric;
+    return Date.parse(String(value));
+}
+window.normalizeEpochMs = normalizeEpochMs;
+
+function canOperateMap() {
+    return ['admin', 'operator'].includes(window.authManager?.getUserInfo?.()?.role);
+}
+window.canOperateMap = canOperateMap;
 
 function scheduleRealtimeSensorUiUpdate(message) {
     const key = `${message.station_id || 'current'}_${message.sensor_type || message.type}`;
@@ -58,6 +73,8 @@ function stopMapBackgroundWork() {
         socket.onclose = null;
         socket.close();
     }
+    if (typeof stopIncidentSocket === 'function') stopIncidentSocket();
+    if (typeof stopRescueAdminSocket === 'function') stopRescueAdminSocket();
     if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
     if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);
     gnssAdjustmentDebugState.statusPollId = null;
@@ -65,7 +82,9 @@ function stopMapBackgroundWork() {
     if (realtimeSensorUiFrameId !== null) cancelAnimationFrame(realtimeSensorUiFrameId);
     realtimeSensorUiFrameId = null;
     pendingRealtimeSensorUi.clear();
-    window.unmountReactStationList?.();
+    longTermRequestSequence += 1;
+    longTermRequestController?.abort();
+    longTermRequestController = null;
     destroyStationCharts();
     stopLongTerm3DAnimations();
 }
@@ -94,7 +113,30 @@ let showStationMarkers = true;
 let stationClusterGroup = null;
 let clusterPolylines = [];
 let showRescueMarkers = true;
+let showCorsBaseMarkers = true;
 let currentMapMode = 'station';
+const mapUiState = window.mapUiState = {
+    mode: currentMapMode,
+    layers: { stations: true, cors: true, rescue: true, heatmap: false },
+    activePanel: null,
+    selectedStation: null,
+};
+function setMapState(patch = {}) {
+    if (patch.mode && ['station', 'rescue'].includes(patch.mode)) {
+        currentMapMode = patch.mode;
+        mapUiState.mode = patch.mode;
+    }
+    if (patch.layers && typeof patch.layers === 'object') {
+        Object.entries(patch.layers).forEach(([key, value]) => {
+            if (key in mapUiState.layers) mapUiState.layers[key] = Boolean(value);
+        });
+    }
+    if ('activePanel' in patch) mapUiState.activePanel = patch.activePanel || null;
+    if ('selectedStation' in patch) mapUiState.selectedStation = patch.selectedStation == null ? null : Number(patch.selectedStation);
+    return mapUiState;
+}
+window.setMapState = setMapState;
+window.setMapMode = mode => setMapState({ mode });
 let stationsFetchInFlight = false;
 let projectsFetchInFlight = false;
 let rescueMarkersFetchInFlight = false;
@@ -112,6 +154,8 @@ function setStationListSidebarOpen(sidebar, open) {
     sidebar.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
     document.getElementById('navbar-hamburger-btn')
         ?.setAttribute('aria-expanded', String(open));
+    if (open) mapUiState.activePanel = 'stations';
+    else if (mapUiState.activePanel === 'stations') mapUiState.activePanel = null;
 }
 
 function setGnssAdvancedPanelOpen(sidepanel, open, { focusClose = false } = {}) {
@@ -166,6 +210,8 @@ function setGnssAdvancedPanelOpen(sidepanel, open, { focusClose = false } = {}) 
     if (open && focusClose) {
         requestAnimationFrame(() => sidepanel.querySelector('#gnss-sidepanel-close')?.focus());
     }
+    if (open) mapUiState.activePanel = 'gnss';
+    else if (mapUiState.activePanel === 'gnss') mapUiState.activePanel = null;
 }
 
 function setDetailSidebarOpen(sidebar, open) {
@@ -198,6 +244,8 @@ function setDetailSidebarOpen(sidebar, open) {
     sidebar.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
     sidebar.style.setProperty('opacity', open ? '1' : '0', 'important');
     sidebar.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
+    if (open) mapUiState.activePanel = 'detail';
+    else if (mapUiState.activePanel === 'detail') mapUiState.activePanel = null;
 }
 
 function setChartsPanelOpen(panel, open) {
@@ -207,6 +255,8 @@ function setChartsPanelOpen(panel, open) {
     document.getElementById('btn-show-charts')
         ?.setAttribute('aria-expanded', String(open));
     if (open) panel.querySelector('.charts-panel-content')?.scrollTo({ top: 0 });
+    if (open) mapUiState.activePanel = 'charts';
+    else if (mapUiState.activePanel === 'charts') mapUiState.activePanel = null;
 }
 let mapInteractionDepth = 0;
 let mapInteractionActive = false;
@@ -366,7 +416,7 @@ function ensureGnssAdjustmentRunningPill() {
     pill.id = 'gnss-adjustment-running-pill';
     pill.type = 'button';
     pill.style.cssText = [
-        'position:fixed', 'right:22px', 'bottom:22px', 'z-index:1085',
+        'position:fixed', 'right:22px', 'bottom:22px', 'z-index:var(--z-popover)',
         'display:none', 'align-items:center', 'gap:10px', 'padding:10px 16px',
         'border:1px solid rgba(45,212,191,.65)', 'border-radius:999px',
         'background:linear-gradient(135deg,#071a22,#0d3037)', 'color:#d5fffb',
@@ -1350,7 +1400,7 @@ function setupMobileMapNavigation() {
             setStationListSidebarOpen(stationSheet, true);
         } else if (action === 'layers') {
             closePrimarySheets();
-            document.getElementById('layer-mode-toggle')?.click();
+            document.getElementById('layer-popover-toggle')?.click();
         } else if (action === 'rescue') {
             closePrimarySheets();
             document.getElementById('btn-guest-rescue')?.click();

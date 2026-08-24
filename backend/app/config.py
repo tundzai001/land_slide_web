@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    PRIVATE_AUTHZ_GRACE_SECONDS: int = 300
     ENVIRONMENT: str = "production"
+    PUBLIC_SITE_URL: str = "https://monitoring.aitogy.com"
     CORS_ORIGINS: str = "https://monitoring.aitogy.com,http://127.0.0.1:8001,http://localhost:8001"
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 10
@@ -32,6 +34,18 @@ class Settings(BaseSettings):
     DB_COMMAND_TIMEOUT_SECONDS: int = 30
     RUN_SCHEMA_BOOTSTRAP: bool = False
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
+
+    # The MQTT ingest spool is deliberately local and append-only.  It is a
+    # last-resort handoff for a DB outage; normal traffic still drains through
+    # the in-process batch buffer.  Deployments with a persistent volume may
+    # point this at a dedicated path, while tests can inject a temporary one.
+    INGEST_SPOOL_DIR: str = ""
+    INGEST_SPOOL_MAX_BYTES: int = 256 * 1024 * 1024
+    INGEST_SPOOL_RETRY_SECONDS: float = 5.0
+    INGEST_SPOOL_BATCH_SIZE: int = 256
+    FILE_CLEANUP_INTERVAL_SECONDS: float = 10.0
+    FILE_CLEANUP_LEASE_SECONDS: int = 60
+    FILE_CLEANUP_MAX_ATTEMPTS: int = 12
     
     MQTT_BROKER: str = ""
     MQTT_PORT: int = 1883

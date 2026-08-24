@@ -8,6 +8,27 @@ class AdminManager {
         this._disposed = false;
         this._refreshIntervals = [];
         this._wsReconnectTimer = null;
+        this._wsConnecting = false;
+        this.operationsWs = null;
+        this._operationsWsReconnectTimer = null;
+        this._operationsWsConnecting = false;
+        this._authzChangeHandler = (event) => this.applyAuthzSession(event.detail?.user || null);
+        this._authzExpiredHandler = () => {
+            this._tabRequestControllers?.forEach?.(controller => controller.abort());
+            this._tabRequestControllers?.clear?.();
+            this.operationsWs?.close?.(1000, 'authorization grace expired');
+            this.ws?.close?.(1000, 'authorization grace expired');
+        };
+        this._popstateHandler = () => {
+            const tab = new URLSearchParams(window.location.search).get('tab') || history.state?.adminTab;
+            if (tab) {
+                const control = Array.from(document.querySelectorAll('[data-tab]')).find(el => el.dataset.tab === tab) || null;
+                this.switchTab(tab, control, true, { replace: true, restore: true });
+            }
+        };
+        window.addEventListener('authzChanged', this._authzChangeHandler);
+        window.addEventListener('authzExpired', this._authzExpiredHandler);
+        window.addEventListener('popstate', this._popstateHandler);
         this._spaNavigateHandler = (event) => {
             if (event.detail?.view !== 'admin') this.dispose();
         };
@@ -64,7 +85,6 @@ class AdminManager {
         }
 
         this.init();
-        this.setupWebSocketListener();
     }
 
     /** Lắng nghe các sự kiện realtime từ Server */
@@ -98,6 +118,8 @@ class AdminManager {
 
     async setupWebSocketListener() {
         if (this._disposed || document.documentElement.dataset.appView !== 'admin') return;
+        if (this._wsConnecting) return;
+        this._wsConnecting = true;
 
         try {
             const ticketResponse = await fetch('/api/auth/ws-ticket', {
@@ -107,13 +129,21 @@ class AdminManager {
             });
             if (!ticketResponse.ok) throw new Error(`WebSocket ticket HTTP ${ticketResponse.status}`);
             const { ticket } = await ticketResponse.json();
-            if (this._disposed || document.documentElement.dataset.appView !== 'admin') return;
+            if (this._disposed || document.documentElement.dataset.appView !== 'admin') { this._wsConnecting = false; return; }
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/admin?ticket=${encodeURIComponent(ticket)}`;
             this.ws = new WebSocket(wsUrl);
+            this._wsConnecting = false;
             this.ws.onmessage = (event) => {
-                const message = JSON.parse(event.data);
+                let message;
+                try { message = JSON.parse(event.data); } catch (_) { return; }
+                if (message.type === 'incident_changed') {
+                    window.incidentStore?.applyEnvelope(message);
+                    window.dispatchEvent(new CustomEvent('incidentChanged', { detail: message }));
+                    window.loadAdminIncidents?.(true);
+                    return;
+                }
                 if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
                     console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
 
@@ -183,6 +213,7 @@ class AdminManager {
                 }, 5000);
             };
         } catch (e) {
+            this._wsConnecting = false;
             console.warn('Admin WebSocket unavailable:', e);
             if (!this._disposed && document.documentElement.dataset.appView === 'admin') {
                 this._wsReconnectTimer = setTimeout(() => {
@@ -193,8 +224,44 @@ class AdminManager {
         }
     }
 
+    async setupOperationsWebSocket() {
+        if (this._disposed || document.documentElement.dataset.appView !== 'admin' || this._operationsWsConnecting || this.operationsWs) return;
+        this._operationsWsConnecting = true;
+        try {
+            const response = await fetch('/api/auth/ws-ticket', { method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'operations' }), cache: 'no-store' });
+            if (!response.ok) throw new Error(`Operations ticket HTTP ${response.status}`);
+            const { ticket } = await response.json();
+            if (this._disposed || document.documentElement.dataset.appView !== 'admin') { this._operationsWsConnecting = false; return; }
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const socket = new WebSocket(`${protocol}//${window.location.host}/ws/operations?ticket=${encodeURIComponent(ticket)}`);
+            this.operationsWs = socket; this._operationsWsConnecting = false;
+            socket.onopen = () => {
+                const projects = (this.currentUserAssignedProjects || window.authManager?.getUserInfo?.()?.assigned_projects || []).map(Number).filter(Number.isFinite);
+                socket.send(JSON.stringify({ type: 'subscribe', project_ids: projects, station_ids: [], channels: ['incident'] }));
+                document.documentElement.dataset.incidentsRealtime = 'connected';
+            };
+            socket.onmessage = event => {
+                try { const message = JSON.parse(event.data); if (message.type === 'incident_changed') { window.incidentStore?.applyEnvelope(message); window.dispatchEvent(new CustomEvent('incidentChanged', { detail: message })); } } catch (_) { /* malformed private event is ignored */ }
+            };
+            socket.onerror = () => { document.documentElement.dataset.incidentsRealtime = 'degraded'; };
+            socket.onclose = () => {
+                if (this.operationsWs !== socket) return;
+                this.operationsWs = null; document.documentElement.dataset.incidentsRealtime = 'disconnected';
+                if (!this._disposed && document.documentElement.dataset.appView === 'admin') this._operationsWsReconnectTimer = setTimeout(() => { this._operationsWsReconnectTimer = null; this.setupOperationsWebSocket(); }, 5000);
+            };
+        } catch (_) {
+            this._operationsWsConnecting = false; document.documentElement.dataset.incidentsRealtime = 'degraded';
+            if (!this._disposed && document.documentElement.dataset.appView === 'admin') this._operationsWsReconnectTimer = setTimeout(() => { this._operationsWsReconnectTimer = null; this.setupOperationsWebSocket(); }, 5000);
+        }
+    }
+
     /** Switch visible tab pane (called from sidebar icons) */
-    switchTab(tabId, linkEl) {
+    switchTab(tabId, linkEl, loadData = true, options = {}) {
+        if (!this.canAccessTab(tabId)) {
+            linkEl?.setAttribute('aria-disabled', 'true');
+            window.toast?.warning?.('Bạn không có quyền mở khu vực này.');
+            return false;
+        }
         // Hide all tab panes
         document.querySelectorAll('#admin-tab-content > .tab-pane').forEach(p => {
             p.classList.remove('show', 'active');
@@ -204,21 +271,124 @@ class AdminManager {
         if (target) {
             target.classList.add('show', 'active');
         }
-        // Update sidebar active state
-        document.querySelectorAll('.admin-sidebar .nav-link').forEach(l => l.classList.remove('active'));
-        if (linkEl) linkEl.classList.add('active');
+        // One active-state source for desktop rail, mobile navigation and More sheet.
+        document.querySelectorAll('[data-tab]').forEach(control => {
+            const active = control.dataset.tab === tabId;
+            control.classList.toggle('active', active);
+            if (active) control.setAttribute('aria-current', 'page');
+            else control.removeAttribute('aria-current');
+        });
+        const previousTabId = this.currentTabId;
+        this.currentTabId = tabId;
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', tabId);
+        const state = { ...(history.state || {}), adminTab: tabId };
+        if (options.replace || options.restore || previousTabId === tabId) history.replaceState(state, '', url);
+        else history.pushState(state, '', url);
+        if (!options.restore) linkEl?.focus?.({ preventScroll: true });
 
+        if (!loadData) return;
         // Trigger data loading for specific tabs
         if (tabId === 'tab-projects') {
             this.resetNavigation?.();
             this.loadProjects?.();
         } else if (tabId === 'tab-database') {
             window.dbManager?.loadAllData?.();
+        } else if (tabId === 'tab-simulations') {
+            this.loadSimulationRuns?.();
         } else if (tabId === 'tab-pi') {
             this.loadPiDevices?.();
         } else if (tabId === 'tab-rescue') {
             this.loadRescueRequests?.();
+        } else if (tabId === 'tab-users') {
+            this.loadUsers?.();
         }
+        return true;
+    }
+
+    hasPermission(permission) {
+        const permissions = this.currentUserPermissions || this.currentUser?.permissions || [];
+        return permissions.includes(permission) || this.currentUserRole === 'admin';
+    }
+
+    canAccessTab(tabId) {
+        const required = {
+            'tab-users': 'MANAGE_USERS',
+            'tab-projects': 'VIEW_STATIONS',
+            'tab-database': 'MANAGE_DATABASE',
+            'tab-simulations': 'MANAGE_SIMULATIONS',
+            'tab-pi': 'VIEW_FIELD_DEVICES',
+            'tab-rescue': 'MANAGE_RESCUE',
+        }[tabId];
+        return !required || this.hasPermission(required);
+    }
+
+    applyPermissionVisibility() {
+        document.querySelectorAll('[data-tab]').forEach(control => {
+            const allowed = this.canAccessTab(control.dataset.tab);
+            control.classList.toggle('is-locked', !allowed);
+            control.toggleAttribute('aria-disabled', !allowed);
+            if (!allowed) {
+                control.setAttribute('title', 'Bạn không có quyền mở khu vực này');
+            } else {
+                control.removeAttribute('title');
+            }
+            const item = control.closest('.nav-item');
+            if (item) item.classList.toggle('is-locked', !allowed);
+        });
+        document.querySelectorAll('[data-private-permission]').forEach(control => {
+            const allowed = this.hasPermission(control.dataset.privatePermission);
+            control.toggleAttribute('disabled', !allowed);
+            control.toggleAttribute('aria-disabled', !allowed);
+            control.classList.toggle('is-locked', !allowed);
+        });
+    }
+
+    _safeFallbackTab() {
+        return ['tab-projects', 'tab-pi', 'tab-rescue', 'tab-database', 'tab-simulations', 'tab-users']
+            .find(tab => this.canAccessTab(tab)) || 'tab-projects';
+    }
+
+    async applyAuthzSession(user) {
+        if (this._disposed) return;
+        this.currentUser = user || null;
+        this.currentUserRole = user?.role || '';
+        this.currentUserAssignedProjects = user?.assigned_projects || [];
+        this.currentUserPermissions = user?.permissions || [];
+        this.applyPermissionVisibility();
+        if (!this.canAccessTab(this.currentTabId)) {
+            this.closeRescueInspector?.();
+            window.dbManager?.closeInspector?.();
+            window.dbManager?.datasetRequestController?.abort?.();
+            this.switchTab(this._safeFallbackTab(), null, true, { replace: true, restore: true });
+        }
+        if (this.hasPermission('VIEW_INCIDENTS')) {
+            this.setupOperationsWebSocket();
+        } else if (this.operationsWs) {
+            this.operationsWs.close(1000, 'authorization changed');
+            this.operationsWs = null;
+        }
+        if (this.currentUserRole === 'admin' && !this.ws) this.setupWebSocketListener();
+        if (this.currentUserRole !== 'admin' && this.ws) {
+            this.ws.close(1000, 'authorization changed');
+            this.ws = null;
+        }
+    }
+
+    async bootstrapRoleFirst() {
+        const user = await this.fetchCurrentUserRole();
+        if (this._disposed || !user) return;
+        this.applyPermissionVisibility();
+        const requested = new URLSearchParams(window.location.search).get('tab') || history.state?.adminTab;
+        const initialTab = requested && this.canAccessTab(requested) ? requested : this._safeFallbackTab();
+        const initialControl = Array.from(document.querySelectorAll('[data-tab]')).find(el => el.dataset.tab === initialTab) || null;
+        this.switchTab(initialTab, initialControl, false, { replace: true, restore: true });
+        if (this.canAccessTab('tab-projects')) this.loadProjects?.();
+        if (this.canAccessTab('tab-users')) this.loadUsers?.();
+        if (this.hasPermission('VIEW_INCIDENTS')) {
+            this.setupOperationsWebSocket();
+        }
+        if (this.currentUserRole === 'admin') this.setupWebSocketListener();
     }
 
     init() {
@@ -284,8 +454,6 @@ class AdminManager {
             }
         });
 
-        // Load projects first so project names are available for user rendering
-        this.loadProjects().then(() => this.loadUsers());
         this.setupTabHandlers();
         this.setupLogout();
         this.setupOfflineThresholdListeners();
@@ -304,8 +472,8 @@ class AdminManager {
             });
         }
 
-        // Fetch current user role and apply restrictions
-        this.fetchCurrentUserRole();
+        // Resolve authz before any private manager starts a loader/socket.
+        this.bootstrapRoleFirst();
 
         // ✅ Auto-refresh Pi Devices tab every 15s to see online status quickly
         this._refreshIntervals.push(setInterval(() => {
@@ -328,23 +496,24 @@ class AdminManager {
     /** Fetch current user role from API and apply role-based restrictions */
     async fetchCurrentUserRole() {
         try {
-            const res = await fetch('/api/auth/me', {
-                headers: { 'Authorization': `Bearer ${this.token}` }
+            const res = await window.authManager?.apiFetch?.('/api/auth/me', { cache: 'no-store' }) || await fetch('/api/auth/me', {
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                cache: 'no-store',
             });
-            if (!res.ok) return;
+            if (!res?.ok) return null;
             const user = await res.json();
+            this.currentUser = user;
             this.currentUserRole = user.role;
             this.currentUserAssignedProjects = user.assigned_projects || [];
+            this.currentUserPermissions = user.permissions || [];
 
             console.log(`[ADMIN] User role: ${user.role}, assigned projects: ${JSON.stringify(this.currentUserAssignedProjects)}`);
 
-            if (user.role === 'viewer') {
-                this.applyViewerRestrictions();
-            } else if (user.role === 'operator') {
-                this.applyOperatorRestrictions();
-            }
+            this.applyPermissionVisibility();
+            return user;
         } catch (e) {
             console.error('Error fetching user role:', e);
+            return null;
         }
     }
 

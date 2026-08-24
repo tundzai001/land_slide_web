@@ -42,7 +42,7 @@ class ToastNotification {
                 position: fixed;
                 top: 20px; /* Cách đỉnh 20px để dễ nhìn hơn */
                 right: 20px;
-                z-index: 100000; /* ✅ Cao hơn Bootstrap Modal (1055) */
+                z-index: var(--z-toast); /* Above drawers and modals */
                 display: flex;
                 flex-direction: column;
                 gap: 10px;

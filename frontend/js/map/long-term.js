@@ -5,6 +5,12 @@ async function loadLongTermAnalysis(options = {}) {
         console.error('❌ [MAP] No station selected');
         return null;
     }
+    try { await window.loadFeatureLibrary?.('chart'); }
+    catch (_) { showLongTermError('Không thể tải thư viện biểu đồ.'); return null; }
+
+    const requestSequence = ++longTermRequestSequence;
+    longTermRequestController?.abort();
+    longTermRequestController = new AbortController();
 
     const stationId = currentStationData.id;
     const includeCorrelation = options.includeCorrelation === true || isRainCorrelationAiEnabled;
@@ -24,7 +30,9 @@ async function loadLongTermAnalysis(options = {}) {
             include_correlation: includeCorrelation ? 'true' : 'false',
             correlation_model: 'slide_model'
         });
-        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?${params.toString()}`);
+        const res = await fetch(`/api/stations/${stationId}/long-term-analysis?${params.toString()}`, {
+            signal: longTermRequestController.signal,
+        });
 
         if (!res.ok) {
             const error = await res.json();
@@ -33,16 +41,22 @@ async function loadLongTermAnalysis(options = {}) {
 
         const data = await res.json();
 
+        if (requestSequence !== longTermRequestSequence || currentStationData?.id !== stationId) return null;
+
         renderLongTermAnalysis(data);
         return data;
 
     } catch (e) {
+        if (e.name === 'AbortError') return null;
         console.error('❌ [MAP] Error loading long-term analysis:', e);
         showLongTermError(e.message);
         return null;
     } finally {
-        rainCorrelationAiRunning = false;
-        updateRainCorrelationAiControls();
+        if (requestSequence === longTermRequestSequence) {
+            rainCorrelationAiRunning = false;
+            longTermRequestController = null;
+            updateRainCorrelationAiControls();
+        }
     }
 }
 
@@ -381,12 +395,50 @@ function showSlideModelResultPopup(rainCorr) {
 // Global references for 3D logic
 let gnssScene, gnssCamera, gnssRenderer, gnssControls, gnssAnimationId;
 let imuScene, imuCamera, imuRenderer, imuControls, imuAnimationId;
+let gnssResizeObserver, imuResizeObserver, realtimeImuResizeObserver;
+let gnssResizeHandler, imuResizeHandler, realtimeImuResizeHandler;
+
+function disposeThreeInstance(scene, renderer, controls) {
+    controls?.dispose?.();
+    scene?.traverse?.(object => {
+        object.geometry?.dispose?.();
+        if (Array.isArray(object.material)) object.material.forEach(material => material?.dispose?.());
+        else object.material?.dispose?.();
+    });
+    renderer?.dispose?.();
+    renderer?.forceContextLoss?.();
+    renderer?.domElement?.remove?.();
+}
+
+function disposeGnss3D() {
+    if (gnssAnimationId) cancelAnimationFrame(gnssAnimationId);
+    if (gnssResizeHandler) window.removeEventListener('resize', gnssResizeHandler);
+    gnssResizeObserver?.disconnect?.();
+    disposeThreeInstance(gnssScene, gnssRenderer, gnssControls);
+    gnssScene = gnssCamera = gnssRenderer = gnssControls = gnssAnimationId = gnssResizeObserver = gnssResizeHandler = null;
+}
+
+function disposeImu3D() {
+    if (imuAnimationId) cancelAnimationFrame(imuAnimationId);
+    if (imuResizeHandler) window.removeEventListener('resize', imuResizeHandler);
+    imuResizeObserver?.disconnect?.();
+    disposeThreeInstance(imuScene, imuRenderer, imuControls);
+    imuScene = imuCamera = imuRenderer = imuControls = imuAnimationId = imuResizeObserver = imuResizeHandler = null;
+}
+
+function disposeRealtimeImu3D() {
+    if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
+    if (realtimeImuResizeHandler) window.removeEventListener('resize', realtimeImuResizeHandler);
+    realtimeImuResizeObserver?.disconnect?.();
+    disposeThreeInstance(realtimeImuScene, realtimeImuRenderer, realtimeImuControls);
+    realtimeImuScene = realtimeImuCamera = realtimeImuRenderer = realtimeImuControls = realtimeImuAnimationId = null;
+    realtimeImuResizeObserver = realtimeImuResizeHandler = realtimeImuSensorBlock = realtimeImuTargetQuaternion = null;
+}
 
 function stopLongTerm3DAnimations() {
-    if (gnssAnimationId) cancelAnimationFrame(gnssAnimationId);
-    if (imuAnimationId) cancelAnimationFrame(imuAnimationId);
-    gnssAnimationId = null;
-    imuAnimationId = null;
+    disposeGnss3D();
+    disposeImu3D();
+    disposeRealtimeImu3D();
 }
 
 // Helper: wait until a container has non-zero dimensions (handles CSS transitions/display:none)
@@ -472,7 +524,7 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
     if (!container) return;
 
     // Cleanup previous
-    if (gnssAnimationId) cancelAnimationFrame(gnssAnimationId);
+    disposeGnss3D();
     container.innerHTML = '';
 
     gnssScene = new THREE.Scene();
@@ -551,7 +603,10 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
         gnssControls.update();
         gnssRenderer.render(gnssScene, gnssCamera);
     }
-    animate();
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        gnssControls.update();
+        gnssRenderer.render(gnssScene, gnssCamera);
+    } else animate();
 
     // Resize handler + ResizeObserver for proper sizing after CSS transitions
     function handleGnssResize() {
@@ -562,9 +617,10 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
         gnssRenderer.setSize(d.w, d.h);
     }
     window.addEventListener('resize', handleGnssResize);
+    gnssResizeHandler = handleGnssResize;
     if (typeof ResizeObserver !== 'undefined') {
-        const gnssRo = new ResizeObserver(() => handleGnssResize());
-        gnssRo.observe(container);
+        gnssResizeObserver = new ResizeObserver(() => handleGnssResize());
+        gnssResizeObserver.observe(container);
     }
 }
 
@@ -572,7 +628,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     const container = document.getElementById('container-3d-imu');
     if (!container) return;
 
-    if (imuAnimationId) cancelAnimationFrame(imuAnimationId);
+    disposeImu3D();
     container.innerHTML = '';
 
     imuScene = new THREE.Scene();
@@ -755,7 +811,7 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
     }
 
     function animate() {
-        imuAnimationId = requestAnimationFrame(animate);
+        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) imuAnimationId = requestAnimationFrame(animate);
 
         // Cập nhật guy wires
         sensorBlock.updateMatrixWorld();
@@ -780,9 +836,10 @@ function initIMU3D(timeSeries, THREE, OrbitControls) {
         imuRenderer.setSize(d.w, d.h);
     }
     window.addEventListener('resize', handleImuResize);
+    imuResizeHandler = handleImuResize;
     if (typeof ResizeObserver !== 'undefined') {
-        const imuRo = new ResizeObserver(() => handleImuResize());
-        imuRo.observe(container);
+        imuResizeObserver = new ResizeObserver(() => handleImuResize());
+        imuResizeObserver.observe(container);
     }
 }
 
@@ -790,7 +847,7 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
     const container = document.getElementById('realtime-imu-3d-scene');
     if (!container) return;
 
-    if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
+    disposeRealtimeImu3D();
     container.innerHTML = '';
 
     try {
@@ -946,7 +1003,7 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
         realtimeImuTargetQuaternion.setFromEuler(euler);
 
         function animate() {
-            realtimeImuAnimationId = requestAnimationFrame(animate);
+            if (!matchMedia('(prefers-reduced-motion: reduce)').matches) realtimeImuAnimationId = requestAnimationFrame(animate);
 
             if (realtimeImuTargetQuaternion) {
                 realtimeImuSensorBlock.quaternion.slerp(realtimeImuTargetQuaternion, 0.1);
@@ -975,9 +1032,10 @@ async function initRealtimeIMU3D(initialRoll, initialPitch) {
             realtimeImuRenderer.setSize(d.w, d.h);
         }
         window.addEventListener('resize', handleRealtimeImuResize);
+        realtimeImuResizeHandler = handleRealtimeImuResize;
         if (typeof ResizeObserver !== 'undefined') {
-            const rtImuRo = new ResizeObserver(() => handleRealtimeImuResize());
-            rtImuRo.observe(container);
+            realtimeImuResizeObserver = new ResizeObserver(() => handleRealtimeImuResize());
+            realtimeImuResizeObserver.observe(container);
         }
 
     } catch (e) {

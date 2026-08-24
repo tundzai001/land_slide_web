@@ -12,6 +12,13 @@ body,
     text-rendering: optimizeLegibility;
 }
 
+.sidebar-brand { cursor: pointer; }
+.sidebar-brand .app-brand-plate { display:block; width:86px; min-height:0; padding:0; margin:0 auto 8px; background:transparent; border:0; border-radius:0; }
+.sidebar-brand .app-brand-plate img { display:block; width:100%; height:auto; }
+.sidebar-brand .app-brand-product { display:grid; line-height:1; text-align:center; }
+.sidebar-brand .app-brand-product strong { font-size:.9rem; }
+.sidebar-brand .app-brand-product small { margin-top:4px; color:var(--text-muted); font-size:.7rem; letter-spacing:.12em; text-transform:uppercase; }
+
 /* Fix table alignment */
 .table th,
 .table td {
@@ -160,7 +167,7 @@ body {
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
     padding: 0;
-    z-index: 1000;
+    z-index: var(--z-navbar);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -259,7 +266,7 @@ body {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.2s;
-    z-index: 1100;
+    z-index: var(--z-popover);
     font-size: 0.9rem;
     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
 }
@@ -308,7 +315,7 @@ body {
     display: flex;
     align-items: center;
     padding: 0 32px;
-    z-index: 900;
+    z-index: var(--z-sidebar);
 }
 
 .navbar-left,

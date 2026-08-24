@@ -36,6 +36,8 @@ function setupEventListeners() {
     const layerModeToggle = document.getElementById('layer-mode-toggle');
     const layerStationCb = document.getElementById('layer-station');
     const layerRescueCb = document.getElementById('layer-rescue');
+    const layerPopoverToggle = document.getElementById('layer-popover-toggle');
+    const layerPopover = document.getElementById('layer-popover');
     if (layerModeToggle && layerStationCb && layerRescueCb) {
         layerModeToggle.addEventListener('change', () => {
             if (layerModeToggle.checked) {
@@ -47,10 +49,23 @@ function setupEventListeners() {
                 layerStationCb.checked = true;
                 layerRescueCb.checked = true;
             }
+            setMapMode(layerModeToggle.checked ? 'rescue' : 'station');
             layerStationCb.dispatchEvent(new Event('change'));
             layerRescueCb.dispatchEvent(new Event('change'));
         });
     }
+    layerPopoverToggle?.addEventListener('click', event => {
+        event.stopPropagation();
+        layerPopover.hidden = !layerPopover.hidden;
+        layerPopoverToggle.setAttribute('aria-expanded', String(!layerPopover.hidden));
+    });
+    layerPopover?.addEventListener('click', event => event.stopPropagation());
+    document.addEventListener('click', () => {
+        if (!layerPopover?.hidden) {
+            layerPopover.hidden = true;
+            layerPopoverToggle?.setAttribute('aria-expanded', 'false');
+        }
+    });
 
     // === Custom Glass Zoom Controls ===
     const zoomInBtn = document.getElementById('map-zoom-in');
@@ -113,6 +128,8 @@ function setupEventListeners() {
 
     if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', async () => {
+            try { await window.loadFeatureLibrary?.('chart'); }
+            catch (_) { window.toast?.error('Không thể tải thư viện biểu đồ.'); return; }
             const stationContext = document.getElementById('charts-station-context');
             if (stationContext && currentStationData) {
                 stationContext.textContent = `${currentStationData.name} · ${currentStationData.station_code}`;
@@ -247,7 +264,9 @@ function setupEventListeners() {
                     if (latest) {
                         // Small delay to let display:block take effect
                         setTimeout(() => {
-                            initRealtimeIMU3D(latest.roll || 0, latest.pitch || 0);
+                            const roll = Number(latest.roll);
+                            const pitch = Number(latest.pitch);
+                            if (Number.isFinite(roll) && Number.isFinite(pitch)) initRealtimeIMU3D(roll, pitch);
                         }, 50);
                     }
                 }
@@ -256,9 +275,7 @@ function setupEventListeners() {
                 chartImuWrapper.style.display = 'block';
                 btnToggleImu3d.innerHTML = '<i class="bi bi-box me-1"></i>3D View';
                 // Cleanup realtime scene on hide
-                if (realtimeImuAnimationId) cancelAnimationFrame(realtimeImuAnimationId);
-                realtimeImuScene = null;
-                realtimeImuRenderer = null;
+                disposeRealtimeImu3D();
             }
         });
     }
@@ -294,6 +311,10 @@ function setupEventListeners() {
     const btnNetworkAdj = document.getElementById('btn-network-adj');
     if (btnNetworkAdj && advSidepanel) {
         btnNetworkAdj.addEventListener('click', () => {
+            if (!canOperateMap()) {
+                window.toast?.warning('Bạn không có quyền chạy bình sai GNSS.');
+                return;
+            }
             // Check for offline rovers
             let hasOffline = false;
             if (typeof stationsData !== 'undefined' && Array.isArray(stationsData)) {
@@ -519,6 +540,9 @@ function setupEventListeners() {
             this.draw(performance.now());
         },
         addPoint(name, relX, relY, isBase = false, stationId = null) {
+            const x = Number(relX);
+            const y = Number(relY);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return;
             const numericStationId = Number(stationId);
             const hasStationId = stationId !== null && stationId !== '' && Number.isFinite(numericStationId);
             if (!this.points[name] && hasStationId) {
@@ -533,23 +557,27 @@ function setupEventListeners() {
                 }
             }
             if (!this.points[name]) {
-                this.points[name] = { name, x: Number(relX) || 0, y: Number(relY) || 0, isBase, samples: 1, placeholder: false, stationId: hasStationId ? numericStationId : null };
+                this.points[name] = { name, x, y, isBase, samples: 1, placeholder: false, stationId: hasStationId ? numericStationId : null };
                 if (isBase) this.basePoint = this.points[name];
             } else if (!isBase) {
                 const point = this.points[name];
                 if (point.placeholder) {
-                    point.x = Number(relX) || 0;
-                    point.y = Number(relY) || 0;
+                    point.x = x;
+                    point.y = y;
                     point.samples = 1;
                     point.placeholder = false;
                     return;
                 }
                 point.samples = Number(point.samples || 1) + 1;
-                point.x += ((Number(relX) || 0) - point.x) / point.samples;
-                point.y += ((Number(relY) || 0) - point.y) / point.samples;
+                point.x += (x - point.x) / point.samples;
+                point.y += (y - point.y) / point.samples;
             }
         },
         addBaseline(from, to, data) {
+            const dn = Number(data?.dn);
+            const de = Number(data?.de);
+            const dh = Number(data?.dh);
+            if (![dn, de, dh].every(Number.isFinite)) return;
             const orderedPair = from === 'BASE'
                 ? ['BASE', to]
                 : to === 'BASE'
@@ -560,9 +588,9 @@ function setupEventListeners() {
             to = orderedPair[1];
             data = {
                 ...data,
-                dn: direction * Number(data.dn || 0),
-                de: direction * Number(data.de || 0),
-                dh: direction * Number(data.dh || 0),
+                dn: direction * dn,
+                de: direction * de,
+                dh: direction * dh,
             };
             const key = `${from}\u0000${to}`;
             let edge = this.baselines.find(item => item.key === key);
@@ -580,9 +608,9 @@ function setupEventListeners() {
                     samples: 1,
                     data: {
                         ...data,
-                        dn: Number(data.dn) || 0,
-                        de: Number(data.de) || 0,
-                        dh: Number(data.dh) || 0,
+                        dn: data.dn,
+                        de: data.de,
+                        dh: data.dh,
                     },
                 };
                 this.baselines.push(edge);
@@ -764,7 +792,11 @@ function setupEventListeners() {
             if (!Array.isArray(baseXYZ)) {
                 baseXYZ = getAdjustedPointCoordinates(Object.values(result.points)[0]);
             }
-            baseXYZ = Array.isArray(baseXYZ) ? baseXYZ.map(Number) : [0, 0, 0];
+            baseXYZ = Array.isArray(baseXYZ) ? baseXYZ.slice(0, 3).map(Number) : null;
+            if (!baseXYZ || baseXYZ.length < 3 || !baseXYZ.every(Number.isFinite)) {
+                window.toast?.warning?.('Thiếu tọa độ mốc GNSS hợp lệ; không thể dựng sơ đồ hiệu chỉnh.');
+                return;
+            }
             this.addPoint('BASE', 0, 0, true);
             this.roverCount = Array.isArray(result.points)
                 ? result.points.length
@@ -778,10 +810,12 @@ function setupEventListeners() {
             resultBaselines.forEach(item => {
                 const vector = item.adjusted_xyz || item.adjusted_neu || item.observed_xyz || item.observed_neu;
                 if (!Array.isArray(vector) || vector.length < 3) return;
+                const normalizedVector = vector.slice(0, 3).map(Number);
+                if (!normalizedVector.every(Number.isFinite)) return;
                 this.addBaseline(item.from, item.to, {
-                    dn: Number(vector[0]) || 0,
-                    de: Number(vector[1]) || 0,
-                    dh: Number(vector[2]) || 0,
+                    dn: normalizedVector[0],
+                    de: normalizedVector[1],
+                    dh: normalizedVector[2],
                     full_data: item,
                 });
             });
@@ -1345,6 +1379,10 @@ function setupEventListeners() {
     }
 
         window.requestGnssAdjustment = async function(projectId, stationIds) {
+        if (!canOperateMap()) {
+            showAdjustmentError('Không có quyền', 'Chỉ operator hoặc admin được chạy bình sai GNSS.');
+            return;
+        }
         // The advanced-panel action operates on the currently selected station,
         // while the map-cluster action passes the project explicitly.
         projectId = projectId || currentStationData?.project_id;
@@ -1504,6 +1542,11 @@ function setupEventListeners() {
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
+            if (layerPopover && !layerPopover.hidden) {
+                layerPopover.hidden = true;
+                layerPopoverToggle?.setAttribute('aria-expanded', 'false');
+                layerPopoverToggle?.focus();
+            }
             closeSlideModelResultPopup();
             setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
         }
@@ -1513,6 +1556,10 @@ function setupEventListeners() {
     const sirenToggleBtns = document.querySelectorAll('.btn-siren-toggle');
     sirenToggleBtns.forEach(sirenToggleBtn => {
         sirenToggleBtn.addEventListener('click', async () => {
+            if (!canOperateMap()) {
+                window.toast?.warning('Bạn không có quyền điều khiển còi.');
+                return;
+            }
             if (!currentAlertStationId) return;
             const state = sirenToggleBtn.getAttribute('data-siren-state');
             const target = sirenToggleBtn.getAttribute('data-target') || 'all';

@@ -15,13 +15,33 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _check_private_device_scope(user: model_auth.User, project_id: int) -> None:
+    """Field-device data is private even though station metadata is public."""
+    if user.role == auth.Role.ADMIN:
+        return
+    assigned = {
+        int(value)
+        for value in (getattr(user, "assigned_projects", None) or [])
+        if str(value).strip().lstrip("-").isdigit()
+    }
+    if project_id not in assigned:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thiết bị của dự án này")
+
+
 @router.get("/api/admin/stations/{station_id}/devices")
 async def get_station_devices(
     station_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.get_current_user)
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_FIELD_DEVICES))
 ):
     try:
+        station_result = await db.execute(
+            select(model_config.Station).where(model_config.Station.id == station_id)
+        )
+        station = station_result.scalar_one_or_none()
+        if not station:
+            raise HTTPException(status_code=404, detail="Station not found")
+        _check_private_device_scope(current_user, station.project_id)
         result = await db.execute(
             select(model_config.Device)
             .where(model_config.Device.station_id == station_id)
@@ -54,15 +74,17 @@ async def create_device_in_station(
     station_id: int,
     device_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     try:
         # Verify station exists
         result = await db.execute(
             select(model_config.Station).where(model_config.Station.id == station_id)
         )
-        if not result.scalar_one_or_none():
+        station = result.scalar_one_or_none()
+        if not station:
             raise HTTPException(status_code=404, detail="Station not found")
+        _check_private_device_scope(current_user, station.project_id)
 
         new_device = model_config.Device(
             device_code=device_data['device_code'],
@@ -100,7 +122,7 @@ async def create_device_in_station(
 async def delete_device(
     device_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     try:
         result = await db.execute(
@@ -110,6 +132,14 @@ async def delete_device(
 
         if not device:
             raise HTTPException(status_code=404, detail="Device not found")
+
+        station_result = await db.execute(
+            select(model_config.Station).where(model_config.Station.id == device.station_id)
+        )
+        station = station_result.scalar_one_or_none()
+        if not station:
+            raise HTTPException(status_code=404, detail="Station not found")
+        _check_private_device_scope(current_user, station.project_id)
 
         await db.delete(device)
         await db.commit()
@@ -124,5 +154,4 @@ async def delete_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
-
 

@@ -7,7 +7,7 @@
     position: absolute;
     top: 80px;
     right: 16px;
-    z-index: 1100;
+    z-index: var(--z-popover);
     width: 240px;
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.45) !important;
@@ -188,7 +188,7 @@ body.rescue-mode-active .toggle-list-btn {
     position: fixed;
     bottom: 28px;
     right: 28px;
-    z-index: 900;
+    z-index: var(--z-sidebar);
     display: flex;
     align-items: center;
     gap: 0;

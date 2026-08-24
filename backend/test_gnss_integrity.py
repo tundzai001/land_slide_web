@@ -6,12 +6,43 @@ import numpy as np
 
 from processors.gnss_processor import GNSSVelocityProcessor
 from mqtt_bridge import MQTTBridge
+from app.landslide_analyzer import LandslideAnalyzer
 
 
 class GnssFixedOnlyTests(unittest.TestCase):
+    def test_processor_waits_for_persisted_state_before_consuming_gga(self):
+        processor = GNSSVelocityProcessor.__new__(GNSSVelocityProcessor)
+        processor._initialization_complete = False
+        processor.state = "ORIGIN_LOCKED"
+
+        result = processor.process_gngga("$GNGGA,ignored", {})
+
+        self.assertEqual(result["type"], "gnss_status")
+        self.assertEqual(result["status"], "INITIALIZING")
+
+    def test_uncertain_gnss_processor_status_never_becomes_safe(self):
+        analyzer = LandslideAnalyzer()
+        for status in (
+            "INITIALIZING",
+            "VELOCITY_WARMUP",
+            "UNVERIFIED_POSITION_SHIFT",
+            "PERSISTENT_OFFSET_QUARANTINED",
+            "REJECTED_MEASUREMENT",
+            "UNSTABLE_FIX",
+            "INVALID_DATA",
+        ):
+            result = analyzer.analyze_gnss_displacement(
+                99,
+                [{"timestamp": 1_700_000_000, "data": {"status": status, "speed_2d": 0.0}}],
+                {"GnssAlerting": {"enabled": True}},
+            )
+            self.assertEqual(result["level"], "PENDING")
+            self.assertEqual(result["signal_state"], "UNKNOWN")
+
     def _processor_without_db(self):
         processor = GNSSVelocityProcessor.__new__(GNSSVelocityProcessor)
         processor.device_id = 99
+        processor.db_session_factory = None
         processor.context_label = "test"
         processor.state = "ORIGIN_LOCKED"
         processor.origin = {
@@ -21,6 +52,9 @@ class GnssFixedOnlyTests(unittest.TestCase):
             "R": np.eye(3),
             "ecef": np.zeros(3),
         }
+        processor._origin_locked_at = 1_699_999_900
+        processor._origin_record_id = 7
+        processor.min_fix_quality = 4
         processor.stats = {
             "total_processed": 0,
             "low_quality_rejected": 0,
@@ -35,6 +69,11 @@ class GnssFixedOnlyTests(unittest.TestCase):
         processor.disp_state_ready = False
         processor.peak_displacement_mm = 0.0
         processor._reference_changed_at = None
+        processor._reference_change_source = None
+        processor._last_handled_reference_event_ts = None
+        processor._last_reacquire_ts = 0.0
+        processor._needs_boot_anchor = False
+        processor._quarantine_checkpointed = False
         return processor
 
     def test_rtk_float_is_status_only_and_does_not_mutate_measurement_state(self):
@@ -230,6 +269,91 @@ class GnssFixedOnlyTests(unittest.TestCase):
         self.assertIn("shift_e_m", quarantined["data"])
         self.assertLess(float(processor.history[-1]["pos_enu"][0]), 0.01)
         self.assertLess(float(processor.disp_enu_state[0]), 0.01)
+
+    def test_unverified_shift_survives_processor_restart(self):
+        base_ts = 1_700_000_000.0
+        processor = self._processor_without_db()
+        processor.history = deque([
+            {"ts": base_ts, "pos_enu": np.zeros(3, dtype=float)}
+        ], maxlen=1200)
+        processor.reacquire_candidates = deque([
+            {
+                "ts": base_ts + 1.0 + index * 12.0,
+                "pos_enu": np.array([0.04, 0.0, 0.40 + (0.001 if index % 2 else -0.001)]),
+                "fix_quality": 4,
+            }
+            for index in range(6)
+        ], maxlen=10)
+        processor._shift_started_at = base_ts + 1.0
+        processor.disp_enu_state = np.array([0.002, -0.001, 0.003])
+        processor.disp_state_ready = True
+        processor.peak_displacement_mm = 2.3
+        checkpoint = processor._runtime_state_snapshot()
+
+        restarted = self._processor_without_db()
+        restarted.history = deque(maxlen=1200)
+        restarted.reacquire_candidates = deque(maxlen=10)
+        restarted.max_step_distance_m = 0.2
+        restarted.max_step_vertical_m = 0.15
+        restarted.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        restarted.origin["R"] = np.eye(3)
+
+        self.assertTrue(restarted._restore_runtime_state(checkpoint))
+        self.assertEqual(len(restarted.reacquire_candidates), 6)
+        np.testing.assert_allclose(restarted.disp_enu_state, [0.002, -0.001, 0.003])
+
+        restarted._parse_gngga = lambda _: {
+            "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+            "gga_timestamp": base_ts + 62.0,
+            "received_timestamp": base_ts + 62.1,
+            "fix_quality": 4,
+            "num_sats": 20,
+            "hdop": 0.5,
+        }
+        restarted._gngga_to_ecef = lambda *_: (
+            restarted.origin["ecef"] + np.array([0.04, 0.0, 0.40])
+        )
+
+        result = restarted._handle_processing("$GNGGA,TEST", 4, {})
+
+        self.assertEqual(result["status"], "UNVERIFIED_POSITION_SHIFT")
+        self.assertTrue(result["data"]["possible_ground_movement"])
+        np.testing.assert_allclose(restarted.history[-1]["pos_enu"], np.zeros(3))
+
+    def test_mismatched_restart_checkpoint_uses_safe_zero_enu_anchor(self):
+        processor = self._processor_without_db()
+        processor.history = deque([
+            {"ts": 1_700_000_000.0, "pos_enu": np.zeros(3, dtype=float)}
+        ], maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        checkpoint = processor._runtime_state_snapshot()
+
+        restarted = self._processor_without_db()
+        restarted._origin_record_id += 1
+        restarted.history = deque(maxlen=1200)
+        restarted.reacquire_candidates = deque(maxlen=10)
+        restarted.max_step_distance_m = 0.2
+        restarted.max_step_vertical_m = 0.15
+        restarted.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        restarted.origin["R"] = np.eye(3)
+
+        self.assertFalse(restarted._restore_runtime_state(checkpoint))
+        restarted._parse_gngga = lambda _: {
+            "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+            "gga_timestamp": 1_700_000_100.0,
+            "received_timestamp": 1_700_000_100.1,
+            "fix_quality": 4,
+            "num_sats": 20,
+            "hdop": 0.5,
+        }
+        restarted._gngga_to_ecef = lambda *_: (
+            restarted.origin["ecef"] + np.array([0.0, 0.0, 0.40])
+        )
+
+        result = restarted._handle_processing("$GNGGA,TEST", 4, {})
+
+        self.assertEqual(result["status"], "INVALID_DATA")
+        np.testing.assert_allclose(restarted.history[-1]["pos_enu"], np.zeros(3))
 
     def test_stationary_noise_does_not_make_total_displacement_ramp(self):
         processor = self._processor_without_db()

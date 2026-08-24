@@ -1,5 +1,5 @@
 #backend/app/models/data.py
-from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index, Text
+from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index, Text, UniqueConstraint, text
 from app.database import BaseData
 
 class SensorData(BaseData):
@@ -9,12 +9,23 @@ class SensorData(BaseData):
     __table_args__ = (
         Index('ix_sensor_data_station_type_ts', 'station_id', 'sensor_type', 'timestamp'),
         Index('ix_sensor_data_station_ts', 'station_id', 'timestamp'),
+        Index('ix_sensor_data_type_ts', 'sensor_type', 'timestamp'),
+        Index(
+            'ix_sensor_data_ingest_id_unique',
+            'ingest_id',
+            unique=True,
+            postgresql_where=text('ingest_id IS NOT NULL'),
+            sqlite_where=text('ingest_id IS NOT NULL'),
+        ),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)  # BigInteger cho dữ liệu lớn
     station_id = Column(Integer, index=True, nullable=False)
     timestamp = Column(BigInteger, index=True, nullable=False)
     sensor_type = Column(String, index=True, nullable=False)
+    # Natural identity is additive and nullable for historical rows.  New
+    # writers use it for MQTT redelivery/commit-unknown deduplication.
+    ingest_id = Column(String(64), nullable=True)
     
     data = Column(JSON, nullable=False)
     
@@ -134,6 +145,120 @@ class RescueRequest(BaseData):
     admin_note = Column(String, nullable=True)
     handled_by = Column(String, nullable=True)
     handled_at = Column(BigInteger, nullable=True)
+
+
+class IncidentCase(BaseData):
+    """Durable, non-PII operations case built from an Alert or RescueRequest."""
+
+    __tablename__ = "incident_cases"
+    __table_args__ = (
+        UniqueConstraint("source_kind", "source_id", name="uq_incident_source"),
+        Index("ix_incident_attention", "status", "priority", "updated_at", "id"),
+        Index("ix_incident_scope_status", "project_id", "status", "updated_at", "id"),
+        Index("ix_incident_station_status", "station_id", "status", "updated_at", "id"),
+        Index("ix_incident_signal", "source_severity", "signal_state", "updated_at", "id"),
+        Index("ix_incident_lookup_pending", "updated_at", "id", postgresql_where=text("scope_state = 'LOOKUP_PENDING'")),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    reference = Column(String(40), nullable=False, unique=True, index=True)
+    source_kind = Column(String(24), nullable=False)
+    source_id = Column(BigInteger, nullable=False)
+    project_id = Column(Integer, nullable=True, index=True)
+    station_id = Column(Integer, nullable=True, index=True)
+    scope_state = Column(String(20), nullable=False, default="LOOKUP_PENDING")
+    project_name_snapshot = Column(String(255), nullable=True)
+    project_code_snapshot = Column(String(100), nullable=True)
+    station_name_snapshot = Column(String(255), nullable=True)
+    station_code_snapshot = Column(String(100), nullable=True)
+    title = Column(String(255), nullable=False)
+    summary = Column(Text, nullable=False, default="")
+    source_severity = Column(String(16), nullable=False, default="UNKNOWN")
+    signal_state = Column(String(16), nullable=False, default="UNKNOWN")
+    priority = Column(String(16), nullable=False, default="UNTRIAGED")
+    status = Column(String(24), nullable=False, default="new")
+    assigned_to_user_id = Column(Integer, nullable=True, index=True)
+    assigned_to_username = Column(String(150), nullable=True)
+    opened_at = Column(BigInteger, nullable=False)
+    last_signal_at = Column(BigInteger, nullable=False)
+    acknowledged_at = Column(BigInteger, nullable=True)
+    resolved_at = Column(BigInteger, nullable=True)
+    updated_at = Column(BigInteger, nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    revision = Column(BigInteger, nullable=False, default=1)
+    last_event_sequence = Column(Integer, nullable=False, default=0)
+
+
+class IncidentEvent(BaseData):
+    """Append-only, non-PII case timeline event."""
+
+    __tablename__ = "incident_events"
+    __table_args__ = (
+        UniqueConstraint("incident_id", "sequence", name="uq_incident_event_sequence"),
+        Index("ix_incident_events_case_created", "incident_id", "created_at", "id"),
+        Index("ix_incident_events_project_cursor", "project_id_at_event", "id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    incident_id = Column(BigInteger, nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    event_type = Column(String(32), nullable=False)
+    actor_kind = Column(String(16), nullable=False, default="system")
+    actor_user_id = Column(Integer, nullable=True)
+    actor_username = Column(String(150), nullable=True)
+    project_id_at_event = Column(Integer, nullable=True)
+    previous_project_id = Column(Integer, nullable=True)
+    created_at = Column(BigInteger, nullable=False)
+    note = Column(Text, nullable=True)
+    payload = Column(JSON, nullable=False, default=dict)
+    mutation_request_id = Column(BigInteger, nullable=True)
+
+
+class IncidentMutationRequest(BaseData):
+    """Idempotency ledger for authenticated Incident mutations."""
+
+    __tablename__ = "incident_mutation_requests"
+    __table_args__ = (
+        UniqueConstraint("incident_id", "actor_user_id", "idempotency_key", name="uq_incident_mutation_key"),
+        Index("ix_incident_mutation_incident", "incident_id", "created_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    incident_id = Column(BigInteger, nullable=False, index=True)
+    actor_user_id = Column(Integer, nullable=False)
+    idempotency_key = Column(String(64), nullable=False)
+    action = Column(String(48), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    sequence_from = Column(Integer, nullable=True)
+    sequence_to = Column(Integer, nullable=True)
+    result_revision = Column(BigInteger, nullable=True)
+    result_version = Column(Integer, nullable=True)
+    changed = Column(Boolean, nullable=False, default=False)
+    created_at = Column(BigInteger, nullable=False)
+
+
+class FileCleanupJob(BaseData):
+    """Small durable outbox placeholder for rescue upload cleanup."""
+
+    __tablename__ = "file_cleanup_jobs"
+    __table_args__ = (
+        UniqueConstraint("upload_id", "job_generation", name="uq_cleanup_upload_generation"),
+        Index("ix_cleanup_status_run_after", "status", "run_after"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    upload_id = Column(String(36), nullable=False)
+    image_storage_key = Column(String(255), nullable=True)
+    job_generation = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="PENDING")
+    attempts = Column(Integer, nullable=False, default=0)
+    run_after = Column(BigInteger, nullable=False)
+    lease_owner = Column(String(64), nullable=True)
+    lease_until = Column(BigInteger, nullable=True)
+    lease_generation = Column(Integer, nullable=False, default=0)
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+    last_error_code = Column(String(64), nullable=True)
 
 
 class SimulationRun(BaseData):

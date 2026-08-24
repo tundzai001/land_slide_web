@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from app import auth
 from app.routers.authentication import create_websocket_ticket
+from app.routers.frontend import _consume_ws_ticket
 
 
 class JwtCompatibilityTests(unittest.TestCase):
@@ -41,7 +42,12 @@ class WebSocketTicketTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["sub"], "admin")
         self.assertEqual(payload["purpose"], "websocket")
+        self.assertEqual(payload["boot_epoch"], auth.WS_BOOT_EPOCH)
         self.assertLessEqual(payload["exp"] - int(auth.datetime.now(auth.timezone.utc).timestamp()), 30)
+
+    async def test_ticket_jti_is_one_time(self):
+        self.assertTrue(await _consume_ws_ticket("security-test-jti"))
+        self.assertFalse(await _consume_ws_ticket("security-test-jti"))
 
 
 if __name__ == "__main__":

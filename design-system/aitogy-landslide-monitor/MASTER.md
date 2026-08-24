@@ -2,9 +2,9 @@
 
 ## Product direction
 
-**Teal Operations** for a public-safety monitoring product: calm, precise and data-first. Red and amber communicate operational risk only. Decorative neon, gold luxury styling, structural emoji and layout-shifting hover effects are forbidden.
+Teal Operations for a public-safety monitoring product: calm, precise and data-first. Aitogy is the masterbrand; Landslide Monitor is the product. “Bản đồ” is a destination, not a brand. Red and amber communicate operational risk only. Aitogy orange is brand-only.
 
-## Semantic color tokens
+## Semantic tokens
 
 | Role | Light | Dark |
 |---|---:|---:|
@@ -21,29 +21,26 @@
 | Success | `#15803D` | `#4ADE80` |
 | Warning | `#B45309` | `#FBBF24` |
 | Danger | `#B91C1C` | `#FB7185` |
+| Brand orange | `#FF6B00` | `#FF7A1A` |
 
-## Typography and density
+## Typography, density and motion
 
-- Interface: `DM Sans`, with system sans-serif fallback.
-- Data and timestamps: system monospace with tabular numerals.
-- Type scale: 12, 14, 16, 18, 24, 32px. Body line-height: 1.5–1.65.
-- Spacing: 4/8px rhythm. Core gaps: 8, 12, 16, 24, 32px.
-- Radius: 8px controls, 12px compact cards, 16px panels, 22px hero surfaces.
-- Motion: 150–300ms and only for state/continuity. Respect `prefers-reduced-motion`.
+- Interface: DM Sans with system sans-serif fallback. Data/timestamps use system monospace and tabular numerals.
+- Type scale: 12, 14, 16, 18, 24, 32px; body line-height 1.5–1.65. Mobile body is 16px; metadata never below 12px.
+- Spacing follows 4/8px rhythm. Radius scale is 8/12/16/22px.
+- Touch targets are at least 44×44px and focus rings are 3px with WCAG AA contrast.
+- Landing may use exactly one complex scroll-linked story. Other motion is 150–300ms, limited to transform/opacity/interaction state and disabled under reduced motion.
+- Use named z-index tokens; do not introduce arbitrary high values.
 
 ## Interaction contract
 
-- Touch targets are at least 44×44px; checkbox/radio glyphs are 18–20px inside a larger label target.
-- Every icon-only control has an accessible name and visible focus state.
+- Every icon-only control has an accessible name. Status always has text/icon in addition to color.
 - Loading actions are disabled, show progress and restore in `finally`.
 - Empty, loading, stale, offline and error are distinct states with recovery actions.
-- Status never relies on color alone.
 - Drawers and modals close with Escape, trap focus while open and restore focus to the trigger.
 
 ## Page defaults
 
-- Landing/Login: spacious, trust-first, responsive, light by default with dark available.
-- Map: full-viewport operational workspace with compact floating panels and mobile bottom navigation.
-- Management: dense light-first operations console; retain the approved information architecture.
-
-Page rules in `pages/` override this file only where explicitly stated.
+- Landing/Login: spacious, trust-first, light by default with dark available.
+- Map: full-viewport operational workspace with compact panels and mobile bottom navigation.
+- Management: dense light-first operations console; preserve approved IA, permissions and workflows while allowing a full presentation reskin.

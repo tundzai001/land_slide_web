@@ -123,6 +123,13 @@ textarea:focus-visible {
     text-decoration: none;
 }
 
+.top-navbar .app-brand-plate {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+
 .brand-text i {
     display: inline-grid;
     width: 36px;
@@ -529,6 +536,11 @@ textarea:focus-visible {
     font-weight: 800 !important;
     line-height: 1.1;
     letter-spacing: 0.035em;
+}
+
+.gnss-fix-badge {
+    font-size: 0.75rem !important;
+    letter-spacing: 0.02em;
 }
 
 .sensor-offline-badge,
@@ -983,12 +995,12 @@ textarea:focus-visible {
 }
 
 #guestRescueModal {
-    z-index: 3200 !important;
+    z-index: var(--z-critical) !important;
 }
 
 body:has(#guestRescueModal.show) .modal-backdrop,
 .modal-backdrop.show {
-    z-index: 3190 !important;
+    z-index: var(--z-critical) !important;
     opacity: 0.42 !important;
 }
 
@@ -1192,7 +1204,7 @@ body:has(#guestRescueModal.show) .modal-backdrop,
         border-radius: 15px !important;
     }
 
-    .brand-text span {
+    .brand-text .app-brand-product {
         display: none;
     }
 
@@ -1268,13 +1280,13 @@ body:has(#guestRescueModal.show) .modal-backdrop,
     .brand-text i,
     .navbar-hamburger,
     .top-navbar .btn-link {
-        width: 38px !important;
-        height: 38px !important;
-        min-width: 38px !important;
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
     }
 
     .top-navbar .btn-outline-primary {
-        width: 38px;
+        width: 44px;
         padding: 0 !important;
         overflow: hidden;
         font-size: 0 !important;

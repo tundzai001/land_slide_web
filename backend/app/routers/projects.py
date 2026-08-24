@@ -105,7 +105,7 @@ async def get_projects(
     limit: Optional[int] = None,
     sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.get_current_user)
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS))
 ):
     try:
         result = await db.execute(

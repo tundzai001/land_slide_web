@@ -47,7 +47,7 @@ body {
     backdrop-filter: saturate(200%) blur(32px);
     -webkit-backdrop-filter: saturate(200%) blur(32px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    z-index: 3000;
+    z-index: var(--z-critical);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -69,6 +69,22 @@ body {
 .brand-text:hover {
     color: var(--accent-primary);
 }
+
+.app-brand-plate {
+    display: block;
+    flex: 0 0 auto;
+    width: 68px;
+    height: auto;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+}
+
+.app-brand-plate img { display: block; width: 100%; height: auto; }
+.app-brand-product { display: grid; line-height: 1; }
+.app-brand-product strong { font-size: 0.9rem; }
+.app-brand-product small { margin-top: 3px; color: var(--text-muted); font-size: 0.7rem; letter-spacing: .12em; text-transform: uppercase; }
 
 /*  MAP CONTAINER  */
 #map {

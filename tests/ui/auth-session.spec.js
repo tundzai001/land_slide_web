@@ -4,7 +4,7 @@ const { join } = require('node:path');
 
 const projectRoot = join(__dirname, '..', '..');
 const sessionSource = readFileSync(join(projectRoot, 'frontend/js/session-state.js'), 'utf8');
-const landingSource = readFileSync(join(projectRoot, 'frontend/js/landing.jsx'), 'utf8');
+const landingSource = readFileSync(join(projectRoot, 'frontend/js/landing.js'), 'utf8');
 const runtimeSource = readFileSync(join(projectRoot, 'frontend/js/app-runtime.js'), 'utf8');
 
 async function installAppRoutes(page, authStatus = 200) {
@@ -26,11 +26,11 @@ async function installAppRoutes(page, authStatus = 200) {
   });
 }
 
-test('landing React state routes remembered operators to management', async () => {
+test('landing progressive enhancement routes remembered operators to management', async () => {
   expect(landingSource).toContain("window.authSession?.inspect?.()");
-  expect(landingSource).toContain("['admin','operator'].includes(session.user?.role)");
-  expect(landingSource).toContain("href: canManage ? '/management' : '/map'");
-  expect(landingSource).toContain("label: canManage ? 'Quản trị hệ thống' : 'Mở bản đồ'");
+  expect(landingSource).toContain("['admin', 'operator'].includes(session.user?.role)");
+  expect(landingSource).toContain("const href = canManage ? '/management' : '/map'");
+  expect(landingSource).toContain("const label = canManage ? 'Quản trị hệ thống' : 'Mở bản đồ'");
 });
 
 test('login route forwards a valid remembered session without showing the form', async ({ page }) => {

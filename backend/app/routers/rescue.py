@@ -1,6 +1,7 @@
 """Public rescue intake and administrative rescue workflow routes."""
 import logging
 import time
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -16,6 +17,7 @@ from ..models import auth as model_auth
 from ..models import data as model_data
 from ..services import rescue_storage
 from ..services.pagination import normalize_page, set_pagination_headers
+from ..services.incident_cases import append_event, ensure_incident_case, get_case_for_source, serialize_case
 from ..websocket import manager as ws_manager
 
 router = APIRouter()
@@ -125,11 +127,40 @@ async def create_rescue_request(
         status="pending",
     )
     db.add(row)
+    await db.flush()
+    incident_case, _created, incident_event = await ensure_incident_case(
+        db,
+        source_kind="RESCUE_REQUEST",
+        source_id=int(row.id),
+        title="Yêu cầu cứu hộ",
+        summary="Yêu cầu cứu hộ mới cần được triage.",
+        source_severity="UNKNOWN",
+        signal_state="NOT_APPLICABLE",
+        now=now_ts,
+    )
     await db.commit()
     await db.refresh(row)
+    if incident_event is not None:
+        await db.refresh(incident_event)
 
     parsed = rescue_storage.unpack_message(row.message)
     try:
+        await ws_manager.broadcast_operations(
+            {
+                "protocol": 2,
+                "type": "incident_changed",
+                "event_id": int(incident_event.id) if incident_event is not None else None,
+                "sequence_from": incident_event.sequence if incident_event is not None else None,
+                "sequence_to": incident_event.sequence if incident_event is not None else None,
+                "incident_id": int(incident_case.id),
+                "incident_revision": int(incident_case.revision),
+                "workflow_version": int(incident_case.version),
+                "action": "created" if _created else "updated",
+                "project_id": incident_case.project_id,
+                "station_id": incident_case.station_id,
+                "summary": serialize_case(incident_case),
+            }
+        )
         await ws_manager.broadcast_admins(
             {
                 "type": "rescue_request",
@@ -247,7 +278,47 @@ async def update_rescue_request(
     else:
         row.handled_by = None
         row.handled_at = None
+    incident_case = await get_case_for_source(db, "RESCUE_REQUEST", int(row.id), for_update=True)
+    incident_event = None
+    if incident_case is not None:
+        target_status = {
+            "pending": "in_progress" if incident_case.status in {"resolved", "dismissed"} else incident_case.status,
+            "resolved": "resolved",
+            "rejected": "dismissed",
+        }[new_status]
+        status_changed = incident_case.status != target_status
+        reopened = incident_case.status in {"resolved", "dismissed"} and target_status == "in_progress"
+        incident_case.status = target_status
+        incident_case.resolved_at = int(time.time()) if target_status == "resolved" else None
+        if status_changed:
+            incident_case.version += 1
+            incident_event = await append_event(
+                db,
+                incident_case,
+                "status_changed",
+                actor_kind="user",
+                actor_user_id=int(current_user.id),
+                actor_username=current_user.username,
+                note=payload.admin_note or ("legacy_reopen" if reopened else None),
+                payload={"status": target_status, "legacy_reopen": reopened},
+            )
     await db.commit()
+    if incident_event is not None:
+        await db.refresh(incident_event)
+        await ws_manager.broadcast_operations({
+            "protocol": 2,
+            "type": "incident_changed",
+            "event_id": int(incident_event.id),
+            "sequence_from": int(incident_event.sequence),
+            "sequence_to": int(incident_event.sequence),
+            "incident_id": int(incident_case.id),
+            "incident_revision": int(incident_case.revision),
+            "workflow_version": int(incident_case.version),
+            "action": "updated",
+            "project_id": incident_case.project_id,
+            "station_id": incident_case.station_id,
+            "summary": serialize_case(incident_case),
+        })
     return {"status": "ok", "id": int(row.id), "new_status": row.status}
 
 
@@ -285,13 +356,30 @@ async def delete_rescue_request(
             for other in other_rows
         )
 
+    cleanup_job = None
+    if can_delete_image and target_image_url:
+        now_ts = int(time.time())
+        upload_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(target_image_url)))
+        existing_job = (
+            await db.execute(
+                select(model_data.FileCleanupJob).where(
+                    model_data.FileCleanupJob.upload_id == upload_id,
+                    model_data.FileCleanupJob.job_generation == 0,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_job is None:
+            db.add(model_data.FileCleanupJob(
+                upload_id=upload_id,
+                image_storage_key=str(target_image_url)[:255],
+                job_generation=0,
+                status="PENDING",
+                attempts=0,
+                run_after=now_ts,
+                created_at=now_ts,
+                updated_at=now_ts,
+            ))
+
     await db.delete(row)
     await db.commit()
-    if can_delete_image:
-        image_path = rescue_storage.resolve_image_path(target_image_url)
-        if image_path and image_path.exists():
-            try:
-                image_path.unlink()
-            except OSError as exc:
-                logger.warning("Failed to remove rescue image %s: %s", image_path, exc)
     return {"status": "ok", "deleted_id": int(request_id)}

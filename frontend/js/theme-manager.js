@@ -53,6 +53,19 @@ class ThemeManager {
 
         // Dispatch event
         window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme } }));
+        requestAnimationFrame(() => {
+            if (typeof charts === 'undefined') return;
+            const gridColor = theme === 'dark' ? 'rgba(255,255,255,.08)' : 'rgba(15,42,46,.08)';
+            const tickColor = theme === 'dark' ? '#a7c1be' : '#526b70';
+            Object.values(charts).forEach(chart => {
+                if (!chart?.options?.scales) return;
+                Object.values(chart.options.scales).forEach(scale => {
+                    if (scale.grid) scale.grid.color = gridColor;
+                    if (scale.ticks) scale.ticks.color = tickColor;
+                });
+                chart.update('none');
+            });
+        });
     }
 
     toggle() {

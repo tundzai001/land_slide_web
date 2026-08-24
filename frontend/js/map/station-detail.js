@@ -16,7 +16,10 @@ function _showSirenIfAlerting(stationId, data) {
     if (sirenSection) sirenSection.style.display = '';
 
     const risk = data.risk_assessment?.overall_risk || data.risk_level;
-    const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status !== 'offline';
+    // A durable unresolved alert may be old after a restart. Keep it visible
+    // as STALE, but never re-trigger a physical siren until fresh telemetry
+    // confirms the dangerous state again.
+    const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status === 'online';
 
     // Default statuses based on pi_devices array from station detail API
     let pointDeviceStatus = 'idle';
@@ -162,6 +165,7 @@ async function selectStation(stationId, options = {}) {
     if (currentMapMode === 'rescue') {
         return;
     }
+    setMapState({ selectedStation: Number(stationId) });
 
     document.querySelectorAll('.station-item[data-station-id]').forEach(item => {
         const selected = Number(item.dataset.stationId) === Number(stationId);
@@ -216,18 +220,22 @@ async function selectStation(stationId, options = {}) {
         const _riskLevel = data.risk_assessment?.overall_risk || data.risk_level || 'LOW';
         const _riskBand = normalizeRiskLevel(_riskLevel, data.status);
         const _activeAlerts = data.risk_assessment?.active_alerts || [];
+        const _freshAlerts = data.risk_assessment?.fresh_alerts || _activeAlerts.filter(alert => !alert?.stale);
+        const _staleAlerts = data.risk_assessment?.stale_alerts || _activeAlerts.filter(alert => alert?.stale);
+        const _canRestoreFresh = (_riskBand === 'MEDIUM' || _riskBand === 'CRITICAL') &&
+            _freshAlerts.length > 0 && data.status !== 'offline';
+        const _canRestoreStale = _riskBand === 'STALE' && _staleAlerts.length > 0 && data.status === 'stale';
         if (!_banner?.classList.contains('show') &&
             !skipBannerRestore &&
             !isBannerSuppressed(data.id) &&
-            (_riskBand === 'MEDIUM' || _riskBand === 'CRITICAL') &&
-            _activeAlerts.length > 0 &&
-            data.status !== 'offline') {
-            const _topAlert = _activeAlerts.find(a => a.level === 'CRITICAL') || _activeAlerts[0];
+            (_canRestoreFresh || _canRestoreStale)) {
+            const _alertsForBanner = _canRestoreFresh ? _freshAlerts : _staleAlerts;
+            const _topAlert = _alertsForBanner.find(a => a.level === 'CRITICAL') || _alertsForBanner[0];
             // Show banner (silent — không kêu còi browser)
             showAlertBanner({
                 station_id: data.id,
                 level: _topAlert.level,
-                message: _topAlert.message,
+                message: _topAlert.stale ? `Chưa xác minh sau mất kết nối: ${_topAlert.message}` : _topAlert.message,
                 sensor_type: mapAlertCategoryToSensorType(_topAlert.category)
             }, { silent: true });
             // Sync siren buttons đúng per-device (đã handle offline/online trong _showSirenIfAlerting)
@@ -465,7 +473,7 @@ function updateGnssIntegrityStatus(payload) {
         ? `${metric(integrity.spread_xy_m)} / ${metric(integrity.spread_u_m)}` : '--');
     setText('gnss-shift-duration', Number.isFinite(Number(integrity.duration_s)) ? `${Number(integrity.duration_s).toFixed(1)} s` : '--');
     setText('gnss-reference-event', integrity.reference_event_verified
-        ? `Đã xác minh${Number.isFinite(eventTs) ? ` · ${new Date(eventTs * 1000).toLocaleTimeString('vi-VN')}` : ''}`
+        ? `Đã xác minh${Number.isFinite(eventTs) ? ` · ${new Date(normalizeEpochMs(eventTs)).toLocaleTimeString('vi-VN')}` : ''}`
         : integrity.possible_ground_movement ? 'Chưa xác minh · có thể là chuyển vị đất' : 'Không có');
 }
 
@@ -545,17 +553,17 @@ function updateSidebarUI(data) {
     updateGnssIntegrityStatus(adv);
     if (adv && adv.adv_x !== undefined) {
         // Vị trí hiện tại: Lat/Lon/Alt từ GNGGA
-        setText('adv-val-lat', (adv.lat || 0).toFixed(6));
-        setText('adv-val-lon', (adv.lon || 0).toFixed(6));
-        setText('adv-val-alt', (adv.adv_h || adv.h || 0).toFixed(3));
+        setText('adv-val-lat', safeNumber(adv.lat, 6));
+        setText('adv-val-lon', safeNumber(adv.lon, 6));
+        setText('adv-val-alt', safeNumber(adv.adv_h ?? adv.h, 3));
         // Biến dạng lũy kế
-        setText('adv-val-dx', (adv.adv_dx || 0).toFixed(2));
-        setText('adv-val-dy', (adv.adv_dy || 0).toFixed(2));
-        setText('adv-val-dh', (adv.adv_dh || 0).toFixed(2));
+        setText('adv-val-dx', safeNumber(adv.adv_dx, 2));
+        setText('adv-val-dy', safeNumber(adv.adv_dy, 2));
+        setText('adv-val-dh', safeNumber(adv.adv_dh, 2));
         // Vận tốc biến dạng
-        setText('adv-val-vdx', (adv.adv_vdx || 0).toFixed(4));
-        setText('adv-val-vdy', (adv.adv_vdy || 0).toFixed(4));
-        setText('adv-val-vdh', (adv.adv_vdh || 0).toFixed(4));
+        setText('adv-val-vdx', safeNumber(adv.adv_vdx, 4));
+        setText('adv-val-vdy', safeNumber(adv.adv_vdy, 4));
+        setText('adv-val-vdh', safeNumber(adv.adv_vdh, 4));
     }
     updateSensorOfflineBadge('rain', rainOnline);
     updateSensorOfflineBadge('water', waterOnline);
@@ -623,17 +631,25 @@ function updateSidebarUI(data) {
             // Use backend drift calculation if available
             if (useApiImu) {
                 if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-                    setText('val-imu-drift-len', `${safeNumber((parseFloat(imuLatest.drift_len_mm) || 0) / 10, 1)} cm`);
+                    const driftLengthMm = Number(imuLatest.drift_len_mm);
+                    setText(
+                        'val-imu-drift-len',
+                        Number.isFinite(driftLengthMm) ? `${safeNumber(driftLengthMm / 10, 1)} cm` : '-- cm'
+                    );
                     setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
 
                     // Update realtime 3D if active
                     if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
-                        const currPitch = (imuLatest.pitch || 0) * Math.PI / 180;
-                        const currRoll = (imuLatest.roll || 0) * Math.PI / 180;
-                        const targetQuaternion = new _THREE.Quaternion();
-                        const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
-                        targetQuaternion.setFromEuler(euler);
-                        realtimeImuTargetQuaternion = targetQuaternion;
+                        const pitch = Number(imuLatest.pitch);
+                        const roll = Number(imuLatest.roll);
+                        if (Number.isFinite(pitch) && Number.isFinite(roll)) {
+                            const currPitch = pitch * Math.PI / 180;
+                            const currRoll = roll * Math.PI / 180;
+                            const targetQuaternion = new _THREE.Quaternion();
+                            const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
+                            targetQuaternion.setFromEuler(euler);
+                            realtimeImuTargetQuaternion = targetQuaternion;
+                        }
                     }
                 } else {
                     updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
@@ -669,7 +685,7 @@ function updateSidebarUI(data) {
                 adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
             }
             if (adjTimeEl && adjCached.latest_timestamp) {
-                adjTimeEl.textContent = new Date(adjCached.latest_timestamp * 1000).toLocaleString();
+                adjTimeEl.textContent = new Date(normalizeEpochMs(adjCached.latest_timestamp)).toLocaleString();
             }
             if (adjResultsSection) {
                 adjResultsSection.style.display = 'block';
@@ -791,7 +807,7 @@ function buildChartTimeLabels(history) {
         : 0;
     const showSeconds = spanMs > 0 && spanMs <= 10 * 60 * 1000;
     return (history || []).map(item => {
-        const date = new Date(Number(item.timestamp) * 1000);
+        const date = new Date(normalizeEpochMs(item.timestamp));
         return date.toLocaleTimeString('vi-VN', {
             hour: '2-digit',
             minute: '2-digit',
@@ -937,9 +953,13 @@ function renderImuChart(history) {
 
     const labels = buildChartTimeLabels(history);
 
-    const rollData = (history || []).map(h => parseFloat(h.data?.roll) || 0);
-    const pitchData = (history || []).map(h => parseFloat(h.data?.pitch) || 0);
-    const yawData = (history || []).map(h => parseFloat(h.data?.yaw) || 0);
+    const metricOrNull = value => {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+    };
+    const rollData = (history || []).map(h => metricOrNull(h.data?.roll));
+    const pitchData = (history || []).map(h => metricOrNull(h.data?.pitch));
+    const yawData = (history || []).map(h => metricOrNull(h.data?.yaw));
 
     if (charts['chart-imu']) {
         charts['chart-imu'].destroy();

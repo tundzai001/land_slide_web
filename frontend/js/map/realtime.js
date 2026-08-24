@@ -2,8 +2,150 @@
 // WEBSOCKET REALTIME CONNECTION
 // =====================================================
 
+let incidentSocket = null;
+let incidentSocketReconnectId = null;
+let incidentSocketReconnectAttempt = 0;
+let incidentSocketTicketPromise = null;
+let rescueAdminSocket = null;
+let rescueAdminReconnectId = null;
+let rescueAdminReconnectAttempt = 0;
+let rescueAdminTicketPromise = null;
+
+function incidentSocketAllowed() {
+    const user = window.authManager?.getUserInfo?.();
+    return isMapViewActive() && window.authManager?.isAuthenticated?.() && ['admin', 'operator', 'viewer'].includes(user?.role);
+}
+
+async function requestIncidentSocketTicket() {
+    if (incidentSocketTicketPromise) return incidentSocketTicketPromise;
+    incidentSocketTicketPromise = (async () => {
+        const response = await window.authManager.apiFetch('/api/auth/ws-ticket', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: 'operations' }),
+            cache: 'no-store',
+        });
+        if (!response?.ok) throw new Error(`Incident ticket HTTP ${response?.status || 0}`);
+        return (await response.json()).ticket;
+    })().finally(() => { incidentSocketTicketPromise = null; });
+    return incidentSocketTicketPromise;
+}
+
+function scheduleIncidentSocketReconnect() {
+    if (incidentSocketReconnectId || !incidentSocketAllowed()) return;
+    const baseDelay = Math.min(30000, 1000 * (2 ** Math.min(incidentSocketReconnectAttempt, 5)));
+    incidentSocketReconnectAttempt += 1;
+    incidentSocketReconnectId = setTimeout(() => {
+        incidentSocketReconnectId = null;
+        setupIncidentSocket();
+    }, Math.round(baseDelay * (0.8 + Math.random() * 0.4)));
+}
+
+async function setupIncidentSocket() {
+    if (!incidentSocketAllowed()) return;
+    if (incidentSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(incidentSocket.readyState)) return;
+    try {
+        const ticket = await requestIncidentSocketTicket();
+        if (!incidentSocketAllowed() || !ticket) return;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(`${protocol}//${window.location.host}/ws/operations?ticket=${encodeURIComponent(ticket)}`);
+        incidentSocket = socket;
+        socket.onopen = () => {
+            if (incidentSocket !== socket) return;
+            incidentSocketReconnectAttempt = 0;
+            document.documentElement.dataset.incidentsRealtime = 'connected';
+            const projectIds = (window.authManager.getUserInfo()?.assigned_projects || []).map(Number).filter(Number.isFinite);
+            socket.send(JSON.stringify({ type: 'subscribe', project_ids: projectIds, station_ids: [], channels: ['incident'] }));
+        };
+        socket.onmessage = event => {
+            if (incidentSocket !== socket) return;
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === 'incident_changed') {
+                    window.incidentStore?.applyEnvelope(message);
+                    window.dispatchEvent(new CustomEvent('incidentChanged', { detail: message }));
+                }
+            } catch (error) {
+                console.warn('[INCIDENT][WS] Invalid envelope:', error);
+            }
+        };
+        socket.onerror = () => { if (incidentSocket === socket) document.documentElement.dataset.incidentsRealtime = 'degraded'; };
+        socket.onclose = () => {
+            if (incidentSocket !== socket) return;
+            incidentSocket = null;
+            document.documentElement.dataset.incidentsRealtime = 'disconnected';
+            scheduleIncidentSocketReconnect();
+        };
+    } catch (error) {
+        document.documentElement.dataset.incidentsRealtime = 'degraded';
+        scheduleIncidentSocketReconnect();
+    }
+}
+
+function stopIncidentSocket() {
+    if (incidentSocketReconnectId) clearTimeout(incidentSocketReconnectId);
+    incidentSocketReconnectId = null;
+    incidentSocketReconnectAttempt = 0;
+    const socket = incidentSocket;
+    incidentSocket = null;
+    if (socket) { socket.onclose = null; socket.close(); }
+    document.documentElement.dataset.incidentsRealtime = 'disconnected';
+}
+
+function rescueAdminSocketAllowed() {
+    return isMapViewActive() && window.authManager?.isAuthenticated?.() && window.authManager.getUserInfo?.()?.role === 'admin';
+}
+async function requestRescueAdminTicket() {
+    if (rescueAdminTicketPromise) return rescueAdminTicketPromise;
+    rescueAdminTicketPromise = (async () => {
+        const response = await window.authManager.apiFetch('/api/auth/ws-ticket', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'legacy_admin' }), cache: 'no-store',
+        });
+        if (!response?.ok) throw new Error(`Admin ticket HTTP ${response?.status || 0}`);
+        return (await response.json()).ticket;
+    })().finally(() => { rescueAdminTicketPromise = null; });
+    return rescueAdminTicketPromise;
+}
+function scheduleRescueAdminReconnect() {
+    if (rescueAdminReconnectId || !rescueAdminSocketAllowed()) return;
+    const delay = Math.min(30000, 1000 * (2 ** Math.min(rescueAdminReconnectAttempt, 5)));
+    rescueAdminReconnectAttempt += 1;
+    rescueAdminReconnectId = setTimeout(() => { rescueAdminReconnectId = null; setupRescueAdminSocket(); }, delay);
+}
+async function setupRescueAdminSocket() {
+    if (!rescueAdminSocketAllowed() || rescueAdminSocket) return;
+    try {
+        const ticket = await requestRescueAdminTicket();
+        if (!rescueAdminSocketAllowed() || !ticket) return;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(`${protocol}//${window.location.host}/ws/admin?ticket=${encodeURIComponent(ticket)}`);
+        rescueAdminSocket = socket;
+        socket.onopen = () => { if (rescueAdminSocket === socket) { rescueAdminReconnectAttempt = 0; document.documentElement.dataset.rescueRealtime = 'connected'; } };
+        socket.onmessage = event => {
+            if (rescueAdminSocket !== socket) return;
+            try { const message = JSON.parse(event.data); if (message.type === 'rescue_request') updateRescueMarkerFromWebSocket(message); } catch (_) { /* keep the private channel fail-soft */ }
+        };
+        socket.onerror = () => { if (rescueAdminSocket === socket) document.documentElement.dataset.rescueRealtime = 'degraded'; };
+        socket.onclose = () => { if (rescueAdminSocket !== socket) return; rescueAdminSocket = null; document.documentElement.dataset.rescueRealtime = 'disconnected'; scheduleRescueAdminReconnect(); };
+    } catch (_) { document.documentElement.dataset.rescueRealtime = 'degraded'; scheduleRescueAdminReconnect(); }
+}
+function stopRescueAdminSocket() {
+    if (rescueAdminReconnectId) clearTimeout(rescueAdminReconnectId);
+    rescueAdminReconnectId = null; rescueAdminReconnectAttempt = 0;
+    const socket = rescueAdminSocket; rescueAdminSocket = null;
+    if (socket) { socket.onclose = null; socket.close(); }
+    document.documentElement.dataset.rescueRealtime = 'disconnected';
+}
+
+function finiteMetric(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
 function setupWebSocket() {
     if (!isMapViewActive()) return;
+    setupIncidentSocket();
+    setupRescueAdminSocket();
     if (wsConnection && [WebSocket.OPEN, WebSocket.CONNECTING].includes(wsConnection.readyState)) {
         return;
     }
@@ -104,17 +246,34 @@ function syncWebSocketSubscription(stationId = currentStationData?.id) {
 window.addEventListener('online', () => {
     if (!isMapViewActive()) return;
     if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) setupWebSocket();
+    if (!incidentSocket || incidentSocket.readyState === WebSocket.CLOSED) setupIncidentSocket();
+    if (!rescueAdminSocket || rescueAdminSocket.readyState === WebSocket.CLOSED) setupRescueAdminSocket();
 });
 document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') {
+        stopIncidentSocket();
+        stopRescueAdminSocket();
+        return;
+    }
     if (document.visibilityState === 'visible' && isMapViewActive()) {
         if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) {
             setupWebSocket();
         }
+        setupIncidentSocket();
+        setupRescueAdminSocket();
         loadStations();
         loadCorsBaseStations();
         loadRescueMarkers();
     }
 });
+window.addEventListener('auth:ready', () => {
+    if (isMapViewActive()) {
+        setupIncidentSocket();
+        setupRescueAdminSocket();
+        void window.loadIncidentInbox?.();
+    }
+});
+window.addEventListener('authzExpired', () => { stopIncidentSocket(); stopRescueAdminSocket(); });
 window.addEventListener('spa:navigate', (event) => {
     if (event.detail?.view !== 'map') stopMapBackgroundWork();
 });
@@ -463,6 +622,10 @@ function handleRealtimeUpdate(message) {
 
     // ✅ Handle gnss baseline collected (Draw board)
     if (message.type === 'gnss_baseline_collected') {
+        const baseline = Array.isArray(message.baseline_neu)
+            ? message.baseline_neu.map(finiteMetric)
+            : null;
+        if (!baseline || baseline.some(value => value === null)) return;
         const belongsToActiveRun = (
             gnssAdjustmentDebugState.active
             && Number(message.project_id) === gnssAdjustmentDebugState.projectId
@@ -475,7 +638,7 @@ function handleRealtimeUpdate(message) {
             syncGnssWorkflowBaseline(message);
             addGnssAdjustmentDebug(
                 'BASELINE',
-                `${message.rover_name}: dN=${Number(message.baseline_neu?.[0]).toFixed(4)}, dE=${Number(message.baseline_neu?.[1]).toFixed(4)}, dH=${Number(message.baseline_neu?.[2]).toFixed(4)}`,
+                `${message.rover_name}: dN=${baseline[0].toFixed(4)}, dE=${baseline[1].toFixed(4)}, dH=${baseline[2].toFixed(4)}`,
                 'success',
             );
         }
@@ -483,13 +646,13 @@ function handleRealtimeUpdate(message) {
             const fromPoint = String(message.from || 'BASE');
             window.gnssBoardState.addPoint('BASE', 0, 0, true);
             const origin = window.gnssBoardState.points[fromPoint] || window.gnssBoardState.points.BASE;
-            const relX = origin.x + Number(message.baseline_neu?.[1] || 0);
-            const relY = origin.y + Number(message.baseline_neu?.[0] || 0);
+            const relX = origin.x + baseline[1];
+            const relY = origin.y + baseline[0];
             window.gnssBoardState.addPoint(message.rover_name, relX, relY, false, message.station_id);
             window.gnssBoardState.addBaseline(fromPoint, message.rover_name, {
-                dn: message.baseline_neu[0],
-                de: message.baseline_neu[1],
-                dh: message.baseline_neu[2],
+                dn: baseline[0],
+                de: baseline[1],
+                dh: baseline[2],
                 full_data: message.full_data
             });
         }
@@ -552,7 +715,7 @@ function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
     }
     if (adjTimeEl) {
         const timestamp = Number(message.timestamp || message.data.computed_at || Date.now() / 1000);
-        adjTimeEl.textContent = new Date(timestamp * 1000).toLocaleString();
+        adjTimeEl.textContent = new Date(normalizeEpochMs(timestamp)).toLocaleString();
     }
     if (adjResultsSection) adjResultsSection.style.display = 'flex';
     const terminalModal = document.getElementById('gnssTerminalModal');
@@ -650,17 +813,17 @@ function updateRealtimeSensorValues(message) {
         if (data.adv_x !== undefined) {
             if (advancedVisible) {
              // Vị trí hiện tại: VN2000 NEH
-             setText('adv-val-lat', (data.adv_y || 0).toFixed(3));
-             setText('adv-val-lon', (data.adv_x || 0).toFixed(3));
-             setText('adv-val-alt', (data.adv_h || 0).toFixed(3));
+             setText('adv-val-lat', safeNumber(data.adv_y, 3));
+             setText('adv-val-lon', safeNumber(data.adv_x, 3));
+             setText('adv-val-alt', safeNumber(data.adv_h, 3));
              // Biến dạng lũy kế
-            setText('adv-val-dx', (data.adv_dx || 0).toFixed(2));
-            setText('adv-val-dy', (data.adv_dy || 0).toFixed(2));
-            setText('adv-val-dh', (data.adv_dh || 0).toFixed(2));
+            setText('adv-val-dx', safeNumber(data.adv_dx, 2));
+            setText('adv-val-dy', safeNumber(data.adv_dy, 2));
+            setText('adv-val-dh', safeNumber(data.adv_dh, 2));
              // Vận tốc biến dạng (mm/phút)
-             setText('adv-val-vdx', (data.adv_vdx || 0).toFixed(2));
-             setText('adv-val-vdy', (data.adv_vdy || 0).toFixed(2));
-             setText('adv-val-vdh', (data.adv_vdh || 0).toFixed(2));
+             setText('adv-val-vdx', safeNumber(data.adv_vdx, 2));
+             setText('adv-val-vdy', safeNumber(data.adv_vdy, 2));
+             setText('adv-val-vdh', safeNumber(data.adv_vdh, 2));
             }
 
              // ✅ CACHE: Lưu vào currentStationData để không bị mất khi refresh định kỳ
@@ -702,12 +865,12 @@ function updateRealtimeSensorValues(message) {
 
         // Update Theil-Sen display in both Main Sidebar and Advanced Panel
         if (data.velocity_method === 'theil_sen_enu') {
-            const sampleCount = data.velocity_sample_count || 0;
-            const durationS = data.velocity_window_duration_s ? data.velocity_window_duration_s.toFixed(1) : 0;
-            const rms = data.velocity_residual_rms_mm ? data.velocity_residual_rms_mm.toFixed(2) : 0;
-            const mad = data.velocity_residual_mad_mm ? data.velocity_residual_mad_mm.toFixed(2) : '--';
-            const uncert = data.velocity_uncertainty_mm_s ? data.velocity_uncertainty_mm_s.toFixed(4) : 0;
-            const ci95 = data.velocity_confidence_95_mm_s ? data.velocity_confidence_95_mm_s.toFixed(4) : '--';
+            const sampleCount = Number.isFinite(Number(data.velocity_sample_count)) ? Number(data.velocity_sample_count) : '--';
+            const durationS = safeNumber(data.velocity_window_duration_s, 1);
+            const rms = safeNumber(data.velocity_residual_rms_mm, 2);
+            const mad = safeNumber(data.velocity_residual_mad_mm, 2);
+            const uncert = safeNumber(data.velocity_uncertainty_mm_s, 4);
+            const ci95 = safeNumber(data.velocity_confidence_95_mm_s, 4);
 
             if (advancedVisible) {
             // Advanced Panel - Theil-Sen section
@@ -720,15 +883,15 @@ function updateRealtimeSensorValues(message) {
             setText('adv-val-ci95', `± ${ci95}`);
 
             // Advanced Panel - Raw velocity (trước lọc)
-            setText('adv-val-raw-ve', (data.raw_vel_e_mm_s || 0).toFixed(4));
-            setText('adv-val-raw-vn', (data.raw_vel_n_mm_s || 0).toFixed(4));
-            setText('adv-val-raw-vu', (data.raw_vel_u_mm_s || 0).toFixed(4));
-            setText('adv-val-raw-2d', (data.raw_speed_2d_mm_s || 0).toFixed(4));
+            setText('adv-val-raw-ve', safeNumber(data.raw_vel_e_mm_s, 4));
+            setText('adv-val-raw-vn', safeNumber(data.raw_vel_n_mm_s, 4));
+            setText('adv-val-raw-vu', safeNumber(data.raw_vel_u_mm_s, 4));
+            setText('adv-val-raw-2d', safeNumber(data.raw_speed_2d_mm_s, 4));
 
             // Advanced Panel - Filtered velocity (sau Theil-Sen)
-            setText('adv-val-filt-ve', (data.vel_e || 0).toFixed(4));
-            setText('adv-val-filt-vn', (data.vel_n || 0).toFixed(4));
-            setText('adv-val-filt-vu', (data.vel_u || 0).toFixed(4));
+            setText('adv-val-filt-ve', safeNumber(data.vel_e, 4));
+            setText('adv-val-filt-vn', safeNumber(data.vel_n, 4));
+            setText('adv-val-filt-vu', safeNumber(data.vel_u, 4));
             const filteredSpeed2d = Number(data.speed_2d_mm_s);
             setText(
                 'adv-val-filt-2d',
@@ -736,16 +899,16 @@ function updateRealtimeSensorValues(message) {
             );
 
             // Advanced Panel - Displacement
-            setText('adv-val-disp-total', (data.total_displacement_mm || 0).toFixed(2));
-            setText('adv-val-disp-peak', (data.peak_displacement_mm || 0).toFixed(2));
-            setText('adv-val-disp-noise', (data.displacement_noise_floor_mm || 0).toFixed(3));
-            setText('adv-val-disp-uncert', (data.displacement_uncertainty_mm || 0).toFixed(3));
-            setText('adv-val-disp-window', data.displacement_sample_count || '--');
-            setText('adv-val-disp-dur', (data.displacement_window_duration_s || 0).toFixed(1));
+            setText('adv-val-disp-total', safeNumber(data.total_displacement_mm, 2));
+            setText('adv-val-disp-peak', safeNumber(data.peak_displacement_mm, 2));
+            setText('adv-val-disp-noise', safeNumber(data.displacement_noise_floor_mm, 3));
+            setText('adv-val-disp-uncert', safeNumber(data.displacement_uncertainty_mm, 3));
+            setText('adv-val-disp-window', Number.isFinite(Number(data.displacement_sample_count)) ? Number(data.displacement_sample_count) : '--');
+            setText('adv-val-disp-dur', safeNumber(data.displacement_window_duration_s, 1));
 
             // Advanced Panel - GNSS quality
-            setText('adv-val-sats', data.num_sats || '--');
-            setText('adv-val-hdop', data.hdop ? data.hdop.toFixed(1) : '--');
+            setText('adv-val-sats', Number.isFinite(Number(data.num_sats)) ? Number(data.num_sats) : '--');
+            setText('adv-val-hdop', safeNumber(data.hdop, 1));
 
             // Advanced Panel - Timestamps
             if (data.gga_utc) {
@@ -759,7 +922,7 @@ function updateRealtimeSensorValues(message) {
                 setText('adv-val-ts-gga', '--');
             }
             if (data.timestamp) {
-                const recvDate = new Date(data.timestamp * 1000);
+                const recvDate = new Date(normalizeEpochMs(data.timestamp));
                 setText('adv-val-ts-recv', recvDate.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + recvDate.getMilliseconds());
             } else {
                 setText('adv-val-ts-recv', '--');
@@ -810,7 +973,7 @@ function updateRealtimeSensorValues(message) {
         if (chartsVisible && charts['chart-gnss']) {
             const chart = charts['chart-gnss'];
             if (velocityMmS !== null) {
-                chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
                 chart.data.datasets[0].data.push(velocityMmS);
 
                 if (chart.data.labels.length > 50) {
@@ -824,12 +987,12 @@ function updateRealtimeSensorValues(message) {
     }
 
     if (sensor_type === 'rain' && data) {
-        const intensity = data.intensity_mm_h || data.intensity || 0;
+        const intensity = finiteMetric(data.intensity_mm_h ?? data.intensity);
         animateValue('val-rain', intensity, 1, 'mm/h');
 
         if (chartsVisible && charts['chart-rain']) {
             const chart = charts['chart-rain'];
-            chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(intensity);
 
             if (chart.data.labels.length > 50) {
@@ -842,12 +1005,12 @@ function updateRealtimeSensorValues(message) {
     }
 
     if (sensor_type === 'water' && data) {
-        const level = data.water_level || data.level || data.processed_value_meters || 0;
+        const level = finiteMetric(data.water_level ?? data.level ?? data.processed_value_meters);
         setHTML('val-water', formatWaterLevelDisplay(data));
         console.log('💧 [WATER] Level value:', level, 'from data:', data);
         if (chartsVisible && charts['chart-water']) {
             const chart = charts['chart-water'];
-            chart.data.labels.push(new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             chart.data.datasets[0].data.push(level);
 
             if (chart.data.labels.length > 50) {
@@ -874,8 +1037,8 @@ function updateRealtimeSensorValues(message) {
         setText('val-imu-delta-yaw', formatImuDelta(data.yaw, 'yaw'));
 
         // Use backend drift calculation if available, fallback to JS
-        if (data.drift_len_mm !== undefined && data.drift_dir !== undefined) {
-            animateValue('val-imu-drift-len', (parseFloat(data.drift_len_mm) || 0) / 10, 1, ' cm', true);
+        if (finiteMetric(data.drift_len_mm) !== null && data.drift_dir !== undefined && data.drift_dir !== null) {
+            animateValue('val-imu-drift-len', finiteMetric(data.drift_len_mm) / 10, 1, ' cm', true);
             setText('val-imu-drift-dir', `(${data.drift_dir})`);
         } else {
             updateImuDrift(data.roll, data.pitch);
@@ -897,11 +1060,11 @@ function updateRealtimeSensorValues(message) {
         if (chartsVisible && charts['chart-imu']) {
             const chart = charts['chart-imu'];
             const ts = Number(timestamp) || Math.floor(Date.now() / 1000);
-            const timeLabel = new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const timeLabel = new Date(normalizeEpochMs(ts)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             chart.data.labels.push(timeLabel);
-            chart.data.datasets[0].data.push(parseFloat(data.roll) || 0);
-            chart.data.datasets[1].data.push(parseFloat(data.pitch) || 0);
-            chart.data.datasets[2].data.push(parseFloat(data.yaw) || 0);
+            chart.data.datasets[0].data.push(finiteMetric(data.roll));
+            chart.data.datasets[1].data.push(finiteMetric(data.pitch));
+            chart.data.datasets[2].data.push(finiteMetric(data.yaw));
 
             if (chart.data.labels.length > 50) {
                 chart.data.labels.shift();

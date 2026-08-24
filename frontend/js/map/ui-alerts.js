@@ -150,16 +150,6 @@ function flashUpdate(el) {
 function filterStations(searchTerm) {
     const term = String(searchTerm || '').trim().toLocaleLowerCase('vi');
     const statusFilter = document.getElementById('station-status-filter')?.value || 'all';
-    if (window.renderReactStationList) {
-        const filtered = !term ? allStations : allStations.filter(station => (
-            `${station.name || ''} ${station.station_code || ''}`
-                .toLocaleLowerCase('vi')
-                .includes(term)
-        ));
-        window.renderReactStationList(filtered);
-        return;
-    }
-
     const items = document.querySelectorAll('.station-item');
     let visibleCount = 0;
     items.forEach(item => {

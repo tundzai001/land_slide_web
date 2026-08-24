@@ -443,7 +443,7 @@ input[type="number"] {
     border-radius: 4px;
     white-space: nowrap;
     pointer-events: none;
-    z-index: 1000;
+    z-index: var(--z-navbar);
 }
 
 .hover-opacity-100 {

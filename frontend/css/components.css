@@ -2,6 +2,37 @@
    REUSABLE COMPONENTS ( components.css)
 ======================================== */
 
+/* Authz grace expiry: explicit, keyboard-reachable failure state. */
+.authz-expired-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-critical);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgb(3 25 27 / 76%);
+    backdrop-filter: blur(8px);
+}
+
+.authz-expired-card {
+    width: min(100%, 440px);
+    padding: 32px;
+    border: 1px solid color-mix(in srgb, var(--border-color, #b7d3d0) 70%, transparent);
+    border-radius: 16px;
+    background: var(--surface-elevated, #f8fffe);
+    color: var(--text-primary, #123638);
+    box-shadow: 0 24px 72px rgb(0 0 0 / 28%);
+}
+
+.authz-expired-card > i { display: block; margin-bottom: 16px; color: var(--brand-orange, #ed7d32); font-size: 2rem; }
+.authz-expired-card h2 { margin: 0 0 8px; font-size: 1.25rem; }
+.authz-expired-card p { margin: 0 0 20px; line-height: 1.55; }
+
+html[data-authz-lock="expired"] [data-private-content] {
+    pointer-events: none;
+    user-select: none;
+}
+
 /* === BUTTONS === */
 .btn {
     border-radius: 10px;
@@ -67,7 +98,7 @@
     justify-content: center;
     font-size: 1.5rem;
     color: white;
-    z-index: 9999;
+    z-index: var(--z-toast);
     transition: all var(--transition-base);
 }
 

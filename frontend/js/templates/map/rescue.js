@@ -110,7 +110,7 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
                                     </div>
                                     <div id="guest-rescue-address-results"
                                         class="list-group position-absolute w-100 mt-1"
-                                        style="z-index: 1060; display: none; max-height: 180px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.2); border-radius: 6px;">
+                                        style="z-index: var(--z-popover); display: none; max-height: 180px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.2); border-radius: 6px;">
                                     </div>
                                 </div>
                             </div>

@@ -66,12 +66,15 @@ from .routers import projects as projects_router
 from .routers import rescue as rescue_router
 from .routers import stations as stations_router
 from .routers import simulations as simulations_router
+from .routers import incidents as incidents_router
+from .routers import health as health_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
 from .models.pi_device import PiDevice  # noqa: F401 – ensures table is registered
 from .runtime import analyzer, cors_failover_status, mqtt_service
 from .services.gnss_rollup import run_gnss_daily_rollup_daemon
+from .services.file_cleanup import run_file_cleanup_daemon
 
 # Import security core
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -85,6 +88,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 gnss_rollup_task: Optional[asyncio.Task] = None
 cors_failover_task: Optional[asyncio.Task] = None
+file_cleanup_task: Optional[asyncio.Task] = None
 
 
 async def run_cors_fixed_base_failover_daemon():
@@ -136,7 +140,7 @@ async def lifespan(app: FastAPI):
 
     # Start the Security IPC Server as a background task
     asyncio.create_task(start_ipc_server())
-    global gnss_rollup_task, cors_failover_task
+    global gnss_rollup_task, cors_failover_task, file_cleanup_task
 
     try:
         # Production startup must not acquire DDL locks. Fresh development
@@ -224,6 +228,7 @@ async def lifespan(app: FastAPI):
         cors_failover_task = asyncio.create_task(
             run_cors_fixed_base_failover_daemon()
         )
+        file_cleanup_task = asyncio.create_task(run_file_cleanup_daemon())
         logger.info("✓ GNSS rollup daemon started")
 
         logger.info("=" * 60)
@@ -244,6 +249,10 @@ async def lifespan(app: FastAPI):
             cors_failover_task.cancel()
             with suppress(asyncio.CancelledError):
                 await cors_failover_task
+        if file_cleanup_task and not file_cleanup_task.done():
+            file_cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await file_cleanup_task
         # Stop MQTT producers and await their DB work before disposing pools.
         # Otherwise Paho callbacks can enqueue writes into closing asyncpg
         # connections and leave unobserved Future exceptions behind.
@@ -285,7 +294,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=[
         "ETag", "Server-Timing", "X-Request-ID",
-        "X-Total-Count", "X-Offset", "X-Limit",
+        "X-Total-Count", "X-Offset", "X-Limit", "X-Has-More",
     ],
 )
 app.add_middleware(CharsetMiddleware)
@@ -302,6 +311,8 @@ app.include_router(projects_router.router)
 app.include_router(rescue_router.router)
 app.include_router(stations_router.router)
 app.include_router(simulations_router.router)
+app.include_router(incidents_router.router)
+app.include_router(health_router.router)
 
 # ── Anti-cache middleware for frontend assets ──
 app.add_middleware(VersionedAssetCacheMiddleware)

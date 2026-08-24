@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
@@ -7,6 +7,8 @@ import * as esbuild from 'esbuild';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const frontendRoot = path.join(projectRoot, 'frontend');
 const outputRoot = path.join(frontendRoot, 'dist');
+const publicSiteUrl = (process.env.PUBLIC_SITE_URL || 'https://monitoring.aitogy.com').replace(/\/$/, '');
+const isProduction = (process.env.ENVIRONMENT || 'production').toLowerCase() === 'production';
 
 async function sourceFilesIn(directory = frontendRoot, relativeRoot = '') {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -44,18 +46,18 @@ const groups = {
     'css/map/effects-theme.css', 'css/map/tools.css', 'css/map/gnss.css',
     'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css',
     'css/map/premium-light.css', 'css/map/operations-polish.css',
-    'css/map/digital-twin-workspace.css', 'css/map/digital-twin-results.css'
+    'css/map/digital-twin-workspace.css', 'css/map/digital-twin-results.css', 'css/map/incidents.css'
   ],
   'admin.min.css': [
     'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/configuration.css',
     'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/premium-light.css',
-    'css/admin/pi-devices.css'
+    'css/admin/pi-devices.css', 'css/admin/incidents.css', 'css/admin/simulations.css'
   ],
-  'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js'],
+  'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js', 'js/incident-store.js'],
   'map-app.min.js': [
     'js/templates/map/shell.js', 'js/templates/map/station-panels.js',
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
-    'js/map/runtime.js', 'js/map/realtime.js', 'js/map/marker-alerts.js',
+    'js/map/runtime.js', 'js/map/realtime.js', 'js/map/incidents.js', 'js/map/marker-alerts.js',
     'js/map/guest-rescue.js', 'js/map/map-layers.js', 'js/map/map-interactions.js',
     'js/map/stations.js', 'js/map/station-detail.js', 'js/map/long-term.js',
     'js/map/analysis.js', 'js/map/ui-alerts.js', 'js/map/tools.js'
@@ -73,7 +75,7 @@ const groups = {
     'js/admin/velocity.js', 'js/admin/origin.js', 'js/admin/provisioning.js',
     'js/admin/users.js', 'js/admin/pi-devices.js', 'js/admin/pi-device-actions.js', 'js/admin/pi-center.js',
     'js/admin/auto-adjustment.js',
-    'js/admin/lifecycle.js', 'js/admin/bootstrap.js', 'js/db-manager.js'
+    'js/admin/lifecycle.js', 'js/admin/bootstrap.js', 'js/admin/incidents.js', 'js/admin/simulations.js', 'js/db-manager.js'
   ]
 };
 
@@ -93,13 +95,6 @@ async function minify(outputName, files) {
   // Several route-critical selectors are the first rule in their module.
   const separator = loader === 'css' ? '\n' : '\n;\n';
   let source = (await concatenate(files, separator)).replaceAll('__BUILD_VERSION__', buildVersion);
-  if (outputName === 'map-app.min.js') {
-    const jsxSource = await readFile(path.join(frontendRoot, 'js/react/station-list.jsx'), 'utf8');
-    const jsx = await esbuild.transform(jsxSource, {
-      loader: 'jsx', target: 'es2019', minify: true, legalComments: 'none', charset: 'utf8'
-    });
-    source += `\n;\n${jsx.code}`;
-  }
   const transformed = await esbuild.transform(source, {
     loader,
     target: loader === 'css' ? undefined : 'es2019',
@@ -116,9 +111,9 @@ async function minify(outputName, files) {
 
 async function buildLanding() {
   const sessionSource = await readFile(path.join(frontendRoot, 'js/session-state.js'), 'utf8');
-  const jsxSource = await readFile(path.join(frontendRoot, 'js/landing.jsx'), 'utf8');
-  const transformed = await esbuild.transform(`${sessionSource}\n;\n${jsxSource}`, {
-    loader: 'jsx',
+  const landingSource = await readFile(path.join(frontendRoot, 'js/landing.js'), 'utf8');
+  const transformed = await esbuild.transform(`${sessionSource}\n;\n${landingSource}`, {
+    loader: 'js',
     target: 'es2019',
     minify: true,
     minifyIdentifiers: false,
@@ -150,15 +145,21 @@ await esbuild.build({
   external: ['three', 'three/*']
 });
 
-for (const shellName of ['index.html', 'app.html']) {
+for (const assetName of ['aitogy.png', 'social-card.png']) {
+  await copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName));
+}
+
+for (const shellName of ['index.html', 'map.html', 'app.html']) {
   const shell = (await readFile(path.join(frontendRoot, shellName), 'utf8'))
-    .replaceAll('__BUILD_VERSION__', buildVersion);
+    .replaceAll('__BUILD_VERSION__', buildVersion)
+    .replaceAll('__PUBLIC_SITE_URL__', publicSiteUrl)
+    .replaceAll('__ROBOTS_META__', isProduction ? 'index, follow' : 'noindex, nofollow');
   await writeFile(path.join(outputRoot, shellName), shell, 'utf8');
 }
 
 const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'app-runtime.min.js',
-  'digital-twin.min.js', 'index.html', 'app.html'
+  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
 ].sort();
 const manifest = { version: 1, build: buildVersion, generated_at: new Date().toISOString(), assets: {} };
 for (const name of artifactNames) {
@@ -180,7 +181,7 @@ for (const name of artifactNames.filter(name => name.endsWith('.js'))) {
   if (forbidden.test(output)) throw new Error(`${name} still references a source-only path or runtime compiler`);
 }
 
-for (const shellName of ['index.html', 'app.html']) {
+for (const shellName of ['index.html', 'map.html', 'app.html']) {
   const shell = await readFile(path.join(outputRoot, shellName), 'utf8');
   if (shell.includes('__BUILD_VERSION__') || /["']\/(?:js|css)\//i.test(shell)) {
     throw new Error(`${shellName} still references a source-only path or unresolved build version`);

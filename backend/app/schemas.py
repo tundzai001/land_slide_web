@@ -95,6 +95,9 @@ class UserResponse(UserBase):
     is_active: bool
     permissions: List[str] = []
     assigned_projects: List[int] = []
+    authz_scope_hash: str = ""
+    private_authz_grace_seconds: int = 300
+    server_time: int = 0
 
     class Config:
         from_attributes = True

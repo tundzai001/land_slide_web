@@ -1,7 +1,10 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 
-from app.routers.database_admin import _device_runtime_state
+from fastapi import HTTPException, Response
+
+from app.routers.database_admin import _device_runtime_state, admin_get_sensor_data
 
 
 class DeviceRuntimeStateTests(unittest.TestCase):
@@ -22,6 +25,74 @@ class DeviceRuntimeStateTests(unittest.TestCase):
 
         self.assertEqual(_device_runtime_state(stale, station, 1000)["effective_status"], "offline")
         self.assertEqual(_device_runtime_state(disabled, station, 1000)["effective_status"], "offline")
+
+
+class _RowsResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def all(self):
+        return self.rows
+
+
+class _SensorDb:
+    def __init__(self, rows):
+        self.rows = rows
+        self.execute_count = 0
+
+    async def execute(self, _query):
+        self.execute_count += 1
+        return _RowsResult(self.rows)
+
+
+class SensorDataFastPageTests(unittest.TestCase):
+    def test_fast_page_skips_total_count_and_reports_has_more(self):
+        rows = [
+            SimpleNamespace(
+                id=index,
+                station_id=7,
+                timestamp=1000 - index,
+                sensor_type="gnss_adjusted",
+                data_preview='{"type":"gnss_adjusted"}',
+                value_1=None,
+                value_2=None,
+                value_3=None,
+                value_4=None,
+                value_5=None,
+            )
+            for index in range(1, 4)
+        ]
+        db = _SensorDb(rows)
+        response = Response()
+
+        result = asyncio.run(admin_get_sensor_data(
+            response=response,
+            offset=0,
+            limit=2,
+            include_total=False,
+            include_data=False,
+            include_internal=True,
+            db=db,
+            current_user=None,
+        ))
+
+        self.assertEqual(db.execute_count, 1)
+        self.assertEqual([row["id"] for row in result], [1, 2])
+        self.assertEqual(response.headers["X-Has-More"], "true")
+        self.assertNotIn("X-Total-Count", response.headers)
+
+    def test_internal_stream_requires_explicit_opt_in(self):
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(admin_get_sensor_data(
+                response=Response(),
+                sensor_type="gnss_adjusted",
+                include_total=False,
+                include_data=False,
+                db=_SensorDb([]),
+                current_user=None,
+            ))
+
+        self.assertEqual(raised.exception.status_code, 422)
 
 
 if __name__ == "__main__":

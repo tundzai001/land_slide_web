@@ -241,7 +241,7 @@ async def list_pi_devices(
     limit: Optional[int] = None,
     sort: str = "-registered_at",
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.get_current_user)
+    current_user=Depends(auth.require_permission(auth.Permission.VIEW_FIELD_DEVICES))
 ):
     """List all registered Pi devices (admin only)."""
     try:
@@ -329,7 +329,7 @@ async def list_pi_devices(
 @router.get("/pi-devices/available")
 async def list_available_pi_devices(
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.get_current_user)
+    current_user=Depends(auth.require_permission(auth.Permission.VIEW_FIELD_DEVICES))
 ):
     """Return Pi devices that are activated but NOT yet assigned to any station."""
     try:
@@ -349,7 +349,7 @@ async def list_available_pi_devices(
 async def activate_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     """
     Admin activates a Pi:
@@ -431,7 +431,7 @@ async def assign_pi_to_station(
     pi_id: int,
     payload: PiAssignRequest,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    current_user=Depends(auth.require_permission(auth.Permission.ASSIGN_FIELD_DEVICES))
 ):
     """
     Admin assigns an activated Pi to a station.
@@ -480,7 +480,7 @@ async def assign_pi_to_station(
 async def unassign_pi(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    current_user=Depends(auth.require_permission(auth.Permission.ASSIGN_FIELD_DEVICES))
 ):
     """Remove Pi from its station (set back to 'activated')."""
     try:
@@ -513,7 +513,7 @@ async def unassign_pi(
 async def toggle_lock_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     """Toggle lock/unlock a Pi device."""
     try:
@@ -544,7 +544,7 @@ async def toggle_lock_pi_device(
 async def delete_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     """Delete a Pi device record."""
     try:
@@ -568,7 +568,7 @@ async def delete_pi_device(
 async def reset_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     """Factory-reset a Pi device: clear license, station, set status back to pending."""
     try:
@@ -615,7 +615,7 @@ async def assign_pi_to_center(
     pi_id: int,
     payload: PiAssignToCenterRequest,
     db: AsyncSession = Depends(get_config_db),
-    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user=Depends(auth.require_permission(auth.Permission.MANAGE_FIELD_DEVICES))
 ):
     """Assign a pi_point device to a pi_center device."""
     try:

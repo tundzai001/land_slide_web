@@ -1628,6 +1628,32 @@ class LandslideAnalyzer:
                 return None
 
             latest = recent_data[-1]['data']
+            # A processor status is evidence about measurement quality, not a
+            # safe velocity.  In particular, a restored GNSS quarantine or a
+            # post-restart velocity warm-up must never fall through to
+            # ``speed_2d=0`` and auto-resolve a durable alert.
+            latest_status = str(latest.get('status') or '').upper()
+            if latest_status in {
+                'INITIALIZING',
+                'VELOCITY_WARMUP',
+                'UNVERIFIED_POSITION_SHIFT',
+                'PERSISTENT_OFFSET_QUARANTINED',
+                'REJECTED_MEASUREMENT',
+                'UNSTABLE_FIX',
+                'REFERENCE_CHANGE_PENDING',
+                'STALE_REFERENCE',
+                'REACQUIRE_REFUSED',
+                'INVALID_DATA',
+                'UNTRUSTED_GEOMETRY',
+                'CHECKSUM_FAILED',
+                'NO_DATA',
+            }:
+                return {
+                    'level': 'PENDING',
+                    'category': 'gnss_velocity',
+                    'signal_state': 'UNKNOWN',
+                    'processor_status': latest_status,
+                }
             if latest.get('velocity_reliable') is False or latest.get('velocity_significant') is False:
                 return {'level': 'PENDING', 'category': 'gnss_velocity'}
             velocity_ms = latest.get('speed_2d', 0.0) 

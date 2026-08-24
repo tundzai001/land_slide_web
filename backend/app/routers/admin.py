@@ -634,6 +634,7 @@ async def update_user(
 
     await db.commit()
     await db.refresh(user)
+    auth.invalidate_user_cache(user.username)
     return user
 
 @router.delete("/users/{user_id}")
@@ -653,8 +654,10 @@ async def delete_user(
     if user.username == 'admin':
         raise HTTPException(status_code=400, detail="Cannot delete the admin user")
     
+    username = user.username
     await db.execute(delete(model_auth.User).where(model_auth.User.id == user_id))
     await db.commit()
+    auth.invalidate_user_cache(username)
     return {"status": "success"}
 
 @router.put("/users/{user_id}/status")
@@ -675,6 +678,7 @@ async def toggle_user_status(
     is_active = payload.get("is_active", True)
     user.is_active = is_active
     await db.commit()
+    auth.invalidate_user_cache(user.username)
     return {"status": "success", "is_active": user.is_active}
 
 @router.put("/users/{user_id}/projects")
@@ -692,6 +696,7 @@ async def update_user_projects(
     
     user.assigned_projects = payload.get("assigned_projects", [])
     await db.commit()
+    auth.invalidate_user_cache(user.username)
     return {"status": "success", "assigned_projects": user.assigned_projects}
 
 @router.post("/db/export-csv")  

@@ -28,11 +28,26 @@ class ConnectionManager:
         "gnss_adjustment_step": "adjustment",
         "origin_locked_event": "adjustment",
         "gnss_offset_calibration_progress": "adjustment",
+        "incident_changed": "incident",
+    }
+    RELIABLE_MESSAGE_TYPES = {
+        "alert",
+        "incident_changed",
+        "rescue_request",
+        "rescue_request_updated",
+        "rescue_request_deleted",
+        "origin_locked_event",
+        "gnss_adjustment_result",
+        "gnss_adjustment_failed",
     }
 
     def __init__(self):
         self.active_connections: List[WebSocket] = []
         self._send_locks: Dict[int, asyncio.Lock] = {}
+        self._outboxes: Dict[int, asyncio.Queue] = {}
+        self._sender_tasks: Dict[int, asyncio.Task] = {}
+        self._outbox_drops = 0
+        self._slow_client_closes = 0
         # Connections stay legacy-compatible until they send a v2 subscription.
         self._subscriptions: Dict[int, dict] = {}
         self.last_broadcast_time = defaultdict(float)
@@ -62,11 +77,16 @@ class ConnectionManager:
         if websocket not in self.active_connections:
             self.active_connections.append(websocket)
         self._send_locks.setdefault(id(websocket), asyncio.Lock())
+        self._outboxes[id(websocket)] = asyncio.Queue(maxsize=64)
+        self._sender_tasks[id(websocket)] = asyncio.create_task(
+            self._sender_loop(websocket), name=f"ws-sender-{id(websocket)}"
+        )
+        operations_socket = websocket.url.path == "/ws/operations"
         self._subscriptions[id(websocket)] = {
-            "legacy": True,
+            "legacy": not operations_socket,
             "station_ids": set(),
-            "project_ids": set(),
-            "channels": set(),
+            "project_ids": set(getattr(websocket.state, "user_project_ids", []) or []),
+            "channels": {"incident"} if operations_socket else set(),
         }
         logger.info("WebSocket connected. Total: %s", len(self.active_connections))
         await self.send_personal(
@@ -76,14 +96,21 @@ class ConnectionManager:
                 "protocol_version": self.PROTOCOL_VERSION,
                 "heartbeat_interval_seconds": 20,
                 "subscriptions_supported": True,
+                "authz_scope_hash": getattr(websocket.state, "authz_scope_hash", None),
+                "channel": getattr(websocket.state, "ws_channel", "legacy"),
             },
         )
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            self._send_locks.pop(id(websocket), None)
-            self._subscriptions.pop(id(websocket), None)
+            connection_id = id(websocket)
+            self._send_locks.pop(connection_id, None)
+            self._outboxes.pop(connection_id, None)
+            sender = self._sender_tasks.pop(connection_id, None)
+            if sender and sender is not asyncio.current_task():
+                sender.cancel()
+            self._subscriptions.pop(connection_id, None)
             logger.info("WebSocket disconnected. Total: %s", len(self.active_connections))
 
     @staticmethod
@@ -251,11 +278,79 @@ class ConnectionManager:
             return_exceptions=True,
         )
 
+    async def broadcast_operations(self, message: dict):
+        """Send non-PII Incident envelopes to scoped operations sockets.
+
+        The public ``/ws/updates`` stream deliberately never receives Incident
+        cases or Rescue metadata.  Project filtering is delegated to the same
+        subscription gate used by sensor streams.
+        """
+        def in_operations_scope(connection: WebSocket) -> bool:
+            role = getattr(connection.state, "user_role", None)
+            if role == "admin":
+                return True
+            project_id = message.get("project_id")
+            if project_id is None:
+                return False
+            subscription = self._subscriptions.get(id(connection)) or {}
+            project_ids = subscription.get("project_ids") or set(getattr(connection.state, "user_project_ids", []) or [])
+            try:
+                return int(project_id) in {int(value) for value in project_ids}
+            except (TypeError, ValueError):
+                return False
+
+        connections = tuple(
+            connection
+            for connection in self.active_connections
+            if connection.url.path == "/ws/operations"
+            and getattr(connection.state, "user_role", None) in {"admin", "operator", "viewer"}
+            and in_operations_scope(connection)
+            and self._should_send(connection, message)
+        )
+        if not connections:
+            return
+        await asyncio.gather(
+            *(self._send_one(connection, message) for connection in connections),
+            return_exceptions=True,
+        )
+
     async def send_personal(self, websocket: WebSocket, message: dict):
         await self._send_one(websocket, message)
 
     async def _send_one(self, connection: WebSocket, message: dict):
         if connection not in self.active_connections:
+            return
+        outbox = self._outboxes.get(id(connection))
+        if outbox is not None:
+            reliable = str(message.get("type") or "") in self.RELIABLE_MESSAGE_TYPES or bool(message.get("reliable"))
+            if outbox.full():
+                if reliable:
+                    self._slow_client_closes += 1
+                    try:
+                        await connection.close(code=1013, reason="client too slow")
+                    except Exception:
+                        pass
+                    self.disconnect(connection)
+                    return
+                # Best-effort sensor/status updates coalesce by station/type.
+                key = (
+                    str(message.get("type") or ""),
+                    str(message.get("station_id") or ""),
+                    str(message.get("sensor_type") or ""),
+                )
+                queue_items = list(outbox._queue)  # bounded internal deque
+                for index, queued in enumerate(queue_items):
+                    queued_key = (
+                        str(queued.get("type") or ""),
+                        str(queued.get("station_id") or ""),
+                        str(queued.get("sensor_type") or ""),
+                    ) if isinstance(queued, dict) else None
+                    if queued_key == key:
+                        outbox._queue[index] = message
+                        return
+                self._outbox_drops += 1
+                return
+            outbox.put_nowait(message)
             return
         send_lock = self._send_locks.setdefault(id(connection), asyncio.Lock())
         async with send_lock:
@@ -273,6 +368,26 @@ class ConnectionManager:
                     )
                     self.disconnect(connection)
 
+    async def _sender_loop(self, connection: WebSocket) -> None:
+        outbox = self._outboxes.get(id(connection))
+        if outbox is None:
+            return
+        try:
+            while connection in self.active_connections:
+                message = await outbox.get()
+                try:
+                    await asyncio.wait_for(
+                        connection.send_json(message), timeout=self.SEND_TIMEOUT_SECONDS
+                    )
+                finally:
+                    outbox.task_done()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if connection in self.active_connections:
+                logger.warning("WebSocket sender removed client after send failure: %s", exc)
+                self.disconnect(connection)
+
     async def _send_to_all(self, message: dict):
         connections = tuple(
             connection
@@ -285,6 +400,16 @@ class ConnectionManager:
             *(self._send_one(connection, message) for connection in connections),
             return_exceptions=True,
         )
+
+    def diagnostics(self) -> dict:
+        queues = list(self._outboxes.values())
+        return {
+            "clients": len(self.active_connections),
+            "outbox_capacity": 64,
+            "outbox_backlog": sum(queue.qsize() for queue in queues),
+            "outbox_drops": int(self._outbox_drops),
+            "slow_client_closes": int(self._slow_client_closes),
+        }
 
 
 manager = ConnectionManager()

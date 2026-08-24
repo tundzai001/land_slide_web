@@ -148,7 +148,7 @@ window.showStationQR = async function (lat, lng, stationName) {
 
     const overlay = document.createElement('div');
     overlay.id = 'qr-popup-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:var(--z-critical);display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
     overlay.innerHTML = `
         <div class="qr-popup-glass">
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -228,24 +228,19 @@ let rescueHeatLayer = null;
 let heatmapVisible = false;
 
 function buildHeatmapData() {
-    // Sử dụng dữ liệu rescue thật nếu có, nếu không dùng mẫu
-    if (rescueRequestsData && rescueRequestsData.length > 0) {
-        return rescueRequestsData
-            .filter(r => r.latitude && r.longitude)
-            .map(r => [r.latitude, r.longitude, 0.8]);
-    }
-    // Dữ liệu mẫu 10 điểm quanh Đà Nẵng
-    return [
-        [16.047, 108.206, 0.9], [16.052, 108.212, 0.7], [16.041, 108.198, 0.8],
-        [16.060, 108.220, 0.6], [16.035, 108.190, 0.95], [16.055, 108.200, 0.5],
-        [16.043, 108.215, 0.85], [16.065, 108.208, 0.7], [16.038, 108.225, 0.6],
-        [16.050, 108.195, 0.75]
-    ];
+    return (rescueRequestsData || [])
+        .filter(request => Number.isFinite(Number(request.latitude)) && Number.isFinite(Number(request.longitude)))
+        .map(request => [Number(request.latitude), Number(request.longitude), 0.8]);
 }
 
-function toggleHeatmap() {
+async function toggleHeatmap() {
     const btn = document.getElementById('heatmap-toggle');
-    if (!map || typeof L.heatLayer === 'undefined') {
+    if (!map) return;
+    if (!heatmapVisible && typeof L.heatLayer === 'undefined') {
+        try { await window.loadFeatureLibrary?.('heat'); }
+        catch (_) { window.toast?.error('Không thể tải lớp heatmap.'); return; }
+    }
+    if (typeof L.heatLayer === 'undefined') {
         window.toast?.error('Plugin heatmap chưa sẵn sàng.');
         return;
     }
@@ -254,11 +249,22 @@ function toggleHeatmap() {
 
     if (heatmapVisible) {
         const data = buildHeatmapData();
+        if (!data.length) {
+            heatmapVisible = false;
+            const checkbox = document.getElementById('layer-heatmap');
+            if (checkbox) checkbox.checked = false;
+            setMapState({ layers: { heatmap: false } });
+            window.toast?.info('Chưa có yêu cầu cứu hộ có tọa độ để hiển thị heatmap.');
+            return;
+        }
         rescueHeatLayer = L.heatLayer(data, {
             radius: 30, blur: 20, maxZoom: 14,
             gradient: { 0.2: '#2196f3', 0.4: '#4caf50', 0.6: '#ffeb3b', 0.8: '#ff9800', 1: '#f44336' }
         }).addTo(window.map);
         btn?.classList.add('active');
+        const checkbox = document.getElementById('layer-heatmap');
+        if (checkbox) checkbox.checked = true;
+        setMapState({ layers: { heatmap: true } });
         window.toast?.info('Heatmap đã bật');
     } else {
         if (rescueHeatLayer && window.map) {
@@ -266,6 +272,9 @@ function toggleHeatmap() {
             rescueHeatLayer = null;
         }
         btn?.classList.remove('active');
+        const checkbox = document.getElementById('layer-heatmap');
+        if (checkbox) checkbox.checked = false;
+        setMapState({ layers: { heatmap: false } });
         window.toast?.info('Heatmap đã tắt');
     }
 }
@@ -296,7 +305,7 @@ function setupTimelineSlider() {
             const req = rescueRequestsData.find(r => String(r.id) === String(id));
             if (!req || !req.created_at) return;
 
-            const reqDate = new Date(req.created_at);
+            const reqDate = new Date(normalizeEpochMs(req.created_at));
             const daysDiff = Math.floor((Date.now() - reqDate.getTime()) / (1000 * 60 * 60 * 24));
             const reqDaySlot = 30 - daysDiff; // 1 = cũ nhất, 30 = mới nhất
 

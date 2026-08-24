@@ -388,6 +388,7 @@ class MQTTTransportMixin:
             self.client.loop_start()
             self._track_background_task(self.reload_topics_from_db())
             self._track_background_task(self._flush_loop())  # ✅ Khởi động flush buffer
+            self._track_background_task(self._drain_ingest_spool_loop())
             logger.info("✅ MQTT Bridge started successfully.")
         except Exception as e:
             logger.error(f"❌ Failed to start MQTT Bridge: {e}")
@@ -399,6 +400,12 @@ class MQTTTransportMixin:
             self.client.loop_stop()
             self.client.disconnect()
         finally:
+            # Give the durable batch path one bounded final attempt before
+            # cancelling background tasks and disposing database pools.
+            try:
+                await asyncio.wait_for(self._flush_write_buffer(), timeout=5.0)
+            except Exception as exc:
+                logger.warning("Final MQTT persistence flush deferred: %s", exc)
             pending_futures = list(self._threadsafe_futures)
             for future in pending_futures:
                 future.cancel()

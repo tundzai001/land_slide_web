@@ -36,6 +36,13 @@ const mapControlsCss = [
   'frontend/css/map/digital-twin-workspace.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
 
+const brandCss = [
+  'frontend/css/map/base.css',
+  'frontend/css/admin/base.css',
+  'frontend/css/login.css',
+  'frontend/css/landing.css',
+].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
+
 const viewports = [
   { name: '320x568', width: 320, height: 568 },
   { name: '390x844', width: 390, height: 844 },
@@ -82,7 +89,7 @@ for (const viewport of viewports) {
     await page.goto('/');
     await expect(page.locator('h1')).toContainText('Nhìn thấy chuyển động');
     await assertViewportContract(page);
-    await expect(page).toHaveScreenshot(`landing-${viewport.name}-${testInfo.project.name}.png`, { fullPage: true });
+    await expect(page).toHaveScreenshot(`landing-${viewport.name}-${testInfo.project.name}.png`, { fullPage: viewport.width < 2560 });
   });
 
   test(`login responsive ${viewport.name}`, async ({ page }, testInfo) => {
@@ -397,6 +404,85 @@ test('desktop map controls remain stable, separated and readable', async ({ page
   expect(geometry.railRescueGap).toBeGreaterThanOrEqual(12);
   expect(geometry.authColor).toBe('rgb(255, 255, 255)');
   expect(geometry.authBackground).toBe('rgb(37, 99, 235)');
+});
+
+test('map GNSS badge stays inside its pill and brand logos have no white plate', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const logoData = readFileSync(join(__dirname, '..', '..', 'frontend/assets/aitogy.png')).toString('base64');
+  await page.setContent(`<!doctype html><html data-theme="dark" data-app-view="map"><head><style>${mapControlsCss}\n${brandCss}</style></head><body>
+    <nav class="top-navbar" style="position:relative">
+      <a class="brand-text" href="#">
+        <span id="map-brand-plate" class="app-brand-plate"><img src="data:image/png;base64,${logoData}" width="759" height="329" alt="Aitogy"></span>
+        <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
+      </a>
+    </nav>
+    <div class="sidebar-brand"><span id="admin-brand-plate" class="app-brand-plate"></span></div>
+    <div class="login-brand"><span id="login-brand-plate" class="app-brand-plate"></span></div>
+    <a class="brand" href="#"><span id="landing-brand-plate" class="brand-plate"></span></a>
+    <main class="sidebar-content" style="width:380px">
+      <div class="sensor-compact">
+        <button type="button" class="sensor-item sensor-clickable" id="sensor-card-gnss">
+          <span class="sensor-label">
+            <span>Vận tốc GNSS (3D)</span>
+            <span id="gnss-fix-badge" class="gnss-fix-badge GNSS_RTK_FIXED">RTK FIXED</span>
+          </span>
+        </button>
+        <div class="sensor-item"></div>
+      </div>
+    </main>
+  </body></html>`);
+
+  const contract = await page.evaluate(() => {
+    const badge = document.querySelector('#gnss-fix-badge');
+    const card = document.querySelector('#sensor-card-gnss');
+    const plate = document.querySelector('#map-brand-plate');
+    const logo = plate.querySelector('img');
+    const badgeRect = badge.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const logoRect = logo.getBoundingClientRect();
+    const badgeStyle = getComputedStyle(badge);
+    const plateStyles = ['map', 'admin', 'login', 'landing'].map(surface => {
+      const style = getComputedStyle(document.querySelector(`#${surface}-brand-plate`));
+      return {
+        background: style.backgroundColor,
+        border: Number.parseFloat(style.borderTopWidth),
+        padding: Number.parseFloat(style.paddingTop),
+      };
+    });
+    return {
+      badgeOverflow: badge.scrollWidth - badge.clientWidth,
+      badgeInsideCard: badgeRect.left >= cardRect.left && badgeRect.right <= cardRect.right,
+      badgeFontSize: Number.parseFloat(badgeStyle.fontSize),
+      plateStyles,
+      logoRatio: logoRect.width / logoRect.height,
+    };
+  });
+
+  expect(contract.badgeOverflow).toBeLessThanOrEqual(1);
+  expect(contract.badgeInsideCard).toBe(true);
+  expect(contract.badgeFontSize).toBeGreaterThanOrEqual(12);
+  expect(contract.plateStyles).toEqual(Array(4).fill({
+    background: 'rgba(0, 0, 0, 0)',
+    border: 0,
+    padding: 0,
+  }));
+  expect(contract.logoRatio).toBeCloseTo(759 / 329, 2);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileMapBrand = await page.evaluate(() => {
+    const plate = document.querySelector('#map-brand-plate');
+    const logo = plate.querySelector('img');
+    const rect = logo.getBoundingClientRect();
+    return {
+      display: getComputedStyle(plate).display,
+      width: rect.width,
+      height: rect.height,
+    };
+  });
+
+  expect(mobileMapBrand.display).not.toBe('none');
+  expect(mobileMapBrand.width).toBeGreaterThan(0);
+  expect(mobileMapBrand.height).toBeGreaterThan(0);
 });
 
 for (const viewport of viewports) {

@@ -553,3 +553,16 @@
 @media (prefers-reduced-motion: reduce) {
     .login-page *, .login-page *::before, .login-page *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+.login-brand .app-brand-plate {
+    display: block;
+    width: 112px;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+}
+.login-brand .app-brand-plate img { display: block; width: 100%; height: auto; }
+.login-brand .app-brand-product { display: grid; line-height: 1; }
+.login-brand .app-brand-product strong { font-size: 1rem; }
+.login-brand .app-brand-product small { margin-top: 5px; font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; }

@@ -299,7 +299,7 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
     /* Náº±m giá»¯a khoáº£ng trá»‘ng: left sidebar 340px, right sidebar 420px */
     left: calc(var(--sidebar-width) + (100vw - var(--sidebar-width) - 420px) / 2);
     transform: translateX(-50%) translateY(-120%);
-    z-index: 9998;
+    z-index: var(--z-critical);
     width: calc(100vw - var(--sidebar-width) - 420px - 40px);
     max-width: 700px;
     background: var(--alert-banner-bg);
@@ -453,4 +453,3 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
 .btn-alert-dismiss:hover {
     background: rgba(255, 255, 255, 0.3);
 }
-

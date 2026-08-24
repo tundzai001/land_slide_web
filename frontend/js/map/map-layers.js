@@ -5,10 +5,13 @@
 function setupMarkerLayerControls() {
     const layerStation = document.getElementById('layer-station');
     const layerRescue = document.getElementById('layer-rescue');
+    const layerCors = document.getElementById('layer-cors');
+    const layerHeatmap = document.getElementById('layer-heatmap');
 
     if (layerStation) {
         layerStation.addEventListener('change', () => {
             showStationMarkers = layerStation.checked;
+            setMapState({ layers: { stations: showStationMarkers } });
             toggleStationMarkersDisplay();
             updateUIVisibilityBasedOnLayers();
         });
@@ -17,14 +20,30 @@ function setupMarkerLayerControls() {
     if (layerRescue) {
         layerRescue.addEventListener('change', () => {
             showRescueMarkers = layerRescue.checked;
+            setMapState({ layers: { rescue: showRescueMarkers } });
             toggleRescueMarkersDisplay();
             updateUIVisibilityBasedOnLayers();
         });
     }
 
+    layerCors?.addEventListener('change', () => {
+        showCorsBaseMarkers = layerCors.checked;
+        setMapState({ layers: { cors: showCorsBaseMarkers } });
+        Object.values(corsBaseMarkers).forEach(marker => {
+            const leafletMap = getLeafletMap();
+            if (!leafletMap) return;
+            if (showCorsBaseMarkers) marker.addTo(leafletMap);
+            else leafletMap.removeLayer(marker);
+        });
+    });
+    layerHeatmap?.addEventListener('change', () => {
+        if (layerHeatmap.checked !== heatmapVisible) void toggleHeatmap();
+    });
+
     // Mặc định bật cả 2
     showStationMarkers = true;
     showRescueMarkers = true;
+    showCorsBaseMarkers = true;
     if (layerStation) layerStation.checked = true;
     if (layerRescue) layerRescue.checked = true;
 
@@ -115,7 +134,7 @@ function toggleStationMarkersDisplay() {
     }
 
     Object.values(corsBaseMarkers).forEach(marker => {
-        if (showStationMarkers) {
+        if (showCorsBaseMarkers) {
             if (!leafletMap.hasLayer(marker)) marker.addTo(leafletMap);
         } else if (leafletMap.hasLayer(marker)) {
             leafletMap.removeLayer(marker);
@@ -348,7 +367,7 @@ function addOrUpdateCorsBaseMarker(station) {
         .bindPopup(popupContent, { maxWidth: 300 });
 
     const leafletMap = getLeafletMap();
-    if (showStationMarkers && leafletMap) {
+    if (showCorsBaseMarkers && leafletMap) {
         marker.addTo(leafletMap);
     }
 
@@ -499,7 +518,7 @@ function addRescueMarker(rescueRequest) {
                 <div><strong>Tỉnh/TP:</strong> ${escapeRescueHtml(province_city || '(Không có)')}</div>
                 <div><strong>Vị trí:</strong> ${latitude.toFixed(6)}, ${longitude.toFixed(6)}</div>
                 ${accuracy_m ? `<div><strong>Độ chính xác:</strong> ±${accuracy_m}m</div>` : ''}
-                <div><strong>Thời gian:</strong> ${new Date(created_at).toLocaleString('vi-VN')}</div>
+                <div><strong>Thời gian:</strong> ${new Date(normalizeEpochMs(created_at)).toLocaleString('vi-VN')}</div>
                 ${safeSourceLink ? `<div><strong>Nguồn:</strong> <a href="${escapeRescueHtml(safeSourceLink)}" target="_blank" rel="noopener noreferrer">Mở link</a></div>` : ''}
                 <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
                     <strong style="font-size: 12px;">Tình trạng:</strong>

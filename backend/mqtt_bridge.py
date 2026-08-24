@@ -16,11 +16,13 @@ from app.websocket import manager
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import config as model_config
 from app.models import data as model_data
+from app.services.incident_cases import append_event, serialize_case
 from app.config import settings
 from app.landslide_analyzer import LandslideAnalyzer
 from app.mqtt.persistence import MQTTPersistenceMixin
 from app.mqtt.transport import MQTTTransportMixin
 from app.services import adjustment_failure
+from app.services.ingest_spool import IngestSpool
 
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.water_processor import WaterEngine, RainEngine
@@ -138,6 +140,20 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         self._device_update_buffer: dict = {}   # {device_id: last_data_time}
         self._latest_cache_buffer: dict = {}    # {(station_id, sensor_type): newest row}
         self._buffer_lock = asyncio.Lock()
+        self._sensor_db_lock = asyncio.Lock()
+        self._ingest_spool = IngestSpool()
+        self._ingest_spool_ids = set()
+        self._ingest_metrics = {
+            "inserted": 0,
+            "deduped": 0,
+            "null_identity": 0,
+            "commit_unknown_retries": 0,
+            "spool_retries": 0,
+            "spool_rejected": 0,
+            "drained_batches": 0,
+            "last_success_at": 0,
+            "last_error": None,
+        }
         self._flush_interval: int = 5  # giây – flush mỗi 5 giây 1 lần
         self._diag_last_log_ts = defaultdict(int)
         # Coalesce best-effort latest-value work. Fragmented GNSS/AGRICA can
@@ -520,6 +536,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 "station_id": station_id,
                 "timestamp": current_timestamp,
                 "sensor_type": "gnss_adjusted",
+                "ingest_id": self._make_ingest_id(
+                    0, station_id, "gnss_adjusted", current_timestamp, adjustment
+                ),
                 "data": adjustment,
                 "value_1": None,
                 "value_2": None,
@@ -974,12 +993,39 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                             "data": res.get('data'),
                         }
                         
-                        if res.get('status') in {'INVALID_DATA', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'}:
+                        if res.get('status') in {
+                            'INITIALIZING', 'VELOCITY_WARMUP', 'INVALID_DATA',
+                            'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY',
+                            'PERSISTENT_OFFSET_QUARANTINED', 'REJECTED_MEASUREMENT',
+                            'UNSTABLE_FIX', 'REFERENCE_CHANGE_PENDING',
+                            'STALE_REFERENCE', 'REACQUIRE_REFUSED',
+                            'CHECKSUM_FAILED', 'NO_DATA',
+                        }:
+                            # Keep an existing unresolved GNSS alert alive
+                            # while the processor is quarantined/warming up;
+                            # this is not a safe reading and must not expire
+                            # merely because the service restarted.
+                            try:
+                                await self._touch_active_alert(
+                                    station_id,
+                                    'gnss_velocity',
+                                    current_timestamp,
+                                )
+                            except Exception as touch_error:
+                                logger.error(f"❌ GNSS active-alert refresh failed: {touch_error}")
                             # Immediate buffering for anomalies
                             anomaly_record = {
                                 "station_id": station_id,
                                 "timestamp": current_timestamp,
                                 "sensor_type": "gnss_anomaly",
+                                "ingest_id": self._make_ingest_id(
+                                    device_id,
+                                    station_id,
+                                    "gnss_anomaly",
+                                    current_timestamp,
+                                    status_payload,
+                                    raw_payload,
+                                ),
                                 "data": status_payload,
                                 "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None
                             }
@@ -1216,21 +1262,77 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 
                 if categories_to_resolve:
                     async with DataSessionLocal() as db_data:
-                        res = await db_data.execute(
-                            model_data.Alert.__table__.update()
-                            .where(and_(
-                                model_data.Alert.station_id == station_id,
-                                model_data.Alert.is_resolved == False,
-                                model_data.Alert.category.in_(categories_to_resolve)
-                            ))
-                            .values(is_resolved=True)
-                        )
-                        if res.rowcount > 0:
+                        # A database/read failure must never turn an uncertain
+                        # station into a resolved one.  Check the durable
+                        # summary before mutating alert rows so a restart or
+                        # transient pool outage cannot silence a real alarm.
+                        summary_before = await self._get_station_active_alert_summary(station_id, station_config)
+                        if summary_before.get('degraded'):
+                            logger.warning(
+                                f"⚠️ Alert summary unavailable for station {station_id}; "
+                                "skipping auto-resolve and keeping siren state unchanged."
+                            )
+                            res = None
+                        incident_events = []
+                        if summary_before.get('degraded'):
+                            alert_ids = []
+                        else:
+                            alert_ids = [int(value) for value in (await db_data.execute(
+                                select(model_data.Alert.id).where(and_(
+                                    model_data.Alert.station_id == station_id,
+                                    model_data.Alert.is_resolved == False,
+                                    model_data.Alert.category.in_(categories_to_resolve),
+                                ))
+                            )).scalars().all()]
+                        if not summary_before.get('degraded'):
+                            res = await db_data.execute(
+                                model_data.Alert.__table__.update()
+                                .where(and_(
+                                    model_data.Alert.station_id == station_id,
+                                    model_data.Alert.is_resolved == False,
+                                    model_data.Alert.category.in_(categories_to_resolve)
+                                ))
+                                .values(is_resolved=True)
+                            )
+                            if alert_ids:
+                                incident_rows = (await db_data.execute(
+                                    select(model_data.IncidentCase).where(
+                                        model_data.IncidentCase.source_kind == "SENSOR_ALERT",
+                                        model_data.IncidentCase.source_id.in_(alert_ids),
+                                    ).with_for_update()
+                                )).scalars().all()
+                                for incident_case in incident_rows:
+                                    if incident_case.status in {"resolved", "dismissed"}:
+                                        continue
+                                    incident_case.signal_state = "RETURNED"
+                                    incident_case.status = "resolved"
+                                    incident_case.resolved_at = int(time.time())
+                                    incident_case.version += 1
+                                    incident_events.append((incident_case, await append_event(
+                                        db_data, incident_case, "signal_returned",
+                                        payload={"signal_state": "RETURNED", "status": "resolved", "reason": "sensor_recovered"},
+                                    )))
+                        if res is not None and res.rowcount > 0:
                             await db_data.commit()
+                            for incident_case, incident_event in incident_events:
+                                await db_data.refresh(incident_event)
+                                await manager.broadcast_operations({
+                                    "protocol": 2, "type": "incident_changed", "event_id": int(incident_event.id),
+                                    "sequence_from": int(incident_event.sequence), "sequence_to": int(incident_event.sequence),
+                                    "incident_id": int(incident_case.id), "incident_revision": int(incident_case.revision),
+                                    "workflow_version": int(incident_case.version), "action": "resolved",
+                                    "project_id": incident_case.project_id, "station_id": incident_case.station_id,
+                                    "summary": serialize_case(incident_case),
+                                })
                             is_just_resolved = True
                             summary = await self._get_station_active_alert_summary(station_id, station_config)
                             unresolved_count = summary.get('unresolved_count', 0)
-                            if unresolved_count == 0:
+                            if summary.get('degraded'):
+                                logger.warning(
+                                    f"⚠️ Alert summary unavailable for station {station_id}; "
+                                    "keeping siren state unchanged."
+                                )
+                            elif unresolved_count == 0:
                                 logger.info(f"✅ Auto-resolved {res.rowcount} alerts for station {station_id} (sensor: {sensor_type}). Sending stop_siren command...")
                                 # Gửi MQTT auto_stop_siren để Pi tắt loa nhưng không bị 'MUTE'
                                 cmd_topic = f"landslide/{station_id}/command"
@@ -1329,6 +1431,14 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                         "station_id": station_id,
                         "timestamp": current_timestamp,
                         "sensor_type": sensor_type,
+                        "ingest_id": self._make_ingest_id(
+                            device_id,
+                            station_id,
+                            sensor_type,
+                            current_timestamp,
+                            processed_data,
+                            raw_payload,
+                        ),
                         "data": processed_data,
                         "value_1": processed_data.get('speed_2d_mm_s', 0.0) if sensor_type == 'gnss' else processed_data.get('intensity_mm_h', 0.0) if sensor_type == 'rain' else processed_data.get('water_level', 0.0) if sensor_type == 'water' else processed_data.get('roll', 0.0),
                         "value_2": processed_data.get('total_displacement_mm', 0.0) if sensor_type == 'gnss' else processed_data.get('accumulated_mm', 0.0) if sensor_type == 'rain' else processed_data.get('intensity_mm_h', 0.0) if sensor_type == 'water' else processed_data.get('pitch', 0.0),
@@ -1341,12 +1451,16 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                     await self._save_alert_immediate(device_id, station_id, sensor_record, alert, current_timestamp)
                 elif is_just_resolved:
                     # ✅ RESOLVE → Buffer rồi flush ngay, tránh mất dữ liệu khi server restart
-                    await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data)
+                    await self._buffer_sensor_record(
+                        device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload
+                    )
                     await self._flush_write_buffer()
                     logger.info(f"💾 [RESOLVE FLUSH] {station_name} - {sensor_type.upper()} ts={current_timestamp} written immediately")
                 else:
                     # ✅ BÌNH THƯỜNG → Đưa vào buffer, flush theo chu kỳ
-                    await self._buffer_sensor_record(device_id, station_id, sensor_type, current_timestamp, processed_data)
+                    await self._buffer_sensor_record(
+                        device_id, station_id, sensor_type, current_timestamp, processed_data, raw_payload
+                    )
 
         except Exception as e:
             logger.error(f"❌ DB Error: {e}")

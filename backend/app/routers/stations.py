@@ -1,4 +1,6 @@
 """Station discovery, details, risk analysis and GNSS summaries."""
+import asyncio
+import copy
 import logging
 import math
 import time
@@ -25,6 +27,13 @@ from ..services.pagination import normalize_page, set_pagination_headers, slice_
 from ..services.mqtt_topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_mqtt_topic
 
 router = APIRouter(tags=["Stations"])
+
+# Long-term analysis is CPU-heavy and may be requested concurrently by many
+# operators. Keep it off the event loop and cap process-wide concurrency so a
+# burst of chart opens cannot starve MQTT/HTTP handling.
+_LONG_TERM_ANALYSIS_SEMAPHORE = asyncio.Semaphore(2)
+_LONG_TERM_ANALYSIS_CACHE: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
+_LONG_TERM_ANALYSIS_CACHE_TTL_SECONDS = 30.0
 logger = logging.getLogger(__name__)
 
 
@@ -178,12 +187,14 @@ def _summarize_station_alerts(
     }
     ttl_cfg = config.get("alert_ttl_seconds", {}) or {}
     now_ts = int(time.time())
-    fresh_alerts = [
-        alert
-        for alert in alerts
-        if now_ts - int(alert.timestamp or 0)
-        <= int(ttl_cfg.get(alert.category, default_ttl.get(alert.category, 180)))
-    ]
+    # TTL only describes freshness; it must never erase an unresolved durable
+    # alert from the API.  A restart can happen after the last sensor packet,
+    # so silently dropping the row would make a real warning look SAFE.
+    alert_rows = []
+    for alert in alerts:
+        ttl = int(ttl_cfg.get(alert.category, default_ttl.get(alert.category, 180)))
+        age_seconds = max(0, now_ts - int(alert.timestamp or 0))
+        alert_rows.append((alert, age_seconds > ttl, age_seconds))
 
     priority = {
         "EXTREME": 5,
@@ -195,7 +206,7 @@ def _summarize_station_alerts(
     }
     overall_risk = "LOW"
     highest_score = -1
-    for alert in fresh_alerts:
+    for alert, _is_stale, _age_seconds in alert_rows:
         level = str(alert.level or "").upper()
         if alert.category in {"tilt_warning", "tilt_critical", "shock", "tilt"} and level == "WARNING":
             level = "CRITICAL"
@@ -214,8 +225,34 @@ def _summarize_station_alerts(
                 "category": alert.category,
                 "message": alert.message,
                 "timestamp": alert.timestamp,
+                "stale": is_stale,
+                "age_seconds": age_seconds,
             }
-            for alert in fresh_alerts
+            for alert, is_stale, age_seconds in alert_rows
+        ],
+        "stale_alerts": [
+            {
+                "level": alert.level,
+                "category": alert.category,
+                "message": alert.message,
+                "timestamp": alert.timestamp,
+                "stale": True,
+                "age_seconds": age_seconds,
+            }
+            for alert, is_stale, age_seconds in alert_rows
+            if is_stale
+        ],
+        "fresh_alerts": [
+            {
+                "level": alert.level,
+                "category": alert.category,
+                "message": alert.message,
+                "timestamp": alert.timestamp,
+                "stale": False,
+                "age_seconds": age_seconds,
+            }
+            for alert, is_stale, age_seconds in alert_rows
+            if not is_stale
         ],
     }
 
@@ -234,7 +271,7 @@ async def get_stations_by_project(
     include_runtime: bool = Query(True),
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.get_current_user)
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS))
 ):
     # Enforce operator project access
     check_operator_project_access(current_user, project_id)
@@ -900,7 +937,11 @@ async def _calculate_station_risk_assessment(
     station_id: int,
     station_config: Optional[Dict[str, Any]] = None
 ) -> Dict:
-    """Helper: Tính toán risk assessment từ unresolved alerts còn hiệu lực thời gian."""
+    """Build risk assessment while retaining unresolved rows across restarts.
+
+    TTL controls the ``stale`` marker only; resolution remains an explicit
+    durable state transition (or a verified recovery signal).
+    """
     try:
         now_ts = int(time.time())
         alerting_cfg = (station_config or {}).get("alerting", {}) if station_config else {}
@@ -912,7 +953,8 @@ async def _calculate_station_risk_assessment(
         water_offline = get_offline_threshold(station_config or {}, 'water')
         imu_offline = get_offline_threshold(station_config or {}, 'imu')
 
-        # Chỉ tính alert còn "tươi" để tránh kẹt WARNING/CRITICAL khi sensor đã ngừng gửi.
+        # TTL chỉ gắn nhãn stale. Không được lọc bỏ unresolved alert vì trạng
+        # thái này phải tồn tại qua restart cho tới khi có resolve rõ ràng.
         default_ttl = {
             'gnss_velocity': max(90, gnss_offline * 2),
             'rainfall': max(120, rain_offline * 2),
@@ -943,12 +985,11 @@ async def _calculate_station_risk_assessment(
         )
         alerts = result.scalars().all()
 
-        # Lọc alert hết hạn theo category-specific TTL.
-        fresh_alerts = []
+        alert_rows = []
         for a in alerts:
             ttl = alert_ttl.get(a.category, 180)
-            if (now_ts - int(a.timestamp or 0)) <= ttl:
-                fresh_alerts.append(a)
+            age_seconds = max(0, now_ts - int(a.timestamp or 0))
+            alert_rows.append((a, age_seconds > ttl, age_seconds))
 
         # Dùng logic max-level giống mqtt_bridge._get_station_active_alert_summary()
         # để WebSocket và REST API trả về cùng giá trị risk_level.
@@ -962,7 +1003,7 @@ async def _calculate_station_risk_assessment(
         }
         overall_risk = "LOW"
         highest_score = -1
-        for a in fresh_alerts:
+        for a, _is_stale, _age_seconds in alert_rows:
             level = str(a.level or "").upper()
             if a.category in ('tilt_warning', 'tilt_critical', 'shock', 'tilt') and level == 'WARNING':
                 level = 'CRITICAL'
@@ -981,10 +1022,36 @@ async def _calculate_station_risk_assessment(
                     "level": a.level,
                     "category": a.category,
                     "message": a.message,
-                    "timestamp": a.timestamp
+                    "timestamp": a.timestamp,
+                    "stale": is_stale,
+                    "age_seconds": age_seconds,
                 }
-                for a in fresh_alerts
-            ]
+                for a, is_stale, age_seconds in alert_rows
+            ],
+            "stale_alerts": [
+                {
+                    "level": a.level,
+                    "category": a.category,
+                    "message": a.message,
+                    "timestamp": a.timestamp,
+                    "stale": True,
+                    "age_seconds": age_seconds,
+                }
+                for a, is_stale, age_seconds in alert_rows
+                if is_stale
+            ],
+            "fresh_alerts": [
+                {
+                    "level": a.level,
+                    "category": a.category,
+                    "message": a.message,
+                    "timestamp": a.timestamp,
+                    "stale": False,
+                    "age_seconds": age_seconds,
+                }
+                for a, is_stale, age_seconds in alert_rows
+                if not is_stale
+            ],
         }
     except Exception as e:
         logger.error(f"Error calculating risk: {e}")
@@ -1009,6 +1076,26 @@ async def get_long_term_analysis(
     + Multi-window analysis + Inverse Velocity (Fukuzono)
     """
     try:
+        try:
+            days = float(days)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="days must be a number")
+        if not math.isfinite(days) or days < (1 / 24) or days > 365:
+            raise HTTPException(status_code=422, detail="days must be between 1 hour and 365 days")
+
+        model_key = str(correlation_model or "slide_model").strip().lower()
+        if include_correlation and model_key != "slide_model":
+            raise HTTPException(status_code=400, detail="Unsupported correlation_model. Use slide_model.")
+
+        cache_key = (int(station_id), round(days, 6), bool(include_correlation), model_key)
+        cached = _LONG_TERM_ANALYSIS_CACHE.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < _LONG_TERM_ANALYSIS_CACHE_TTL_SECONDS:
+            return copy.deepcopy(cached[1])
+
+        async def _run_analysis(func, **kwargs):
+            async with _LONG_TERM_ANALYSIS_SEMAPHORE:
+                return await asyncio.to_thread(func, **kwargs)
+
         def is_gnss_analysis_point(data: dict) -> bool:
             if not isinstance(data, dict):
                 return False
@@ -1256,7 +1343,7 @@ async def get_long_term_analysis(
 
         # 5. Phân tích GNSS (trên window requested)
         if len(historical_gnss_requested) >= 2:
-            gnss_analysis = analyzer.analyze_long_term_velocity(
+            gnss_analysis = await _run_analysis(analyzer.analyze_long_term_velocity,
                 station_id=station_id,
                 historical_data=historical_gnss_requested,
                 config=station.config or {},
@@ -1328,7 +1415,7 @@ async def get_long_term_analysis(
             historical_imu_requested = historical_imu_full[-60:]
 
         if len(historical_imu_requested) >= 2:
-            imu_analysis = analyzer.analyze_long_term_tilt(
+            imu_analysis = await _run_analysis(analyzer.analyze_long_term_tilt,
                 station_id=station_id,
                 historical_data=historical_imu_requested,
                 window_days=days
@@ -1386,7 +1473,7 @@ async def get_long_term_analysis(
 
             if len(gnss_for_correlation) >= 2 and len(rain_data) >= 2:
                 historical_rain = [{"timestamp": d.timestamp, "data": d.data} for d in rain_data]
-                rain_correlation = analyzer.analyze_rainfall_displacement_correlation(
+                rain_correlation = await _run_analysis(analyzer.analyze_rainfall_displacement_correlation,
                     gnss_data=gnss_for_correlation,
                     rain_data=historical_rain,
                     window_days=days,
@@ -1412,7 +1499,7 @@ async def get_long_term_analysis(
 
         # 8. Phân tích đa cửa sổ (Multi-Window) - dùng full GNSS data
         if len(historical_gnss_full) >= 2:
-            multi_window = analyzer.analyze_multi_window(
+            multi_window = await _run_analysis(analyzer.analyze_multi_window,
                 station_id=station_id,
                 historical_data=historical_gnss_full,
                 config=station.config or {},
@@ -1435,12 +1522,17 @@ async def get_long_term_analysis(
             result["message"] = "Không đủ dữ liệu GNSS và IMU để phân tích."
 
         # 10. Cross-sensor consensus — đánh giá đồng thuận giữa các model
-        result["cross_sensor_consensus"] = analyzer.analyze_cross_sensor_consensus(
+        result["cross_sensor_consensus"] = await _run_analysis(analyzer.analyze_cross_sensor_consensus,
             gnss_result=result.get("gnss", {}),
             imu_result=result.get("imu", {}),
             rain_corr_result=result.get("rainfall_correlation", {})
         )
 
+        _LONG_TERM_ANALYSIS_CACHE[cache_key] = (time.monotonic(), copy.deepcopy(result))
+        # Bound memory even if many station IDs are probed over time.
+        if len(_LONG_TERM_ANALYSIS_CACHE) > 256:
+            oldest_key = min(_LONG_TERM_ANALYSIS_CACHE, key=lambda key: _LONG_TERM_ANALYSIS_CACHE[key][0])
+            _LONG_TERM_ANALYSIS_CACHE.pop(oldest_key, None)
         return result
 
     except HTTPException:

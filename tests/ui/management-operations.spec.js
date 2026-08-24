@@ -44,6 +44,8 @@ test('database explorer loads one paginated dataset and opens the inspector', as
   await expect(page.locator('#db-context-filters select')).toHaveCount(3);
   await page.locator('.db-dataset[data-dataset="sensor_data"]').click();
   await expect(page.locator('#db-context-filters select')).toHaveCount(2);
+  const sensorTypeValues = await page.locator('#db-context-filters select').nth(1).locator('option').evaluateAll(options => options.map(option => option.value));
+  expect(sensorTypeValues).toEqual(['', 'gnss', 'imu', 'rain', 'water']);
   await page.locator('.db-dataset[data-dataset="alerts"]').click();
   await expect(page.locator('#db-context-filters select')).toHaveCount(3);
   await page.locator('.db-dataset[data-dataset="stations"]').click();
@@ -51,6 +53,101 @@ test('database explorer loads one paginated dataset and opens the inspector', as
   await expect(page.locator('#db-inspector')).toHaveClass(/open/);
   await expect(page.locator('#db-inspector-content')).toContainText('DAP-01');
   await expect(page.locator('#db-page-next')).toBeDisabled();
+});
+
+test('sensor pages load lightweight rows and GNSS details open as a downloadable table', async ({ page }) => {
+  await mountManagement(page);
+  await page.evaluate(() => {
+    window.authSession = { getToken: () => 'test-token' };
+    window.bootstrap = { Modal: class { show() {} hide() {} } };
+    Object.defineProperty(window, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} } });
+    window.downloadAuthenticatedFile = async url => { window.downloadedAdjustmentUrl = url; };
+    window.fetch = async url => {
+      const target = String(url);
+      if (target.includes('/api/admin/projects')) return new Response('[]', { status: 200 });
+      if (target.includes('/api/admin/db/stations?limit=1000')) return new Response('[]', { status: 200 });
+      if (target.includes('/stats')) return new Response(JSON.stringify({ sensor_data: 864872, gnss_adjustments: 196 }), { status: 200 });
+      if (target.endsWith('/api/admin/db/sensor-data/77')) {
+        return new Response(JSON.stringify({
+          id: 77,
+          station_id: 7,
+          timestamp: 1787419040,
+          sensor_type: 'gnss_adjusted',
+          data: {
+            type: 'gnss_adjusted',
+            project_code: 'SQ-2026',
+            cluster_name: 'Cụm Bắc',
+            quality_gate: { passed: true },
+            points: {
+              ROVER_07: { station_id: 7, adjusted_x: 123.4567, adjusted_y: 234.5678, adjusted_z: 345.6789, dx: 0.0012, dy: -0.0023, dz: 0.0034 },
+            },
+            audit_json_url: '/api/admin/gnss/adjustment/reports/2/result.json',
+            excel_report_url: '/api/admin/gnss/adjustment/reports/2/result.xlsx',
+          },
+        }), { status: 200 });
+      }
+      if (target.includes('/api/admin/db/sensor-data?')) {
+        window.sensorListUrl = target;
+        return new Response(JSON.stringify([{
+          id: 77,
+          station_id: 7,
+          timestamp: 1787419040,
+          sensor_type: 'gnss_adjusted',
+          data_preview: '{"type":"gnss_adjusted","project_code":"SQ-2026"}',
+        }]), { status: 200, headers: { 'X-Has-More': 'false' } });
+      }
+      return new Response('[]', { status: 200, headers: { 'X-Total-Count': '0' } });
+    };
+  });
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+  await page.locator('.db-dataset[data-dataset="gnss_adjustments"]').click();
+
+  await expect(page.locator('#db-table-body .db-row')).toHaveCount(1);
+  const listUrl = await page.evaluate(() => window.sensorListUrl);
+  expect(listUrl).toContain('include_total=false');
+  expect(listUrl).toContain('include_data=false');
+  expect(listUrl).toContain('include_internal=true');
+  await expect(page.locator('#db-current-meta')).toContainText('tải nhanh');
+
+  await page.locator('#db-table-body .db-row').click();
+  await expect(page.locator('.adjustment-result-table tbody tr')).toHaveCount(1);
+  await expect(page.locator('.adjustment-result-table')).toContainText('ROVER_07');
+  await expect(page.locator('#db-inspector-actions')).toContainText('Tải JSON');
+  await expect(page.locator('#db-inspector-actions')).toContainText('Tải XLSX');
+
+  await page.getByRole('button', { name: 'Tải JSON' }).click();
+  await expect.poll(() => page.evaluate(() => window.downloadedAdjustmentUrl)).toBe('/api/admin/gnss/adjustment/reports/2/result.json');
+});
+
+test('dark theme applies one semantic surface across the data workspace', async ({ page }) => {
+  await mountManagement(page);
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await page.waitForTimeout(350);
+  const colors = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    const surface = style.getPropertyValue('--admin-surface').trim();
+    const muted = style.getPropertyValue('--admin-surface-muted').trim();
+    const rgb = value => {
+      const probe = document.createElement('div');
+      probe.style.color = value;
+      document.body.appendChild(probe);
+      const result = getComputedStyle(probe).color;
+      probe.remove();
+      return result;
+    };
+    return {
+      surface: rgb(surface),
+      muted: rgb(muted),
+      kpi: getComputedStyle(document.querySelector('#tab-database .ops-kpi')).backgroundColor,
+      explorer: getComputedStyle(document.querySelector('.db-explorer')).backgroundColor,
+      rail: getComputedStyle(document.querySelector('.db-dataset-rail')).backgroundColor,
+      toolbar: getComputedStyle(document.querySelector('.db-toolbar')).backgroundColor,
+    };
+  });
+  expect(colors.kpi).toBe(colors.surface);
+  expect(colors.explorer).toBe(colors.surface);
+  expect(colors.toolbar).toBe(colors.surface);
+  expect(colors.rail).toBe(colors.muted);
 });
 
 test('user management filters and edits account configuration', async ({ page }) => {

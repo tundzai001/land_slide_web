@@ -6,12 +6,16 @@ const indexSource = readFileSync(join(__dirname, '..', '..', 'frontend/index.htm
 const landingCss = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landing.min.css'));
 const landingJs = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landing.min.js'));
 
-test('index remains a thin React CDN shell', async () => {
-  expect(indexSource).toContain('<div id="landing-root"></div>');
-  expect(indexSource).toContain('react.production.min.js');
-  expect(indexSource).toContain('react-dom.production.min.js');
-  expect(indexSource).not.toContain('Nhìn thấy chuyển động');
-  expect(indexSource).not.toContain('<section');
+test('index is semantic and progressively enhanced without React', async () => {
+  expect(indexSource).toContain('<main id="main">');
+  expect(indexSource).toContain('<section class="hero"');
+  expect(indexSource).toContain('Nhìn thấy chuyển động');
+  expect(indexSource).toContain('rel="canonical"');
+  expect(indexSource).not.toContain('react.production.min.js');
+  expect(indexSource).not.toContain('ReactDOM');
+  expect(landingCss.toString()).toContain('.story-enhanced .story-stage');
+  expect(landingJs.toString()).toContain('story-enhanced');
+  expect(landingJs.toString()).toContain('--stage-scale');
 });
 
 const sizes = [
@@ -22,7 +26,7 @@ const sizes = [
 ];
 
 for (const size of sizes) {
-  test(`premium React landing is usable on ${size.name}`, async ({ page }) => {
+test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     await page.setViewportSize(size);
     await page.route('http://127.0.0.1:8000/', route => route.fulfill({
       contentType: 'text/html; charset=utf-8',
@@ -44,7 +48,7 @@ for (const size of sizes) {
       }),
     }));
     await page.goto('/');
-    await expect(page.locator('#landing-root')).not.toBeEmpty();
+    await expect(page.locator('#main')).not.toBeEmpty();
     await expect(page.locator('h1')).toContainText('Nhìn thấy chuyển động');
     await expect(page.locator('#stations-total')).toHaveText('59');
 

@@ -1,5 +1,6 @@
 """Frontend document, health-check, and WebSocket routes."""
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -7,7 +8,7 @@ from pathlib import Path
 
 import jwt
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -22,6 +23,31 @@ logger = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 PUBLIC_SOUND_DIR = Path(__file__).resolve().parents[2] / "static" / "sounds"
 PUBLIC_SOUND_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}\.mp3$")
+
+_ws_ticket_lock = asyncio.Lock()
+_consumed_ws_tickets: dict[str, float] = {}
+
+
+async def _consume_ws_ticket(jti: str, *, ttl_seconds: int = 60) -> bool:
+    """Consume a ticket once and keep the registry bounded for one worker."""
+    now = time.time()
+    async with _ws_ticket_lock:
+        for key, expires_at in list(_consumed_ws_tickets.items()):
+            if expires_at <= now:
+                _consumed_ws_tickets.pop(key, None)
+        if not jti or jti in _consumed_ws_tickets:
+            return False
+        _consumed_ws_tickets[jti] = now + ttl_seconds
+        return True
+
+
+def _frontend_document(file_name: str, *, private: bool = False):
+    file_path = FRONTEND_DIR / file_name
+    if not file_path.exists():
+        return JSONResponse(status_code=503, content={"error": "Frontend not found"})
+    noindex = private or settings.ENVIRONMENT.lower() != "production"
+    headers = {"X-Robots-Tag": "noindex, noarchive"} if noindex else {}
+    return FileResponse(file_path, media_type="text/html; charset=utf-8", headers=headers)
 
 # ============================================================================
 # WEBSOCKET & HEALTH CHECK
@@ -49,7 +75,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
         await websocket.close(code=1008, reason="Origin not allowed")
         return False
 
-    if websocket.url.path != "/ws/admin":
+    if websocket.url.path not in {"/ws/admin", "/ws/operations"}:
         return True
 
     token = websocket.query_params.get("ticket")
@@ -64,14 +90,44 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
             algorithms=[settings.ALGORITHM],
         )
         username = payload.get("sub")
-        if not username or payload.get("purpose") != "websocket":
+        channel = str(payload.get("channel") or "legacy_admin").lower()
+        required_channel = "operations" if websocket.url.path == "/ws/operations" else None
+        if required_channel and channel != required_channel:
+            raise ValueError("Wrong WebSocket channel")
+        if websocket.url.path == "/ws/admin" and channel not in {"legacy_admin", "admin"}:
+            raise ValueError("Wrong WebSocket channel")
+        jti = str(payload.get("jti") or "")
+        if (
+            not username
+            or payload.get("purpose") != "websocket"
+            or payload.get("boot_epoch") != auth.WS_BOOT_EPOCH
+            or not await _consume_ws_ticket(jti)
+        ):
             raise ValueError("Token has no subject")
 
         async with AuthSessionLocal() as db:
             user = await auth.get_user_by_username_cached(username, db)
         if user is None or not user.is_active:
             raise ValueError("Inactive user")
+        if channel == "admin" and str(user.role or "") != auth.Role.ADMIN:
+            raise ValueError("Admin channel requires admin role")
+        assigned_projects = sorted({
+            int(project_id)
+            for project_id in (getattr(user, "assigned_projects", []) or [])
+            if str(project_id).strip().lstrip("-").isdigit()
+        })
+        scope_material = ":".join([
+            str(user.id), str(bool(user.is_active)).lower(), str(user.role or ""),
+            ",".join(map(str, assigned_projects)),
+        ])
+        scope_hash = hashlib.sha256(scope_material.encode("utf-8")).hexdigest()
+        if payload.get("authz_scope_hash") and payload.get("authz_scope_hash") != scope_hash:
+            raise ValueError("Authorization scope changed")
         websocket.state.user_role = str(user.role or "")
+        websocket.state.user_id = int(user.id)
+        websocket.state.user_project_ids = assigned_projects
+        websocket.state.authz_scope_hash = scope_hash
+        websocket.state.ws_channel = channel
     except (jwt.InvalidTokenError, ValueError):
         await websocket.close(code=1008, reason="Invalid authentication")
         return False
@@ -85,6 +141,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
 
 @router.websocket("/ws/updates")
 @router.websocket("/ws/admin")
+@router.websocket("/ws/operations")
 async def websocket_endpoint(websocket: WebSocket):
     if not await _authorize_websocket(websocket):
         return
@@ -146,28 +203,46 @@ async def read_root(request: Request):
     if legacy_view in {"admin", "management"}:
         return RedirectResponse(url="/management", status_code=307)
     if legacy_view in {"map", "login"}:
-        return RedirectResponse(url="/", status_code=307)
-
-    file_path = FRONTEND_DIR / "index.html"
-    if file_path.exists():
-        return FileResponse(file_path, media_type="text/html; charset=utf-8")
-    return {"error": "Frontend not found"}
+        return RedirectResponse(url=f"/{legacy_view}", status_code=307)
+    return _frontend_document("index.html")
 
 @router.get("/management")
 @router.get("/management.html")
 @router.get("/admin")
 @router.get("/admin.html")
 async def read_app():
-    file_path = FRONTEND_DIR / "app.html"
-    if file_path.exists():
-        return FileResponse(file_path, media_type="text/html; charset=utf-8")
-    return {"error": "Frontend not found"}
+    return _frontend_document("app.html", private=True)
 
 @router.get("/map")
+async def read_map():
+    return _frontend_document("map.html")
+
+
 @router.get("/login")
-async def read_map_or_login():
-    """Serve the route-aware application shell for stable deep links."""
-    file_path = FRONTEND_DIR / "app.html"
-    if file_path.exists():
-        return FileResponse(file_path, media_type="text/html; charset=utf-8")
-    return {"error": "Frontend not found"}
+async def read_login():
+    return _frontend_document("app.html", private=True)
+
+
+@router.get("/robots.txt")
+async def robots_txt():
+    site_url = settings.PUBLIC_SITE_URL.rstrip("/")
+    if settings.ENVIRONMENT.lower() != "production":
+        return PlainTextResponse("User-agent: *\nDisallow: /\n")
+    return PlainTextResponse(
+        f"User-agent: *\nDisallow: /api/\nDisallow: /ws/\nSitemap: {site_url}/sitemap.xml\n"
+    )
+
+
+@router.get("/sitemap.xml")
+async def sitemap_xml():
+    if settings.ENVIRONMENT.lower() != "production":
+        return Response(status_code=404)
+    site_url = settings.PUBLIC_SITE_URL.rstrip("/")
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f'<url><loc>{site_url}/</loc></url>'
+        f'<url><loc>{site_url}/map</loc></url>'
+        '</urlset>'
+    )
+    return Response(content=xml, media_type="application/xml")

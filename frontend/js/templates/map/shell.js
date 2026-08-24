@@ -10,8 +10,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
             </button>
 
             <a href="#" class="brand-text" data-map-home>
-                <i class="bi bi-activity"></i>
-                <span>Landslide Monitor</span>
+                <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
+                <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
             </a>
 
             <button type="button" id="btn-digital-twin" class="btn btn-sm map-simulation-nav"
@@ -33,9 +33,15 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <span class="layer-mode-option rescue-mode" id="icon-layer-rescue"><i class="bi bi-life-preserver"></i><span>Cứu hộ</span></span>
             </label>
 
-            <!-- Hidden checkboxes for JS compatibility -->
-            <input type="checkbox" id="layer-station" class="d-none" checked>
-            <input type="checkbox" id="layer-rescue" class="d-none" checked>
+            <div class="map-layer-control">
+                <button type="button" id="layer-popover-toggle" class="map-icon-button" aria-label="Chọn lớp bản đồ" aria-expanded="false" aria-controls="layer-popover"><i class="bi bi-layers"></i></button>
+                <fieldset id="layer-popover" class="map-layer-popover" hidden><legend>Lớp hiển thị</legend>
+                    <label><input type="checkbox" id="layer-station" checked><span><i class="bi bi-broadcast-pin"></i> Trạm quan trắc</span></label>
+                    <label><input type="checkbox" id="layer-cors" checked><span><i class="bi bi-crosshair"></i> Trạm CORS base</span></label>
+                    <label><input type="checkbox" id="layer-rescue" checked><span><i class="bi bi-life-preserver"></i> Yêu cầu cứu hộ</span></label>
+                    <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Heatmap cứu hộ</span></label>
+                </fieldset>
+            </div>
 
             <button id="theme-toggle-btn" class="map-icon-button" aria-label="Chuyển giao diện sáng tối">
                 <i class="bi bi-moon-stars-fill"></i>
@@ -115,8 +121,10 @@ window.LegacyTemplateParts['shell'] = String.raw`
     </div>
 
     <aside class="map-status-legend" aria-label="Chú giải trạng thái trạm">
-        <span><i class="status-dot is-online"></i>Trực tuyến</span>
-        <span><i class="status-dot is-stale"></i>Mất tín hiệu</span>
+        <span><i class="status-dot is-safe"></i>An toàn</span>
+        <span><i class="status-dot is-warning"></i>Cảnh báo</span>
+        <span><i class="status-dot is-critical"></i>Nguy cấp</span>
+        <span><i class="status-dot is-stale"></i>Dữ liệu cũ</span>
         <span><i class="status-dot is-offline"></i>Ngoại tuyến</span>
     </aside>
 

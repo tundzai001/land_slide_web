@@ -558,7 +558,8 @@ function renderRainfallCorrelationSection(data) {
 // MULTI-WINDOW ANALYSIS SECTION (CALENDAR INTERVALS)
 // =========================================================================
 function formatDisplacementString(valMm, decimals = 1) {
-    const val = parseFloat(valMm) || 0;
+    const val = Number(valMm);
+    if (!Number.isFinite(val)) return '--';
     if (Math.abs(val) >= 10) {
         return `${(val / 10).toFixed(decimals)} cm`;
     }
@@ -856,7 +857,7 @@ function renderStaleInfo(data, mqttConnected, latestSensorTs) {
     }
 
     const ageText = formatAgeFromTimestamp(latestSensorTs);
-    const localTime = new Date(latestSensorTs * 1000).toLocaleString('vi-VN');
+    const localTime = new Date(normalizeEpochMs(latestSensorTs)).toLocaleString('vi-VN');
 
     if (!mqttConnected) {
         staleEl.innerHTML = `<span class="badge-label">MẤT KẾT NỐI</span> Dữ liệu cuối: ${ageText} (${localTime})`;
@@ -873,4 +874,3 @@ function renderStaleInfo(data, mqttConnected, latestSensorTs) {
     staleEl.style.display = 'none';
     staleEl.innerHTML = '';
 }
-

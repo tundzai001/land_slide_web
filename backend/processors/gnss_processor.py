@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 A_WGS84 = 6378137.0
 F_WGS84 = 1 / 298.257223563
 E2_WGS84 = 2 * F_WGS84 - F_WGS84**2
+GNSS_RUNTIME_STATE_VERSION = 1
+GNSS_RUNTIME_STATE_SAVE_INTERVAL_S = 15.0
 
 def haversine_2d(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -66,6 +68,8 @@ class GNSSVelocityProcessor:
         self._last_handled_reference_event_ts = None
         self._reference_transition = None
         self._last_origin_candidate_ts = None
+        self._origin_locked_at = None
+        self._origin_record_id = None
 
         # State
         self.state = "AWAITING_CANDIDATES"
@@ -85,6 +89,18 @@ class GNSSVelocityProcessor:
         self.peak_displacement_mm = 0.0
         self.tracking_offset_enu = np.zeros(3, dtype=float)
         self._last_reacquire_ts = 0.0
+        self._needs_boot_anchor = True
+        self._quarantine_checkpointed = False
+        # Do not consume a GGA sample while the immutable origin/checkpoint
+        # load is still in flight.  Otherwise a restart can collect a fresh
+        # origin before the persisted safety state is restored.
+        self._initialization_complete = False
+        self._initialization_task = None
+        self._runtime_state_save_task = None
+        self._runtime_state_dirty = False
+        self._runtime_state_pending_snapshot = None
+        self._runtime_state_pending_offset = None
+        self._last_runtime_state_schedule_monotonic = 0.0
 
         self.stats = {
             'total_processed': 0,
@@ -104,6 +120,7 @@ class GNSSVelocityProcessor:
         """Signal that CORS base / datum reference changed; allows tracking reacquire within time window."""
         self._reference_changed_at = timestamp or time.time()
         self._reference_change_source = source
+        self._schedule_runtime_state_save(force=True)
         logger.info(f"[{self._log_prefix()}] Reference frame change marked (source: {source})")
 
     def is_reference_changed_recently(self, current_ts: float, window_s: float = 300.0) -> bool:
@@ -118,6 +135,8 @@ class GNSSVelocityProcessor:
     def _normalize_epoch_timestamp(value) -> Optional[float]:
         try:
             timestamp = float(value)
+            if not math.isfinite(timestamp):
+                return None
             return timestamp / 1000.0 if timestamp > 1e11 else timestamp
         except (TypeError, ValueError):
             return None
@@ -133,6 +152,275 @@ class GNSSVelocityProcessor:
         ):
             raise ValueError(f"invalid persisted tracking offset: {offset}")
         return offset
+
+    def _runtime_state_key(self) -> str:
+        return f"gnss_runtime_state:{self.device_id}"
+
+    def _runtime_origin_identity(self):
+        origin = getattr(self, "origin", None)
+        locked_at = self._normalize_epoch_timestamp(getattr(self, "_origin_locked_at", None))
+        origin_record_id = getattr(self, "_origin_record_id", None)
+        if not origin or locked_at is None or origin_record_id is None:
+            return None
+        try:
+            identity = {
+                "id": int(origin_record_id),
+                "locked_at": int(locked_at),
+                "lat": float(origin["lat"]),
+                "lon": float(origin["lon"]),
+                "h": float(origin["h"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            return None
+        return identity if all(math.isfinite(identity[key]) for key in ("lat", "lon", "h")) else None
+
+    @staticmethod
+    def _validated_runtime_vector(value, name):
+        vector = np.asarray(value, dtype=float)
+        if vector.shape != (3,) or not np.all(np.isfinite(vector)) or np.max(np.abs(vector)) > 1_000_000.0:
+            raise ValueError(f"invalid {name}: {vector}")
+        return vector
+
+    def _runtime_state_snapshot(self):
+        identity = self._runtime_origin_identity()
+        history = getattr(self, "history", None)
+        if identity is None or not history:
+            return None
+        last = history[-1]
+        if not isinstance(last, dict) or "ts" not in last or "pos_enu" not in last:
+            return None
+        last_ts = self._normalize_epoch_timestamp(last["ts"])
+        if last_ts is None:
+            return None
+        try:
+            last_position = self._validated_runtime_vector(last["pos_enu"], "last trusted ENU")
+            displacement = self._validated_runtime_vector(
+                getattr(self, "disp_enu_state", np.zeros(3, dtype=float)),
+                "displacement ENU",
+            )
+            tracking_offset = self._validated_tracking_offset(
+                getattr(self, "tracking_offset_enu", np.zeros(3, dtype=float))
+            )
+        except (TypeError, ValueError):
+            return None
+
+        candidates = []
+        for candidate in list(getattr(self, "reacquire_candidates", ()))[:10]:
+            try:
+                candidate_ts = self._normalize_epoch_timestamp(candidate["ts"])
+                candidate_position = self._validated_runtime_vector(candidate["pos_enu"], "quarantine ENU")
+                if candidate_ts is None:
+                    continue
+                candidates.append({
+                    "ts": candidate_ts,
+                    "pos_enu": candidate_position.tolist(),
+                    "fix_quality": int(candidate.get("fix_quality", self.min_fix_quality)),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        shift_started_at = self._normalize_epoch_timestamp(getattr(self, "_shift_started_at", None))
+        quarantine = (
+            {"started_at": shift_started_at, "candidates": candidates}
+            if candidates and shift_started_at is not None else None
+        )
+        reference_changed_at = self._normalize_epoch_timestamp(getattr(self, "_reference_changed_at", None))
+        last_handled_event = self._normalize_epoch_timestamp(
+            getattr(self, "_last_handled_reference_event_ts", None)
+        )
+        peak_mm = float(getattr(self, "peak_displacement_mm", 0.0))
+        if not math.isfinite(peak_mm):
+            return None
+        reference_source = getattr(self, "_reference_change_source", None)
+        if reference_source is not None and not isinstance(reference_source, str):
+            reference_source = str(reference_source)
+        return {
+            "version": GNSS_RUNTIME_STATE_VERSION,
+            "origin": identity,
+            "tracking_offset_enu": tracking_offset.tolist(),
+            "last_trusted": {"gga_timestamp": last_ts, "pos_enu": last_position.tolist()},
+            "displacement": {
+                "enu": displacement.tolist(),
+                "ready": bool(getattr(self, "disp_state_ready", False)),
+                "peak_mm": max(0.0, peak_mm),
+            },
+            "last_reacquire_ts": self._normalize_epoch_timestamp(
+                getattr(self, "_last_reacquire_ts", 0.0)
+            ) or 0.0,
+            "reference_event": {
+                "changed_at": reference_changed_at,
+                "source": reference_source,
+                "last_handled_at": last_handled_event,
+            },
+            "quarantine": quarantine,
+            "updated_at": int(time.time()),
+        }
+
+    def _restore_runtime_state(self, value) -> bool:
+        """Restore only a checkpoint tied to this exact immutable origin and offset."""
+        self._needs_boot_anchor = True
+        try:
+            if not isinstance(value, dict) or value.get("version") != GNSS_RUNTIME_STATE_VERSION:
+                return False
+            expected_origin = self._runtime_origin_identity()
+            stored_origin = value.get("origin")
+            if expected_origin is None or not isinstance(stored_origin, dict):
+                return False
+            if int(stored_origin.get("locked_at")) != expected_origin["locked_at"]:
+                return False
+            if int(stored_origin.get("id")) != expected_origin["id"]:
+                return False
+            for key, tolerance in (("lat", 1e-10), ("lon", 1e-10), ("h", 1e-4)):
+                if not math.isclose(
+                    float(stored_origin.get(key)), expected_origin[key], rel_tol=0.0, abs_tol=tolerance
+                ):
+                    return False
+
+            stored_offset = self._validated_tracking_offset(value.get("tracking_offset_enu"))
+            current_offset = self._validated_tracking_offset(
+                getattr(self, "tracking_offset_enu", np.zeros(3, dtype=float))
+            )
+            if not np.allclose(stored_offset, current_offset, rtol=0.0, atol=1e-7):
+                return False
+
+            trusted = value.get("last_trusted")
+            displacement = value.get("displacement")
+            if not isinstance(trusted, dict) or not isinstance(displacement, dict):
+                return False
+            trusted_ts = self._normalize_epoch_timestamp(trusted.get("gga_timestamp"))
+            trusted_position = self._validated_runtime_vector(trusted.get("pos_enu"), "last trusted ENU")
+            displacement_position = self._validated_runtime_vector(displacement.get("enu"), "displacement ENU")
+            displacement_ready = displacement.get("ready")
+            peak_mm = float(displacement.get("peak_mm"))
+            if (
+                trusted_ts is None or trusted_ts <= 0.0
+                or not isinstance(displacement_ready, bool)
+                or not math.isfinite(peak_mm) or peak_mm < 0.0
+            ):
+                return False
+
+            last_reacquire_ts = self._normalize_epoch_timestamp(value.get("last_reacquire_ts", 0.0))
+            if last_reacquire_ts is None or last_reacquire_ts < 0.0:
+                return False
+            reference_event = value.get("reference_event") or {}
+            if not isinstance(reference_event, dict):
+                return False
+            reference_changed_at = self._normalize_epoch_timestamp(reference_event.get("changed_at"))
+            last_handled_event = self._normalize_epoch_timestamp(reference_event.get("last_handled_at"))
+            reference_source = reference_event.get("source")
+            if reference_source is not None and not isinstance(reference_source, str):
+                return False
+
+            restored_candidates = []
+            quarantine = value.get("quarantine")
+            shift_started_at = None
+            if quarantine is not None:
+                if not isinstance(quarantine, dict) or not isinstance(quarantine.get("candidates"), list):
+                    return False
+                shift_started_at = self._normalize_epoch_timestamp(quarantine.get("started_at"))
+                if shift_started_at is None or shift_started_at < trusted_ts:
+                    return False
+                for candidate in quarantine["candidates"][-10:]:
+                    if not isinstance(candidate, dict):
+                        return False
+                    candidate_ts = self._normalize_epoch_timestamp(candidate.get("ts"))
+                    candidate_position = self._validated_runtime_vector(
+                        candidate.get("pos_enu"), "quarantine ENU"
+                    )
+                    fix_quality = int(candidate.get("fix_quality"))
+                    if candidate_ts is None or candidate_ts <= trusted_ts:
+                        return False
+                    restored_candidates.append({
+                        "ts": candidate_ts,
+                        "pos_enu": candidate_position,
+                        "fix_quality": fix_quality,
+                    })
+                if not restored_candidates:
+                    return False
+
+            self.history.clear()
+            self.history.append({"ts": trusted_ts, "pos_enu": trusted_position})
+            self.reacquire_candidates.clear()
+            self.reacquire_candidates.extend(restored_candidates)
+            self.disp_enu_state = displacement_position
+            self.disp_state_ready = displacement_ready
+            self.peak_displacement_mm = peak_mm
+            self._last_reacquire_ts = last_reacquire_ts
+            self._reference_changed_at = reference_changed_at
+            self._reference_change_source = reference_source
+            self._last_handled_reference_event_ts = last_handled_event
+            self._shift_started_at = shift_started_at
+            self._consecutive_rejects = len(restored_candidates)
+            self._quarantine_checkpointed = bool(restored_candidates)
+            self._needs_boot_anchor = False
+            return True
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+
+    async def _async_save_runtime_state(self, snapshot) -> bool:
+        if snapshot is None:
+            return False
+        try:
+            from app.models.config import GlobalConfig
+            from sqlalchemy import select
+
+            async with self.db_session_factory() as db:
+                result = await db.execute(select(GlobalConfig).where(GlobalConfig.key == self._runtime_state_key()))
+                existing = result.scalar_one_or_none()
+                now = int(time.time())
+                if existing:
+                    existing.value = snapshot
+                    existing.updated_at = now
+                    existing.updated_by = "gnss_processor"
+                else:
+                    db.add(GlobalConfig(
+                        key=self._runtime_state_key(),
+                        value=snapshot,
+                        updated_at=now,
+                        updated_by="gnss_processor",
+                    ))
+                await db.commit()
+            return True
+        except Exception as exc:
+            logger.error(f"[{self._log_prefix()}] Failed to persist GNSS runtime state: {exc}")
+            return False
+
+    async def _runtime_state_save_loop(self):
+        try:
+            while getattr(self, "_runtime_state_dirty", False):
+                self._runtime_state_dirty = False
+                snapshot = self._runtime_state_pending_snapshot
+                offset = self._runtime_state_pending_offset
+                self._runtime_state_pending_snapshot = None
+                self._runtime_state_pending_offset = None
+                if offset is not None and not await self._async_save_tracking_offset(offset):
+                    continue
+                await self._async_save_runtime_state(snapshot)
+        finally:
+            self._runtime_state_save_task = None
+
+    def _schedule_runtime_state_save(self, *, force=False, persist_tracking_offset=False):
+        if not getattr(self, "db_session_factory", None):
+            return
+        now = time.monotonic()
+        last = getattr(self, "_last_runtime_state_schedule_monotonic", 0.0)
+        if not force and now - last < GNSS_RUNTIME_STATE_SAVE_INTERVAL_S:
+            return
+        snapshot = self._runtime_state_snapshot()
+        if snapshot is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._last_runtime_state_schedule_monotonic = now
+        self._runtime_state_pending_snapshot = snapshot
+        if persist_tracking_offset:
+            self._runtime_state_pending_offset = np.asarray(self.tracking_offset_enu, dtype=float).copy()
+        self._runtime_state_dirty = True
+        task = getattr(self, "_runtime_state_save_task", None)
+        if task is None or task.done():
+            self._runtime_state_save_task = loop.create_task(self._runtime_state_save_loop())
 
     def _integrity_config(self, station_config: Dict) -> Dict[str, float]:
         config = (station_config or {}).get("GnssIntegrity") or (station_config or {}).get("gnss_integrity") or {}
@@ -173,6 +461,7 @@ class GNSSVelocityProcessor:
         if self._normalize_epoch_timestamp(getattr(self, "_reference_changed_at", None)) == event_ts:
             self._reference_changed_at = None
             self._reference_change_source = None
+        self._schedule_runtime_state_save(force=True)
 
     @staticmethod
     def _shift_data(
@@ -285,11 +574,8 @@ class GNSSVelocityProcessor:
             } for candidate in candidates)
             self.reacquire_candidates.clear()
             self._consecutive_rejects = 0
-            try:
-                import asyncio
-                asyncio.get_running_loop().create_task(self._async_save_tracking_offset())
-            except RuntimeError:
-                pass
+            self._quarantine_checkpointed = False
+            self._schedule_runtime_state_save(force=True, persist_tracking_offset=True)
             return {
                 "type": "gnss_status",
                 "status": "TRACKING_REACQUIRED",
@@ -336,9 +622,18 @@ class GNSSVelocityProcessor:
         self.peak_displacement_mm = 0.0
         self.tracking_offset_enu = np.zeros(3, dtype=float)
         self._last_reacquire_ts = 0.0
+        self._needs_boot_anchor = True
+        self._quarantine_checkpointed = False
+        self._runtime_state_save_task = None
+        self._runtime_state_dirty = False
+        self._runtime_state_pending_snapshot = None
+        self._runtime_state_pending_offset = None
+        self._last_runtime_state_schedule_monotonic = 0.0
         self._last_handled_reference_event_ts = None
         self._reference_transition = None
         self._last_origin_candidate_ts = None
+        self._origin_locked_at = None
+        self._origin_record_id = None
         self.last_process_time = 0
         logger.info(f"🔄 [GNSS] Origin reset for device {self.device_id}")
         return True
@@ -434,17 +729,20 @@ class GNSSVelocityProcessor:
             import asyncio
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._async_load_origin_task())
+                self._initialization_task = loop.create_task(self._async_load_origin_task())
             except RuntimeError:
                 logger.warning(f"⚠️ Device {self.device_id}: Init outside event loop, origin will be collected manually.")
+                self._initialization_complete = True
         except Exception as e:
             logger.error(f"❌ Device {self.device_id}: Error scheduling DB load: {e}")
+            self._initialization_complete = True
 
     async def _async_load_origin_task(self):
         try:
-            from app.models.config import GNSSOrigin
+            from app.models.config import GlobalConfig, GNSSOrigin
             from sqlalchemy import select
-            
+
+            runtime_state = None
             async with self.db_session_factory() as db:
                 try:
                     result = await db.execute(
@@ -457,7 +755,8 @@ class GNSSVelocityProcessor:
                     result = await db.execute(
                         select(
                             GNSSOrigin.lat, GNSSOrigin.lon, GNSSOrigin.h,
-                            GNSSOrigin.rotation_matrix, GNSSOrigin.ecef_origin
+                            GNSSOrigin.rotation_matrix, GNSSOrigin.ecef_origin,
+                            GNSSOrigin.locked_at, GNSSOrigin.id,
                         ).where(GNSSOrigin.device_id == self.device_id)
                     )
                     row = result.first()
@@ -465,10 +764,23 @@ class GNSSVelocityProcessor:
                         origin_record = type('SimpleOrigin', (), {
                             'lat': row[0], 'lon': row[1], 'h': row[2],
                             'rotation_matrix': row[3], 'ecef_origin': row[4],
+                            'locked_at': row[5],
+                            'id': row[6],
                             'tracking_offset': None
                         })()
                     else:
                         origin_record = None
+
+                try:
+                    runtime_result = await db.execute(
+                        select(GlobalConfig).where(GlobalConfig.key == self._runtime_state_key())
+                    )
+                    runtime_record = runtime_result.scalar_one_or_none()
+                    runtime_state = runtime_record.value if runtime_record else None
+                except Exception as runtime_err:
+                    logger.warning(
+                        f"[{self._log_prefix()}] GNSS runtime checkpoint unavailable: {runtime_err}"
+                    )
             
             if origin_record:
                 # Validate dữ liệu trước khi dùng
@@ -480,6 +792,8 @@ class GNSSVelocityProcessor:
                         'R': np.array(origin_record.rotation_matrix),
                         'ecef': np.array(origin_record.ecef_origin)
                     }
+                    self._origin_locked_at = getattr(origin_record, 'locked_at', None)
+                    self._origin_record_id = getattr(origin_record, 'id', None)
                     if getattr(origin_record, 'tracking_offset', None):
                         try:
                             self.tracking_offset_enu = self._validated_tracking_offset(origin_record.tracking_offset)
@@ -487,12 +801,24 @@ class GNSSVelocityProcessor:
                         except Exception as ex:
                             logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
                     self.state = "ORIGIN_LOCKED"
+                    if self._restore_runtime_state(runtime_state):
+                        logger.info(
+                            f"✅ [ASYNC LOAD] Restored GNSS safety checkpoint for device {self.device_id}"
+                        )
+                    else:
+                        self._needs_boot_anchor = True
+                        logger.warning(
+                            f"[{self._log_prefix()}] No matching GNSS safety checkpoint; "
+                            "first FIXED sample will be checked against the locked zero-ENU baseline"
+                        )
                     logger.info(f"✅ [ASYNC LOAD] Loaded origin for device {self.device_id}: ({origin_record.lat}, {origin_record.lon})")
                 else:
                     logger.warning(f"⚠️ Device {self.device_id}: Found origin record but matrix data is missing.")
             
         except Exception as e:
             logger.error(f"❌ Device {self.device_id}: Failed to load origin from DB: {repr(e)}")
+        finally:
+            self._initialization_complete = True
 
     async def _save_origin_to_db(self):
         """✅ Lưu origin vào DB và đồng bộ vào Station Config"""
@@ -523,6 +849,8 @@ class GNSSVelocityProcessor:
                         'R': np.array(existing.rotation_matrix),
                         'ecef': np.array(existing.ecef_origin),
                     }
+                    self._origin_locked_at = existing.locked_at
+                    self._origin_record_id = existing.id
                     if getattr(existing, 'tracking_offset', None) and np.all(self.tracking_offset_enu == 0.0):
                         try:
                             self.tracking_offset_enu = self._validated_tracking_offset(existing.tracking_offset)
@@ -534,12 +862,14 @@ class GNSSVelocityProcessor:
                     )
                 else:
                     is_new_origin = True
+                    locked_at = int(time.time())
+                    self._origin_locked_at = locked_at
                     new_origin = GNSSOrigin(
                         device_id=self.device_id,
                         lat=self.origin['lat'],
                         lon=self.origin['lon'],
                         h=self.origin['h'],
-                        locked_at=int(time.time()),
+                        locked_at=locked_at,
                         spread_meters=0.0,
                         num_points=len(self.origin_candidates),
                         rotation_matrix=rot_matrix,
@@ -547,6 +877,8 @@ class GNSSVelocityProcessor:
                         tracking_offset=tracking_offset_list
                     )
                     db.add(new_origin)
+                    await db.flush()
+                    self._origin_record_id = new_origin.id
                 
                 # 2. ✅ Đồng bộ ngược vào Station.config['gnss_origin'] (dành cho UI Admin)
                 # Tìm station_id từ device_id
@@ -753,6 +1085,11 @@ class GNSSVelocityProcessor:
         self._reference_transition = None
         self._consecutive_rejects = 0
         self.reacquire_candidates.clear()
+        self._quarantine_checkpointed = False
+        self._schedule_runtime_state_save(force=True)
+        runtime_save_task = getattr(self, "_runtime_state_save_task", None)
+        if runtime_save_task is not None:
+            await asyncio.shield(runtime_save_task)
 
         return {
             "device_id": self.device_id,
@@ -773,6 +1110,14 @@ class GNSSVelocityProcessor:
 
     def process_gngga(self, raw_payload: str, station_config: Dict = None) -> Optional[Dict[str, Any]]:
         status_type = 'origin_status' if self.state == "AWAITING_CANDIDATES" else 'gnss_status'
+        if not getattr(self, "_initialization_complete", True):
+            return {
+                "type": status_type,
+                "status": "INITIALIZING",
+                "fix_quality": None,
+                "fix_mode": "UNKNOWN",
+                "message": "Waiting for persisted GNSS origin and safety checkpoint"
+            }
         try:
             # Extract câu GGA từ bất kỳ vị trí nào trong string.
             # Lấy trọn vẹn câu GGA để validate checksum chính xác (không strip *XX)
@@ -918,6 +1263,7 @@ class GNSSVelocityProcessor:
                     'ecef': self._gngga_to_ecef(center_lat, center_lon, center_h)
                 }
                 self.state = "ORIGIN_LOCKED"
+                self._needs_boot_anchor = True
                 logger.info(
                     f"ORIGIN LOCKED (Device {self.device_id}): ({center_lat:.6f}, {center_lon:.6f}, {center_h:.3f}m), "
                     f"Spread XY: {max_dist_xy:.3f}m (max={max_xy}m), U: {max_dist_u:.3f}m (max={max_u}m)"
@@ -1013,6 +1359,16 @@ class GNSSVelocityProcessor:
         # Subtract tracking_offset_enu so that the reacquired baseline reference is applied to every incoming sample
         pos_enu = pos_enu_raw - getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
 
+        # Never let the first post-restart fix silently become the trusted baseline.
+        # A persisted checkpoint is preferred; zero ENU is the conservative fallback.
+        if getattr(self, "_needs_boot_anchor", False):
+            if not self.history:
+                self.history.append({
+                    "ts": ts - 1.0,
+                    "pos_enu": np.zeros(3, dtype=float),
+                })
+            self._needs_boot_anchor = False
+
         reference_result = self._handle_reference_transition(
             ts, pos_enu, fix_quality, station_config, raw_payload or gngga_string,
         )
@@ -1070,8 +1426,10 @@ class GNSSVelocityProcessor:
         stale_reference = dt > 60.0
 
         if is_spike:
-            if not self.reacquire_candidates:
+            quarantine_started = not self.reacquire_candidates
+            if quarantine_started:
                 self._shift_started_at = ts
+                self._quarantine_checkpointed = False
             self._consecutive_rejects += 1
             self.stats['spike_rejected'] += 1
             self.history.pop()
@@ -1080,6 +1438,7 @@ class GNSSVelocityProcessor:
                 'pos_enu': pos_enu,
                 'fix_quality': fix_quality,
             })
+            self._schedule_runtime_state_save(force=quarantine_started)
 
             persistent_offset = False
             candidate_offset_2d_m = None
@@ -1166,17 +1525,13 @@ class GNSSVelocityProcessor:
                     } for candidate in self.reacquire_candidates)
                     self.reacquire_candidates.clear()
                     self._consecutive_rejects = 0
+                    self._quarantine_checkpointed = False
                     logger.info(
                         f"[{self._log_prefix()}] Tracking reacquired after verified reference shift (duration={persistent_shift_duration_s:.1f}s): "
                         f"offset2d={candidate_offset_2d_m:.3f}m, offsetU={candidate_offset_u_m:.3f}m. "
                         "Locked origin and last accepted displacement preserved."
                     )
-                    try:
-                        import asyncio
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(self._async_save_tracking_offset())
-                    except RuntimeError:
-                        pass
+                    self._schedule_runtime_state_save(force=True, persist_tracking_offset=True)
 
                     return {
                         "type": "gnss_status",
@@ -1193,6 +1548,9 @@ class GNSSVelocityProcessor:
                     }
 
                 if persistent_offset and persistent_shift_duration_ok and (offset_too_large or accumulated_too_much or in_cooldown or not reacquire_allowed):
+                    if not getattr(self, "_quarantine_checkpointed", False):
+                        self._quarantine_checkpointed = True
+                        self._schedule_runtime_state_save(force=True)
                     # Log why reacquire was refused (only once per 60s to reduce spam).
                     if not hasattr(self, '_last_reacquire_refused_log_ts'):
                         self._last_reacquire_refused_log_ts = 0.0
@@ -1252,9 +1610,12 @@ class GNSSVelocityProcessor:
             }
 
         # Good sample accepted — reset consecutive reject counter
+        quarantine_cleared = bool(self.reacquire_candidates)
         self._consecutive_rejects = 0
         self._shift_started_at = None
         self.reacquire_candidates.clear()
+        self._quarantine_checkpointed = False
+        self._schedule_runtime_state_save(force=quarantine_cleared)
 
         gnss_alert_cfg = (station_config or {}).get("GnssAlerting", {}) if isinstance(station_config, dict) else {}
         try:

@@ -9,7 +9,7 @@
     backdrop-filter: blur(12px) saturate(180%);
     -webkit-backdrop-filter: blur(12px) saturate(180%);
     border-right: 1px solid var(--border-color);
-    z-index: 1800;
+    z-index: var(--z-drawer);
     transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
@@ -120,7 +120,7 @@
     font-size: 1rem;
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 1060;
+    z-index: var(--z-popover);
 }
 
 .sidebar-close-tab:hover {
@@ -180,7 +180,7 @@
     backdrop-filter: blur(12px) saturate(180%);
     -webkit-backdrop-filter: blur(12px) saturate(180%);
     border-right: 1px solid var(--border-color);
-    z-index: 1800;
+    z-index: var(--z-drawer);
     transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
     overflow-y: auto;
     box-shadow: var(--glass-shadow);
@@ -204,7 +204,7 @@ body.map-is-moving .detail-sidebar,
     position: absolute;
     top: 16px;
     right: 16px;
-    z-index: 1050;
+    z-index: var(--z-popover);
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -306,6 +306,37 @@ body.map-is-moving .detail-sidebar,
     border: 1px solid transparent;
     line-height: 1;
     white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Keep status badges inside the sensor card at narrow desktop/tablet widths. */
+.sensor-label {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 5px 6px;
+    min-width: 0;
+    align-items: start !important;
+}
+
+.sensor-label > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.sensor-label > .gnss-fix-badge,
+.sensor-label > .sensor-offline-badge,
+.sensor-label > .imu-offline-badge {
+    justify-self: end;
+    min-width: 0;
+}
+
+.sensor-label > .sensor-offline-badge,
+.sensor-label > .imu-offline-badge {
+    grid-column: 2;
+    grid-row: 2;
 }
 
 .gnss-fix-badge.GNSS_RTK_FIXED {

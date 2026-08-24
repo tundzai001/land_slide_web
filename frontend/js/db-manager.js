@@ -11,6 +11,8 @@ class DatabaseManager {
         this.offset = 0;
         this.limit = 50;
         this.total = 0;
+        this.hasMore = false;
+        this.hasExactTotal = true;
         this.sort = '-id';
         this.searchTimer = null;
         this.selectedRecord = null;
@@ -26,6 +28,9 @@ class DatabaseManager {
         this.exportDownloadStarted = false;
         this.datasetLoadSequence = 0;
         this.datasetRequestController = null;
+        this.statsTimer = null;
+        this.statsPromise = null;
+        this.statsLoaded = false;
 
         if (!this.token) {
             window.SPA_SUPPRESS_AUTO_MAP_ON_LANDING = true;
@@ -54,7 +59,7 @@ class DatabaseManager {
             });
         }
         const dbSidebarLink = document.querySelector('[data-tab="tab-database"]');
-        if (dbSidebarLink) {
+        if (dbSidebarLink && !window.adminManager?.switchTab) {
             dbSidebarLink.addEventListener('click', () => {
                 this.loadAllData();
             });
@@ -91,7 +96,7 @@ class DatabaseManager {
         document.getElementById('db-current-meta').textContent = 'Đang đồng bộ dữ liệu…';
         try {
             await this.fetchCurrentDataset(this.datasetRequestController.signal);
-            if (loadSequence === this.datasetLoadSequence) this.fetchStats();
+            if (loadSequence === this.datasetLoadSequence) this.scheduleStats();
         } catch (e) {
             if (e.name === 'AbortError' || loadSequence !== this.datasetLoadSequence) return;
             console.error('[DB MANAGER] load error:', e);
@@ -112,17 +117,32 @@ class DatabaseManager {
 
     async fetchCurrentDataset(signal) {
         const config = this.datasetConfig();
-        const query = new URLSearchParams({ offset: String(this.offset), limit: String(this.limit), sort: this.sort });
+        const sort = ['sensor_data', 'gnss_adjustments'].includes(this.currentDataset)
+            ? (this.sort === 'id' ? 'timestamp' : '-timestamp')
+            : this.sort;
+        const query = new URLSearchParams({ offset: String(this.offset), limit: String(this.limit), sort });
         const search = document.getElementById('db-search')?.value.trim() || '';
         if (search && ['stations', 'devices'].includes(this.currentDataset)) query.set('q', search);
         Object.entries(this.filters).forEach(([key, value]) => {
             if (value !== '' && value != null) query.set(key, value);
         });
-        if (this.currentDataset === 'gnss_adjustments') query.set('sensor_type', 'gnss_adjusted');
+        if (this.currentDataset === 'gnss_adjustments') {
+            query.set('sensor_type', 'gnss_adjusted');
+            query.set('include_internal', 'true');
+        }
+        if (['sensor_data', 'gnss_adjustments'].includes(this.currentDataset)) {
+            query.set('include_total', 'false');
+            query.set('include_data', 'false');
+        }
         const res = await fetch(`/api/admin/db/${config.endpoint}?${query}`, { headers: { 'Authorization': `Bearer ${this.token}` }, signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const rows = await res.json();
-        this.total = Number(res.headers.get('X-Total-Count') || rows.length || 0);
+        const totalHeader = res.headers.get('X-Total-Count');
+        this.hasExactTotal = totalHeader !== null;
+        this.hasMore = res.headers.get('X-Has-More') === 'true';
+        this.total = this.hasExactTotal
+            ? Number(totalHeader || 0)
+            : this.offset + rows.length + (this.hasMore ? 1 : 0);
         this.allData = rows.map(row => ({ ...row, _table: this.currentDataset }));
         this.filteredData = search && !['stations', 'devices'].includes(this.currentDataset)
             ? this.allData.filter(row => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
@@ -175,7 +195,13 @@ class DatabaseManager {
             ],
             sensor_data: [
                 this.filterSelect('Trạm', 'station_id', stationOptions),
-                this.filterSelect('Loại sensor', 'sensor_type', [{ value: '', label: 'Tất cả sensor' }, ...['gnss', 'imu', 'rain', 'water', 'gnss_audit', 'gnss_adjusted'].map(value => ({ value, label: value.toUpperCase() }))]),
+                this.filterSelect('Loại cảm biến', 'sensor_type', [
+                    { value: '', label: 'Tất cả sensor' },
+                    { value: 'gnss', label: 'GNSS' },
+                    { value: 'imu', label: 'IMU' },
+                    { value: 'rain', label: 'Mưa' },
+                    { value: 'water', label: 'Mực nước' },
+                ]),
             ],
             gnss_adjustments: [
                 this.filterSelect('Trạm', 'station_id', stationOptions),
@@ -216,7 +242,8 @@ class DatabaseManager {
 
     changePage(direction) {
         const nextOffset = this.offset + direction * this.limit;
-        if (nextOffset < 0 || nextOffset >= this.total) return;
+        if (nextOffset < 0 || (direction > 0 && !this.hasMore && !this.hasExactTotal)) return;
+        if (this.hasExactTotal && nextOffset >= this.total) return;
         this.offset = nextOffset;
         this.loadAllData();
     }
@@ -237,12 +264,18 @@ class DatabaseManager {
             </tr>`;
         }).join('');
         const start = this.total ? this.offset + 1 : 0;
-        const end = Math.min(this.offset + this.allData.length, this.total);
-        document.getElementById('db-current-meta').textContent = `${this.total.toLocaleString('vi-VN')} bản ghi`;
-        document.getElementById('db-page-summary').textContent = `Hiển thị ${start}–${end} / ${this.total.toLocaleString('vi-VN')}`;
+        const end = this.offset + this.allData.length;
+        document.getElementById('db-current-meta').textContent = this.hasExactTotal
+            ? `${this.total.toLocaleString('vi-VN')} bản ghi`
+            : `${this.allData.length} bản ghi mới nhất · tải nhanh`;
+        document.getElementById('db-page-summary').textContent = this.hasExactTotal
+            ? `Hiển thị ${start}–${Math.min(end, this.total)} / ${this.total.toLocaleString('vi-VN')}`
+            : `Hiển thị ${start}–${end}${this.hasMore ? ' · còn dữ liệu' : ''}`;
         document.getElementById('db-page-number').textContent = `Trang ${Math.floor(this.offset / this.limit) + 1}`;
         document.getElementById('db-page-prev').disabled = this.offset === 0;
-        document.getElementById('db-page-next').disabled = this.offset + this.limit >= this.total;
+        document.getElementById('db-page-next').disabled = this.hasExactTotal
+            ? this.offset + this.limit >= this.total
+            : !this.hasMore;
     }
 
     getTableBadgeColor(table) {
@@ -265,7 +298,8 @@ class DatabaseManager {
             return `${item.device_code || '--'} · ${item.name || item.device_type || 'Thiết bị'}`;
         }
         if (['sensor_data', 'gnss_adjustments'].includes(item._table)) {
-            return `${String(item.sensor_type || 'sensor').toUpperCase()} · Trạm #${item.station_id ?? '--'}`;
+            const cluster = item.data?.cluster_name || item.data?.project_code;
+            return `${String(item.sensor_type || 'sensor').toUpperCase()} · ${cluster ? `${cluster} · ` : ''}Trạm #${item.station_id ?? '--'}`;
         }
         if (item._table === 'alerts') {
             return `${item.category || 'Cảnh báo'} · ${item.message || '--'}`;
@@ -276,7 +310,9 @@ class DatabaseManager {
 
     getRecordSecondary(item) {
         if (item._table === 'devices') return item.mqtt_topic || item.device_type || 'Không có MQTT topic';
-        if (['sensor_data', 'gnss_adjustments'].includes(item._table)) return JSON.stringify(item.data || {}).slice(0, 110);
+        if (['sensor_data', 'gnss_adjustments'].includes(item._table)) {
+            return item.data_preview || this.compactJsonPreview(item.data);
+        }
         if (item._table === 'alerts') return `Trạm #${item.station_id ?? '--'} · ${item.level || '--'}`;
         if (item._table === 'simulations') return `${item.station_code || item.project_code || 'Kịch bản thủ công'} · ${item.summary?.classification || item.mode}`;
         const location = item.location && typeof item.location === 'object'
@@ -308,7 +344,16 @@ class DatabaseManager {
         Object.entries(mapping).forEach(([key, ids]) => ids.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = Number(stats[key] || 0).toLocaleString('vi-VN'); }));
     }
 
+    scheduleStats() {
+        if (this.statsLoaded) return;
+        clearTimeout(this.statsTimer);
+        this.statsTimer = setTimeout(() => this.fetchStats(), 3000);
+    }
+
     async fetchStats() {
+        if (this.statsLoaded) return;
+        if (this.statsPromise) return this.statsPromise;
+        this.statsPromise = (async () => {
         try {
             const res = await fetch('/api/admin/db/stats', {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -321,26 +366,112 @@ class DatabaseManager {
 
             const stats = await res.json();
             this.updateStats(stats);
+            this.statsLoaded = true;
         } catch (e) {
             console.warn('❌ Error fetching DB stats:', e);
+        } finally {
+            this.statsPromise = null;
         }
+        })();
+        return this.statsPromise;
     }
 
-    viewRecord(table, id) {
-        const record = this.allData.find(r => r._table === table && r.id === id);
-        if (!record) return;
-        this.selectedRecord = record;
-        document.getElementById('db-inspector-title').textContent = `${this.datasetConfig(table)?.title || table} #${id}`;
-        document.getElementById('db-inspector-content').innerHTML = `<section class="drawer-summary"><span class="management-status ${this.getRecordStatus(record).className}">${this.escapeHtml(this.getRecordStatus(record).label)}</span><h6>${this.escapeHtml(this.getPreviewData(record))}</h6><p>${this.escapeHtml(this.getRecordSecondary(record))}</p></section><div class="drawer-section-title"><span>RAW JSON</span><button class="btn btn-sm btn-outline-secondary" onclick="window.dbManager.copyCurrentRecord()"><i class="bi bi-copy me-1"></i>Sao chép</button></div><pre class="json-inspector">${this.escapeHtml(JSON.stringify(record, null, 2))}</pre>`;
-        const editButton = ['stations', 'devices'].includes(table)
-            ? `<button class="btn btn-primary" onclick="window.dbManager.editRecord('${table}', ${id})"><i class="bi bi-pencil me-1"></i>Chỉnh sửa</button>`
-            : '';
-        const downloadButton = table === 'simulations' ? `<button class="btn btn-primary" onclick="window.dbManager.downloadSimulation(${id})"><i class="bi bi-download me-1"></i>Tải báo cáo</button>` : '';
-        document.getElementById('db-inspector-actions').innerHTML = `${downloadButton}<button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${table}', ${id})"><i class="bi bi-trash3 me-1"></i>Xóa</button>${editButton}`;
+    compactJsonPreview(data) {
+        if (!data || typeof data !== 'object') return String(data ?? '{}');
+        const entries = Object.entries(data).slice(0, 4).map(([key, value]) => {
+            if (value && typeof value === 'object') {
+                const size = Array.isArray(value) ? value.length : Object.keys(value).length;
+                return `"${key}":${Array.isArray(value) ? `[${size} mục]` : `{${size} trường}`}`;
+            }
+            const text = typeof value === 'string' ? `"${value.slice(0, 42)}"` : String(value);
+            return `"${key}":${text}`;
+        });
+        return `{${entries.join(', ')}${Object.keys(data).length > entries.length ? ', …' : ''}}`;
+    }
+
+    openInspector() {
         document.getElementById('db-inspector').classList.add('open');
         document.getElementById('db-inspector').setAttribute('aria-hidden', 'false');
         document.getElementById('db-inspector-backdrop').classList.add('show');
         document.querySelector('#db-inspector > header button')?.focus();
+    }
+
+    async viewRecord(table, id) {
+        const record = this.allData.find(r => r._table === table && r.id === id);
+        if (!record) return;
+        this.selectedRecord = record;
+        document.getElementById('db-inspector-title').textContent = `${this.datasetConfig(table)?.title || table} #${id}`;
+        if (['sensor_data', 'gnss_adjustments'].includes(table) && !record.data) {
+            document.getElementById('db-inspector-content').innerHTML = '<div class="ops-loading"><span class="spinner-border spinner-border-sm" role="status"></span><span>Đang tải chi tiết bản ghi…</span></div>';
+            document.getElementById('db-inspector-actions').innerHTML = '';
+            this.openInspector();
+            try {
+                const response = await fetch(`/api/admin/db/sensor-data/${id}`, { headers: { 'Authorization': `Bearer ${this.token}` } });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                Object.assign(record, await response.json(), { _table: table });
+                if (this.selectedRecord !== record) return;
+            } catch (error) {
+                document.getElementById('db-inspector-content').innerHTML = `<div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được chi tiết</strong><p>${this.escapeHtml(error.message)}</p><button class="btn btn-outline-primary" onclick="window.dbManager.viewRecord('${table}', ${id})">Thử lại</button></div>`;
+                return;
+            }
+        }
+        this.renderInspector(record);
+        this.openInspector();
+    }
+
+    renderInspector(record) {
+        const status = this.getRecordStatus(record);
+        const isAdjustment = record._table === 'gnss_adjustments';
+        const points = isAdjustment && record.data?.points && typeof record.data.points === 'object'
+            ? Object.entries(record.data.points)
+            : [];
+        const number = value => Number.isFinite(Number(value)) ? Number(value).toFixed(4) : '--';
+        const pointRows = points.map(([name, point]) => `<tr><th scope="row">${this.escapeHtml(name)}</th><td>${this.escapeHtml(point.station_id ?? '--')}</td><td>${number(point.adjusted_x ?? point.adjusted_n)}</td><td>${number(point.adjusted_y ?? point.adjusted_e)}</td><td>${number(point.adjusted_z ?? point.adjusted_u)}</td><td>${number(point.dx ?? point.correction_n)}</td><td>${number(point.dy ?? point.correction_e)}</td><td>${number(point.dz ?? point.correction_u)}</td></tr>`).join('');
+        const dataRows = Object.entries(record.data || {}).map(([key, value]) => `<tr><th scope="row">${this.escapeHtml(key)}</th><td>${this.escapeHtml(value && typeof value === 'object' ? (Array.isArray(value) ? `[${value.length} phần tử]` : `{${Object.keys(value).length} trường}`) : value)}</td></tr>`).join('');
+        const resultTable = isAdjustment && pointRows
+            ? `<div class="drawer-section-title"><span>TỌA ĐỘ SAU BÌNH SAI</span><span>${points.length} điểm</span></div><div class="adjustment-table-wrap"><table class="adjustment-result-table"><thead><tr><th>Điểm</th><th>Trạm</th><th>X (m)</th><th>Y (m)</th><th>Z (m)</th><th>ΔX</th><th>ΔY</th><th>ΔZ</th></tr></thead><tbody>${pointRows}</tbody></table></div>`
+            : `<div class="drawer-section-title"><span>DỮ LIỆU DẠNG BẢNG</span></div><table class="record-detail-table"><tbody>${dataRows || '<tr><td>Không có dữ liệu</td></tr>'}</tbody></table>`;
+        document.getElementById('db-inspector-content').innerHTML = `<section class="drawer-summary"><span class="management-status ${status.className}">${this.escapeHtml(status.label)}</span><h6>${this.escapeHtml(this.getPreviewData(record))}</h6><p>${this.escapeHtml(isAdjustment ? `${record.data?.project_code || 'Dự án'} · ${record.data?.cluster_name || 'Cụm GNSS'} · ${this.getRecordTime(record)}` : this.getRecordSecondary(record))}</p></section>${resultTable}<details class="raw-json-details" ontoggle="if(this.open) window.dbManager.renderRawJson()"><summary><span><i class="bi bi-braces" aria-hidden="true"></i> JSON thô</span><small>Chỉ tạo khi mở để giữ giao diện mượt</small></summary><div id="db-raw-json"></div></details>`;
+        const editButton = ['stations', 'devices'].includes(record._table)
+            ? `<button class="btn btn-primary" onclick="window.dbManager.editRecord('${record._table}', ${record.id})"><i class="bi bi-pencil me-1"></i>Chỉnh sửa</button>`
+            : '';
+        const simulationButton = record._table === 'simulations' ? `<button class="btn btn-primary" onclick="window.dbManager.downloadSimulation(${record.id})"><i class="bi bi-download me-1"></i>Tải báo cáo</button>` : '';
+        const adjustmentButtons = isAdjustment
+            ? `${record.data?.audit_json_url ? '<button class="btn btn-outline-primary" onclick="window.dbManager.downloadAdjustmentArtifact(\'json\')"><i class="bi bi-filetype-json me-1"></i>Tải JSON</button>' : ''}${record.data?.excel_report_url || record.data?.report_file_url ? '<button class="btn btn-primary" onclick="window.dbManager.downloadAdjustmentArtifact(\'xlsx\')"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Tải XLSX</button>' : ''}`
+            : '';
+        document.getElementById('db-inspector-actions').innerHTML = `${adjustmentButtons}${simulationButton}<button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${record._table}', ${record.id})"><i class="bi bi-trash3 me-1"></i>Xóa</button>${editButton}`;
+    }
+
+    renderRawJson() {
+        const container = document.getElementById('db-raw-json');
+        if (!container || container.childElementCount || !this.selectedRecord) return;
+        container.innerHTML = '<div class="ops-loading"><span class="spinner-border spinner-border-sm"></span><span>Đang dựng JSON…</span></div>';
+        setTimeout(() => {
+            if (!container.isConnected) return;
+            container.innerHTML = `<div class="drawer-section-title"><span>RAW JSON</span><button class="btn btn-sm btn-outline-secondary" onclick="window.dbManager.copyCurrentRecord()"><i class="bi bi-copy me-1"></i>Sao chép</button></div><pre class="json-inspector">${this.escapeHtml(JSON.stringify(this.selectedRecord, null, 2))}</pre>`;
+        }, 0);
+    }
+
+    async downloadAdjustmentArtifact(format) {
+        const data = this.selectedRecord?.data || {};
+        const url = String(format === 'json' ? data.audit_json_url : (data.excel_report_url || data.report_file_url) || '');
+        if (!url) return;
+        const button = document.activeElement;
+        const original = button?.innerHTML;
+        try {
+            if (button instanceof HTMLButtonElement) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải';
+            }
+            await window.downloadAuthenticatedFile(url, url.split('/').pop());
+        } catch (error) {
+            window.toast?.error?.(`Không tải được file ${format.toUpperCase()}.`);
+        } finally {
+            if (button instanceof HTMLButtonElement) {
+                button.disabled = false;
+                button.innerHTML = original;
+            }
+        }
     }
 
     closeInspector() {
@@ -727,7 +858,7 @@ class DatabaseManager {
         pill.id = 'database-export-task-pill';
         pill.type = 'button';
         pill.style.cssText = [
-            'position:fixed', 'right:22px', 'bottom:76px', 'z-index:1090',
+            'position:fixed', 'right:22px', 'bottom:76px', 'z-index:var(--z-popover)',
             'display:none', 'align-items:center', 'gap:10px', 'min-width:245px',
             'padding:11px 14px', 'border:1px solid rgba(66,201,155,.58)',
             'border-radius:13px', 'background:linear-gradient(135deg,#0b3028,#0d5b46)',
@@ -987,6 +1118,25 @@ class DatabaseManager {
 // Initialization
 function bootstrapDatabaseManager() {
     console.log('[DB MANAGER] Initializing...');
+    const user = window.authManager?.getUserInfo?.() || window.authManager?.user;
+    if (!user) {
+        // Embedded/runtime contract tests and legacy shells may provide the
+        // already-authenticated session adapter without loading auth.js. Keep
+        // that compatibility path; the production shell always exposes
+        // authManager and therefore remains capability-gated above.
+        if (!window.authManager && window.authSession?.getToken?.()) {
+            if (!window.dbManager) window.dbManager = new DatabaseManager();
+            return;
+        }
+        window.addEventListener('auth:ready', bootstrapDatabaseManager, { once: true });
+        return;
+    }
+    const permissions = user.permissions || [];
+    if (user.role !== 'admin' && !permissions.includes('MANAGE_DATABASE')) {
+        // Keep the destination locked but never instantiate a manager that
+        // would issue forbidden filter/stats requests.
+        return;
+    }
     if (!window.dbManager) {
         window.dbManager = new DatabaseManager();
     }

@@ -1,0 +1,12 @@
+.simulation-audit-workspace { display:grid; gap:16px; }
+.simulation-audit-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; min-height:44px; padding:12px 14px; border:1px solid var(--admin-border, #dce9e3); border-radius:12px; background:var(--admin-surface, #fff); color:var(--admin-muted, #60756d); }
+.simulation-audit-note { font-size:.78rem; }
+.simulation-audit-list { display:grid; gap:12px; }
+.simulation-audit-card { display:grid; gap:12px; padding:16px; border:1px solid var(--admin-border, #dce9e3); border-radius:14px; background:var(--admin-surface, #fff); box-shadow:0 8px 24px rgba(16,76,57,.06); }
+.simulation-audit-card__header, .simulation-audit-card__facts, .simulation-audit-card__actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.simulation-audit-card__header { justify-content:space-between; }
+.simulation-audit-card__facts { color:var(--admin-muted, #60756d); font-size:.84rem; }
+.simulation-audit-card__facts span { min-width:0; }
+.simulation-audit-card__actions { justify-content:flex-end; }
+@media (max-width:767px) { .simulation-audit-card__actions > * { flex:1 1 120px; min-height:44px; } }
+@media (prefers-reduced-motion: reduce) { .simulation-audit-card { box-shadow:none; } }

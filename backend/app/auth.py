@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import asyncio
+import secrets
 import time
 import jwt
 from jwt import InvalidTokenError as JWTError
@@ -21,6 +22,18 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 _AUTH_USER_CACHE_TTL_SECONDS = 15.0
 _auth_user_cache = {}
 _auth_user_locks = {}
+# Short-lived WebSocket tickets are single-process credentials.  A fresh
+# random epoch invalidates every outstanding ticket after a process restart,
+# even when the JWT signing secret remains stable.
+WS_BOOT_EPOCH = secrets.token_urlsafe(16)
+
+
+def invalidate_user_cache(username: Optional[str] = None) -> None:
+    """Drop cached auth records immediately after an admin RBAC mutation."""
+    if username:
+        _auth_user_cache.pop(str(username), None)
+        return
+    _auth_user_cache.clear()
 
 
 async def get_user_by_username_cached(username: str, db: AsyncSession):
@@ -54,18 +67,28 @@ class Permission:
     EDIT_STATIONS = "edit_stations"
     VIEW_STATIONS = "view_stations"
     MANAGE_SIMULATIONS = "manage_simulations"
+    CONTROL_SIREN = "control_siren"
+    RUN_ADJUSTMENT = "run_adjustment"
+    VIEW_INCIDENTS = "view_incidents"
+    MANAGE_INCIDENTS = "manage_incidents"
+    VIEW_FIELD_DEVICES = "view_field_devices"
+    ASSIGN_FIELD_DEVICES = "assign_field_devices"
+    MANAGE_FIELD_DEVICES = "manage_field_devices"
+    MANAGE_DATABASE = "manage_database"
+    MANAGE_RESCUE = "manage_rescue"
 
 # --- Password Hashing ---
 async def get_password_hash(password: str) -> str:
     pwd_bytes = password.encode('utf-8')
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(pwd_bytes, salt)
-    return hashed.decode('utf-8') 
+    salt = await asyncio.to_thread(bcrypt.gensalt)
+    hashed = await asyncio.to_thread(bcrypt.hashpw, pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
 async def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(
-        plain_password.encode('utf-8'), 
-        hashed_password.encode('utf-8')
+    return await asyncio.to_thread(
+        bcrypt.checkpw,
+        plain_password.encode('utf-8'),
+        hashed_password.encode('utf-8'),
     )
 
 # --- JWT Token ---
@@ -103,11 +126,34 @@ async def get_current_user(
 # --- Phân quyền ---
 def get_user_permissions(user):
     if user.role == Role.ADMIN:
-        return [Permission.MANAGE_USERS, Permission.EDIT_STATIONS, Permission.VIEW_STATIONS, Permission.MANAGE_SIMULATIONS]
+        return [
+            Permission.MANAGE_USERS,
+            Permission.EDIT_STATIONS,
+            Permission.VIEW_STATIONS,
+            Permission.CONTROL_SIREN,
+            Permission.RUN_ADJUSTMENT,
+            Permission.VIEW_INCIDENTS,
+            Permission.MANAGE_INCIDENTS,
+            Permission.VIEW_FIELD_DEVICES,
+            Permission.ASSIGN_FIELD_DEVICES,
+            Permission.MANAGE_FIELD_DEVICES,
+            Permission.MANAGE_DATABASE,
+            Permission.MANAGE_RESCUE,
+            Permission.MANAGE_SIMULATIONS,
+        ]
     if user.role == Role.OPERATOR:
-        return [Permission.EDIT_STATIONS, Permission.VIEW_STATIONS]
+        return [
+            Permission.EDIT_STATIONS,
+            Permission.VIEW_STATIONS,
+            Permission.CONTROL_SIREN,
+            Permission.RUN_ADJUSTMENT,
+            Permission.VIEW_INCIDENTS,
+            Permission.MANAGE_INCIDENTS,
+            Permission.VIEW_FIELD_DEVICES,
+            Permission.ASSIGN_FIELD_DEVICES,
+        ]
     if user.role == Role.VIEWER:
-        return [Permission.VIEW_STATIONS]
+        return [Permission.VIEW_STATIONS, Permission.VIEW_INCIDENTS, Permission.VIEW_FIELD_DEVICES]
     return []
 
 def require_permission(permission: str):

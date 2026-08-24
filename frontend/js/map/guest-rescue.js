@@ -123,13 +123,22 @@ function setupGuestRescueUI() {
                         const btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'list-group-item list-group-item-action py-2';
-                        btn.innerHTML = `<div class="d-flex align-items-center gap-2">
-                                            <i class="bi bi-geo-alt-fill text-danger text-opacity-75"></i>
-                                            <div style="font-size:0.8rem; line-height: 1.3; text-align: left;">
-                                                <div class="fw-bold text-truncate" style="max-width: 250px;">${item.name || 'Địa điểm'}</div>
-                                                <div class="text-muted text-truncate" style="font-size:0.75rem; max-width: 250px;">${item.display_name}</div>
-                                            </div>
-                                         </div>`;
+                        const row = document.createElement('div');
+                        row.className = 'd-flex align-items-center gap-2';
+                        const icon = document.createElement('i');
+                        icon.className = 'bi bi-geo-alt-fill text-danger text-opacity-75';
+                        icon.setAttribute('aria-hidden', 'true');
+                        const copy = document.createElement('div');
+                        copy.className = 'rescue-address-result-copy';
+                        const title = document.createElement('div');
+                        title.className = 'fw-bold text-truncate';
+                        title.textContent = String(item.name || 'Địa điểm');
+                        const detail = document.createElement('div');
+                        detail.className = 'text-muted text-truncate rescue-address-result-detail';
+                        detail.textContent = String(item.display_name || '');
+                        copy.append(title, detail);
+                        row.append(icon, copy);
+                        btn.append(row);
                         btn.addEventListener('click', () => {
                             if (latEl) latEl.value = parseFloat(item.lat).toFixed(6);
                             if (lonEl) lonEl.value = parseFloat(item.lon).toFixed(6);
@@ -408,4 +417,3 @@ async function submitGuestRescueRequest() {
         submitBtn.innerHTML = oldHtml;
     }
 }
-

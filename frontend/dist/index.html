@@ -3,20 +3,103 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="description" content="Nền tảng quan trắc, phân tích và cảnh báo sạt lở theo thời gian thực cho hạ tầng trọng yếu.">
+    <title>Aitogy Landslide Monitor | Quan trắc sạt lở realtime</title>
+    <meta name="description" content="Aitogy Landslide Monitor hợp nhất dữ liệu GNSS, mưa, mực nước và IMU để hỗ trợ theo dõi sạt lở theo thời gian thực.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://monitoring.aitogy.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="vi_VN">
+    <meta property="og:site_name" content="Aitogy Landslide Monitor">
+    <meta property="og:title" content="Aitogy Landslide Monitor | Quan trắc sạt lở realtime">
+    <meta property="og:description" content="Theo dõi tín hiệu quan trắc sạt lở trong một không gian vận hành rõ ràng, liên tục và có ngữ cảnh.">
+    <meta property="og:url" content="https://monitoring.aitogy.com/">
+    <meta property="og:image" content="https://monitoring.aitogy.com/assets/social-card.png?v=4068541858ce">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Aitogy Landslide Monitor | Quan trắc sạt lở realtime">
+    <meta name="twitter:description" content="Theo dõi tín hiệu quan trắc sạt lở theo thời gian thực.">
+    <meta name="twitter:image" content="https://monitoring.aitogy.com/assets/social-card.png?v=4068541858ce">
     <meta name="theme-color" content="#f4f8f7">
     <meta name="color-scheme" content="dark light">
-    <title>Landslide Monitor — Quan trắc an toàn theo thời gian thực</title>
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"Aitogy Landslide Monitor","url":"https://monitoring.aitogy.com/"},{"@type":"Organization","name":"Aitogy","url":"https://monitoring.aitogy.com/","logo":"https://monitoring.aitogy.com/assets/aitogy.png?v=4068541858ce"}]}</script>
     <script>document.documentElement.dataset.theme=localStorage.getItem('theme')==='dark'?'dark':'light'</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/landing.min.css?v=c8d746d2b87c">
+    <link rel="stylesheet" href="/assets/landing.min.css?v=4068541858ce">
 </head>
 <body>
-    <div id="landing-root"></div>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="/assets/landing.min.js?v=c8d746d2b87c"></script>
+    <a class="skip-link" href="#main">Bỏ qua đến nội dung chính</a>
+    <header class="site-header">
+        <div class="header-inner">
+            <a class="brand" href="/" aria-label="Aitogy Landslide Monitor — Trang chủ">
+                <span class="brand-plate"><img src="/assets/aitogy.png?v=4068541858ce" width="759" height="329" alt="Aitogy"></span>
+                <span class="brand-product"><strong>Landslide</strong><small>Monitor</small></span>
+            </a>
+            <nav class="desktop-nav" aria-label="Điều hướng chính">
+                <a href="#story">Hành trình tín hiệu</a><a href="#network">Trạng thái mạng</a><a href="#response">Hành động</a>
+            </nav>
+            <div class="header-actions">
+                <button class="icon-button" id="theme-toggle" type="button" aria-label="Chuyển giao diện tối"><span aria-hidden="true">◐</span></button>
+                <a class="button button-ghost login-link" id="auth-link" href="/login?return_to=%2Fmanagement">Đăng nhập</a>
+                <a class="button button-primary header-cta" href="/map">Mở bản đồ</a>
+                <button class="menu-button" id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Mở trình đơn"><span></span><span></span><span></span></button>
+            </div>
+        </div>
+        <nav class="mobile-menu" id="mobile-menu" aria-label="Điều hướng di động" hidden>
+            <a href="#story">Hành trình tín hiệu</a><a href="#network">Trạng thái mạng</a><a href="#response">Hành động</a><a href="/map">Mở bản đồ realtime</a><a href="/login?return_to=%2Fmanagement">Đăng nhập</a>
+        </nav>
+    </header>
+
+    <main id="main">
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="hero-copy reveal">
+                <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>An toàn bắt đầu từ việc thấy sớm</p>
+                <h1 id="hero-title">Nhìn thấy chuyển động.<br><em>Trước khi thành rủi ro.</em></h1>
+                <p class="hero-lead">Mỗi thay đổi rất nhỏ ngoài hiện trường được biến thành tín hiệu dễ hiểu, để đội vận hành có thêm thời gian đưa ra quyết định đúng.</p>
+                <div class="hero-actions"><a class="button button-primary button-large" href="/map">Xem khu vực đang quan trắc <span aria-hidden="true">→</span></a><a class="button button-ghost button-large" href="#story">Theo dõi hành trình tín hiệu</a></div>
+                <p class="outcome-strip"><span>Phát hiện sớm</span><i></i><span>Đánh giá rõ</span><i></i><span>Phản ứng kịp thời</span></p>
+            </div>
+            <div class="hero-visual reveal" aria-label="Minh họa mạng cảm biến trên địa hình">
+                <div class="hero-terrain" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                <p class="illustration-label">Minh họa</p>
+                <div class="floating-status"><span aria-hidden="true">✓</span><div><small>Quan trắc đa cảm biến</small><strong>Một dòng thời gian chung</strong></div></div>
+            </div>
+        </section>
+
+        <section class="story" id="story" data-step="0" aria-labelledby="story-title">
+            <div class="story-shell">
+                <div class="story-copy">
+                    <header class="story-heading"><p class="overline">MỘT TÍN HIỆU. MỘT HÀNH TRÌNH.</p><h2 id="story-title">Từ dịch chuyển nhỏ<br>đến hành động rõ ràng.</h2></header>
+                    <article data-story-step="0"><span>01</span><div><h3>Phát hiện thay đổi rất nhỏ</h3><p>Baseline và điểm đo hiện tại cho thấy vector dịch chuyển ở cấp milimét ngay khi tín hiệu xuất hiện.</p></div></article>
+                    <article data-story-step="1"><span>02</span><div><h3>Đặt tín hiệu vào đúng bối cảnh</h3><p>GNSS, mưa, mực nước và IMU được đặt trên cùng một dòng thời gian thay vì các mảnh dữ liệu rời rạc.</p></div></article>
+                    <article data-story-step="2"><span>03</span><div><h3>Làm rõ điều cần xác minh</h3><p>Nhiễu nền lùi lại; cụm tín hiệu được corroborate hiện rõ với nhãn “Cần xác minh”, không tự suy diễn thành cảnh báo.</p></div></article>
+                    <article data-story-step="3"><span>04</span><div><h3>Đưa tín hiệu đến đội vận hành</h3><p>Toàn mạng hội tụ về operations node, nơi sự kiện được tiếp nhận và chuyển thành luồng hành động có trách nhiệm.</p></div></article>
+                </div>
+                <div class="story-stage">
+                    <div class="story-poster" aria-hidden="true"><span class="ridge ridge-back"></span><span class="ridge ridge-front"></span><i class="sensor sensor-a"></i><i class="sensor sensor-b"></i><i class="sensor sensor-c"></i></div>
+                    <canvas id="story-canvas" aria-hidden="true"></canvas>
+                    <div class="story-caption" aria-hidden="true"><span>Minh họa tín hiệu quan trắc</span><strong id="story-caption">Phát hiện · Vector dịch chuyển</strong></div>
+                    <div class="story-progress" aria-hidden="true"><span></span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="network-section" id="network" aria-labelledby="network-title">
+            <div class="section-intro reveal"><div><p class="overline">BỨC TRANH ĐANG DIỄN RA</p><h2 id="network-title">Không phải một bản báo cáo.<br>Là trạng thái ngay lúc này.</h2></div><div class="updated" id="metrics-status" role="status" aria-live="polite"><span aria-hidden="true"></span><span>Đang tải trạng thái mạng…</span><button type="button" id="metrics-retry" hidden>Thử lại</button></div></div>
+            <div class="metric-grid" id="metric-grid" aria-live="polite" aria-busy="true">
+                <article class="metric-card metric-total reveal"><span>Toàn mạng</span><strong id="stations-total">—</strong><p>điểm được quản lý</p></article>
+                <article class="metric-card metric-online reveal"><span>Đang trực tuyến</span><strong id="stations-online">—</strong><p>đang gửi dữ liệu</p></article>
+                <article class="metric-card metric-stale reveal"><span>Cần chú ý</span><strong id="stations-stale">—</strong><p>luồng dữ liệu chậm</p></article>
+                <article class="metric-card metric-offline reveal"><span>Ngoại tuyến</span><strong id="stations-offline">—</strong><p>chưa có tín hiệu</p></article>
+            </div>
+        </section>
+
+        <section class="final-cta reveal" id="response" aria-labelledby="cta-title"><p class="overline">TỪ NHẬN BIẾT ĐẾN HÀNH ĐỘNG</p><h2 id="cta-title">Thấy toàn cảnh.<br>Đi đúng bước tiếp theo.</h2><p>Mở bản đồ vận hành để xem từng khu vực, từng điểm quan trắc và trạng thái mới nhất.</p><div class="hero-actions"><a class="button button-primary button-large" href="/map">Mở bản đồ realtime <span aria-hidden="true">→</span></a><a class="button button-ghost button-large" href="/login?return_to=%2Fmanagement">Đăng nhập vận hành</a></div></section>
+    </main>
+
+    <footer class="site-footer"><a class="brand footer-brand" href="/"><span class="brand-plate"><img src="/assets/aitogy.png?v=4068541858ce" width="759" height="329" alt="Aitogy"></span><span class="brand-product"><strong>Landslide</strong><small>Monitor</small></span></a><p>Quan trắc liên tục để hành động sớm hơn.</p><span>© 2026 Aitogy</span></footer>
+    <script src="/assets/landing.min.js?v=4068541858ce"></script>
 </body>
 </html>

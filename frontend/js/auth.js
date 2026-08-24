@@ -18,6 +18,47 @@ class AuthManager {
         this._isVerifyingToken = false;
         this._verifyPromise = null;
         this._unauthorizedCheckPromise = null;
+        this.authzDeadlineAt = 0;
+        this.authzDeadlineTimer = null;
+        this.authzLocked = false;
+        addEventListener('pageshow', () => this.enforceAuthzDeadline());
+        addEventListener('visibilitychange', () => {
+            if (!document.hidden) this.enforceAuthzDeadline();
+        });
+    }
+
+    armAuthzDeadline(user) {
+        const graceSeconds = Math.max(60, Math.min(Number(user?.private_authz_grace_seconds) || 300, 900));
+        this.authzDeadlineAt = Date.now() + graceSeconds * 1000;
+        this.authzLocked = false;
+        document.documentElement.removeAttribute('data-authz-lock');
+        if (this.authzDeadlineTimer) clearTimeout(this.authzDeadlineTimer);
+        this.authzDeadlineTimer = setTimeout(() => this.enforceAuthzDeadline(), graceSeconds * 1000 + 20);
+    }
+
+    enforceAuthzDeadline() {
+        if (!this.authzDeadlineAt || Date.now() < this.authzDeadlineAt) return false;
+        this.authzLocked = true;
+        document.documentElement.setAttribute('data-authz-lock', 'expired');
+        window.revokeAuthenticatedBlobUrls?.();
+        const privateElements = document.querySelectorAll('[data-private-content]');
+        privateElements.forEach(element => {
+            element.setAttribute('inert', '');
+            element.setAttribute('aria-hidden', 'true');
+        });
+        if (privateElements.length && !document.getElementById('authz-expired-dialog')) {
+            const dialog = document.createElement('div');
+            dialog.id = 'authz-expired-dialog';
+            dialog.className = 'authz-expired-dialog';
+            dialog.setAttribute('role', 'alertdialog');
+            dialog.setAttribute('aria-modal', 'true');
+            dialog.setAttribute('aria-labelledby', 'authz-expired-title');
+            dialog.innerHTML = '<div class="authz-expired-card"><i class="bi bi-shield-exclamation" aria-hidden="true"></i><h2 id="authz-expired-title">Phiên quyền đã hết hạn</h2><p>Quyền truy cập đã thay đổi hoặc phiên cần được xác thực lại. Hãy đăng nhập lại để tiếp tục.</p><a class="btn btn-primary" href="/login?return_to=' + encodeURIComponent(location.pathname) + '">Đăng nhập lại</a></div>';
+            document.body.appendChild(dialog);
+            dialog.querySelector('a')?.focus({ preventScroll: true });
+        }
+        window.dispatchEvent(new CustomEvent('authzExpired'));
+        return true;
     }
 
     // ✅ CRITICAL: Verify token on init
@@ -80,12 +121,31 @@ class AuthManager {
                 const res = await fetch('/api/auth/me', {
                     headers: {
                         'Authorization': `Bearer ${this.token}`
-                    }
+                    },
+                    signal: AbortSignal.timeout(10000),
+                    cache: 'no-store',
                 });
 
                 if (res.ok) {
+                    const previousScopeHash = this.user?.authz_scope_hash || '';
+                    const previousRole = this.user?.role || '';
+                    const previousProjects = JSON.stringify(this.user?.assigned_projects || []);
                     this.user = await res.json();
+                    this.armAuthzDeadline(this.user);
                     sessionStorage.setItem('auth_user', JSON.stringify(this.user));
+                    const nextProjects = JSON.stringify(this.user?.assigned_projects || []);
+                    if (
+                        previousScopeHash &&
+                        (
+                            previousScopeHash !== (this.user?.authz_scope_hash || '') ||
+                            previousRole !== (this.user?.role || '') ||
+                            previousProjects !== nextProjects
+                        )
+                    ) {
+                        window.dispatchEvent(new CustomEvent('authzChanged', {
+                            detail: { previousScopeHash, user: this.user },
+                        }));
+                    }
                     return true;
                 }
                 if (res.status === 401) return false;
@@ -196,6 +256,13 @@ class AuthManager {
             clearInterval(this.tokenCheckInterval);
             this.tokenCheckInterval = null;
         }
+        if (this.authzDeadlineTimer) {
+            clearTimeout(this.authzDeadlineTimer);
+            this.authzDeadlineTimer = null;
+        }
+        this.authzDeadlineAt = 0;
+        this.authzLocked = false;
+        document.documentElement.removeAttribute('data-authz-lock');
 
         // Clear data from both storages
         this.token = null;
@@ -343,13 +410,16 @@ class AuthManager {
             window.location.href = `/login?return_to=${encodeURIComponent(window.location.pathname)}`;
             return;
         }
+        if (this.enforceAuthzDeadline()) {
+            throw new Error('AUTHZ_GRACE_EXPIRED');
+        }
 
         const headers = {
             ...options.headers,
             'Authorization': `Bearer ${this.token}`
         };
 
-        const response = await fetch(url, { ...options, headers });
+        const response = await fetch(url, { ...options, headers, cache: options.cache || 'no-store' });
 
         if (response.status === 401) {
             void this.handleUnauthorizedResponse(url);
@@ -455,6 +525,7 @@ const initAuthUI = async () => {
 
     // Update UI
     window.authManager.updateAuthUI();
+    window.dispatchEvent(new CustomEvent('auth:ready', { detail: window.authManager.getUserInfo?.() || null }));
 
     // ✅ Retry with delays (handle timing issues)
     setTimeout(() => window.authManager.updateAuthUI(), 100);

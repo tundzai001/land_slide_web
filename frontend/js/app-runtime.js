@@ -57,6 +57,7 @@
         if (name === 'qr') return loadScript(CDN.qr);
         if (name === 'pdf') return loadScript(CDN.pdf);
         if (name === 'chart') return loadScript(CDN.chart);
+        if (name === 'heat') return loadScript(CDN.heat);
         if (name === 'digital-twin') return loadScript('/assets/digital-twin.min.js?v=__BUILD_VERSION__', 'module');
         throw new Error(`Thư viện không được hỗ trợ: ${name}`);
     };
@@ -73,8 +74,8 @@
         <main class="login-page">
             <section class="login-visual" aria-hidden="true">
                 <div class="login-brand">
-                    <span class="login-brand-icon"><i class="bi bi-activity"></i></span>
-                    <span>Landslide <small>Monitor</small></span>
+                    <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
+                    <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
                 </div>
                 <div class="login-network">
                     <div class="login-network-label"><span></span> Hệ thống đang vận hành</div>
@@ -185,6 +186,7 @@
             <button type="button" data-more><i class="bi bi-grid"></i><span>Thêm</span></button>
             <div class="admin-more-sheet" hidden>
                 <button type="button" data-tab="tab-users"><i class="bi bi-people"></i> Người dùng</button>
+                <button type="button" data-tab="tab-simulations"><i class="bi bi-boxes"></i> Simulation audit</button>
                 <button type="button" data-logout-action><i class="bi bi-box-arrow-right"></i> Đăng xuất</button>
             </div>`;
         const more = navigation.querySelector('.admin-more-sheet');
@@ -197,7 +199,6 @@
             const tab = button.dataset.tab;
             if (tab) {
                 window.adminManager?.switchTab(tab, button);
-                navigation.querySelectorAll(':scope > button').forEach(item => item.classList.toggle('active', item === button));
                 more.hidden = true;
             }
         });
@@ -216,8 +217,39 @@
         annotate();
         new MutationObserver(annotate).observe(document.getElementById('admin-tab-content'), {childList: true, subtree: true});
     }
+    function setupAdminDrawerAccessibility() {
+        const drawers = [
+            ['rescue-inspector', '.rescue-case'],
+            ['db-inspector', '.db-row'],
+        ];
+        const triggers = new Map();
+        document.addEventListener('click', event => {
+            drawers.forEach(([id, selector]) => {
+                if (event.target.closest(selector)) triggers.set(id, event.target.closest(selector));
+            });
+        }, true);
+        document.addEventListener('keydown', event => {
+            const entry = drawers.find(([id]) => document.getElementById(id)?.classList.contains('open'));
+            if (!entry) return;
+            const drawer = document.getElementById(entry[0]);
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                drawer.querySelector('header button')?.click();
+                triggers.get(entry[0])?.focus?.({ preventScroll: true });
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            const focusable = Array.from(drawer.querySelectorAll('a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])')).filter(element => element.offsetParent !== null);
+            if (!focusable.length) return;
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        });
+    }
     async function bootLegacy(view) {
         document.documentElement.dataset.appView = view;
+        if (view === 'admin') root.setAttribute('data-private-content', '');
+        else root.removeAttribute('data-private-content');
         document.title = view === 'map' ? 'Bản đồ realtime · Landslide Monitor' : 'Quản trị · Landslide Monitor';
         await Promise.all((view === 'map' ? mapStyles : adminStyles).concat(sharedStyles).map(loadStyle));
         await loadScript('/assets/shared.min.js?v=__BUILD_VERSION__');
@@ -225,7 +257,7 @@
         await loadScript(CDN.sweetalert);
         if (view === 'map') {
             await loadStyle(CDN.leafletCss); await loadStyle(CDN.clusterCss); await loadStyle(CDN.clusterDefaultCss);
-            await loadScript(CDN.leaflet); await Promise.all([loadScript(CDN.cluster), loadScript(CDN.heat), loadScript(CDN.chart)]);
+            await loadScript(CDN.leaflet); await loadScript(CDN.cluster);
             window.__MAP_BUNDLE_LOADING__ = true;
             await loadScript('/assets/map-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.map;
@@ -236,6 +268,7 @@
             root.innerHTML = window.LegacyTemplates.admin;
             setupAdminMobileNavigation();
             setupAdminResponsiveTables();
+            setupAdminDrawerAccessibility();
             await window.bootstrapAdminManager?.();
             window.bootstrapDatabaseManager?.();
         }

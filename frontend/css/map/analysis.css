@@ -8,7 +8,7 @@
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
     box-shadow: var(--shadow-xl);
-    z-index: 1500;
+    z-index: var(--z-drawer);
     transform: translateX(100%);
     opacity: 0;
     visibility: hidden;
@@ -137,7 +137,7 @@
     height: 100vh;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(10px);
-    z-index: 2000;
+    z-index: var(--z-modal);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -203,7 +203,7 @@
 .sm-model-popup-overlay {
     position: fixed;
     inset: 0;
-    z-index: 2200;
+    z-index: var(--z-modal);
     background: rgba(5, 10, 18, 0.55);
     backdrop-filter: blur(4px);
     display: flex;
@@ -887,4 +887,3 @@
     letter-spacing: 0.05em;
     white-space: nowrap;
 }
-

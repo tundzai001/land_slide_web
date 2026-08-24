@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import String, cast, delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import auth
@@ -15,6 +15,14 @@ from ..models import config as model_config
 from ..models import data as model_data
 from ..services.pagination import normalize_page, set_pagination_headers, slice_rows
 from ..services.station_policy import get_offline_threshold
+
+
+# These streams are implementation/audit records emitted by the GNSS adjustment
+# pipeline.  They are intentionally kept in the data store and exposed through
+# the dedicated "Kết quả bình sai GNSS" dataset, but they are not raw sensor
+# readings and must not pollute the general sensor explorer.
+PUBLIC_SENSOR_TYPES = ("gnss", "imu", "rain", "water")
+INTERNAL_SENSOR_TYPES = ("gnss_audit", "gnss_adjusted")
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -60,7 +68,7 @@ async def get_database_stats(
             .group_by(model_data.SensorData.sensor_type)
         )
         counts_by_type = {sensor_type: int(count or 0) for sensor_type, count in sensor_counts.all()}
-        num_data = sum(counts_by_type.values())
+        num_data = sum(counts_by_type.get(sensor_type, 0) for sensor_type in PUBLIC_SENSOR_TYPES)
         num_adjustments = counts_by_type.get("gnss_adjusted", 0)
 
         # Đếm Active Alerts (Chưa xử lý)
@@ -229,46 +237,116 @@ async def admin_get_sensor_data(
     station_id: Optional[int] = None,
     sensor_type: Optional[str] = None,
     sort: str = "-timestamp",
+    include_total: bool = True,
+    include_data: bool = True,
+    include_internal: bool = False,
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy sensor data gần nhất"""
     try:
-        query = select(model_data.SensorData)
+        requested_sensor_type = sensor_type.strip().lower() if sensor_type and sensor_type.strip() else None
+        if requested_sensor_type in INTERNAL_SENSOR_TYPES and not include_internal:
+            raise HTTPException(
+                status_code=422,
+                detail="Internal GNSS streams belong to the dedicated adjustment dataset",
+            )
+
+        sensor_filters = []
         if station_id is not None:
-            query = query.where(model_data.SensorData.station_id == station_id)
-        if sensor_type:
-            query = query.where(model_data.SensorData.sensor_type == sensor_type)
+            sensor_filters.append(model_data.SensorData.station_id == station_id)
+        if requested_sensor_type:
+            sensor_filters.append(model_data.SensorData.sensor_type == requested_sensor_type)
+        elif not include_internal:
+            sensor_filters.append(model_data.SensorData.sensor_type.in_(PUBLIC_SENSOR_TYPES))
+        query = select(model_data.SensorData).where(*sensor_filters)
         sort_fields = {"id": model_data.SensorData.id, "timestamp": model_data.SensorData.timestamp, "station_id": model_data.SensorData.station_id, "sensor_type": model_data.SensorData.sensor_type}
         field = sort.lstrip("-")
         if field not in sort_fields:
             raise HTTPException(status_code=422, detail="Unsupported sort field")
         page_offset, page_limit = normalize_page(offset, limit, max_limit=2000)
-        total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
+        total = None
+        if include_total:
+            total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
         column = sort_fields[field]
-        result = await db.execute(query.order_by(column.desc() if sort.startswith("-") else column.asc()).offset(page_offset).limit(page_limit))
-        data = result.scalars().all()
-        set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
-        return [
-            {
-                "id": d.id,
-                "station_id": d.station_id,
-                "timestamp": d.timestamp,
-                "sensor_type": d.sensor_type,
-                "data": d.data,
-                "value_1": d.value_1,
-                "value_2": d.value_2,
-                "value_3": d.value_3,
-                "value_4": d.value_4,
-                "value_5": d.value_5
-            }
-            for d in data
-        ]
+        if include_data:
+            page_query = query
+        else:
+            page_query = select(
+                model_data.SensorData.id,
+                model_data.SensorData.station_id,
+                model_data.SensorData.timestamp,
+                model_data.SensorData.sensor_type,
+                model_data.SensorData.value_1,
+                model_data.SensorData.value_2,
+                model_data.SensorData.value_3,
+                model_data.SensorData.value_4,
+                model_data.SensorData.value_5,
+                func.substr(cast(model_data.SensorData.data, String), 1, 240).label("data_preview"),
+            )
+            page_query = page_query.where(*sensor_filters)
+
+        fetch_limit = page_limit + 1 if not include_total else page_limit
+        result = await db.execute(
+            page_query.order_by(column.desc() if sort.startswith("-") else column.asc())
+            .offset(page_offset)
+            .limit(fetch_limit)
+        )
+        data = result.scalars().all() if include_data else result.all()
+        has_more = not include_total and len(data) > page_limit
+        if has_more:
+            data = data[:page_limit]
+        if total is not None:
+            set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
+        else:
+            response.headers["X-Offset"] = str(page_offset)
+            response.headers["X-Limit"] = str(page_limit)
+            response.headers["X-Has-More"] = "true" if has_more else "false"
+
+        return [{
+            "id": d.id,
+            "station_id": d.station_id,
+            "timestamp": d.timestamp,
+            "sensor_type": d.sensor_type,
+            **({"data": d.data} if include_data else {"data_preview": d.data_preview}),
+            "value_1": d.value_1,
+            "value_2": d.value_2,
+            "value_3": d.value_3,
+            "value_4": d.value_4,
+            "value_5": d.value_5,
+        } for d in data]
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching sensor data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/admin/db/sensor-data/{record_id}")
+async def admin_get_sensor_data_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_data_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+):
+    record = (
+        await db.execute(
+            select(model_data.SensorData).where(model_data.SensorData.id == record_id)
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Sensor data not found")
+    return {
+        "id": record.id,
+        "station_id": record.station_id,
+        "timestamp": record.timestamp,
+        "sensor_type": record.sensor_type,
+        "data": record.data,
+        "value_1": record.value_1,
+        "value_2": record.value_2,
+        "value_3": record.value_3,
+        "value_4": record.value_4,
+        "value_5": record.value_5,
+    }
 
 
 @router.get("/api/admin/db/alerts")

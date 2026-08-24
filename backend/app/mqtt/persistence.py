@@ -1,5 +1,6 @@
 """Buffered sensor persistence, alert, and heartbeat behavior for MQTT."""
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -9,7 +10,10 @@ import paho.mqtt.client as mqtt
 from sqlalchemy import and_, select
 
 from app.database import ConfigSessionLocal, DataSessionLocal
+from app.config import settings
 from app.models import data as model_data
+from app.services.incident_cases import append_event, ensure_incident_case, serialize_case
+from app.services.ingest_spool import IngestSpool
 from app.websocket import manager
 from .utils import clean_null_bytes
 
@@ -37,6 +41,9 @@ class MQTTPersistenceMixin:
             "station_id": station_id,
             "timestamp": timestamp,
             "sensor_type": "gnss_audit",
+            "ingest_id": self._make_ingest_id(
+                device_id, station_id, "gnss_audit", timestamp, data
+            ),
             "data": clean_null_bytes(data),
             "value_1": None,
             "value_2": None,
@@ -136,8 +143,192 @@ class MQTTPersistenceMixin:
             await asyncio.sleep(self._flush_interval)
             await self._flush_write_buffer()
 
+    def _get_ingest_spool(self) -> IngestSpool:
+        spool = getattr(self, "_ingest_spool", None)
+        if spool is None:
+            spool = self._ingest_spool = IngestSpool()
+        return spool
+
+    def _ensure_ingest_metrics(self) -> dict[str, Any]:
+        metrics = getattr(self, "_ingest_metrics", None)
+        if metrics is None:
+            metrics = self._ingest_metrics = {
+                "inserted": 0,
+                "deduped": 0,
+                "null_identity": 0,
+                "commit_unknown_retries": 0,
+                "spool_retries": 0,
+                "spool_rejected": 0,
+                "drained_batches": 0,
+                "last_success_at": 0,
+                "last_error": None,
+            }
+        return metrics
+
+    def _make_ingest_id(
+        self,
+        device_id: int,
+        station_id: int,
+        sensor_type: str,
+        timestamp: int,
+        processed_data: Any,
+        source_payload: str | None = None,
+    ) -> str:
+        """Build a deterministic natural identity for a broker delivery.
+
+        Device sequence is not available for every legacy field unit, so the
+        timestamp and normalized payload are the fallback identity.  This is
+        only used for retry/redelivery dedupe; rows without a stable identity
+        remain at-least-once.
+        """
+        normalized = source_payload
+        if not normalized:
+            normalized = json.dumps(
+                processed_data if processed_data is not None else {},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        material = "|".join(
+            [
+                str(int(device_id or 0)),
+                str(int(station_id or 0)),
+                str(sensor_type or ""),
+                str(int(timestamp or 0)),
+                normalized,
+            ]
+        )
+        return hashlib.sha256(material.encode("utf-8", errors="replace")).hexdigest()
+
+    async def _persist_sensor_batch(self, sensor_batch: list[dict]) -> dict[str, int]:
+        """Persist one batch with identity-aware PostgreSQL conflict handling."""
+        if not sensor_batch:
+            return {"inserted": 0, "deduped": 0, "null_identity": 0}
+        rows = [
+            clean_null_bytes(
+                {key: value for key, value in row.items() if not str(key).startswith("_")}
+            )
+            for row in sensor_batch
+        ]
+        identities = [row.get("ingest_id") for row in rows]
+        metrics = {
+            "inserted": 0,
+            "deduped": 0,
+            "null_identity": sum(1 for value in identities if not value),
+        }
+        async with DataSessionLocal() as db:
+            dialect_obj = getattr(getattr(db, "bind", None), "dialect", None)
+            dialect = str(getattr(dialect_obj, "name", "") or "")
+            if dialect == "postgresql" and any(value for value in identities):
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                statement = pg_insert(model_data.SensorData.__table__).values(rows)
+                statement = statement.on_conflict_do_nothing(
+                    index_elements=["ingest_id"],
+                    index_where=model_data.SensorData.__table__.c.ingest_id.is_not(None),
+                )
+                result = await db.execute(statement)
+            else:
+                result = await db.execute(model_data.SensorData.__table__.insert(), rows)
+            await db.commit()
+            rowcount = getattr(result, "rowcount", None)
+            metrics["inserted"] = (
+                int(rowcount)
+                if isinstance(rowcount, int) and rowcount >= 0
+                else len(rows)
+            )
+            metrics["deduped"] = max(0, len(rows) - metrics["inserted"])
+        return metrics
+
+    async def _spool_failed_sensor_batch(self, sensor_batch: list[dict], reason: str) -> set[str]:
+        self._ensure_ingest_metrics()
+        spool = self._get_ingest_spool()
+        new_records: list[dict] = []
+        batch_ids: set[str] = set()
+        for record in sensor_batch:
+            existing = str(record.get("_spool_id") or "").strip()
+            if existing:
+                batch_ids.add(existing)
+                continue
+            new_records.append(record)
+        if new_records:
+            batch_id = hashlib.sha256(
+                f"{time.time_ns()}:{id(sensor_batch)}".encode("ascii")
+            ).hexdigest()[:32]
+            for record in new_records:
+                record["_spool_id"] = batch_id
+            payload = [
+                {key: value for key, value in record.items() if not str(key).startswith("_")}
+                for record in new_records
+            ]
+            persisted = await spool.append(batch_id, payload, reason)
+            if persisted:
+                batch_ids.add(batch_id)
+                self._ingest_spool_ids = getattr(self, "_ingest_spool_ids", set())
+                self._ingest_spool_ids.add(batch_id)
+            else:
+                self._ingest_metrics["spool_rejected"] = self._ingest_metrics.get("spool_rejected", 0) + len(new_records)
+                logger.critical("Ingest spool hard limit reached; retaining %s rows in RAM", len(new_records))
+        return batch_ids
+
+    async def _drain_ingest_spool_loop(self):
+        self._ensure_ingest_metrics()
+        logger.info("Started durable ingest spool drain task")
+        retry_seconds = max(1.0, float(getattr(settings, "INGEST_SPOOL_RETRY_SECONDS", 5.0)))
+        while True:
+            await asyncio.sleep(retry_seconds)
+            envelopes = await self._get_ingest_spool().pending(
+                limit=max(1, int(getattr(settings, "INGEST_SPOOL_BATCH_SIZE", 256)))
+            )
+            for envelope in envelopes:
+                batch_id = str(envelope.get("batch_id") or "")
+                records = list(envelope.get("records") or [])
+                if not batch_id or not records:
+                    await self._get_ingest_spool().acknowledge(batch_id)
+                    continue
+                try:
+                    lock = getattr(self, "_sensor_db_lock", None)
+                    if lock is None:
+                        lock = self._sensor_db_lock = asyncio.Lock()
+                    async with lock:
+                        metrics = await self._persist_sensor_batch(records)
+                    await self._get_ingest_spool().acknowledge(batch_id)
+                    self._ingest_metrics["inserted"] += metrics["inserted"]
+                    self._ingest_metrics["deduped"] += metrics["deduped"]
+                    self._ingest_metrics["drained_batches"] += 1
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._ingest_metrics["spool_retries"] += 1
+                    self._ingest_metrics["last_error"] = type(exc).__name__
+                    logger.warning("Durable ingest spool retry deferred: %s", exc)
+                    break
+
+    async def ingest_diagnostics(self) -> dict[str, Any]:
+        metrics = dict(getattr(self, "_ingest_metrics", {}) or {})
+        try:
+            spool = await self._get_ingest_spool().stats()
+        except Exception as exc:
+            spool = {
+                "batches": -1,
+                "records": -1,
+                "bytes": -1,
+                "oldest_age_seconds": -1,
+                "error": type(exc).__name__,
+            }
+        return {
+            "buffer_depth": len(getattr(self, "_sensor_buffer", []) or []),
+            "station_update_depth": len(getattr(self, "_station_update_buffer", {}) or {}),
+            "device_update_depth": len(getattr(self, "_device_update_buffer", {}) or {}),
+            "latest_cache_depth": len(getattr(self, "_latest_cache_buffer", {}) or {}),
+            "metrics": metrics,
+            "spool": spool,
+        }
+
     async def _flush_write_buffer(self):
         """Flush toàn bộ buffer ra DB bằng bulk insert / batch update."""
+        self._ensure_ingest_metrics()
         async with self._buffer_lock:
             if (
                 not self._sensor_buffer
@@ -163,12 +354,32 @@ class MQTTPersistenceMixin:
         # 1. Bulk insert sensor data (1 INSERT nhiều rows thay vì nhiều INSERT)
         if sensor_batch:
             try:
-                async with DataSessionLocal() as db:
-                    await db.execute(model_data.SensorData.__table__.insert(), sensor_batch)
-                    await db.commit()
-                logger.debug(f"💾 [BULK FLUSH] {len(sensor_batch)} sensor records saved")
+                lock = getattr(self, "_sensor_db_lock", None)
+                if lock is None:
+                    lock = self._sensor_db_lock = asyncio.Lock()
+                async with lock:
+                    metrics = await self._persist_sensor_batch(sensor_batch)
+                self._ingest_metrics["inserted"] += metrics["inserted"]
+                self._ingest_metrics["deduped"] += metrics["deduped"]
+                self._ingest_metrics["null_identity"] += metrics["null_identity"]
+                self._ingest_metrics["last_success_at"] = int(time.time())
+                await self._get_ingest_spool().acknowledge(
+                    *(str(row.get("_spool_id")) for row in sensor_batch if row.get("_spool_id"))
+                )
+                logger.debug(
+                    f"💾 [BULK FLUSH] {len(sensor_batch)} sensor records saved "
+                    f"(inserted={metrics['inserted']} deduped={metrics['deduped']})"
+                )
             except Exception as e:
                 logger.error(f"❌ Bulk sensor flush error: {e}")
+                # The batch is removed from RAM before the transaction so the
+                # MQTT callback can keep accepting data.  Put it back when the
+                # write fails; otherwise a short DB outage silently loses the
+                # measurements that arrived during that window.
+                self._ingest_metrics["commit_unknown_retries"] += 1
+                await self._spool_failed_sensor_batch(sensor_batch, type(e).__name__)
+                async with self._buffer_lock:
+                    self._sensor_buffer[0:0] = sensor_batch
 
         # 2. Batch update Device.last_data_time + Station.last_update / status
         if latest_cache_batch:
@@ -215,12 +426,32 @@ class MQTTPersistenceMixin:
                 logger.debug(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
             except Exception as e:
                 logger.error(f"❌ Batch config update error: {e}")
+                async with self._buffer_lock:
+                    for sid, values in station_batch.items():
+                        previous = self._station_update_buffer.get(sid)
+                        if previous is None or int(values.get("last_update", 0)) >= int(previous.get("last_update", 0)):
+                            self._station_update_buffer[sid] = values
+                    for did, timestamp in device_batch.items():
+                        if int(timestamp) >= int(self._device_update_buffer.get(did, 0)):
+                            self._device_update_buffer[did] = int(timestamp)
 
     async def _save_alert_immediate(self, device_id: int, station_id: int, sensor_record: dict, alert: dict, current_timestamp: int):
         """Ghi trực tiếp xuống DB ngay lập tức khi có alert (không qua buffer)."""
+        incident_scope = {}
         try:
-            from app.models.config import Device, Station
+            from app.models.config import Device, Project, Station
             async with ConfigSessionLocal() as db_config:
+                scope_row = (await db_config.execute(
+                    select(Station.project_id, Station.name, Station.station_code, Project.name, Project.project_code)
+                    .join(Project, Project.id == Station.project_id)
+                    .where(Station.id == station_id)
+                )).first()
+                if scope_row:
+                    incident_scope = {
+                        "project_id": int(scope_row[0]), "station_name": scope_row[1],
+                        "station_code": scope_row[2], "project_name": scope_row[3],
+                        "project_code": scope_row[4],
+                    }
                 await db_config.execute(
                     Device.__table__.update().where(Device.id == device_id).values(last_data_time=current_timestamp)
                 )
@@ -256,17 +487,81 @@ class MQTTPersistenceMixin:
                     existing_alert.category = alert['category']
                     existing_alert.message = alert['message']
                 else:
-                    db_data.add(model_data.Alert(
+                    existing_alert = model_data.Alert(
                         station_id=station_id,
                         timestamp=current_timestamp,
                         level=alert['level'],
                         category=alert['category'],
                         message=alert['message'],
                         is_resolved=False
-                    ))
+                    )
+                    db_data.add(existing_alert)
+                await db_data.flush()
+                incident_case, _, incident_event = await ensure_incident_case(
+                    db_data,
+                    source_kind="SENSOR_ALERT",
+                    source_id=int(existing_alert.id),
+                    title=f"Cảnh báo {str(alert.get('category') or 'sensor').upper()}",
+                    summary=str(alert.get('message') or 'Cảnh báo sensor cần theo dõi'),
+                    source_severity=str(alert.get('level') or 'UNKNOWN'),
+                    signal_state="ACTIVE" if not existing_alert.is_resolved else "RETURNED",
+                    station_id=int(station_id),
+                    project_id=incident_scope.get("project_id"),
+                    project_name=incident_scope.get("project_name"),
+                    project_code=incident_scope.get("project_code"),
+                    station_name=incident_scope.get("station_name"),
+                    station_code=incident_scope.get("station_code"),
+                    now=int(current_timestamp),
+                )
                 await db_data.commit()
+                if incident_event is not None:
+                    await db_data.refresh(incident_event)
+                    await manager.broadcast_operations({
+                        "protocol": 2,
+                        "type": "incident_changed",
+                        "event_id": int(incident_event.id),
+                        "sequence_from": int(incident_event.sequence),
+                        "sequence_to": int(incident_event.sequence),
+                        "incident_id": int(incident_case.id),
+                        "incident_revision": int(incident_case.revision),
+                        "workflow_version": int(incident_case.version),
+                        "action": "opened" if incident_event.event_type == "opened" else "updated",
+                        "project_id": incident_case.project_id,
+                        "station_id": incident_case.station_id,
+                        "summary": serialize_case(incident_case),
+                    })
         except Exception as e:
             logger.error(f"❌ Alert data save error: {e}")
+
+    async def _touch_active_alert(self, station_id: int, category: str, timestamp: int) -> int:
+        """Refresh an unresolved alert without changing its level/message.
+
+        A restored GNSS quarantine is still an active operational condition.
+        Refreshing its durable timestamp keeps the REST summary from treating
+        a healthy restart as an automatic resolution while the processor is
+        collecting a new velocity window.
+        """
+        try:
+            async with DataSessionLocal() as db_data:
+                result = await db_data.execute(
+                    model_data.Alert.__table__.update()
+                    .where(and_(
+                        model_data.Alert.station_id == station_id,
+                        model_data.Alert.category == category,
+                        model_data.Alert.is_resolved.is_(False),
+                    ))
+                    .values(timestamp=int(timestamp))
+                )
+                await db_data.commit()
+                return int(result.rowcount or 0)
+        except Exception as exc:
+            logger.error(
+                "❌ Failed to refresh active alert station=%s category=%s: %s",
+                station_id,
+                category,
+                exc,
+            )
+            return 0
 
     async def _suppress_station_alerts(self, station_id: int):
         """Resolve active alerts and keep station status LOW when alerting is disabled."""
@@ -279,6 +574,12 @@ class MQTTPersistenceMixin:
         self._alert_suppression_last_attempt[station_id] = now
         try:
             async with DataSessionLocal() as db_data:
+                alert_ids = [int(value) for value in (await db_data.execute(
+                    select(model_data.Alert.id).where(and_(
+                        model_data.Alert.station_id == station_id,
+                        model_data.Alert.is_resolved == False,
+                    ))
+                )).scalars().all()]
                 res = await db_data.execute(
                     model_data.Alert.__table__.update()
                     .where(and_(
@@ -287,8 +588,37 @@ class MQTTPersistenceMixin:
                     ))
                     .values(is_resolved=True)
                 )
+                incident_events = []
+                if alert_ids:
+                    incident_rows = (await db_data.execute(
+                        select(model_data.IncidentCase).where(
+                            model_data.IncidentCase.source_kind == "SENSOR_ALERT",
+                            model_data.IncidentCase.source_id.in_(alert_ids),
+                        ).with_for_update()
+                    )).scalars().all()
+                    for incident_case in incident_rows:
+                        if incident_case.status in {"resolved", "dismissed"}:
+                            continue
+                        incident_case.signal_state = "RETURNED"
+                        incident_case.status = "resolved"
+                        incident_case.resolved_at = int(time.time())
+                        incident_case.version += 1
+                        incident_events.append((incident_case, await append_event(
+                            db_data, incident_case, "signal_returned",
+                            payload={"signal_state": "RETURNED", "status": "resolved", "reason": "alerting_disabled"},
+                        )))
                 if res.rowcount > 0:
                     await db_data.commit()
+                    for incident_case, incident_event in incident_events:
+                        await db_data.refresh(incident_event)
+                        await manager.broadcast_operations({
+                            "protocol": 2, "type": "incident_changed", "event_id": int(incident_event.id),
+                            "sequence_from": int(incident_event.sequence), "sequence_to": int(incident_event.sequence),
+                            "incident_id": int(incident_case.id), "incident_revision": int(incident_case.revision),
+                            "workflow_version": int(incident_case.version), "action": "resolved",
+                            "project_id": incident_case.project_id, "station_id": incident_case.station_id,
+                            "summary": serialize_case(incident_case),
+                        })
                     cmd_topic = f"landslide/{station_id}/command"
                     self._get_client_for_station(station_id).publish(cmd_topic, json.dumps({"cmd": "auto_stop_siren", "ts": int(time.time())}), qos=1)
                     logger.info(f"Alerting disabled for station {station_id}; resolved {res.rowcount} active alerts.")
@@ -352,14 +682,17 @@ class MQTTPersistenceMixin:
                 )
                 rows = res.all()
 
-            fresh_levels = []
+            unresolved_levels = []
+            stale_count = 0
             for level, category, ts in rows:
                 ttl = alert_ttl.get(category, 180)
-                if (now_ts - int(ts or 0)) <= ttl:
-                    normalized_level = str(level or '').upper()
-                    if category in ('tilt_warning', 'tilt_critical', 'shock', 'tilt') and normalized_level == 'WARNING':
-                        normalized_level = 'CRITICAL'
-                    fresh_levels.append(normalized_level)
+                age_seconds = max(0, now_ts - int(ts or 0))
+                if age_seconds > ttl:
+                    stale_count += 1
+                normalized_level = str(level or '').upper()
+                if category in ('tilt_warning', 'tilt_critical', 'shock', 'tilt') and normalized_level == 'WARNING':
+                    normalized_level = 'CRITICAL'
+                unresolved_levels.append(normalized_level)
 
             priority = {
                 "EXTREME": 5,
@@ -369,7 +702,7 @@ class MQTTPersistenceMixin:
                 "MEDIUM": 1,
                 "LOW": 0,
             }
-            normalized_levels = [str(level).upper() for level in fresh_levels if level is not None]
+            normalized_levels = [str(level).upper() for level in unresolved_levels if level is not None]
             highest_level = "LOW"
             highest_score = -1
             for level in normalized_levels:
@@ -379,11 +712,21 @@ class MQTTPersistenceMixin:
                     highest_score = score
 
             if highest_level in priority and highest_level != "LOW":
-                return {"risk_level": highest_level, "unresolved_count": len(fresh_levels)}
-            return {"risk_level": "LOW", "unresolved_count": len(fresh_levels)}
+                return {
+                    "risk_level": highest_level,
+                    "unresolved_count": len(unresolved_levels),
+                    "stale_count": stale_count,
+                }
+            return {
+                "risk_level": "LOW",
+                "unresolved_count": len(unresolved_levels),
+                "stale_count": stale_count,
+            }
         except Exception as e:
             logger.error(f"❌ Error reading active alert summary for station {station_id}: {e}")
-            return {"risk_level": "LOW", "unresolved_count": 0}
+            # Database uncertainty is not a safe reading.  Callers must keep
+            # the last durable siren/alert state and avoid auto-stop actions.
+            return {"risk_level": "UNKNOWN", "unresolved_count": 0, "degraded": True}
 
     async def _save_imu_baseline(self, station_id: int, baseline_data: dict):
         """Lưu IMU baseline vào station config trong DB."""
@@ -436,7 +779,15 @@ class MQTTPersistenceMixin:
         heartbeat_interval = max(5, offline_threshold // 2)
         return (current_timestamp - last_saved) >= heartbeat_interval
 
-    async def _buffer_sensor_record(self, device_id: int, station_id: int, sensor_type: str, current_timestamp: int, processed_data: dict):
+    async def _buffer_sensor_record(
+        self,
+        device_id: int,
+        station_id: int,
+        sensor_type: str,
+        current_timestamp: int,
+        processed_data: dict,
+        source_payload: str | None = None,
+    ):
         val_1, val_2, val_3, val_4, val_5 = 0.0, 0.0, 0.0, 0.0, 0.0
 
         if sensor_type == 'gnss':
@@ -459,6 +810,14 @@ class MQTTPersistenceMixin:
             "station_id": station_id,
             "timestamp": current_timestamp,
             "sensor_type": sensor_type,
+            "ingest_id": self._make_ingest_id(
+                device_id,
+                station_id,
+                sensor_type,
+                current_timestamp,
+                processed_data,
+                source_payload,
+            ),
             "data": processed_data,
             "value_1": val_1,
             "value_2": val_2,
