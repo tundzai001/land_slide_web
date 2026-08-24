@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "build": "4068541858ce",
-  "generated_at": "2026-08-24T12:02:54.766Z",
+  "build": "503ffe27ee89",
+  "generated_at": "2026-08-24T16:34:41.669Z",
   "assets": {
     "admin-app.min.js": {
-      "bytes": 437641,
-      "sha256": "b415d552b5032297e1a05507cb8914a46b51a222b28234bcc620022b80c64e20"
+      "bytes": 437630,
+      "sha256": "4672d89c53982ea784bc31c3dde90216d916c102219fcb83a44a5443140368d0"
     },
     "admin.min.css": {
       "bytes": 106324,
@@ -21,11 +21,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 17113,
-      "sha256": "f4608a8d956d7831945db2c6b210a2826f67677cf512f57934e14f931892315a"
+      "sha256": "d3c469533cf483989f78ee3b7e64fd759a2b3986f3612a5f2104e5f37db4690f"
     },
     "app.html": {
       "bytes": 913,
-      "sha256": "578f76bcfa4aa9b26984a532482b1cc152895dded459f18daca8eb92cf4413e7"
+      "sha256": "42f28b41d5c375300e0450bb929260f7d063d824cc9c7bf993cbccabbe2ae9a5"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -33,11 +33,11 @@
     },
     "index.html": {
       "bytes": 10562,
-      "sha256": "f3462e3bafd2a6163a1050ed99968a029ff09e35f5d5d57d54af4a10a9f88404"
+      "sha256": "ac7d09e914e2ebba0fec3c6c300408f8f0a88f7624ba3c1f30fa2302a0ef018e"
     },
     "landing.min.css": {
-      "bytes": 16133,
-      "sha256": "76a37fd5da75ff609f94de5645b2bf2d35389d279fb9055de55dd57f630ab013"
+      "bytes": 16216,
+      "sha256": "888458fe95b165221745e4b558506f2f1b09321e3ad5486089ae06eeda041bac"
     },
     "landing.min.js": {
       "bytes": 12398,
@@ -49,11 +49,11 @@
     },
     "map-app.min.js": {
       "bytes": 423183,
-      "sha256": "3b1fafafcaf42945dd3d40e15b812ba435d9bccbf9ab14449609a1f70b2c088f"
+      "sha256": "4562f01dd956399157a352a6a2f19fa5c973efecfa86ca7101cc1b5c0cdc44a6"
     },
     "map.html": {
       "bytes": 2499,
-      "sha256": "9acf30cc2ecf5caaac86885dbc0d546b83331d1672e10123cddad5ae4b8f4f02"
+      "sha256": "2192de811c465c73db27fd2745e187fea332487a9b28179ac01b8b5117136e3e"
     },
     "map.min.css": {
       "bytes": 150472,

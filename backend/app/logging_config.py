@@ -1,6 +1,7 @@
 """Process-wide logging and Windows console configuration."""
 import logging
 import os
+import re
 import sys
 
 LOG_FILE_NAME = "landslide_system.log"
@@ -68,7 +69,34 @@ class HeartbeatFilter(logging.Filter):
         return "/api/field/heartbeat" not in record.getMessage()
 
 
+class SensitiveQueryFilter(logging.Filter):
+    """Keep short-lived WebSocket credentials out of access logs."""
+
+    _sensitive_query = re.compile(r"(?i)([?&](?:ticket|access_token)=)[^&\s\"']+")
+
+    @classmethod
+    def _redact(cls, value: str) -> str:
+        return cls._sensitive_query.sub(r"\1<redacted>", value)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = self._redact(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                self._redact(value) if isinstance(value, str) else value
+                for value in record.args
+            )
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: self._redact(value) if isinstance(value, str) else value
+                for key, value in record.args.items()
+            }
+        return True
+
+
 def install_heartbeat_filter() -> None:
     access_logger = logging.getLogger("uvicorn.access")
     if not any(isinstance(item, HeartbeatFilter) for item in access_logger.filters):
         access_logger.addFilter(HeartbeatFilter())
+    if not any(isinstance(item, SensitiveQueryFilter) for item in access_logger.filters):
+        access_logger.addFilter(SensitiveQueryFilter())

@@ -26,3 +26,4 @@ main{max-width:1600px;margin:auto}.hero{min-height:min(920px,100svh);padding:cal
 .story-enhanced .story-stage[data-pose="3"] .ridge-front{transform:translate3d(-4%,7%,0) scale(1.12)}
 @media(prefers-reduced-motion:reduce){.story-enhanced .story-poster,.story-enhanced .ridge-front,.story-enhanced .ridge-back,.story-enhanced .sensor{transition:none}}
 @media(prefers-reduced-motion:reduce){.story-stage{transition:none}}
+.story:not(.story-enhanced){min-height:auto}.story.story-enhanced{min-height:300vh}

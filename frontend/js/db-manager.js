@@ -76,7 +76,7 @@ class DatabaseManager {
             const headers = { 'Authorization': `Bearer ${this.token}` };
             const [projectsRes, stationsRes] = await Promise.all([
                 fetch('/api/admin/projects', { headers }),
-                fetch('/api/admin/db/stations?limit=1000&sort=station_code', { headers }),
+                fetch('/api/admin/db/stations?sort=station_code', { headers }),
             ]);
             this.filterOptions.projects = projectsRes.ok ? await projectsRes.json() : [];
             this.filterOptions.stations = stationsRes.ok ? await stationsRes.json() : [];

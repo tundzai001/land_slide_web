@@ -126,3 +126,21 @@ test('desktop story advances without shifting the fixed navigation', async ({ pa
   expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: 'test-results/landing-story-desktop.png' });
 });
+
+test('story fallback stays compact when progressive enhancement is unavailable', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('http://127.0.0.1:8000/', route => route.fulfill({
+    contentType: 'text/html; charset=utf-8',
+    body: indexSource.replaceAll('__BUILD_VERSION__', 'test'),
+  }));
+  await page.route('**/assets/landing.min.css*', route => route.fulfill({ contentType: 'text/css', body: landingCss }));
+  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: '' }));
+  await page.goto('/');
+
+  const geometry = await page.locator('.story').evaluate(element => ({
+    height: element.getBoundingClientRect().height,
+    enhanced: element.classList.contains('story-enhanced'),
+  }));
+  expect(geometry.enhanced).toBe(false);
+  expect(geometry.height).toBeLessThan(2250);
+});

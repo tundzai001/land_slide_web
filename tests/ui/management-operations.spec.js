@@ -65,7 +65,7 @@ test('sensor pages load lightweight rows and GNSS details open as a downloadable
     window.fetch = async url => {
       const target = String(url);
       if (target.includes('/api/admin/projects')) return new Response('[]', { status: 200 });
-      if (target.includes('/api/admin/db/stations?limit=1000')) return new Response('[]', { status: 200 });
+      if (target.includes('/api/admin/db/stations?sort=station_code')) return new Response('[]', { status: 200 });
       if (target.includes('/stats')) return new Response(JSON.stringify({ sensor_data: 864872, gnss_adjustments: 196 }), { status: 200 });
       if (target.endsWith('/api/admin/db/sensor-data/77')) {
         return new Response(JSON.stringify({
