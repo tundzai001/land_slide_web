@@ -622,19 +622,32 @@ class AdminStationPresetsFeature extends window.AdminManager {
     }
 
     renderGnssCalibrationResult(calibration) {
+        if (!calibration) return;
+        this.renderGnssTrackingOffset(calibration.new_tracking_offset, {
+            state: 'Vừa hiệu chuẩn & lưu',
+            source: `${calibration.sample_count || 0} mẫu`,
+            duration: `${Number(calibration.duration_s || 0).toFixed(1)} giây`,
+        });
+    }
+
+    renderGnssTrackingOffset(offset, { state = 'Đang áp dụng', source = 'Dữ liệu runtime/DB', duration = '—' } = {}) {
         const box = document.getElementById('gnss-offset-result');
-        if (!box || !calibration) return;
-        const formatMm = value => (Number(value || 0) * 1000).toFixed(3);
+        if (!box) return;
         const set = (id, value) => {
             const el = document.getElementById(id);
             if (el) el.textContent = value;
         };
-        set('gnss-offset-e', formatMm(calibration.shift_e_m));
-        set('gnss-offset-n', formatMm(calibration.shift_n_m));
-        set('gnss-offset-u', formatMm(calibration.shift_u_m));
-        set('gnss-offset-2d', Number(calibration.new_tracking_offset_2d_mm || 0).toFixed(3));
-        set('gnss-offset-samples', `${calibration.sample_count || 0} mẫu`);
-        set('gnss-offset-duration', `${Number(calibration.duration_s || 0).toFixed(1)} giây`);
+        const values = Array.isArray(offset) ? offset.slice(0, 3).map(Number) : [];
+        const valid = values.length === 3 && values.every(Number.isFinite);
+        const formatMm = value => (value * 1000).toFixed(3);
+        set('gnss-offset-e', valid ? formatMm(values[0]) : '—');
+        set('gnss-offset-n', valid ? formatMm(values[1]) : '—');
+        set('gnss-offset-u', valid ? formatMm(values[2]) : '—');
+        set('gnss-offset-2d', valid ? (Math.hypot(values[0], values[1]) * 1000).toFixed(3) : '—');
+        set('gnss-offset-state', valid ? state : 'Chưa có offset hợp lệ');
+        set('gnss-offset-samples', source);
+        set('gnss-offset-duration', duration);
+        box.classList.toggle('is-missing', !valid);
         box.hidden = false;
     }
 

@@ -20,6 +20,28 @@ async function mountManagement(page, width = 1366) {
   await page.evaluate(() => { document.body.innerHTML = window.LegacyTemplateParts.shell; });
 }
 
+test('station settings show the persisted GNSS tracking offset, not only the latest shift', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.addScriptTag({ content: source('frontend/js/templates/admin/station-connectivity.js') });
+  await page.evaluate(() => {
+    document.body.innerHTML = window.LegacyTemplateParts['station-connectivity'];
+    document.getElementById('mqtt-gnss-section').style.display = 'block';
+  });
+  await page.addScriptTag({ content: source('frontend/js/admin/core.js') });
+  await page.addScriptTag({ content: source('frontend/js/admin/station-presets.js') });
+  await page.evaluate(() => {
+    window.adminManager = Object.create(window.AdminManager.prototype);
+    window.adminManager.renderGnssTrackingOffset([0.00125, -0.0025, 3.49597667]);
+  });
+
+  await expect(page.locator('#gnss-offset-result')).toBeVisible();
+  await expect(page.locator('#gnss-offset-state')).toHaveText('Đang áp dụng');
+  await expect(page.locator('#gnss-offset-e')).toHaveText('1.250');
+  await expect(page.locator('#gnss-offset-n')).toHaveText('-2.500');
+  await expect(page.locator('#gnss-offset-u')).toHaveText('3495.977');
+  await expect(page.locator('#gnss-offset-2d')).toHaveText('2.795');
+});
+
 test('database explorer loads one paginated dataset and opens the inspector', async ({ page }) => {
   await mountManagement(page);
   await page.evaluate(() => {

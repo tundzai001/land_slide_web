@@ -114,6 +114,17 @@ test('desktop story advances without shifting the fixed navigation', async ({ pa
   await page.goto('/');
 
   const before = await page.locator('.header-inner').boundingBox();
+  const storyVisibility = async progress => {
+    await page.evaluate(value => {
+      const story = document.querySelector('.story');
+      scrollTo(0, story.offsetTop + (story.offsetHeight - innerHeight) * value);
+    }, progress);
+    await page.waitForTimeout(350);
+    return page.locator(`[data-story-step="${Math.min(3, Math.floor(progress * 4))}"]`).evaluate(element => Number(getComputedStyle(element).opacity));
+  };
+  for (const progress of [0, .125, .375, .625, .875]) {
+    expect(await storyVisibility(progress), `chapter at story progress ${progress}`).toBeGreaterThan(.8);
+  }
   await page.evaluate(() => {
     const story = document.querySelector('.story');
     scrollTo(0, story.offsetTop + (story.offsetHeight - innerHeight) * .72);

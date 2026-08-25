@@ -237,6 +237,8 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
     border-radius: 12px;
     background: #f3fbf7;
 }
+.gnss-offset-result.is-missing { border-color: #d8dee8; background: #f7f8fa; }
+.gnss-offset-result.is-missing .gnss-offset-result-heading { color: #596579; }
 .gnss-offset-result-heading,
 .gnss-offset-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .gnss-offset-result-heading { margin-bottom: 9px; color: #176b53; font-size: .76rem; font-weight: 800; }
@@ -247,6 +249,7 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
 .gnss-offset-grid strong { display: inline-block; margin: 3px 3px 0 0; color: #123f34; font: 800 .88rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 .gnss-offset-meta { margin-top: 9px; color: #5e8173; font-size: .66rem; }
 [data-theme="dark"] .gnss-offset-result { border-color: #285b50; background: #102b28; }
+[data-theme="dark"] .gnss-offset-result.is-missing { border-color: #405064; background: #17202b; }
 [data-theme="dark"] .gnss-offset-result-heading { color: #86efac; }
 [data-theme="dark"] .gnss-offset-result-heading small,
 [data-theme="dark"] .gnss-offset-meta,

@@ -9,5 +9,9 @@
   "devDependencies": {
     "@playwright/test": "^1.54.0",
     "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "gsap": "^3.13.0",
+    "three": "^0.180.0"
   }
 }

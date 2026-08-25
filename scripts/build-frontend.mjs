@@ -110,17 +110,17 @@ async function minify(outputName, files) {
 }
 
 async function buildLanding() {
-  const sessionSource = await readFile(path.join(frontendRoot, 'js/session-state.js'), 'utf8');
-  const landingSource = await readFile(path.join(frontendRoot, 'js/landing.js'), 'utf8');
-  const transformed = await esbuild.transform(`${sessionSource}\n;\n${landingSource}`, {
-    loader: 'js',
+  await esbuild.build({
+    entryPoints: [path.join(frontendRoot, 'js/landing.js')],
+    outfile: path.join(outputRoot, 'landing.min.js'),
+    bundle: true,
+    format: 'iife',
     target: 'es2019',
     minify: true,
-    minifyIdentifiers: false,
     legalComments: 'none',
     charset: 'utf8',
+    sourcemap: false,
   });
-  await writeFile(path.join(outputRoot, 'landing.min.js'), transformed.code, 'utf8');
 }
 
 await rm(outputRoot, { recursive: true, force: true });

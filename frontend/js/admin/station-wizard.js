@@ -256,6 +256,8 @@ class AdminStationWizardFeature extends window.AdminManager {
             });
 
             if (Array.isArray(devices)) {
+                const gnssDevice = devices.find(dev => dev.device_type === 'gnss' && dev.is_active !== false)
+                    || devices.find(dev => dev.device_type === 'gnss');
                 devices.forEach(dev => {
                     const type = dev.device_type;
                     const checkbox = document.getElementById(`edit-${type}`);
@@ -307,6 +309,12 @@ class AdminStationWizardFeature extends window.AdminManager {
                 const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => document.getElementById(`edit-${t}`)?.checked);
                 const emptyState = document.getElementById('mqtt-empty-state');
                 if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
+                if (gnssDevice) {
+                    this.renderGnssTrackingOffset?.(gnssDevice.tracking_offset, {
+                        state: gnssDevice.tracking_offset == null ? 'Chưa lưu offset' : 'Đang áp dụng',
+                        source: gnssDevice.tracking_offset == null ? 'Chưa có dữ liệu runtime/DB' : 'Đọc từ runtime/DB',
+                    });
+                }
             }
 
             // STEP 3: Thresholds

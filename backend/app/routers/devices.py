@@ -50,6 +50,18 @@ async def get_station_devices(
 
         devices = result.scalars().all()
 
+        device_ids = [device.id for device in devices]
+        tracking_offsets = {}
+        if device_ids:
+            origin_result = await db.execute(
+                select(model_config.GNSSOrigin.device_id, model_config.GNSSOrigin.tracking_offset)
+                .where(model_config.GNSSOrigin.device_id.in_(device_ids))
+            )
+            tracking_offsets = {
+                device_id: tracking_offset
+                for device_id, tracking_offset in origin_result.all()
+            }
+
         return [
             {
                 "id": d.id,
@@ -60,7 +72,8 @@ async def get_station_devices(
                 "position": d.position,
                 "is_active": d.is_active,
                 "last_data_time": d.last_data_time,
-                "config": d.config or {}
+                "config": d.config or {},
+                "tracking_offset": tracking_offsets.get(d.id) if d.device_type == "gnss" else None,
             }
             for d in devices
         ]
@@ -154,4 +167,3 @@ async def delete_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
-
