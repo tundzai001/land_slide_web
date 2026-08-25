@@ -5,30 +5,30 @@
 ================================================================ */
 
 :root {
-    --map-canvas: #f5f7fa;
-    --map-surface: #ffffff;
-    --map-surface-subtle: #f7f9fc;
-    --map-surface-muted: #eef3f8;
-    --map-line: #e2e8f0;
-    --map-line-strong: #cbd5e1;
-    --map-text: #172033;
-    --map-text-soft: #42526a;
-    --map-muted: #68778d;
-    --map-blue: #2563eb;
-    --map-blue-dark: #1d4ed8;
-    --map-blue-soft: #eff6ff;
-    --map-teal: #0f9f8f;
-    --map-teal-soft: #ecfdf8;
-    --map-amber: #d97706;
-    --map-amber-soft: #fff8eb;
-    --map-danger: #dc3347;
-    --map-danger-dark: #bc2036;
-    --map-danger-soft: #fff1f2;
+    --map-canvas: var(--surface-canvas);
+    --map-surface: var(--surface-default);
+    --map-surface-subtle: var(--surface-subtle);
+    --map-surface-muted: var(--surface-hover);
+    --map-line: var(--border-color);
+    --map-line-strong: var(--border-strong);
+    --map-text: var(--on-surface);
+    --map-text-soft: var(--text-secondary);
+    --map-muted: var(--text-muted);
+    --map-blue: var(--accent-primary);
+    --map-blue-dark: var(--accent-primary-hover);
+    --map-blue-soft: var(--surface-selected);
+    --map-teal: var(--accent-primary);
+    --map-teal-soft: var(--surface-selected);
+    --map-amber: var(--accent-warning);
+    --map-amber-soft: var(--state-warning-bg);
+    --map-danger: var(--accent-danger);
+    --map-danger-dark: var(--accent-danger);
+    --map-danger-soft: var(--state-danger-bg);
     --map-radius-sm: 10px;
     --map-radius: 14px;
     --map-radius-lg: 20px;
-    --map-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 18px rgba(15, 23, 42, 0.05);
-    --map-shadow-panel: 0 20px 55px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.06);
+    --map-shadow-card: var(--shadow-sm);
+    --map-shadow-panel: var(--shadow-lg);
     --map-focus: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
@@ -68,8 +68,8 @@ textarea:focus-visible {
     height: 60px !important;
     padding: 0 14px !important;
     color: var(--map-text) !important;
-    background: rgba(255, 255, 255, 0.96) !important;
-    border: 1px solid rgba(203, 213, 225, 0.88) !important;
+    background: color-mix(in srgb, var(--map-surface) 96%, transparent) !important;
+    border: 1px solid var(--map-line) !important;
     border-radius: 18px !important;
     box-shadow: 0 8px 30px rgba(15, 23, 42, 0.1) !important;
     backdrop-filter: blur(12px) saturate(130%) !important;
@@ -186,7 +186,7 @@ textarea:focus-visible {
 
 /* ---------- Map canvas and controls ---------- */
 #map {
-    background: #dfe7ed !important;
+    background: var(--map-canvas) !important;
 }
 
 .custom-map-controls {
@@ -196,7 +196,7 @@ textarea:focus-visible {
     padding: 6px !important;
     border: 1px solid var(--map-line) !important;
     border-radius: 15px !important;
-    background: rgba(255, 255, 255, 0.96) !important;
+    background: color-mix(in srgb, var(--map-surface) 96%, transparent) !important;
     box-shadow: var(--map-shadow-card) !important;
     backdrop-filter: none !important;
 }
@@ -242,7 +242,7 @@ textarea:focus-visible {
     color: var(--map-text) !important;
     border: 1px solid var(--map-line) !important;
     border-radius: var(--map-radius) !important;
-    background: rgba(255, 255, 255, 0.97) !important;
+    background: color-mix(in srgb, var(--map-surface) 97%, transparent) !important;
     box-shadow: var(--map-shadow-card) !important;
     backdrop-filter: none !important;
 }
@@ -263,7 +263,7 @@ textarea:focus-visible {
 .leaflet-popup-content-wrapper,
 .leaflet-popup-tip {
     color: var(--map-text-soft) !important;
-    background: rgba(255, 255, 255, 0.98) !important;
+    background: color-mix(in srgb, var(--map-surface) 98%, transparent) !important;
 }
 
 .leaflet-popup-content-wrapper {
@@ -545,9 +545,9 @@ textarea:focus-visible {
 
 .sensor-offline-badge,
 .imu-offline-badge {
-    color: #667085 !important;
-    border-color: #d8dee8 !important;
-    background: #f1f4f8 !important;
+    color: var(--state-neutral-text) !important;
+    border-color: var(--map-line) !important;
+    background: var(--state-neutral-bg) !important;
 }
 
 .sensor-compact {
@@ -1151,17 +1151,17 @@ body:has(#guestRescueModal.show) .modal-backdrop,
     top: 82px !important;
     left: 50% !important;
     width: min(680px, calc(100vw - 32px)) !important;
-    color: #7f1d1d !important;
-    border: 1px solid #fecaca !important;
+    color: var(--state-danger-text) !important;
+    border: 1px solid var(--map-danger) !important;
     border-radius: 14px !important;
-    background: #fff7f7 !important;
+    background: var(--state-danger-bg) !important;
     box-shadow: var(--map-shadow-panel) !important;
 }
 
 .alert-title,
 .alert-message,
 .alert-station {
-    color: #7f1d1d !important;
+    color: var(--state-danger-text) !important;
 }
 
 /* ---------- Mobile bottom navigation ---------- */
@@ -1169,7 +1169,7 @@ body:has(#guestRescueModal.show) .modal-backdrop,
     color: var(--map-muted) !important;
     border: 1px solid var(--map-line) !important;
     border-radius: 16px !important;
-    background: rgba(255, 255, 255, 0.98) !important;
+    background: color-mix(in srgb, var(--map-surface) 98%, transparent) !important;
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.13) !important;
     backdrop-filter: blur(10px) !important;
 }
@@ -1396,20 +1396,20 @@ body:has(#guestRescueModal.show) .modal-backdrop,
     justify-content: space-between;
     gap: 12px;
     padding: 10px 12px;
-    border: 1px solid #d8e3f1;
+    border: 1px solid var(--map-line);
     border-radius: 10px;
-    background: #fff;
+    background: var(--map-surface);
 }
 
 .gnss-cluster-result-identity {
     display: grid;
     gap: 2px;
     min-width: 0;
-    color: #172033;
+    color: var(--map-text);
 }
 
 .gnss-cluster-result-identity span {
-    color: #61708a;
+    color: var(--map-muted);
     font-size: .75rem;
 }
 

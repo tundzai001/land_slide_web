@@ -45,13 +45,13 @@ const groups = {
     'css/map/base.css', 'css/map/station-panels.css', 'css/map/analysis.css',
     'css/map/effects-theme.css', 'css/map/tools.css', 'css/map/gnss.css',
     'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css',
-    'css/map/premium-light.css', 'css/map/operations-polish.css',
-    'css/map/digital-twin-workspace.css', 'css/map/digital-twin-results.css', 'css/map/incidents.css'
+    'css/map/premium-light.css', 'css/map/digital-twin-workspace.css',
+    'css/map/digital-twin-results.css', 'css/map/incidents.css', 'css/map/operations-polish.css'
   ],
   'admin.min.css': [
     'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/configuration.css',
-    'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/premium-light.css',
-    'css/admin/pi-devices.css', 'css/admin/incidents.css', 'css/admin/simulations.css'
+    'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/pi-devices.css',
+    'css/admin/incidents.css', 'css/admin/simulations.css', 'css/admin/premium-light.css'
   ],
   'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js', 'js/incident-store.js'],
   'map-app.min.js': [
@@ -145,7 +145,7 @@ await esbuild.build({
   external: ['three', 'three/*']
 });
 
-for (const assetName of ['aitogy.png', 'social-card.png']) {
+for (const assetName of ['aitogy.png', 'favicon.svg', 'social-card.png']) {
   await copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName));
 }
 
@@ -153,13 +153,13 @@ for (const shellName of ['index.html', 'map.html', 'app.html']) {
   const shell = (await readFile(path.join(frontendRoot, shellName), 'utf8'))
     .replaceAll('__BUILD_VERSION__', buildVersion)
     .replaceAll('__PUBLIC_SITE_URL__', publicSiteUrl)
-    .replaceAll('__ROBOTS_META__', isProduction ? 'index, follow' : 'noindex, nofollow');
+    .replaceAll('__ROBOTS_META__', isProduction ? 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1' : 'noindex, nofollow');
   await writeFile(path.join(outputRoot, shellName), shell, 'utf8');
 }
 
 const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'app-runtime.min.js',
-  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
+  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'favicon.svg', 'social-card.png'
 ].sort();
 const manifest = { version: 1, build: buildVersion, generated_at: new Date().toISOString(), assets: {} };
 for (const name of artifactNames) {

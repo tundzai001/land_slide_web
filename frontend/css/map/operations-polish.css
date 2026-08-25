@@ -3,23 +3,23 @@
 /* Keep the map tiles untouched, but let every map chrome surface follow the
    global theme. premium-light.css is intentionally loaded before this file. */
 html[data-theme="dark"] {
-    --map-canvas: #071a1c;
-    --map-surface: #0b2427;
-    --map-surface-subtle: #123034;
-    --map-surface-muted: #183b3e;
-    --map-line: #29494c;
-    --map-line-strong: #3b6265;
-    --map-text: #f0fdfa;
-    --map-text-soft: #c2d8d5;
-    --map-muted: #8eaaa6;
-    --map-blue: #2dd4bf;
-    --map-blue-dark: #5eead4;
-    --map-blue-soft: rgba(45, 212, 191, 0.14);
-    --map-teal: #2dd4bf;
-    --map-teal-soft: rgba(45, 212, 191, 0.12);
-    --map-danger-soft: rgba(251, 113, 133, 0.14);
-    --map-shadow-card: 0 2px 10px rgba(0, 0, 0, 0.2);
-    --map-shadow-panel: 0 20px 55px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.24);
+    --map-canvas: var(--surface-canvas);
+    --map-surface: var(--surface-default);
+    --map-surface-subtle: var(--surface-subtle);
+    --map-surface-muted: var(--surface-hover);
+    --map-line: var(--border-color);
+    --map-line-strong: var(--border-strong);
+    --map-text: var(--on-surface);
+    --map-text-soft: var(--text-secondary);
+    --map-muted: var(--text-muted);
+    --map-blue: var(--accent-primary);
+    --map-blue-dark: var(--accent-primary-hover);
+    --map-blue-soft: var(--surface-selected);
+    --map-teal: var(--accent-primary);
+    --map-teal-soft: var(--surface-selected);
+    --map-danger-soft: var(--state-danger-bg);
+    --map-shadow-card: var(--shadow-sm);
+    --map-shadow-panel: var(--shadow-lg);
 }
 
 html[data-theme="dark"] .top-navbar {

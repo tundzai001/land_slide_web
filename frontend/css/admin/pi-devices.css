@@ -7,36 +7,36 @@
 .pi-filter-field > span { color: var(--admin-muted); font-size: .7rem; font-weight: 750; text-transform: uppercase; }
 .pi-filter-field .form-select { min-width: 180px; min-height: 44px; font-size: .82rem; }
 .pi-list-head, .pi-device-row { display: grid; grid-template-columns: minmax(280px, 1.6fr) minmax(160px, .75fr) minmax(160px, .75fr) minmax(150px, .7fr); align-items: center; gap: 16px; }
-.pi-list-head { padding: 11px 16px; color: #607087; background: #f7f9fc; font-size: .68rem; font-weight: 800; letter-spacing: .055em; text-transform: uppercase; }
+.pi-list-head { padding: 11px 16px; color: var(--admin-muted); background: var(--admin-surface-muted); font-size: .68rem; font-weight: 800; letter-spacing: .055em; text-transform: uppercase; }
 .pi-device-list { min-height: 92px; }
-.pi-device-row { position: relative; min-height: 76px; padding: 13px 16px; border-top: 1px solid #edf1f6; transition: background-color .18s ease, box-shadow .18s ease; }
+.pi-device-row { position: relative; min-height: 76px; padding: 13px 16px; border-top: 1px solid var(--admin-border); background: var(--admin-surface); transition: background-color .18s ease, box-shadow .18s ease; }
 .pi-device-row:first-child { border-top: 0; }
 .pi-device-row[hidden] { display: none !important; }
-.pi-device-row:hover { background: #f8fbff; box-shadow: inset 3px 0 var(--admin-primary); }
-.pi-device-row.is-selected { background: #edf4fb; box-shadow: inset 3px 0 var(--admin-primary); }
+.pi-device-row:hover { background: var(--surface-hover); box-shadow: inset 3px 0 var(--admin-primary); }
+.pi-device-row.is-selected { background: var(--surface-selected); box-shadow: inset 3px 0 var(--admin-primary); }
 .pi-device-identity { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
 .pi-device-select { display: none; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; margin: -5px 0; border-radius: 10px; cursor: pointer; }
 .pi-device-select.is-visible { display: grid; }
 .pi-device-select input, .user-project-option input { width: 18px !important; height: 18px !important; min-width: 18px !important; min-height: 18px !important; margin: 0 !important; accent-color: var(--admin-primary); }
-.pi-device-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; color: var(--admin-primary); background: #eaf1f7; }
+.pi-device-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; color: var(--admin-primary); background: var(--admin-surface-muted); }
 .pi-device-name { min-width: 0; }
 .pi-device-name strong { display: block; overflow: hidden; color: var(--admin-text); font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
 .pi-device-name small { display: block; margin-top: 3px; color: var(--admin-muted); font-size: .7rem; }
 .pi-device-serial { width: max-content; max-width: 100%; overflow: hidden; padding: 5px 8px; border-radius: 7px; color: var(--admin-text); background: var(--admin-surface-muted); font: 700 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .pi-device-status, .pi-connection { display: inline-flex; align-items: center; gap: 6px; width: max-content; padding: 6px 9px; border-radius: 999px; font-size: .7rem; font-weight: 750; }
-.pi-device-status.is-pending { color: #885f00; background: #fff5d7; }
-.pi-device-status.is-activated { color: #137a47; background: #e9f8ef; }
-.pi-device-status.is-assigned { color: #155a8a; background: #e8f3fb; }
-.pi-device-status.is-locked { color: #a12b37; background: #fdecef; }
-.pi-connection.is-online { color: #137a47; background: #e9f8ef; }
-.pi-connection.is-offline { color: #687587; background: #eef1f5; }
+.pi-device-status.is-pending { color: var(--state-warning-text); background: var(--state-warning-bg); }
+.pi-device-status.is-activated { color: var(--state-success-text); background: var(--state-success-bg); }
+.pi-device-status.is-assigned { color: var(--state-info-text); background: var(--state-info-bg); }
+.pi-device-status.is-locked { color: var(--state-danger-text); background: var(--state-danger-bg); }
+.pi-connection.is-online { color: var(--state-success-text); background: var(--state-success-bg); }
+.pi-connection.is-offline { color: var(--state-neutral-text); background: var(--state-neutral-bg); }
 .pi-connection i, .pi-console-footer i { font-size: .55rem; }
 .pi-console-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 10px 16px; border-top: 1px solid var(--admin-border); color: var(--admin-muted); font-size: .72rem; }
 .pi-console-footer .is-online { color: #18a561; }
 .pi-console-footer .is-offline { color: #a7b0bd; }
 .pi-child-list { grid-column: 1 / -1; display: grid; gap: 7px; margin: 0 0 0 53px; }
-.pi-child-device { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 7px 10px; border: 1px solid #e4eaf1; border-radius: 9px; background: #fafbfd; }
-.pi-child-device strong { color: #344258; font-size: .74rem; }
+.pi-child-device { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 7px 10px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-surface-muted); }
+.pi-child-device strong { color: var(--admin-text); font-size: .74rem; }
 .pi-child-device small { color: var(--admin-muted); font-size: .68rem; }
 .pi-child-device .btn { margin-left: auto; }
 .pi-action-bar { position: fixed; z-index: 50; left: 50%; bottom: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: calc(100vw - 28px); padding: 10px 12px; border: 1px solid #344258; border-radius: 14px; background: #172033; box-shadow: 0 18px 50px rgba(15, 23, 42, .28); transform: translate(-50%, calc(100% + 40px)); transition: transform .22s ease; }

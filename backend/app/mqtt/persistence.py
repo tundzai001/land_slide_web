@@ -541,6 +541,19 @@ class MQTTPersistenceMixin:
         a healthy restart as an automatic resolution while the processor is
         collecting a new velocity window.
         """
+        # A rejected GNSS sample can arrive several times per second. Refreshing
+        # the same alert for every packet creates a DB write storm while the
+        # processor is intentionally quarantined. One touch per 15s preserves
+        # the durable TTL without competing with sensor persistence.
+        refresh_key = (int(station_id), str(category))
+        refresh_attempts = getattr(self, "_active_alert_refresh_attempts", None)
+        if refresh_attempts is None:
+            refresh_attempts = self._active_alert_refresh_attempts = {}
+        now = time.monotonic()
+        last_attempt = float(refresh_attempts.get(refresh_key, 0.0) or 0.0)
+        if now - last_attempt < 15.0:
+            return 0
+        refresh_attempts[refresh_key] = now
         try:
             async with DataSessionLocal() as db_data:
                 result = await db_data.execute(

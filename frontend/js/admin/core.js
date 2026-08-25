@@ -171,13 +171,19 @@ class AdminManager {
                         if (progress.phase === 'complete') {
                             statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Backend đã thu đủ mẫu và áp dụng offset.</span>';
                             statusEl.className = 'text-success small';
+                            this._gnssCalibrationCompleted = true;
                             this._gnssCalibrationInProgress = false;
+                            const resetBtn = document.getElementById('btn-reset-origin');
+                            if (resetBtn) resetBtn.disabled = false;
+                            Promise.resolve(this.refreshGnssTrackingOffset?.(this.currentStationId)).catch(() => {});
                         } else {
                             const duration = Number(progress.duration_s || 0).toFixed(1);
                             const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));
                             const sampleCount = Number(progress.sample_count || 0);
-                            const minimumSamples = Number(progress.minimum_samples || 60);
-                            statusEl.innerHTML = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Backend đang thu RTK FIXED… ${duration}s · ${sampleCount}/${minimumSamples} mẫu · còn ${remaining}s`;
+                            const minimumSamples = Number(progress.minimum_samples || 61);
+                            const intervalCount = Math.max(0, sampleCount - 1);
+                            const minimumDuration = Number(progress.minimum_duration_s || 60).toFixed(1);
+                            statusEl.innerHTML = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu RTK FIXED… ${sampleCount}/${minimumSamples} mẫu · ${intervalCount} khoảng đo · ${duration}/${minimumDuration}s · còn ${remaining}s`;
                             statusEl.className = 'text-info small';
                         }
                     }

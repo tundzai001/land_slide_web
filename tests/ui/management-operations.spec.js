@@ -8,8 +8,8 @@ const css = [
   'frontend/css/theme-variables.css',
   'frontend/css/components.css',
   'frontend/css/admin/base.css',
-  'frontend/css/admin/premium-light.css',
   'frontend/css/admin/pi-devices.css',
+  'frontend/css/admin/premium-light.css',
 ].map(source).join('\n');
 
 async function mountManagement(page, width = 1366) {
@@ -40,6 +40,36 @@ test('station settings show the persisted GNSS tracking offset, not only the lat
   await expect(page.locator('#gnss-offset-n')).toHaveText('-2.500');
   await expect(page.locator('#gnss-offset-u')).toHaveText('3495.977');
   await expect(page.locator('#gnss-offset-2d')).toHaveText('2.795');
+});
+
+test('GNSS calibration keeps waiting for realtime completion after a gateway 504', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body><button id="btn-reset-origin"></button><small id="origin-status"></small></body></html>');
+  await page.addScriptTag({ content: source('frontend/js/admin/core.js') });
+  await page.addScriptTag({ content: source('frontend/js/admin/station-presets.js') });
+  await page.evaluate(() => {
+    window.confirm = () => true;
+    window.calibrationToasts = [];
+    window.toast = {
+      info: message => window.calibrationToasts.push({ type: 'info', message }),
+      error: message => window.calibrationToasts.push({ type: 'error', message }),
+    };
+    window.fetch = async () => new Response('', { status: 504 });
+    window.adminManager = Object.create(window.AdminManager.prototype);
+    window.adminManager.token = 'test-token';
+  });
+
+  await page.evaluate(() => window.adminManager.resetGnssOrigin(7));
+
+  await expect(page.locator('#btn-reset-origin')).toBeDisabled();
+  await expect(page.locator('#origin-status')).toContainText('Gateway');
+  const state = await page.evaluate(() => ({
+    inProgress: window.adminManager._gnssCalibrationInProgress,
+    toasts: window.calibrationToasts,
+  }));
+  expect(state.inProgress).toBe(true);
+  expect(state.toasts.some(toast => toast.type === 'info')).toBe(true);
+  expect(state.toasts.some(toast => toast.type === 'error')).toBe(false);
+  await page.evaluate(() => { window.adminManager._gnssCalibrationInProgress = false; });
 });
 
 test('database explorer loads one paginated dataset and opens the inspector', async ({ page }) => {
@@ -143,7 +173,10 @@ test('sensor pages load lightweight rows and GNSS details open as a downloadable
 
 test('dark theme applies one semantic surface across the data workspace', async ({ page }) => {
   await mountManagement(page);
-  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'dark';
+    document.querySelector('#pi-grid-body').innerHTML = '<article class="pi-device-row"><span class="pi-device-status is-pending">Chờ kích hoạt</span></article>';
+  });
   await page.waitForTimeout(350);
   const colors = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
@@ -164,12 +197,18 @@ test('dark theme applies one semantic surface across the data workspace', async 
       explorer: getComputedStyle(document.querySelector('.db-explorer')).backgroundColor,
       rail: getComputedStyle(document.querySelector('.db-dataset-rail')).backgroundColor,
       toolbar: getComputedStyle(document.querySelector('.db-toolbar')).backgroundColor,
+      piList: getComputedStyle(document.querySelector('.pi-list-head')).backgroundColor,
+      piRow: getComputedStyle(document.querySelector('.pi-device-row')).backgroundColor,
+      piStatus: getComputedStyle(document.querySelector('.pi-device-status')).backgroundColor,
     };
   });
   expect(colors.kpi).toBe(colors.surface);
   expect(colors.explorer).toBe(colors.surface);
   expect(colors.toolbar).toBe(colors.surface);
   expect(colors.rail).toBe(colors.muted);
+  expect(colors.piList).toBe(colors.muted);
+  expect(colors.piRow).toBe(colors.surface);
+  expect(colors.piStatus).not.toBe('rgb(255, 245, 215)');
 });
 
 test('user management filters and edits account configuration', async ({ page }) => {

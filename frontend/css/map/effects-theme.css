@@ -177,20 +177,20 @@
 }
 
 [data-theme="dark"] .reliability-note-warning {
-    color: #ffd166;
-    background: rgba(92, 59, 12, 0.55);
-    border-color: rgba(255, 209, 102, 0.35);
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border-color: var(--accent-warning);
 }
 
 [data-theme="dark"] .longterm-metric-card.is-preliminary {
-    border-color: rgba(255, 209, 102, 0.35) !important;
-    background: linear-gradient(180deg, rgba(92, 59, 12, 0.45) 0%, var(--bg-tertiary) 100%) !important;
+    border-color: var(--accent-warning) !important;
+    background: linear-gradient(180deg, var(--state-warning-bg) 0%, var(--surface-subtle) 100%) !important;
 }
 
 [data-theme="dark"] .metric-inline-warning {
-    color: #ffd166;
-    background: rgba(92, 59, 12, 0.55);
-    border-color: rgba(255, 209, 102, 0.35);
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border-color: var(--accent-warning);
 }
 
 [data-theme="dark"] .longterm-metric-card .text-muted {

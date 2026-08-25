@@ -582,6 +582,70 @@ class GnssFixedOnlyTests(unittest.TestCase):
         )
         self.assertGreater(processor.peak_displacement_mm, 0.0)
 
+    def test_manual_offset_calibration_captures_quarantined_fixed_samples(self):
+        processor = self._processor_without_db()
+        processor.history = deque([
+            {"ts": 1_699_999_999.0, "pos_enu": np.zeros(3, dtype=float)},
+        ], maxlen=1200)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor.origin["ecef"] = np.array([1000.0, 2000.0, 3000.0])
+        processor.origin["R"] = np.eye(3)
+        center = np.array([0.04, 0.0, 0.40], dtype=float)
+        sample_index = {"value": 0}
+
+        def fake_parse(_):
+            return {
+                "wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                "gga_timestamp": 1_700_000_000.0 + sample_index["value"],
+                "fix_quality": 4,
+                "num_sats": 20,
+                "hdop": 0.5,
+            }
+
+        def fake_ecef(*_):
+            sample_index["value"] += 1
+            return processor.origin["ecef"] + center
+
+        processor._parse_gngga = fake_parse
+        processor._gngga_to_ecef = fake_ecef
+
+        saved = []
+
+        async def save_offset(offset=None):
+            saved.append(np.asarray(offset, dtype=float).copy())
+            return True
+
+        processor._async_save_tracking_offset = save_offset
+
+        async def calibrate_while_quarantined():
+            task = asyncio.create_task(processor.recalibrate_tracking_offset(
+                minimum_samples=3,
+                minimum_duration_s=2.0,
+                timeout_s=1.0,
+                poll_interval_s=0.001,
+            ))
+            await asyncio.sleep(0)
+            for _ in range(3):
+                result = processor._handle_processing("$GNGGA,TEST", 4, {})
+                self.assertIn(result["status"], {"INVALID_DATA", "UNVERIFIED_POSITION_SHIFT"})
+                await asyncio.sleep(0)
+            return await task
+
+        result = asyncio.run(calibrate_while_quarantined())
+
+        self.assertEqual(result["sample_count"], 3)
+        np.testing.assert_allclose(processor.tracking_offset_enu, center, atol=1e-12)
+        np.testing.assert_allclose(saved[0], center, atol=1e-12)
+        self.assertFalse(processor.reacquire_candidates)
+        np.testing.assert_allclose(processor.history[-1]["pos_enu"], np.zeros(3), atol=1e-12)
+        post_calibration = processor._handle_processing("$GNGGA,TEST", 4, {})
+        self.assertNotIn(
+            post_calibration.get("status"),
+            {"INVALID_DATA", "UNVERIFIED_POSITION_SHIFT"},
+        )
+
     def test_horizontal_stale_cluster_reacquires_tracking(self):
         """Verify trạm lệch ngang (offset2D > max_step) sau khi mất fix lâu (dt > 60s) vẫn reacquire thành công."""
         processor = self._processor_without_db()

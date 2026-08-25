@@ -576,9 +576,11 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
         const resetBtn = document.getElementById('btn-reset-origin');
         const statusEl = document.getElementById('origin-status');
+        let awaitingRealtimeCompletion = false;
         try {
             if (resetBtn) resetBtn.disabled = true;
             this._gnssCalibrationInProgress = true;
+            this._gnssCalibrationCompleted = false;
             if (statusEl) {
                 statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Backend đang chuẩn bị thu mẫu RTK FIXED…';
                 statusEl.className = 'text-info small';
@@ -592,6 +594,25 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
+                if (res.status === 504) {
+                    if (this._gnssCalibrationCompleted) return;
+                    awaitingRealtimeCompletion = true;
+                    if (statusEl) {
+                        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Gateway đã hết thời gian chờ; backend vẫn đang hoàn tất hiệu chuẩn…';
+                        statusEl.className = 'text-warning small';
+                    }
+                    window.toast?.info('HTTP hết thời gian chờ, không phải lỗi hiệu chuẩn. Đang chờ kết quả realtime.');
+                    setTimeout(() => {
+                        if (!this._gnssCalibrationInProgress) return;
+                        this._gnssCalibrationInProgress = false;
+                        if (resetBtn) resetBtn.disabled = false;
+                        if (statusEl) {
+                            statusEl.textContent = 'Không nhận được phản hồi realtime; tải lại cấu hình trạm để kiểm tra offset đã lưu.';
+                            statusEl.className = 'text-warning small';
+                        }
+                    }, 20_000);
+                    return;
+                }
                 if (res.status === 401) {
                     await window.authManager?.handleUnauthorizedResponse?.('gnss-calibration');
                     throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại');
@@ -616,9 +637,24 @@ class AdminStationPresetsFeature extends window.AdminManager {
         } catch (e) {
             window.toast?.error('Offset calibration failed: ' + e.message);
         } finally {
-            this._gnssCalibrationInProgress = false;
-            if (resetBtn) resetBtn.disabled = false;
+            if (!awaitingRealtimeCompletion) {
+                this._gnssCalibrationInProgress = false;
+                if (resetBtn) resetBtn.disabled = false;
+            }
         }
+    }
+
+    async refreshGnssTrackingOffset(stationId) {
+        if (!stationId) return;
+        const res = await fetch(`/api/admin/stations/${stationId}/devices`, {
+            headers: { 'Authorization': `Bearer ${this.token}` },
+            cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const devices = await res.json();
+        const gnss = devices.find(device => device.device_type === 'gnss' && device.is_active !== false)
+            || devices.find(device => device.device_type === 'gnss');
+        if (gnss) this.renderGnssTrackingOffset(gnss.tracking_offset);
     }
 
     renderGnssCalibrationResult(calibration) {

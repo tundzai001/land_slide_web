@@ -340,24 +340,24 @@ body.map-is-moving .detail-sidebar,
 }
 
 .gnss-fix-badge.GNSS_RTK_FIXED {
-    color: #14532d;
-    background: #dcfce7;
-    border-color: #86efac;
+    color: var(--state-success-text);
+    background: var(--state-success-bg);
+    border-color: var(--accent-success);
 }
 
 .gnss-fix-badge.GNSS_RTK_FLOAT,
 .gnss-fix-badge.GNSS_DGPS_FLOAT {
-    color: #78350f;
-    background: #fef3c7;
-    border-color: #fcd34d;
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border-color: var(--accent-warning);
 }
 
 .gnss-fix-badge.GNSS_SINGLE,
 .gnss-fix-badge.GNSS_INVALID,
 .gnss-fix-badge.GNSS_UNKNOWN {
-    color: #7f1d1d;
-    background: #fee2e2;
-    border-color: #fca5a5;
+    color: var(--state-danger-text);
+    background: var(--state-danger-bg);
+    border-color: var(--accent-danger);
 }
 
 .sensor-value-large {

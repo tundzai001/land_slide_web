@@ -558,26 +558,26 @@
 }
 
 .reliability-note-warning {
-    color: #8a5a00;
-    background: #fff4d6;
-    border-color: #f3d388;
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border-color: var(--accent-warning);
 }
 
 .analysis-source-note {
     margin-bottom: 12px;
     padding: 10px 12px;
     border-radius: 10px;
-    border: 1px solid #9fd3ff;
-    background: #ecf6ff;
-    color: #145a8d;
+    border: 1px solid var(--accent-info);
+    background: var(--state-info-bg);
+    color: var(--state-info-text);
     font-size: 0.88rem;
     font-weight: 600;
 }
 
 .longterm-metric-card.is-preliminary {
     border-style: dashed;
-    border-color: #f3d388;
-    background: linear-gradient(180deg, rgba(255, 244, 214, 0.8) 0%, var(--bg-tertiary) 100%);
+    border-color: var(--accent-warning);
+    background: linear-gradient(180deg, var(--state-warning-bg) 0%, var(--surface-subtle) 100%);
 }
 
 .metric-inline-warning {
@@ -589,9 +589,9 @@
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 700;
-    color: #8a5a00;
-    background: #fff4d6;
-    border: 1px solid #f3d388;
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border: 1px solid var(--accent-warning);
 }
 
 /* â”€â”€ Cross-sensor consensus â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -614,21 +614,21 @@
 }
 
 .consensus-strong {
-    color: #0a6640;
-    background: #d4f4e2;
-    border: 1px solid #6fcf97;
+    color: var(--state-success-text);
+    background: var(--state-success-bg);
+    border: 1px solid var(--accent-success);
 }
 
 .consensus-partial {
-    color: #7a4f00;
-    background: #fff0cc;
-    border: 1px solid #f3c44c;
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border: 1px solid var(--accent-warning);
 }
 
 .consensus-conflict {
-    color: #8b0000;
-    background: #fde8e8;
-    border: 1px solid #f08080;
+    color: var(--state-danger-text);
+    background: var(--state-danger-bg);
+    border: 1px solid var(--accent-danger);
 }
 
 .consensus-none {
@@ -656,21 +656,21 @@
 }
 
 .sensor-chip-ok {
-    color: #0a6640;
-    background: #d4f4e2;
-    border-color: #6fcf97;
+    color: var(--state-success-text);
+    background: var(--state-success-bg);
+    border-color: var(--accent-success);
 }
 
 .sensor-chip-alert {
-    color: #7a4f00;
-    background: #fff0cc;
-    border-color: #f3c44c;
+    color: var(--state-warning-text);
+    background: var(--state-warning-bg);
+    border-color: var(--accent-warning);
 }
 
 .sensor-chip-conflict {
-    color: #8b0000;
-    background: #fde8e8;
-    border-color: #f08080;
+    color: var(--state-danger-text);
+    background: var(--state-danger-bg);
+    border-color: var(--accent-danger);
 }
 
 .consensus-notes-list {
@@ -686,42 +686,6 @@
     padding: 8px 12px;
     font-size: 0.88rem;
     color: var(--text-primary);
-}
-
-[data-theme="dark"] .consensus-strong {
-    color: #6fcf97;
-    background: rgba(10, 102, 64, 0.3);
-    border-color: #27ae60;
-}
-
-[data-theme="dark"] .consensus-partial {
-    color: #f3c44c;
-    background: rgba(122, 79, 0, 0.35);
-    border-color: #f5a623;
-}
-
-[data-theme="dark"] .consensus-conflict {
-    color: #ff8080;
-    background: rgba(139, 0, 0, 0.3);
-    border-color: #e74c3c;
-}
-
-[data-theme="dark"] .sensor-chip-ok {
-    color: #6fcf97;
-    background: rgba(10, 102, 64, 0.3);
-    border-color: #27ae60;
-}
-
-[data-theme="dark"] .sensor-chip-alert {
-    color: #f3c44c;
-    background: rgba(122, 79, 0, 0.35);
-    border-color: #f5a623;
-}
-
-[data-theme="dark"] .sensor-chip-conflict {
-    color: #ff8080;
-    background: rgba(139, 0, 0, 0.3);
-    border-color: #e74c3c;
 }
 
 /*  CLASSIFICATION SCALE  */

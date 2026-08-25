@@ -101,6 +101,10 @@ class GNSSVelocityProcessor:
         self._runtime_state_pending_snapshot = None
         self._runtime_state_pending_offset = None
         self._last_runtime_state_schedule_monotonic = 0.0
+        # Manual offset calibration must be able to collect stable FIXED samples
+        # even while the normal integrity gate keeps a shifted cluster quarantined.
+        self._offset_calibration_samples = deque(maxlen=600)
+        self._offset_calibration_in_progress = False
 
         self.stats = {
             'total_processed': 0,
@@ -953,12 +957,17 @@ class GNSSVelocityProcessor:
         self,
         *,
         station_id: Optional[int] = None,
-        minimum_samples: int = 60,
+        minimum_samples: int = 61,
         minimum_duration_s: float = 60.0,
         timeout_s: float = 120.0,
         poll_interval_s: float = 0.25,
     ):
-        """Collect a fresh stable FIXED window and re-zero displacement."""
+        """Collect a fresh stable FIXED window and re-zero displacement.
+
+        During quarantine, samples are deliberately excluded from ``history``.
+        A manual calibration therefore uses a short-lived capture buffer filled
+        by ``_handle_processing`` while this method is waiting.
+        """
         if self.state != "ORIGIN_LOCKED" or self.origin is None:
             raise ValueError("GNSS origin is not locked")
         if getattr(self, "_offset_calibration_in_progress", False):
@@ -970,14 +979,21 @@ class GNSSVelocityProcessor:
         poll_interval_s = max(0.01, float(poll_interval_s))
         started_after_ts = float(self.history[-1]["ts"]) if self.history else -math.inf
         old_offset = self.tracking_offset_enu.copy()
+        capture_buffer = getattr(self, "_offset_calibration_samples", None)
+        if capture_buffer is None:
+            capture_buffer = deque(maxlen=600)
+            self._offset_calibration_samples = capture_buffer
+        capture_buffer.clear()
         deadline = asyncio.get_running_loop().time() + timeout_s
         self._offset_calibration_in_progress = True
         last_progress_second = -1
+        used_capture_samples = False
         try:
             while True:
-                samples = [
-                    sample
-                    for sample in self.history
+                captured_samples = list(capture_buffer)
+                used_capture_samples = bool(captured_samples)
+                samples = captured_samples or [
+                    sample for sample in self.history
                     if float(sample["ts"]) > started_after_ts
                 ]
                 duration_s = (
@@ -1029,6 +1045,7 @@ class GNSSVelocityProcessor:
                 await asyncio.sleep(poll_interval_s)
         finally:
             self._offset_calibration_in_progress = False
+            capture_buffer.clear()
 
         if not np.allclose(self.tracking_offset_enu, old_offset):
             raise ValueError("GNSS tracking reference changed during calibration; retry")
@@ -1054,8 +1071,19 @@ class GNSSVelocityProcessor:
             raise RuntimeError("Could not persist GNSS tracking offset")
 
         self.tracking_offset_enu = proposed_offset
-        for sample in self.history:
-            sample["pos_enu"] = np.asarray(sample["pos_enu"], dtype=float) - center
+        if used_capture_samples:
+            # Quarantined samples never entered trusted history. Replace the
+            # stale pre-shift anchor with their re-zeroed window so the first
+            # post-calibration FIXED sample is accepted instead of creating a
+            # synthetic jump back from ``-center``.
+            self.history.clear()
+            self.history.extend({
+                "ts": sample["ts"],
+                "pos_enu": np.asarray(sample["pos_enu"], dtype=float) - center,
+            } for sample in samples)
+        else:
+            for sample in self.history:
+                sample["pos_enu"] = np.asarray(sample["pos_enu"], dtype=float) - center
 
         calibrated_positions = np.asarray(
             [sample["pos_enu"] for sample in samples],
@@ -1374,6 +1402,18 @@ class GNSSVelocityProcessor:
         )
         if reference_result is not None:
             return reference_result
+
+        # Keep a bounded, non-persisted capture window for the explicit manual
+        # calibration action. This includes FIXED samples that the integrity
+        # gate will quarantine below, so a shifted cluster can be recalibrated
+        # instead of waiting forever for accepted history to appear.
+        if getattr(self, "_offset_calibration_in_progress", False):
+            capture_buffer = getattr(self, "_offset_calibration_samples", None)
+            if capture_buffer is not None:
+                capture_buffer.append({
+                    "ts": float(ts),
+                    "pos_enu": np.asarray(pos_enu, dtype=float).copy(),
+                })
 
         self.history.append({
             'ts': ts,

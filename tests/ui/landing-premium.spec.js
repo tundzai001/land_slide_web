@@ -11,6 +11,12 @@ test('index is semantic and progressively enhanced without React', async () => {
   expect(indexSource).toContain('<section class="hero"');
   expect(indexSource).toContain('Nhìn thấy chuyển động');
   expect(indexSource).toContain('rel="canonical"');
+  expect(indexSource).toContain('Quan trắc sạt lở đất realtime');
+  expect(indexSource).toContain('"@type":"WebPage"');
+  expect(indexSource).toContain('og:image:alt');
+  expect(indexSource).toContain('rel="icon"');
+  expect(indexSource).toContain('<address class="footer-contact"');
+  expect(indexSource).toContain('aitogyaitogy@gmail.com');
   expect(indexSource).not.toContain('react.production.min.js');
   expect(indexSource).not.toContain('ReactDOM');
   expect(landingCss.toString()).toContain('.story-enhanced .story-stage');
@@ -23,6 +29,7 @@ const sizes = [
   { name: 'mobile', width: 390, height: 844 },
   { name: 'landscape', width: 844, height: 390 },
   { name: 'desktop', width: 1440, height: 1000 },
+  { name: 'desktop-wide', width: 1920, height: 1080 },
 ];
 
 for (const size of sizes) {
@@ -54,6 +61,7 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
 
     const contract = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth - innerWidth,
+      mainWidth: document.querySelector('main').getBoundingClientRect().width,
       h1: document.querySelectorAll('h1').length,
       emptyLinks: [...document.querySelectorAll('a')].filter(link => !link.textContent.trim() && !link.getAttribute('aria-label')).length,
       undersizedTargets: [...document.querySelectorAll('a,button')].filter(element => {
@@ -69,6 +77,7 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     expect(contract.h1).toBe(1);
     expect(contract.emptyLinks).toBe(0);
     expect(contract.undersizedTargets).toEqual([]);
+    if (size.width >= 1800) expect(contract.mainWidth).toBeGreaterThanOrEqual(size.width * .98);
 
     const themeButton = page.locator('.icon-button');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
