@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "build": "2af79720b414",
-  "generated_at": "2026-08-25T16:01:41.488Z",
+  "build": "26ed05cbd4b3",
+  "generated_at": "2026-08-26T03:33:05.318Z",
   "assets": {
     "admin-app.min.js": {
       "bytes": 440269,
-      "sha256": "2dd0a6229f0aa18aa0a2d1ca21c5c06cb27338193eb89daa15457e880d954c45"
+      "sha256": "4c657bafe22ed0dd2ae6f5a63f7d181e1f87a5b41a4d9a078a5d2fb04f12dff6"
     },
     "admin.min.css": {
       "bytes": 108043,
@@ -21,11 +21,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 17113,
-      "sha256": "0b7e5f29860288dc4fb740104999c17f03cd11900059d5aa859acc70aa1f64d2"
+      "sha256": "07d68ac8f2fb04d6723d0862959e82d22c7978c4c831e4a5e8e61c6b3f258dd9"
     },
     "app.html": {
       "bytes": 998,
-      "sha256": "86f2ff7dbb9a26ce77cc4390f3a6e77ddd4a247e6fb31f0a416d09c82393ffc9"
+      "sha256": "cda2fadcb238757dd6da730c6d4f8c96d69450dd48f42a25d49654ce792a6b21"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -37,7 +37,7 @@
     },
     "index.html": {
       "bytes": 15516,
-      "sha256": "57b09372b5795775217043cd18cde9facf96cf83a69c864bb56c3a38e95959e2"
+      "sha256": "13a0a7a8270482fd86b75b5590ab5f694d0a9b0c009fafd210877dd2bce8c73c"
     },
     "landing.min.css": {
       "bytes": 24314,
@@ -53,15 +53,15 @@
     },
     "map-app.min.js": {
       "bytes": 423183,
-      "sha256": "0fe18237b8e11bfd0571aecc1018dc6548af4eb8aa9618184a848ca08c47b7bd"
+      "sha256": "396a05725db81da02ce0ef6d2f98e2ff09fdf0c2c6d403b635d95a252de56441"
     },
     "map.html": {
       "bytes": 2830,
-      "sha256": "90aed81ad9098598581094899fd69729cde40c851b92b5ad8306999944a91dce"
+      "sha256": "9f133afa37d15187f5f79e8f9b27e1611eae47bae9f1760cb761d89ab533d4e1"
     },
     "map.min.css": {
-      "bytes": 151236,
-      "sha256": "1ee438f6254de7dce9950bf51d3baa90910f0238d3d695354565c13544edf864"
+      "bytes": 151163,
+      "sha256": "9044034417c0d7e53fbc93bdda95d513453c88dcbb2411b0e927a94df0a0883d"
     },
     "shared.min.js": {
       "bytes": 23434,

@@ -1,22 +1,25 @@
 /* ============================================================
    DIGITAL TWIN — Slide model 3D SIMULATION STYLES
-   Sci-Fi Dark Mode / Glassmorphism HUD
+   Theme-aware simulation workspace / Glassmorphism HUD
    ============================================================ */
 
 :root {
-    --dt-bg: #0a0e1a;
-    --dt-panel-bg: rgba(10, 14, 30, 0.85);
-    --dt-panel-border: rgba(45, 212, 191, 0.15);
-    --dt-accent: #2dd4bf;
-    --dt-accent-glow: rgba(45, 212, 191, 0.4);
-    --dt-danger: #f43f5e;
-    --dt-danger-glow: rgba(244, 63, 94, 0.5);
-    --dt-warning: #f59e0b;
-    --dt-warning-glow: rgba(245, 158, 11, 0.4);
-    --dt-safe: #10b981;
-    --dt-text: #e2e8f0;
-    --dt-text-dim: #94a3b8;
-    --dt-hud-bg: rgba(10, 14, 30, 0.7);
+    --dt-bg: var(--surface-canvas);
+    --dt-panel-bg: color-mix(in srgb, var(--surface-default) 92%, transparent);
+    --dt-panel-border: var(--border-color);
+    --dt-accent: var(--accent-primary);
+    --dt-accent-glow: color-mix(in srgb, var(--accent-primary) 38%, transparent);
+    --dt-danger: var(--accent-danger);
+    --dt-danger-glow: color-mix(in srgb, var(--accent-danger) 45%, transparent);
+    --dt-warning: var(--accent-warning);
+    --dt-warning-glow: color-mix(in srgb, var(--accent-warning) 38%, transparent);
+    --dt-safe: var(--accent-success);
+    --dt-text: var(--on-surface);
+    --dt-text-dim: var(--on-surface-muted);
+    --dt-hud-bg: color-mix(in srgb, var(--surface-default) 90%, transparent);
+    --dt-control-bg: var(--surface-subtle);
+    --dt-control-hover: var(--surface-hover);
+    --dt-track: var(--border-color);
     --dt-radius: 12px;
     --dt-font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --dt-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -50,7 +53,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 16px;
-    background: rgba(10, 14, 30, 0.8);
+    background: var(--dt-panel-bg);
     backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--dt-panel-border);
 }
@@ -93,8 +96,8 @@
     gap: 6px;
     padding: 4px 12px;
     border-radius: 20px;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: var(--state-success-bg);
+    border: 1px solid var(--accent-success);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1px;
@@ -104,27 +107,27 @@
 }
 
 .dt-status-badge.warning {
-    background: rgba(245, 158, 11, 0.1);
-    border-color: rgba(245, 158, 11, 0.3);
+    background: var(--state-warning-bg);
+    border-color: var(--accent-warning);
 }
 .dt-status-badge.warning .dt-status-dot { background: var(--dt-warning); box-shadow: 0 0 8px var(--dt-warning-glow); }
 .dt-status-badge.warning .dt-status-text { color: var(--dt-warning); }
 
 .dt-status-badge.critical {
-    background: rgba(244, 63, 94, 0.15);
-    border-color: rgba(244, 63, 94, 0.4);
+    background: var(--state-danger-bg);
+    border-color: var(--accent-danger);
     animation: badge-pulse 1s ease-in-out infinite;
 }
 .dt-status-badge.critical .dt-status-dot { background: var(--dt-danger); box-shadow: 0 0 12px var(--dt-danger-glow); }
 .dt-status-badge.critical .dt-status-text { color: var(--dt-danger); }
 
 .dt-status-badge.sliding {
-    background: rgba(244, 63, 94, 0.2);
-    border-color: rgba(244, 63, 94, 0.5);
+    background: var(--state-danger-bg);
+    border-color: var(--accent-danger);
     animation: badge-pulse 0.5s ease-in-out infinite;
 }
-.dt-status-badge.sliding .dt-status-dot { background: #ff1744; box-shadow: 0 0 16px rgba(255, 23, 68, 0.8); }
-.dt-status-badge.sliding .dt-status-text { color: #ff1744; }
+.dt-status-badge.sliding .dt-status-dot { background: var(--dt-danger); box-shadow: 0 0 16px var(--dt-danger-glow); }
+.dt-status-badge.sliding .dt-status-text { color: var(--dt-danger); }
 
 @keyframes badge-pulse {
     0%, 100% { opacity: 1; }
@@ -172,8 +175,8 @@
 .dt-btn-icon {
     width: 36px; height: 36px;
     border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--dt-panel-border);
+    background: var(--dt-control-bg);
     color: var(--dt-text-dim);
     cursor: pointer;
     display: flex;
@@ -183,7 +186,7 @@
     transition: all 0.2s;
 }
 .dt-btn-icon:hover {
-    background: rgba(255,255,255,0.1);
+    background: var(--dt-control-hover);
     color: var(--dt-accent);
     border-color: var(--dt-accent);
 }
@@ -194,8 +197,8 @@
     gap: 6px;
     padding: 6px 14px;
     border-radius: 8px;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: var(--dt-control-bg);
+    border: 1px solid var(--dt-panel-border);
     color: var(--dt-text-dim);
     font-size: 13px;
     font-weight: 500;
@@ -250,13 +253,13 @@
     background: transparent;
 }
 #dt-panel::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.1);
+    background: var(--dt-track);
     border-radius: 2px;
 }
 
 .dt-panel-section {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
+    background: var(--dt-control-bg);
+    border: 1px solid var(--dt-panel-border);
     border-radius: var(--dt-radius);
     padding: 14px;
     margin-bottom: 8px;
@@ -273,7 +276,7 @@
     color: var(--dt-accent);
     margin-bottom: 14px;
     padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--dt-panel-border);
 }
 
 .dt-section-header i {
@@ -313,7 +316,7 @@
     width: 100%;
     height: 6px;
     border-radius: 3px;
-    background: rgba(255,255,255,0.08);
+    background: var(--dt-track);
     outline: none;
     cursor: pointer;
 }
@@ -325,7 +328,7 @@
     height: 16px;
     border-radius: 50%;
     background: var(--dt-accent);
-    border: 2px solid rgba(255,255,255,0.2);
+    border: 2px solid color-mix(in srgb, var(--on-surface) 20%, transparent);
     box-shadow: 0 0 8px var(--dt-accent-glow);
     cursor: pointer;
     transition: transform 0.2s;
@@ -392,8 +395,8 @@
     width: 100%;
     padding: 10px;
     border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--dt-panel-border);
+    background: var(--dt-control-bg);
     color: var(--dt-text-dim);
     font-weight: 600;
     font-size: 13px;
@@ -406,7 +409,7 @@
     font-family: var(--dt-font);
 }
 .dt-btn-secondary:hover {
-    background: rgba(255,255,255,0.08);
+    background: var(--dt-control-hover);
     color: var(--dt-text);
 }
 
@@ -459,7 +462,7 @@
 
 .dt-gauge-bg {
     fill: none;
-    stroke: rgba(255,255,255,0.06);
+    stroke: var(--border-color);
     stroke-width: 8;
 }
 
@@ -508,8 +511,8 @@
     font-family: var(--dt-mono);
     color: var(--dt-safe);
     padding: 3px 12px;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: var(--state-success-bg);
+    border: 1px solid var(--accent-success);
     border-radius: 20px;
     transition: all 0.5s;
 }
@@ -520,7 +523,7 @@
     left: 16px;
     background: var(--dt-hud-bg);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(244, 63, 94, 0.3);
+    border: 1px solid color-mix(in srgb, var(--dt-danger) 30%, transparent);
     border-radius: var(--dt-radius);
     padding: 12px 20px;
     min-width: 400px;
@@ -559,7 +562,7 @@
     font-family: var(--dt-mono);
     font-size: 20px;
     font-weight: 800;
-    color: white;
+    color: var(--dt-text);
 }
 
 .dt-damage-lbl {
@@ -578,7 +581,7 @@
     gap: 10px;
     background: var(--dt-hud-bg);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--dt-panel-border);
     border-radius: 30px;
     padding: 6px 16px;
     min-width: 350px;
@@ -606,7 +609,7 @@
 .dt-tl-bar {
     flex: 1;
     height: 4px;
-    background: rgba(255,255,255,0.08);
+    background: var(--dt-track);
     border-radius: 2px;
     overflow: hidden;
 }
@@ -630,8 +633,8 @@
     font-family: var(--dt-mono);
     font-size: 11px;
     color: var(--dt-accent);
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: var(--dt-control-bg);
+    border: 1px solid var(--dt-panel-border);
     border-radius: 6px;
     padding: 3px 6px;
     cursor: pointer;
@@ -665,7 +668,7 @@
 
 .dt-loading-spinner {
     width: 48px; height: 48px;
-    border: 3px solid rgba(255,255,255,0.1);
+    border: 3px solid var(--dt-track);
     border-top-color: var(--dt-accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -686,7 +689,7 @@
 #dt-warning-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(244, 63, 94, 0.08);
+    background: color-mix(in srgb, var(--dt-danger) 8%, transparent);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -697,8 +700,8 @@
 }
 
 @keyframes warning-flash {
-    0%, 100% { background: rgba(244, 63, 94, 0.05); }
-    50% { background: rgba(244, 63, 94, 0.12); }
+    0%, 100% { background: color-mix(in srgb, var(--dt-danger) 5%, transparent); }
+    50% { background: color-mix(in srgb, var(--dt-danger) 12%, transparent); }
 }
 
 .dt-warning-text {
@@ -718,7 +721,7 @@
 .dt-warning-sub {
     font-family: var(--dt-mono);
     font-size: 18px;
-    color: rgba(244, 63, 94, 0.8);
+    color: color-mix(in srgb, var(--dt-danger) 80%, transparent);
     margin-top: 8px;
     font-weight: 700;
 }
