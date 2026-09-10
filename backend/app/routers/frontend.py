@@ -246,3 +246,19 @@ async def sitemap_xml():
         '</urlset>'
     )
     return Response(content=xml, media_type="application/xml")
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    file_path = FRONTEND_DIR / "aitogy.png"
+    if file_path.exists():
+        return FileResponse(file_path, media_type="image/png")
+    return Response(status_code=404)
+
+
+@router.get("/img/aitogy.png", include_in_schema=False)
+async def aitogy_logo():
+    file_path = FRONTEND_DIR / "aitogy.png"
+    if file_path.exists():
+        return FileResponse(file_path, media_type="image/png")
+    return Response(status_code=404)

@@ -12,7 +12,7 @@
         if (root) return root;
         root = document.createElement('aside'); root.id = 'incident-inbox'; root.className = 'incident-inbox'; root.setAttribute('aria-label', 'Hộp sự cố vận hành'); root.setAttribute('data-private-content', 'true');
         root.innerHTML = '<div class="incident-inbox__head"><div><span class="eyebrow">Operations</span><h2>Sự cố</h2></div><button type="button" class="icon-btn" data-incident-close aria-label="Đóng hộp sự cố">×</button></div><div class="incident-inbox__meta"><span data-incident-connection>Đang tải…</span><button type="button" class="text-btn" data-incident-reload>Tải lại</button></div><div class="incident-inbox__list" data-incident-list></div>';
-        const host = document.getElementById('map') || document.body;
+        const host = document.getElementById('app-root') || document.body;
         host.appendChild(root);
         let toggle = document.getElementById('incident-toggle');
         if (!toggle) { toggle = text('button', 'Sự cố', 'incident-toggle'); toggle.id = 'incident-toggle'; toggle.type = 'button'; toggle.setAttribute('aria-controls', 'incident-inbox'); host.appendChild(toggle); }

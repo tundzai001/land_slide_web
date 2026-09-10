@@ -145,7 +145,7 @@ await esbuild.build({
   external: ['three', 'three/*']
 });
 
-for (const assetName of ['aitogy.png', 'favicon.svg', 'social-card.png']) {
+for (const assetName of ['aitogy.png', 'social-card.png']) {
   await copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName));
 }
 
@@ -159,7 +159,7 @@ for (const shellName of ['index.html', 'map.html', 'app.html']) {
 
 const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'app-runtime.min.js',
-  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'favicon.svg', 'social-card.png'
+  'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
 ].sort();
 const manifest = { version: 1, build: buildVersion, generated_at: new Date().toISOString(), assets: {} };
 for (const name of artifactNames) {
@@ -190,3 +190,5 @@ for (const shellName of ['index.html', 'map.html', 'app.html']) {
 
 const totalBytes = Object.values(manifest.assets).reduce((sum, asset) => sum + asset.bytes, 0);
 process.stdout.write(`Built ${artifactNames.length} production assets (${totalBytes.toLocaleString('en-US')} bytes) in frontend/dist\n`);
+process.exit(0);
+

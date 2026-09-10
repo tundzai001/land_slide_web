@@ -13,6 +13,40 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
     const cleanups = [];
 
+    let currentQualityTier = 'high';
+    const cpuCores = navigator.hardwareConcurrency || 4;
+    if (navigator.connection?.saveData || cpuCores <= 2 || reducedMotion.matches) {
+        currentQualityTier = 'lite';
+    } else if (cpuCores <= 4) {
+        currentQualityTier = 'balanced';
+    }
+
+    let lenis = null;
+    if (!reducedMotion.matches && typeof window.Lenis !== 'undefined') {
+        lenis = new window.Lenis({
+            duration: 1.2,
+            easing: t => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+            smoothWheel: true
+        });
+        lenis.on('scroll', ScrollTrigger.update);
+        gsap.ticker.add(time => lenis.raf(time * 1000));
+        gsap.ticker.lagSmoothing(0);
+        document.addEventListener('click', event => {
+            const anchor = event.target.closest('a[href^="#"]');
+            if (anchor) {
+                const targetId = anchor.getAttribute('href');
+                if (targetId && targetId !== '#') {
+                    event.preventDefault();
+                    lenis.scrollTo(targetId, { offset: 0 });
+                }
+            }
+        });
+        cleanups.push(() => {
+            lenis.destroy();
+            gsap.ticker.remove(time => lenis.raf(time * 1000));
+        });
+    }
+
     function setTheme(theme) {
         document.documentElement.dataset.theme = theme;
         localStorage.setItem('theme', theme);
@@ -100,8 +134,39 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
                     setState('empty', 'Chưa có trạm quan trắc trong mạng');
                     return;
                 }
-                const format = new Intl.NumberFormat('vi-VN');
-                keys.forEach(key => { $(`#stations-${key}`).textContent = Number.isFinite(Number(stations[key])) ? format.format(Number(stations[key])) : '—'; });
+                const animateScramble = (el, finalVal, duration = 1200) => {
+                    if (!el) return;
+                    if (!Number.isFinite(finalVal) || reducedMotion.matches) {
+                        el.textContent = Number.isFinite(finalVal) ? new Intl.NumberFormat('vi-VN').format(finalVal) : '—';
+                        return;
+                    }
+                    const finalStr = new Intl.NumberFormat('vi-VN').format(finalVal);
+                    const chars = '0123456789';
+                    const startTime = performance.now();
+                    const tick = now => {
+                        const elapsed = now - startTime;
+                        const progress = Math.min(1, elapsed / duration);
+                        const lockCount = Math.floor(progress * finalStr.length);
+                        let out = '';
+                        for (let i = 0; i < finalStr.length; i++) {
+                            if (i < lockCount || finalStr[i] === '.' || finalStr[i] === ',' || finalStr[i] === ' ') {
+                                out += finalStr[i];
+                            } else {
+                                out += chars[Math.floor(Math.random() * chars.length)];
+                            }
+                        }
+                        el.textContent = out;
+                        if (progress < 1) requestAnimationFrame(tick);
+                        else el.textContent = finalStr;
+                    };
+                    requestAnimationFrame(tick);
+                };
+                keys.forEach(key => {
+                    const el = $(`#stations-${key}`);
+                    const val = Number(stations[key]);
+                    if (Number.isFinite(val)) animateScramble(el, val);
+                    else if (el) el.textContent = '—';
+                });
                 const updatedAt = new Date(data.updated_at);
                 const stale = !Number.isFinite(updatedAt.getTime()) || Date.now() - updatedAt.getTime() > 15 * 60 * 1000;
                 const formatted = Number.isFinite(updatedAt.getTime()) ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(updatedAt) : 'không rõ thời điểm';
@@ -123,8 +188,9 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
     }
 
     function createRenderer(canvas) {
-        const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
-        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: currentQualityTier !== 'lite', powerPreference: 'high-performance' });
+        const maxRatio = currentQualityTier === 'high' ? 1.6 : (currentQualityTier === 'balanced' ? 1.3 : 1.0);
+        renderer.setPixelRatio(Math.min(devicePixelRatio, maxRatio));
         renderer.setClearColor(0x000000, 0);
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         return renderer;
@@ -384,11 +450,15 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
     function setupReveals() {
         if (reducedMotion.matches) {
             $$('.reveal').forEach(element => element.classList.add('is-visible'));
+            $$('.section-divider').forEach(divider => divider.style.transform = 'scaleX(1)');
             return;
         }
         document.documentElement.classList.add('gsap-ready');
         $$('.reveal').forEach(element => {
             gsap.fromTo(element,{ autoAlpha:0,y:22 },{ autoAlpha:1,y:0,duration:.55,ease:'power2.out',scrollTrigger:{ trigger:element,start:'top 88%',once:true },onStart:()=>element.classList.add('is-visible'),onComplete:()=>element.classList.add('is-visible') });
+        });
+        $$('.section-divider').forEach(divider => {
+            gsap.fromTo(divider, { scaleX: 0 }, { scaleX: 1, duration: 1.1, ease: 'power2.inOut', scrollTrigger: { trigger: divider, start: 'top 92%', once: true } });
         });
     }
 
@@ -445,6 +515,120 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
         gsap.to('.hero-aurora-b',{ yPercent:-14,xPercent:-10,ease:'none',scrollTrigger:{ start:'top top',end:'max',scrub:1.5 } });
     }
 
+    function setupCardTilt() {
+        if (reducedMotion.matches || matchMedia('(hover: none)').matches) return;
+        $$('.metric-card').forEach(card => {
+            const shine = $('.card-shine', card);
+            let bounds = null;
+            const onEnter = () => { bounds = card.getBoundingClientRect(); };
+            const onMove = event => {
+                if (!bounds) bounds = card.getBoundingClientRect();
+                const x = (event.clientX - bounds.left) / bounds.width - 0.5;
+                const y = (event.clientY - bounds.top) / bounds.height - 0.5;
+                gsap.to(card, {
+                    rotateX: -y * 12,
+                    rotateY: x * 12,
+                    z: 6,
+                    duration: 0.25,
+                    ease: 'power1.out',
+                    transformPerspective: 800
+                });
+                if (shine) {
+                    const px = Math.round((x + 0.5) * 100);
+                    const py = Math.round((y + 0.5) * 100);
+                    shine.style.background = `radial-gradient(circle at ${px}% ${py}%, rgba(13,148,136,.22) 0%, transparent 60%)`;
+                }
+            };
+            const onLeave = () => {
+                bounds = null;
+                gsap.to(card, { rotateX: 0, rotateY: 0, z: 0, duration: 0.45, ease: 'power2.out' });
+            };
+            card.addEventListener('mouseenter', onEnter);
+            card.addEventListener('mousemove', onMove);
+            card.addEventListener('mouseleave', onLeave);
+            cleanups.push(() => {
+                card.removeEventListener('mouseenter', onEnter);
+                card.removeEventListener('mousemove', onMove);
+                card.removeEventListener('mouseleave', onLeave);
+            });
+        });
+    }
+
+    function setupMagneticButtons() {
+        if (reducedMotion.matches || matchMedia('(hover: none)').matches) return;
+        const targets = $$('.hero-actions .button, .header-cta, .final-cta .button');
+        targets.forEach(btn => {
+            let bounds = null;
+            const onEnter = () => { bounds = btn.getBoundingClientRect(); };
+            const onMove = event => {
+                if (!bounds) bounds = btn.getBoundingClientRect();
+                const dx = (event.clientX - (bounds.left + bounds.width / 2)) * 0.28;
+                const dy = (event.clientY - (bounds.top + bounds.height / 2)) * 0.28;
+                gsap.to(btn, { x: dx, y: dy, scale: 1.04, duration: 0.25, ease: 'power1.out' });
+            };
+            const onLeave = () => {
+                bounds = null;
+                gsap.to(btn, { x: 0, y: 0, scale: 1, duration: 0.65, ease: 'elastic.out(1.1, 0.4)' });
+            };
+            btn.addEventListener('mouseenter', onEnter);
+            btn.addEventListener('mousemove', onMove);
+            btn.addEventListener('mouseleave', onLeave);
+            cleanups.push(() => {
+                btn.removeEventListener('mouseenter', onEnter);
+                btn.removeEventListener('mousemove', onMove);
+                btn.removeEventListener('mouseleave', onLeave);
+            });
+        });
+    }
+
+    function setupPerformanceGuard() {
+        if (reducedMotion.matches || currentQualityTier === 'lite') return;
+        const toast = $('#quality-toast');
+        if (!toast) return;
+        const toastText = $('p', toast);
+        const toastBtn = $('.toast-action', toast);
+        const toastClose = $('.toast-dismiss', toast);
+
+        let lastTime = performance.now();
+        let frames = 0;
+        let slowCount = 0;
+        let monitoring = true;
+
+        const checkFPS = now => {
+            if (!monitoring) return;
+            frames++;
+            if (now - lastTime >= 3500) {
+                const fps = Math.round((frames * 1000) / (now - lastTime));
+                frames = 0;
+                lastTime = now;
+                if (fps < 38) {
+                    slowCount++;
+                    if (slowCount >= 2 && currentQualityTier !== 'lite') {
+                        if (toastText) toastText.textContent = 'Thiết bị đang chạy chậm. Bạn có muốn giảm hiệu ứng để mượt hơn?';
+                        if (toastBtn) toastBtn.textContent = 'Bật chế độ tiết kiệm (Lite)';
+                        toast.classList.add('is-visible');
+                        monitoring = false;
+                        return;
+                    }
+                } else {
+                    slowCount = Math.max(0, slowCount - 1);
+                }
+            }
+            requestAnimationFrame(checkFPS);
+        };
+        requestAnimationFrame(checkFPS);
+        cleanups.push(() => { monitoring = false; });
+
+        toastBtn?.addEventListener('click', () => {
+            currentQualityTier = 'lite';
+            toast.classList.remove('is-visible');
+            dispatchEvent(new CustomEvent('qualityTierChanged', { detail: { tier: 'lite' } }));
+        });
+        toastClose?.addEventListener('click', () => {
+            toast.classList.remove('is-visible');
+        });
+    }
+
     setupHeader();
     setupMetrics();
     setupHero();
@@ -452,6 +636,9 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
     setupStory();
     setupFinalMotion();
     setupPageMotion();
+    setupCardTilt();
+    setupMagneticButtons();
+    setupPerformanceGuard();
     setupAuthLink().catch(() => {});
     addEventListener('load',() => ScrollTrigger.refresh(),{ once:true });
     addEventListener('pagehide',() => cleanups.splice(0).forEach(cleanup => cleanup()),{ once:true });

@@ -78,7 +78,7 @@ from .services.file_cleanup import run_file_cleanup_daemon
 
 # Import security core
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from security_core import AdvancedSecurityMiddleware, start_ipc_server
+from security_core import AdvancedSecurityMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +138,6 @@ async def run_cors_fixed_base_failover_daemon():
 async def lifespan(app: FastAPI):
     logger.info("🚀 Landslide Monitoring System starting...")
 
-    # Start the Security IPC Server as a background task
-    asyncio.create_task(start_ipc_server())
     global gnss_rollup_task, cors_failover_task, file_cleanup_task
 
     try:
