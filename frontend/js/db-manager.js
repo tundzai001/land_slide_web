@@ -9,7 +9,7 @@ class DatabaseManager {
         this.filteredData = [];
         this.currentDataset = 'stations';
         this.offset = 0;
-        this.limit = 50;
+        this.limit = 100;
         this.total = 0;
         this.hasMore = false;
         this.hasExactTotal = true;
@@ -18,6 +18,8 @@ class DatabaseManager {
         this.selectedRecord = null;
         this.filters = {};
         this.filterOptions = { projects: [], stations: [] };
+        this.filterOptionsLoaded = false;
+        this.filterOptionsPromise = null;
         this.currentEditModal = null;
         this.exportProjects = [];
         this.exportStations = [];
@@ -28,6 +30,8 @@ class DatabaseManager {
         this.exportDownloadStarted = false;
         this.datasetLoadSequence = 0;
         this.datasetRequestController = null;
+        this.datasetPrefetchController = null;
+        this.datasetPageCache = new Map();
         this.statsTimer = null;
         this.statsPromise = null;
         this.statsLoaded = false;
@@ -67,23 +71,30 @@ class DatabaseManager {
 
         console.log('✅ [DB MANAGER] Initialized');
         this.renderContextFilters();
-        void this.loadFilterOptions();
         if (this.exportTaskId) this.startExportPolling(this.exportTaskId);
     }
 
     async loadFilterOptions() {
+        if (this.filterOptionsLoaded) return;
+        if (this.filterOptionsPromise) return this.filterOptionsPromise;
+        this.filterOptionsPromise = (async () => {
         try {
             const headers = { 'Authorization': `Bearer ${this.token}` };
             const [projectsRes, stationsRes] = await Promise.all([
                 fetch('/api/admin/projects', { headers }),
-                fetch('/api/admin/db/stations?sort=station_code', { headers }),
+                fetch('/api/admin/db/stations?summary_only=true&sort=station_code', { headers }),
             ]);
             this.filterOptions.projects = projectsRes.ok ? await projectsRes.json() : [];
             this.filterOptions.stations = stationsRes.ok ? await stationsRes.json() : [];
+            this.filterOptionsLoaded = projectsRes.ok && stationsRes.ok;
             this.renderContextFilters();
         } catch (error) {
             console.warn('[DB MANAGER] filter options unavailable:', error);
+        } finally {
+            this.filterOptionsPromise = null;
         }
+        })();
+        return this.filterOptionsPromise;
     }
 
     async loadAllData() {
@@ -96,7 +107,10 @@ class DatabaseManager {
         document.getElementById('db-current-meta').textContent = 'Đang đồng bộ dữ liệu…';
         try {
             await this.fetchCurrentDataset(this.datasetRequestController.signal);
-            if (loadSequence === this.datasetLoadSequence) this.scheduleStats();
+            if (loadSequence === this.datasetLoadSequence) {
+                this.scheduleStats();
+                void this.loadFilterOptions();
+            }
         } catch (e) {
             if (e.name === 'AbortError' || loadSequence !== this.datasetLoadSequence) return;
             console.error('[DB MANAGER] load error:', e);
@@ -111,52 +125,105 @@ class DatabaseManager {
             sensor_data: { endpoint: 'sensor-data', title: 'Dữ liệu cảm biến', icon: 'bi-activity' },
             gnss_adjustments: { endpoint: 'sensor-data', title: 'Kết quả bình sai GNSS', icon: 'bi-crosshair2' },
             alerts: { endpoint: 'alerts', title: 'Cảnh báo', icon: 'bi-bell' }
-            ,simulations: { endpoint: 'simulations', title: 'Kết quả mô phỏng', icon: 'bi-boxes' }
         }[dataset];
     }
 
-    async fetchCurrentDataset(signal) {
-        const config = this.datasetConfig();
+    buildDatasetRequest(offset = this.offset) {
+        const dataset = this.currentDataset;
+        const config = this.datasetConfig(dataset);
         const sort = ['sensor_data', 'gnss_adjustments'].includes(this.currentDataset)
             ? (this.sort === 'id' ? 'timestamp' : '-timestamp')
             : this.sort;
-        const query = new URLSearchParams({ offset: String(this.offset), limit: String(this.limit), sort });
+        const query = new URLSearchParams({ offset: String(offset), limit: String(this.limit), sort });
         const search = document.getElementById('db-search')?.value.trim() || '';
-        if (search && ['stations', 'devices'].includes(this.currentDataset)) query.set('q', search);
+        if (search && ['stations', 'devices'].includes(dataset)) query.set('q', search);
         Object.entries(this.filters).forEach(([key, value]) => {
             if (value !== '' && value != null) query.set(key, value);
         });
-        if (this.currentDataset === 'gnss_adjustments') {
+        if (dataset === 'gnss_adjustments') {
             query.set('sensor_type', 'gnss_adjusted');
             query.set('include_internal', 'true');
         }
-        if (['sensor_data', 'gnss_adjustments'].includes(this.currentDataset)) {
+        if (['sensor_data', 'gnss_adjustments'].includes(dataset)) {
             query.set('include_total', 'false');
             query.set('include_data', 'false');
         }
-        const res = await fetch(`/api/admin/db/${config.endpoint}?${query}`, { headers: { 'Authorization': `Bearer ${this.token}` }, signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return { dataset, offset, search, url: `/api/admin/db/${config.endpoint}?${query}` };
+    }
+
+    async requestDatasetPage(request, signal) {
+        const res = await fetch(request.url, { headers: { 'Authorization': `Bearer ${this.token}` }, signal });
+        if (!res.ok) {
+            const errorBody = await res.json().catch(() => null);
+            throw new Error(errorBody?.detail || `HTTP ${res.status}`);
+        }
         const rows = await res.json();
         const totalHeader = res.headers.get('X-Total-Count');
-        this.hasExactTotal = totalHeader !== null;
-        this.hasMore = res.headers.get('X-Has-More') === 'true';
-        this.total = this.hasExactTotal
-            ? Number(totalHeader || 0)
-            : this.offset + rows.length + (this.hasMore ? 1 : 0);
-        this.allData = rows.map(row => ({ ...row, _table: this.currentDataset }));
-        this.filteredData = search && !['stations', 'devices'].includes(this.currentDataset)
-            ? this.allData.filter(row => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
+        const hasExactTotal = totalHeader !== null;
+        const hasMore = hasExactTotal
+            ? request.offset + rows.length < Number(totalHeader || 0)
+            : res.headers.get('X-Has-More') === 'true';
+        return { ...request, rows, hasExactTotal, hasMore, total: hasExactTotal ? Number(totalHeader || 0) : request.offset + rows.length + (hasMore ? 1 : 0) };
+    }
+
+    applyDatasetPage(page) {
+        this.hasExactTotal = page.hasExactTotal;
+        this.hasMore = page.hasMore;
+        this.total = page.total;
+        this.allData = page.rows.map(row => ({ ...row, _table: page.dataset }));
+        this.filteredData = page.search && !['stations', 'devices'].includes(page.dataset)
+            ? this.allData.filter(row => JSON.stringify(row).toLowerCase().includes(page.search.toLowerCase()))
             : this.allData;
         this.renderTable();
     }
 
+    async fetchCurrentDataset(signal) {
+        const request = this.buildDatasetRequest();
+        let page = this.datasetPageCache.get(request.url);
+        if (page) this.datasetPageCache.delete(request.url);
+        else page = await this.requestDatasetPage(request, signal);
+        this.applyDatasetPage(page);
+        void this.prefetchNextDatasetPage();
+    }
+
+    async prefetchNextDatasetPage() {
+        const hasNext = this.hasExactTotal
+            ? this.offset + this.limit < this.total
+            : this.hasMore;
+        if (!hasNext) return;
+        const request = this.buildDatasetRequest(this.offset + this.limit);
+        if (this.datasetPageCache.has(request.url)) return;
+        this.datasetPrefetchController?.abort();
+        const controller = new AbortController();
+        this.datasetPrefetchController = controller;
+        try {
+            const page = await this.requestDatasetPage(request, controller.signal);
+            this.datasetPageCache.set(request.url, page);
+        } catch (error) {
+            if (error.name !== 'AbortError') console.debug('[DB MANAGER] next page prefetch skipped:', error.message);
+        } finally {
+            if (this.datasetPrefetchController === controller) this.datasetPrefetchController = null;
+        }
+    }
+
+    clearDatasetPageCache() {
+        this.datasetPrefetchController?.abort();
+        this.datasetPrefetchController = null;
+        this.datasetPageCache.clear();
+    }
+
     applyFilter() {
         clearTimeout(this.searchTimer);
-        this.searchTimer = setTimeout(() => { this.offset = 0; this.loadAllData(); }, 250);
+        this.searchTimer = setTimeout(() => {
+            this.clearDatasetPageCache();
+            this.offset = 0;
+            this.loadAllData();
+        }, 250);
     }
 
     selectDataset(dataset, button) {
         if (!this.datasetConfig(dataset)) return;
+        this.clearDatasetPageCache();
         this.currentDataset = dataset;
         this.offset = 0;
         this.filters = {};
@@ -211,17 +278,12 @@ class DatabaseManager {
                 this.filterSelect('Mức độ', 'level', [{ value: '', label: 'Mọi mức độ' }, ...['INFO', 'WARNING', 'CRITICAL'].map(value => ({ value, label: value }))]),
                 this.filterSelect('Xử lý', 'is_resolved', [{ value: '', label: 'Tất cả cảnh báo' }, { value: 'false', label: 'Đang mở' }, { value: 'true', label: 'Đã xử lý' }]),
             ],
-            simulations: [
-                this.filterSelect('Dự án', 'project_id', projectOptions),
-                this.filterSelect('Trạm', 'station_id', stationOptions),
-                this.filterSelect('Trạng thái', 'status', [{ value: '', label: 'Mọi trạng thái' }, ...['completed', 'running', 'failed', 'stopped', 'interrupted'].map(value => ({ value, label: value }))]),
-                this.filterSelect('Nguồn', 'mode', [{ value: '', label: 'Mọi nguồn' }, { value: 'manual', label: 'Nhập tay' }, { value: 'station_snapshot', label: 'Dữ liệu trạm' }]),
-            ],
         };
         container.innerHTML = (filters[this.currentDataset] || []).join('');
     }
 
     setContextFilter(key, value) {
+        this.clearDatasetPageCache();
         if (value === '') delete this.filters[key];
         else this.filters[key] = value;
         this.offset = 0;
@@ -229,12 +291,14 @@ class DatabaseManager {
     }
 
     changeSort(value) {
+        this.clearDatasetPageCache();
         this.sort = value === 'id' ? 'id' : '-id';
         this.offset = 0;
         this.loadAllData();
     }
 
     changePageSize(value) {
+        this.clearDatasetPageCache();
         this.limit = Math.max(25, Math.min(100, Number(value) || 50));
         this.offset = 0;
         this.loadAllData();
@@ -340,14 +404,18 @@ class DatabaseManager {
     }
 
     updateStats(stats) {
-        const mapping = { stations: ['stat-stations', 'db-count-stations'], devices: ['stat-devices', 'db-count-devices'], sensor_data: ['stat-data', 'db-count-sensor_data'], gnss_adjustments: ['db-count-gnss_adjustments'], alerts: ['stat-alerts', 'db-count-alerts'], simulations: ['db-count-simulations'] };
-        Object.entries(mapping).forEach(([key, ids]) => ids.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = Number(stats[key] || 0).toLocaleString('vi-VN'); }));
+        const mapping = { stations: ['stat-stations', 'db-count-stations'], devices: ['stat-devices', 'db-count-devices'], sensor_data: ['stat-data', 'db-count-sensor_data'], gnss_adjustments: ['db-count-gnss_adjustments'], alerts: ['stat-alerts', 'db-count-alerts'] };
+        Object.entries(mapping).forEach(([key, ids]) => {
+            const prefix = stats[`${key}_estimated`] ? '≈' : '';
+            const value = `${prefix}${Number(stats[key] || 0).toLocaleString('vi-VN')}`;
+            ids.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = value; });
+        });
     }
 
     scheduleStats() {
         if (this.statsLoaded) return;
         clearTimeout(this.statsTimer);
-        this.statsTimer = setTimeout(() => this.fetchStats(), 3000);
+        this.statsTimer = setTimeout(() => this.fetchStats(), 50);
     }
 
     async fetchStats() {

@@ -1,11 +1,12 @@
 """Administrative database inspection and record-management routes."""
+import json
 import logging
 import time
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import String, cast, delete, desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import auth
@@ -24,8 +25,22 @@ from ..services.station_policy import get_offline_threshold
 PUBLIC_SENSOR_TYPES = ("gnss", "imu", "rain", "water")
 INTERNAL_SENSOR_TYPES = ("gnss_audit", "gnss_adjusted")
 
+
+def _sensor_data_preview(value):
+    """Return a compact, bounded preview without database-specific JSON casts."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    return text[:240]
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_stats_cache: dict | None = None
+_stats_cache_expires_at = 0.0
+_STATS_CACHE_TTL_SECONDS = 30.0
 
 
 def _device_runtime_state(device, station, now_ts: int) -> dict:
@@ -50,8 +65,12 @@ def _device_runtime_state(device, station, now_ts: int) -> dict:
 async def get_database_stats(
     config_db: AsyncSession = Depends(get_config_db),
     data_db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
+    global _stats_cache, _stats_cache_expires_at
+    now = time.monotonic()
+    if _stats_cache is not None and now < _stats_cache_expires_at:
+        return _stats_cache
     try:
         # Đếm Stations
         count_stations = await config_db.execute(select(func.count()).select_from(model_config.Station))
@@ -61,35 +80,37 @@ async def get_database_stats(
         count_devices = await config_db.execute(select(func.count()).select_from(model_config.Device))
         num_devices = count_devices.scalar()
 
-        # Count both sensor totals in one scan. The old implementation scanned
-        # the 800k+ row table twice and made the admin dashboard prone to 504s.
-        sensor_counts = await data_db.execute(
-            select(model_data.SensorData.sensor_type, func.count())
-            .group_by(model_data.SensorData.sensor_type)
+        # PostgreSQL exact COUNT/GROUP BY must visit every visible row.  The
+        # dashboard only needs a scale indicator, so use the indexed primary-key
+        # high-water mark and keep the exact filtered count for the much smaller
+        # adjustment stream.
+        sensor_high_watermark = await data_db.execute(select(func.max(model_data.SensorData.id)))
+        num_data = int(sensor_high_watermark.scalar() or 0)
+        count_adjustments = await data_db.execute(
+            select(func.count()).select_from(model_data.SensorData).where(
+                model_data.SensorData.sensor_type == "gnss_adjusted"
+            )
         )
-        counts_by_type = {sensor_type: int(count or 0) for sensor_type, count in sensor_counts.all()}
-        num_data = sum(counts_by_type.get(sensor_type, 0) for sensor_type in PUBLIC_SENSOR_TYPES)
-        num_adjustments = counts_by_type.get("gnss_adjusted", 0)
+        num_adjustments = int(count_adjustments.scalar() or 0)
 
         # Đếm Active Alerts (Chưa xử lý)
         count_alerts = await data_db.execute(
             select(func.count()).select_from(model_data.Alert).where(model_data.Alert.is_resolved == False)
         )
         num_alerts = count_alerts.scalar()
-        count_simulations = await data_db.execute(select(func.count()).select_from(model_data.SimulationRun))
-        num_simulations = count_simulations.scalar()
-
-        return {
+        _stats_cache = {
             "stations": num_stations,
             "devices": num_devices,
             "sensor_data": num_data,
+            "sensor_data_estimated": True,
             "gnss_adjustments": num_adjustments,
             "alerts": num_alerts,
-            "simulations": num_simulations
         }
+        _stats_cache_expires_at = now + _STATS_CACHE_TTL_SECONDS
+        return _stats_cache
     except Exception as e:
         logger.error(f"Stats error: {e}")
-        return {"stations": 0, "devices": 0, "sensor_data": 0, "gnss_adjustments": 0, "alerts": 0, "simulations": 0}
+        return {"stations": 0, "devices": 0, "sensor_data": 0, "gnss_adjustments": 0, "alerts": 0}
 
 @router.get("/api/admin/db/stations")
 async def admin_get_all_stations(
@@ -100,8 +121,9 @@ async def admin_get_all_stations(
     offset: Optional[int] = None,
     limit: Optional[int] = None,
     sort: Optional[str] = None,
+    summary_only: bool = False,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy tất cả stations từ DB"""
     try:
@@ -120,6 +142,19 @@ async def admin_get_all_stations(
             query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
         result = await db.execute(query)
         stations = result.scalars().all()
+        if summary_only:
+            rows = [
+                {
+                    "id": station.id,
+                    "station_code": station.station_code,
+                    "name": station.name,
+                    "project_id": station.project_id,
+                }
+                for station in stations
+            ]
+            page_offset, page_limit = normalize_page(offset, limit)
+            set_pagination_headers(response, total=len(rows), offset=page_offset, limit=page_limit)
+            return slice_rows(rows, page_offset, page_limit)
         devices = list((await db.execute(select(model_config.Device))).scalars().all())
         devices_by_station = {}
         for device in devices:
@@ -170,7 +205,7 @@ async def admin_get_all_devices(
     limit: Optional[int] = None,
     sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy tất cả devices từ DB"""
     try:
@@ -241,7 +276,7 @@ async def admin_get_sensor_data(
     include_data: bool = True,
     include_internal: bool = False,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy sensor data gần nhất"""
     try:
@@ -282,7 +317,10 @@ async def admin_get_sensor_data(
                 model_data.SensorData.value_3,
                 model_data.SensorData.value_4,
                 model_data.SensorData.value_5,
-                func.substr(cast(model_data.SensorData.data, String), 1, 240).label("data_preview"),
+                # Fetch JSON for the already bounded page and compact it in
+                # Python. Casting JSON to text with substr() varied between
+                # database drivers and was the source of the 500 on this page.
+                model_data.SensorData.data,
             )
             page_query = page_query.where(*sensor_filters)
 
@@ -303,18 +341,30 @@ async def admin_get_sensor_data(
             response.headers["X-Limit"] = str(page_limit)
             response.headers["X-Has-More"] = "true" if has_more else "false"
 
-        return [{
-            "id": d.id,
-            "station_id": d.station_id,
-            "timestamp": d.timestamp,
-            "sensor_type": d.sensor_type,
-            **({"data": d.data} if include_data else {"data_preview": d.data_preview}),
-            "value_1": d.value_1,
-            "value_2": d.value_2,
-            "value_3": d.value_3,
-            "value_4": d.value_4,
-            "value_5": d.value_5,
-        } for d in data]
+        rows = []
+        for d in data:
+            row = {
+                "id": d.id,
+                "station_id": d.station_id,
+                "timestamp": d.timestamp,
+                "sensor_type": d.sensor_type,
+                "value_1": d.value_1,
+                "value_2": d.value_2,
+                "value_3": d.value_3,
+                "value_4": d.value_4,
+                "value_5": d.value_5,
+            }
+            if include_data:
+                row["data"] = d.data
+            else:
+                # Keep compatibility with the lightweight runtime test rows
+                # while production rows now carry the original JSON value.
+                source = getattr(d, "data", None)
+                if source is None:
+                    source = getattr(d, "data_preview", None)
+                row["data_preview"] = _sensor_data_preview(source)
+            rows.append(row)
+        return rows
     except HTTPException:
         raise
     except Exception as e:
@@ -326,7 +376,7 @@ async def admin_get_sensor_data(
 async def admin_get_sensor_data_record(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
 ):
     record = (
         await db.execute(
@@ -359,7 +409,7 @@ async def admin_get_alerts(
     is_resolved: Optional[bool] = None,
     sort: str = "-timestamp",
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy alerts gần nhất"""
     try:
@@ -442,7 +492,7 @@ async def admin_update_station(
     record_id: int,
     update_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Cập nhật station record"""
     try:
@@ -476,7 +526,7 @@ async def admin_update_station(
 async def admin_delete_station(
     record_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Xóa station"""
     try:
@@ -505,7 +555,7 @@ async def admin_update_device(
     record_id: int,
     update_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         result = await db.execute(
@@ -533,7 +583,7 @@ async def admin_update_device(
 async def admin_delete_device(
     record_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         await db.execute(
@@ -550,7 +600,7 @@ async def admin_delete_device(
 async def admin_delete_sensor_data(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         from sqlalchemy import delete as sql_delete
@@ -568,7 +618,7 @@ async def admin_delete_sensor_data(
 async def admin_delete_alert(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         from sqlalchemy import delete as sql_delete
@@ -586,7 +636,7 @@ async def admin_delete_alert(
 async def admin_delete_simulation(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
 ):
     try:
         result = await db.execute(

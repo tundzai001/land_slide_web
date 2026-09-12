@@ -80,7 +80,7 @@ test('database explorer loads one paginated dataset and opens the inspector', as
     Object.defineProperty(window, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} } });
     window.fetch = async url => {
       const target = String(url);
-      if (target.includes('/stats')) return new Response(JSON.stringify({ stations: 12, devices: 12, sensor_data: 817874, alerts: 1 }), { status: 200 });
+      if (target.includes('/stats')) return new Response(JSON.stringify({ stations: 12, devices: 12, sensor_data: 817874, sensor_data_estimated: true, alerts: 1 }), { status: 200 });
       if (target.includes('/api/admin/projects')) return new Response(JSON.stringify([{ id: 2, name: 'Sín Quyền' }]), { status: 200 });
       return new Response(JSON.stringify([{ id: 7, station_code: 'DAP-01', name: 'Đập 1', project_id: 2, status: 'offline', age_seconds: 3600, created_at: 1787100000 }]), { status: 200, headers: { 'X-Total-Count': '12' } });
     };
@@ -89,7 +89,10 @@ test('database explorer loads one paginated dataset and opens the inspector', as
   await page.evaluate(() => { window.bootstrapDatabaseManager(); return window.dbManager.loadAllData(); });
 
   await expect(page.locator('#db-current-meta')).toContainText('12 bản ghi');
+  await expect(page.locator('#stat-data')).toHaveText('≈817.874');
   await expect(page.locator('#db-table-body .db-row')).toHaveCount(1);
+  await expect(page.locator('.db-dataset[data-dataset="simulations"]')).toHaveCount(0);
+  await expect(page.locator('[data-tab="tab-simulations"]')).toHaveText('Mô phỏng');
   await expect(page.locator('#db-table-body .management-status')).toContainText('Offline');
   await expect(page.locator('#db-context-filters select')).toHaveCount(2);
   await page.locator('.db-dataset[data-dataset="devices"]').click();
@@ -105,6 +108,34 @@ test('database explorer loads one paginated dataset and opens the inspector', as
   await expect(page.locator('#db-inspector')).toHaveClass(/open/);
   await expect(page.locator('#db-inspector-content')).toContainText('DAP-01');
   await expect(page.locator('#db-page-next')).toBeDisabled();
+});
+
+test('database explorer prefetches the next 100-row page', async ({ page }) => {
+  await mountManagement(page);
+  await page.evaluate(() => {
+    window.authSession = { getToken: () => 'test-token' };
+    window.bootstrap = { Modal: class { show() {} hide() {} } };
+    Object.defineProperty(window, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} } });
+    window.datasetPageRequests = 0;
+    window.fetch = async url => {
+      const target = String(url);
+      if (target.includes('/stats')) return new Response('{}', { status: 200 });
+      if (target.includes('/api/admin/projects') || target.includes('summary_only=true')) return new Response('[]', { status: 200 });
+      window.datasetPageRequests += 1;
+      const offset = Number(new URL(target, 'https://test.local').searchParams.get('offset') || 0);
+      return new Response(JSON.stringify([{ id: offset + 1, station_code: `DAP-${offset + 1}`, name: `Trạm ${offset + 1}`, status: 'online' }]), {
+        status: 200,
+        headers: { 'X-Total-Count': '200' },
+      });
+    };
+  });
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+  await page.evaluate(() => { window.bootstrapDatabaseManager(); return window.dbManager.loadAllData(); });
+
+  await expect.poll(() => page.evaluate(() => window.datasetPageRequests)).toBe(2);
+  await page.locator('#db-page-next').click();
+  await expect(page.locator('#db-table-body')).toContainText('DAP-101');
+  expect(await page.evaluate(() => window.datasetPageRequests)).toBe(2);
 });
 
 test('sensor pages load lightweight rows and GNSS details open as a downloadable table', async ({ page }) => {

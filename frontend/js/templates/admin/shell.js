@@ -39,7 +39,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <a class="nav-link" href="#" data-tab="tab-simulations"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-simulations', this)">
                     <i class="bi bi-boxes"></i>
-                    <span>Simulation audit</span>
+                    <span>Mô phỏng</span>
                 </a>
             </div>
             <div class="nav-item">
@@ -183,7 +183,6 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <button class="db-dataset" data-dataset="sensor_data" onclick="window.dbManager.selectDataset('sensor_data', this)"><i class="bi bi-activity"></i><span>Cảm biến</span><b id="db-count-sensor_data">--</b></button>
                         <button class="db-dataset" data-dataset="gnss_adjustments" onclick="window.dbManager.selectDataset('gnss_adjustments', this)"><i class="bi bi-crosshair2"></i><span>Bình sai GNSS</span><b id="db-count-gnss_adjustments">--</b></button>
                         <button class="db-dataset" data-dataset="alerts" onclick="window.dbManager.selectDataset('alerts', this)"><i class="bi bi-bell"></i><span>Cảnh báo</span><b id="db-count-alerts">--</b></button>
-                        <button class="db-dataset" data-dataset="simulations" onclick="window.dbManager.selectDataset('simulations', this)"><i class="bi bi-boxes"></i><span>Mô phỏng</span><b id="db-count-simulations">--</b></button>
                     </nav>
                     <div class="db-workspace">
                         <div class="db-toolbar">
@@ -191,7 +190,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                             <label class="ops-search" for="db-search"><i class="bi bi-search"></i><input type="search" id="db-search" placeholder="Tìm trong dataset…" oninput="window.dbManager.applyFilter()"></label>
                             <div id="db-context-filters" class="db-context-filters" aria-label="Bộ lọc dataset"></div>
                             <select class="form-select" id="db-sort" aria-label="Sắp xếp dữ liệu" onchange="window.dbManager.changeSort(this.value)"><option value="-id">Mới nhất</option><option value="id">Cũ nhất</option></select>
-                            <select class="form-select" id="db-limit" aria-label="Số dòng mỗi trang" onchange="window.dbManager.changePageSize(this.value)"><option value="25">25 dòng</option><option value="50" selected>50 dòng</option><option value="100">100 dòng</option></select>
+                            <select class="form-select" id="db-limit" aria-label="Số dòng mỗi trang" onchange="window.dbManager.changePageSize(this.value)"><option value="25">25 dòng</option><option value="50">50 dòng</option><option value="100" selected>100 dòng</option></select>
                         </div>
                         <div class="custom-table db-table-wrap">
                             <table class="table table-hover align-middle mb-0">
@@ -214,7 +213,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             <!-- TAB: SIMULATION AUDIT -->
             <div class="tab-pane fade" id="tab-simulations" data-private-permission="MANAGE_SIMULATIONS">
                 <header class="ops-page-header simulation-audit-header">
-                    <div><span class="ops-eyebrow">REPRODUCIBLE ANALYSIS</span><h4><i class="bi bi-boxes me-2"></i>Simulation audit</h4><p>Theo dõi trạng thái, tham số nguồn và kết quả mô phỏng Digital Twin mà không thay đổi physics hiện có.</p></div>
+                    <div><span class="ops-eyebrow">PHÂN TÍCH TÁI LẬP</span><h4><i class="bi bi-boxes me-2"></i>Mô phỏng</h4><p>Theo dõi trạng thái, tham số nguồn và kết quả mô phỏng Digital Twin mà không thay đổi mô hình vật lý hiện có.</p></div>
                     <button type="button" class="btn btn-outline-primary" onclick="window.adminManager?.loadSimulationRuns(true)"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
                 </header>
                 <section class="simulation-audit-workspace" aria-live="polite">
