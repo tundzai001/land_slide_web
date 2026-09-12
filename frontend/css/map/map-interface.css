@@ -995,11 +995,10 @@ textarea:focus-visible {
 }
 
 #guestRescueModal {
-    z-index: var(--z-critical) !important;
+    z-index: calc(var(--z-critical) + 1) !important;
 }
 
-body:has(#guestRescueModal.show) .modal-backdrop,
-.modal-backdrop.show {
+body:has(#guestRescueModal.show) .modal-backdrop.show {
     z-index: var(--z-critical) !important;
     opacity: 0.42 !important;
 }

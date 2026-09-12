@@ -37,6 +37,16 @@ _LONG_TERM_ANALYSIS_CACHE_TTL_SECONDS = 30.0
 logger = logging.getLogger(__name__)
 
 
+def _station_detail_adjustment_latest(
+    payload: Optional[Dict[str, Any]], include_observations: bool
+) -> Dict[str, Any]:
+    """Keep raw adjustment observations out of the normal station-detail response."""
+    latest = dict(payload or {})
+    if not include_observations:
+        latest.pop("baseline_observations", None)
+    return latest
+
+
 def is_offline_display_enabled(station_config: Optional[Dict[str, Any]]) -> bool:
     cfg = station_config or {}
     return bool(
@@ -703,6 +713,7 @@ async def get_station_detail(
     station_id: int,
     request: Request,
     include_history: bool = True,
+    include_adjustment_observations: bool = False,
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db),
     db_auth: AsyncSession = Depends(get_auth_db)
@@ -862,7 +873,9 @@ async def get_station_detail(
             if adj_cached:
                 sensor_data["gnss_adjusted"] = {
                     "is_online": True,
-                    "latest": adj_cached.data,
+                    "latest": _station_detail_adjustment_latest(
+                        adj_cached.data, include_adjustment_observations
+                    ),
                     "latest_timestamp": adj_cached.timestamp,
                     "history": []
                 }

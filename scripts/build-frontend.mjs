@@ -45,7 +45,7 @@ const groups = {
     'css/map/base.css', 'css/map/station-panels.css', 'css/map/analysis.css',
     'css/map/effects-theme.css', 'css/map/tools.css', 'css/map/gnss.css',
     'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css',
-    'css/map/premium-light.css', 'css/map/digital-twin-workspace.css',
+    'css/map/map-interface.css', 'css/map/digital-twin-workspace.css',
     'css/map/digital-twin-results.css', 'css/map/incidents.css', 'css/map/operations-polish.css'
   ],
   'admin.min.css': [
@@ -191,4 +191,3 @@ for (const shellName of ['index.html', 'map.html', 'app.html']) {
 const totalBytes = Object.values(manifest.assets).reduce((sum, asset) => sum + asset.bytes, 0);
 process.stdout.write(`Built ${artifactNames.length} production assets (${totalBytes.toLocaleString('en-US')} bytes) in frontend/dist\n`);
 process.exit(0);
-

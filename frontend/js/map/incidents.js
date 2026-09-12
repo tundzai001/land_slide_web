@@ -16,9 +16,15 @@
         host.appendChild(root);
         let toggle = document.getElementById('incident-toggle');
         if (!toggle) { toggle = text('button', 'Sự cố', 'incident-toggle'); toggle.id = 'incident-toggle'; toggle.type = 'button'; toggle.setAttribute('aria-controls', 'incident-inbox'); host.appendChild(toggle); }
-        root.classList.add('is-open'); toggle.setAttribute('aria-expanded', 'true');
-        toggle.addEventListener('click', () => { root.classList.toggle('is-open'); toggle.setAttribute('aria-expanded', String(root.classList.contains('is-open'))); });
-        root.querySelector('[data-incident-close]').addEventListener('click', () => { root.classList.remove('is-open'); toggle.setAttribute('aria-expanded', 'false'); });
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.addEventListener('click', () => {
+            root.classList.toggle('is-open');
+            const isOpen = root.classList.contains('is-open');
+            toggle.setAttribute('aria-expanded', String(isOpen));
+            if (isOpen) { ensureIncidentPolling(); window.loadIncidentInbox?.(); }
+            else if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        });
+        root.querySelector('[data-incident-close]').addEventListener('click', () => { root.classList.remove('is-open'); toggle.setAttribute('aria-expanded', 'false'); if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } });
         root.querySelector('[data-incident-reload]').addEventListener('click', () => window.loadIncidentInbox?.(true));
         root.addEventListener('click', handleAction);
         return root;
@@ -63,7 +69,7 @@
         }, 15000);
     }
     window.addEventListener('incidentStoreChanged', renderIncidentInbox); window.addEventListener('incidentChanged', renderIncidentInbox);
-    window.addEventListener('auth:ready', () => { if (allowed()) { ensureIncidentPolling(); window.loadIncidentInbox(); } });
+    window.addEventListener('auth:ready', () => { if (allowed()) ensureIncidentInbox(); });
     window.addEventListener('authzExpired', () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; const root = document.getElementById('incident-inbox'); if (root) root.hidden = true; });
-    setTimeout(() => { if (allowed()) { ensureIncidentPolling(); window.loadIncidentInbox(); } }, 0);
+    setTimeout(() => { if (allowed()) ensureIncidentInbox(); }, 0);
 })();

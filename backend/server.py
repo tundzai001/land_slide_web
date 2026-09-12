@@ -11,7 +11,7 @@ if __name__ == "__main__":
         "app.main:app",
         host="0.0.0.0",
         port=8001,
-        reload=settings.ENVIRONMENT.strip().lower() == "development",
+        reload=False,
         proxy_headers=True,
         forwarded_allow_ips="127.0.0.1",
     )
