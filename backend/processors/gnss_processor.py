@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 A_WGS84 = 6378137.0
 F_WGS84 = 1 / 298.257223563
 E2_WGS84 = 2 * F_WGS84 - F_WGS84**2
-GNSS_RUNTIME_STATE_VERSION = 1
+# Derived displacement/peak values from the previous runtime state were allowed
+# to accumulate from overlapping noise windows.  Bump the checkpoint version so
+# the first process restart rebuilds that derived state from fresh observations.
+GNSS_RUNTIME_STATE_VERSION = 2
 GNSS_RUNTIME_STATE_SAVE_INTERVAL_S = 15.0
 
 def haversine_2d(lat1, lon1, lat2, lon2):
@@ -81,6 +84,11 @@ class GNSSVelocityProcessor:
         # 31-sample deque made the displacement median cycle too quickly.
         self.history = deque(maxlen=max(filter_window_size + 1, 1200))
         self.reacquire_candidates = deque(maxlen=10)
+        # A single rolling velocity window can be biased by multipath even
+        # while the monument is static. Keep a separate evidence streak for
+        # movement confirmation; this never alters the measured velocity.
+        self._velocity_confirmation_history = deque(maxlen=120)
+        self.last_significant_motion_ts = 0.0
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
         # Stable displacement state for UI/log (reduce "standing still but jumping total").
@@ -619,6 +627,8 @@ class GNSSVelocityProcessor:
         self.state = "AWAITING_CANDIDATES"
         self.history = deque(maxlen=max(self.filter_window_size + 1, 1200))
         self.reacquire_candidates = deque(maxlen=10)
+        self._velocity_confirmation_history = deque(maxlen=120)
+        self.last_significant_motion_ts = 0.0
         self.v_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
         self.v_state_ready = False
         self.disp_enu_state = np.array([0.0, 0.0, 0.0], dtype=float)
@@ -727,6 +737,153 @@ class GNSSVelocityProcessor:
             'sample_count': int(len(samples)),
             'duration_s': float(times[-1] - times[0]),
         }
+
+    def _update_velocity_confirmation(
+        self,
+        timestamp: float,
+        velocity_m_s: np.ndarray,
+        statistically_significant: bool,
+        reliable: bool,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Confirm movement from independent, directionally consistent windows.
+
+        ``velocity_m_s`` remains the measured robust estimate.  This gate only
+        decides whether it is safe to call the estimate ground movement.  A
+        rolling window produces highly correlated estimates, so accepting every
+        epoch would count the same samples repeatedly.  Evidence is therefore
+        sampled at least once per velocity window.
+        """
+        config = config if isinstance(config, dict) else {}
+        try:
+            required_samples = max(
+                int(config.get('velocity_confirmation_samples', 3)),
+                2,
+            )
+        except (TypeError, ValueError):
+            required_samples = 3
+        try:
+            required_duration_s = max(
+                float(config.get('velocity_confirmation_duration_s', 30.0)),
+                5.0,
+            )
+        except (TypeError, ValueError):
+            required_duration_s = 30.0
+        try:
+            direction_threshold = min(
+                max(float(config.get('velocity_confirmation_direction_cosine', 0.70)), 0.0),
+                1.0,
+            )
+        except (TypeError, ValueError):
+            direction_threshold = 0.70
+        try:
+            minimum_gap_s = max(
+                float(config.get('velocity_confirmation_min_gap_s', 15.0)),
+                1.0,
+            )
+        except (TypeError, ValueError):
+            minimum_gap_s = 15.0
+        try:
+            max_gap_s = max(
+                float(config.get(
+                    'velocity_confirmation_max_gap_s',
+                    max(required_duration_s, minimum_gap_s * 2.0),
+                )),
+                minimum_gap_s,
+            )
+        except (TypeError, ValueError):
+            max_gap_s = max(required_duration_s, minimum_gap_s * 2.0)
+
+        evidence = getattr(self, '_velocity_confirmation_history', None)
+        if not isinstance(evidence, deque):
+            evidence = deque(maxlen=120)
+            self._velocity_confirmation_history = evidence
+
+        def empty_result() -> Dict[str, Any]:
+            self.last_significant_motion_ts = 0.0
+            return {
+                'confirmed': False,
+                'sample_count': 0,
+                'duration_s': 0.0,
+                'direction_cosine': None,
+                'accepted_sample': False,
+                'required_samples': required_samples,
+                'required_duration_s': required_duration_s,
+                'minimum_gap_s': minimum_gap_s,
+            }
+
+        def current_result(accepted_sample: bool) -> Dict[str, Any]:
+            if not evidence:
+                return empty_result()
+            reference = np.asarray(evidence[0]['velocity'], dtype=float)
+            reference_norm = float(np.linalg.norm(reference))
+            direction_cosine = min(
+                float(np.dot(reference, item['velocity']) / (
+                    reference_norm * float(np.linalg.norm(item['velocity']))
+                ))
+                for item in evidence
+            )
+            duration_s = max(0.0, ts - float(evidence[0]['ts']))
+            confirmed = bool(
+                len(evidence) >= required_samples
+                and duration_s >= required_duration_s
+                and direction_cosine >= direction_threshold
+            )
+            self.last_significant_motion_ts = float(evidence[0]['ts']) if confirmed else 0.0
+            return {
+                'confirmed': confirmed,
+                'sample_count': len(evidence),
+                'duration_s': duration_s,
+                'direction_cosine': direction_cosine,
+                'accepted_sample': accepted_sample,
+                'required_samples': required_samples,
+                'required_duration_s': required_duration_s,
+                'minimum_gap_s': minimum_gap_s,
+            }
+
+        try:
+            ts = float(timestamp)
+            vector = np.asarray(velocity_m_s, dtype=float).reshape(-1)
+        except (TypeError, ValueError):
+            evidence.clear()
+            return empty_result()
+
+        if (
+            not math.isfinite(ts)
+            or vector.size != 3
+            or not np.all(np.isfinite(vector))
+            or np.linalg.norm(vector) <= 0.0
+            or not statistically_significant
+            or not reliable
+        ):
+            evidence.clear()
+            return empty_result()
+
+        if evidence:
+            previous = evidence[-1]
+            gap_s = ts - float(previous['ts'])
+            previous_vector = np.asarray(previous['velocity'], dtype=float)
+            previous_norm = float(np.linalg.norm(previous_vector))
+            vector_norm = float(np.linalg.norm(vector))
+            cosine = float(np.dot(previous_vector, vector) / (previous_norm * vector_norm))
+            if gap_s <= 0.0 or gap_s > max_gap_s or cosine < direction_threshold:
+                evidence.clear()
+            elif gap_s < minimum_gap_s:
+                # The current rolling velocity window overlaps the previous
+                # evidence window.  Keep the streak, but do not count another
+                # copy of the same observations.
+                return current_result(False)
+
+        evidence.append({'ts': ts, 'velocity': vector.copy()})
+        horizon_s = max(
+            required_duration_s * 2.0,
+            minimum_gap_s * max(required_samples + 1, 2),
+            60.0,
+        )
+        cutoff_ts = ts - horizon_s
+        while len(evidence) > 1 and float(evidence[0]['ts']) < cutoff_ts:
+            evidence.popleft()
+        return current_result(True)
 
     def _schedule_load_origin(self):
         try:
@@ -1109,6 +1266,8 @@ class GNSSVelocityProcessor:
         # Keep the newest measured residual; never synthesize a zero payload.
         self.disp_enu_state = calibrated_positions[-1].copy()
         self.disp_state_ready = True
+        self._velocity_confirmation_history = deque(maxlen=120)
+        self.last_significant_motion_ts = 0.0
         self.peak_displacement_mm = float(np.linalg.norm(self.disp_enu_state[:2]) * 1000.0)
         self._reference_transition = None
         self._consecutive_rejects = 0
@@ -1718,12 +1877,38 @@ class GNSSVelocityProcessor:
             or abs(v_enu_stable[2] * 1000.0) > flag_z_mm_s
         )
         estimated_speed_3d_mm_s = float(np.linalg.norm(v_enu_stable) * 1000.0)
-        velocity_noise_threshold_mm_s = max(
-            velocity_estimate['confidence_95_mm_s'],
-            0.15  # 0.15 mm/s baseline sensor noise floor for RTK FIXED
+        try:
+            velocity_min_sigma = max(
+                float(gnss_alert_cfg.get('velocity_min_sigma', 3.0)),
+                1.0,
+            )
+        except (TypeError, ValueError):
+            velocity_min_sigma = 3.0
+        velocity_uncertainty_mm_s = float(velocity_estimate['uncertainty_mm_s'])
+        velocity_detection_threshold_mm_s = max(
+            velocity_min_sigma * velocity_uncertainty_mm_s
+            if math.isfinite(velocity_uncertainty_mm_s) else float('inf'),
+            0.15,  # conservative RTK FIXED floor; this is not the movement value
+        )
+        velocity_z_score = (
+            estimated_speed_3d_mm_s / velocity_uncertainty_mm_s
+            if math.isfinite(velocity_uncertainty_mm_s) and velocity_uncertainty_mm_s > 0.0
+            else 0.0
         )
         velocity_significant = bool(
-            estimated_speed_3d_mm_s > velocity_noise_threshold_mm_s
+            math.isfinite(velocity_detection_threshold_mm_s)
+            and estimated_speed_3d_mm_s >= velocity_detection_threshold_mm_s
+        )
+        confirmation_cfg = dict(gnss_alert_cfg)
+        # Confirmation samples must represent independent velocity windows;
+        # otherwise a 1 Hz stream counts the same 15 s window many times.
+        confirmation_cfg.setdefault('velocity_confirmation_min_gap_s', velocity_window_seconds)
+        velocity_confirmation = self._update_velocity_confirmation(
+            ts,
+            v_enu_stable,
+            velocity_significant,
+            velocity_reliable,
+            confirmation_cfg,
         )
         self.v_enu_state = v_enu_stable.copy()
         self.v_state_ready = True
@@ -1843,9 +2028,22 @@ class GNSSVelocityProcessor:
             1.4826 * residual_mad_mm / math.sqrt(len(displacement_history)),
         )
 
+        try:
+            displacement_change_sigma = max(
+                float(gnss_alert_cfg.get("displacement_change_sigma", 3.0)),
+                1.0,
+            )
+        except (TypeError, ValueError):
+            displacement_change_sigma = 3.0
+
         displacement_updated = False
-        horizontal_speed_mm_s = speed_2d * 1000.0
-        motion_confirmed = horizontal_speed_mm_s > displacement_stationary_speed_mm_s
+        candidate_step_mm = None
+        measured_speed_3d_mm_s = estimated_speed_3d_mm_s
+        displacement_change_threshold_mm = max(
+            displacement_noise_floor_mm * displacement_change_sigma,
+            displacement_uncertainty_mm * displacement_change_sigma,
+            displacement_noise_floor_min_mm,
+        )
         if not self.disp_state_ready:
             # Publish the real displacement from the locked origin after the
             # first stable window; stationary gating only controls later drift.
@@ -1853,18 +2051,36 @@ class GNSSVelocityProcessor:
             self.disp_state_ready = True
             displacement_updated = True
         else:
-            # Advance published displacement only after motion clears the
-            # stationary-speed gate and moves beyond the measured noise floor.
+            # Compare the new position candidate with the last accepted
+            # position.  Cumulative peak/alpha updates are deliberately not
+            # used as movement evidence.
             candidate_step_mm = float(
                 np.linalg.norm(displacement_candidate - self.disp_enu_state) * 1000.0
             )
-            if motion_confirmed and candidate_step_mm > displacement_noise_floor_mm:
-                alpha = 0.15
-                self.disp_enu_state = (
-                    (1.0 - alpha) * self.disp_enu_state
-                    + alpha * displacement_candidate
-                )
-                displacement_updated = True
+        position_change_significant = bool(
+            self.disp_state_ready
+            and candidate_step_mm is not None
+            and candidate_step_mm >= displacement_change_threshold_mm
+            and measured_speed_3d_mm_s >= displacement_stationary_speed_mm_s
+        )
+        motion_confirmed = bool(
+            velocity_confirmation['confirmed'] and position_change_significant
+        )
+        if (
+            self.disp_state_ready
+            and motion_confirmed
+            and velocity_confirmation.get('accepted_sample', True)
+        ):
+            # The median candidate is already the robust position estimate for
+            # this window.  Commit it only at an independent confirmation
+            # epoch, so a stationary multipath drift cannot ramp the state.
+            self.disp_enu_state = displacement_candidate.copy()
+            displacement_updated = True
+
+        # Keep the raw speed and uncertainty visible even when the movement
+        # decision is negative.  The public confirmation flag combines the
+        # independent velocity evidence with the position-change test.
+        movement_confirmed = motion_confirmed
 
         total_displacement_m = float(np.linalg.norm(self.disp_enu_state[:2]))
         total_displacement_3d_m = float(np.linalg.norm(self.disp_enu_state))
@@ -1937,6 +2153,9 @@ class GNSSVelocityProcessor:
             'displacement_sample_count': len(displacement_history),
             'displacement_noise_floor_mm': displacement_noise_floor_mm,
             'displacement_uncertainty_mm': displacement_uncertainty_mm,
+            'candidate_step_displacement_mm': candidate_step_mm,
+            'displacement_change_threshold_mm': displacement_change_threshold_mm,
+            'position_change_significant': position_change_significant,
             'vel_e': v_e_mm_s,
             'vel_n': v_n_mm_s,
             'vel_u': v_u_mm_s,
@@ -1953,8 +2172,24 @@ class GNSSVelocityProcessor:
             'velocity_residual_mad_mm': velocity_estimate['residual_mad_mm'],
             'velocity_uncertainty_mm_s': velocity_estimate['uncertainty_mm_s'],
             'velocity_confidence_95_mm_s': velocity_estimate['confidence_95_mm_s'],
+            'velocity_detection_threshold_mm_s': velocity_detection_threshold_mm_s,
+            'velocity_z_score': velocity_z_score,
+            'velocity_min_sigma': velocity_min_sigma,
             'velocity_reliable': velocity_reliable,
-            'velocity_significant': velocity_significant,
+            # Keep the public movement flag conservative. The raw statistical
+            # result is exposed separately for diagnostics, so a stationary
+            # multipath spike cannot look like confirmed movement in logs/API.
+            'velocity_significant': movement_confirmed,
+            'velocity_statistically_significant': velocity_significant,
+            'velocity_persistent': velocity_confirmation['confirmed'],
+            'velocity_confirmed': movement_confirmed,
+            'velocity_confirmation_sample_count': velocity_confirmation['sample_count'],
+            'velocity_confirmation_duration_s': velocity_confirmation['duration_s'],
+            'velocity_confirmation_direction_cosine': velocity_confirmation['direction_cosine'],
+            'velocity_confirmation_accepted_sample': velocity_confirmation.get('accepted_sample', False),
+            'velocity_confirmation_min_gap_s': velocity_confirmation.get('minimum_gap_s'),
+            'velocity_confirmation_required_samples': velocity_confirmation['required_samples'],
+            'velocity_confirmation_required_duration_s': velocity_confirmation['required_duration_s'],
             'velocity_out_of_range': velocity_out_of_range,
             'fix_quality': point['fix_quality'],
             'fix_mode': self._fix_mode(point['fix_quality']),

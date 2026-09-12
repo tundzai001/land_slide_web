@@ -145,6 +145,67 @@ class GnssFixedOnlyTests(unittest.TestCase):
 
         self.assertLess(speed_mm_s, estimate["confidence_95_mm_s"])
 
+    def test_velocity_spike_needs_persistent_same_direction_evidence(self):
+        processor = self._processor_without_db()
+        config = {
+            "velocity_confirmation_samples": 3,
+            "velocity_confirmation_duration_s": 20.0,
+            "velocity_confirmation_direction_cosine": 0.70,
+            "velocity_confirmation_min_gap_s": 10.0,
+        }
+        velocity = np.array([0.0006, 0.0002, 0.0])
+
+        first = processor._update_velocity_confirmation(100.0, velocity, True, True, config)
+        second = processor._update_velocity_confirmation(110.0, velocity, True, True, config)
+        confirmed = processor._update_velocity_confirmation(120.0, velocity, True, True, config)
+
+        self.assertFalse(first["confirmed"])
+        self.assertFalse(second["confirmed"])
+        self.assertTrue(confirmed["confirmed"])
+        self.assertEqual(confirmed["sample_count"], 3)
+        self.assertEqual(confirmed["duration_s"], 20.0)
+
+        overlapping = processor._update_velocity_confirmation(
+            125.0,
+            velocity,
+            True,
+            True,
+            config,
+        )
+        self.assertFalse(overlapping["accepted_sample"])
+        self.assertEqual(overlapping["sample_count"], 3)
+
+        # A later direction reversal breaks the evidence streak immediately;
+        # the measured velocity itself is never changed by this gate.
+        reversed_result = processor._update_velocity_confirmation(
+            121.0,
+            np.array([-0.0006, -0.0002, 0.0]),
+            True,
+            True,
+            config,
+        )
+        self.assertFalse(reversed_result["confirmed"])
+        self.assertEqual(reversed_result["sample_count"], 1)
+
+    def test_analyzer_keeps_statistical_only_velocity_pending(self):
+        analyzer = LandslideAnalyzer()
+        result = analyzer.analyze_gnss_displacement(
+            99,
+            [{
+                "timestamp": 1_700_000_000,
+                "data": {
+                    "status": "TRACKING_NORMAL",
+                    "speed_2d": 0.0006719,
+                    "velocity_reliable": True,
+                    "velocity_significant": True,
+                    "velocity_confirmed": False,
+                },
+            }],
+            {"GnssAlerting": {"enabled": True}},
+        )
+        self.assertEqual(result["level"], "PENDING")
+        self.assertEqual(result["category"], "gnss_velocity")
+
     def test_gga_time_resolves_across_utc_midnight(self):
         received = 1_704_153_601.0  # 2024-01-02 00:00:01 UTC
         resolved = GNSSVelocityProcessor._gga_epoch_seconds("235959.00", received)
@@ -781,8 +842,13 @@ class GnssFixedOnlyTests(unittest.TestCase):
 
         # Baseline: 20 samples at origin (0, 0, 0) with 0.5mm noise
         positions = [np.array([0.0005 if i % 2 else -0.0005, 0.0, 0.0]) for i in range(20)]
-        # Then slow creep to 10mm (0.010m) over 20 seconds
-        positions += [np.array([0.010 + (0.0005 if i % 2 else -0.0005), 0.0, 0.0]) for i in range(20)]
+        # Then slow creep to 30mm (0.030m) over 60 seconds.  The detector
+        # requires independent windows, so the fixture must span more than
+        # one confirmation interval.
+        positions += [
+            np.array([0.0005 * i + (0.0005 if i % 2 else -0.0005), 0.0, 0.0])
+            for i in range(60)
+        ]
         sample_index = {"value": 0}
 
         def fake_parse(_):

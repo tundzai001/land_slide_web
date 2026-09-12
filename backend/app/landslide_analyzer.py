@@ -1654,7 +1654,16 @@ class LandslideAnalyzer:
                     'signal_state': 'UNKNOWN',
                     'processor_status': latest_status,
                 }
-            if latest.get('velocity_reliable') is False or latest.get('velocity_significant') is False:
+            if latest.get('velocity_reliable') is False:
+                return {'level': 'PENDING', 'category': 'gnss_velocity'}
+            # New processor payloads separate a statistically significant
+            # rolling-window estimate from movement confirmed across windows.
+            # Keep the old fallback for payloads produced before that field
+            # existed.
+            if 'velocity_confirmed' in latest:
+                if latest.get('velocity_confirmed') is not True:
+                    return {'level': 'PENDING', 'category': 'gnss_velocity'}
+            elif latest.get('velocity_significant') is False:
                 return {'level': 'PENDING', 'category': 'gnss_velocity'}
             velocity_ms = latest.get('speed_2d', 0.0) 
             velocity_mms = velocity_ms * 1000.0

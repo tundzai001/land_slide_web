@@ -232,25 +232,25 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">East</span>
-                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-ve">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-ve">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">North</span>
-                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-vn">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-vn">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">Up</span>
-                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-vu">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-secondary" id="adv-val-raw-vu">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">Tốc độ 2D</span>
-                                <div class="adv-value-row"><span class="adv-value text-secondary fw-bold" id="adv-val-raw-2d">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-secondary fw-bold" id="adv-val-raw-2d">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                     </div>
@@ -263,25 +263,25 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">East</span>
-                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-ve">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-ve">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">North</span>
-                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-vn">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-vn">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">Up</span>
-                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-vu">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-info" id="adv-val-filt-vu">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="adv-item">
                                 <span class="adv-label">Tốc độ 2D</span>
-                                <div class="adv-value-row"><span class="adv-value text-info fw-bold" id="adv-val-filt-2d">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value text-info fw-bold" id="adv-val-filt-2d">--</span><span class="adv-unit">mm/s</span></div>
                             </div>
                         </div>
                     </div>
@@ -294,19 +294,19 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <div class="col-4">
                             <div class="adv-item">
                                 <span class="adv-label">&Delta;X (E)</span>
-                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdx">--</span><span class="adv-unit">mm/min</span></div>
                             </div>
                         </div>
                         <div class="col-4">
                             <div class="adv-item">
                                 <span class="adv-label">&Delta;Y (N)</span>
-                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdy">--</span><span class="adv-unit">mm/min</span></div>
                             </div>
                         </div>
                         <div class="col-4">
                             <div class="adv-item">
                                 <span class="adv-label">&Delta;H (U)</span>
-                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span></div>
+                                <div class="adv-value-row"><span class="adv-value" id="adv-val-vdh">--</span><span class="adv-unit">mm/min</span></div>
                             </div>
                         </div>
                     </div>
@@ -411,10 +411,6 @@ window.LegacyTemplateParts['shell'] = String.raw`
                         <span class="adv-label">HDOP</span>
                         <div class="adv-value-row"><span class="adv-value" id="adv-val-hdop">--</span></div>
                     </div>
-                </div>
-
-                <div class="mt-2 small text-muted text-center italic" style="font-size: 0.65rem;">
-                    * Hệ tọa độ VN2000. Giá trị hiển thị nguyên bản từ backend, không lọc/ép UI.
                 </div>
 
             </div>

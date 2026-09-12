@@ -31,11 +31,15 @@
     }
     function renderIncidentInbox() {
         const root = ensureIncidentInbox(); if (!allowed()) { root.hidden = true; return; } root.hidden = false;
+        const rows = (window.incidentStore?.list?.() || []).filter(row => !['resolved', 'dismissed'].includes(row.status)).slice(0, 8);
+        const toggle = document.getElementById('incident-toggle');
+        const hasOpenIncidents = rows.length > 0;
+        root.hidden = !hasOpenIncidents;
+        if (toggle) toggle.hidden = !hasOpenIncidents;
+        if (!hasOpenIncidents) { root.classList.remove('is-open'); return; }
         if (renderedRevision === window.incidentStore?.revision) return;
         renderedRevision = window.incidentStore?.revision ?? renderedRevision;
         const list = root.querySelector('[data-incident-list]'); list.replaceChildren();
-        const rows = (window.incidentStore?.list?.() || []).filter(row => !['resolved', 'dismissed'].includes(row.status)).slice(0, 8);
-        if (!rows.length) { list.appendChild(text('p', 'Chưa có sự cố cần xử lý.', 'incident-inbox__empty')); return; }
         rows.forEach(row => {
             const item = document.createElement('article'); item.className = `incident-item incident-item--${row.priority.toLowerCase()}`; item.dataset.incidentId = String(row.id);
             const head = document.createElement('div'); head.className = 'incident-item__head'; head.append(text('strong', row.reference || `INC-${row.id}`), text('span', priorityLabel[row.priority] || row.priority, 'incident-priority'), text('span', statusLabel[row.status] || row.status, 'incident-status'));

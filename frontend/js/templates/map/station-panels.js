@@ -193,6 +193,16 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
         </div>
 
         <div class="charts-panel-content">
+            <div class="charts-toolbar" aria-label="Khoảng thời gian biểu đồ">
+                <div class="chart-range-selector" id="chart-range-selector" role="group" aria-label="Chọn khoảng thời gian">
+                    <button type="button" class="chart-range-btn active" data-chart-hours="24" aria-pressed="true">24 giờ</button>
+                    <button type="button" class="chart-range-btn" data-chart-hours="168" aria-pressed="false">7 ngày</button>
+                    <button type="button" class="chart-range-btn" data-chart-hours="720" aria-pressed="false">30 ngày</button>
+                    <button type="button" class="chart-range-btn" data-chart-hours="8760" aria-pressed="false">1 năm</button>
+                </div>
+                <span class="charts-point-meta" id="charts-point-meta">Mặc định 24 giờ</span>
+            </div>
+
             <!-- GNSS Chart -->
             <div class="chart-box" id="chart-box-gnss">
                 <div class="chart-title"><i class="bi bi-speedometer2"></i><span>Vận tốc GNSS</span></div>

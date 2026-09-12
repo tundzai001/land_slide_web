@@ -19,6 +19,10 @@
 }
 
 .incident-inbox[hidden] { display: none; }
+.incident-toggle[hidden] { display: none !important; }
+.incident-inbox:not(.is-open) { display: none; }
+.incident-inbox:not(.is-open) + .incident-toggle { display: inline-flex; }
+.incident-inbox.is-open + .incident-toggle { display: none; }
 .incident-inbox__head,
 .incident-inbox__meta,
 .incident-item__head,

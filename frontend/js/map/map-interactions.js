@@ -155,6 +155,16 @@ function setupEventListeners() {
         });
     }
 
+    document.querySelectorAll('[data-chart-hours]').forEach(button => {
+        button.addEventListener('click', async () => {
+            if (button.disabled || !currentStationData) return;
+            const hours = Number(button.dataset.chartHours);
+            if (!Number.isFinite(hours)) return;
+            updateChartRangeControls(hours);
+            await loadStationHistoryAndRenderCharts({ hours });
+        });
+    });
+
 
 
     // ✅ NEW: Mở Digital Twin 3D
@@ -205,7 +215,6 @@ function setupEventListeners() {
             e.stopPropagation();
             console.log('👆 [GNSS] GNSS Velocity card clicked');
             // Remove expanded mode when just opening from card
-            const wasActive = advSidepanel.classList.contains('active');
             advSidepanel.classList.remove('expanded');
             setGnssAdvancedPanelOpen(advSidepanel, true);
 
@@ -216,8 +225,6 @@ function setupEventListeners() {
             if (window.matchMedia('(max-width: 900px)').matches) {
                 setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
             }
-            if (!wasActive) loadLongTermAnalysis();
-
             console.log('✨ [GNSS] Sidepanel active: true');
         });
     } else {

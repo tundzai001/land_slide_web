@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "build": "341b88946b70",
-  "generated_at": "2026-09-12T04:08:29.476Z",
+  "build": "c3e8591e3075",
+  "generated_at": "2026-09-12T09:33:27.954Z",
   "assets": {
     "admin-app.min.js": {
       "bytes": 440269,
-      "sha256": "833e03453d31bfdca29342ec6e68edcaa65f7f3ec1e92ece6ca14788d1dbd78c"
+      "sha256": "82976d632bde7dfd162c5030512d993948f90c7be3ea21ca514b67c73e9e40cd"
     },
     "admin.min.css": {
       "bytes": 108043,
@@ -21,11 +21,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 17113,
-      "sha256": "53e4e7cc619d0a4c5f8ce4624ef697368b0e6c4562a305517b1ed98e848465b0"
+      "sha256": "a334aa0b7e8c290a025d478d87f721fe9721c541a2f6eade9a9b6d7c79273157"
     },
     "app.html": {
       "bytes": 993,
-      "sha256": "b769de78ad41bb84e552156bf6b6fa76a4d736859a71295ff4b11db9e07bf9e7"
+      "sha256": "3f1d566a47ba8dd4543a2372305690b67433e9e58bf4521c2837304eca5a4cc2"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -33,7 +33,7 @@
     },
     "index.html": {
       "bytes": 16184,
-      "sha256": "a3c36526c6e7ef26ca2b55120f2a45260916202393090e7ba0e44c22562a3e19"
+      "sha256": "bf1e7a1491225387d7191d4fdc7ef02e21be9f68aaf6cf2b51b2a25536a40e3a"
     },
     "landing.min.css": {
       "bytes": 27569,
@@ -48,16 +48,16 @@
       "sha256": "2444438ce771eb06ebb8c6544c3a25af56d96a0b7cca58c3f398db96d608aaea"
     },
     "map-app.min.js": {
-      "bytes": 423316,
-      "sha256": "4fb2a09d80e7e8609197556dce3865aedb663e946f7d9702fef9b07fb14c324e"
+      "bytes": 432911,
+      "sha256": "86afc11e8954df9bc048798cb99cc1c34258fb327c444f0d80cf481c2456a6a7"
     },
     "map.html": {
       "bytes": 2825,
-      "sha256": "68a8fd6b031510d3979a348243761c6bd00bbcbb1344fe830629658bc12bb4c4"
+      "sha256": "f3e47aad1f39e9d601194cd976d16dda46d7a997b43d98db5614bfb98c3b1132"
     },
     "map.min.css": {
-      "bytes": 151157,
-      "sha256": "b9021b105f7d00b80a6f9884b8acfbd30a3920d400d86b9853c9733e11cfd757"
+      "bytes": 153164,
+      "sha256": "e5359f97253ba62d46f102105b10e636e551ef1e617e3c753b8dea594b6e2565"
     },
     "shared.min.js": {
       "bytes": 23434,

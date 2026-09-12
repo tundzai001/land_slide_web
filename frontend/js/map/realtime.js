@@ -788,6 +788,13 @@ function updateRealtimeSensorValues(message) {
         currentStationData.sensors[sensor_type].latest_timestamp = Number(timestamp || Date.now() / 1000);
     }
 
+    const isSelectedStation = mapUiState.selectedStation != null
+        && Number(stationId) === Number(mapUiState.selectedStation);
+    if (!isSelectedStation) {
+        if (sensor_type === 'imu' && data) maybeTriggerLocalImuCriticalFallback(stationId, data);
+        return;
+    }
+
     const detailVisible = document.getElementById('detail-sidebar')?.classList.contains('active');
     const chartsVisible = document.getElementById('charts-panel')?.classList.contains('active');
     const advancedVisible = document.getElementById('gnss-advanced-sidepanel')?.classList.contains('active');
@@ -813,17 +820,17 @@ function updateRealtimeSensorValues(message) {
         if (data.adv_x !== undefined) {
             if (advancedVisible) {
              // Vị trí hiện tại: VN2000 NEH
-             setText('adv-val-lat', safeNumber(data.adv_y, 3));
-             setText('adv-val-lon', safeNumber(data.adv_x, 3));
+             setText('adv-val-lat', safeNumber(data.adv_x, 3));
+             setText('adv-val-lon', safeNumber(data.adv_y, 3));
              setText('adv-val-alt', safeNumber(data.adv_h, 3));
              // Biến dạng lũy kế
             setText('adv-val-dx', safeNumber(data.adv_dx, 2));
             setText('adv-val-dy', safeNumber(data.adv_dy, 2));
             setText('adv-val-dh', safeNumber(data.adv_dh, 2));
              // Vận tốc biến dạng (mm/phút)
-             setText('adv-val-vdx', safeNumber(data.adv_vdx, 2));
-             setText('adv-val-vdy', safeNumber(data.adv_vdy, 2));
-             setText('adv-val-vdh', safeNumber(data.adv_vdh, 2));
+             setText('adv-val-vdx', formatGnssVelocityValue(data.adv_vdx, data, 2));
+             setText('adv-val-vdy', formatGnssVelocityValue(data.adv_vdy, data, 2));
+             setText('adv-val-vdh', formatGnssVelocityValue(data.adv_vdh, data, 2));
             }
 
              // ✅ CACHE: Lưu vào currentStationData để không bị mất khi refresh định kỳ
@@ -843,7 +850,20 @@ function updateRealtimeSensorValues(message) {
                      velocity_residual_mad_mm: data.velocity_residual_mad_mm,
                      velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s,
                      velocity_confidence_95_mm_s: data.velocity_confidence_95_mm_s,
+                     velocity_detection_threshold_mm_s: data.velocity_detection_threshold_mm_s,
+                     velocity_z_score: data.velocity_z_score,
+                     velocity_min_sigma: data.velocity_min_sigma,
                      velocity_significant: data.velocity_significant,
+                     velocity_statistically_significant: data.velocity_statistically_significant,
+                     velocity_persistent: data.velocity_persistent,
+                     velocity_confirmed: data.velocity_confirmed,
+                     velocity_confirmation_sample_count: data.velocity_confirmation_sample_count,
+                     velocity_confirmation_duration_s: data.velocity_confirmation_duration_s,
+                     velocity_confirmation_direction_cosine: data.velocity_confirmation_direction_cosine,
+                     velocity_confirmation_accepted_sample: data.velocity_confirmation_accepted_sample,
+                     velocity_confirmation_min_gap_s: data.velocity_confirmation_min_gap_s,
+                     velocity_confirmation_required_samples: data.velocity_confirmation_required_samples,
+                     velocity_confirmation_required_duration_s: data.velocity_confirmation_required_duration_s,
                      velocity_reliable: data.velocity_reliable,
                      vel_e: data.vel_e, vel_n: data.vel_n, vel_u: data.vel_u,
                      raw_vel_e_mm_s: data.raw_vel_e_mm_s,
@@ -855,6 +875,9 @@ function updateRealtimeSensorValues(message) {
                      peak_displacement_mm: data.peak_displacement_mm,
                      displacement_noise_floor_mm: data.displacement_noise_floor_mm,
                      displacement_uncertainty_mm: data.displacement_uncertainty_mm,
+                     candidate_step_displacement_mm: data.candidate_step_displacement_mm,
+                     displacement_change_threshold_mm: data.displacement_change_threshold_mm,
+                     position_change_significant: data.position_change_significant,
                      displacement_sample_count: data.displacement_sample_count,
                      integrity: data.integrity || data.data,
                      displacement_window_duration_s: data.displacement_window_duration_s,
@@ -864,6 +887,7 @@ function updateRealtimeSensorValues(message) {
         }
 
         // Update Theil-Sen display in both Main Sidebar and Advanced Panel
+        clearGnssEvaluationSummary();
         if (data.velocity_method === 'theil_sen_enu') {
             const sampleCount = Number.isFinite(Number(data.velocity_sample_count)) ? Number(data.velocity_sample_count) : '--';
             const durationS = safeNumber(data.velocity_window_duration_s, 1);
@@ -889,14 +913,10 @@ function updateRealtimeSensorValues(message) {
             setText('adv-val-raw-2d', safeNumber(data.raw_speed_2d_mm_s, 4));
 
             // Advanced Panel - Filtered velocity (sau Theil-Sen)
-            setText('adv-val-filt-ve', safeNumber(data.vel_e, 4));
-            setText('adv-val-filt-vn', safeNumber(data.vel_n, 4));
-            setText('adv-val-filt-vu', safeNumber(data.vel_u, 4));
-            const filteredSpeed2d = Number(data.speed_2d_mm_s);
-            setText(
-                'adv-val-filt-2d',
-                Number.isFinite(filteredSpeed2d) ? filteredSpeed2d.toFixed(4) : '--'
-            );
+            setText('adv-val-filt-ve', formatGnssVelocityValue(data.vel_e, data, 4));
+            setText('adv-val-filt-vn', formatGnssVelocityValue(data.vel_n, data, 4));
+            setText('adv-val-filt-vu', formatGnssVelocityValue(data.vel_u, data, 4));
+            setText('adv-val-filt-2d', formatGnssVelocityValue(data.speed_2d_mm_s, data, 4));
 
             // Advanced Panel - Displacement
             setText('adv-val-disp-total', safeNumber(data.total_displacement_mm, 2));
@@ -949,18 +969,41 @@ function updateRealtimeSensorValues(message) {
                     return;
                 }
                 let trendHtml = '';
-                if (data.velocity_significant === true) {
-                    trendHtml = `<span class="text-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Có chuyển dịch</span>`;
+                const hasConfirmationField = Object.prototype.hasOwnProperty.call(data, 'velocity_confirmed');
+                const movementConfirmed = hasConfirmationField
+                    ? data.velocity_confirmed === true
+                    : data.velocity_significant === true;
+                const statisticalSignal = data.velocity_statistically_significant === true
+                    || (!hasConfirmationField && data.velocity_significant === true);
+                const persistentVelocity = data.velocity_persistent === true;
+                if (movementConfirmed && data.velocity_reliable !== false) {
+                    trendHtml = `<span class="text-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
+                } else if (data.velocity_reliable === false) {
+                    trendHtml = `<span class="text-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
+                } else if (persistentVelocity && data.position_change_significant !== true) {
+                    trendHtml = `<span class="text-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
+                } else if (hasConfirmationField && statisticalSignal) {
+                    const confirmedSamples = Number.isFinite(Number(data.velocity_confirmation_sample_count))
+                        ? Number(data.velocity_confirmation_sample_count)
+                        : 0;
+                    const requiredSamples = Number.isFinite(Number(data.velocity_confirmation_required_samples))
+                        ? Number(data.velocity_confirmation_required_samples)
+                        : 3;
+                    trendHtml = `<span class="text-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
                 } else {
-                    trendHtml = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Ổn định (Noise Floor)</span>`;
+                    trendHtml = `<span class="text-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
                 }
-                const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '0.00';
+                const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '--';
                 const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
+                const zScore = Number(data.velocity_z_score);
+                const zHtml = Number.isFinite(zScore)
+                    ? `<span class="opacity-75 font-monospace">z=${zScore.toFixed(2)}σ / ngưỡng ${Number(data.velocity_min_sigma || 3).toFixed(1)}σ</span>`
+                    : '';
                 evalSummaryEl.innerHTML = `
                     <div class="d-flex flex-column gap-1">
                         <div>${trendHtml}</div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="opacity-75 font-monospace">(${ciStr})</span>` : ''}
+                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="opacity-75 font-monospace">(${ciStr})</span>` : ''} ${zHtml}
                         </div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
                             <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)

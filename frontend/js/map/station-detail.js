@@ -1,4 +1,68 @@
 // =====================================================
+const CHART_SENSOR_TYPES = Object.freeze(['gnss', 'rain', 'water', 'imu']);
+const CHART_RANGE_OPTIONS = Object.freeze([
+    { hours: 24, label: '24 giờ' },
+    { hours: 24 * 7, label: '7 ngày' },
+    { hours: 24 * 30, label: '30 ngày' },
+    { hours: 24 * 365, label: '1 năm' },
+]);
+let activeChartHours = 24;
+
+function getChartRange(hours = activeChartHours) {
+    return CHART_RANGE_OPTIONS.find(option => option.hours === Number(hours)) || CHART_RANGE_OPTIONS[0];
+}
+
+function getChartHistoryLimit(hours) {
+    if (hours <= 24) return 500;
+    if (hours <= 24 * 7) return 1000;
+    if (hours <= 24 * 30) return 1500;
+    return 2000;
+}
+
+function getChartableSensorTypes(data) {
+    const sensors = data?.sensors || {};
+    return CHART_SENSOR_TYPES.filter(sensorType => (
+        sensors[sensorType] && typeof sensors[sensorType] === 'object'
+    ));
+}
+
+function updateChartRangeControls(hours = activeChartHours) {
+    activeChartHours = getChartRange(hours).hours;
+    const range = getChartRange(activeChartHours);
+    const period = document.querySelector('.charts-period');
+    if (period) period.textContent = range.label;
+    document.querySelectorAll('[data-chart-hours]').forEach(button => {
+        const active = Number(button.dataset.chartHours) === activeChartHours;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+}
+
+function updateChartsAvailability(data) {
+    const chartButton = document.getElementById('btn-show-charts');
+    const chartPanel = document.getElementById('charts-panel');
+    const actionButtons = chartButton?.closest('.action-buttons');
+    const longTermButton = document.getElementById('btn-long-term');
+    const hasCharts = getChartableSensorTypes(data).length > 0;
+    const hasOtherAction = Boolean(
+        longTermButton
+        && !longTermButton.classList.contains('d-none')
+        && longTermButton.style.display !== 'none'
+    );
+
+    if (chartButton) {
+        chartButton.hidden = !hasCharts;
+        chartButton.disabled = !hasCharts;
+        chartButton.setAttribute('aria-hidden', String(!hasCharts));
+    }
+    if (actionButtons) actionButtons.style.display = hasCharts || hasOtherAction ? '' : 'none';
+
+    if (!hasCharts) {
+        setChartsPanelOpen(chartPanel, false);
+        destroyStationCharts();
+    }
+}
+
 // SIREN POPUP HELPER — Dùng bởi selectStation và Track button
 // =====================================================
 function _showSirenIfAlerting(stationId, data) {
@@ -76,8 +140,13 @@ async function fetchStationDetail(stationId, { includeHistory = false, signal } 
     return response.json();
 }
 
-async function fetchStationHistory(stationId, { signal } = {}) {
-    const url = `/api/stations/${stationId}/history?hours=24&limit=500`;
+async function fetchStationHistory(stationId, { hours = activeChartHours, sensorTypes = [], signal } = {}) {
+    const params = new URLSearchParams({
+        hours: String(hours),
+        limit: String(getChartHistoryLimit(hours)),
+    });
+    if (sensorTypes.length) params.set('sensor_types', sensorTypes.join(','));
+    const url = `/api/stations/${stationId}/history?${params.toString()}`;
     const requestOptions = signal ? { signal } : {};
     const response = window.authManager?.isAuthenticated?.()
         ? await window.authManager.apiFetch(url, requestOptions)
@@ -117,12 +186,20 @@ function focusMapOnStation(stationId, skipZoom = false) {
     });
 }
 
-async function loadStationHistoryAndRenderCharts() {
+async function loadStationHistoryAndRenderCharts({ hours = activeChartHours } = {}) {
     const stationId = Number(currentStationData?.id || 0);
     if (!stationId) return;
+    const range = getChartRange(hours);
+    const sensorTypes = getChartableSensorTypes(currentStationData);
+    updateChartRangeControls(range.hours);
+    if (!sensorTypes.length) {
+        updateChartsAvailability(currentStationData);
+        return;
+    }
     const chartsPanel = document.getElementById('charts-panel');
     const chartsButton = document.getElementById('btn-show-charts');
-    const cached = stationHistoryCache.get(stationId);
+    const cacheKey = `${stationId}:${range.hours}`;
+    const cached = stationHistoryCache.get(cacheKey);
     if (cached && Date.now() - cached.loadedAt < STATION_HISTORY_CACHE_MS) {
         renderCharts(cached.data);
         return;
@@ -132,8 +209,11 @@ async function loadStationHistoryAndRenderCharts() {
     stationHistoryController = new AbortController();
     chartsPanel?.classList.add('station-history-loading');
     if (chartsButton) chartsButton.disabled = true;
+    document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = true; });
     try {
         const historyPayload = await fetchStationHistory(stationId, {
+            hours: range.hours,
+            sensorTypes,
             signal: stationHistoryController.signal,
         });
         if (Number(currentStationData?.id || 0) !== stationId) return;
@@ -142,12 +222,13 @@ async function loadStationHistoryAndRenderCharts() {
             sensors: { ...currentStationData.sensors },
         };
         Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
+            if (!sensorTypes.includes(sensorType)) return;
             data.sensors[sensorType] = {
                 ...(data.sensors[sensorType] || {}),
                 history: sensorHistory.history || [],
             };
         });
-        stationHistoryCache.set(stationId, { data, loadedAt: Date.now() });
+        stationHistoryCache.set(cacheKey, { data, loadedAt: Date.now() });
         currentStationData = data;
         renderCharts(data);
     } catch (error) {
@@ -158,12 +239,20 @@ async function loadStationHistoryAndRenderCharts() {
     } finally {
         chartsPanel?.classList.remove('station-history-loading');
         if (chartsButton) chartsButton.disabled = false;
+        document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = false; });
     }
 }
 
 async function selectStation(stationId, options = {}) {
     if (currentMapMode === 'rescue') {
         return;
+    }
+    const chartsPanel = document.getElementById('charts-panel');
+    setChartsPanelOpen(chartsPanel, false);
+    destroyStationCharts();
+    const advancedPanel = document.getElementById('gnss-advanced-sidepanel');
+    if (advancedPanel?.classList.contains('active') && Number(currentStationData?.id) !== Number(stationId)) {
+        setGnssAdvancedPanelOpen(advancedPanel, false);
     }
     setMapState({ selectedStation: Number(stationId) });
 
@@ -189,6 +278,7 @@ async function selectStation(stationId, options = {}) {
         setDetailSidebarOpen(sidebar, true);
         sidebar.setAttribute('aria-busy', 'true');
     }
+    resetStationSensorCards();
     const stationSummary = allStations.find(station => Number(station.id) === Number(stationId));
     if (stationSummary) {
         setText('st-name', stationSummary.name);
@@ -255,6 +345,10 @@ async function selectStation(stationId, options = {}) {
             });
         }
     }
+}
+
+function formatGnssVelocityValue(value, _data, decimals = 4) {
+    return safeNumber(value, decimals);
 }
 
 function getGnssVelocity(gnssLatest) {
@@ -489,7 +583,35 @@ function updateSensorOfflineBadge(sensorType, isOnline) {
     badge.style.display = isOnline ? 'none' : '';
 }
 
+function clearGnssEvaluationSummary() {
+    const summary = document.getElementById('gnss-eval-summary');
+    if (!summary) return;
+    summary.replaceChildren();
+    summary.style.display = 'none';
+}
+
+function resetStationSensorCards() {
+    setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+    setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
+    setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
+    setText('val-imu-roll', '--°');
+    setText('val-imu-pitch', '--°');
+    setText('val-imu-yaw', '--°');
+    setText('val-imu-delta-roll', '-- mm');
+    setText('val-imu-delta-pitch', '-- mm');
+    setText('val-imu-delta-yaw', '-- mm');
+    updateImuDrift(null, null);
+    updateGnssFixBadge('NO_DATA', 0);
+    document.getElementById('gnss-fix-badge')?.style.setProperty('display', '');
+    ['gnss', 'rain', 'water', 'imu'].forEach(sensorType => {
+        document.getElementById(`${sensorType}-offline-badge`)?.style.setProperty('display', 'none');
+    });
+    clearGnssEvaluationSummary();
+}
+
 function updateSidebarUI(data) {
+    clearGnssEvaluationSummary();
+    updateChartsAvailability(data);
     setText('st-name', data.name);
     setText('st-code', data.station_code);
 
@@ -551,19 +673,29 @@ function updateSidebarUI(data) {
     // API trả data flat trên gnssLatest, WS cache lưu dưới gnssLatest.data
     const adv = gnssLatest?.data || gnssLatest;
     updateGnssIntegrityStatus(adv);
+    if (adv) {
+        setText('adv-val-raw-ve', safeNumber(adv.raw_vel_e_mm_s, 4));
+        setText('adv-val-raw-vn', safeNumber(adv.raw_vel_n_mm_s, 4));
+        setText('adv-val-raw-vu', safeNumber(adv.raw_vel_u_mm_s, 4));
+        setText('adv-val-raw-2d', safeNumber(adv.raw_speed_2d_mm_s, 4));
+        setText('adv-val-filt-ve', formatGnssVelocityValue(adv.vel_e, adv, 4));
+        setText('adv-val-filt-vn', formatGnssVelocityValue(adv.vel_n, adv, 4));
+        setText('adv-val-filt-vu', formatGnssVelocityValue(adv.vel_u, adv, 4));
+        setText('adv-val-filt-2d', formatGnssVelocityValue(adv.speed_2d_mm_s, adv, 4));
+    }
     if (adv && adv.adv_x !== undefined) {
         // Vị trí hiện tại: Lat/Lon/Alt từ GNGGA
-        setText('adv-val-lat', safeNumber(adv.lat, 6));
-        setText('adv-val-lon', safeNumber(adv.lon, 6));
+        setText('adv-val-lat', safeNumber(adv.adv_x, 3));
+        setText('adv-val-lon', safeNumber(adv.adv_y, 3));
         setText('adv-val-alt', safeNumber(adv.adv_h ?? adv.h, 3));
         // Biến dạng lũy kế
         setText('adv-val-dx', safeNumber(adv.adv_dx, 2));
         setText('adv-val-dy', safeNumber(adv.adv_dy, 2));
         setText('adv-val-dh', safeNumber(adv.adv_dh, 2));
         // Vận tốc biến dạng
-        setText('adv-val-vdx', safeNumber(adv.adv_vdx, 4));
-        setText('adv-val-vdy', safeNumber(adv.adv_vdy, 4));
-        setText('adv-val-vdh', safeNumber(adv.adv_vdh, 4));
+        setText('adv-val-vdx', formatGnssVelocityValue(adv.adv_vdx, adv, 4));
+        setText('adv-val-vdy', formatGnssVelocityValue(adv.adv_vdy, adv, 4));
+        setText('adv-val-vdh', formatGnssVelocityValue(adv.adv_vdh, adv, 4));
     }
     updateSensorOfflineBadge('rain', rainOnline);
     updateSensorOfflineBadge('water', waterOnline);
@@ -740,6 +872,9 @@ function destroyStationCharts() {
 function renderCharts(data) {
     if (!data.sensors) return;
 
+    updateChartsAvailability(data);
+    updateChartRangeControls();
+
     console.log('📊 [CHARTS] Rendering charts for station devices...');
 
     // Show charts based on DEVICE presence, not data existence
@@ -781,6 +916,15 @@ function renderCharts(data) {
         renderImuChart(data.sensors.imu.history || []);
     }
 
+    const pointMeta = document.getElementById('charts-point-meta');
+    if (pointMeta) {
+        const totalPoints = CHART_SENSOR_TYPES.reduce(
+            (total, sensorType) => total + Number(data.sensors?.[sensorType]?.history?.length || 0),
+            0,
+        );
+        pointMeta.textContent = totalPoints ? `${totalPoints.toLocaleString('vi-VN')} điểm đã tải` : 'Chưa có dữ liệu trong khoảng này';
+    }
+
     // Show/hide chart boxes
     allChartIds.forEach(chartBoxId => {
         const chartBox = document.getElementById(chartBoxId);
@@ -800,14 +944,18 @@ function renderCharts(data) {
 
 function buildChartTimeLabels(history) {
     const timestamps = (history || [])
-        .map(item => Number(item.timestamp) * 1000)
+        .map(item => normalizeEpochMs(item.timestamp))
         .filter(Number.isFinite);
     const spanMs = timestamps.length > 1
         ? Math.max(...timestamps) - Math.min(...timestamps)
         : 0;
     const showSeconds = spanMs > 0 && spanMs <= 10 * 60 * 1000;
+    const showDate = spanMs > 36 * 60 * 60 * 1000;
     return (history || []).map(item => {
         const date = new Date(normalizeEpochMs(item.timestamp));
+        if (showDate) {
+            return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        }
         return date.toLocaleTimeString('vi-VN', {
             hour: '2-digit',
             minute: '2-digit',
@@ -881,6 +1029,7 @@ function renderChart(id, history, key, color, label) {
     gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.20)`);
     gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.0)`);
 
+    const showPoints = values.length <= 140;
     charts[id] = new Chart(canvas, {
         type: 'line',
         data: {
@@ -891,9 +1040,9 @@ function renderChart(id, history, key, color, label) {
                 borderColor: color,
                 backgroundColor: gradient,
                 fill: true,
-                tension: 0.28,
-                borderWidth: 2.25,
-                pointRadius: 0,
+                tension: 0,
+                borderWidth: 1.8,
+                pointRadius: showPoints ? 1.8 : 0,
                 pointHoverRadius: 4,
                 pointBackgroundColor: color,
                 pointBorderColor: '#fff',
@@ -903,6 +1052,8 @@ function renderChart(id, history, key, color, label) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: false,
+            normalized: true,
             interaction: {
                 mode: 'index',
                 intersect: false,
@@ -921,14 +1072,14 @@ function renderChart(id, history, key, color, label) {
                 }
             },
             scales: {
-                x: { 
-                    display: true,
-                    grid: { display: false },
-                    ticks: {
-                        color: tickColor,
-                        maxTicksLimit: 6,
-                        maxRotation: 0
-                    }
+                    x: { 
+                        display: true,
+                        grid: { display: false },
+                        ticks: {
+                            color: tickColor,
+                            maxTicksLimit: 8,
+                            maxRotation: 0
+                        }
                 },
                 y: {
                     grid: { 
