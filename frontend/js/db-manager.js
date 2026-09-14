@@ -406,8 +406,7 @@ class DatabaseManager {
     updateStats(stats) {
         const mapping = { stations: ['stat-stations', 'db-count-stations'], devices: ['stat-devices', 'db-count-devices'], sensor_data: ['stat-data', 'db-count-sensor_data'], gnss_adjustments: ['db-count-gnss_adjustments'], alerts: ['stat-alerts', 'db-count-alerts'] };
         Object.entries(mapping).forEach(([key, ids]) => {
-            const prefix = stats[`${key}_estimated`] ? '≈' : '';
-            const value = `${prefix}${Number(stats[key] || 0).toLocaleString('vi-VN')}`;
+            const value = Number(stats[key] || 0).toLocaleString('vi-VN');
             ids.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = value; });
         });
     }

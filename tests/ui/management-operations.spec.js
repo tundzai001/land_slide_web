@@ -80,7 +80,7 @@ test('database explorer loads one paginated dataset and opens the inspector', as
     Object.defineProperty(window, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} } });
     window.fetch = async url => {
       const target = String(url);
-      if (target.includes('/stats')) return new Response(JSON.stringify({ stations: 12, devices: 12, sensor_data: 817874, sensor_data_estimated: true, alerts: 1 }), { status: 200 });
+      if (target.includes('/stats')) return new Response(JSON.stringify({ stations: 12, devices: 12, sensor_data: 817874, alerts: 1 }), { status: 200 });
       if (target.includes('/api/admin/projects')) return new Response(JSON.stringify([{ id: 2, name: 'Sín Quyền' }]), { status: 200 });
       return new Response(JSON.stringify([{ id: 7, station_code: 'DAP-01', name: 'Đập 1', project_id: 2, status: 'offline', age_seconds: 3600, created_at: 1787100000 }]), { status: 200, headers: { 'X-Total-Count': '12' } });
     };
@@ -89,7 +89,7 @@ test('database explorer loads one paginated dataset and opens the inspector', as
   await page.evaluate(() => { window.bootstrapDatabaseManager(); return window.dbManager.loadAllData(); });
 
   await expect(page.locator('#db-current-meta')).toContainText('12 bản ghi');
-  await expect(page.locator('#stat-data')).toHaveText('≈817.874');
+  await expect(page.locator('#stat-data')).toHaveText('817.874');
   await expect(page.locator('#db-table-body .db-row')).toHaveCount(1);
   await expect(page.locator('.db-dataset[data-dataset="simulations"]')).toHaveCount(0);
   await expect(page.locator('[data-tab="tab-simulations"]')).toHaveText('Mô phỏng');

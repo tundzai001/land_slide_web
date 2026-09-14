@@ -80,12 +80,14 @@ async def get_database_stats(
         count_devices = await config_db.execute(select(func.count()).select_from(model_config.Device))
         num_devices = count_devices.scalar()
 
-        # PostgreSQL exact COUNT/GROUP BY must visit every visible row.  The
-        # dashboard only needs a scale indicator, so use the indexed primary-key
-        # high-water mark and keep the exact filtered count for the much smaller
-        # adjustment stream.
-        sensor_high_watermark = await data_db.execute(select(func.max(model_data.SensorData.id)))
-        num_data = int(sensor_high_watermark.scalar() or 0)
+        # Match the general sensor explorer: internal GNSS adjustment streams
+        # are counted separately below.
+        count_sensor_data = await data_db.execute(
+            select(func.count()).select_from(model_data.SensorData).where(
+                model_data.SensorData.sensor_type.in_(PUBLIC_SENSOR_TYPES)
+            )
+        )
+        num_data = int(count_sensor_data.scalar() or 0)
         count_adjustments = await data_db.execute(
             select(func.count()).select_from(model_data.SensorData).where(
                 model_data.SensorData.sensor_type == "gnss_adjusted"
@@ -102,7 +104,6 @@ async def get_database_stats(
             "stations": num_stations,
             "devices": num_devices,
             "sensor_data": num_data,
-            "sensor_data_estimated": True,
             "gnss_adjustments": num_adjustments,
             "alerts": num_alerts,
         }
