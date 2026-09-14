@@ -30,6 +30,16 @@ class MQTTPersistenceMixin:
         "REJECTED_MEASUREMENT",
     }
 
+    @staticmethod
+    def _is_processing_storage_enabled(station_config: Optional[dict]) -> bool:
+        """Return whether internal GNSS processing logs may be persisted."""
+        config = station_config if isinstance(station_config, dict) else {}
+        data_logging = config.get("data_logging")
+        if isinstance(data_logging, dict) and "enabled" in data_logging:
+            return data_logging.get("enabled") is not False
+        # Existing stations do not have this key yet; keep their behavior.
+        return True
+
     async def _append_gnss_audit_record(
         self,
         device_id: int,
@@ -88,6 +98,8 @@ class MQTTPersistenceMixin:
         result: dict,
         station_config: dict,
     ) -> bool:
+        if not self._is_processing_storage_enabled(station_config):
+            return False
         if not await self._should_record_gnss_anomaly(device_id, result):
             return False
         audit = dict(result or {})
@@ -114,6 +126,8 @@ class MQTTPersistenceMixin:
         forward_action: str,
         forward_rc: int,
     ) -> bool:
+        if not self._is_processing_storage_enabled(station_config):
+            return False
         if str(forward_action).lower() == "published" and int(forward_rc or 0) == 0:
             return False
         state = getattr(self, "_gnss_forward_error_state", None)

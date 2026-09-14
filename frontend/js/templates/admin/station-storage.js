@@ -20,6 +20,23 @@ window.LegacyTemplateParts['station-storage'] = String.raw`                <!-- 
                             <span class="station-section-badge">Theo trạm</span>
                         </div>
                         <div class="sensor-config-body">
+                            <div class="station-options mb-3" role="group" aria-labelledby="station-processing-options-heading">
+                                <div class="station-options-heading">
+                                    <h6 id="station-processing-options-heading">Lưu log xử lý</h6>
+                                    <p>Cấu hình riêng cho trạm này; không ảnh hưởng đến xử lý realtime.</p>
+                                </div>
+                                <label class="station-option-card" for="cfg-station-processing-storage-enabled">
+                                    <span class="station-option-icon station-option-icon-info" aria-hidden="true"><i class="bi bi-cpu"></i></span>
+                                    <span class="station-option-copy">
+                                        <strong>Lưu trạng thái xử lý GNSS</strong>
+                                        <small>Lưu các bản ghi <code>gnss_anomaly</code> và <code>gnss_audit</code>. Tắt để giảm phình cơ sở dữ liệu; trạm vẫn xử lý, cảnh báo và cập nhật realtime.</small>
+                                    </span>
+                                    <span class="station-switch">
+                                        <input type="checkbox" id="cfg-station-processing-storage-enabled" role="switch" checked>
+                                        <span class="station-switch-track" aria-hidden="true"></span>
+                                    </span>
+                                </label>
+                            </div>
                             <div class="station-inline-note">
                                 <i class="bi bi-info-circle" aria-hidden="true"></i>
                                 <span>Để trống để dùng chu kỳ mặc định của hệ thống. Giá trị tối thiểu là 10 giây.</span>

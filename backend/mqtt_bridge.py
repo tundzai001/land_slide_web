@@ -1013,24 +1013,26 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                                 )
                             except Exception as touch_error:
                                 logger.error(f"❌ GNSS active-alert refresh failed: {touch_error}")
-                            # Immediate buffering for anomalies
-                            anomaly_record = {
-                                "station_id": station_id,
-                                "timestamp": current_timestamp,
-                                "sensor_type": "gnss_anomaly",
-                                "ingest_id": self._make_ingest_id(
-                                    device_id,
-                                    station_id,
-                                    "gnss_anomaly",
-                                    current_timestamp,
-                                    status_payload,
-                                    raw_payload,
-                                ),
-                                "data": status_payload,
-                                "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None
-                            }
-                            async with self._buffer_lock:
-                                self._sensor_buffer.append(anomaly_record)
+                            # Immediate buffering for anomalies can be disabled
+                            # per station without stopping processing or alerts.
+                            if self._is_processing_storage_enabled(station_config):
+                                anomaly_record = {
+                                    "station_id": station_id,
+                                    "timestamp": current_timestamp,
+                                    "sensor_type": "gnss_anomaly",
+                                    "ingest_id": self._make_ingest_id(
+                                        device_id,
+                                        station_id,
+                                        "gnss_anomaly",
+                                        current_timestamp,
+                                        status_payload,
+                                        raw_payload,
+                                    ),
+                                    "data": status_payload,
+                                    "value_1": None, "value_2": None, "value_3": None, "value_4": None, "value_5": None
+                                }
+                                async with self._buffer_lock:
+                                    self._sensor_buffer.append(anomaly_record)
                                 
                         try:
                             await self._upsert_latest_sensor_cache(station_id, 'gnss', current_timestamp, status_payload)

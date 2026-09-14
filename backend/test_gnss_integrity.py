@@ -1130,6 +1130,21 @@ class GnssAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config["GnssIntegrity"]["process_max_hdop"], 2.0)
         self.assertEqual(config["GnssIntegrity"]["process_min_sats"], 10)
         self.assertEqual(config["GnssIntegrity"]["reference_transition_samples"], 6)
+        self.assertTrue(bridge._is_processing_storage_enabled(config))
+
+    async def test_processing_log_storage_can_be_disabled_per_station(self):
+        bridge = self._bridge_without_clients()
+        disabled_config = {"data_logging": {"enabled": False}}
+
+        self.assertFalse(bridge._is_processing_storage_enabled(disabled_config))
+        self.assertFalse(await bridge._buffer_gnss_audit(
+            9, 8, 123456, "$GNGGA,TEST*00", {"status": "UNSTABLE_FIX"}, disabled_config,
+        ))
+        self.assertFalse(await bridge._buffer_gnss_forward_audit(
+            9, 8, 123456, {}, disabled_config,
+            "test/gnss", "local", "{}", "publish_failed", 7,
+        ))
+        self.assertEqual(bridge._sensor_buffer, [])
 
     async def test_rejected_raw_is_saved_even_when_only_gngga_field_is_selected(self):
         bridge = self._bridge_without_clients()

@@ -20,6 +20,20 @@ async function mountManagement(page, width = 1366) {
   await page.evaluate(() => { document.body.innerHTML = window.LegacyTemplateParts.shell; });
 }
 
+test('station step 4 exposes the per-station processing log toggle', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.addScriptTag({ content: source('frontend/js/templates/admin/station-storage.js') });
+  await page.evaluate(() => {
+    document.body.innerHTML = window.LegacyTemplateParts['station-storage'];
+  });
+
+  const toggle = page.locator('#cfg-station-processing-storage-enabled');
+  await expect(toggle).toBeChecked();
+  await expect(page.locator('label[for="cfg-station-processing-storage-enabled"]')).toContainText('gnss_anomaly');
+  await toggle.uncheck();
+  await expect(toggle).not.toBeChecked();
+});
+
 test('station settings show the persisted GNSS tracking offset, not only the latest shift', async ({ page }) => {
   await page.setContent('<!doctype html><html><body></body></html>');
   await page.addScriptTag({ content: source('frontend/js/templates/admin/station-connectivity.js') });

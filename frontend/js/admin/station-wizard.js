@@ -157,6 +157,8 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (alertingDisabledEl) alertingDisabledEl.checked = false;
         const offlineDisplayEl = document.getElementById('station-offline-display-enabled');
         if (offlineDisplayEl) offlineDisplayEl.checked = false;
+        const processingStorageEl = document.getElementById('cfg-station-processing-storage-enabled');
+        if (processingStorageEl) processingStorageEl.checked = true;
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
 
         ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
@@ -326,6 +328,10 @@ class AdminStationWizardFeature extends window.AdminManager {
             const offlineDisplayEl = document.getElementById('station-offline-display-enabled');
             if (offlineDisplayEl) {
                 offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
+            }
+            const processingStorageEl = document.getElementById('cfg-station-processing-storage-enabled');
+            if (processingStorageEl) {
+                processingStorageEl.checked = cfg.data_logging?.enabled !== false;
             }
             this.currentStationConfig = cfg;
             const simulationProfile = cfg.simulation_profile || {};

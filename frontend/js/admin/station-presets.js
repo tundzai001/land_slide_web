@@ -429,6 +429,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
             offline_display: {
                 enabled: !!document.getElementById('station-offline-display-enabled')?.checked
             },
+            data_logging: {
+                enabled: !!document.getElementById('cfg-station-processing-storage-enabled')?.checked
+            },
             Water: {
                 warning_threshold: parseFloat(document.getElementById('cfg-water-warning')?.value || 0),
                 critical_threshold: parseFloat(document.getElementById('cfg-water-critical')?.value || 0),
