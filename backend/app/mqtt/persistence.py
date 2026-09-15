@@ -225,6 +225,10 @@ class MQTTPersistenceMixin:
             )
             for row in sensor_batch
         ]
+        for row in rows:
+            row.setdefault("adjustment_key", None)
+            row.setdefault("adjustment_project_id", None)
+            row.setdefault("adjustment_cluster_index", None)
         identities = [row.get("ingest_id") for row in rows]
         metrics = {
             "inserted": 0,

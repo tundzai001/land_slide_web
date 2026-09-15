@@ -3,12 +3,10 @@ import unittest
 from types import SimpleNamespace
 
 from fastapi import HTTPException, Response
-from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
 from app.routers.database_admin import (
     _device_runtime_state,
-    _gnss_adjustment_identity_columns,
     admin_get_sensor_data,
 )
 
@@ -45,9 +43,11 @@ class _SensorDb:
     def __init__(self, rows):
         self.rows = rows
         self.execute_count = 0
+        self.last_query = None
 
-    async def execute(self, _query):
+    async def execute(self, query):
         self.execute_count += 1
+        self.last_query = query
         return _RowsResult(self.rows)
 
 
@@ -75,6 +75,7 @@ class SensorDataFastPageTests(unittest.TestCase):
             response=response,
             offset=0,
             limit=2,
+            sensor_type="gnss_adjusted",
             include_total=False,
             include_data=False,
             include_internal=True,
@@ -86,6 +87,9 @@ class SensorDataFastPageTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in result], [1, 2])
         self.assertEqual(response.headers["X-Has-More"], "true")
         self.assertNotIn("X-Total-Count", response.headers)
+        sql = str(db.last_query.compile(dialect=postgresql.dialect())).upper()
+        self.assertIn("ADJUSTMENT_KEY IS NOT NULL", sql)
+        self.assertNotIn("ROW_NUMBER", sql)
 
     def test_internal_stream_requires_explicit_opt_in(self):
         with self.assertRaises(HTTPException) as raised:
@@ -99,19 +103,6 @@ class SensorDataFastPageTests(unittest.TestCase):
             ))
 
         self.assertEqual(raised.exception.status_code, 422)
-
-
-class AdjustmentIdentitySqlTests(unittest.TestCase):
-    def test_identity_keys_are_safe_for_string_json_timestamps(self):
-        sql = str(
-            select(*_gnss_adjustment_identity_columns()).compile(
-                dialect=postgresql.dialect()
-            )
-        ).upper()
-
-        self.assertNotIn("AS INTEGER", sql)
-        self.assertIn("AS VARCHAR", sql)
-
 
 if __name__ == "__main__":
     unittest.main()

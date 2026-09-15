@@ -356,6 +356,35 @@ class GnssAdjustmentExcelReportTests(unittest.TestCase):
 
 
 class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_success_marks_one_fast_list_row_but_keeps_every_station_copy(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        bridge.adjustment_phase = {}
+        bridge.adjustment_message = {}
+        bridge.adjustment_results = {}
+        bridge.adjustment_run_contexts = {
+            17: {"project_id": 9, "project_code": "P9", "cluster_index": 2, "cluster_name": "Cụm 3"}
+        }
+        bridge.adjustment_cluster_results = {9: {}}
+        bridge._sensor_buffer = []
+        bridge._buffer_lock = asyncio.Lock()
+        bridge._write_adjustment_reports = Mock(return_value={})
+        bridge._upsert_latest_sensor_cache = AsyncMock()
+        adjustment = {
+            "points": {"S1": {"station_id": 101}, "S2": {"station_id": 102}},
+            "quality_gate": {"passed": True},
+        }
+
+        with patch("mqtt_bridge.manager", SimpleNamespace(broadcast=AsyncMock())):
+            await bridge._handle_round_robin_adjustment_result(17, adjustment)
+
+        self.assertEqual(len(bridge._sensor_buffer), 2)
+        representatives = [row for row in bridge._sensor_buffer if row["adjustment_key"]]
+        self.assertEqual(len(representatives), 1)
+        self.assertEqual(representatives[0]["adjustment_key"], "run:9:2:17")
+        self.assertEqual(representatives[0]["adjustment_project_id"], 9)
+        self.assertEqual(representatives[0]["adjustment_cluster_index"], 2)
+        self.assertEqual(bridge._upsert_latest_sensor_cache.await_count, 2)
+
     async def test_failed_quality_gate_writes_audit_but_does_not_publish_coordinates(self):
         bridge = MQTTBridge.__new__(MQTTBridge)
         bridge.adjustment_phase = {}

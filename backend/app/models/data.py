@@ -11,6 +11,24 @@ class SensorData(BaseData):
         Index('ix_sensor_data_station_ts', 'station_id', 'timestamp'),
         Index('ix_sensor_data_type_ts', 'sensor_type', 'timestamp'),
         Index(
+            'ix_sensor_data_adjustment_page',
+            'sensor_type', 'timestamp',
+            postgresql_where=text('adjustment_key IS NOT NULL'),
+            sqlite_where=text('adjustment_key IS NOT NULL'),
+        ),
+        Index(
+            'ix_sensor_data_adjustment_cluster',
+            'adjustment_project_id', 'adjustment_cluster_index', 'timestamp',
+            postgresql_where=text('adjustment_key IS NOT NULL'),
+            sqlite_where=text('adjustment_key IS NOT NULL'),
+        ),
+        Index(
+            'ix_sensor_data_adjustment_key_unique',
+            'adjustment_key', unique=True,
+            postgresql_where=text('adjustment_key IS NOT NULL'),
+            sqlite_where=text('adjustment_key IS NOT NULL'),
+        ),
+        Index(
             'ix_sensor_data_ingest_id_unique',
             'ingest_id',
             unique=True,
@@ -26,6 +44,11 @@ class SensorData(BaseData):
     # Natural identity is additive and nullable for historical rows.  New
     # writers use it for MQTT redelivery/commit-unknown deduplication.
     ingest_id = Column(String(64), nullable=True)
+    # One per-run representative makes adjustment lists/counts index-only.
+    # Per-station copies remain available for station history.
+    adjustment_key = Column(String(255), nullable=True)
+    adjustment_project_id = Column(Integer, nullable=True)
+    adjustment_cluster_index = Column(Integer, nullable=True)
     
     data = Column(JSON, nullable=False)
     

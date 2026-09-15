@@ -528,10 +528,20 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
         phase, summary = self._refresh_project_adjustment_state(public_project_id)
         self.adjustment_message[public_project_id] = f"{cluster_name}: {completed_message}"
 
+        representative_pending = True
         for point in adjustment.get("points", {}).values():
             station_id = point.get("station_id")
             if not station_id:
                 continue
+            adjustment_key = None
+            adjustment_project_id = None
+            adjustment_cluster_index = None
+            if representative_pending:
+                cluster_index = int(adjustment.get("cluster_index", -1))
+                adjustment_key = f"run:{public_project_id}:{cluster_index}:{run_id}"
+                adjustment_project_id = public_project_id
+                adjustment_cluster_index = cluster_index
+                representative_pending = False
             payload = {
                 "station_id": station_id,
                 "timestamp": current_timestamp,
@@ -539,6 +549,9 @@ class MQTTBridge(AdjustmentReportMixin, MQTTTransportMixin, MQTTPersistenceMixin
                 "ingest_id": self._make_ingest_id(
                     0, station_id, "gnss_adjusted", current_timestamp, adjustment
                 ),
+                "adjustment_key": adjustment_key,
+                "adjustment_project_id": adjustment_project_id,
+                "adjustment_cluster_index": adjustment_cluster_index,
                 "data": adjustment,
                 "value_1": None,
                 "value_2": None,
