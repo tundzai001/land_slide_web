@@ -36,6 +36,15 @@ def _sensor_data_preview(value):
         text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
     return text[:240]
 
+
+def _gnss_adjustment_identity_columns():
+    payload = model_data.SensorData.data
+    return (
+        func.coalesce(payload["project_id"].as_integer(), 0),
+        func.coalesce(payload["cluster_index"].as_integer(), -1),
+        func.coalesce(payload["computed_at"].as_integer(), model_data.SensorData.timestamp),
+    )
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _stats_cache: dict | None = None
@@ -88,11 +97,16 @@ async def get_database_stats(
             )
         )
         num_data = int(count_sensor_data.scalar() or 0)
-        count_adjustments = await data_db.execute(
-            select(func.count()).select_from(model_data.SensorData).where(
-                model_data.SensorData.sensor_type == "gnss_adjusted"
-            )
+        adjustment_project_key, adjustment_cluster_key, adjustment_time_key = (
+            _gnss_adjustment_identity_columns()
         )
+        adjustment_keys = (
+            select(adjustment_project_key, adjustment_cluster_key, adjustment_time_key)
+            .where(model_data.SensorData.sensor_type == "gnss_adjusted")
+            .distinct()
+            .subquery()
+        )
+        count_adjustments = await data_db.execute(select(func.count()).select_from(adjustment_keys))
         num_adjustments = int(count_adjustments.scalar() or 0)
 
         # Đếm Active Alerts (Chưa xử lý)
@@ -272,6 +286,7 @@ async def admin_get_sensor_data(
     limit: int = 500,
     station_id: Optional[int] = None,
     sensor_type: Optional[str] = None,
+    cluster_key: Optional[str] = None,
     sort: str = "-timestamp",
     include_total: bool = True,
     include_data: bool = True,
@@ -288,6 +303,16 @@ async def admin_get_sensor_data(
                 detail="Internal GNSS streams belong to the dedicated adjustment dataset",
             )
 
+        grouped_adjustments = requested_sensor_type == "gnss_adjusted" and not include_data
+        cluster_project_id = cluster_index = None
+        if cluster_key:
+            if requested_sensor_type != "gnss_adjusted":
+                raise HTTPException(status_code=422, detail="GNSS cluster filter requires gnss_adjusted")
+            try:
+                cluster_project_id, cluster_index = (int(value) for value in cluster_key.split(":", 1))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="Invalid GNSS cluster filter")
+
         sensor_filters = []
         if station_id is not None:
             sensor_filters.append(model_data.SensorData.station_id == station_id)
@@ -295,18 +320,66 @@ async def admin_get_sensor_data(
             sensor_filters.append(model_data.SensorData.sensor_type == requested_sensor_type)
         elif not include_internal:
             sensor_filters.append(model_data.SensorData.sensor_type.in_(PUBLIC_SENSOR_TYPES))
+        adjustment_project_key = adjustment_cluster_key = adjustment_time_key = None
+        if grouped_adjustments:
+            adjustment_project_key, adjustment_cluster_key, adjustment_time_key = (
+                _gnss_adjustment_identity_columns()
+            )
+            if cluster_project_id is not None:
+                sensor_filters.extend([
+                    adjustment_project_key == cluster_project_id,
+                    adjustment_cluster_key == cluster_index,
+                ])
         query = select(model_data.SensorData).where(*sensor_filters)
         sort_fields = {"id": model_data.SensorData.id, "timestamp": model_data.SensorData.timestamp, "station_id": model_data.SensorData.station_id, "sensor_type": model_data.SensorData.sensor_type}
         field = sort.lstrip("-")
         if field not in sort_fields:
             raise HTTPException(status_code=422, detail="Unsupported sort field")
+
+        ranked_query = None
+        if grouped_adjustments:
+            adjustment_payload = model_data.SensorData.data
+            ranked_query = select(
+                model_data.SensorData.id,
+                model_data.SensorData.station_id,
+                model_data.SensorData.timestamp,
+                model_data.SensorData.sensor_type,
+                model_data.SensorData.value_1,
+                model_data.SensorData.value_2,
+                model_data.SensorData.value_3,
+                model_data.SensorData.value_4,
+                model_data.SensorData.value_5,
+                adjustment_project_key.label("project_id"),
+                adjustment_payload["project_code"].as_string().label("project_code"),
+                adjustment_cluster_key.label("cluster_index"),
+                adjustment_payload["cluster_name"].as_string().label("cluster_name"),
+                adjustment_time_key.label("computed_at"),
+                func.row_number().over(
+                    partition_by=(
+                        adjustment_project_key,
+                        adjustment_cluster_key,
+                        adjustment_time_key,
+                    ),
+                    order_by=model_data.SensorData.id.desc(),
+                ).label("_adjustment_rank"),
+            ).where(*sensor_filters).subquery()
+
         page_offset, page_limit = normalize_page(offset, limit, max_limit=2000)
         total = None
         if include_total:
-            total = int((await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0)
-        column = sort_fields[field]
+            count_query = (
+                select(ranked_query.c.id)
+                .where(ranked_query.c._adjustment_rank == 1)
+                if grouped_adjustments
+                else query
+            )
+            total = int((await db.execute(select(func.count()).select_from(count_query.subquery()))).scalar() or 0)
         if include_data:
             page_query = query
+            column = sort_fields[field]
+        elif grouped_adjustments:
+            page_query = select(ranked_query).where(ranked_query.c._adjustment_rank == 1)
+            column = ranked_query.c[field]
         else:
             page_query = select(
                 model_data.SensorData.id,
@@ -318,12 +391,9 @@ async def admin_get_sensor_data(
                 model_data.SensorData.value_3,
                 model_data.SensorData.value_4,
                 model_data.SensorData.value_5,
-                # Fetch JSON for the already bounded page and compact it in
-                # Python. Casting JSON to text with substr() varied between
-                # database drivers and was the source of the 500 on this page.
-                model_data.SensorData.data,
             )
             page_query = page_query.where(*sensor_filters)
+            column = sort_fields[field]
 
         fetch_limit = page_limit + 1 if not include_total else page_limit
         result = await db.execute(
@@ -355,14 +425,23 @@ async def admin_get_sensor_data(
                 "value_4": d.value_4,
                 "value_5": d.value_5,
             }
+            if grouped_adjustments:
+                row.update({
+                    "project_id": getattr(d, "project_id", None),
+                    "project_code": getattr(d, "project_code", None),
+                    "cluster_index": getattr(d, "cluster_index", None),
+                    "cluster_name": getattr(d, "cluster_name", None),
+                    "computed_at": getattr(d, "computed_at", None),
+                })
             if include_data:
                 row["data"] = d.data
             else:
-                # Keep compatibility with the lightweight runtime test rows
-                # while production rows now carry the original JSON value.
-                source = getattr(d, "data", None)
-                if source is None:
-                    source = getattr(d, "data_preview", None)
+                # Do not fetch the JSON payload for list pages. GNSS adjustment
+                # rows contain the complete network result; the detail endpoint
+                # loads that payload only when a row is opened.
+                source = getattr(d, "data_preview", None)
+                if source is None and not grouped_adjustments:
+                    source = getattr(d, "data", None)
                 row["data_preview"] = _sensor_data_preview(source)
             rows.append(row)
         return rows

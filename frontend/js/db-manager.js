@@ -250,6 +250,17 @@ class DatabaseManager {
         if (!container) return;
         const projectOptions = [{ value: '', label: 'Tất cả dự án' }, ...this.filterOptions.projects.map(project => ({ value: project.id, label: project.name || project.project_code }))];
         const stationOptions = [{ value: '', label: 'Tất cả trạm' }, ...this.filterOptions.stations.map(station => ({ value: station.id, label: station.station_code || station.name }))];
+        const clusterOptions = [
+            { value: '', label: 'Tất cả cụm' },
+            ...this.filterOptions.projects.flatMap(project => {
+                const projectLabel = project.project_code || project.name || `Dự án #${project.id}`;
+                const clusters = Array.isArray(project.gnss_clusters) ? project.gnss_clusters : [];
+                return clusters.map((cluster, index) => ({
+                    value: `${project.id}:${index}`,
+                    label: `${projectLabel} · ${cluster?.name || `Cụm ${index + 1}`}`,
+                }));
+            }),
+        ];
         const filters = {
             stations: [
                 this.filterSelect('Dự án', 'project_id', projectOptions),
@@ -271,7 +282,7 @@ class DatabaseManager {
                 ]),
             ],
             gnss_adjustments: [
-                this.filterSelect('Trạm', 'station_id', stationOptions),
+                this.filterSelect('Cụm', 'cluster_key', clusterOptions),
             ],
             alerts: [
                 this.filterSelect('Trạm', 'station_id', stationOptions),
@@ -327,13 +338,14 @@ class DatabaseManager {
                 <td><div class="d-flex gap-1 justify-content-end"><button class="management-icon-btn btn btn-outline-danger" onclick="event.stopPropagation();window.dbManager.deleteRecord('${item._table}', ${item.id})" aria-label="Xóa bản ghi #${item.id}"><i class="bi bi-trash3"></i></button><button class="management-icon-btn btn btn-outline-secondary" onclick="event.stopPropagation();window.dbManager.viewRecord('${item._table}', ${item.id})" aria-label="Xem bản ghi #${item.id}"><i class="bi bi-chevron-right"></i></button></div></td>
             </tr>`;
         }).join('');
+        const itemLabel = this.currentDataset === 'gnss_adjustments' ? 'cụm' : 'bản ghi';
         const start = this.total ? this.offset + 1 : 0;
         const end = this.offset + this.allData.length;
         document.getElementById('db-current-meta').textContent = this.hasExactTotal
-            ? `${this.total.toLocaleString('vi-VN')} bản ghi`
-            : `${this.allData.length} bản ghi mới nhất · tải nhanh`;
+            ? `${this.total.toLocaleString('vi-VN')} ${itemLabel}`
+            : `${this.allData.length} ${itemLabel} mới nhất · tải nhanh`;
         document.getElementById('db-page-summary').textContent = this.hasExactTotal
-            ? `Hiển thị ${start}–${Math.min(end, this.total)} / ${this.total.toLocaleString('vi-VN')}`
+            ? `Hiển thị ${start}–${Math.min(end, this.total)} / ${this.total.toLocaleString('vi-VN')} ${itemLabel}`
             : `Hiển thị ${start}–${end}${this.hasMore ? ' · còn dữ liệu' : ''}`;
         document.getElementById('db-page-number').textContent = `Trang ${Math.floor(this.offset / this.limit) + 1}`;
         document.getElementById('db-page-prev').disabled = this.offset === 0;
@@ -361,7 +373,13 @@ class DatabaseManager {
         if (item._table === 'devices') {
             return `${item.device_code || '--'} · ${item.name || item.device_type || 'Thiết bị'}`;
         }
-        if (['sensor_data', 'gnss_adjustments'].includes(item._table)) {
+        if (item._table === 'gnss_adjustments') {
+            const project = item.data?.project_code || item.project_code || (item.data?.project_id || item.project_id ? `Dự án #${item.data?.project_id || item.project_id}` : 'GNSS');
+            const index = item.data?.cluster_index ?? item.cluster_index;
+            const cluster = item.data?.cluster_name || item.cluster_name || (index != null ? `Cụm ${Number(index) + 1}` : 'Cụm GNSS');
+            return `${project} · ${cluster}`;
+        }
+        if (item._table === 'sensor_data') {
             const cluster = item.data?.cluster_name || item.data?.project_code;
             return `${String(item.sensor_type || 'sensor').toUpperCase()} · ${cluster ? `${cluster} · ` : ''}Trạm #${item.station_id ?? '--'}`;
         }
@@ -374,8 +392,11 @@ class DatabaseManager {
 
     getRecordSecondary(item) {
         if (item._table === 'devices') return item.mqtt_topic || item.device_type || 'Không có MQTT topic';
-        if (['sensor_data', 'gnss_adjustments'].includes(item._table)) {
-            return item.data_preview || this.compactJsonPreview(item.data);
+        if (item._table === 'gnss_adjustments') {
+            return item.data_preview || 'Mở để xem toàn bộ kết quả cụm';
+        }
+        if (item._table === 'sensor_data') {
+            return item.data_preview || (item.data ? this.compactJsonPreview(item.data) : 'Mở để xem chi tiết');
         }
         if (item._table === 'alerts') return `Trạm #${item.station_id ?? '--'} · ${item.level || '--'}`;
         if (item._table === 'simulations') return `${item.station_code || item.project_code || 'Kịch bản thủ công'} · ${item.summary?.classification || item.mode}`;
