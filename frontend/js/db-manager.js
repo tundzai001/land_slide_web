@@ -72,6 +72,9 @@ class DatabaseManager {
         console.log('✅ [DB MANAGER] Initialized');
         this.renderContextFilters();
         if (this.exportTaskId) this.startExportPolling(this.exportTaskId);
+        if (document.getElementById('tab-database')?.classList.contains('active')) {
+            void this.loadAllData();
+        }
     }
 
     async loadFilterOptions() {

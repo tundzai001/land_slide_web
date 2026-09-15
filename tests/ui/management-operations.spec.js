@@ -124,6 +124,33 @@ test('database explorer loads one paginated dataset and opens the inspector', as
   await expect(page.locator('#db-page-next')).toBeDisabled();
 });
 
+test('database explorer loads after a direct reload on the database tab', async ({ page }) => {
+  await mountManagement(page);
+  await page.evaluate(() => {
+    window.authSession = { getToken: () => 'test-token' };
+    window.bootstrap = { Modal: class { show() {} hide() {} } };
+    Object.defineProperty(window, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} } });
+    document.getElementById('tab-database').classList.add('show', 'active');
+    window.datasetPageRequests = 0;
+    window.fetch = async url => {
+      const target = String(url);
+      if (target.includes('/stats')) return new Response(JSON.stringify({ stations: 1 }), { status: 200 });
+      if (target.includes('/api/admin/projects') || target.includes('summary_only=true')) return new Response('[]', { status: 200 });
+      window.datasetPageRequests += 1;
+      return new Response(JSON.stringify([{ id: 7, station_code: 'DAP-01', name: 'Đập 1', status: 'online' }]), {
+        status: 200,
+        headers: { 'X-Total-Count': '1' },
+      });
+    };
+  });
+
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+
+  await expect.poll(() => page.evaluate(() => window.datasetPageRequests)).toBeGreaterThan(0);
+  await expect(page.locator('#db-table-body')).toContainText('DAP-01');
+  await expect(page.locator('#stat-stations')).toHaveText('1');
+});
+
 test('database explorer prefetches the next 100-row page', async ({ page }) => {
   await mountManagement(page);
   await page.evaluate(() => {
