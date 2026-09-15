@@ -3,8 +3,14 @@ import unittest
 from types import SimpleNamespace
 
 from fastapi import HTTPException, Response
+from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 
-from app.routers.database_admin import _device_runtime_state, admin_get_sensor_data
+from app.routers.database_admin import (
+    _device_runtime_state,
+    _gnss_adjustment_identity_columns,
+    admin_get_sensor_data,
+)
 
 
 class DeviceRuntimeStateTests(unittest.TestCase):
@@ -93,6 +99,18 @@ class SensorDataFastPageTests(unittest.TestCase):
             ))
 
         self.assertEqual(raised.exception.status_code, 422)
+
+
+class AdjustmentIdentitySqlTests(unittest.TestCase):
+    def test_identity_keys_are_safe_for_string_json_timestamps(self):
+        sql = str(
+            select(*_gnss_adjustment_identity_columns()).compile(
+                dialect=postgresql.dialect()
+            )
+        ).upper()
+
+        self.assertNotIn("AS INTEGER", sql)
+        self.assertIn("AS VARCHAR", sql)
 
 
 if __name__ == "__main__":

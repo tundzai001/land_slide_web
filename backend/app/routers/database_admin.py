@@ -6,7 +6,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import String, cast, delete, desc, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import auth
@@ -37,12 +37,25 @@ def _sensor_data_preview(value):
     return text[:240]
 
 
+def _coerce_int(value, fallback=None):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _gnss_adjustment_identity_columns():
     payload = model_data.SensorData.data
     return (
-        func.coalesce(payload["project_id"].as_integer(), 0),
-        func.coalesce(payload["cluster_index"].as_integer(), -1),
-        func.coalesce(payload["computed_at"].as_integer(), model_data.SensorData.timestamp),
+        # Keep JSON values as text while grouping.  Historical adjustment
+        # payloads may store computed_at as an ISO string, and PostgreSQL
+        # rejects an integer cast for those rows.
+        func.coalesce(payload["project_id"].as_string(), literal("0")),
+        func.coalesce(payload["cluster_index"].as_string(), literal("-1")),
+        func.coalesce(
+            payload["computed_at"].as_string(),
+            cast(model_data.SensorData.timestamp, String),
+        ),
     )
 
 router = APIRouter()
@@ -97,17 +110,21 @@ async def get_database_stats(
             )
         )
         num_data = int(count_sensor_data.scalar() or 0)
-        adjustment_project_key, adjustment_cluster_key, adjustment_time_key = (
-            _gnss_adjustment_identity_columns()
-        )
-        adjustment_keys = (
-            select(adjustment_project_key, adjustment_cluster_key, adjustment_time_key)
-            .where(model_data.SensorData.sensor_type == "gnss_adjusted")
-            .distinct()
-            .subquery()
-        )
-        count_adjustments = await data_db.execute(select(func.count()).select_from(adjustment_keys))
-        num_adjustments = int(count_adjustments.scalar() or 0)
+        num_adjustments = 0
+        try:
+            adjustment_project_key, adjustment_cluster_key, adjustment_time_key = (
+                _gnss_adjustment_identity_columns()
+            )
+            adjustment_keys = (
+                select(adjustment_project_key, adjustment_cluster_key, adjustment_time_key)
+                .where(model_data.SensorData.sensor_type == "gnss_adjusted")
+                .distinct()
+                .subquery()
+            )
+            count_adjustments = await data_db.execute(select(func.count()).select_from(adjustment_keys))
+            num_adjustments = int(count_adjustments.scalar() or 0)
+        except Exception as adjustment_error:
+            logger.warning("GNSS adjustment stats unavailable: %s", adjustment_error)
 
         # Đếm Active Alerts (Chưa xử lý)
         count_alerts = await data_db.execute(
@@ -327,8 +344,8 @@ async def admin_get_sensor_data(
             )
             if cluster_project_id is not None:
                 sensor_filters.extend([
-                    adjustment_project_key == cluster_project_id,
-                    adjustment_cluster_key == cluster_index,
+                    adjustment_project_key == str(cluster_project_id),
+                    adjustment_cluster_key == str(cluster_index),
                 ])
         query = select(model_data.SensorData).where(*sensor_filters)
         sort_fields = {"id": model_data.SensorData.id, "timestamp": model_data.SensorData.timestamp, "station_id": model_data.SensorData.station_id, "sensor_type": model_data.SensorData.sensor_type}
@@ -427,11 +444,14 @@ async def admin_get_sensor_data(
             }
             if grouped_adjustments:
                 row.update({
-                    "project_id": getattr(d, "project_id", None),
+                    "project_id": _coerce_int(getattr(d, "project_id", None)),
                     "project_code": getattr(d, "project_code", None),
-                    "cluster_index": getattr(d, "cluster_index", None),
+                    "cluster_index": _coerce_int(getattr(d, "cluster_index", None)),
                     "cluster_name": getattr(d, "cluster_name", None),
-                    "computed_at": getattr(d, "computed_at", None),
+                    "computed_at": _coerce_int(
+                        getattr(d, "computed_at", None),
+                        getattr(d, "timestamp", None),
+                    ),
                 })
             if include_data:
                 row["data"] = d.data
