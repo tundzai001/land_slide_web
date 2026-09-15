@@ -727,7 +727,8 @@ function setupEventListeners() {
                                 );
                             } catch (error) {
                                 console.error('[GNSS] Cluster report download failed:', error);
-                                window.toast?.error?.(`Không tải được báo cáo ${title.textContent}.`);
+                                const reason = error?.message ? `: ${error.message}` : '';
+                                window.toast?.error?.(`Không tải được báo cáo ${title.textContent}${reason}`);
                             }
                         });
                         actions.appendChild(button);
@@ -756,7 +757,8 @@ function setupEventListeners() {
                         );
                     } catch (error) {
                         console.error('[GNSS] Excel download failed:', error);
-                        window.toast?.error?.('Không tải được báo cáo bình sai.');
+                        const reason = error?.message ? `: ${error.message}` : '';
+                        window.toast?.error?.(`Không tải được báo cáo bình sai${reason}`);
                     }
                 } : null;
             }
@@ -771,7 +773,8 @@ function setupEventListeners() {
                         );
                     } catch (error) {
                         console.error('[GNSS] Audit download failed:', error);
-                        window.toast?.error?.('Không tải được hồ sơ audit.');
+                        const reason = error?.message ? `: ${error.message}` : '';
+                        window.toast?.error?.(`Không tải được hồ sơ audit${reason}`);
                     }
                 } : null;
             }

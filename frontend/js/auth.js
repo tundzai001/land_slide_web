@@ -474,7 +474,20 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
         throw new Error('Refusing to download a non-admin protected asset');
     }
     const response = await window.authManager.apiFetch(safeUrl, { cache: 'no-store' });
-    if (!response?.ok) throw new Error(`Download HTTP ${response?.status || 0}`);
+    if (!response?.ok) {
+        let detail = '';
+        try {
+            const data = await response.json();
+            detail = data?.detail || data?.message || '';
+        } catch (_) {
+            try {
+                detail = await response.text();
+            } catch (_) {}
+        }
+        const errorMsg = detail ? `HTTP ${response?.status || 0}: ${detail}` : `Download HTTP ${response?.status || 0}`;
+        console.error(`[Download] Thất bại khi tải file từ ${safeUrl}:`, errorMsg, response);
+        throw new Error(errorMsg);
+    }
     const blobUrl = URL.createObjectURL(await response.blob());
     try {
         const disposition = response.headers.get('content-disposition') || '';

@@ -34,6 +34,82 @@ ADJUSTMENT_REPORT_NAME = re.compile(
 )
 
 
+def _regenerate_xlsx_from_json(xlsx_path: Path, search_dir: Path) -> Optional[Path]:
+    """Regenerate a missing XLSX report from its sibling JSON audit file.
+
+    Returns the Path to the newly created XLSX, or None if no JSON source
+    could be found or the generation failed.
+    """
+    # Find the corresponding JSON file: same name but .json extension.
+    json_path = xlsx_path.with_suffix(".json")
+    if not json_path.is_file():
+        # For scoped paths the JSON may use "gnss_adjustment_" prefix while
+        # the XLSX uses "gnss_binh_sai_" prefix, or vice versa.
+        stem = xlsx_path.stem
+        alt_stem = (
+            stem.replace("gnss_binh_sai_", "gnss_adjustment_", 1)
+            if stem.startswith("gnss_binh_sai_")
+            else stem.replace("gnss_adjustment_", "gnss_binh_sai_", 1)
+        )
+        alt_json = xlsx_path.with_name(f"{alt_stem}.json")
+        if alt_json.is_file():
+            json_path = alt_json
+        else:
+            # Last resort: search the directory for any JSON with matching timestamp.
+            for candidate in search_dir.glob("*.json"):
+                if candidate.is_file():
+                    json_path = candidate
+                    break
+            else:
+                return None
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:
+        logger.warning("Failed to read JSON audit %s for XLSX regeneration", json_path, exc_info=True)
+        return None
+
+    try:
+        status = str(payload.get("status") or "").lower()
+        if status == "failed":
+            from ..services.adjustment_failure import _write_failure_workbook
+            _write_failure_workbook(xlsx_path, payload)
+        else:
+            # Use the full Excel report writer for successful adjustments.
+            from processors.gnss_adjustment.reporting import AdjustmentReportMixin
+
+            class _Writer(AdjustmentReportMixin):
+                pass
+
+            project_id = int(payload.get("project_id") or 0)
+            timestamp = int(payload.get("timestamp") or payload.get("computed_at") or 0)
+            _Writer()._append_adjustment_to_excel(
+                project_id,
+                timestamp,
+                payload,
+                "",
+                report_directory=xlsx_path.parent,
+            )
+            # _append_adjustment_to_excel generates its own filename; find it.
+            if not xlsx_path.is_file():
+                # Look for any newly created XLSX in the same directory.
+                candidates = sorted(
+                    xlsx_path.parent.glob("gnss_binh_sai_*.xlsx"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if candidates:
+                    xlsx_path = candidates[0]
+
+        if xlsx_path.is_file():
+            logger.info("Regenerated XLSX from JSON: %s -> %s", json_path, xlsx_path)
+            return xlsx_path
+    except Exception:
+        logger.warning("Failed to regenerate XLSX from %s", json_path, exc_info=True)
+
+    return None
+
 class GnssAdjustmentStartRequest(BaseModel):
     project_id: int
     base_mountpoint: Optional[str] = None
@@ -76,8 +152,21 @@ async def download_gnss_adjustment_report(
 
     report_root = ADJUSTMENT_REPORT_DIR.resolve()
     report_path = (report_root / filename).resolve()
-    if report_path.parent != report_root or not report_path.is_file():
+    if report_path.parent != report_root:
         raise HTTPException(status_code=404, detail="Adjustment report not found")
+
+    # If the requested XLSX is missing, try to regenerate from the JSON audit.
+    if not report_path.is_file():
+        extension = match.group("extension")
+        if extension == "xlsx":
+            report_path = _regenerate_xlsx_from_json(report_path, report_root)
+            if report_path is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="File XLSX không tồn tại và không thể tạo lại (thiếu JSON gốc)",
+                )
+        else:
+            raise HTTPException(status_code=404, detail="Adjustment report not found")
 
     extension = match.group("extension")
     media_type = (
@@ -139,7 +228,16 @@ async def download_scoped_gnss_adjustment_report(
         raise HTTPException(status_code=404, detail="Adjustment report not found")
         
     if not report_path.is_file():
-        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        # If the requested XLSX is missing, try to regenerate from the JSON audit.
+        if report_path.suffix.lower() == ".xlsx":
+            report_path = _regenerate_xlsx_from_json(report_path, scope_root)
+            if report_path is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="File XLSX không tồn tại và không thể tạo lại (thiếu JSON gốc)",
+                )
+        else:
+            raise HTTPException(status_code=404, detail="Adjustment report not found")
 
     extension = report_path.suffix.lower()
     media_type = (

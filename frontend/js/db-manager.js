@@ -546,17 +546,23 @@ class DatabaseManager {
     async downloadAdjustmentArtifact(format) {
         const data = this.selectedRecord?.data || {};
         const url = String(format === 'json' ? data.audit_json_url : (data.excel_report_url || data.report_file_url) || '');
-        if (!url) return;
+        if (!url) {
+            console.warn(`[DB Manager] Bản ghi #${this.selectedRecord?.id} không có URL cho file ${format.toUpperCase()}:`, data);
+            window.toast?.warning?.(`Bản ghi này chưa có liên kết tải file ${format.toUpperCase()}.`);
+            return;
+        }
         const button = document.activeElement;
         const original = button?.innerHTML;
         try {
             if (button instanceof HTMLButtonElement) {
                 button.disabled = true;
-                button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải';
+                button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải…';
             }
             await window.downloadAuthenticatedFile(url, url.split('/').pop());
         } catch (error) {
-            window.toast?.error?.(`Không tải được file ${format.toUpperCase()}.`);
+            console.error(`[DB Manager] Lỗi khi tải file ${format.toUpperCase()} (${url}):`, error);
+            const reason = error?.message ? `: ${error.message}` : '';
+            window.toast?.error?.(`Không tải được file ${format.toUpperCase()}${reason}`);
         } finally {
             if (button instanceof HTMLButtonElement) {
                 button.disabled = false;
