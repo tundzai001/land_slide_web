@@ -90,6 +90,7 @@ class SensorDataFastPageTests(unittest.TestCase):
         sql = str(db.last_query.compile(dialect=postgresql.dialect())).upper()
         self.assertIn("ADJUSTMENT_KEY IS NOT NULL", sql)
         self.assertNotIn("ROW_NUMBER", sql)
+        self.assertNotIn("SENSOR_DATA.DATA", sql)
 
     def test_internal_stream_requires_explicit_opt_in(self):
         with self.assertRaises(HTTPException) as raised:

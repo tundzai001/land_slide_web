@@ -328,7 +328,6 @@ async def admin_get_sensor_data(
             raise HTTPException(status_code=422, detail="Unsupported sort field")
 
         if grouped_adjustments:
-            adjustment_payload = model_data.SensorData.data
             summary_query = select(
                 model_data.SensorData.id,
                 model_data.SensorData.station_id,
@@ -340,10 +339,7 @@ async def admin_get_sensor_data(
                 model_data.SensorData.value_4,
                 model_data.SensorData.value_5,
                 model_data.SensorData.adjustment_project_id.label("project_id"),
-                adjustment_payload["project_code"].as_string().label("project_code"),
                 model_data.SensorData.adjustment_cluster_index.label("cluster_index"),
-                adjustment_payload["cluster_name"].as_string().label("cluster_name"),
-                adjustment_payload["computed_at"].as_string().label("computed_at"),
             ).where(*sensor_filters)
 
         page_offset, page_limit = normalize_page(offset, limit, max_limit=2000)
