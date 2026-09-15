@@ -469,7 +469,16 @@ window.hydrateAuthenticatedImages = async function (root = document) {
 };
 
 window.downloadAuthenticatedFile = async function (url, fallbackName) {
-    const safeUrl = String(url || '').trim();
+    let safeUrl = String(url || '').trim();
+    // Auto-rewrite legacy /static/adjustments/ URLs from older DB records.
+    if (safeUrl.startsWith('/static/adjustments/')) {
+        const filename = safeUrl.slice('/static/adjustments/'.length);
+        const idMatch = filename.match(/^gnss_(?:binh_sai|adjustment)_(\d+)_/);
+        if (idMatch) {
+            safeUrl = `/api/admin/gnss/adjustment/reports/${idMatch[1]}/${filename}`;
+            console.info('[Download] Chuyển URL cũ →', safeUrl);
+        }
+    }
     if (!safeUrl.startsWith('/api/admin/') || safeUrl.startsWith('//')) {
         throw new Error('Refusing to download a non-admin protected asset');
     }

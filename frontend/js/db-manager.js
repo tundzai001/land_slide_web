@@ -553,12 +553,23 @@ class DatabaseManager {
         }
         const button = document.activeElement;
         const original = button?.innerHTML;
+        // Normalize legacy /static/adjustments/ URLs to the authenticated API path.
+        let downloadUrl = url;
+        const legacyPrefix = '/static/adjustments/';
+        if (downloadUrl.startsWith(legacyPrefix)) {
+            const filename = downloadUrl.slice(legacyPrefix.length);
+            const idMatch = filename.match(/^gnss_(?:binh_sai|adjustment)_(\d+)_/);
+            if (idMatch) {
+                downloadUrl = `/api/admin/gnss/adjustment/reports/${idMatch[1]}/${filename}`;
+                console.info(`[DB Manager] Chuyển URL cũ → ${downloadUrl}`);
+            }
+        }
         try {
             if (button instanceof HTMLButtonElement) {
                 button.disabled = true;
                 button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải…';
             }
-            await window.downloadAuthenticatedFile(url, url.split('/').pop());
+            await window.downloadAuthenticatedFile(downloadUrl, downloadUrl.split('/').pop());
         } catch (error) {
             console.error(`[DB Manager] Lỗi khi tải file ${format.toUpperCase()} (${url}):`, error);
             const reason = error?.message ? `: ${error.message}` : '';
