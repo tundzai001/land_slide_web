@@ -2,7 +2,7 @@
 from .auth import User, BaseAuth
 from .config import Project, Station, Device, GNSSOrigin, GlobalConfig, BaseConfig
 from .data import (
-    SensorData, LatestSensorCache, Alert, GnssDailySummary, GnssWeeklySummary,
+    SensorData, GnssAdjustmentEvidence, LatestSensorCache, Alert, GnssDailySummary, GnssWeeklySummary,
     RescueRequest, SimulationRun, IncidentCase, IncidentEvent,
     IncidentMutationRequest, FileCleanupJob, BaseData,
 )

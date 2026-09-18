@@ -181,7 +181,7 @@ class MQTTTransportMixin:
             if sensor_type == 'gnss':
                 station_code = (info or {}).get('station_code')
                 if station_code:
-                    from app.modules.ntrip_pusher import ntrip_manager
+                    from app.mqtt.ntrip_pusher import ntrip_manager
                     ntrip_manager.feed_data(station_code, msg.payload)
                 # Inspect the original bytes before text decoding. RTCM is binary
                 # and is intentionally discarded by the normal sensor pipeline.
@@ -227,7 +227,7 @@ class MQTTTransportMixin:
         try:
             import json
             payload = json.loads(msg.payload.decode('utf-8'))
-            from app.modules.ntrip_pusher import ntrip_manager
+            from app.mqtt.ntrip_pusher import ntrip_manager
             import asyncio
             if msg.topic == "command/ntrip/route/start":
                 route_payload = payload.get("ntrip_route") if isinstance(payload.get("ntrip_route"), dict) else payload
@@ -284,7 +284,7 @@ class MQTTTransportMixin:
     ) -> bool:
         """Open every SOURCE target and wait for all caster handshakes."""
 
-        from app.modules.ntrip_pusher import ntrip_manager
+        from app.mqtt.ntrip_pusher import ntrip_manager
 
         mapped_topics = sorted({
             topic
@@ -352,7 +352,7 @@ class MQTTTransportMixin:
     ) -> None:
         """Require the first valid RTCM frame on every primed mountpoint."""
 
-        from app.modules.ntrip_pusher import ntrip_manager
+        from app.mqtt.ntrip_pusher import ntrip_manager
 
         try:
             await ntrip_manager.wait_for_rtcm(station_code, timeout=timeout)
@@ -370,7 +370,7 @@ class MQTTTransportMixin:
         )
 
     async def _stop_round_robin_ntrip_route(self, station_code: str) -> None:
-        from app.modules.ntrip_pusher import ntrip_manager
+        from app.mqtt.ntrip_pusher import ntrip_manager
 
         await ntrip_manager.stop_pusher(station_code)
 
@@ -432,3 +432,10 @@ class MQTTTransportMixin:
             logger.info(f"🎯 [BRIDGE] Calibrated tracking offset for device {device_id}")
             return result
         return None
+
+    def _get_client_for_station(self, station_id: int) -> mqtt.Client:
+        """Return the station's dynamic client, falling back to the main client."""
+        broker_key = self._station_brokers.get(station_id)
+        if broker_key and broker_key in self._sub_clients:
+            return self._sub_clients[broker_key]
+        return self.client

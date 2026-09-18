@@ -53,28 +53,32 @@ from .database import (
     auth_engine, config_engine, data_engine,
     AuthSessionLocal, ConfigSessionLocal, DataSessionLocal
 )
-from .routers import admin as admin_router
-from .routers import authentication as authentication_router
-from .routers import database_admin as database_admin_router
-from .routers import devices as devices_router
-from .routers import cors_stations as cors_stations_router
-from .routers import field as field_router
-from .routers import field_provisioning as field_provisioning_router
-from .routers import frontend as frontend_router
-from .routers import gnss_adjustment as gnss_adjustment_router
-from .routers import projects as projects_router
-from .routers import rescue as rescue_router
-from .routers import stations as stations_router
-from .routers import simulations as simulations_router
-from .routers import incidents as incidents_router
-from .routers import health as health_router
+from .features.authentication import router as authentication_router
+from .features.database_admin import router as database_admin_router
+from .features.devices import router as devices_router
+from .features.projects import cors_stations as cors_stations_router
+from .features.field import router as field_router
+from .features.field import provisioning_router as field_provisioning_router
+from .features.frontend import router as frontend_router
+from .features.data_export import router as data_export_router
+from .features.database_admin import maintenance_router as database_maintenance_router
+from .features.devices import admin_router as device_admin_router
+from .features.gnss_adjustment import router as gnss_adjustment_router
+from .features.projects import router as projects_router
+from .features.rescue import router as rescue_router
+from .features.stations import admin_router as station_admin_router
+from .features.users import router as users_router
+from .features.stations import router as stations_router
+from .features.simulation import router as simulations_router
+from .features.incidents import router as incidents_router
+from .features.health import router as health_router
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
 from .models.pi_device import PiDevice  # noqa: F401 – ensures table is registered
 from .runtime import analyzer, cors_failover_status, mqtt_service
-from .services.gnss_rollup import run_gnss_daily_rollup_daemon
-from .services.file_cleanup import run_file_cleanup_daemon
+from .features.gnss_monitoring.rollup import run_gnss_daily_rollup_daemon
+from .infrastructure.file_cleanup import run_file_cleanup_daemon
 
 # Import security core
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -219,7 +223,7 @@ async def lifespan(app: FastAPI):
         mqtt_service.start()
         logger.info("✓ Background MQTT Service started")
 
-        from .services.scheduler import start_scheduler
+        from .infrastructure.scheduler import start_scheduler
         await start_scheduler()
 
         gnss_rollup_task = asyncio.create_task(run_gnss_daily_rollup_daemon())
@@ -237,7 +241,7 @@ async def lifespan(app: FastAPI):
 
     finally:
         logger.info("🛑 Shutting down...")
-        from .services.scheduler import stop_scheduler
+        from .infrastructure.scheduler import stop_scheduler
         stop_scheduler()
         if gnss_rollup_task and not gnss_rollup_task.done():
             gnss_rollup_task.cancel()
@@ -296,8 +300,12 @@ app.add_middleware(
     ],
 )
 app.add_middleware(CharsetMiddleware)
-app.include_router(admin_router.router)
 app.include_router(authentication_router.router)
+app.include_router(users_router.router)
+app.include_router(device_admin_router.router)
+app.include_router(station_admin_router.router)
+app.include_router(database_maintenance_router.router)
+app.include_router(data_export_router.router)
 app.include_router(database_admin_router.router)
 app.include_router(devices_router.router)
 app.include_router(cors_stations_router.router)

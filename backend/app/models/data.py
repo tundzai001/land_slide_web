@@ -58,6 +58,40 @@ class SensorData(BaseData):
     value_4 = Column(Float, nullable=True)  
     value_5 = Column(Float, nullable=True)  
 
+
+class GnssAdjustmentEvidence(BaseData):
+    """Raw observation evidence kept apart from the compact adjustment result."""
+
+    __tablename__ = "gnss_adjustment_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "adjustment_key",
+            "source_index",
+            name="uq_gnss_adjustment_evidence_source",
+        ),
+        Index(
+            "ix_gnss_adjustment_evidence_key_index",
+            "adjustment_key",
+            "source_index",
+        ),
+        Index(
+            "ix_gnss_adjustment_evidence_project_ts",
+            "project_id",
+            "timestamp",
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    adjustment_key = Column(String(255), nullable=False)
+    project_id = Column(Integer, nullable=False, index=True)
+    cluster_index = Column(Integer, nullable=True)
+    timestamp = Column(BigInteger, nullable=False)
+    source_index = Column(Integer, nullable=False)
+    station_id = Column(Integer, nullable=True)
+    epoch_ts = Column(BigInteger, nullable=True)
+    raw_payload = Column(Text, nullable=True)
+    data = Column(JSON, nullable=False)
+
 class LatestSensorCache(BaseData):
     """Bảng cache giá trị sensor mới nhất — upsert mỗi lần MQTT nhận data,
     không phụ thuộc chu kỳ lưu sensor_data. Dùng để frontend luôn hiện số mới nhất."""
