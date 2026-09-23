@@ -6,15 +6,15 @@ import asyncio
 import argparse
 import json
 import logging
-import shutil
 import sys
 import time
+from io import BytesIO
 from pathlib import Path
 
 from backend.app.config import settings
-from backend.app.modules.ntrip_pusher import ntrip_manager
-from backend.processors.gnss_adjustment_runtime import parse_agrica
-from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
+from backend.app.mqtt.ntrip_pusher import ntrip_manager
+from backend.processors.gnss_adjustment.runtime import parse_agrica
+from backend.processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
 from live_base_output_probe import LiveFeed, _UnusedPublisher
 from live_gnss_probe import TOPICS
 
@@ -366,15 +366,17 @@ async def main() -> int:
             from mqtt_bridge import MQTTBridge
 
             report_bridge = MQTTBridge.__new__(MQTTBridge)
-            generated_xlsx = report_bridge._append_adjustment_to_excel(
+            report_stream = BytesIO()
+            report_bridge._append_adjustment_to_excel(
                 PROJECT_ID,
                 int(time.time()),
                 result,
                 "",
+                output_stream=report_stream,
             )
             xlsx_output_path = Path(args.xlsx_output).resolve()
             xlsx_output_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(generated_xlsx, xlsx_output_path)
+            xlsx_output_path.write_bytes(report_stream.getvalue())
         print(f"[{ts()}] FINAL SUCCESS", flush=True)
         print(f"[{ts()}] RESULT JSON: {output_path}", flush=True)
         if xlsx_output_path:

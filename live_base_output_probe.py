@@ -11,8 +11,8 @@ import time
 import paho.mqtt.client as mqtt
 
 from backend.app.config import settings
-from backend.processors.gnss_adjustment_runtime import parse_agrica
-from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
+from backend.processors.gnss_adjustment.runtime import parse_agrica
+from backend.processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
 from live_gnss_probe import AGRICA_RE, TOPICS, TopicStats
 
 

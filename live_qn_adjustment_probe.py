@@ -22,10 +22,14 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from backend.app.config import settings
-from backend.app.modules.ntrip_pusher import ntrip_manager
+from backend.app.features.gnss_adjustment.store import (
+    add_report_links,
+    compact_adjustment_payload,
+)
+from backend.app.mqtt.ntrip_pusher import ntrip_manager
 from backend.mqtt_bridge import MQTTBridge
-from backend.processors.gnss_adjustment_runtime import parse_agrica
-from backend.processors.round_robin_manager import RoundRobinAdjustmentManager
+from backend.processors.gnss_adjustment.runtime import parse_agrica
+from backend.processors.gnss_adjustment.round_robin import RoundRobinAdjustmentManager
 from live_base_output_probe import LiveFeed, _UnusedPublisher
 
 
@@ -375,15 +379,15 @@ async def main() -> int:
 
         result = results[-1]
         report_timestamp = int(time.time())
-        reporter = object.__new__(MQTTBridge)
-        report_urls = reporter._write_adjustment_reports(
-            PROJECT_ID,
-            report_timestamp,
-            result,
+        compact_result, evidence = compact_adjustment_payload(result)
+        compact_result["project_id"] = PROJECT_ID
+        compact_result["run_id"] = PROJECT_ID
+        compact_result["adjustment_key"] = f"probe:{PROJECT_ID}:{report_timestamp}"
+        report_urls = add_report_links(
+            compact_result,
+            project_id=PROJECT_ID,
+            timestamp=report_timestamp,
         )
-        report_dir = Path(__file__).resolve().parent / "backend" / "static" / "adjustments"
-        excel_path = report_dir / Path(report_urls["excel_report_url"]).name
-        json_path = report_dir / Path(report_urls["audit_json_url"]).name
 
         quality = result.get("quality") or {}
         print(f"[{ts()}] FULL LOCAL QN ADJUSTMENT COMPLETE", flush=True)
@@ -395,8 +399,9 @@ async def main() -> int:
             f"loops={len(result.get('loops') or [])}",
             flush=True,
         )
-        print(f"  Excel={excel_path}", flush=True)
-        print(f"  JSON={json_path}", flush=True)
+        print(f"  Excel (on-demand)={report_urls['excel_report_url']}", flush=True)
+        print(f"  JSON (on-demand)={report_urls['audit_json_url']}", flush=True)
+        print(f"  Raw evidence rows in DB={len(evidence)}", flush=True)
         return 0
     finally:
         for station in selected_stations:

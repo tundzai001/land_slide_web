@@ -5,7 +5,7 @@ Dựa vào việc kiểm tra lỗi và nội dung phản hồi trong `log.txt`, 
 ## 🔴 1. Tại sao Auto Adjustment thất bại (Thư mục adjustments trống)?
 
 **Nguyên nhân:**
-Quá trình lập lịch bình sai tự động (`app/services/scheduler.py`) luôn bị kẹt ở bước "preflight" kiểm tra rover. Lỗi cụ thể là:
+Quá trình lập lịch bình sai tự động (`app/infrastructure/scheduler.py`) luôn bị kẹt ở bước "preflight" kiểm tra rover. Lỗi cụ thể là:
 `ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection`
 Lỗi này xảy ra bên trong `ensure_rover_streams_ready` -> `_query_client_table` (file `round_robin.py`), khi hệ thống cố gắng kết nối tới cổng HTTP (NTRIP_PORT, thường là 2101) của AICaster để lấy `clienttable`. Nếu AICaster không chạy, sai port, hoặc kết nối bị từ chối, toàn bộ tiến trình Auto Adjustment sẽ bị hủy bỏ (Abort) và báo lỗi, dẫn đến thư mục `adjustments` không có file kết quả.
 

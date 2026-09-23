@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import paho.mqtt.client as mqtt
 
 from backend.app.config import settings
-from backend.app.modules.ntrip_pusher import Rtcm3FrameFilter
+from backend.app.mqtt.ntrip_pusher import Rtcm3FrameFilter
 
 
 TOPICS = {

@@ -122,7 +122,7 @@ sequenceDiagram
 
 **Giải pháp**: Tuần tự hóa (serialize) các cluster runs khi chúng chia sẻ mountpoint/caster resources, HOẶC đảm bảo mỗi cụm chỉ fanout đến mountpoint của riêng nó.
 
-**File cần sửa**: [`scheduler.py:289`](file:///C:/Users/len/Desktop/tun/land_slide_web/backend/app/services/scheduler.py#L286-L292)
+**File cần sửa**: [`scheduler.py:289`](file:///C:/Users/len/Desktop/tun/land_slide_web/backend/app/infrastructure/scheduler.py#L286-L292)
 
 ```diff
 -            # Independent project clusters own independent manager sessions.
@@ -148,7 +148,7 @@ Thêm log chi tiết hơn khi phát hiện xung đột mountpoint giữa các c�
 
 Cleanup `adjustment_run_contexts` khi exception xảy ra sau khi đã ghi STARTING status, tránh việc schedule tiếp theo bị skip do context cũ stuck.
 
-**File cần sửa**: [`scheduler.py:294-301`](file:///C:/Users/len/Desktop/tun/land_slide_web/backend/app/services/scheduler.py#L294-L301)
+**File cần sửa**: [`scheduler.py:294-301`](file:///C:/Users/len/Desktop/tun/land_slide_web/backend/app/infrastructure/scheduler.py#L294-L301)
 
 ---
 
@@ -157,8 +157,8 @@ Cleanup `adjustment_run_contexts` khi exception xảy ra sau khi đã ghi STARTI
 ### Automated Tests
 ```bash
 cd backend
-python -m pytest test_auto_adjustment_scheduler.py -v
-python -m pytest test_ntrip_round_robin_transport.py -v
+python -m pytest tests/test_auto_adjustment_scheduler.py -v
+python -m pytest tests/test_ntrip_round_robin_transport.py -v
 ```
 
 ### Manual Verification
