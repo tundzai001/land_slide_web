@@ -368,7 +368,6 @@ class AdminStationWizardFeature extends window.AdminManager {
 
             // ✅ ĐỌC OFFLINE THRESHOLDS
             const offlineThresholds = cfg.offline_thresholds || {};
-            console.log('📋 [EDIT] Config from API:', JSON.stringify(cfg));
             console.log('📋 [EDIT] offline_thresholds:', JSON.stringify(offlineThresholds));
 
             const gnssThreshold = offlineThresholds.gnss ?? this.defaultOfflineThresholds.gnss;

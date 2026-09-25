@@ -516,7 +516,6 @@ class AdminStationPresetsFeature extends window.AdminManager {
         };
 
         console.log('💾 [SAVE] isEditMode:', this.isEditMode, 'stationId:', this.currentStationId);
-        console.log('💾 [SAVE] Payload:', JSON.stringify(payload, null, 2));
 
         try {
             let url = this.isEditMode

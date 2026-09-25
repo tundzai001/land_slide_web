@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from .topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_
 from .defaults import get_default_station_config
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
+logger = logging.getLogger(__name__)
 
 @router.put("/stations/{station_id}/config")
 async def update_station_config(
@@ -124,7 +126,7 @@ async def update_station_config(
                     existing_devices[s_type].config = dev_config
                     flag_modified(existing_devices[s_type], "config")
 
-                    logger.info(f"  ✅ Updated {s_type}: topic={topic}, config.mqtt={mqtt_payload}")
+                    logger.info(f"  ✅ Updated {s_type}: topic={topic}")
                 else:
                     # Check if device_code already exists globally (orphaned or other station)
                     dev_code = f"{station.station_code}_{s_type.upper()}"
@@ -146,7 +148,7 @@ async def update_station_config(
                         found_dev.config = dev_config
                         flag_modified(found_dev, "config")
 
-                        logger.info(f"  🔄 Reassigned existing device {dev_code}: topic={topic}, config.mqtt={mqtt_payload}")
+                        logger.info(f"  🔄 Reassigned existing device {dev_code}: topic={topic}")
                     else:
                         db.add(model_config.Device(
                             device_code=dev_code,
@@ -159,7 +161,7 @@ async def update_station_config(
                             created_at=int(time.time()),
                             updated_at=int(time.time())
                         ))
-                        logger.info(f"  🆕 Created {s_type}: topic={topic}, config.mqtt={mqtt_payload}")
+                        logger.info(f"  🆕 Created {s_type}: topic={topic}")
 
             # 3. Deactivate unchecked sensors
             for d_type, dev in existing_devices.items():
