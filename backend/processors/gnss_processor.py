@@ -109,6 +109,9 @@ class GNSSVelocityProcessor(
         # even while the normal integrity gate keeps a shifted cluster quarantined.
         self._offset_calibration_samples = deque(maxlen=600)
         self._offset_calibration_in_progress = False
+        self._origin_relock_samples = deque(maxlen=600)
+        self._origin_relock_in_progress = False
+        self._origin_relock_integrity_config = None
 
         self.stats = {
             'total_processed': 0,

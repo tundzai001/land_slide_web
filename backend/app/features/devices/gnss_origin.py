@@ -56,3 +56,49 @@ async def reset_gnss_origin(
         "origin_unchanged": True,
         "calibrations": calibrations,
     }
+
+
+@router.post("/gnss/relock-origin/{station_id}")
+async def relock_gnss_origin(
+    station_id: int,
+    request_data: dict,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+):
+    """Replace a station's locked GNSS origin after stable RTK FIXED capture."""
+    from ...runtime import mqtt_service
+
+    topic = str(request_data.get("topic") or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="GNSS MQTT topic is required")
+
+    result = await db.execute(
+        select(model_config.Device).where(
+            model_config.Device.station_id == station_id,
+            model_config.Device.device_type == "gnss",
+            model_config.Device.is_active.is_(True),
+            model_config.Device.mqtt_topic == topic,
+        )
+    )
+    devices = result.scalars().all()
+    if not devices:
+        raise HTTPException(status_code=404, detail="No active GNSS device matches this topic")
+    if len(devices) != 1:
+        raise HTTPException(status_code=409, detail="The GNSS topic maps to multiple active devices")
+
+    device_id = devices[0].id
+    await db.close()
+    try:
+        relock = await mqtt_service.relock_gnss_origin(
+            device_id,
+            station_id=station_id,
+            actor=current_user.username,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {
+        "status": "origin_relocked",
+        "station_id": station_id,
+        "relock": relock,
+    }

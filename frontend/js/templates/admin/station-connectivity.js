@@ -126,17 +126,35 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                         </div>
                                         <div class="d-flex justify-content-between align-items-center">
                                             <small id="origin-status" class="text-muted">Chưa có dữ liệu gốc</small>
-                                            <div class="d-flex gap-2">
+                                            <div class="d-flex flex-wrap justify-content-end gap-2">
                                                 <button type="button" class="btn btn-sm btn-outline-warning"
                                                     id="btn-reset-origin"
                                                     onclick="window.adminManager.resetGnssOrigin(window.adminManager.currentStationId)">
                                                     <i class="bi bi-crosshair me-1"></i> Hiệu chuẩn offset
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                    id="btn-relock-origin"
+                                                    onclick="window.adminManager.relockGnssOrigin(window.adminManager.currentStationId)">
+                                                    <i class="bi bi-lock-fill me-1" aria-hidden="true"></i> Khóa lại tọa độ gốc
                                                 </button>
                                                 <button type="button" class="btn btn-sm btn-warning"
                                                     id="btn-fetch-origin"
                                                     onclick="window.adminManager.fetchLatestOrigin()">
                                                     <i class="bi bi-arrow-repeat me-1"></i> Lấy tọa độ
                                                 </button>
+                                            </div>
+                                        </div>
+                                        <div id="gnss-origin-relock-progress" class="mt-3 p-3 border rounded-3 bg-body-tertiary" hidden aria-live="polite">
+                                            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                                <strong id="gnss-origin-relock-label" class="small">Đang thu mẫu RTK FIXED</strong>
+                                                <span id="gnss-origin-relock-counts" class="small text-muted">0/61 mẫu · 0/60 giây</span>
+                                            </div>
+                                            <div class="progress" role="progressbar" aria-label="Tiến trình khóa lại tọa độ gốc" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="height: 10px;">
+                                                <div id="gnss-origin-relock-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width: 0%;"></div>
+                                            </div>
+                                            <div class="d-flex justify-content-between flex-wrap gap-1 mt-2">
+                                                <small id="gnss-origin-relock-detail" class="text-muted">Giữ RTK FIXED ổn định trong lúc thu mẫu.</small>
+                                                <small id="gnss-origin-relock-remaining" class="text-muted">Đang kết nối thiết bị…</small>
                                             </div>
                                         </div>
                                         <div id="gnss-offset-result" class="gnss-offset-result" hidden aria-live="polite">

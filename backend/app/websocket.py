@@ -28,6 +28,7 @@ class ConnectionManager:
         "gnss_adjustment_step": "adjustment",
         "origin_locked_event": "adjustment",
         "gnss_offset_calibration_progress": "adjustment",
+        "gnss_origin_relock_progress": "adjustment",
         "incident_changed": "incident",
     }
     RELIABLE_MESSAGE_TYPES = {

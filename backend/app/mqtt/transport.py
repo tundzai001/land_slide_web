@@ -433,6 +433,19 @@ class MQTTTransportMixin:
             return result
         return None
 
+    async def relock_gnss_origin(
+        self,
+        device_id: int,
+        *,
+        station_id: int,
+        actor: str,
+    ):
+        """Relock one device's immutable monitoring origin from stable live fixes."""
+        processor = self.processors_cache.get(f"device_{device_id}")
+        if not processor or not hasattr(processor, "relock_origin"):
+            raise RuntimeError("GNSS processor is not ready; wait for live RTK FIXED data")
+        return await processor.relock_origin(station_id=station_id, actor=actor)
+
     def _get_client_for_station(self, station_id: int) -> mqtt.Client:
         """Return the station's dynamic client, falling back to the main client."""
         broker_key = self._station_brokers.get(station_id)

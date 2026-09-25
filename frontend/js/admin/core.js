@@ -146,6 +146,7 @@ class AdminManager {
                 }
                 if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
                     console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
+                    const relocked = !!message.data?.relocked;
 
                     // Cập nhật ngay lập tức lên UI
                     const latEl = document.getElementById('origin-lat');
@@ -158,11 +159,79 @@ class AdminManager {
                     if (hEl) hEl.value = message.data.h;
 
                     if (statusEl) {
-                        statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
+                        statusEl.innerHTML = relocked
+                            ? '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã khóa lại tọa độ gốc mới.</span>'
+                            : '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
                         statusEl.className = 'small mt-1';
                     }
 
-                    window.toast?.success('Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+                    window.toast?.success(relocked
+                        ? 'Đã khóa lại tọa độ gốc GNSS.'
+                        : 'Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+                } else if (message.type === 'gnss_origin_relock_progress' &&
+                    (message.station_id == this.currentStationId ||
+                        message.station_id == this._gnssOriginRelockStationId)) {
+                    const progress = message.data || {};
+                    const statusEl = document.getElementById('origin-status');
+                    const button = document.getElementById('btn-relock-origin');
+                    if (progress.phase === 'complete') {
+                        const isActiveStation = message.station_id == this.currentStationId;
+                        const isLocalOperation = message.station_id == this._gnssOriginRelockStationId;
+                        if (isLocalOperation) {
+                            this._gnssOriginRelockCompleted = true;
+                            this._gnssOriginRelockInProgress = false;
+                            this._gnssOriginRelockStationId = null;
+                        }
+                        if (isActiveStation || isLocalOperation) {
+                            if (button) button.disabled = false;
+                            ['btn-reset-origin', 'btn-fetch-origin'].forEach(id => {
+                                const relatedButton = document.getElementById(id);
+                                if (relatedButton) relatedButton.disabled = false;
+                            });
+                        }
+                        if (isActiveStation) {
+                            this.updateGnssOriginRelockProgress?.(progress);
+                            if (statusEl) {
+                                statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Đã khóa lại gốc; chuyển vị tracking tính từ mốc mới.</span>';
+                                statusEl.className = 'text-success small';
+                            }
+                            this.renderGnssTrackingOffset?.([0, 0, 0], {
+                                state: 'Gốc mới đã khóa',
+                                source: `${progress.sample_count || 0} mẫu RTK FIXED`,
+                                duration: `${Number(progress.duration_s || 0).toFixed(1)} giây`,
+                            });
+                        }
+                    } else if (progress.phase === 'failed') {
+                        const isActiveStation = message.station_id == this.currentStationId;
+                        const isLocalOperation = message.station_id == this._gnssOriginRelockStationId;
+                        if (isLocalOperation) {
+                            this._gnssOriginRelockInProgress = false;
+                            this._gnssOriginRelockStationId = null;
+                        }
+                        if (isActiveStation || isLocalOperation) {
+                            if (button) button.disabled = false;
+                            ['btn-reset-origin', 'btn-fetch-origin'].forEach(id => {
+                                const relatedButton = document.getElementById(id);
+                                if (relatedButton) relatedButton.disabled = false;
+                            });
+                        }
+                        if (isActiveStation) {
+                            this.updateGnssOriginRelockProgress?.(progress);
+                            if (statusEl) {
+                                statusEl.textContent = progress.message || 'Không thể khóa lại tọa độ gốc.';
+                                statusEl.className = 'text-danger small';
+                            }
+                            window.toast?.error(progress.message || 'Không thể khóa lại tọa độ gốc.');
+                        }
+                    } else if (message.station_id == this.currentStationId) {
+                        this.updateGnssOriginRelockProgress?.(progress);
+                        if (statusEl) {
+                            statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu mẫu RTK FIXED ổn định…';
+                            statusEl.className = 'text-info small';
+                        }
+                        [button, document.getElementById('btn-reset-origin'), document.getElementById('btn-fetch-origin')]
+                            .filter(Boolean).forEach(actionButton => { actionButton.disabled = true; });
+                    }
                 } else if (message.type === 'gnss_offset_calibration_progress' &&
                     (message.station_id == null || message.station_id == this.currentStationId)) {
                     const progress = message.data || {};

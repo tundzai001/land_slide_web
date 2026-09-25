@@ -295,6 +295,40 @@ class GnssPayloadMixin:
 
             if re.search(r'\$G[NP]GGA,', raw_payload):
                 res = processor.process_gngga(raw_payload, station_config)
+                if res is None and getattr(processor, "_origin_relock_in_progress", False):
+                    await self._touch_online_heartbeat(device_id, station_id, current_timestamp)
+                    try:
+                        await self._touch_active_alert(
+                            station_id,
+                            'gnss_velocity',
+                            current_timestamp,
+                        )
+                    except Exception as touch_error:
+                        logger.error(f"❌ GNSS active-alert refresh during origin relock failed: {touch_error}")
+
+                    status_payload = {
+                        "status": "ORIGIN_RELOCK_COLLECTING",
+                        "fix_quality": getattr(processor, "min_fix_quality", 4),
+                        "message": "Collecting stable RTK FIXED samples to replace the monitoring origin",
+                        "data": {
+                            "integrity_state": "ORIGIN_RELOCK_COLLECTING",
+                            "position_quality_reliable": False,
+                        },
+                    }
+                    try:
+                        await self._upsert_latest_sensor_cache(
+                            station_id, 'gnss', current_timestamp, status_payload
+                        )
+                        await manager.broadcast({
+                            "type": "sensor_status",
+                            "station_id": station_id,
+                            "sensor_type": "gnss",
+                            "timestamp": current_timestamp,
+                            "data": status_payload,
+                        })
+                    except Exception as ws_e:
+                        logger.error(f"❌ GNSS origin relock status update failed: {ws_e}")
+                    return
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
 

@@ -117,6 +117,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         this.currentStationConfig = {};
         this.stationPresetConfirm = null;
         this.currentStep = 1;
+        this.resetGnssOriginRelockProgress?.();
         if (this._originResetTimer) {
             clearInterval(this._originResetTimer);
             this._originResetTimer = null;
@@ -217,6 +218,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             this.isEditMode = true;
             this.currentStationId = stationId;
             this.currentStep = 1;
+            this.resetGnssOriginRelockProgress?.();
             this.resetGnssCalibrationResult?.();
             if (this._originResetTimer) {
                 clearInterval(this._originResetTimer);

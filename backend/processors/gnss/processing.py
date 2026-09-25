@@ -87,6 +87,10 @@ class GNSSProcessingMixin:
                 }
 
             fix_quality = int(parts[6]) if parts[6] else 0
+
+            if getattr(self, "_origin_relock_in_progress", False):
+                self._capture_origin_relock_sample(payload, fix_quality, station_config)
+                return None
             
             if self.state == "AWAITING_CANDIDATES":
                 return self._handle_origin_collection(payload, fix_quality, station_config)
@@ -104,6 +108,38 @@ class GNSSProcessingMixin:
                 "fix_mode": "UNKNOWN",
                 "message": "Failed to parse GGA payload"
             }
+
+    def _capture_origin_relock_sample(self, gngga_string, fix_quality, station_config=None):
+        samples = self._origin_relock_samples
+        required_fix = getattr(self, "min_fix_quality", 4)
+        if fix_quality != required_fix:
+            samples.clear()
+            self.stats['low_quality_rejected'] += 1
+            return
+
+        point = self._parse_gngga(gngga_string)
+        if not point:
+            samples.clear()
+            return
+
+        integrity_cfg = self._integrity_config(station_config)
+        self._origin_relock_integrity_config = integrity_cfg
+        if (
+            point.get("hdop", 99.9) > integrity_cfg["process_max_hdop"]
+            or point.get("num_sats", 0) < integrity_cfg["process_min_sats"]
+        ):
+            samples.clear()
+            self.stats['low_quality_rejected'] += 1
+            return
+
+        timestamp = point.get("gga_timestamp") or point.get("received_timestamp") or time.time()
+        last_timestamp = samples[-1]["ts"] if samples else None
+        if last_timestamp is not None and (
+            timestamp <= last_timestamp
+            or timestamp - last_timestamp > integrity_cfg["origin_max_gap_s"]
+        ):
+            samples.clear()
+        samples.append({"ts": float(timestamp), "wgs": dict(point["wgs"])})
 
     def _handle_origin_collection(self, gngga_string, fix_quality, station_config: Dict = None):
         # Origin candidates must be one uninterrupted RTK-quality acquisition epoch.

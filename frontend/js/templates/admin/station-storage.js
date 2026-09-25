@@ -120,7 +120,7 @@ window.LegacyTemplateParts['station-storage'] = String.raw`                <!-- 
             <div class="modal-footer station-wizard-footer">
                 <div class="station-footer-meta" aria-live="polite">
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
-                    <span>Dữ liệu chỉ được lưu khi hoàn tất bước 4</span>
+                    <span>Khóa lại gốc lưu sau khi thu mẫu; cấu hình khác lưu ở bước 4</span>
                 </div>
                 <div class="d-flex gap-2 station-footer-actions">
                     <button type="button" class="btn btn-secondary" id="btn-wizard-back" style="display: none;"
