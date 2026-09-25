@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "build": "9ea91312deb1",
-  "generated_at": "2026-09-25T03:25:07.491Z",
+  "build": "621bb9d874d9",
+  "generated_at": "2026-09-25T07:08:04.027Z",
   "assets": {
     "admin-app.min.js": {
       "bytes": 458974,
-      "sha256": "b3bdc388b38bf77476ecefa66b38063e1b29d0954a966ab2a0a3d81b55d1d93a"
+      "sha256": "90c58ce67c4c9e44f5f485e8c9c93684f4dd101209cfba9f21f6aa579106bb8b"
     },
     "admin.min.css": {
-      "bytes": 108043,
-      "sha256": "379ae190ff5939fcb6d544093ef8399faaabfce0e534e1d16404b9e02c761889"
+      "bytes": 108052,
+      "sha256": "b9ea5e1b4a69fd197685a3a70feb97638ec54911c51ec2284e8d53c5869d0504"
     },
     "aitogy.png": {
       "bytes": 202093,
@@ -21,11 +21,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 17113,
-      "sha256": "739e08eb9715097973e7c534fe6725b2a76cff4e69423e0ae9f6e2e6a86ea567"
+      "sha256": "d14412b18421d1c240fda0391adff9c8e1bf7eec7f3f8362223dff5130247d21"
     },
     "app.html": {
       "bytes": 993,
-      "sha256": "5b901a64d4961efbf69c2a4fe6c9eeac09e67855b9fabbb2c480b040b07b6fe0"
+      "sha256": "1f74541a690f1e65cb3bf41709d4e97bd6f60d9292e262c82fe0dbb9c594efc7"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -33,7 +33,7 @@
     },
     "index.html": {
       "bytes": 16184,
-      "sha256": "0c1e66fce02fbec13a50ca22e7698ccadb0c11f199869be0078afa5ca2fb570a"
+      "sha256": "56ffd9ee9f8a37839802288f4959b5e85a86b4f207b5f10643216d0df51579ff"
     },
     "landing.min.css": {
       "bytes": 27569,
@@ -49,11 +49,11 @@
     },
     "map-app.min.js": {
       "bytes": 433127,
-      "sha256": "eeefc8e5371bd9c666ba5565eb1e9f269b325846028051ba96d13a9130c337cb"
+      "sha256": "ec695a4b46a0006cd75c01ac6637399f6029d43483dbabbfb9ed1ffb625464f4"
     },
     "map.html": {
       "bytes": 2825,
-      "sha256": "39eaee12f67e6855820128fe4aabb0cd2f1f7d20902fd737d5f87b8b8e16e59f"
+      "sha256": "2b1aa8a02bf1e563a93c62146861f9f6ef6602358be5ad2fb748de8b7bfaa9ef"
     },
     "map.min.css": {
       "bytes": 153164,

@@ -12,7 +12,7 @@ from ...database import get_data_db
 from ...models import auth as model_auth
 from ...models import data as model_data
 from .cases import PRIORITY_ORDER, VALID_PRIORITIES, VALID_STATUSES, case_project_ids, serialize_case
-from .common import (_attention_rank, _base_scope_stmt, _canonical_filter_hash, _decode_cursor, _event_rows, _is_admin, _is_manager, _load_case, _private_headers, _scope_hash, _sign_cursor)
+from .common import (_STATUS_ATTENTION_ORDER, _attention_rank, _base_scope_stmt, _canonical_filter_hash, _decode_cursor, _event_rows, _is_admin, _is_manager, _load_case, _private_headers, _scope_hash, _sign_cursor)
 
 router = APIRouter(tags=["Incidents"])
 
