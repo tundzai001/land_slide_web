@@ -1,9 +1,13 @@
 import shutil
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 from app.infrastructure.ingest_spool import IngestSpool
+from app.mqtt.persistence.ingest import SensorIngestPersistenceMixin
+from sqlalchemy.dialects import postgresql
 
 
 class IngestSpoolTests(unittest.IsolatedAsyncioTestCase):
@@ -49,6 +53,35 @@ class IngestSpoolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await spool.stats())["batches"], 0)
         finally:
             shutil.rmtree(directory, ignore_errors=True)
+
+    async def test_replay_ignores_any_unique_conflict(self):
+        class Session:
+            bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def execute(self, statement):
+                sql = str(statement.compile(dialect=postgresql.dialect())).upper()
+                self_test.assertIn("ON CONFLICT DO NOTHING", sql)
+                self_test.assertNotIn("ON CONFLICT (INGEST_ID)", sql)
+                return SimpleNamespace(rowcount=1)
+
+            async def commit(self):
+                pass
+
+        self_test = self
+        rows = [
+            {"station_id": 1, "timestamp": 1, "sensor_type": "gnss_adjusted", "ingest_id": "a", "adjustment_key": "run:1", "data": {}},
+            {"station_id": 2, "timestamp": 2, "sensor_type": "gnss", "ingest_id": "b", "data": {}},
+        ]
+        with patch("app.mqtt.persistence.ingest.DataSessionLocal", return_value=Session()):
+            metrics = await SensorIngestPersistenceMixin()._persist_sensor_batch(rows)
+        self.assertEqual(metrics["inserted"], 1)
+        self.assertEqual(metrics["deduped"], 1)
 
 
 if __name__ == "__main__":

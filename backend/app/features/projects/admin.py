@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -14,6 +15,7 @@ from ...models import config as model_config
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 
 router = APIRouter(tags=["Projects"])
+logger = logging.getLogger(__name__)
 
 @router.get("/api/admin/projects")
 async def get_projects(

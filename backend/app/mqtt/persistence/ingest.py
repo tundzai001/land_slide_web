@@ -102,14 +102,13 @@ class SensorIngestPersistenceMixin:
         async with DataSessionLocal() as db:
             dialect_obj = getattr(getattr(db, "bind", None), "dialect", None)
             dialect = str(getattr(dialect_obj, "name", "") or "")
-            if dialect == "postgresql" and any(value for value in identities):
+            if dialect == "postgresql":
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
                 statement = pg_insert(model_data.SensorData.__table__).values(rows)
-                statement = statement.on_conflict_do_nothing(
-                    index_elements=["ingest_id"],
-                    index_where=model_data.SensorData.__table__.c.ingest_id.is_not(None),
-                )
+                # Spool replay may meet either the ingest identity or an
+                # already persisted adjustment representative.
+                statement = statement.on_conflict_do_nothing()
                 result = await db.execute(statement)
             else:
                 result = await db.execute(model_data.SensorData.__table__.insert(), rows)

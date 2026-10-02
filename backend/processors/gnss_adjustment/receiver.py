@@ -1094,7 +1094,8 @@ class RoundRobinReceiverMixin:
                                     response_error,
                                 )
                             else:
-                                logger.error(
+                                logger.log(
+                                    logging.ERROR if attempt == max_retries else logging.WARNING,
                                     "Error reading command response for %s: %s",
                                     command_str,
                                     response_error,

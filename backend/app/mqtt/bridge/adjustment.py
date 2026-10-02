@@ -96,7 +96,11 @@ class MQTTAdjustmentMixin:
         current_timestamp = int(time.time())
         adjustment, evidence = compact_adjustment_payload(adjustment)
         cluster_index = int(adjustment.get("cluster_index", -1))
-        adjustment_key = f"run:{public_project_id}:{cluster_index}:{run_id}"
+        # Scheduler run IDs are reused for every cycle. Keep a stable token
+        # within this session while giving the next cycle a distinct key.
+        run_token = run_context.setdefault("started_at_ns", time.time_ns())
+        self.adjustment_run_contexts[run_id]["started_at_ns"] = run_token
+        adjustment_key = f"run:{public_project_id}:{cluster_index}:{run_id}:{run_token}"
         adjustment["adjustment_key"] = adjustment_key
         adjustment = add_report_links(
             adjustment,

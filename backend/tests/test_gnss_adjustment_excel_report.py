@@ -382,7 +382,10 @@ class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge._sensor_buffer), 2)
         representatives = [row for row in bridge._sensor_buffer if row["adjustment_key"]]
         self.assertEqual(len(representatives), 1)
-        self.assertEqual(representatives[0]["adjustment_key"], "run:9:2:17")
+        self.assertEqual(
+            representatives[0]["adjustment_key"],
+            f"run:9:2:17:{bridge.adjustment_run_contexts[17]['started_at_ns']}",
+        )
         self.assertEqual(representatives[0]["adjustment_project_id"], 9)
         self.assertEqual(representatives[0]["adjustment_cluster_index"], 2)
         self.assertEqual(bridge._upsert_latest_sensor_cache.await_count, 2)
@@ -412,7 +415,7 @@ class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.adjustment_phase[17], "FAILED_QUALITY_GATE")
         self.assertEqual(
             bridge.adjustment_results[17]["cluster_results"][0]["adjustment_key"],
-            "run:17:-1:17",
+            f"run:17:-1:17:{bridge.adjustment_run_contexts[17]['started_at_ns']}",
         )
         self.assertEqual(len(bridge._sensor_buffer), 1)
         self.assertEqual(bridge._sensor_buffer[0]["sensor_type"], "gnss_adjustment_failed")
@@ -422,6 +425,29 @@ class GnssAdjustmentQualityGateTests(unittest.IsolatedAsyncioTestCase):
             broadcast.await_args.args[0]["phase"],
             "FAILED_QUALITY_GATE",
         )
+
+    async def test_reused_scheduler_run_id_gets_new_adjustment_key(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        bridge.adjustment_phase = {}
+        bridge.adjustment_message = {}
+        bridge.adjustment_results = {}
+        bridge.adjustment_cluster_results = {9: {}}
+        bridge._sensor_buffer = []
+        bridge._buffer_lock = asyncio.Lock()
+        bridge._upsert_latest_sensor_cache = AsyncMock()
+        adjustment = {"points": {"S1": {"station_id": 101}}, "quality_gate": {"passed": True}}
+        keys = []
+        with (
+            patch("app.mqtt.bridge.adjustment.persist_evidence", new=AsyncMock()),
+            patch("app.mqtt.bridge.adjustment.manager", SimpleNamespace(broadcast=AsyncMock())),
+        ):
+            for started_at_ns in (100, 200):
+                bridge.adjustment_run_contexts = {
+                    -3001: {"project_id": 9, "cluster_index": 0, "started_at_ns": started_at_ns}
+                }
+                await bridge._handle_round_robin_adjustment_result(-3001, dict(adjustment))
+                keys.append(bridge._sensor_buffer[-1]["adjustment_key"])
+        self.assertEqual(keys, ["run:9:0:-3001:100", "run:9:0:-3001:200"])
 
 
 if __name__ == "__main__":

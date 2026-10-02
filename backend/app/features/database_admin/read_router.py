@@ -26,6 +26,9 @@ INTERNAL_SENSOR_TYPES = (
     "gnss_adjusted",
     "gnss_adjustment_failed",
 )
+_STATS_CACHE_TTL_SECONDS = 5
+_stats_cache = None
+_stats_cache_expires_at = 0.0
 
 def _sensor_data_preview(value):
     """Return a compact, bounded preview without database-specific JSON casts."""

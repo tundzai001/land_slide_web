@@ -13,8 +13,8 @@ from app.features.gnss_adjustment.store import write_adjustment_failure_report
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler()
 VIETNAM_TIMEZONE = timezone(timedelta(hours=7), "Asia/Ho_Chi_Minh")
+scheduler = AsyncIOScheduler(timezone=VIETNAM_TIMEZONE)
 ACTIVE_ADJUSTMENT_STATUSES = {
     "STARTING",
     "COLLECTING_BASELINE",

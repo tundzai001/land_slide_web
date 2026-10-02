@@ -231,6 +231,7 @@ async def start_gnss_adjustment(
             mqtt_service.adjustment_run_contexts = {}
         mqtt_service.adjustment_run_contexts[session_id] = {
             "run_id": session_id,
+            "started_at_ns": time.time_ns(),
             "project_id": int(project.id),
             "project_code": str(project.project_code or f"project-{project.id}"),
             "cluster_index": req.cluster_index if req.cluster_index is not None else next(

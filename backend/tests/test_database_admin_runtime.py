@@ -1,6 +1,8 @@
 import asyncio
+import time
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import HTTPException, Response
 from sqlalchemy.dialects import postgresql
@@ -9,6 +11,7 @@ from app.features.database_admin.router import (
     _device_runtime_state,
     admin_get_sensor_data,
 )
+from app.features.database_admin import read_router
 
 
 class DeviceRuntimeStateTests(unittest.TestCase):
@@ -29,6 +32,16 @@ class DeviceRuntimeStateTests(unittest.TestCase):
 
         self.assertEqual(_device_runtime_state(stale, station, 1000)["effective_status"], "offline")
         self.assertEqual(_device_runtime_state(disabled, station, 1000)["effective_status"], "offline")
+
+    def test_stats_cache_is_initialized_and_can_serve_cached_value(self):
+        cached = {"stations": 2}
+        with (
+            patch.object(read_router, "_stats_cache", cached),
+            patch.object(read_router, "_stats_cache_expires_at", time.monotonic() + 10),
+        ):
+            self.assertIs(
+                asyncio.run(read_router.get_database_stats(None, None, None)), cached
+            )
 
 
 class _RowsResult:
