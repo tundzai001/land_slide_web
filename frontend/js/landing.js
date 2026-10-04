@@ -261,24 +261,27 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (obj.name) nodes[obj.name] = obj;
             if (obj.isMesh && obj.material) {
                 obj.material = obj.material.clone();
+                if (obj.geometry?.attributes?.color) {
+                    obj.material.vertexColors = true;
+                }
                 if (['TerrainSurface', 'SlipSurface', 'UnstableWedge', 'GroundwaterTable', 'PiezometerWaterColumn'].includes(obj.name)) {
                     obj.material.transparent = true;
                 }
             }
         });
 
-        // Add subtle CAD topographic wireframe on top of the Blender TerrainSurface
+        // Add subtle CAD topographic shimmer on top of the Blender TerrainSurface
         const terrain = nodes.TerrainSurface;
         if (terrain && terrain.geometry) {
             const wireGeo = new THREE.WireframeGeometry(terrain.geometry);
             const wireMat = new THREE.LineBasicMaterial({
                 color: 0x5eead4,
                 transparent: true,
-                opacity: 0.11,
+                opacity: 0.024,
                 blending: THREE.AdditiveBlending
             });
             const wireMesh = new THREE.LineSegments(wireGeo, wireMat);
-            wireMesh.position.y = 0.012;
+            wireMesh.position.y = 0.008;
             terrain.add(wireMesh);
             nodes.TerrainWire = wireMesh;
         }
@@ -383,22 +386,29 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 packets.push({ mesh: packet, curve: arc.userData.curve, speed: 0.28 + idx * 0.06, phase: idx * 0.25 });
             });
 
-            // Satellite carrier-phase beams down to stations
-            const satNames = ['GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03'];
-            const targetAnchors = [anchors.gnss_base, anchors.gnss_mid, anchors.gnss_toe];
+            // Satellite carrier-phase beams down to stations from all 6 NASA satellites
+            const satNames = ['GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04', 'GNSS_Sat_05', 'GNSS_Sat_06'];
+            const targetAnchors = [
+                anchors.gnss_base,
+                anchors.gnss_mid,
+                anchors.gnss_toe,
+                anchors.ops_hub,
+                anchors.gnss_crown,
+                anchors.gnss_mid
+            ];
             satNames.forEach((name, idx) => {
                 const satObj = nodes[name];
                 if (!satObj) return;
                 const beamGeo = new THREE.BufferGeometry();
                 beamGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
                 const beam = new THREE.Line(beamGeo, new THREE.LineBasicMaterial({
-                    color: idx === 0 ? 0xd7ef73 : 0x5eead4,
+                    color: idx % 2 === 0 ? 0xd7ef73 : 0x5eead4,
                     transparent: true,
                     opacity: 0.24,
                     blending: THREE.AdditiveBlending
                 }));
                 worldGroup.add(beam);
-                satBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 1.1 });
+                satBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 0.95 });
             });
 
             canvas.classList.add('is-ready');
@@ -474,7 +484,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 4.3 - progress * 0.65 - pointerY * 0.25,
                 8.2 - progress * 1.4
             );
-            camera.lookAt(-0.3 + progress * 0.3, 0.15, 0.1);
+            camera.lookAt(-0.25 + progress * 0.3, 0.34, 0.08);
 
             render();
             frame = requestAnimationFrame(tick);
@@ -619,21 +629,24 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         opsPulseRing.position.set(anchors.ops_hub[0], anchors.ops_hub[1] - 1.35, anchors.ops_hub[2]);
         worldGroup.add(opsPulseRing);
 
-        // 4. Camera Choreography Splines across the 4 Storytelling Chapters
+        // 4. Camera Choreography Splines across the 4 Storytelling Chapters (framed for widescreen full-bleed theater)
         const camCurve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(-2.35, 3.15, 5.45), // Step 0: Tight on Upper/Mid Slip Zone & Borehole IMU
-            new THREE.Vector3(-2.85, 2.25, 6.55), // Step 1: Front Cutaway Aquifer & Piezometer Well
-            new THREE.Vector3(-0.15, 4.75, 7.35), // Step 2: Multi-Station GNSS Baseline Triangulation Overview
-            new THREE.Vector3(2.85, 3.55, 6.45),  // Step 3: Operations Command Hub & Highway Warning Corridor
-            new THREE.Vector3(3.35, 3.15, 5.85)   // Step 3 End hold
+            new THREE.Vector3(-2.45, 3.65, 6.45), // Entry & Step 0: Zooming in from Hero overview to Mid Slip Zone & Borehole IMU
+            new THREE.Vector3(-2.65, 2.15, 6.25), // Step 1: Front Cutaway Aquifer & Piezometer Well
+            new THREE.Vector3(-0.35, 4.45, 7.25), // Step 2: Multi-Station GNSS Baseline + NASA Satellite Constellation Overview
+            new THREE.Vector3(2.55, 3.35, 6.25),  // Step 3: Operations Command Hub & Highway Warning Corridor
+            new THREE.Vector3(3.05, 2.95, 5.65)   // Step 3 End hold
         ]);
         const lookCurve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(-0.95, 0.35, 0.35), // Step 0 target: Mid GNSS + IMU Borehole
-            new THREE.Vector3(-1.65, -0.25, 2.15),// Step 1 target: Piezometer + Groundwater Cutaway
-            new THREE.Vector3(-0.75, 0.20, 0.15), // Step 2 target: Full Slope Slip Wedge
-            new THREE.Vector3(2.35, 0.05, 0.85),  // Step 3 target: Operations Hub + Mountain Highway Gate
-            new THREE.Vector3(2.85, 0.15, 0.75)
+            new THREE.Vector3(-1.45, 0.38, 0.25), // Step 0 target shifted left so 3D slope sits in right 65% of widescreen stage
+            new THREE.Vector3(-2.15, -0.25, 2.05),// Step 1 target: Piezometer + Groundwater Cutaway
+            new THREE.Vector3(-1.25, 0.42, 0.15), // Step 2 target: Full Slope Slip Wedge + NASA Satellite Constellation
+            new THREE.Vector3(1.65, 0.24, 0.85),  // Step 3 target: Operations Hub + Mountain Highway Fleet
+            new THREE.Vector3(2.15, 0.28, 0.75)
         ]);
+
+        const storySatBeams = [];
+        const storySatWorldPos = new THREE.Vector3();
 
         // Load Blender GLB Scene
         getBlenderTemplate().then(template => {
@@ -645,6 +658,31 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (nodes.GNSS_Station_Mid) initialMidStationPos = nodes.GNSS_Station_Mid.position.clone();
             if (nodes.IMU_Borehole_Assembly) initialImuPos = nodes.IMU_Borehole_Assembly.position.clone();
             worldGroup.add(root);
+
+            const satNames = ['GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04', 'GNSS_Sat_05', 'GNSS_Sat_06'];
+            const targetAnchors = [
+                anchors.gnss_base,
+                anchors.gnss_mid,
+                anchors.gnss_toe,
+                anchors.ops_hub,
+                anchors.gnss_crown,
+                anchors.gnss_mid
+            ];
+            satNames.forEach((name, idx) => {
+                const satObj = nodes[name];
+                if (!satObj) return;
+                const beamGeo = new THREE.BufferGeometry();
+                beamGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+                const beam = new THREE.Line(beamGeo, new THREE.LineBasicMaterial({
+                    color: idx % 2 === 0 ? 0xd7ef73 : 0x5eead4,
+                    transparent: true,
+                    opacity: 0.22,
+                    blending: THREE.AdditiveBlending
+                }));
+                worldGroup.add(beam);
+                storySatBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 0.95 });
+            });
+
             canvas.classList.add('is-ready');
             applyProgressState(targetProgress, 0);
             render();
@@ -659,6 +697,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         } : {};
         const projVec = new THREE.Vector3();
 
+        const pinOffsets = {
+            gnss_mid: [3.5, -5.5],
+            imu_borehole: [-4.5, 6.5],
+            rain_gauge: [-6.0, -4.0],
+            piezometer: [-3.5, 5.5],
+            ops_hub: [0.0, -4.5]
+        };
+
         function updateCalloutPins(step) {
             if (!calloutContainer) return;
             const activeMap = {
@@ -672,8 +718,9 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 if (!el || !anchors[key]) return;
                 projVec.set(...anchors[key]);
                 projVec.project(camera);
-                const xPct = Math.min(90, Math.max(10, (projVec.x * 0.5 + 0.5) * 100));
-                const yPct = Math.min(84, Math.max(16, (-projVec.y * 0.5 + 0.5) * 100));
+                const [ox, oy] = pinOffsets[key] || [0, 0];
+                const xPct = Math.min(91, Math.max(43, (projVec.x * 0.5 + 0.5) * 100 + ox));
+                const yPct = Math.min(82, Math.max(18, (-projVec.y * 0.5 + 0.5) * 100 + oy));
                 el.style.left = `${xPct.toFixed(1)}%`;
                 el.style.top = `${yPct.toFixed(1)}%`;
                 el.classList.toggle('is-active', activeSet.has(key));
@@ -733,9 +780,22 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 twinNodes.PiezometerWaterColumn.position.y = waterRise * 0.45;
             }
 
-            // 5. Act 3: Multi-Sensor Baseline Triangulation Lasers
+            // 5. Act 3: Multi-Sensor Baseline Triangulation Lasers & Satellite Carrier Beams
             baselineLines.forEach(line => {
                 line.material.opacity = wVerify * 0.78 + wResponse * 0.28;
+            });
+            if (twinNodes.Satellite_Constellation) {
+                twinNodes.Satellite_Constellation.position.x = -0.2 + Math.sin(elapsed * 0.42) * 0.28;
+            }
+            storySatBeams.forEach(({ satObj, target, beam, phase }) => {
+                satObj.rotation.y += 0.007;
+                satObj.getWorldPosition(storySatWorldPos);
+                worldGroup.worldToLocal(storySatWorldPos);
+                const posAttr = beam.geometry.attributes.position;
+                posAttr.setXYZ(0, storySatWorldPos.x, storySatWorldPos.y, storySatWorldPos.z);
+                posAttr.setXYZ(1, target.x, target.y, target.z);
+                posAttr.needsUpdate = true;
+                beam.material.opacity = (0.12 + wVerify * 0.28 + wResponse * 0.14) + Math.max(0, Math.sin(elapsed * 2.4 + phase)) * 0.16;
             });
 
             // 6. Act 4: Operations Hub Dispatch & Highway Early Warning Gate
@@ -835,6 +895,8 @@ import { renderLandingTemplate } from './templates/landing-template.js';
 
     function setupHero() {
         const hero = $('.hero');
+        const heroVisual = $('.hero-visual', hero);
+        const heroCopy = $('.hero-copy', hero);
         const canvas = $('#hero-canvas');
         let controller = null;
         if (canUse3D(canvas)) {
@@ -849,16 +911,27 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             .from('.hero-lead, .hero-actions, .signal-proof', { y: 22, autoAlpha: 0, duration: .55, stagger: .08 }, .48)
             .from('.hero-visual', { xPercent: 7, scale: .96, autoAlpha: 0, duration: .9 }, .18)
             .from('.floating-status', { y: 16, autoAlpha: 0, duration: .45 }, .76);
-        if (controller) {
+        if (controller || heroVisual) {
             const sceneState = { progress: 0 };
             ScrollTrigger.create({
                 trigger: hero,
                 start: 'top top',
                 end: 'bottom top',
-                scrub: 0.5,
+                scrub: 0.45,
                 onUpdate: self => {
-                    sceneState.progress = self.progress;
-                    controller.setProgress(sceneState.progress);
+                    const p = self.progress;
+                    sceneState.progress = p;
+                    controller?.setProgress(p);
+                    if (heroVisual && innerWidth >= 901) {
+                        const zoom = 1 + p * 0.15;
+                        const shiftX = -p * 11;
+                        const shiftY = p * 6;
+                        heroVisual.style.transform = p > 0.002 ? `translate3d(${shiftX.toFixed(2)}%, ${shiftY.toFixed(2)}%, 0) scale(${zoom.toFixed(3)})` : '';
+                    }
+                    if (heroCopy && innerWidth >= 901) {
+                        heroCopy.style.transform = p > 0.002 ? `translate3d(0, ${(-p * 36).toFixed(1)}px, 0)` : '';
+                        heroCopy.style.opacity = p > 0.002 ? String(Math.max(0.18, 1 - p * 0.78)) : '';
+                    }
                 }
             });
         }
@@ -917,10 +990,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         ];
         const stepBadges = ['BƯỚC 01 / 04', 'BƯỚC 02 / 04', 'BƯỚC 03 / 04', 'BƯỚC 04 / 04'];
         const stageTransforms = [
-            { scale: 1.0, x: '0%', y: '0%', radius: '24px' },
-            { scale: 1.03, x: '-1.5%', y: '-1%', radius: '18px' },
-            { scale: 0.98, x: '1.5%', y: '0.5%', radius: '26px' },
-            { scale: 1.01, x: '0%', y: '1%', radius: '20px' }
+            { scale: 1.00, x: 0.0, y: 0.0, radius: 20 },
+            { scale: 1.02, x: -0.6, y: -0.4, radius: 18 },
+            { scale: 0.99, x: 0.6, y: 0.3, radius: 22 },
+            { scale: 1.01, x: 0.0, y: 0.4, radius: 18 }
         ];
 
         if (innerWidth < 901 || reducedMotion.matches) {
@@ -948,11 +1021,24 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             stage.dataset.pose = String(step);
             story.style.setProperty('--story-progress', progress.toFixed(4));
 
+            // Smooth zoom-out expansion as user scrolls from Hero right-card into the full-bleed Story theater
+            const entryRaw = THREE.MathUtils.clamp(
+                (window.scrollY - (story.offsetTop - innerHeight * 0.88)) / Math.max(1, innerHeight * 0.92),
+                0,
+                1
+            );
+            const zoomEase = entryRaw * entryRaw * (3 - 2 * entryRaw);
             const pose = stageTransforms[step];
-            stage.style.setProperty('--stage-scale', String(pose.scale));
-            stage.style.setProperty('--stage-x', pose.x);
-            stage.style.setProperty('--stage-y', pose.y);
-            stage.style.setProperty('--stage-radius', pose.radius);
+            const curScale = 0.60 + (pose.scale - 0.60) * zoomEase;
+            const curX = 18.0 * (1 - zoomEase) + pose.x * zoomEase;
+            const curY = -3.5 * (1 - zoomEase) + pose.y * zoomEase;
+            const curRadius = 28 * (1 - zoomEase) + pose.radius * zoomEase;
+
+            stage.style.setProperty('--stage-scale', curScale.toFixed(3));
+            stage.style.setProperty('--stage-x', `${curX.toFixed(2)}%`);
+            stage.style.setProperty('--stage-y', `${curY.toFixed(2)}%`);
+            stage.style.setProperty('--stage-radius', `${curRadius.toFixed(1)}px`);
+            story.style.setProperty('--hud-opacity', zoomEase.toFixed(3));
 
             if (caption) caption.textContent = captions[step];
             if (camMode) camMode.textContent = camModes[step];
