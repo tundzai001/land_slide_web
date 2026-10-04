@@ -3,22 +3,24 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const indexSource = readFileSync(join(__dirname, '..', '..', 'frontend/index.html'), 'utf8');
+const landingTemplateSource = readFileSync(join(__dirname, '..', '..', 'frontend/js/templates/landing-template.js'), 'utf8');
 const landingCss = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landing.min.css'));
 const landingJs = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landing.min.js'));
 
 test('index is semantic and progressively enhanced without React', async () => {
-  expect(indexSource).toContain('<main id="main">');
-  expect(indexSource).toContain('<section class="hero"');
-  expect(indexSource).toContain('Nhìn thấy chuyển động');
+  expect(indexSource).toContain('<div id="landing-root"></div>');
   expect(indexSource).toContain('rel="canonical"');
   expect(indexSource).toContain('Quan trắc sạt lở đất realtime');
   expect(indexSource).toContain('"@type":"WebPage"');
   expect(indexSource).toContain('og:image:alt');
   expect(indexSource).toContain('rel="icon"');
-  expect(indexSource).toContain('<address class="footer-contact"');
-  expect(indexSource).toContain('aitogyaitogy@gmail.com');
   expect(indexSource).not.toContain('react.production.min.js');
   expect(indexSource).not.toContain('ReactDOM');
+  expect(landingTemplateSource).toContain('<main id="main">');
+  expect(landingTemplateSource).toContain('<section class="hero"');
+  expect(landingTemplateSource).toContain('Nhìn thấy chuyển động');
+  expect(landingTemplateSource).toContain('<address class="footer-contact"');
+  expect(landingTemplateSource).toContain('aitogyaitogy@gmail.com');
   expect(landingCss.toString()).toContain('.story-enhanced .story-stage');
   expect(landingJs.toString()).toContain('story-enhanced');
   expect(landingJs.toString()).toContain('--stage-scale');
@@ -148,13 +150,14 @@ test('desktop story advances without shifting the fixed navigation', async ({ pa
 });
 
 test('story fallback stays compact when progressive enhancement is unavailable', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route('http://127.0.0.1:8000/', route => route.fulfill({
     contentType: 'text/html; charset=utf-8',
     body: indexSource.replaceAll('__BUILD_VERSION__', 'test'),
   }));
   await page.route('**/assets/landing.min.css*', route => route.fulfill({ contentType: 'text/css', body: landingCss }));
-  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: '' }));
+  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: landingJs }));
   await page.goto('/');
 
   const geometry = await page.locator('.story').evaluate(element => ({
