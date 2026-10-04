@@ -7,6 +7,7 @@ import copy
 import inspect
 import json
 import logging
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -220,6 +221,18 @@ class RoundRobinCorsMixin:
         selected_server_id: Optional[int] = None,
         all_streams: bool = False,
     ) -> None:
+        # configure-service replaces the whole device config. Serialize its
+        # read/modify/write with other clusters and the failover daemon.
+        async with self._cors_topology_lock:
+            await self._set_cors_fixed_base_enabled_unlocked(
+                mountpoint, enabled, selected_host, selected_serial,
+                selected_server_id, all_streams,
+            )
+
+    async def _set_cors_fixed_base_enabled_unlocked(
+        self, mountpoint, enabled, selected_host, selected_serial,
+        selected_server_id, all_streams,
+    ) -> None:
         if not mountpoint:
             return
         snapshot_key = (
@@ -229,30 +242,58 @@ class RoundRobinCorsMixin:
             int(selected_server_id) if selected_server_id not in (None, "") else 0,
         )
         if not enabled:
-            if snapshot_key in self._cors_fixed_base_snapshots:
+            snapshot = self._cors_fixed_base_snapshots.get(snapshot_key)
+            if snapshot and snapshot["confirmed_disabled"]:
                 return
-            serial, server_id, original = await asyncio.to_thread(
-                self._find_cors_station_sync,
-                mountpoint,
-                selected_host,
-                selected_serial,
-                selected_server_id,
-            )
-            self._cors_fixed_base_snapshots[snapshot_key] = {
-                "serial": serial,
-                "server_id": server_id,
-                "service_config": copy.deepcopy(original),
-            }
+            if snapshot:
+                serial = snapshot["serial"]
+                server_id = snapshot["server_id"]
+                original = copy.deepcopy(snapshot["service_config"])
+                disabled_server_ids = snapshot["disabled_server_ids"]
+            else:
+                serial, server_id, original = await asyncio.to_thread(
+                    self._find_cors_station_sync,
+                    mountpoint,
+                    selected_host,
+                    selected_serial,
+                    selected_server_id,
+                )
+                # A peer may already have disabled S1 when this job snapshots S2.
+                # Retain the original flags so the final release restores both.
+                peers = [peer for peer in self._cors_fixed_base_snapshots.values()
+                         if peer["serial"].casefold() == serial.casefold()]
+                for peer in peers:
+                    for sid in peer["disabled_server_ids"]:
+                        flag = f"server{sid}_enabled"
+                        if flag in peer["service_config"]:
+                            original[flag] = peer["service_config"][flag]
+                        else:
+                            original.pop(flag, None)
+                disabled_server_ids = (1, 2) if all_streams else (server_id,)
+                snapshot = {
+                    "serial": serial,
+                    "server_id": server_id,
+                    "service_config": copy.deepcopy(original),
+                    "disabled_server_ids": disabled_server_ids,
+                    "confirmed_disabled": False,
+                }
+                self._cors_fixed_base_snapshots[snapshot_key] = snapshot
+            peers = [peer for key, peer in self._cors_fixed_base_snapshots.items()
+                     if key != snapshot_key and peer["serial"].casefold() == serial.casefold()]
             disabled_config = self._cors_service_config_with_server_enabled(
                 original,
                 None if all_streams else server_id,
                 enabled=False,
             )
+            for peer in peers:
+                for sid in peer["disabled_server_ids"]:
+                    disabled_config[f"server{sid}_enabled"] = False
             await asyncio.to_thread(
                 self._cors_configure_service_sync,
                 serial,
                 disabled_config,
             )
+            snapshot["confirmed_disabled"] = True
             logger.info(
                 "WEB CORS configure-service hard-disabled fixed base %s host=%s serial=%s S%s",
                 mountpoint,
@@ -270,10 +311,15 @@ class RoundRobinCorsMixin:
                 mountpoint,
             )
             return
+        restored_config = copy.deepcopy(snapshot["service_config"])
+        for peer_key, peer in self._cors_fixed_base_snapshots.items():
+            if peer_key != snapshot_key and peer["serial"].casefold() == snapshot["serial"].casefold():
+                for sid in peer["disabled_server_ids"]:
+                    restored_config[f"server{sid}_enabled"] = False
         await asyncio.to_thread(
             self._cors_configure_service_sync,
             snapshot["serial"],
-            copy.deepcopy(snapshot["service_config"]),
+            restored_config,
         )
         self._cors_fixed_base_snapshots.pop(snapshot_key, None)
         logger.info(
@@ -304,10 +350,11 @@ class RoundRobinCorsMixin:
         server_id: int,
     ) -> bool:
         target_serial = str(serial or "").strip().casefold()
+        # Even a single-stream hold owns a full configure-service document.
+        # Failover must not overwrite it via the other stream of this receiver.
         fixed_stream_is_managed = any(
-            str(key[2] or "").strip().casefold() == target_serial
-            and int(key[3] or 0) == int(server_id)
-            for key in self._cors_fixed_base_snapshots
+            str(snapshot["serial"]).strip().casefold() == target_serial
+            for snapshot in self._cors_fixed_base_snapshots.values()
         )
         if fixed_stream_is_managed:
             return True
@@ -510,6 +557,9 @@ class RoundRobinCorsMixin:
                 backup_server_id,
                 primary_mp.casefold(),
             )
+            previous_state = self._cors_failover_last_state.get(pair_key)
+            change_started_at = time.time()
+            configuration_changed = False
 
             if not primary_online and not backup_online:
                 desired_state = "NO_SOURCE_BOTH_OFFLINE"
@@ -532,6 +582,7 @@ class RoundRobinCorsMixin:
                         enabled_config,
                     )
                     backup_station["service_config"] = enabled_config
+                    configuration_changed = True
                     logger.warning(
                         "CORS automatic failover: %s offline; enabled %s/S%s -> %s",
                         cluster.get("base_station"),
@@ -556,6 +607,7 @@ class RoundRobinCorsMixin:
                         disabled_config,
                     )
                     backup_station["service_config"] = disabled_config
+                    configuration_changed = True
                 primary_config = self._cors_effective_service_config(primary_station)
                 if not self._cors_server_enabled(primary_config, primary_server_id):
                     enabled_config = self._cors_service_config_with_server_enabled(
@@ -569,6 +621,7 @@ class RoundRobinCorsMixin:
                         enabled_config,
                     )
                     primary_station["service_config"] = enabled_config
+                    configuration_changed = True
                     logger.info(
                         "CORS automatic failback: restored %s/S%s -> %s and stopped %s/S%s",
                         cluster.get("base_station"),
@@ -579,6 +632,15 @@ class RoundRobinCorsMixin:
                     )
 
             self._cors_failover_last_state[pair_key] = desired_state
+            if (self.reference_change_callback and configuration_changed
+                    and previous_state != desired_state):
+                # Publish only after every required control operation succeeded.
+                # Repeated writes from a stale CORS map are not new handovers.
+                result = self.reference_change_callback(
+                    cluster, change_started_at, f"cors_failover:{desired_state}",
+                )
+                if inspect.isawaitable(result):
+                    await result
             outcomes.append({
                 "cluster": name,
                 "state": desired_state,

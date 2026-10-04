@@ -104,16 +104,29 @@ class GNSSReferenceMixin:
         event_ts, event_source = self._reference_event(station_config)
 
         if transition is None:
+            handled_ts = getattr(self, "_last_handled_reference_event_ts", None)
+            # CORS-controlled handovers can take 45--120 seconds to regain FIXED.
+            # Keep config timestamps tightly aligned; allow a bounded acquisition
+            # window for the explicit runtime event, including after restart.
+            alignment_s = integrity_cfg["reference_event_alignment_s"]
+            if event_ts == self._normalize_epoch_timestamp(getattr(self, "_reference_changed_at", None)):
+                alignment_s = max(alignment_s, 300.0)
             if (
                 event_ts is None
-                or event_ts == getattr(self, "_last_handled_reference_event_ts", None)
+                or (handled_ts is not None and event_ts <= handled_ts)
                 or not self.history
-                or not 0.0 <= ts - event_ts <= integrity_cfg["reference_event_alignment_s"]
+                or not 0.0 <= ts - event_ts <= alignment_s
             ):
+                return None
+            # A new CORS operation cannot explain an older unresolved shift.
+            shift_started_at = getattr(self, "_shift_started_at", None)
+            if self.reacquire_candidates and shift_started_at is not None and shift_started_at < event_ts:
+                self._consume_reference_event(event_ts)
                 return None
             transition = {
                 "event_ts": event_ts,
                 "event_source": event_source,
+                "deadline": event_ts + alignment_s,
                 "started_at": ts,
                 "pre_position": self.history[-1]["pos_enu"].copy(),
                 "candidates": deque(maxlen=integrity_cfg["reference_transition_samples"]),
@@ -124,6 +137,36 @@ class GNSSReferenceMixin:
                 "quarantining post-event FIXED samples"
             )
 
+        if ts > transition["deadline"]:
+            self._reference_transition = None
+            self._consume_reference_event(transition["event_ts"])
+            return {
+                "type": "gnss_status",
+                "status": "UNVERIFIED_POSITION_SHIFT",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": raw_payload,
+                "data": {
+                    "integrity_state": "UNVERIFIED_POSITION_SHIFT",
+                    "position_quality_reliable": False,
+                    "possible_ground_movement": True,
+                    "reference_event_verified": True,
+                    "reference_event_timestamp": transition["event_ts"],
+                },
+                "message": "Reference transition timed out; last trusted position preserved",
+            }
+        if ts < transition["event_ts"] or (
+            transition["candidates"] and ts <= transition["candidates"][-1]["ts"]
+        ):
+            return {
+                "type": "gnss_status",
+                "status": "NON_MONOTONIC_GGA_TIME",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "message": "Reference transition requires distinct increasing GGA epochs",
+            }
+        if transition["candidates"] and ts - transition["candidates"][-1]["ts"] > integrity_cfg["origin_max_gap_s"]:
+            transition["candidates"].clear()
         transition["candidates"].append({"ts": ts, "pos_enu": pos_enu.copy()})
         candidate_count = len(transition["candidates"])
         target_count = transition["candidates"].maxlen
@@ -164,6 +207,25 @@ class GNSSReferenceMixin:
             not (stable and not offset_too_large and not accumulated_too_much and not in_cooldown),
             transition["event_ts"], transition["started_at"],
         )
+        # The caster may keep delivering old-base FIXED epochs after the control
+        # ACK. Do not spend the runtime event on an unchanged first window.
+        waiting_for_handover = bool(
+            transition["event_ts"] == self._normalize_epoch_timestamp(getattr(self, "_reference_changed_at", None))
+            and np.hypot(*tracking_shift[:2]) <= integrity_cfg["reacquire_max_spread_xy_m"]
+            and abs(tracking_shift[2]) <= integrity_cfg["reacquire_max_spread_u_m"]
+        )
+        if (not stable or in_cooldown or waiting_for_handover) and ts < transition["deadline"]:
+            data["integrity_state"] = "REFERENCE_TRANSITION"
+            data["position_quality_reliable"] = False
+            return {
+                "type": "gnss_status",
+                "status": "REFERENCE_TRANSITION",
+                "fix_quality": fix_quality,
+                "fix_mode": self._fix_mode(fix_quality),
+                "raw_payload": raw_payload,
+                "data": data,
+                "message": "Verified reference change: waiting for a stable FIXED window",
+            }
         self._reference_transition = None
         self._consume_reference_event(transition["event_ts"])
 

@@ -976,17 +976,16 @@ class RoundRobinCycleMixin:
                     cluster.get("round_robin_route_mountpoint")
                     or cluster.get("base_stream_mp")
                 )
-                # A physical CORS base can publish the same RTCM source through
-                # both S1 and S2 (for example SinQuyen2 -> SinQuyen2,SinQuyen1).
-                # Temporary rover bases must replace both outputs as well;
-                # otherwise clients attached to the reciprocal mountpoint keep
-                # receiving the fixed base and never complete the handover.
+                # Only a total cluster owns both CORS outputs. Normal clusters
+                # may run concurrently on S1/S2 of the same physical receiver;
+                # publishing to the other mountpoint corrupts its corrections.
+                uses_common_base = requires_common_base_handover(cluster)
                 temporary_route_mountpoints: list[str] = []
                 if configured_mountpoint:
                     temporary_route_mountpoints.append(str(configured_mountpoint).strip())
                 selected_service_config = cluster.get("base_service_config") or {}
                 normalized_route_host = str(route_host or "").strip().casefold()
-                for server_id in (1, 2):
+                for server_id in ((1, 2) if uses_common_base else ()):
                     candidate_mountpoint = str(
                         selected_service_config.get(f"mountpoint{server_id}") or ""
                     ).strip()
@@ -1044,7 +1043,6 @@ class RoundRobinCycleMixin:
                     configured_base_serial,
                     configured_base_server_id,
                 )
-                is_multi_mp = True
                 if configured_mountpoint and base_stream_key not in suspended_bases:
                     await self._emit_progress(
                         project_id,
@@ -1510,7 +1508,7 @@ class RoundRobinCycleMixin:
                                     str(configured_mountpoint),
                                     enabled=False,
                                     selected_host=configured_base_host,
-                                    all_streams=True,
+                                    all_streams=uses_common_base,
                                     **fixed_base_identity_kwargs,
                                 )
 
@@ -1658,8 +1656,6 @@ class RoundRobinCycleMixin:
                         and rotation_index + 1 < initial_rotation_count
                         and configured_mountpoint
                     ):
-                        # Always sleep ALL streams (S1 & S2) of the fixed base to ensure cross-base streams are also stopped
-                        is_multi_mp = True
                         fixed_base_identity_kwargs = {
                             "selected_serial": configured_base_serial,
                             "selected_server_id": (configured_base_server_id or None),

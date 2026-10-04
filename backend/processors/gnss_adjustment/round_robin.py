@@ -154,6 +154,7 @@ class RoundRobinAdjustmentManager(
         result_callback: Optional[Callable[[int, dict], Any]] = None,
         error_callback: Optional[Callable[[int, str], Any]] = None,
         progress_callback: Optional[Callable[[int, str], Any]] = None,
+        reference_change_callback: Optional[Callable[[dict, float, str], Any]] = None,
     ):
         self.mqtt_client = mqtt_client
         self.caster_host = caster_host
@@ -190,6 +191,7 @@ class RoundRobinAdjustmentManager(
         self.result_callback = result_callback
         self.error_callback = error_callback
         self.progress_callback = progress_callback
+        self.reference_change_callback = reference_change_callback
         self._last_set_error: Optional[str] = None
         self._last_set_response: Optional[str] = None
         self._last_set_warnings: List[str] = []

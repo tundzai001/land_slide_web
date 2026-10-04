@@ -11,6 +11,21 @@ logger = logging.getLogger(__name__)
 
 
 class GnssPayloadMixin:
+    def _monitoring_paused_for_adjustment(self, project_id: int, station_id: int) -> bool:
+        contexts = getattr(self, "adjustment_run_contexts", {})
+        for run_id, session in self.round_robin_manager._sessions.items():
+            if self.adjustment_phase.get(run_id) not in {"FREE_NETWORK", "PAUSED"}:
+                continue
+            context = contexts.get(run_id) or {}
+            if int(context.get("project_id") or run_id) != int(project_id):
+                continue
+            if any(
+                int(station_id) in cluster.get("stations", ())
+                for cluster in session.get("clusters", ())
+            ):
+                return True
+        return False
+
     async def _process_gnss_payload(
         self,
         info: dict,
@@ -294,7 +309,18 @@ class GnssPayloadMixin:
             import re
 
             if re.search(r'\$G[NP]GGA,', raw_payload):
-                res = processor.process_gngga(raw_payload, station_config)
+                if self._monitoring_paused_for_adjustment(public_project_id, station_id):
+                    res = {
+                        "type": "gnss_status",
+                        "status": "ADJUSTMENT_IN_PROGRESS",
+                        "message": "GNSS monitoring paused while correction source changes for adjustment",
+                        "data": {
+                            "integrity_state": "ADJUSTMENT_IN_PROGRESS",
+                            "position_quality_reliable": False,
+                        },
+                    }
+                else:
+                    res = processor.process_gngga(raw_payload, station_config)
                 if res is None and getattr(processor, "_origin_relock_in_progress", False):
                     await self._touch_online_heartbeat(device_id, station_id, current_timestamp)
                     try:
@@ -354,9 +380,9 @@ class GnssPayloadMixin:
                         'INITIALIZING', 'VELOCITY_WARMUP', 'INVALID_DATA',
                         'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY',
                         'PERSISTENT_OFFSET_QUARANTINED', 'REJECTED_MEASUREMENT',
-                        'UNSTABLE_FIX', 'REFERENCE_CHANGE_PENDING',
+                        'UNSTABLE_FIX', 'REFERENCE_CHANGE_PENDING', 'REFERENCE_TRANSITION',
                         'STALE_REFERENCE', 'REACQUIRE_REFUSED',
-                        'CHECKSUM_FAILED', 'NO_DATA',
+                        'CHECKSUM_FAILED', 'NO_DATA', 'ADJUSTMENT_IN_PROGRESS',
                     }:
                         # Keep an existing unresolved GNSS alert alive
                         # while the processor is quarantined/warming up;
@@ -372,7 +398,8 @@ class GnssPayloadMixin:
                             logger.error(f"❌ GNSS active-alert refresh failed: {touch_error}")
                         # Immediate buffering for anomalies can be disabled
                         # per station without stopping processing or alerts.
-                        if self._is_processing_storage_enabled(station_config):
+                        if (res.get('status') != 'ADJUSTMENT_IN_PROGRESS'
+                                and self._is_processing_storage_enabled(station_config)):
                             anomaly_record = {
                                 "station_id": station_id,
                                 "timestamp": current_timestamp,

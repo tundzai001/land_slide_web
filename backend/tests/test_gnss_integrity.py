@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from collections import deque
+from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 
@@ -10,6 +11,156 @@ from processors.landslide_analyzer import LandslideAnalyzer
 
 
 class GnssFixedOnlyTests(unittest.TestCase):
+    def test_adjustment_gga_does_not_poison_monitoring_history(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        bridge.round_robin_manager = Mock()
+        bridge.round_robin_manager._sessions = {
+            -3001: {"clusters": [{"stations": [5, 7]}]},
+        }
+        bridge.round_robin_manager.has_pending_agrica_fragment.return_value = False
+        bridge.adjustment_phase = {-3001: "FREE_NETWORK"}
+        bridge.adjustment_run_contexts = {-3001: {"project_id": 3}}
+        bridge._touch_active_alert = AsyncMock()
+        bridge._upsert_latest_sensor_cache = AsyncMock()
+        bridge._is_processing_storage_enabled = Mock(return_value=True)
+        bridge._buffer_lock = asyncio.Lock()
+        bridge._sensor_buffer = []
+        processor = Mock()
+        processor.process_gngga.return_value = None
+        processor._origin_relock_in_progress = False
+
+        async def process(station_id):
+            return await bridge._process_gnss_payload(
+                info={"type": "gnss", "project_id": 3},
+                raw_payload="$GNGGA,TEST", public_project_id=3,
+                station_id=station_id, station_name="station", processor=processor,
+                station_config={}, device_id=8, adjustment_only=False,
+                current_timestamp=1_700_000_000,
+            )
+
+        with patch("app.mqtt.bridge.sensor_pipeline.gnss.manager.broadcast", new_callable=AsyncMock) as broadcast:
+            asyncio.run(process(5))
+            processor.process_gngga.assert_not_called()
+            bridge._touch_active_alert.assert_awaited_once()
+            self.assertEqual(broadcast.await_args.args[0]["data"]["status"], "ADJUSTMENT_IN_PROGRESS")
+            self.assertFalse(bridge._sensor_buffer)
+            asyncio.run(process(9))
+            processor.process_gngga.assert_called_once_with("$GNGGA,TEST", {})
+            bridge.adjustment_phase[-3001] = "COMPLETED"
+            asyncio.run(process(5))
+            self.assertEqual(processor.process_gngga.call_count, 2)
+
+    def test_cors_reference_event_reaches_only_affected_gnss_processors(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        affected, unrelated, other_project = Mock(), Mock(), Mock()
+        bridge.topic_map = {
+            "a": {"station_id": 7, "project_id": 1, "type": "gnss", "processor": affected},
+            "duplicate": {"station_id": 7, "project_id": 1, "type": "gnss", "processor": affected},
+            "b": {"station_id": 8, "project_id": 1, "type": "gnss", "processor": unrelated},
+            "c": {"station_id": 9, "project_id": 2, "type": "gnss", "processor": other_project},
+        }
+        bridge._handle_gnss_reference_change(
+            {"stations": ["7"], "project_id": 1}, 1_700_000_000.0, "cors_failover",
+        )
+        affected.mark_reference_changed.assert_called_once_with(
+            timestamp=1_700_000_000.0, source="cors_failover",
+        )
+        unrelated.mark_reference_changed.assert_not_called()
+        other_project.mark_reference_changed.assert_not_called()
+
+    def test_cors_reference_event_accepts_persisted_station_codes(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        affected, unrelated = Mock(), Mock()
+        bridge.topic_map = {
+            "a": {"station_id": 7, "station_code": "Dap1_1", "project_id": 1,
+                  "type": "gnss", "processor": affected},
+            "b": {"station_id": 8, "station_code": "Dap1_2", "project_id": 1,
+                  "type": "gnss", "processor": unrelated},
+        }
+
+        bridge._handle_gnss_reference_change(
+            {"stations": ["Dap1_1"], "project_id": 1}, 1_700_000_000.0,
+            "cors_failover",
+        )
+
+        affected.mark_reference_changed.assert_called_once_with(
+            timestamp=1_700_000_000.0, source="cors_failover",
+        )
+        unrelated.mark_reference_changed.assert_not_called()
+
+    def test_verified_reference_waits_for_delayed_fixed_and_stable_window(self):
+        processor = self._processor_without_db()
+        base_ts = 1_700_000_000.0
+        processor.history = deque([{"ts": base_ts - 1, "pos_enu": np.zeros(3)}], maxlen=1200)
+        processor.reacquire_candidates.clear()
+        processor.mark_reference_changed(base_ts, "cors_failover")
+        for index in range(6):
+            result = processor._handle_reference_transition(
+                base_ts + index, np.zeros(3), 4, {}, "$GNGGA,TEST",
+            )
+            self.assertEqual(result["status"], "REFERENCE_TRANSITION")
+        # The receiver needs 90 seconds to regain FIXED, then reports a noisy
+        # first window before settling at the 44 cm vertical shift from the log.
+        positions = [np.array([0.12, 0.0, u]) for u in (0.3, 0.5, 0.3, 0.5, 0.3, 0.5)]
+        positions += [np.array([0.12, 0.0, 0.44])] * 10
+        results = []
+        for index, position in enumerate(positions):
+            result = processor._handle_reference_transition(
+                base_ts + 90 + index, position, 4, {}, "$GNGGA,TEST",
+            )
+            results.append(result)
+            if result and result["status"] == "TRACKING_REACQUIRED":
+                break
+        self.assertEqual(results[5]["status"], "REFERENCE_TRANSITION")
+        self.assertEqual(results[-1]["status"], "TRACKING_REACQUIRED")
+        np.testing.assert_allclose(processor.tracking_offset_enu, [0.12, 0.0, 0.44])
+        np.testing.assert_allclose(processor.history[-1]["pos_enu"], np.zeros(3))
+        self.assertEqual(processor._last_handled_reference_event_ts, base_ts)
+
+    def test_runtime_reference_event_expires_without_accepting_a_late_shift(self):
+        processor = self._processor_without_db()
+        base_ts = 1_700_000_000.0
+        processor.history = deque([{"ts": base_ts - 1, "pos_enu": np.zeros(3)}], maxlen=1200)
+        processor.reacquire_candidates.clear()
+        processor.mark_reference_changed(base_ts, "cors_failover")
+        processor._handle_reference_transition(base_ts, np.zeros(3), 4, {}, "test")
+        result = processor._handle_reference_transition(
+            base_ts + 301, np.array([0.12, 0.0, 0.44]), 4, {}, "test",
+        )
+        self.assertEqual(result["status"], "UNVERIFIED_POSITION_SHIFT")
+        self.assertIsNone(processor._reference_transition)
+        self.assertEqual(processor._last_handled_reference_event_ts, base_ts)
+        np.testing.assert_allclose(processor.tracking_offset_enu, np.zeros(3))
+
+    def test_new_reference_event_cannot_erase_an_existing_quarantine(self):
+        processor = self._processor_without_db()
+        base_ts = 1_700_000_000.0
+        processor.history = deque([{"ts": base_ts - 85000, "pos_enu": np.zeros(3)}], maxlen=1200)
+        processor._shift_started_at = base_ts - 84999
+        processor.reacquire_candidates = deque([
+            {"ts": base_ts - 1, "pos_enu": np.array([0.12, 0.0, 0.44]), "fix_quality": 4},
+        ], maxlen=10)
+        processor.mark_reference_changed(base_ts, "cors_failover")
+        result = processor._handle_reference_transition(
+            base_ts, np.array([0.12, 0.0, 0.44]), 4, {}, "test",
+        )
+        self.assertIsNone(result)
+        self.assertEqual(processor._last_handled_reference_event_ts, base_ts)
+        np.testing.assert_allclose(processor.tracking_offset_enu, np.zeros(3))
+        np.testing.assert_allclose(processor.history[-1]["pos_enu"], np.zeros(3))
+
+    def test_reference_transition_does_not_count_replayed_epochs(self):
+        processor = self._processor_without_db()
+        base_ts = 1_700_000_000.0
+        processor.history = deque([{"ts": base_ts - 1, "pos_enu": np.zeros(3)}], maxlen=1200)
+        processor.reacquire_candidates.clear()
+        config = {"cors_failover_timestamp": base_ts}
+        results = [processor._handle_reference_transition(
+            base_ts, np.array([0.12, 0.0, 0.44]), 4, config, "$GNGGA,TEST",
+        ) for _ in range(10)]
+        self.assertNotIn("TRACKING_REACQUIRED", {result.get("status") for result in results if result})
+        np.testing.assert_allclose(processor.tracking_offset_enu, np.zeros(3))
+
     def test_processor_waits_for_persisted_state_before_consuming_gga(self):
         processor = GNSSVelocityProcessor.__new__(GNSSVelocityProcessor)
         processor._initialization_complete = False

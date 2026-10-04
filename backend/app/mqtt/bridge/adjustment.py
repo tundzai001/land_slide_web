@@ -16,6 +16,32 @@ logger = logging.getLogger(__name__)
 
 
 class MQTTAdjustmentMixin:
+    def _handle_gnss_reference_change(self, cluster: dict, timestamp: float, source: str):
+        """Forward confirmed CORS operations to the affected monitoring devices."""
+        station_ids = set()
+        station_codes = set()
+        for value in cluster.get("stations", []):
+            try:
+                station_ids.add(int(value))
+            except (TypeError, ValueError):
+                station_codes.add(str(value).strip())
+        project_id = cluster.get("project_id")
+        notified = set()
+        for info in self.topic_map.values():
+            if (
+                info.get("type") != "gnss"
+                or (
+                    int(info.get("station_id") or 0) not in station_ids
+                    and str(info.get("station_code") or "").strip() not in station_codes
+                )
+                or (project_id is not None and int(info.get("project_id") or 0) != int(project_id))
+            ):
+                continue
+            processor = info.get("processor")
+            if processor is not None and id(processor) not in notified:
+                processor.mark_reference_changed(timestamp=timestamp, source=source)
+                notified.add(id(processor))
+
     def _adjustment_run_context(self, run_id: int) -> dict:
         if not hasattr(self, "adjustment_run_contexts"):
             self.adjustment_run_contexts = {}

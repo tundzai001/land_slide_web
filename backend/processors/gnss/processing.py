@@ -453,6 +453,10 @@ class GNSSProcessingMixin:
                 ref_ts, _ = self._reference_event(station_config)
                 event_aligned = bool(
                     ref_ts is not None
+                    and (
+                        getattr(self, "_last_handled_reference_event_ts", None) is None
+                        or ref_ts > self._last_handled_reference_event_ts
+                    )
                     and 0.0 <= getattr(self, "_shift_started_at", ts) - ref_ts
                     <= integrity_cfg["reference_event_alignment_s"]
                 )
@@ -506,11 +510,7 @@ class GNSSProcessingMixin:
                         "fix_quality": fix_quality,
                         "fix_mode": self._fix_mode(fix_quality),
                         "raw_payload": raw_payload or gngga_string,
-                        "data": self._shift_data(
-                            tracking_shift, candidate_xy_spread, candidate_u_spread,
-                            persistent_shift_duration_s, event_aligned, False,
-                            ref_ts, getattr(self, "_shift_started_at", ts),
-                        ),
+                        "data": shift_data,
                         "message": "Stable RTK FIXED tracking reacquired after verified reference shift"
                     }
 
@@ -557,7 +557,8 @@ class GNSSProcessingMixin:
                 self._last_stale_reject_log_ts = ts
                 logger.warning(
                     f"[{self._log_prefix()}] Stale reference after reject: dt={dt:.1f}s. "
-                    "Keeping locked origin and last accepted displacement; waiting for a stable fix."
+                    "Keeping locked origin and last accepted displacement; "
+                    "a stable shifted cluster still requires a verified reference change or manual calibration."
                 )
             return {
                 "type": "gnss_status",

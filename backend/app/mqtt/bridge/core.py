@@ -102,6 +102,7 @@ class MQTTBridgeCore:
             result_callback=self._handle_round_robin_adjustment_result,
             error_callback=self._handle_round_robin_adjustment_error,
             progress_callback=self._handle_round_robin_progress,
+            reference_change_callback=self._handle_gnss_reference_change,
         )
         self._fwd_clients: Dict[tuple, mqtt.Client] = {}  # Cache for external brokers
         self._sub_clients: Dict[tuple, mqtt.Client] = {}  # Dynamic clients for subscriptions

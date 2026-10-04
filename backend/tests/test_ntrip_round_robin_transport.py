@@ -1,8 +1,9 @@
 import asyncio
 import base64
+import copy
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 try:
     from backend.app.mqtt.ntrip_pusher import (
@@ -517,6 +518,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 selected_server_id=2,
                 all_streams=True,
             )
+            self.assertTrue(manager._cors_stream_is_managed_by_adjustment("SINQUYEN2-SERIAL", 1))
+            self.assertTrue(manager._cors_stream_is_managed_by_adjustment("SINQUYEN2-SERIAL", 2))
             await manager._set_cors_fixed_base_enabled(
                 "SinQuyen1",
                 enabled=True,
@@ -532,6 +535,46 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(configured[0][1]["server1_enabled"])
         self.assertFalse(configured[0][1]["server2_enabled"])
         self.assertEqual(configured[1][1], backup_config)
+
+    async def test_parallel_clusters_restore_only_their_own_stream_on_shared_base(self):
+        for restore_order in ((1, 2), (2, 1)):
+            with self.subTest(restore_order=restore_order):
+                manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+                original = {
+                    "server1_enabled": True, "mountpoint1": "SinQuyen2",
+                    "server2_enabled": True, "mountpoint2": "SinQuyen1",
+                }
+                live_config = copy.deepcopy(original)
+
+                def find(_mp, _host, _serial, server_id):
+                    return "SHARED-BASE", server_id, copy.deepcopy(live_config)
+
+                def configure(_serial, config):
+                    live_config.clear()
+                    live_config.update(copy.deepcopy(config))
+
+                async def toggle(server_id, enabled):
+                    await manager._set_cors_fixed_base_enabled(
+                        original[f"mountpoint{server_id}"], enabled,
+                        selected_serial="SHARED-BASE", selected_server_id=server_id,
+                    )
+
+                with patch.object(manager, "_find_cors_station_sync", side_effect=find), patch.object(
+                    manager, "_cors_configure_service_sync", side_effect=configure,
+                ):
+                    await asyncio.gather(toggle(1, False), toggle(2, False))
+                    self.assertFalse(live_config["server1_enabled"])
+                    self.assertFalse(live_config["server2_enabled"])
+                    await toggle(restore_order[0], True)
+                    self.assertTrue(live_config[f"server{restore_order[0]}_enabled"])
+                    self.assertFalse(live_config[f"server{restore_order[1]}_enabled"])
+                    # configure-service replaces the full device config, so the
+                    # daemon must not touch either stream until both jobs release it.
+                    self.assertTrue(manager._cors_stream_is_managed_by_adjustment("SHARED-BASE", 1))
+                    self.assertTrue(manager._cors_stream_is_managed_by_adjustment("SHARED-BASE", 2))
+                    await toggle(restore_order[1], True)
+                    self.assertEqual(live_config, original)
+                    self.assertFalse(manager._cors_fixed_base_snapshots)
 
     async def test_conflict_base_is_hard_disabled_and_returns_exact_restore_snapshot(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
@@ -564,8 +607,58 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(configured[0][1]["server1_stream_on_demand"])
         self.assertTrue(configured[0][1]["server2_stream_on_demand"])
 
-    async def test_cross_station_failover_switches_s2_both_directions(self):
+    async def test_failed_fixed_base_disable_can_be_retried(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        original = {
+            "server1_enabled": True, "server2_enabled": True,
+            "serverhost1": "caster.example", "mountpoint1": "SinQuyen1",
+        }
+        with patch.object(
+            manager, "_find_cors_station_sync", return_value=("SQ1", 1, original),
+        ), patch.object(
+            manager, "_cors_configure_service_sync",
+            side_effect=[RuntimeError("CORS API unavailable"), {"status": "service_config_sent_and_saved"}],
+        ) as configure:
+            with self.assertRaisesRegex(RuntimeError, "CORS API unavailable"):
+                await manager._set_cors_fixed_base_enabled(
+                    "SinQuyen1", False, "caster.example", "SQ1", 1,
+                )
+            snapshot = next(iter(manager._cors_fixed_base_snapshots.values()))
+            self.assertFalse(snapshot["confirmed_disabled"])
+            self.assertEqual(snapshot["service_config"], original)
+
+            await manager._set_cors_fixed_base_enabled(
+                "SinQuyen1", False, "caster.example", "SQ1", 1,
+            )
+            self.assertEqual(configure.call_count, 2)
+            self.assertEqual(len(manager._cors_fixed_base_snapshots), 1)
+            self.assertTrue(snapshot["confirmed_disabled"])
+
+    async def test_failed_fixed_base_disable_still_has_restore_snapshot(self):
+        manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+        original = {"server1_enabled": True, "server2_enabled": True}
+        with patch.object(
+            manager, "_find_cors_station_sync", return_value=("SQ1", 1, original),
+        ), patch.object(
+            manager, "_cors_configure_service_sync",
+            side_effect=[RuntimeError("response lost"), {"status": "service_config_sent_and_saved"}],
+        ) as configure:
+            with self.assertRaisesRegex(RuntimeError, "response lost"):
+                await manager._set_cors_fixed_base_enabled(
+                    "SinQuyen1", False, "caster.example", "SQ1", 1,
+                )
+            await manager._set_cors_fixed_base_enabled(
+                "SinQuyen1", True, "caster.example", "SQ1", 1,
+            )
+
+        self.assertEqual(configure.call_args.args, ("SQ1", original))
+        self.assertFalse(manager._cors_fixed_base_snapshots)
+
+    async def test_cross_station_failover_switches_s2_both_directions(self):
+        reference_changed = Mock()
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), reference_change_callback=reference_changed,
+        )
         stations = [
             {
                 "serial": "SQ1-SERIAL",
@@ -650,6 +743,11 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(configured[0][1]["server2_enabled"])
             self.assertTrue(configured[0][1]["server2_stream_on_demand"])
             self.assertFalse(configured[0][1]["server2_stream_active"])
+            self.assertEqual(reference_changed.call_count, 1)
+            self.assertEqual(reference_changed.call_args.args[0], clusters[0])
+            reference_changed.reset_mock()
+            await manager.reconcile_cors_failover_pairs(clusters, stations=stations)
+            reference_changed.assert_not_called()
 
             stations[0]["status"] = "online"
             stations[1]["status"] = "offline"
@@ -673,6 +771,38 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(configured[1][1]["server2_enabled"])
         self.assertTrue(configured[1][1]["server2_stream_on_demand"])
         self.assertFalse(configured[1][1]["server2_stream_active"])
+        self.assertEqual(reference_changed.call_count, 2)
+
+    async def test_repeated_failback_from_stale_map_does_not_repeat_reference_event(self):
+        reference_changed = Mock()
+        manager = RoundRobinAdjustmentManager(
+            _FakeMqttClient(), reference_change_callback=reference_changed,
+        )
+        stations = [
+            {"serial": "SQ1", "name": "SinQuyen1", "status": "online",
+             "service_config": {"server1_enabled": False,
+                                "serverhost1": "caster.example", "mountpoint1": "SinQuyen1"}},
+            {"serial": "SQ2", "name": "SinQuyen2", "status": "online",
+             "service_config": {"server2_enabled": True,
+                                "serverhost2": "caster.example", "mountpoint2": "SinQuyen1"}},
+        ]
+        cluster = {
+            "name": "Dam 1", "base_station": "SinQuyen1", "base_serial": "SQ1",
+            "base_server_id": 1, "base_stream_host": "caster.example",
+            "base_stream_mp": "SinQuyen1", "backup_base_station": "SinQuyen2",
+            "backup_base_serial": "SQ2", "backup_base_server_id": 2,
+            "backup_base_stream_host": "caster.example",
+            "backup_base_stream_mp": "SinQuyen1",
+        }
+        with patch.object(manager, "_cors_configure_service_sync") as configure:
+            for _ in range(2):
+                # Simulate the API returning the old snapshot on every daemon poll.
+                await manager.reconcile_cors_failover_pairs(
+                    [cluster], stations=copy.deepcopy(stations),
+                )
+
+        self.assertEqual(configure.call_count, 4)
+        reference_changed.assert_called_once()
 
     async def test_seed_forces_both_streams_to_selected_physical_base(self):
         manager = RoundRobinAdjustmentManager(_FakeMqttClient())

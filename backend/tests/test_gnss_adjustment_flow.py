@@ -1286,6 +1286,50 @@ class RoundRobinAdjustmentFlowTests(unittest.TestCase):
 
 
 class RoundRobinCompletionOrderingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_normal_cluster_cannot_publish_to_or_sleep_the_other_cluster_stream(self):
+        for cluster_type in ("normal", "total"):
+            with self.subTest(cluster_type=cluster_type):
+                manager = RoundRobinAdjustmentManager(_FakeMqttClient())
+                manager.configure_project(71, [{
+                    "name": "Dam 1", "cluster_type": cluster_type,
+                    "stations": [701, 702], "rovers": ["R1", "R2"],
+                    "base_stream_mp": "SinQuyen1", "base_stream_host": "caster.example",
+                    "base_serial": "SHARED-BASE", "base_server_id": 2,
+                    "base_service_config": {
+                        "server1_enabled": True, "mountpoint1": "SinQuyen2",
+                        "serverhost1": "caster.example",
+                        "server2_enabled": True, "mountpoint2": "SinQuyen1",
+                        "serverhost2": "caster.example",
+                    },
+                }])
+                manager._freeze_temporary_base_coordinates = Mock(return_value={"R1": {}, "R2": {}})
+                manager._set_cors_fixed_base_enabled = AsyncMock()
+                manager._reacquire_fixed_base_between_rotations = AsyncMock()
+                manager._build_cluster_result = Mock(return_value={"rover_count": 2})
+                routes = []
+
+                async def rotate(rover_code, **kwargs):
+                    routes.append(kwargs["route_mountpoint"])
+                    await kwargs["before_route_start"]()
+                    manager._sessions[71]["clusters"][0]["observations"].append(SimpleNamespace(
+                        base_name=rover_code,
+                        observation=SimpleNamespace(
+                            rover_name="R2" if rover_code == "R1" else "R1",
+                            std_neu=(0.01, 0.01, 0.01), baseline_neu=(10.0, 0.0, 0.0),
+                        ),
+                    ))
+
+                manager._set_rover_as_temporary_base = rotate
+                with patch(f"{RoundRobinAdjustmentManager.__module__}.asyncio.sleep", new=AsyncMock()):
+                    await manager._run_cycle(71)
+                expected_route = "SinQuyen1,SinQuyen2" if cluster_type == "total" else "SinQuyen1"
+                self.assertEqual(routes, [expected_route, expected_route])
+                sleep_calls = [call for call in manager._set_cors_fixed_base_enabled.await_args_list
+                               if not call.kwargs["enabled"]]
+                self.assertEqual(len(sleep_calls), 2)
+                self.assertTrue(all(call.kwargs["all_streams"] == (cluster_type == "total")
+                                    for call in sleep_calls))
+
     async def test_failed_rotation_can_proceed_when_other_base_connects_graph(self):
         attempted_rovers = []
         progress_messages = []
