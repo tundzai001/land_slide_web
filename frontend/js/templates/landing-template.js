@@ -74,11 +74,11 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                         <article data-story-step="0">
                             <span class="chapter-number">01 / 04</span>
                             <div>
-                                <p class="chapter-label">Phát hiện · Vi dịch chuyển khởi phát</p>
+                                <p class="chapter-label">Thiết bị 01 · Quét cận cảnh Trạm GNSS RTK &amp; IMU trên đồi</p>
                                 <h3>Chuyển động bắt đầu rất nhỏ.</h3>
-                                <p>Tại đới trượt sườn giữa, trạm GNSS RTK ghi nhận dịch chuyển cấp milimét trong khi chuỗi cảm biến IMU lỗ khoan phát hiện biến dạng uốn dọc theo mặt trượt ngầm.</p>
+                                <p>Camera tiếp cận từng trạm GNSS RTK trên bệ lục giác đỉnh đồi (Crown), trạm Rover sườn giữa và chuỗi cảm biến IMU lỗ khoan để ghi nhận vi dịch chuyển cấp milimét cùng biến dạng uốn dọc mặt trượt ngầm.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn phát hiện">
-                                    <div class="telemetry-chip"><span>GNSS Rover S2</span><strong>+4.2 mm E · -1.8 mm Z</strong></div>
+                                    <div class="telemetry-chip"><span>GNSS Crown &amp; Rover S2</span><strong>+4.2 mm E · -1.8 mm Z</strong></div>
                                     <div class="telemetry-chip"><span>IMU Lỗ khoan (-6m)</span><strong>+0.14° nghiêng trục X</strong></div>
                                 </div>
                             </div>
@@ -86,9 +86,9 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                         <article data-story-step="1">
                             <span class="chapter-number">02 / 04</span>
                             <div>
-                                <p class="chapter-label">Bối cảnh · Tương quan thủy văn &amp; địa chất</p>
+                                <p class="chapter-label">Thiết bị 02 · Lấy mẫu Trạm mưa tự động &amp; Giếng Piezometer</p>
                                 <h3>Không một cảm biến nào kể hết câu chuyện.</h3>
-                                <p>Mưa lớn kéo dài làm nước thấm qua tầng đất phong hóa. Giếng quan trắc Piezometer ghi nhận mực nước ngầm dâng cao, làm tăng áp lực nước lỗ rỗng ngay sát mặt trượt.</p>
+                                <p>Góc máy lướt sang trạm khí tượng tự động và mặt cắt giếng quan trắc Piezometer khi mưa lớn thấm sâu, ghi nhận trực tiếp cột nước ngầm dâng cao làm tăng áp lực nước lỗ rỗng sát mặt trượt.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn bối cảnh">
                                     <div class="telemetry-chip"><span>Cường độ mưa</span><strong>68 mm/h · Tích lũy 184 mm</strong></div>
                                     <div class="telemetry-chip"><span>Mực nước ngầm</span><strong>Dâng +1.45 m (Áp lực cao)</strong></div>
@@ -98,24 +98,24 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                         <article data-story-step="2">
                             <span class="chapter-number">03 / 04</span>
                             <div>
-                                <p class="chapter-label">Xác minh · Hợp nhất &amp; Bình sai cụm trạm</p>
+                                <p class="chapter-label">Xác minh · Zoom toàn cảnh &amp; Bay theo luồng dữ liệu</p>
                                 <h3>Tách nhiễu khỏi tín hiệu cần chú ý.</h3>
-                                <p>Hệ thống tự động bình sai đường cơ sở từ trạm Base CORS trên đá gốc tới 3 trạm Rover, đối chiếu chéo với IMU và áp lực nước để khoanh vùng khối trượt thực tế.</p>
+                                <p>Sau khi từng thiết bị hoàn tất thu thập dữ liệu, camera phóng rộng toàn cảnh đồng bộ 8 vệ tinh quỹ đạo cao rồi bay bám theo các xung dữ liệu quang học truyền thẳng về Trung tâm Điều hành.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn xác minh">
                                     <div class="telemetry-chip"><span>Tương quan đa cảm biến</span><strong>98.4% · Đã lọc nhiễu</strong></div>
-                                    <div class="telemetry-chip"><span>Phân loại sự kiện</span><strong class="text-amber">CẦN XÁC MINH KHẨN</strong></div>
+                                    <div class="telemetry-chip"><span>Luồng truyền về Center</span><strong class="text-amber">ĐANG ĐỒNG BỘ VỀ HUB</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="3">
                             <span class="chapter-number">04 / 04</span>
                             <div>
-                                <p class="chapter-label">Phản ứng · Cảnh báo sớm &amp; Điều phối</p>
+                                <p class="chapter-label">Phản ứng · Mở cửa Center &amp; Vào Phòng Kiểm Soát AI</p>
                                 <h3>Đúng thông tin, đến đúng người.</h3>
-                                <p>Tín hiệu đã kiểm chứng hội tụ về trung tâm điều hành Operations Hub và kích hoạt cổng cảnh báo trên tuyến đường đèo dưới chân taluy trước khi sạt lở xảy ra.</p>
+                                <p>Khi camera tiến sát cổng chính Operations Center, hệ thống cửa trượt tự động mở rộng đưa góc máy bay thẳng lên Phòng Kiểm Soát trung tâm với 5 màn hình điều hành lớn và sa bàn Hologram 3D.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn phản ứng">
-                                    <div class="telemetry-chip"><span>Operations Node</span><strong class="text-lime">ĐÃ TIẾP NHẬN (&lt; 1.2s)</strong></div>
-                                    <div class="telemetry-chip"><span>Hành lang bảo vệ</span><strong>Cảnh báo tuyến đường chân dốc</strong></div>
+                                    <div class="telemetry-chip"><span>AI Control Room</span><strong class="text-lime">CỬA MỞ · 5 MÀN HÌNH LIVE</strong></div>
+                                    <div class="telemetry-chip"><span>Hành lang bảo vệ</span><strong>Kích hoạt cổng cảnh báo đèo</strong></div>
                                 </div>
                             </div>
                         </article>

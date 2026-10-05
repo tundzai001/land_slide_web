@@ -307,26 +307,308 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         return line;
     }
 
+    function sampleRoadElevation(ry) {
+        const prof = BLENDER_META.roadProfile;
+        if (!Array.isArray(prof) || prof.length < 2) {
+            return -0.58 + 0.08 * (ry / 5.4);
+        }
+        const t = THREE.MathUtils.clamp((ry + 5.0) / 10.0, 0, 1) * (prof.length - 1);
+        const i0 = Math.floor(t);
+        const i1 = Math.min(prof.length - 1, i0 + 1);
+        const frac = t - i0;
+        return prof[i0] * (1 - frac) + prof[i1] * frac;
+    }
+
+    function setupLivingTwinDynamics(nodes) {
+        // 1. 12 Moving Highway Vehicles (6 Northbound in right lane +0.21, 6 Southbound in left lane -0.21)
+        const vehicleConfigs = [
+            // Northbound (+Y_blender / -Z_three, right lane +0.21)
+            { name: 'Vehicle_01_PoliceCruiser', ry0: -4.45, laneX: 0.21, north: true, speed: 0.92, police: true },
+            { name: 'Vehicle_02_RescueBoxTruck', ry0: -2.80, laneX: 0.215, north: true, speed: 0.92, rescue: true },
+            { name: 'Vehicle_04_GeoFieldPickup', ry0: -1.15, laneX: 0.21, north: true, speed: 0.92 },
+            { name: 'Vehicle_05_TelemetryMinivan', ry0: 0.50, laneX: 0.21, north: true, speed: 0.92 },
+            { name: 'Vehicle_08_SportCoupe', ry0: 2.15, laneX: 0.21, north: true, speed: 0.92 },
+            { name: 'Vehicle_11_PatrolInterceptor', ry0: 3.80, laneX: 0.21, north: true, speed: 0.92, police: true },
+            // Southbound (-Y_blender / +Z_three, left lane -0.21)
+            { name: 'Vehicle_07_SedanDaily', ry0: -3.95, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_03_CivilianCharger', ry0: -2.30, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_10_SurveyStriped', ry0: -0.65, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_09_AlpineTourer', ry0: 1.00, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_06_EngineeringVan', ry0: 2.65, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_12_HeavyUtilityTruck', ry0: 4.30, laneX: -0.21, north: false, speed: 0.86, rescue: true }
+        ];
+
+        // In local car coordinates, front bumper (headlights) is at +Z.
+        // Rotating ConeGeometry by -PI/2 around X puts the apex at -Z (bumper) and flares the wide beam toward +Z (ahead of car).
+        const headConeGeo = new THREE.ConeGeometry(0.14, 0.48, 12, 1, true);
+        headConeGeo.rotateX(-Math.PI / 2);
+        const headConeMat = new THREE.MeshBasicMaterial({
+            color: 0xfef08a,
+            transparent: true,
+            opacity: 0.22,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const strobeSphereGeo = new THREE.SphereGeometry(0.042, 8, 8);
+        const redStrobeMat = new THREE.MeshBasicMaterial({
+            color: 0xff1744,
+            transparent: true,
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending
+        });
+        const blueStrobeMat = new THREE.MeshBasicMaterial({
+            color: 0x00b0ff,
+            transparent: true,
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending
+        });
+        const amberStrobeMat = new THREE.MeshBasicMaterial({
+            color: 0xffab00,
+            transparent: true,
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending
+        });
+
+        const activeVehicles = [];
+        vehicleConfigs.forEach(cfg => {
+            const obj = nodes[cfg.name];
+            if (!obj) return;
+            const beamCone = new THREE.Mesh(headConeGeo, headConeMat);
+            beamCone.position.set(0, 0.055, 0.46);
+            obj.add(beamCone);
+
+            let redLamp = null, blueLamp = null, amberLamp = null;
+            if (cfg.police) {
+                redLamp = new THREE.Mesh(strobeSphereGeo, redStrobeMat.clone());
+                redLamp.position.set(-0.06, 0.24, 0.0);
+                blueLamp = new THREE.Mesh(strobeSphereGeo, blueStrobeMat.clone());
+                blueLamp.position.set(0.06, 0.24, 0.0);
+                obj.add(redLamp, blueLamp);
+            } else if (cfg.rescue) {
+                amberLamp = new THREE.Mesh(strobeSphereGeo, amberStrobeMat.clone());
+                amberLamp.position.set(0.0, 0.31, 0.15);
+                obj.add(amberLamp);
+            }
+            activeVehicles.push({ ...cfg, obj, redLamp, blueLamp, amberLamp });
+        });
+
+        // 2. Attach Volumetric Searchlight & LiDAR Scan Cones to Both Rescue Helicopters & Quadcopter Drones
+        const heli1 = nodes.Rescue_Helicopter_01;
+        const heli1Rotor = nodes.Rescue_Helicopter_01_Rotor;
+        const heli1Tail = nodes.Rescue_Helicopter_01_TailRotor;
+        const heli2 = nodes.Rescue_Helicopter_02;
+        const heli2Rotor = nodes.Rescue_Helicopter_02_Rotor;
+        const heli2Tail = nodes.Rescue_Helicopter_02_TailRotor;
+
+        let heliBeam1 = null, heliBeam2 = null;
+        const heliConeGeo = new THREE.ConeGeometry(0.62, 1.95, 24, 1, true);
+        if (heli1) {
+            const hMat1 = new THREE.MeshBasicMaterial({
+                color: 0x38bdf8,
+                transparent: true,
+                opacity: 0.20,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            heliBeam1 = new THREE.Mesh(heliConeGeo, hMat1);
+            heliBeam1.position.set(0, -1.05, 0.22);
+            heli1.add(heliBeam1);
+        }
+        if (heli2) {
+            const hMat2 = new THREE.MeshBasicMaterial({
+                color: 0xfef08a,
+                transparent: true,
+                opacity: 0.18,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            heliBeam2 = new THREE.Mesh(heliConeGeo, hMat2);
+            heliBeam2.position.set(0, -1.00, 0.18);
+            heli2.add(heliBeam2);
+        }
+
+        const drone = nodes.OpsSurveyDrone;
+        const drone2 = nodes.OpsRescueDrone;
+        let lidarCone = null, lidarCone2 = null;
+        const lidarGeo = new THREE.ConeGeometry(0.42, 1.05, 20, 1, true);
+        if (drone) {
+            const lidarMat = new THREE.MeshBasicMaterial({
+                color: 0x22d3ee,
+                transparent: true,
+                opacity: 0.22,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            lidarCone = new THREE.Mesh(lidarGeo, lidarMat);
+            lidarCone.position.set(0, -0.54, 0);
+            drone.add(lidarCone);
+        }
+        if (drone2) {
+            const lidarMat2 = new THREE.MeshBasicMaterial({
+                color: 0xd7ef73,
+                transparent: true,
+                opacity: 0.20,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            lidarCone2 = new THREE.Mesh(lidarGeo, lidarMat2);
+            lidarCone2.position.set(0, -0.54, 0);
+            drone2.add(lidarCone2);
+        }
+
+        const span = 10.0;
+        const halfDepth = 5.4;
+        return {
+            update(elapsed) {
+                // Move all 12 vehicles continuously along the curved 10.8m mountain highway in their exact forward lane direction
+                activeVehicles.forEach(v => {
+                    const dir = v.north ? 1.0 : -1.0;
+                    const rawRy = (((v.ry0 + 5.0 + dir * elapsed * v.speed) % span) + span) % span - 5.0;
+                    const rc = 2.65 + 0.24 * Math.sin((rawRy / halfDepth) * 1.5);
+                    const vx = rc + v.laneX;
+                    const vz = sampleRoadElevation(rawRy) + 0.030;
+                    const dxDy = 0.24 * (1.5 / halfDepth) * Math.cos((rawRy / halfDepth) * 1.5);
+                    // Local +Z is front bumper. Rotating by yaw around +Y sends (0,0,+1) to (+sin(yaw), 0, +cos(yaw)).
+                    // Northbound velocity in Three.js (X, Z) is (+dxDy, -1); Southbound velocity is (-dxDy, +1).
+                    const yaw = v.north ? Math.atan2(dxDy, -1.0) : Math.atan2(-dxDy, 1.0);
+
+                    v.obj.position.set(vx, vz, -rawRy);
+                    v.obj.rotation.set(0, yaw, 0);
+
+                    if (v.redLamp && v.blueLamp) {
+                        const flash = Math.sin(elapsed * 22.0) > 0;
+                        v.redLamp.scale.setScalar(flash ? 1.5 : 0.55);
+                        v.blueLamp.scale.setScalar(flash ? 0.55 : 1.5);
+                    }
+                    if (v.amberLamp) {
+                        const pulse = 0.75 + Math.abs(Math.sin(elapsed * 14.0)) * 0.80;
+                        v.amberLamp.scale.setScalar(pulse);
+                    }
+                });
+
+                // Fly Both AW101 Rescue Helicopters & Spin Main + Tail Rotors at High Speed
+                if (heli1) {
+                    const hAng = elapsed * 0.38;
+                    const hx = -0.35 + Math.cos(hAng) * 1.95;
+                    const hy = -0.25 + Math.sin(hAng * 2.0) * 1.15;
+                    const hz = 2.78 + Math.sin(hAng * 1.5) * 0.16;
+                    const vx = -Math.sin(hAng) * 1.95;
+                    const vzThree = -Math.cos(hAng * 2.0) * 2.30;
+                    const hyaw = Math.atan2(vx, vzThree);
+                    heli1.position.set(hx, hz, -hy);
+                    heli1.rotation.set(0.09, hyaw, Math.sin(hAng) * 0.12);
+                    if (heliBeam1) {
+                        heliBeam1.material.opacity = 0.14 + Math.abs(Math.sin(elapsed * 2.8)) * 0.12;
+                    }
+                }
+                if (heli1Rotor) {
+                    heli1Rotor.rotation.y = elapsed * 24.0;
+                }
+                if (heli1Tail) {
+                    heli1Tail.rotation.x = elapsed * 32.0;
+                }
+
+                if (heli2) {
+                    const hAng2 = elapsed * 0.34 + 1.2;
+                    const hx2 = 4.05 + Math.sin(hAng2) * 1.10;
+                    const hy2 = -0.85 + Math.cos(hAng2) * 0.95;
+                    const hz2 = 2.18 + Math.cos(hAng2 * 2.0) * 0.12;
+                    const vx2 = Math.cos(hAng2) * 1.10;
+                    const vzThree2 = Math.sin(hAng2) * 0.95;
+                    const hyaw2 = Math.atan2(vx2, vzThree2);
+                    heli2.position.set(hx2, hz2, -hy2);
+                    heli2.rotation.set(0.07, hyaw2, -Math.cos(hAng2) * 0.10);
+                    if (heliBeam2) {
+                        heliBeam2.material.opacity = 0.12 + Math.abs(Math.cos(elapsed * 2.5)) * 0.10;
+                    }
+                }
+                if (heli2Rotor) {
+                    heli2Rotor.rotation.y = -elapsed * 24.0;
+                }
+                if (heli2Tail) {
+                    heli2Tail.rotation.x = -elapsed * 32.0;
+                }
+
+                // Rotate Data Center Phased-Array Doppler Radar, Dual Ku-Band Dishes, Control Room 3D Hologram & Screen Scanner
+                if (nodes.OpsBeaconCore) {
+                    nodes.OpsBeaconCore.rotation.y = elapsed * 2.2;
+                }
+                if (nodes.OpsTrackingDish) {
+                    nodes.OpsTrackingDish.rotation.y = Math.sin(elapsed * 0.65) * 0.55;
+                    nodes.OpsTrackingDish.rotation.x = Math.cos(elapsed * 0.42) * 0.08;
+                }
+                if (nodes.OpsSecondaryDish) {
+                    nodes.OpsSecondaryDish.rotation.y = -Math.sin(elapsed * 0.52) * 0.48;
+                    nodes.OpsSecondaryDish.rotation.x = Math.sin(elapsed * 0.38) * 0.07;
+                }
+                if (nodes.OpsHoloTerrain) {
+                    nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
+                    nodes.OpsHoloTerrain.position.y = 0.66 + Math.sin(elapsed * 2.4) * 0.018;
+                }
+                if (nodes.OpsScreenScanner) {
+                    nodes.OpsScreenScanner.position.x = Math.sin(elapsed * 2.2) * 0.36;
+                }
+
+                // Fly Autonomous Survey Quadcopter Drones across the Data Center & Landslide Slip Zone
+                if (drone) {
+                    const dAng = elapsed * 0.55;
+                    const bx = 2.15 + Math.cos(dAng) * 2.35;
+                    const by = -0.65 + Math.sin(dAng * 2.0) * 0.85;
+                    const bz = 1.15 + Math.sin(dAng * 1.5) * 0.18 + (bx < 1.2 ? (1.2 - bx) * 0.25 : 0);
+                    drone.position.set(bx, bz, -by);
+                    drone.rotation.set(
+                        Math.cos(dAng * 2.0) * 0.10,
+                        dAng + Math.PI * 0.5,
+                        Math.sin(dAng) * 0.12
+                    );
+                    if (lidarCone) {
+                        lidarCone.material.opacity = 0.15 + Math.abs(Math.sin(elapsed * 3.5)) * 0.12;
+                    }
+                }
+                if (drone2) {
+                    const dAng2 = elapsed * 0.48 + 1.4;
+                    const bx2 = -1.35 + Math.sin(dAng2) * 1.85;
+                    const by2 = 0.65 + Math.cos(dAng2 * 2.0) * 0.95;
+                    const bz2 = 1.55 + Math.cos(dAng2 * 1.4) * 0.16 + Math.max(0, -bx2 * 0.22);
+                    drone2.position.set(bx2, bz2, -by2);
+                    drone2.rotation.set(
+                        Math.sin(dAng2 * 2.0) * 0.09,
+                        -dAng2,
+                        Math.cos(dAng2) * 0.10
+                    );
+                    if (lidarCone2) {
+                        lidarCone2.material.opacity = 0.14 + Math.abs(Math.cos(elapsed * 3.2)) * 0.12;
+                    }
+                }
+            }
+        };
+    }
+
     // ─── HERO 3D CONTROLLER (Blender GLB Twin + Orbital Constellation) ───
     function createHeroController(canvas) {
         const renderer = createRenderer(canvas);
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x061b1d, 0.032);
+        scene.fog = new THREE.FogExp2(0x061b1d, 0.018);
 
-        const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-        camera.position.set(-2.6, 4.3, 8.2);
+        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 140);
+        camera.position.set(-1.65, 4.95, 10.85);
 
-        scene.add(new THREE.HemisphereLight(0xd2fff7, 0x041517, 2.2));
-        const sun = new THREE.DirectionalLight(0xf0fdfa, 2.6);
-        sun.position.set(-5, 9, 6);
+        scene.add(new THREE.HemisphereLight(0xd2fff7, 0x041517, 2.25));
+        const sun = new THREE.DirectionalLight(0xf0fdfa, 2.65);
+        sun.position.set(-6, 11, 8);
         scene.add(sun);
 
-        const tealRim = new THREE.PointLight(0x2dd4bf, 5.5, 18);
-        tealRim.position.set(-4.5, 3.5, -3.5);
+        const tealRim = new THREE.PointLight(0x2dd4bf, 6.0, 24);
+        tealRim.position.set(-5.5, 4.5, -4.5);
         scene.add(tealRim);
 
-        const slipGlow = new THREE.PointLight(0xffb020, 4.2, 12);
-        slipGlow.position.set(-0.8, 2.0, 0.5);
+        const slipGlow = new THREE.PointLight(0xffb020, 4.8, 16);
+        slipGlow.position.set(-1.1, 2.2, 0.6);
         scene.add(slipGlow);
 
         const worldGroup = new THREE.Group();
@@ -336,20 +618,21 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         const packets = [];
         const satBeams = [];
         let twinNodes = {};
+        let livingDynamics = null;
 
         // Atmospheric floating telemetry dust
-        const dustCount = 90;
+        const dustCount = 110;
         const dustPos = new Float32Array(dustCount * 3);
         for (let i = 0; i < dustPos.length; i += 3) {
-            dustPos[i] = (Math.random() - 0.5) * 12;
-            dustPos[i + 1] = Math.random() * 4.5 - 0.5;
-            dustPos[i + 2] = (Math.random() - 0.5) * 9;
+            dustPos[i] = (Math.random() - 0.5) * 16;
+            dustPos[i + 1] = Math.random() * 5.5 - 0.5;
+            dustPos[i + 2] = (Math.random() - 0.5) * 12;
         }
         const dustGeo = new THREE.BufferGeometry();
         dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
         const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
             color: 0x8af1e2,
-            size: 0.045,
+            size: 0.048,
             transparent: true,
             opacity: 0.55,
             blending: THREE.AdditiveBlending,
@@ -364,15 +647,16 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             twinNodes = nodes;
             if (nodes.TerrainSurface) nodes.TerrainSurface.material.opacity = 0.90;
             worldGroup.add(root);
+            livingDynamics = setupLivingTwinDynamics(nodes);
 
             // Build telemetry arcs from Rover stations & Base CORS to Operations Hub
             const arcConfigs = [
-                [anchors.gnss_base, anchors.gnss_mid, 1.3, 0xd7ef73],
-                [anchors.gnss_crown, anchors.ops_hub, 2.1, 0x5eead4],
-                [anchors.gnss_mid, anchors.ops_hub, 1.8, 0xffb020],
-                [anchors.gnss_toe, anchors.ops_hub, 1.2, 0x5eead4]
+                [anchors.gnss_base, anchors.gnss_mid, 1.5, 0xd7ef73],
+                [anchors.gnss_crown, anchors.ops_hub, 2.4, 0x5eead4],
+                [anchors.gnss_mid, anchors.ops_hub, 2.0, 0xffb020],
+                [anchors.gnss_toe, anchors.ops_hub, 1.4, 0x5eead4]
             ];
-            const packetGeo = new THREE.SphereGeometry(0.065, 10, 10);
+            const packetGeo = new THREE.SphereGeometry(0.075, 10, 10);
             arcConfigs.forEach(([from, to, h, col], idx) => {
                 const arc = createSignalArc(from, to, h, col, 0.42);
                 worldGroup.add(arc);
@@ -386,15 +670,20 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 packets.push({ mesh: packet, curve: arc.userData.curve, speed: 0.28 + idx * 0.06, phase: idx * 0.25 });
             });
 
-            // Satellite carrier-phase beams down to stations from all 6 NASA satellites
-            const satNames = ['GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04', 'GNSS_Sat_05', 'GNSS_Sat_06'];
+            // Satellite carrier-phase beams down to stations from all 8 NASA/CubeSat satellites
+            const satNames = [
+                'GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04',
+                'GNSS_Sat_05', 'GNSS_Sat_06', 'GNSS_Sat_07', 'GNSS_Sat_08'
+            ];
             const targetAnchors = [
                 anchors.gnss_base,
                 anchors.gnss_mid,
                 anchors.gnss_toe,
                 anchors.ops_hub,
                 anchors.gnss_crown,
-                anchors.gnss_mid
+                anchors.gnss_mid,
+                anchors.gnss_base,
+                anchors.ops_hub
             ];
             satNames.forEach((name, idx) => {
                 const satObj = nodes[name];
@@ -408,7 +697,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     blending: THREE.AdditiveBlending
                 }));
                 worldGroup.add(beam);
-                satBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 0.95 });
+                satBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 0.85 });
             });
 
             canvas.classList.add('is-ready');
@@ -448,10 +737,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 p.curve.getPoint(t, p.mesh.position);
             });
 
-            // Animate GNSS satellites & carrier beams
+            // Animate high-altitude GNSS satellites & carrier beams
             if (twinNodes.Satellite_Constellation) {
-                twinNodes.Satellite_Constellation.position.x = -0.5 + Math.sin(elapsed * 0.45) * 0.35;
-                twinNodes.Satellite_Constellation.position.z = Math.cos(elapsed * 0.35) * 0.25;
+                twinNodes.Satellite_Constellation.position.x = -0.15 + Math.sin(elapsed * 0.45) * 0.42;
+                twinNodes.Satellite_Constellation.position.z = Math.cos(elapsed * 0.35) * 0.28;
             }
             satBeams.forEach(({ satObj, target, beam, phase }) => {
                 satObj.rotation.y += 0.008;
@@ -475,16 +764,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (twinNodes.DisplacementVectorArrow) {
                 twinNodes.DisplacementVectorArrow.position.x = Math.sin(elapsed * 2.8) * 0.06;
             }
-            if (twinNodes.OpsBeaconCore) {
-                twinNodes.OpsBeaconCore.rotation.y = elapsed * 0.9;
-            }
+            livingDynamics?.update(elapsed);
 
             camera.position.set(
-                -2.6 + progress * 1.1 + pointerX * 0.35,
-                4.3 - progress * 0.65 - pointerY * 0.25,
-                8.2 - progress * 1.4
+                -1.65 + progress * 1.15 + pointerX * 0.42,
+                4.95 - progress * 0.65 - pointerY * 0.26,
+                10.85 - progress * 1.65
             );
-            camera.lookAt(-0.25 + progress * 0.3, 0.34, 0.08);
+            camera.lookAt(0.18 + progress * 0.30, 1.28, 0.10);
 
             render();
             frame = requestAnimationFrame(tick);
@@ -521,30 +808,39 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         };
     }
 
-    // ─── STORY 3D CONTROLLER (4-Act Blender Scrollytelling Choreography) ───
+    // ─── STORY 3D CONTROLLER (Cinematic Video-Demo Flythrough: Sensor-by-Sensor -> Zoom Out -> Follow Data -> Door Opens -> Control Room) ───
     function createStoryController(canvas, calloutContainer) {
         const renderer = createRenderer(canvas);
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x061f21, 0.028);
+        scene.fog = new THREE.FogExp2(0x061f21, 0.015);
 
-        const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+        const camera = new THREE.PerspectiveCamera(42, 1, 0.08, 140);
         scene.add(new THREE.HemisphereLight(0xd0fff6, 0x041618, 2.35));
         const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
-        dirLight.position.set(-4, 10, 6);
+        dirLight.position.set(-5, 12, 8);
         scene.add(dirLight);
 
-        const slipLight = new THREE.PointLight(0xff9e1b, 4.5, 14);
-        slipLight.position.set(-0.9, 1.8, 0.5);
+        const slipLight = new THREE.PointLight(0xff9e1b, 4.8, 18);
+        slipLight.position.set(-1.1, 2.1, 0.6);
         scene.add(slipLight);
 
-        const waterLight = new THREE.PointLight(0x38bdf8, 3.8, 14);
-        waterLight.position.set(-1.8, 0.5, 3.6);
+        const waterLight = new THREE.PointLight(0x38bdf8, 4.2, 18);
+        waterLight.position.set(-2.2, 0.6, 4.8);
         scene.add(waterLight);
+
+        // Interior Control Room Illumination (lights up the 5-screen command wall, operator desks & 3D hologram!)
+        const controlRoomLight = new THREE.PointLight(0x2dd4bf, 5.8, 12);
+        controlRoomLight.position.set(5.15, 0.92, 0.68);
+        scene.add(controlRoomLight);
 
         const worldGroup = new THREE.Group();
         scene.add(worldGroup);
 
         const anchors = BLENDER_META.anchors;
+        const opsEntranceAnchor = anchors.ops_entrance || [5.15, 0.455, 2.07];
+        const opsHoloAnchor = anchors.ops_holo_table || [5.15, 0.455, 0.73];
+        const opsControlAnchor = anchors.ops_control_room || [5.15, 0.635, 0.19];
+
         let twinNodes = {};
         let initialGroundwaterY = 0;
         let initialWedgePos = null;
@@ -552,12 +848,12 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         let initialImuPos = null;
 
         // 1. Rain Storm Particle System (Act 2: Hydrological Context)
-        const rainCount = 220;
+        const rainCount = 260;
         const rainPositions = new Float32Array(rainCount * 3);
         for (let i = 0; i < rainPositions.length; i += 3) {
-            rainPositions[i] = (Math.random() - 0.5) * 11;
-            rainPositions[i + 1] = Math.random() * 5.2 - 0.2;
-            rainPositions[i + 2] = (Math.random() - 0.5) * 8;
+            rainPositions[i] = (Math.random() - 0.5) * 15;
+            rainPositions[i + 1] = Math.random() * 5.8 - 0.2;
+            rainPositions[i + 2] = (Math.random() - 0.5) * 11;
         }
         const rainGeo = new THREE.BufferGeometry();
         rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
@@ -572,16 +868,43 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         const rainSystem = new THREE.Points(rainGeo, rainMat);
         worldGroup.add(rainSystem);
 
-        // 2. Baseline Triangulation Network (Act 3: Multi-Sensor Verification)
+        // 2. Active Sensor Data-Capture Laser Halo (Moves from device to device as camera samples each station!)
+        const activeScanGroup = new THREE.Group();
+        const scanCylGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.95, 32, 1, true);
+        const scanCylMat = new THREE.MeshBasicMaterial({
+            color: 0x5eead4,
+            transparent: true,
+            opacity: 0,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const scanCylMesh = new THREE.Mesh(scanCylGeo, scanCylMat);
+        const scanRingGeo = new THREE.RingGeometry(0.48, 0.62, 40);
+        const scanRingMat = new THREE.MeshBasicMaterial({
+            color: 0xd7ef73,
+            transparent: true,
+            opacity: 0,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const scanRingMesh = new THREE.Mesh(scanRingGeo, scanRingMat);
+        scanRingMesh.rotation.x = -Math.PI / 2;
+        activeScanGroup.add(scanCylMesh, scanRingMesh);
+        worldGroup.add(activeScanGroup);
+
+        // 3. Baseline Triangulation Network (Act 3: Zoom-Out Multi-Sensor Fusion)
         const baselineGroup = new THREE.Group();
         worldGroup.add(baselineGroup);
         const baselinePairs = [
-            [anchors.gnss_base, anchors.gnss_crown, 0.65, 0x5eead4],
-            [anchors.gnss_base, anchors.gnss_mid, 0.85, 0xffb020],
-            [anchors.gnss_base, anchors.gnss_toe, 1.05, 0x5eead4],
-            [anchors.gnss_crown, anchors.gnss_mid, 0.45, 0xffb020],
-            [anchors.gnss_mid, anchors.gnss_toe, 0.45, 0xffb020],
-            [anchors.imu_borehole, anchors.piezometer, 0.35, 0x38bdf8]
+            [anchors.gnss_base, anchors.gnss_crown, 0.85, 0x5eead4],
+            [anchors.gnss_base, anchors.gnss_mid, 1.05, 0xffb020],
+            [anchors.gnss_base, anchors.gnss_toe, 1.25, 0x5eead4],
+            [anchors.gnss_crown, anchors.gnss_mid, 0.55, 0xffb020],
+            [anchors.gnss_mid, anchors.gnss_toe, 0.55, 0xffb020],
+            [anchors.imu_borehole, anchors.piezometer, 0.45, 0x38bdf8],
+            [anchors.rain_gauge, anchors.piezometer, 0.55, 0x38bdf8]
         ];
         const baselineLines = baselinePairs.map(([a, b, h, col]) => {
             const line = createSignalArc(a, b, h, col, 0);
@@ -589,18 +912,20 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             return line;
         });
 
-        // 3. Operations Dispatch Arcs & Warning Pulse Rings (Act 4: Response)
+        // 4. Operations Dispatch Arcs & Hero Data Packets Streaming Straight Into the Control Room Hologram Table!
         const dispatchGroup = new THREE.Group();
         worldGroup.add(dispatchGroup);
         const dispatchPairs = [
-            [anchors.gnss_mid, anchors.ops_hub, 2.2, 0xd7ef73],
-            [anchors.gnss_crown, anchors.ops_hub, 2.5, 0x5eead4],
-            [anchors.gnss_toe, anchors.ops_hub, 1.5, 0x5eead4],
-            [anchors.ops_hub, anchors.highway_gate, 0.9, 0xd7ef73]
+            [anchors.gnss_crown, opsHoloAnchor, 2.75, 0x5eead4],
+            [anchors.gnss_mid, opsHoloAnchor, 2.35, 0xffb020],
+            [anchors.imu_borehole, opsHoloAnchor, 2.15, 0xd7ef73],
+            [anchors.rain_gauge, opsHoloAnchor, 2.45, 0x38bdf8],
+            [anchors.piezometer, opsHoloAnchor, 1.95, 0x38bdf8],
+            [opsHoloAnchor, anchors.highway_gate, 1.15, 0xd7ef73]
         ];
         const dispatchLines = [];
         const dispatchPackets = [];
-        const pktGeo = new THREE.SphereGeometry(0.075, 10, 10);
+        const pktGeo = new THREE.SphereGeometry(0.095, 12, 12);
         dispatchPairs.forEach(([a, b, h, col], idx) => {
             const arc = createSignalArc(a, b, h, col, 0);
             dispatchGroup.add(arc);
@@ -612,11 +937,11 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 blending: THREE.AdditiveBlending
             }));
             dispatchGroup.add(pkt);
-            dispatchPackets.push({ mesh: pkt, curve: arc.userData.curve, speed: 0.42 + idx * 0.08, phase: idx * 0.25 });
+            dispatchPackets.push({ mesh: pkt, curve: arc.userData.curve, speed: 0.46 + idx * 0.07, phase: idx * 0.18 });
         });
 
-        // Expanding safety rings at Operations Hub & Highway Gate
-        const safetyRingGeo = new THREE.RingGeometry(0.45, 0.56, 48);
+        // Expanding safety rings at Operations Center Entrance / Hologram & Highway Gate
+        const safetyRingGeo = new THREE.RingGeometry(0.45, 0.58, 48);
         const opsPulseRing = new THREE.Mesh(safetyRingGeo, new THREE.MeshBasicMaterial({
             color: 0xd7ef73,
             transparent: true,
@@ -626,27 +951,42 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             depthWrite: false
         }));
         opsPulseRing.rotation.x = -Math.PI / 2;
-        opsPulseRing.position.set(anchors.ops_hub[0], anchors.ops_hub[1] - 1.35, anchors.ops_hub[2]);
+        opsPulseRing.position.set(opsEntranceAnchor[0], opsEntranceAnchor[1] - 0.25, opsEntranceAnchor[2]);
         worldGroup.add(opsPulseRing);
 
-        // 4. Camera Choreography Splines across the 4 Storytelling Chapters (framed for widescreen full-bleed theater)
+        // 5. 10-Point Cinematic Video-Demo Camera Choreography:
+        //    [0..2] Visit Hilltop GNSS Crown -> Mid GNSS Rover S2 -> Subsurface IMU Borehole
+        //    [3..4] Visit Rain Gauge Station -> Cutaway Piezometer Well
+        //    [5..6] Big Zoom-Out Panorama -> Chase Data Stream Across Highway to Operations Center
+        //    [7..9] Arrive at Center Entrance (Doors Open!) -> Fly Through Open Doorway -> Ascend Into AI Control Room!
         const camCurve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(-2.45, 3.65, 6.45), // Entry & Step 0: Zooming in from Hero overview to Mid Slip Zone & Borehole IMU
-            new THREE.Vector3(-2.65, 2.15, 6.25), // Step 1: Front Cutaway Aquifer & Piezometer Well
-            new THREE.Vector3(-0.35, 4.45, 7.25), // Step 2: Multi-Station GNSS Baseline + NASA Satellite Constellation Overview
-            new THREE.Vector3(2.55, 3.35, 6.25),  // Step 3: Operations Command Hub & Highway Warning Corridor
-            new THREE.Vector3(3.05, 2.95, 5.65)   // Step 3 End hold
+            new THREE.Vector3(-3.82, 3.28, 0.72),  // 0.00: Close-up Device 1A — Hilltop GNSS Station Crown
+            new THREE.Vector3(-0.62, 2.22, 2.38),  // 0.11: Close-up Device 1B — Mid-Slope GNSS Rover S2
+            new THREE.Vector3(-1.12, 1.82, 2.68),  // 0.22: Close-up Device 1C — Subsurface IMU Borehole & Shear Vector
+            new THREE.Vector3(-2.82, 2.42, 3.88),  // 0.33: Close-up Device 2A — Automatic Weather & Rain Gauge Station
+            new THREE.Vector3(-1.92, 1.62, 6.88),  // 0.44: Close-up Device 2B — Cutaway Piezometer Groundwater Well
+            new THREE.Vector3(-0.45, 5.25, 10.65), // 0.56: BIG ZOOM-OUT — All Sensors & 8 Satellites Launching Data Stream
+            new THREE.Vector3(2.85, 2.15, 5.45),   // 0.67: CHASING DATA — Flying Alongside Telemetry Packets Toward Center
+            new THREE.Vector3(5.15, 0.58, 3.32),   // 0.78: ENTRANCE PORTAL — Sliding Doors Open Wide in Front of Camera
+            new THREE.Vector3(5.15, 0.56, 1.85),   // 0.89: DOORWAY THRESHOLD — Flying Straight Through Open Entrance Doors
+            new THREE.Vector3(5.15, 0.62, 1.22)    // 1.00: CONTROL ROOM — Inside Command Bridge Facing 5-Screen Wall & 3D Hologram
         ]);
         const lookCurve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(-1.45, 0.38, 0.25), // Step 0 target shifted left so 3D slope sits in right 65% of widescreen stage
-            new THREE.Vector3(-2.15, -0.25, 2.05),// Step 1 target: Piezometer + Groundwater Cutaway
-            new THREE.Vector3(-1.25, 0.42, 0.15), // Step 2 target: Full Slope Slip Wedge + NASA Satellite Constellation
-            new THREE.Vector3(1.65, 0.24, 0.85),  // Step 3 target: Operations Hub + Mountain Highway Fleet
-            new THREE.Vector3(2.15, 0.28, 0.75)
+            new THREE.Vector3(-4.35, 2.52, -1.15), // 0.00: Look at GNSS Station Crown HexPad, InfoPanel & Radome
+            new THREE.Vector3(-1.05, 1.52, 0.45),  // 0.11: Look at GNSS Station Mid S2
+            new THREE.Vector3(-1.48, 1.15, 0.68),  // 0.22: Look at IMU Borehole Casing & Subsurface Nodes
+            new THREE.Vector3(-3.25, 1.82, 2.05),  // 0.33: Look at Rain Gauge Collector, Anemometer & Terminal
+            new THREE.Vector3(-2.25, 0.96, 5.08),  // 0.44: Look at Piezometer Well & Rising Water Column
+            new THREE.Vector3(0.35, 1.35, 0.25),   // 0.56: Look at Full Mountain Slope & Orbital Data Stream
+            new THREE.Vector3(5.15, 0.55, 1.45),   // 0.67: Look Ahead at Operations Center Entrance
+            new THREE.Vector3(5.15, 0.52, 0.65),   // 0.78: Look Through Opening Sliding Doors Into Control Room
+            new THREE.Vector3(5.15, 0.58, 0.17),   // 0.89: Look at 5-Screen Video Wall & 3D Mountain Hologram
+            new THREE.Vector3(5.15, 0.58, 0.17)    // 1.00: Lock Onto Command Video Wall & Holographic Projector
         ]);
 
         const storySatBeams = [];
         const storySatWorldPos = new THREE.Vector3();
+        let livingDynamics = null;
 
         // Load Blender GLB Scene
         getBlenderTemplate().then(template => {
@@ -658,15 +998,21 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (nodes.GNSS_Station_Mid) initialMidStationPos = nodes.GNSS_Station_Mid.position.clone();
             if (nodes.IMU_Borehole_Assembly) initialImuPos = nodes.IMU_Borehole_Assembly.position.clone();
             worldGroup.add(root);
+            livingDynamics = setupLivingTwinDynamics(nodes);
 
-            const satNames = ['GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04', 'GNSS_Sat_05', 'GNSS_Sat_06'];
+            const satNames = [
+                'GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04',
+                'GNSS_Sat_05', 'GNSS_Sat_06', 'GNSS_Sat_07', 'GNSS_Sat_08'
+            ];
             const targetAnchors = [
                 anchors.gnss_base,
                 anchors.gnss_mid,
                 anchors.gnss_toe,
                 anchors.ops_hub,
                 anchors.gnss_crown,
-                anchors.gnss_mid
+                anchors.gnss_mid,
+                anchors.gnss_base,
+                anchors.ops_hub
             ];
             satNames.forEach((name, idx) => {
                 const satObj = nodes[name];
@@ -680,7 +1026,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     blending: THREE.AdditiveBlending
                 }));
                 worldGroup.add(beam);
-                storySatBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 0.95 });
+                storySatBeams.push({ satObj, target: new THREE.Vector3(...targetAnchors[idx]), beam, phase: idx * 0.85 });
             });
 
             canvas.classList.add('is-ready');
@@ -705,18 +1051,20 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             ops_hub: [0.0, -4.5]
         };
 
-        function updateCalloutPins(step) {
+        function updateCalloutPins(step, p) {
             if (!calloutContainer) return;
             const activeMap = {
                 0: ['gnss_mid', 'imu_borehole'],
-                1: ['rain_gauge', 'piezometer', 'imu_borehole'],
-                2: ['gnss_mid', 'imu_borehole', 'piezometer'],
-                3: ['ops_hub', 'gnss_mid']
+                1: ['rain_gauge', 'piezometer'],
+                2: ['gnss_mid', 'imu_borehole', 'piezometer', 'ops_hub'],
+                3: ['ops_hub']
             };
             const activeSet = new Set(activeMap[step] || []);
             Object.entries(pinElements).forEach(([key, el]) => {
-                if (!el || !anchors[key]) return;
-                projVec.set(...anchors[key]);
+                if (!el) return;
+                const targetCoord = (key === 'ops_hub' && p > 0.74) ? opsControlAnchor : anchors[key];
+                if (!targetCoord) return;
+                projVec.set(...targetCoord);
                 projVec.project(camera);
                 const [ox, oy] = pinOffsets[key] || [0, 0];
                 const xPct = Math.min(91, Math.max(43, (projVec.x * 0.5 + 0.5) * 100 + ox));
@@ -734,22 +1082,54 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             const step = Math.min(3, Math.floor(p * 4));
 
             // Smooth weights for each storytelling act
-            const wDetect = 1 - gsap.utils.clamp(0, 1, (p - 0.22) / 0.14);
-            const wContext = gsap.utils.clamp(0, 1, (p - 0.16) / 0.14) * (1 - gsap.utils.clamp(0, 1, (p - 0.54) / 0.14));
-            const wVerify = gsap.utils.clamp(0, 1, (p - 0.44) / 0.14) * (1 - gsap.utils.clamp(0, 1, (p - 0.80) / 0.14));
-            const wResponse = gsap.utils.clamp(0, 1, (p - 0.70) / 0.16);
+            const wDetect = 1 - gsap.utils.clamp(0, 1, (p - 0.22) / 0.12);
+            const wContext = gsap.utils.clamp(0, 1, (p - 0.18) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.52) / 0.12));
+            const wVerify = gsap.utils.clamp(0, 1, (p - 0.44) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.78) / 0.12));
+            const wResponse = gsap.utils.clamp(0, 1, (p - 0.62) / 0.18);
 
             // 1. Camera Spline Position & Target
             camCurve.getPoint(p, camera.position);
             const lookTarget = lookCurve.getPoint(p);
             camera.lookAt(lookTarget);
 
-            // 2. Terrain Cutaway Translucency (semi-translucent during subsurface chapters 0 & 1)
-            if (twinNodes.TerrainSurface) {
-                twinNodes.TerrainSurface.material.opacity = 0.66 + 0.24 * Math.max(wVerify, wResponse);
+            // 2. Active Device Scanning Halo (highlights whichever sensor the camera is currently inspecting in Acts 1 & 2)
+            let scanTarget = null;
+            let scanColor = 0x5eead4;
+            if (p < 0.08) {
+                scanTarget = anchors.gnss_crown;
+                scanColor = 0x5eead4;
+            } else if (p < 0.17) {
+                scanTarget = anchors.gnss_mid;
+                scanColor = 0xd7ef73;
+            } else if (p < 0.26) {
+                scanTarget = anchors.imu_borehole;
+                scanColor = 0xffb020;
+            } else if (p < 0.38) {
+                scanTarget = anchors.rain_gauge;
+                scanColor = 0x38bdf8;
+            } else if (p < 0.49) {
+                scanTarget = anchors.piezometer;
+                scanColor = 0x38bdf8;
+            }
+            if (scanTarget) {
+                activeScanGroup.position.set(scanTarget[0], scanTarget[1] - 0.45, scanTarget[2]);
+                const pulse = 0.85 + Math.sin(elapsed * 5.0) * 0.18;
+                scanRingMesh.scale.setScalar(pulse);
+                scanCylMesh.position.y = 0.35 + Math.sin(elapsed * 4.0) * 0.15;
+                scanCylMat.color.setHex(scanColor);
+                scanCylMat.opacity = 0.22 + Math.abs(Math.sin(elapsed * 4.0)) * 0.16;
+                scanRingMat.opacity = 0.65;
+            } else {
+                scanCylMat.opacity = 0;
+                scanRingMat.opacity = 0;
             }
 
-            // 3. Act 1 & 3: Borehole IMU Tilt & Unstable Wedge Shear along Slip Surface
+            // 3. Terrain Cutaway Translucency (semi-translucent during subsurface chapters 0 & 1)
+            if (twinNodes.TerrainSurface) {
+                twinNodes.TerrainSurface.material.opacity = 0.68 + 0.24 * Math.max(wVerify, wResponse);
+            }
+
+            // 4. Act 1 & 3: Borehole IMU Tilt & Unstable Wedge Shear along Slip Surface
             const shearAmount = 0.04 * wDetect + 0.14 * wVerify + 0.08 * wResponse;
             if (twinNodes.UnstableWedge && initialWedgePos) {
                 twinNodes.UnstableWedge.position.x = initialWedgePos.x + shearAmount;
@@ -768,8 +1148,8 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 twinNodes.SlipSurface.material.opacity = 0.45 + 0.45 * Math.max(wDetect, wVerify);
             }
 
-            // 4. Act 2: Rain Storm & Rising Subsurface Groundwater Table
-            rainMat.opacity = Math.max(0.08, wContext * 0.78 + wVerify * 0.25);
+            // 5. Act 2: Rain Storm & Rising Subsurface Groundwater Table
+            rainMat.opacity = Math.max(0.06, wContext * 0.82 + wVerify * 0.25);
             const waterRise = wContext * 0.34 + wVerify * 0.24 + wResponse * 0.14;
             if (twinNodes.GroundwaterTable) {
                 twinNodes.GroundwaterTable.position.y = initialGroundwaterY + waterRise;
@@ -780,9 +1160,9 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 twinNodes.PiezometerWaterColumn.position.y = waterRise * 0.45;
             }
 
-            // 5. Act 3: Multi-Sensor Baseline Triangulation Lasers & Satellite Carrier Beams
+            // 6. Act 3: Multi-Sensor Baseline Triangulation Lasers & Satellite Carrier Beams
             baselineLines.forEach(line => {
-                line.material.opacity = wVerify * 0.78 + wResponse * 0.28;
+                line.material.opacity = wVerify * 0.82 + wResponse * 0.32;
             });
             if (twinNodes.Satellite_Constellation) {
                 twinNodes.Satellite_Constellation.position.x = -0.2 + Math.sin(elapsed * 0.42) * 0.28;
@@ -795,29 +1175,43 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 posAttr.setXYZ(0, storySatWorldPos.x, storySatWorldPos.y, storySatWorldPos.z);
                 posAttr.setXYZ(1, target.x, target.y, target.z);
                 posAttr.needsUpdate = true;
-                beam.material.opacity = (0.12 + wVerify * 0.28 + wResponse * 0.14) + Math.max(0, Math.sin(elapsed * 2.4 + phase)) * 0.16;
+                beam.material.opacity = (0.12 + wVerify * 0.32 + wResponse * 0.16) + Math.max(0, Math.sin(elapsed * 2.4 + phase)) * 0.16;
             });
 
-            // 6. Act 4: Operations Hub Dispatch & Highway Early Warning Gate
+            // 7. Act 3 & 4: Operations Hub Data Stream + Motorized Sliding Entrance Doors Opening + Control Room Interior!
+            const streamWeight = Math.max(wVerify * 0.75, wResponse);
             dispatchLines.forEach(line => {
-                line.material.opacity = wResponse * 0.85;
+                line.material.opacity = streamWeight * 0.86;
             });
             dispatchPackets.forEach(pkt => {
-                pkt.mesh.material.opacity = wResponse * 0.95;
-                if (wResponse > 0.02) {
+                pkt.mesh.material.opacity = streamWeight * 0.96;
+                if (streamWeight > 0.02) {
                     const t = (elapsed * pkt.speed + pkt.phase) % 1;
                     pkt.curve.getPoint(t, pkt.mesh.position);
                 }
             });
-            if (wResponse > 0.02) {
+
+            // Slide Operations Center Entrance Doors (OpsDoor_Left & OpsDoor_Right) wide open as camera approaches (p = 0.68 -> 0.81)!
+            const doorRaw = gsap.utils.clamp(0, 1, (p - 0.68) / 0.13);
+            const doorEase = doorRaw * doorRaw * (3 - 2 * doorRaw);
+            if (twinNodes.OpsDoor_Left) {
+                twinNodes.OpsDoor_Left.position.x = -0.56 * doorEase;
+            }
+            if (twinNodes.OpsDoor_Right) {
+                twinNodes.OpsDoor_Right.position.x = 0.56 * doorEase;
+            }
+            controlRoomLight.intensity = 3.8 + doorEase * 4.5;
+
+            if (streamWeight > 0.02) {
                 const cycle = (elapsed * 0.65) % 1;
-                opsPulseRing.scale.setScalar(0.8 + cycle * 2.4);
-                opsPulseRing.material.opacity = wResponse * (1 - cycle) * 0.85;
+                opsPulseRing.scale.setScalar(0.8 + cycle * 2.2);
+                opsPulseRing.material.opacity = streamWeight * (1 - cycle) * 0.85;
             } else {
                 opsPulseRing.material.opacity = 0;
             }
 
-            updateCalloutPins(step);
+            livingDynamics?.update(elapsed);
+            updateCalloutPins(step, p);
         }
 
         const render = () => {
@@ -845,10 +1239,6 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     pos.setY(i, y < -0.4 ? 4.8 : y);
                 }
                 pos.needsUpdate = true;
-            }
-
-            if (twinNodes.OpsBeaconCore) {
-                twinNodes.OpsBeaconCore.rotation.y = elapsed * 1.1;
             }
 
             applyProgressState(currentProgress, elapsed);
@@ -977,16 +1367,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         if (!story || !stage || !articles.length) return;
 
         const captions = [
-            'Phát hiện · Vector dịch chuyển GNSS + góc nghiêng IMU',
-            'Bối cảnh · Lượng mưa thấm sâu + mực nước ngầm dâng cao',
-            'Xác minh · Hợp nhất đa cảm biến & bình sai cụm trạm',
-            'Phản ứng · Operations Hub tiếp nhận & kích hoạt cảnh báo'
-        ];
-        const camModes = [
-            'CAM 01 · CẬN CẢNH ĐỚI TRƯỢT & LỖ KHOAN IMU',
-            'CAM 02 · MẶT CẮT THỦY VĂN & MỰC NƯỚC NGẦM',
-            'CAM 03 · TAM GIÁC ĐẠC CỤM TRẠM GNSS RTK',
-            'CAM 04 · TRUNG TÂM ĐIỀU HÀNH & HÀNH LANG ĐÈO'
+            'Thiết bị 01 · Trạm GNSS RTK đỉnh đồi & lỗ khoan IMU lấy mẫu vi dịch chuyển',
+            'Thiết bị 02 · Trạm đo mưa tự động & giếng Piezometer ghi nhận áp lực nước',
+            'Hợp nhất · Zoom toàn cảnh 8 vệ tinh & bay theo luồng dữ liệu về Center',
+            'Phòng kiểm soát · Mở cửa tự động Center & hiển thị đa màn hình điều hành AI'
         ];
         const stepBadges = ['BƯỚC 01 / 04', 'BƯỚC 02 / 04', 'BƯỚC 03 / 04', 'BƯỚC 04 / 04'];
         const stageTransforms = [
@@ -995,6 +1379,18 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             { scale: 0.99, x: 0.6, y: 0.3, radius: 22 },
             { scale: 1.01, x: 0.0, y: 0.4, radius: 18 }
         ];
+
+        const getDetailedCamHud = p => {
+            if (p < 0.09) return 'CAM 01A · CẬN CẢNH TRẠM GNSS ĐỈNH ĐỒI (CROWN)';
+            if (p < 0.17) return 'CAM 01B · QUÉT TRẠM GNSS ROVER S2 SƯỜN GIỮA';
+            if (p < 0.25) return 'CAM 01C · LẤY MẪU LỖ KHOAN IMU & ĐỚI TRƯỢT';
+            if (p < 0.37) return 'CAM 02A · THU THẬP TRẠM ĐO MƯA & KHÍ TƯỢNG';
+            if (p < 0.50) return 'CAM 02B · ĐO CỘT NƯỚC NGẦM GIẾNG PIEZOMETER';
+            if (p < 0.62) return 'CAM 03A · ZOOM TOÀN CẢNH HỢP NHẤT ĐA CẢM BIẾN';
+            if (p < 0.74) return 'CAM 03B · BAY THEO LUỒNG DỮ LIỆU VỀ CENTER';
+            if (p < 0.86) return 'CAM 04A · TIẾP CẬN & MỞ CỬA TRƯỢT OPS CENTER';
+            return 'CAM 04B · PHÒNG KIỂM SOÁT AI · MÀN HÌNH & HOLOGRAM 3D';
+        };
 
         if (innerWidth < 901 || reducedMotion.matches) {
             if (canvas) canvas.hidden = true;
@@ -1013,6 +1409,8 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         } else if (canvas) {
             canvas.hidden = true;
         }
+
+        const pinOpsVal = $('#pin-ops-val', story);
 
         const applyStoryProgress = rawProgress => {
             const progress = THREE.MathUtils.clamp(rawProgress, 0, 1);
@@ -1041,8 +1439,13 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             story.style.setProperty('--hud-opacity', zoomEase.toFixed(3));
 
             if (caption) caption.textContent = captions[step];
-            if (camMode) camMode.textContent = camModes[step];
+            if (camMode) camMode.textContent = getDetailedCamHud(progress);
             if (stepBadge) stepBadge.textContent = stepBadges[step];
+            if (pinOpsVal) {
+                pinOpsVal.textContent = progress > 0.84
+                    ? 'Control Room · 5 Màn hình Live'
+                    : (progress > 0.68 ? 'Đang mở cửa cổng chính…' : 'Đang nhận luồng gói tin');
+            }
 
             articles.forEach((article, index) => {
                 article.setAttribute('aria-hidden', index === step ? 'false' : 'true');
