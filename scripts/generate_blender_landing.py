@@ -229,6 +229,12 @@ def build_geological_block(root, mats):
         for j in range(ny):
             y = -depth / 2 + (j / (ny - 1)) * depth
             z = terrain_height(x, y)
+            pit_floor_z = terrain_height(-1.75, -2.28) - 1.24
+            if -2.78 <= x <= -0.76 and -4.85 <= y <= -2.28:
+                wx = min((x - (-2.78)) / 0.22, (-0.76 - x) / 0.22)
+                wy = min((y - (-4.85)) / 0.28, (-2.28 - y) / 0.12)
+                pit_f = max(0.0, min(1.0, min(wx, wy)))
+                z = z * (1.0 - pit_f) + min(z, pit_floor_z) * pit_f
             grid_verts[i][j] = bm.verts.new((x, y, z))
 
     for i in range(nx - 1):
@@ -266,6 +272,12 @@ def build_geological_block(root, mats):
             if dist_scar < 1.15:
                 scar_w = max(0.0, 1.0 - dist_scar / 1.15) ** 1.4
                 col = lerp_color(col, c_scar_soil, scar_w * 0.75)
+
+            if -2.78 <= vx <= -0.76 and -4.85 <= vy <= -2.28:
+                surf_ref = terrain_height(vx, vy)
+                depth_in_pit = surf_ref - vz
+                if depth_in_pit > 0.08:
+                    col = (0.34, 0.23, 0.14, 1.0) if depth_in_pit < 0.58 else (0.14, 0.24, 0.30, 1.0)
 
             loop[color_layer] = col
 
@@ -377,7 +389,7 @@ def build_geological_block(root, mats):
             theta = (s_idx / segs) * math.pi * 2.0
             organic = 1.0 + 0.08 * math.sin(theta * 3.0 + 0.5) + 0.05 * math.cos(theta * 2.0)
             px = cx + math.cos(theta) * rx * r_frac * organic
-            py = cy + math.sin(theta) * ry * r_frac * organic
+            py = max(-2.22, cy + math.sin(theta) * ry * r_frac * organic)
             surf_z = terrain_height(px, py)
             bowl_depth = 0.96 * (1.0 - (r_frac ** 1.6))
             s_ring.append(bm_slip.verts.new((px, py, surf_z - bowl_depth - 0.02)))
@@ -831,10 +843,16 @@ def build_gnss_station(name: str, x: float, y: float, root, mats, is_base=False,
     dome_obj.data.materials.append(mats["gnss_base_dome"] if is_base else mats["gnss_rover_dome"])
     link_obj(dome_obj, station_grp)
 
-    # 5. Concentric Ground Laser Target Rings + Elevated Telemetry Scan Halo
+    # 5. Concentric Ground Laser Target Rings + Elevated Carrier-Phase Wavefront Rings + 3-Axis (dE, dN, dU) Vector Triad
     mesh_ring = bpy.data.meshes.new(f"{name}_RingMesh")
     bm_r = bmesh.new()
-    for r_rad, thick, z_off in ((0.48, 1.10, 0.032), (0.68, 1.05, 0.032), (0.30, 1.08, top_z + 0.08)):
+    for r_rad, thick, z_off in (
+        (0.48, 1.10, 0.032),
+        (0.68, 1.05, 0.032),
+        (0.28, 1.08, top_z + 0.08),
+        (0.38, 1.06, top_z + 0.24),
+        (0.48, 1.05, top_z + 0.42),
+    ):
         c_geom = bmesh.ops.create_circle(bm_r, cap_ends=False, radius=r_rad, segments=36)
         c_verts = c_geom["verts"]
         c_edges = [e for e in bm_r.edges if e.verts[0] in c_verts and e.verts[1] in c_verts]
@@ -845,6 +863,14 @@ def build_gnss_station(name: str, x: float, y: float, root, mats, is_base=False,
             v.co.y *= thick
         for v in c_verts + ext_verts:
             v.co.z += z_off
+    # 3-Axis RTK Displacement Vector Triad (dE +X, dN +Y, dU +Z) right at the antenna phase center
+    pz_triad = top_z + 0.20
+    add_strut(bm_r, (0.0, 0.0, pz_triad), (0.34, 0.0, pz_triad), radius=0.012, segs=8)
+    add_cylinder(bm_r, (0.37, 0.0, pz_triad), 0.032, 0.004, 0.075, segs=10, rot_euler=(0.0, math.pi / 2, 0.0))
+    add_strut(bm_r, (0.0, 0.0, pz_triad), (0.0, 0.34, pz_triad), radius=0.012, segs=8)
+    add_cylinder(bm_r, (0.0, 0.37, pz_triad), 0.032, 0.004, 0.075, segs=10, rot_euler=(-math.pi / 2, 0.0, 0.0))
+    add_strut(bm_r, (0.0, 0.0, pz_triad), (0.0, 0.0, pz_triad + 0.34), radius=0.012, segs=8)
+    add_cylinder(bm_r, (0.0, 0.0, pz_triad + 0.37), 0.032, 0.004, 0.075, segs=10)
     bm_r.normal_update()
     bm_r.to_mesh(mesh_ring)
     bm_r.free()
@@ -857,49 +883,106 @@ def build_gnss_station(name: str, x: float, y: float, root, mats, is_base=False,
 
 
 def build_imu_borehole(root, mats, templates=None):
-    """Build deep borehole inclinometer casing + real 3D hex pad & telemetry terminal + 6 subsurface MEMS IMU nodes + displacement vector."""
-    x, y = -1.48, -0.68
+    """Build a Compact Surface 6-Axis MEMS IMU Sensor Box Station (Accelerometer + Gyroscope Enclosure, Internal PCB/MEMS Chip, 3 Animated Roll/Pitch/Yaw Gyroscope Gimbal Rings, 3-Axis Accel Triad & Seismic Vibration Waves)."""
+    x, y = -1.42, -0.72
     z = terrain_height(x, y)
     grp = bpy.data.objects.new("IMU_Borehole_Assembly", None)
     grp.location = (x, y, z)
     link_obj(grp, root)
 
+    # Place HexPad foundation + InfoPanel & EdgeLogger behind the IMU Box so the front camera view is 100% clear
     spawn_hw_instance(
         templates, "hex_pad", "IMU_HexPad", grp,
-        loc=(0.0, 0.0, -0.02), rot=(0.0, 0.0, 0.52), scale=(0.76, 0.76, 0.85)
+        loc=(0.0, 0.0, -0.02), rot=(0.0, 0.0, 0.52), scale=(0.82, 0.82, 0.78)
     )
     spawn_hw_instance(
         templates, "info_panel", "IMU_InfoPanel", grp,
-        loc=(-0.22, -0.14, 0.10), rot=(0.0, 0.0, -0.28), scale=(0.82, 0.82, 0.82)
+        loc=(-0.32, 0.18, 0.10), rot=(0.0, 0.0, -0.25), scale=(0.86, 0.86, 0.86)
     )
     spawn_hw_instance(
         templates, "mini_pc", "IMU_EdgeLogger", grp,
-        loc=(0.18, -0.14, 0.14), rot=(0.0, 0.0, 0.35), scale=(0.85, 0.85, 0.85)
+        loc=(0.30, 0.18, 0.14), rot=(0.0, 0.0, 0.28), scale=(0.86, 0.86, 0.86)
     )
 
-    mesh_casing = bpy.data.meshes.new("IMUCasingMesh")
-    bm = bmesh.new()
-    add_cylinder(bm, (0, 0, 0.04), 0.28, 0.25, 0.09, segs=16)
-    add_cylinder(bm, (0, 0, -1.02), 0.058, 0.058, 2.34, segs=16)
-    add_cylinder(bm, (0, 0, 0.22), 0.135, 0.110, 0.28, segs=16)
-    add_cylinder(bm, (0, 0, 0.38), 0.145, 0.145, 0.045, segs=16)
-    for bx, by in ((0.22, 0.22), (-0.22, 0.22), (-0.22, -0.22), (0.22, -0.22)):
-        add_cylinder(bm, (bx, by, 0.16), 0.022, 0.022, 0.28, segs=10)
-    bm.normal_update()
-    bm.to_mesh(mesh_casing)
-    bm.free()
+    # 1. Concrete Slope Tilt-Mounting Pedestal & Corner Anchor Bolts
+    mesh_ped = bpy.data.meshes.new("IMUPedestalMesh")
+    bm_p = bmesh.new()
+    add_box(bm_p, (0.0, 0.0, 0.06), (0.48, 0.40, 0.08))
+    for bx, by in ((-0.20, -0.16), (0.20, -0.16), (0.20, 0.16), (-0.20, 0.16)):
+        add_cylinder(bm_p, (bx, by, 0.12), 0.020, 0.020, 0.08, segs=8)
+    bm_p.normal_update()
+    bm_p.to_mesh(mesh_ped)
+    bm_p.free()
+    ped_obj = bpy.data.objects.new("IMU_Pedestal", mesh_ped)
+    ped_obj.data.materials.append(mats["steel_housing"])
+    link_obj(ped_obj, grp)
 
-    casing_obj = bpy.data.objects.new("IMU_Casing", mesh_casing)
-    casing_obj.data.materials.append(mats["imu_amber"])
-    link_obj(casing_obj, grp)
+    # 2. Ruggedized Compact MEMS IMU Sensor Box (IMU_SensorBox) with Cutaway Top Inspection Window & Internal 6-DoF MEMS Chip
+    # Pivoted at (0, 0, 0.24) so it actively tilts/rocks in Roll & Pitch as the slope vibrates!
+    mesh_box = bpy.data.meshes.new("IMUSensorBoxMesh")
+    bm_b = bmesh.new()
+    # Die-cast industrial IMU enclosure body + mounting flanges + M12 waterproof cable glands
+    add_box(bm_b, (0.0, 0.0, 0.0), (0.36, 0.28, 0.14))
+    add_box(bm_b, (0.0, 0.0, -0.055), (0.44, 0.34, 0.026))
+    # Raised perimeter bezel around top inspection window
+    add_box(bm_b, (0.0, 0.125, 0.078), (0.34, 0.030, 0.024))
+    add_box(bm_b, (0.0, -0.125, 0.078), (0.34, 0.030, 0.024))
+    add_box(bm_b, (-0.155, 0.0, 0.078), (0.030, 0.22, 0.024))
+    add_box(bm_b, (0.155, 0.0, 0.078), (0.030, 0.22, 0.024))
+    # Waterproof M12 telemetry & power glands on left/right sides
+    add_cylinder(bm_b, (-0.21, 0.0, 0.0), 0.028, 0.024, 0.09, segs=12, rot_euler=(0.0, math.pi / 2, 0.0))
+    add_cylinder(bm_b, (0.21, 0.0, 0.0), 0.028, 0.024, 0.09, segs=12, rot_euler=(0.0, math.pi / 2, 0.0))
+    bm_b.normal_update()
+    bm_b.to_mesh(mesh_box)
+    bm_b.free()
 
+    imu_box_obj = bpy.data.objects.new("IMU_Casing", mesh_box)
+    imu_box_obj.location = (0.0, 0.0, 0.24)
+    imu_box_obj.data.materials.append(mats["imu_amber"])
+    link_obj(imu_box_obj, grp)
+
+    # Internal MEMS Chip & 3-Axis Accelerometer/Gyroscope Core inside the IMU Box
+    mesh_chip = bpy.data.meshes.new("IMUMEMSChipMesh")
+    bm_ch = bmesh.new()
+    add_box(bm_ch, (0.0, 0.0, 0.074), (0.26, 0.18, 0.012))
+    add_box(bm_ch, (0.0, 0.0, 0.088), (0.11, 0.11, 0.022))
+    # 3-Axis Acceleration Vector Arrows (aX, aY, aZ) rising directly from the MEMS IC chip
+    add_strut(bm_ch, (0.0, 0.0, 0.10), (0.28, 0.0, 0.10), radius=0.011, segs=8)
+    add_cylinder(bm_ch, (0.31, 0.0, 0.10), 0.028, 0.004, 0.065, segs=10, rot_euler=(0.0, math.pi / 2, 0.0))
+    add_strut(bm_ch, (0.0, 0.0, 0.10), (0.0, -0.26, 0.10), radius=0.011, segs=8)
+    add_cylinder(bm_ch, (0.0, -0.29, 0.10), 0.028, 0.004, 0.065, segs=10, rot_euler=(math.pi / 2, 0.0, 0.0))
+    add_strut(bm_ch, (0.0, 0.0, 0.10), (0.0, 0.0, 0.36), radius=0.011, segs=8)
+    add_cylinder(bm_ch, (0.0, 0.0, 0.39), 0.028, 0.004, 0.065, segs=10)
+    bm_ch.normal_update()
+    bm_ch.to_mesh(mesh_chip)
+    bm_ch.free()
+    chip_obj = bpy.data.objects.new("IMU_MEMSChip", mesh_chip)
+    chip_obj.data.materials.append(mats["ops_glass_cyan"])
+    link_obj(chip_obj, imu_box_obj)
+
+    # 3. Three Orthogonal Animated Gyroscope Gimbal Rings (Roll, Pitch, Yaw) + Seismic Vibration Wave Rings
+    def make_gimbal_ring(g_name: str, rad: float, rot_init, mat):
+        m_g = bpy.data.meshes.new(f"{g_name}Mesh")
+        bm_g = bmesh.new()
+        add_cylinder(bm_g, (0.0, 0.0, 0.0), rad, rad - 0.016, 0.022, segs=36, cap_ends=False, rot_euler=rot_init)
+        bm_g.normal_update()
+        bm_g.to_mesh(m_g)
+        bm_g.free()
+        g_obj = bpy.data.objects.new(g_name, m_g)
+        g_obj.location = (0.0, 0.0, 0.24)
+        g_obj.data.materials.append(mat)
+        link_obj(g_obj, grp)
+        return g_obj
+
+    make_gimbal_ring("IMU_Gimbal_Roll", 0.30, (math.pi / 2, 0.0, 0.0), mats["imu_glow"])
+    make_gimbal_ring("IMU_Gimbal_Pitch", 0.34, (0.0, math.pi / 2, 0.0), mats["ring_lime"])
+    make_gimbal_ring("IMU_Gimbal_Yaw", 0.38, (0.0, 0.0, 0.0), mats["ops_glass_cyan"])
+
+    # Concentric Seismic Ground Vibration Wave Rings around the IMU Box
     mesh_nodes = bpy.data.meshes.new("IMUNodesMesh")
     bm_n = bmesh.new()
-    for depth_z in (-0.18, -0.46, -0.76, -1.06, -1.36, -1.66):
-        add_cylinder(bm_n, (0, 0, depth_z), 0.102, 0.102, 0.15, segs=18)
-        add_cylinder(bm_n, (0, 0, depth_z), 0.134, 0.134, 0.042, segs=18)
-    # Surface telemetry halo around borehole head
-    add_cylinder(bm_n, (0, 0, 0.42), 0.24, 0.22, 0.022, segs=24, cap_ends=False)
+    for s_rad in (0.34, 0.48, 0.64):
+        add_cylinder(bm_n, (0.0, 0.0, 0.035), s_rad, s_rad - 0.020, 0.018, segs=32, cap_ends=False)
     bm_n.normal_update()
     bm_n.to_mesh(mesh_nodes)
     bm_n.free()
@@ -908,18 +991,19 @@ def build_imu_borehole(root, mats, templates=None):
     nodes_obj.data.materials.append(mats["imu_glow"])
     link_obj(nodes_obj, grp)
 
+    # 4. Prominent Downslope Shear Acceleration Vector Arrow (starting cleanly outside the 0.38m gimbal ring)
     mesh_arrow = bpy.data.meshes.new("DisplacementArrowMesh")
     bm_a = bmesh.new()
-    rot_y = Euler((0.0, math.pi / 2 + 0.24, 0.0), "XYZ").to_matrix().to_4x4()
+    rot_y = Euler((0.0, math.pi / 2 + 0.22, 0.0), "XYZ").to_matrix().to_4x4()
     bmesh.ops.create_cone(
-        bm_a, cap_ends=True, segments=16, radius1=0.032, radius2=0.032, depth=0.86,
-        matrix=Matrix.Translation((0.44, 0.0, 0.34)) @ rot_y
+        bm_a, cap_ends=True, segments=16, radius1=0.026, radius2=0.026, depth=0.46,
+        matrix=Matrix.Translation((0.66, 0.0, 0.22)) @ rot_y
     )
-    for ch_idx, offset_x in enumerate((0.70, 0.88, 1.06)):
-        rad = 0.090 + ch_idx * 0.016
+    for ch_idx, offset_x in enumerate((0.84, 0.98, 1.12)):
+        rad = 0.078 + ch_idx * 0.014
         bmesh.ops.create_cone(
-            bm_a, cap_ends=True, segments=16, radius1=rad, radius2=0.005, depth=0.22,
-            matrix=Matrix.Translation((offset_x, 0.0, 0.26 - ch_idx * 0.042)) @ rot_y
+            bm_a, cap_ends=True, segments=16, radius1=rad, radius2=0.005, depth=0.19,
+            matrix=Matrix.Translation((offset_x, 0.0, 0.16 - ch_idx * 0.035)) @ rot_y
         )
     bm_a.normal_update()
     bm_a.to_mesh(mesh_arrow)
@@ -932,8 +1016,8 @@ def build_imu_borehole(root, mats, templates=None):
 
 
 def build_rain_and_piezometer(root, mats, templates=None):
-    """Build Automatic Weather & Rain Gauge Station and Cutaway Piezometer Well with real 3D hardware pads, terminals, and cameras."""
-    rx, ry = -3.25, -2.05
+    """Build (1) Transparent Cutaway Tipping-Bucket Rain Gauge with Falling Rain Streaks & Animated Seesaw Bucket, and (2) Open-Cutaway Borehole Piezometer with Cable-Suspended Sensor Probe, Exposed Groundwater Table & Flowing Underground Water Streamlines."""
+    rx, ry = -3.15, -1.85
     rz = terrain_height(rx, ry)
     rain_grp = bpy.data.objects.new("Rain_Gauge_Station", None)
     rain_grp.location = (rx, ry, rz)
@@ -941,32 +1025,31 @@ def build_rain_and_piezometer(root, mats, templates=None):
 
     spawn_hw_instance(
         templates, "hex_pad", "Rain_HexPad", rain_grp,
-        loc=(0.0, 0.0, -0.02), rot=(0.0, 0.0, 0.25), scale=(0.88, 0.88, 0.90)
+        loc=(0.0, 0.0, -0.02), rot=(0.0, 0.0, 0.25), scale=(0.92, 0.92, 0.90)
     )
     spawn_hw_instance(
         templates, "info_panel", "Rain_InfoPanel", rain_grp,
-        loc=(-0.22, -0.18, 0.12), rot=(0.0, 0.0, -0.32), scale=(0.90, 0.90, 0.90)
+        loc=(-0.34, 0.22, 0.12), rot=(0.0, 0.0, -0.25), scale=(0.92, 0.92, 0.92)
     )
     spawn_hw_instance(
         templates, "ptz_camera", "Rain_PTZCamera", rain_grp,
-        loc=(0.20, -0.14, 0.42), rot=(0.0, 0.0, 0.40), scale=(0.85, 0.85, 0.85)
+        loc=(0.34, 0.22, 0.42), rot=(0.0, 0.0, 0.30), scale=(0.88, 0.88, 0.88)
     )
 
+    # 1A. Rain Gauge Structural Stand, Funnel Rim, Calibration Nozzle & Pivot Axle
     mesh_rg_stand = bpy.data.meshes.new("RainGaugeStandMesh")
     bm_s = bmesh.new()
-    add_cylinder(bm_s, (0, 0, 0.05), 0.29, 0.26, 0.11, segs=16)
-    add_cylinder(bm_s, (0, 0, 0.44), 0.032, 0.024, 0.78, segs=12)
-    for k in range(4):
-        ang = k * (math.pi / 2.0) + 0.4
-        add_strut(bm_s, (math.cos(ang) * 0.22, math.sin(ang) * 0.22, 0.08), (0, 0, 0.46), radius=0.014, segs=8)
-    add_box(bm_s, (0, 0, 0.78), (0.50, 0.032, 0.032))
-    for cup_ang in (0, 2.09, 4.18):
-        cx = -0.23 + math.cos(cup_ang) * 0.072
-        cy = math.sin(cup_ang) * 0.072
-        add_cylinder(bm_s, (cx, cy, 0.84), 0.026, 0.010, 0.034, segs=10)
-    for sh_i in range(5):
-        add_cylinder(bm_s, (0.22, 0, 0.64 + sh_i * 0.030), 0.048, 0.045, 0.020, segs=14)
-
+    add_cylinder(bm_s, (0, 0, 0.06), 0.30, 0.27, 0.10, segs=18)
+    add_cylinder(bm_s, (0, 0, 0.14), 0.23, 0.23, 0.04, segs=24)
+    # Left & Right structural frame columns supporting the top funnel so the center cutaway is 100% open
+    for sx_col in (-0.21, 0.21):
+        add_cylinder(bm_s, (sx_col, 0.0, 0.42), 0.018, 0.018, 0.56, segs=10)
+    # Central pivot stanchion for the Tipping Bucket seesaw at z = 0.34
+    add_box(bm_s, (0.0, 0.05, 0.24), (0.032, 0.032, 0.20))
+    add_cylinder(bm_s, (0.0, 0.0, 0.34), 0.022, 0.022, 0.16, segs=12, rot_euler=(math.pi / 2, 0.0, 0.0))
+    # Weather anemometer arm on the rear mast
+    add_cylinder(bm_s, (-0.26, 0.18, 0.58), 0.018, 0.014, 0.68, segs=10)
+    add_box(bm_s, (-0.26, 0.18, 0.92), (0.34, 0.024, 0.024))
     bm_s.normal_update()
     bm_s.to_mesh(mesh_rg_stand)
     bm_s.free()
@@ -975,11 +1058,15 @@ def build_rain_and_piezometer(root, mats, templates=None):
     stand_obj.data.materials.append(mats["steel_housing"])
     link_obj(stand_obj, rain_grp)
 
+    # 1B. Top Collector Funnel & Drip Spout + Transparent Cutaway Cylinder
     mesh_rg = bpy.data.meshes.new("RainGaugeMesh")
     bm = bmesh.new()
-    add_cylinder(bm, (0, 0, 0.52), 0.148, 0.148, 0.28, segs=24)
-    add_cylinder(bm, (0, 0, 0.70), 0.148, 0.192, 0.095, segs=24)
-    add_cylinder(bm, (0, 0, 0.76), 0.196, 0.196, 0.026, segs=24)
+    # Top funnel rim (z = 0.66..0.82) tapering down to the central drip nozzle (z = 0.52)
+    add_cylinder(bm, (0, 0, 0.78), 0.24, 0.24, 0.05, segs=28)
+    add_cylinder(bm, (0, 0, 0.66), 0.045, 0.23, 0.18, segs=28)
+    add_cylinder(bm, (0, 0, 0.53), 0.024, 0.042, 0.09, segs=16)
+    # Translucent calibration rings around base & funnel
+    add_cylinder(bm, (0, 0, 0.16), 0.24, 0.22, 0.022, segs=28, cap_ends=False)
     add_cylinder(bm, (0, 0, 0.04), 0.44, 0.40, 0.020, segs=28, cap_ends=False)
     bm.normal_update()
     bm.to_mesh(mesh_rg)
@@ -989,8 +1076,46 @@ def build_rain_and_piezometer(root, mats, templates=None):
     rg_obj.data.materials.append(mats["rain_cyan"])
     link_obj(rg_obj, rain_grp)
 
-    # 2. Piezometer Groundwater Monitoring Well on the front cutaway edge
-    px, py = -2.25, -TERRAIN_DEPTH / 2 + 0.32
+    # 1C. Animated Two-Chamber Seesaw Tipping Bucket (Rain_TippingBucket) pivoted at (0, 0, 0.34)
+    mesh_bucket = bpy.data.meshes.new("RainTippingBucketMesh")
+    bm_tb = bmesh.new()
+    # V-shaped seesaw trough + central dividing blade + left/right water chambers
+    add_box(bm_tb, (0.0, 0.0, 0.01), (0.28, 0.11, 0.022))
+    add_box(bm_tb, (0.0, 0.0, 0.065), (0.018, 0.11, 0.10))
+    add_box(bm_tb, (-0.075, 0.0, 0.045), (0.12, 0.10, 0.048), rot_euler=(0.0, 0.22, 0.0))
+    add_box(bm_tb, (0.075, 0.0, 0.045), (0.12, 0.10, 0.048), rot_euler=(0.0, -0.22, 0.0))
+    bm_tb.normal_update()
+    bm_tb.to_mesh(mesh_bucket)
+    bm_tb.free()
+    bucket_obj = bpy.data.objects.new("Rain_TippingBucket", mesh_bucket)
+    bucket_obj.location = (0.0, 0.0, 0.34)
+    bucket_obj.rotation_euler = (0.0, 0.32, 0.0)
+    bucket_obj.data.materials.append(mats["imu_glow"])
+    link_obj(bucket_obj, rain_grp)
+
+    # 1D. Animated Falling Rain Streaks Above Funnel + Internal Water Droplets Dripping Into the Tipping Bucket
+    mesh_drops = bpy.data.meshes.new("RainFallingDropsMesh")
+    bm_dr = bmesh.new()
+    for d_i in range(28):
+        ang = (d_i / 28.0) * math.pi * 2.0
+        r_d = 0.03 + (d_i % 4) * 0.048
+        dx_d = math.cos(ang) * r_d
+        dy_d = math.sin(ang) * r_d
+        dz_d = 0.86 + (d_i % 7) * 0.14
+        add_cylinder(bm_dr, (dx_d, dy_d, dz_d), 0.009, 0.004, 0.095, segs=6)
+    # Central stream of calibrated water drops dripping from funnel spout (z=0.50) into the tipping bucket (z=0.38)
+    for z_drip in (0.49, 0.44, 0.39):
+        bmesh.ops.create_icosphere(bm_dr, subdivisions=1, radius=0.018, matrix=Matrix.Translation((0.0, 0.0, z_drip)))
+    bm_dr.normal_update()
+    bm_dr.to_mesh(mesh_drops)
+    bm_dr.free()
+    drops_obj = bpy.data.objects.new("Rain_FallingDrops", mesh_drops)
+    drops_obj.data.materials.append(mats["water_glow"])
+    link_obj(drops_obj, rain_grp)
+
+    # 2. OPEN-CUTAWAY BOREHOLE PIEZOMETER & SUBSURFACE GROUNDWATER FLOW SHOWCASE
+    # Positioned at (-1.75, -2.28) directly at the top rim of the 1.24m-deep Geological Cutaway Trench!
+    px, py = -1.75, -2.28
     pz = terrain_height(px, py)
     piezo_grp = bpy.data.objects.new("Piezometer_Well_Assembly", None)
     piezo_grp.location = (px, py, pz)
@@ -998,23 +1123,38 @@ def build_rain_and_piezometer(root, mats, templates=None):
 
     spawn_hw_instance(
         templates, "hex_pad", "Piezo_HexPad", piezo_grp,
-        loc=(0.0, 0.06, -0.02), rot=(0.0, 0.0, 0.0), scale=(0.75, 0.75, 0.85)
+        loc=(0.0, 0.18, -0.02), rot=(0.0, 0.0, 0.0), scale=(0.82, 0.82, 0.85)
     )
     spawn_hw_instance(
         templates, "info_panel", "Piezo_InfoPanel", piezo_grp,
-        loc=(-0.22, 0.04, 0.10), rot=(0.0, 0.0, -0.25), scale=(0.82, 0.82, 0.82)
+        loc=(-0.34, 0.18, 0.10), rot=(0.0, 0.0, -0.25), scale=(0.88, 0.88, 0.88)
     )
     spawn_hw_instance(
         templates, "mini_pc", "Piezo_EdgeLogger", piezo_grp,
-        loc=(0.20, 0.04, 0.12), rot=(0.0, 0.0, 0.35), scale=(0.85, 0.85, 0.85)
+        loc=(0.34, 0.18, 0.12), rot=(0.0, 0.0, 0.30), scale=(0.88, 0.88, 0.88)
     )
 
+    # 2A. Surface Wellhead Tripod Winch + Half-Open Cutaway Borehole Casing Slicing Down the Exposed Cliff Face
     mesh_well = bpy.data.meshes.new("PiezometerCasingMesh")
     bm_w = bmesh.new()
-    add_cylinder(bm_w, (0, 0, 0.05), 0.25, 0.22, 0.11, segs=16)
-    add_cylinder(bm_w, (0, 0, 0.24), 0.145, 0.125, 0.30, segs=18)
-    add_box(bm_w, (0.145, 0, 0.28), (0.12, 0.14, 0.20))
-    add_cylinder(bm_w, (0, -0.20, -0.86), 0.086, 0.086, 2.02, segs=18)
+    # Surface wellhead collar & motorized cable winch frame at z = 0.0..0.44
+    add_cylinder(bm_w, (0.0, -0.08, 0.04), 0.18, 0.16, 0.08, segs=16)
+    add_box(bm_w, (-0.12, -0.08, 0.24), (0.028, 0.036, 0.38))
+    add_box(bm_w, (0.12, -0.08, 0.24), (0.028, 0.036, 0.38))
+    add_box(bm_w, (0.0, -0.08, 0.42), (0.28, 0.042, 0.032))
+    # Winch spool drum at z = 0.36
+    add_cylinder(bm_w, (0.0, -0.08, 0.36), 0.055, 0.055, 0.14, segs=16, rot_euler=(0.0, math.pi / 2, 0.0))
+    # Half-open cutaway borehole pipe walls (left, right, and rear walls from z = 0.04 down to z = -1.16)
+    # Leaving the front (-Y) completely open so the camera sees the suspended sensor probe inside the borehole!
+    add_box(bm_w, (-0.105, -0.08, -0.56), (0.024, 0.14, 1.22))
+    add_box(bm_w, (0.105, -0.08, -0.56), (0.024, 0.14, 1.22))
+    add_box(bm_w, (0.0, 0.00, -0.56), (0.23, 0.024, 1.22))
+    # Horizontal slotted filter ribs along the borehole casing
+    for slot_z in (-0.15, -0.35, -0.55, -0.75, -0.95, -1.12):
+        add_box(bm_w, (-0.105, -0.14, slot_z), (0.032, 0.032, 0.028))
+        add_box(bm_w, (0.105, -0.14, slot_z), (0.032, 0.032, 0.028))
+    # Kevlar Suspension Cable running from the winch drum (z = 0.36) straight down into the borehole (z = -0.62)
+    add_cylinder(bm_w, (0.0, -0.08, -0.13), 0.012, 0.012, 0.98, segs=8)
     bm_w.normal_update()
     bm_w.to_mesh(mesh_well)
     bm_w.free()
@@ -1023,11 +1163,32 @@ def build_rain_and_piezometer(root, mats, templates=None):
     well_obj.data.materials.append(mats["steel_housing"])
     link_obj(well_obj, piezo_grp)
 
+    # 2B. Suspended Vibrating-Wire Piezometer Sensor Probe (Piezometer_Probe) Lowered Deep Inside the Borehole!
+    mesh_probe = bpy.data.meshes.new("PiezometerProbeMesh")
+    bm_pr = bmesh.new()
+    # Glowing transducer body + conical filter tip + signal pulse rings climbing the cable
+    add_cylinder(bm_pr, (0.0, -0.08, -0.68), 0.072, 0.072, 0.25, segs=20)
+    add_cylinder(bm_pr, (0.0, -0.08, -0.85), 0.014, 0.072, 0.09, segs=20)
+    add_cylinder(bm_pr, (0.0, -0.08, -0.52), 0.072, 0.034, 0.07, segs=20)
+    for c_pulse_z in (-0.36, -0.16, 0.04, 0.24):
+        add_cylinder(bm_pr, (0.0, -0.08, c_pulse_z), 0.030, 0.030, 0.034, segs=12)
+    bm_pr.normal_update()
+    bm_pr.to_mesh(mesh_probe)
+    bm_pr.free()
+    probe_obj = bpy.data.objects.new("Piezometer_Probe", mesh_probe)
+    probe_obj.data.materials.append(mats["imu_glow"])
+    link_obj(probe_obj, piezo_grp)
+
+    # 2C. Exposed Underground Groundwater Table Volume & Borehole Water Column (PiezometerWaterColumn)
     mesh_col = bpy.data.meshes.new("PiezometerWaterMesh")
     bm_c = bmesh.new()
-    add_cylinder(bm_c, (0, -0.24, -1.06), 0.108, 0.108, 1.28, segs=20)
-    for ring_z in (-1.40, -1.08, -0.76, -0.44, 0.38):
-        add_cylinder(bm_c, (0, -0.24 if ring_z < 0 else 0.0, ring_z), 0.132 if ring_z < 0 else 0.28, 0.132 if ring_z < 0 else 0.26, 0.038, segs=20)
+    # Translucent blue Phreatic Groundwater Table filling the bottom half of the cutaway cliff (z = -1.18 .. -0.40)
+    add_box(bm_c, (0.0, -0.46, -0.79), (1.68, 0.82, 0.78))
+    # Rising water column inside the borehole submerging the Piezometer_Probe
+    add_cylinder(bm_c, (0.0, -0.08, -0.74), 0.094, 0.094, 0.86, segs=20)
+    # Bright phreatic water-table meniscus bars at the top of the groundwater table (z = -0.40)
+    add_box(bm_c, (0.0, -0.16, -0.40), (1.70, 0.036, 0.030))
+    add_box(bm_c, (0.0, -0.86, -0.40), (1.70, 0.036, 0.030))
     bm_c.normal_update()
     bm_c.to_mesh(mesh_col)
     bm_c.free()
@@ -1035,6 +1196,29 @@ def build_rain_and_piezometer(root, mats, templates=None):
     col_obj = bpy.data.objects.new("PiezometerWaterColumn", mesh_col)
     col_obj.data.materials.append(mats["water_glow"])
     link_obj(col_obj, piezo_grp)
+
+    # 2D. Animated Underground Water Flow Streamlines, Droplets & Directional Arrows Streaming Across the Borehole Probe!
+    mesh_wflow = bpy.data.meshes.new("PiezoWaterFlowMesh")
+    bm_wf = bmesh.new()
+    rot_flow = Euler((0.0, math.pi / 2, 0.0), "XYZ").to_matrix().to_4x4()
+    for wf_z in (-0.48, -0.64, -0.80, -0.96):
+        # Horizontal glowing streamline ribbon right across the cutaway cliff & through the slotted borehole
+        add_box(bm_wf, (0.0, -0.15, wf_z), (1.56, 0.018, 0.016))
+        for wf_x in (-0.64, -0.32, 0.0, 0.32, 0.64):
+            bmesh.ops.create_cone(
+                bm_wf, cap_ends=True, segments=12, radius1=0.042, radius2=0.005, depth=0.13,
+                matrix=Matrix.Translation((wf_x, -0.16, wf_z)) @ rot_flow
+            )
+            bmesh.ops.create_icosphere(
+                bm_wf, subdivisions=1, radius=0.024,
+                matrix=Matrix.Translation((wf_x - 0.14, -0.16, wf_z + 0.02))
+            )
+    bm_wf.normal_update()
+    bm_wf.to_mesh(mesh_wflow)
+    bm_wf.free()
+    wflow_obj = bpy.data.objects.new("Piezo_WaterFlowParticles", mesh_wflow)
+    wflow_obj.data.materials.append(mats["ops_glass_cyan"])
+    link_obj(wflow_obj, piezo_grp)
 
 
 def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.0), mat_map=None, exclude_names=()):
@@ -1108,35 +1292,199 @@ def import_single_glb_mesh(filename: str, new_name: str, scale_xyz=(1.0, 1.0, 1.
     return joined
 
 
+def create_grafana_wall_material():
+    """Procedurally generate a crisp 1024x384 Dark-Mode Grafana & WebGIS Command Center Dashboard texture and return an emissive Blender material."""
+    import numpy as np
+
+    W, H = 1024, 384
+    img_arr = np.zeros((H, W, 4), dtype=np.float32)
+    # Deep Grafana dark-slate background (#09101d)
+    img_arr[:, :, 0] = 0.035
+    img_arr[:, :, 1] = 0.062
+    img_arr[:, :, 2] = 0.115
+    img_arr[:, :, 3] = 1.0
+
+    def fill_rect(x0, y0, x1, y1, col):
+        img_arr[max(0, y0):min(H, y1), max(0, x0):min(W, x1)] = col
+
+    def draw_panel(x0, y0, x1, y1, accent_col):
+        # Card border & dark panel body
+        fill_rect(x0, y0, x1, y1, (0.12, 0.22, 0.34, 1.0))
+        fill_rect(x0 + 2, y0 + 2, x1 - 2, y1 - 2, (0.055, 0.095, 0.165, 1.0))
+        # Panel top header bar & status indicator
+        fill_rect(x0 + 2, y1 - 22, x1 - 2, y1 - 2, (0.08, 0.14, 0.24, 1.0))
+        fill_rect(x0 + 10, y1 - 15, x0 + 68, y1 - 8, accent_col)
+        fill_rect(x1 - 38, y1 - 15, x1 - 12, y1 - 8, (0.22, 0.92, 0.65, 1.0))
+        # Subtle horizontal & vertical Grafana gridlines
+        for gy in range(y0 + 24, y1 - 26, 26):
+            fill_rect(x0 + 8, gy, x1 - 8, gy + 1, (0.09, 0.16, 0.26, 1.0))
+        for gx in range(x0 + 36, x1 - 12, 42):
+            fill_rect(gx, y0 + 10, gx + 1, y1 - 24, (0.08, 0.14, 0.23, 1.0))
+
+    # Top Grafana Global Navbar (y = 354..380)
+    fill_rect(0, 354, W, 382, (0.07, 0.13, 0.22, 1.0))
+    fill_rect(16, 362, 180, 374, (0.22, 0.88, 0.96, 1.0))
+    fill_rect(200, 362, 310, 374, (0.20, 0.92, 0.58, 1.0))
+    fill_rect(W - 190, 360, W - 18, 376, (0.98, 0.52, 0.12, 1.0))
+
+    # 1. Left Wing Top Panel: GNSS RTK 3D Displacement Time-Series (S1 Crown, S2 Mid, S3 Toe)
+    draw_panel(14, 188, 276, 346, (0.22, 0.92, 0.84, 1.0))
+    xs_l = np.arange(24, 266)
+    t_l = (xs_l - 24) / 242.0
+    ys_s1 = (218 + 42 * t_l + 14 * np.sin(t_l * 10.0) + 6 * np.cos(t_l * 23.0)).astype(np.int32)
+    ys_s2 = (208 + 78 * (t_l ** 1.25) + 12 * np.sin(t_l * 14.0)).astype(np.int32)
+    ys_s3 = (202 + 18 * t_l + 6 * np.sin(t_l * 8.0)).astype(np.int32)
+    for xi, y1_v, y2_v, y3_v in zip(xs_l, ys_s1, ys_s2, ys_s3):
+        img_arr[200:min(320, y2_v), xi, :3] = np.maximum(img_arr[200:min(320, y2_v), xi, :3], (0.28, 0.16, 0.04))
+        img_arr[max(196, y1_v - 2):min(322, y1_v + 2), xi] = (0.22, 0.95, 0.88, 1.0)
+        img_arr[max(196, y2_v - 2):min(322, y2_v + 2), xi] = (1.0, 0.65, 0.12, 1.0)
+        img_arr[max(196, y3_v - 2):min(322, y3_v + 2), xi] = (0.52, 0.96, 0.36, 1.0)
+
+    # 2. Left Wing Bottom Panel: MEMS IMU 3-Axis Tilt & Vibration Spectrogram
+    draw_panel(14, 16, 276, 176, (1.0, 0.62, 0.14, 1.0))
+    ys_imu_r = (82 + 28 * np.sin(t_l * 28.0) * (0.4 + 0.6 * t_l) + 10 * np.cos(t_l * 65.0)).astype(np.int32)
+    ys_imu_p = (64 + 18 * np.cos(t_l * 22.0) + 14 * t_l).astype(np.int32)
+    for xi, yr, yp in zip(xs_l, ys_imu_r, ys_imu_p):
+        img_arr[max(24, yr - 2):min(150, yr + 2), xi] = (1.0, 0.58, 0.10, 1.0)
+        img_arr[max(24, yp - 2):min(150, yp + 2), xi] = (0.24, 0.86, 0.98, 1.0)
+
+    # 3. Center Left Panel: Grafana Circular Arc Gauges (FoS = 1.18 & Pore Pressure = 42.8 kPa)
+    draw_panel(290, 188, 508, 346, (0.52, 0.96, 0.36, 1.0))
+    yy, xx = np.ogrid[:H, :W]
+    for g_cx, g_cy, g_col in ((348, 256, (0.98, 0.62, 0.12, 1.0)), (450, 256, (0.22, 0.86, 0.98, 1.0))):
+        dist = np.sqrt((xx - g_cx) ** 2 + (yy - g_cy) ** 2)
+        ring_mask = (dist >= 30) & (dist <= 42) & (yy >= g_cy - 18)
+        img_arr[ring_mask] = g_col
+        core_mask = dist <= 18
+        img_arr[core_mask] = (0.12, 0.24, 0.36, 1.0)
+
+    # 4. Center Right Panel: WebGIS Digital Twin Landslide Heatmap & Sensor Nodes
+    draw_panel(518, 188, 736, 346, (0.22, 0.88, 0.96, 1.0))
+    h_cx, h_cy = 626, 258
+    h_dist = np.sqrt(((xx - h_cx) / 1.35) ** 2 + ((yy - h_cy) / 0.85) ** 2)
+    img_arr[(h_dist < 58) & (yy > 196) & (yy < 322)] = (0.08, 0.36, 0.34, 1.0)
+    img_arr[(h_dist < 40) & (yy > 196) & (yy < 322)] = (0.18, 0.62, 0.48, 1.0)
+    img_arr[(h_dist < 26) & (yy > 196) & (yy < 322)] = (0.92, 0.52, 0.12, 1.0)
+    img_arr[(h_dist < 13) & (yy > 196) & (yy < 322)] = (0.98, 0.26, 0.12, 1.0)
+    for nx_p, ny_p in ((575, 285), (618, 262), (665, 244), (595, 232), (648, 282)):
+        fill_rect(nx_p - 4, ny_p - 4, nx_p + 4, ny_p + 4, (0.85, 1.0, 0.45, 1.0))
+
+    # 5. Center Bottom Wide Panel: Multi-Sensor AI Fusion & Early Warning Threshold Curve
+    draw_panel(290, 16, 736, 176, (0.22, 0.92, 0.84, 1.0))
+    # Threshold dashed line at y = 126
+    for tx_d in range(302, 724, 14):
+        fill_rect(tx_d, 126, tx_d + 8, 128, (0.98, 0.28, 0.22, 1.0))
+    xs_c = np.arange(302, 724)
+    t_c = (xs_c - 302) / 422.0
+    ys_f1 = (38 + 76 * (t_c ** 1.4) + 10 * np.sin(t_c * 18.0)).astype(np.int32)
+    ys_f2 = (32 + 54 * t_c + 12 * np.cos(t_c * 14.0)).astype(np.int32)
+    for xi, yf1, yf2 in zip(xs_c, ys_f1, ys_f2):
+        img_arr[24:min(148, yf1), xi, :3] = np.maximum(img_arr[24:min(148, yf1), xi, :3], (0.06, 0.24, 0.32))
+        img_arr[max(22, yf1 - 2):min(148, yf1 + 2), xi] = (0.22, 0.96, 0.88, 1.0)
+        img_arr[max(22, yf2 - 2):min(148, yf2 + 2), xi] = (1.0, 0.68, 0.14, 1.0)
+
+    # 6. Right Wing Top Panel: Tipping-Bucket Rainfall Intensity Histogram (mm/10m)
+    draw_panel(748, 188, 1010, 346, (0.28, 0.78, 0.98, 1.0))
+    for b_idx in range(16):
+        bx0 = 762 + b_idx * 15
+        bh = int(22 + 78 * (0.35 + 0.65 * abs(math.sin(b_idx * 0.65 + 0.4))))
+        fill_rect(bx0, 196, bx0 + 10, 196 + bh, (0.18, 0.68, 0.96, 1.0))
+        fill_rect(bx0, 196 + bh - 4, bx0 + 10, 196 + bh, (0.65, 0.96, 1.0, 1.0))
+
+    # 7. Right Wing Bottom Panel: Borehole Piezometer Pore Pressure (kPa) & Groundwater Table
+    draw_panel(748, 16, 1010, 176, (0.22, 0.74, 0.98, 1.0))
+    xs_r = np.arange(758, 1000)
+    t_r = (xs_r - 758) / 242.0
+    ys_pz = (36 + 74 * (t_r ** 1.15) + 8 * np.sin(t_r * 12.0)).astype(np.int32)
+    for xi, ypz in zip(xs_r, ys_pz):
+        img_arr[22:min(146, ypz), xi, :3] = (0.08, 0.34, 0.58)
+        img_arr[max(22, ypz - 2):min(148, ypz + 2), xi] = (0.38, 0.92, 1.0, 1.0)
+
+    img = bpy.data.images.new("GrafanaDashboardTex", width=W, height=H, alpha=True)
+    img.pixels.foreach_set(img_arr.ravel())
+    grafana_png = BLENDER_DIR / "grafana_dashboard.png"
+    img.filepath_raw = str(grafana_png)
+    img.file_format = "PNG"
+    img.save()
+    img.pack()
+
+    mat = bpy.data.materials.new(name="GrafanaWallMat")
+    mat.use_nodes = True
+    mat.diffuse_color = (0.12, 0.78, 0.92, 1.0)
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    tex_node = nodes.new("ShaderNodeTexImage")
+    tex_node.image = img
+    tex_node.extension = "CLIP"
+    if bsdf:
+        bsdf.inputs["Roughness"].default_value = 0.12
+        bsdf.inputs["Metallic"].default_value = 0.08
+        links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+        if "Emission Color" in bsdf.inputs:
+            links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
+        if "Emission Strength" in bsdf.inputs:
+            bsdf.inputs["Emission Strength"].default_value = 1.65
+    return mat
+
+
+def create_uv_quad_panel(bm, center, width, height, yaw_rad, u0, u1, v0=0.0, v1=1.0):
+    """Create a vertical rectangular display quad in bmesh with explicit UV coordinates [u0..u1, v0..v1] facing -Y (rotated by yaw_rad)."""
+    uv_layer = bm.loops.layers.uv.verify()
+    rot_z = Euler((0.0, 0.0, yaw_rad), "XYZ").to_matrix()
+    hw = width * 0.5
+    hh = height * 0.5
+    c_vec = Vector(center)
+    local_corners = [
+        ((-hw, 0.0, -hh), (u0, v0)),
+        ((hw, 0.0, -hh), (u1, v0)),
+        ((hw, 0.0, hh), (u1, v1)),
+        ((-hw, 0.0, hh), (u0, v1)),
+    ]
+    verts = []
+    for pos, _ in local_corners:
+        w_pos = c_vec + rot_z @ Vector(pos)
+        verts.append(bm.verts.new(w_pos))
+    face = bm.faces.new(verts)
+    for loop, (_, uv) in zip(face.loops, local_corners):
+        loop[uv_layer].uv = uv
+
+
 def build_operations_hub(root, mats, templates=None):
-    """Build an Expanded Futuristic AI Command & Data Center Campus with Motorized Sliding Entrance Doors and a Walk-In Interior Control Room (5-Screen Video Wall, 3D Holographic Terrain Projector, Operator Consoles & Seats)."""
+    """Build a Cohesive Modern Glass-and-Steel AI Data Center & Command Building with Motorized Sliding Glass Doors, Server Racks, Rooftop Helipad, and a Curved Panoramic Grafana + WebGIS Video Wall."""
     ox, oy = 5.15, -0.55
     oz = terrain_height(ox, oy)
     ops_grp = bpy.data.objects.new("Operations_Command_Node", None)
     ops_grp.location = (ox, oy, oz)
     link_obj(ops_grp, root)
 
-    # 1. Monumental Terraced Concrete Citadel Plaza + Grand Approach Ramp + Interior Control Room Deck
+    grafana_mat = create_grafana_wall_material()
+    glass_curtain_mat = make_material(
+        "BuildingCurtainGlassMat",
+        base_color=(0.55, 0.90, 0.98, 1.0),
+        metallic=0.25,
+        roughness=0.08,
+        emission_color=(0.18, 0.72, 0.88),
+        emission_strength=0.25,
+        alpha=0.18,
+    )
+
+    # 1. Landscaped Architectural Concrete Plaza, Grand Approach Staircase & Interior Control Room Deck
     mesh_pad = bpy.data.meshes.new("OpsCampusPadMesh")
     bm_pad = bmesh.new()
-    add_box(bm_pad, (0.05, 0.05, 0.08), (4.25, 4.45, 0.18))
-    add_box(bm_pad, (0.05, 0.08, 0.19), (3.85, 4.05, 0.09))
-    # Front approach ramp & steps leading to the Entrance Portal at y = -1.52
-    add_box(bm_pad, (0.0, -1.92, 0.16), (1.56, 0.72, 0.12), rot_euler=(0.12, 0.0, 0.0))
-    # Interior elevated Control Room bridge deck (y = -1.10 .. +0.55, z = 0.36)
-    add_box(bm_pad, (0.0, -0.25, 0.30), (1.88, 1.75, 0.14))
-    add_box(bm_pad, (0.0, -1.24, 0.27), (1.32, 0.48, 0.12), rot_euler=(0.24, 0.0, 0.0))
-    # Low-profile Octagonal Hologram Projection Table Pedestal in the center of the Control Room (y = -0.22)
-    add_cylinder(bm_pad, (0.0, -0.22, 0.41), 0.32, 0.26, 0.08, segs=8)
-    add_cylinder(bm_pad, (0.0, -0.22, 0.48), 0.28, 0.32, 0.05, segs=8)
-    # Vaulted architectural structural arches framing the Open-View Control Room Sanctuary
-    for arch_y in (-1.05, -0.45, 0.15, 0.52):
-        add_box(bm_pad, (-0.96, arch_y, 0.82), (0.08, 0.10, 1.08))
-        add_box(bm_pad, (0.96, arch_y, 0.82), (0.08, 0.10, 1.08))
-        add_box(bm_pad, (0.0, arch_y, 1.36), (2.02, 0.10, 0.07))
+    add_box(bm_pad, (0.0, -0.15, 0.08), (4.20, 4.10, 0.18))
+    add_box(bm_pad, (0.0, -0.10, 0.19), (3.84, 3.60, 0.09))
+    # Wide architectural approach ramp & steps leading to the front glass entrance at y = -1.48
+    add_box(bm_pad, (0.0, -1.88, 0.16), (1.68, 0.68, 0.12), rot_euler=(0.12, 0.0, 0.0))
+    # Interior elevated Control Room floor slab (y = -1.38 .. +0.88, z = 0.36)
+    add_box(bm_pad, (0.0, -0.22, 0.30), (3.48, 2.38, 0.14))
+    add_box(bm_pad, (0.0, -1.24, 0.27), (1.36, 0.46, 0.12), rot_euler=(0.22, 0.0, 0.0))
+    # Low-profile Octagonal Hologram Table Pedestal in the center of the Control Room (y = -0.28)
+    add_cylinder(bm_pad, (0.0, -0.28, 0.40), 0.28, 0.23, 0.07, segs=8)
+    add_cylinder(bm_pad, (0.0, -0.28, 0.46), 0.25, 0.28, 0.04, segs=8)
     for bx in (-1.75, -1.25, -0.75, 0.75, 1.25, 1.75):
-        add_box(bm_pad, (bx, -2.08, 0.11), (0.09, 0.10, 0.22))
-        add_cylinder(bm_pad, (bx, -1.98, 0.30), 0.022, 0.022, 0.14, segs=8)
+        add_box(bm_pad, (bx, -2.02, 0.11), (0.08, 0.09, 0.22))
+        add_cylinder(bm_pad, (bx, -1.94, 0.30), 0.020, 0.020, 0.14, segs=8)
     bm_pad.normal_update()
     bm_pad.to_mesh(mesh_pad)
     bm_pad.free()
@@ -1144,109 +1492,72 @@ def build_operations_hub(root, mats, templates=None):
     pad_obj.data.materials.append(mats["concrete"])
     link_obj(pad_obj, ops_grp)
 
-    # 2. Rear Citadel Spire (aero_station.glb) framing the back of the Control Room + Flanking Biodomes
-    aero_mat_map = {
-        "Aero_Floor_01": mats["ops_obsidian"],
-        "Aero_Floor_02": mats["steel_housing"],
-        "Aero_Glass": mats["ops_glass_cyan"],
-        "Aero_Glow_01": mats["ring_teal"],
-        "Aero_Glow_02": mats["imu_glow"],
-        "Aero_Holographic": mats["gnss_base_dome"],
-        "Aero_Wall": mats["ops_obsidian"],
-    }
-    aero_obj = import_single_glb_mesh(
-        "aero_station.glb",
-        "OpsCommandStructure",
-        scale_xyz=(0.118, 0.088, 0.058),
-        mat_map=aero_mat_map,
-    )
-    if aero_obj:
-        aero_obj.location = (0.0, 1.48, 0.21)
-        link_obj(aero_obj, ops_grp)
-
-    dome_mat_map = {
-        "DomeBase": mats["steel_housing"],
-        "DomeChip": mats["ops_glass_cyan"],
-    }
-    dome1_obj = import_single_glb_mesh(
-        "sci_dome.glb",
-        "OpsNorthBiodome",
-        scale_xyz=(0.036, 0.032, 0.032),
-        mat_map=dome_mat_map,
-    )
-    if dome1_obj:
-        dome1_obj.location = (1.38, 0.68, 0.21)
-        link_obj(dome1_obj, ops_grp)
-
-    dome2_mat_map = {
-        "DomeBase": mats["ops_obsidian"],
-        "DomeChip": mats["gnss_rover_dome"],
-    }
-    dome2_obj = import_single_glb_mesh(
-        "sci_dome_02.glb",
-        "OpsSouthBiodome",
-        scale_xyz=(0.028, 0.030, 0.028),
-        mat_map=dome2_mat_map,
-    )
-    if dome2_obj:
-        dome2_obj.location = (-1.38, 0.55, 0.21)
-        link_obj(dome2_obj, ops_grp)
-
-    # 3. Hexagonal Helipad Command Plaza on the East Forecourt (hex_pavilion.glb) + External AI Core (teleporter_hub.glb)
-    hex_obj = import_single_glb_mesh(
-        "hex_pavilion.glb",
-        "OpsHelipadPavilion",
-        scale_xyz=(0.046, 0.046, 0.046),
-        mat_map={"HexagonVIP01": mats["ops_obsidian"], "ZenGarden": mats["ops_glass_cyan"]},
-    )
-    hx, hy, hz = 1.38, -1.05, 0.22
-    if hex_obj:
-        hex_obj.location = (hx, hy, 0.20)
-        link_obj(hex_obj, ops_grp)
-
-    holo_base = import_single_glb_mesh(
-        "teleporter_hub.glb",
-        "OpsControlGlass",
-        scale_xyz=(0.32, 0.32, 0.28),
-        mat_map={
-            "AltarHolo": mats["ops_glass_cyan"],
-            "PlatformBarrier": mats["ring_lime"],
-            "Teleporter": mats["steel_housing"],
-        },
-    )
-    if holo_base:
-        holo_base.location = (1.38, -0.15, 0.21)
-        link_obj(holo_base, ops_grp)
-
-    # 4. GRAND MOTORIZED ENTRANCE PORTAL ARCHWAY (Open-Center Gateway) + ANIMATED SLIDING BLAST DOORS (OpsDoor_Left & OpsDoor_Right)
-    mesh_portal = bpy.data.meshes.new("OpsEntrancePortalMesh")
-    bm_pt = bmesh.new()
-    for p_sign in (-1.0, 1.0):
-        # Sculpted inner gateway pylons framing the 1.12m wide doorway opening
-        add_box(bm_pt, (p_sign * 0.64, -1.52, 0.68), (0.16, 0.22, 0.92))
-        # Outer pocket buttress wings that house the sliding doors when open
-        add_box(bm_pt, (p_sign * 0.96, -1.52, 0.64), (0.48, 0.14, 0.84))
-        add_box(bm_pt, (p_sign * 1.22, -1.52, 0.68), (0.14, 0.22, 0.92))
-    # Overhead cantilevered portal lintel & aerodynamic marquee canopy
-    add_box(bm_pt, (0.0, -1.52, 1.16), (2.58, 0.28, 0.12))
-    add_box(bm_pt, (0.0, -1.60, 1.25), (1.84, 0.34, 0.07))
-    bm_pt.normal_update()
-    bm_pt.to_mesh(mesh_portal)
-    bm_pt.free()
-    portal_obj = bpy.data.objects.new("OpsEntrancePortal", mesh_portal)
+    # 2. COHESIVE 2-STORY MODERN ARCHITECTURAL BUILDING ENVELOPE (Columns, Cantilevered Roof Overhang, Mullions & Rear Core)
+    mesh_bldg = bpy.data.meshes.new("OpsEntrancePortalMesh")
+    bm_bl = bmesh.new()
+    # Rear structural core wall (y = 0.98) & interior partition pilasters
+    add_box(bm_bl, (0.0, 0.98, 0.92), (3.56, 0.18, 1.22))
+    # Cantilevered flat architectural roof slab (z = 1.52) + upper penthouse equipment deck (z = 1.61)
+    add_box(bm_bl, (0.0, -0.22, 1.52), (3.88, 2.76, 0.08))
+    add_box(bm_bl, (0.0, -0.15, 1.60), (3.44, 2.36, 0.08))
+    # Front curtain-wall structural steel columns & doorway portal pylons at y = -1.48
+    for col_x in (-1.74, -1.18, -0.62, 0.62, 1.18, 1.74):
+        add_box(bm_bl, (col_x, -1.48, 0.90), (0.10, 0.14, 1.20))
+    # Side structural columns along West (x = -1.74) and East (x = +1.74) facades
+    for col_y in (-0.82, -0.15, 0.48, 0.98):
+        add_box(bm_bl, (-1.74, col_y, 0.90), (0.12, 0.10, 1.20))
+        add_box(bm_bl, (1.74, col_y, 0.90), (0.12, 0.10, 1.20))
+    # Horizontal mezzanine spandrel beam at z = 1.14 across front and sides (leaving central doorway z = 0.24..1.10 open)
+    add_box(bm_bl, (0.0, -1.48, 1.14), (3.58, 0.14, 0.07))
+    add_box(bm_bl, (-1.74, -0.25, 1.14), (0.12, 2.48, 0.06))
+    add_box(bm_bl, (1.74, -0.25, 1.14), (0.12, 2.48, 0.06))
+    # Cantilevered entrance marquee canopy over the front sliding doors
+    add_box(bm_bl, (0.0, -1.66, 1.16), (1.56, 0.36, 0.06))
+    # West-Wing Interior AI Server Racks (6 sleek server cabinets visible through the West glass curtain wall)
+    for r_idx, ry_srv in enumerate((-0.88, -0.48, -0.08, 0.32)):
+        add_box(bm_bl, (-1.38, ry_srv, 0.68), (0.26, 0.24, 0.62))
+    bm_bl.normal_update()
+    bm_bl.to_mesh(mesh_bldg)
+    bm_bl.free()
+    portal_obj = bpy.data.objects.new("OpsEntrancePortal", mesh_bldg)
     portal_obj.data.materials.append(mats["ops_obsidian"])
     link_obj(portal_obj, ops_grp)
 
-    # Glowing Entrance Portal Arch & Floor Runway Strips leading straight up into the Control Room
+    # 2B. Floor-to-Ceiling Architectural Glass Curtain Wall (Left/Right Front Wings, Transom & Side Facades)
+    mesh_cglass = bpy.data.meshes.new("OpsBuildingGlassMesh")
+    bm_cg = bmesh.new()
+    # Front Left & Right glass curtain wings (leaving center x in [-0.58, +0.58] open for sliding doors!)
+    add_box(bm_cg, (-1.18, -1.48, 0.90), (1.06, 0.024, 1.14))
+    add_box(bm_cg, (1.18, -1.48, 0.90), (1.06, 0.024, 1.14))
+    # Upper transom glass above entrance doorway
+    add_box(bm_cg, (0.0, -1.48, 1.32), (1.16, 0.024, 0.30))
+    # West & East side glass curtain walls
+    add_box(bm_cg, (-1.74, -0.25, 0.90), (0.024, 2.42, 1.14))
+    add_box(bm_cg, (1.74, -0.25, 0.90), (0.024, 2.42, 1.14))
+    bm_cg.normal_update()
+    bm_cg.to_mesh(mesh_cglass)
+    bm_cg.free()
+    cglass_obj = bpy.data.objects.new("OpsControlGlass", mesh_cglass)
+    cglass_obj.data.materials.append(glass_curtain_mat)
+    link_obj(cglass_obj, ops_grp)
+
+    # 3. Architectural Roof Fascia LED Strip, Server Rack LED Indicators & Floor Runway Strips
     mesh_arch_glow = bpy.data.meshes.new("OpsEntranceArchGlowMesh")
     bm_ag = bmesh.new()
-    add_box(bm_ag, (-0.58, -1.58, 0.68), (0.042, 0.06, 0.88))
-    add_box(bm_ag, (0.58, -1.58, 0.68), (0.042, 0.06, 0.88))
-    add_box(bm_ag, (0.0, -1.58, 1.14), (1.24, 0.08, 0.052))
+    # Glowing cyan roof fascia perimeter strip
+    add_box(bm_ag, (0.0, -1.60, 1.52), (3.90, 0.035, 0.032))
+    add_box(bm_ag, (-1.94, -0.22, 1.52), (0.035, 2.76, 0.032))
+    add_box(bm_ag, (1.94, -0.22, 1.52), (0.035, 2.76, 0.032))
+    # Glowing doorway portal frame & floor runway strips leading into the Control Room
+    add_box(bm_ag, (-0.57, -1.54, 0.68), (0.036, 0.045, 0.86))
+    add_box(bm_ag, (0.57, -1.54, 0.68), (0.036, 0.045, 0.86))
+    add_box(bm_ag, (0.0, -1.54, 1.12), (1.18, 0.055, 0.042))
     for rx_strip in (-0.28, 0.28):
-        add_box(bm_ag, (rx_strip, -1.25, 0.37), (0.032, 1.45, 0.016))
-    for arch_y in (-1.05, -0.45, 0.15, 0.52):
-        add_box(bm_ag, (0.0, arch_y, 1.32), (1.84, 0.045, 0.028))
+        add_box(bm_ag, (rx_strip, -1.10, 0.37), (0.030, 1.48, 0.014))
+    # Glowing LED strips on the West-Wing AI Server Racks
+    for ry_srv in (-0.88, -0.48, -0.08, 0.32):
+        for z_led in (0.48, 0.62, 0.76, 0.90):
+            add_box(bm_ag, (-1.24, ry_srv, z_led), (0.018, 0.18, 0.020))
     bm_ag.normal_update()
     bm_ag.to_mesh(mesh_arch_glow)
     bm_ag.free()
@@ -1254,44 +1565,45 @@ def build_operations_hub(root, mats, templates=None):
     arch_glow_obj.data.materials.append(mats["ops_glass_cyan"])
     link_obj(arch_glow_obj, ops_grp)
 
-    # Left & Right Sliding Entrance Doors (OpsDoor_Left and OpsDoor_Right)
+    # 4. Motorized Double Sliding Glass Entrance Doors (OpsDoor_Left and OpsDoor_Right)
     def build_sliding_door_panel(door_name: str, side_sign: float):
         mesh_dr = bpy.data.meshes.new(f"{door_name}Mesh")
         bm_dr = bmesh.new()
         cx_panel = side_sign * 0.28
-        add_box(bm_dr, (cx_panel, 0.0, 0.42), (0.55, 0.048, 0.82))
-        add_box(bm_dr, (side_sign * 0.03, -0.015, 0.42), (0.055, 0.068, 0.82))
-        for rib_z in (0.14, 0.42, 0.70):
-            add_box(bm_dr, (cx_panel, -0.018, rib_z), (0.52, 0.062, 0.048))
+        # Slim brushed-steel door frame stiles & rails around a large glass door leaf
+        add_box(bm_dr, (side_sign * 0.025, 0.0, 0.42), (0.042, 0.042, 0.84))
+        add_box(bm_dr, (side_sign * 0.535, 0.0, 0.42), (0.042, 0.042, 0.84))
+        add_box(bm_dr, (cx_panel, 0.0, 0.81), (0.55, 0.042, 0.055))
+        add_box(bm_dr, (cx_panel, 0.0, 0.04), (0.55, 0.042, 0.065))
+        add_box(bm_dr, (cx_panel, -0.015, 0.42), (0.52, 0.048, 0.032))
         bm_dr.normal_update()
         bm_dr.to_mesh(mesh_dr)
         bm_dr.free()
 
         dr_obj = bpy.data.objects.new(door_name, mesh_dr)
-        dr_obj.location = (0.0, -1.52, 0.24)
+        dr_obj.location = (0.0, -1.48, 0.24)
         dr_obj.data.materials.append(mats["steel_housing"])
         link_obj(dr_obj, ops_grp)
 
         mesh_win = bpy.data.meshes.new(f"{door_name}GlassMesh")
         bm_w = bmesh.new()
-        add_box(bm_w, (cx_panel, -0.022, 0.56), (0.38, 0.022, 0.22))
-        add_box(bm_w, (cx_panel, -0.022, 0.28), (0.38, 0.022, 0.20))
+        add_box(bm_w, (cx_panel, 0.0, 0.42), (0.46, 0.016, 0.72))
         bm_w.normal_update()
         bm_w.to_mesh(mesh_win)
         bm_w.free()
         win_obj = bpy.data.objects.new(f"{door_name}_Glass", mesh_win)
-        win_obj.data.materials.append(mats["ops_glass_cyan"])
+        win_obj.data.materials.append(glass_curtain_mat)
         link_obj(win_obj, dr_obj)
         return dr_obj
 
     build_sliding_door_panel("OpsDoor_Left", -1.0)
     build_sliding_door_panel("OpsDoor_Right", 1.0)
 
-    # 5. INTERIOR AI COMMAND & CONTROL ROOM (Unobstructed 5-Screen Video Wall + Low-Profile 3D Hologram Table + Operator Desks & Seats)
+    # 5. INTERIOR AI COMMAND & CONTROL ROOM (3D Hologram Table + 4 Operator Consoles + Curved Grafana Video Wall)
     holo_proj = import_single_glb_mesh(
         "energy_projector.glb",
         "OpsHoloProjector",
-        scale_xyz=(0.11, 0.11, 0.022),
+        scale_xyz=(0.10, 0.10, 0.020),
         mat_map={
             "SciFi_Trim": mats["ops_obsidian"],
             "Tubes_Transparent": mats["ops_glass_cyan"],
@@ -1299,29 +1611,26 @@ def build_operations_hub(root, mats, templates=None):
         },
     )
     if holo_proj:
-        holo_proj.location = (0.0, -0.22, 0.42)
+        holo_proj.location = (0.0, -0.28, 0.41)
         link_obj(holo_proj, ops_grp)
 
-    # Floating 3D Holographic Mountain Terrain & Slip-Zone Model (OpsHoloTerrain) above the low-profile table (z = 0.54)
     mesh_holo_t = bpy.data.meshes.new("OpsHoloTerrainMesh")
     bm_ht = bmesh.new()
-    add_cylinder(bm_ht, (0.0, 0.0, 0.0), 0.24, 0.22, 0.014, segs=24)
-    add_box(bm_ht, (-0.05, 0.02, 0.036), (0.24, 0.18, 0.036), rot_euler=(0.08, 0.26, -0.15))
-    add_box(bm_ht, (-0.09, 0.04, 0.068), (0.15, 0.12, 0.032), rot_euler=(0.10, 0.32, -0.15))
-    for h_pt in ((-0.10, 0.04, 0.105), (-0.02, -0.02, 0.085), (0.05, 0.03, 0.06)):
-        add_cylinder(bm_ht, h_pt, 0.012, 0.004, 0.048, segs=10)
+    add_cylinder(bm_ht, (0.0, 0.0, 0.0), 0.22, 0.20, 0.012, segs=24)
+    add_box(bm_ht, (-0.04, 0.02, 0.032), (0.22, 0.16, 0.032), rot_euler=(0.08, 0.24, -0.15))
+    add_box(bm_ht, (-0.08, 0.03, 0.060), (0.14, 0.11, 0.028), rot_euler=(0.10, 0.30, -0.15))
     bm_ht.normal_update()
     bm_ht.to_mesh(mesh_holo_t)
     bm_ht.free()
     holo_terrain_obj = bpy.data.objects.new("OpsHoloTerrain", mesh_holo_t)
-    holo_terrain_obj.location = (0.0, -0.22, 0.54)
+    holo_terrain_obj.location = (0.0, -0.28, 0.51)
     holo_terrain_obj.data.materials.append(mats["ops_glass_cyan"])
     link_obj(holo_terrain_obj, ops_grp)
 
     mesh_holo_slip = bpy.data.meshes.new("OpsHoloSlipMesh")
     bm_hs = bmesh.new()
-    add_box(bm_hs, (-0.02, -0.01, 0.058), (0.12, 0.095, 0.018), rot_euler=(0.08, 0.28, -0.15))
-    add_cylinder(bm_hs, (0.0, 0.0, 0.015), 0.28, 0.26, 0.010, segs=28, cap_ends=False)
+    add_box(bm_hs, (-0.02, -0.01, 0.050), (0.11, 0.085, 0.016), rot_euler=(0.08, 0.26, -0.15))
+    add_cylinder(bm_hs, (0.0, 0.0, 0.014), 0.25, 0.23, 0.010, segs=28, cap_ends=False)
     bm_hs.normal_update()
     bm_hs.to_mesh(mesh_holo_slip)
     bm_hs.free()
@@ -1329,7 +1638,7 @@ def build_operations_hub(root, mats, templates=None):
     holo_slip_obj.data.materials.append(mats["imu_glow"])
     link_obj(holo_slip_obj, holo_terrain_obj)
 
-    # 5B. Operator Desks (table_futuristic.glb) & Operator Chairs (operator_seat.glb) & Edge-AI Terminals
+    # 5B. Operator Desks (table_futuristic.glb) & Operator Chairs (operator_seat.glb) + Widescreen Grafana Desk Monitors
     desk_tmpl = import_single_glb_mesh(
         "table_futuristic.glb",
         "Tmpl_OpsDesk",
@@ -1343,11 +1652,13 @@ def build_operations_hub(root, mats, templates=None):
         mat_map={"Seat_01": mats["steel_housing"]},
     )
     desk_configs = [
-        ("OpsDesk_LeftFront", (-0.52, -0.58, 0.37), (0.0, 0.0, 0.28)),
-        ("OpsDesk_RightFront", (0.52, -0.58, 0.37), (0.0, 0.0, -0.28)),
-        ("OpsDesk_LeftRear", (-0.56, -0.08, 0.37), (0.0, 0.0, 0.35)),
-        ("OpsDesk_RightRear", (0.56, -0.08, 0.37), (0.0, 0.0, -0.35)),
+        ("OpsDesk_LeftFront", (-0.56, -0.62, 0.37), (0.0, 0.0, 0.24)),
+        ("OpsDesk_RightFront", (0.56, -0.62, 0.37), (0.0, 0.0, -0.24)),
+        ("OpsDesk_LeftRear", (-0.62, -0.06, 0.37), (0.0, 0.0, 0.30)),
+        ("OpsDesk_RightRear", (0.62, -0.06, 0.37), (0.0, 0.0, -0.30)),
     ]
+    mesh_desk_scr = bpy.data.meshes.new("OpsDeskMonitorsMesh")
+    bm_ds = bmesh.new()
     for d_name, d_loc, d_rot in desk_configs:
         if desk_tmpl:
             d_inst = bpy.data.objects.new(d_name, desk_tmpl.data.copy())
@@ -1356,70 +1667,40 @@ def build_operations_hub(root, mats, templates=None):
             link_obj(d_inst, ops_grp)
         if seat_tmpl:
             s_inst = bpy.data.objects.new(f"{d_name}_Seat", seat_tmpl.data.copy())
-            s_inst.location = (d_loc[0] * 1.04, d_loc[1] - 0.18, d_loc[2])
+            s_inst.location = (d_loc[0] * 1.03, d_loc[1] - 0.19, d_loc[2])
             s_inst.rotation_euler = (0.0, 0.0, math.pi + d_rot[2])
             link_obj(s_inst, ops_grp)
-        spawn_hw_instance(
-            templates, "mini_pc", f"{d_name}_PC", ops_grp,
-            loc=(d_loc[0], d_loc[1] + 0.03, d_loc[2] + 0.14), rot=d_rot, scale=(0.65, 0.65, 0.65)
+        create_uv_quad_panel(
+            bm_ds,
+            center=(d_loc[0], d_loc[1] + 0.02, d_loc[2] + 0.22),
+            width=0.26,
+            height=0.11,
+            yaw_rad=d_rot[2],
+            u0=0.0,
+            u1=1.0,
+            v0=0.0,
+            v1=1.0,
         )
+    bm_ds.normal_update()
+    bm_ds.to_mesh(mesh_desk_scr)
+    bm_ds.free()
+    desk_scr_obj = bpy.data.objects.new("OpsDeskMonitors", mesh_desk_scr)
+    desk_scr_obj.data.materials.append(grafana_mat)
+    link_obj(desk_scr_obj, ops_grp)
 
     for tmpl_d in (desk_tmpl, seat_tmpl):
         if tmpl_d and tmpl_d.name in bpy.data.objects:
             bpy.data.objects.remove(tmpl_d, do_unlink=True)
 
-    spawn_hw_instance(
-        templates, "info_panel", "OpsInteriorTerminal_L", ops_grp,
-        loc=(-0.78, -0.42, 0.37), rot=(0.0, 0.0, 0.65), scale=(1.15, 1.15, 1.15)
-    )
-    spawn_hw_instance(
-        templates, "info_panel", "OpsInteriorTerminal_R", ops_grp,
-        loc=(0.78, -0.42, 0.37), rot=(0.0, 0.0, -0.65), scale=(1.15, 1.15, 1.15)
-    )
-
-    # 5C. CURVED 5-SCREEN PANORAMIC COMMAND VIDEO WALL (computer_structure.glb + computer_screen.glb + Unobstructed 3D Telemetry Dashboards)
-    comp_struct_tmpl = import_single_glb_mesh(
-        "computer_structure.glb",
-        "Tmpl_CompStruct",
-        scale_xyz=(0.068, 0.036, 0.068),
-        mat_map={"Computer_Monitor": mats["ops_obsidian"]},
-    )
-    comp_screen_tmpl = import_single_glb_mesh(
-        "computer_screen.glb",
-        "Tmpl_CompScreen",
-        scale_xyz=(0.065, 0.040, 0.055),
-        mat_map={"Computer_Screen": mats["solar_panel"]},
-    )
-    # Placed slightly further back (y = 0.62 and y = 0.46) so the 5 glowing screen faces at y = 0.34 and y = 0.20 are 100% in front!
-    wall_rig_configs = [
-        ("OpsRig_Center", (0.0, 0.62, 0.37), (0.0, 0.0, math.pi), (1.35, 1.0, 1.18)),
-        ("OpsRig_Left", (-0.66, 0.46, 0.37), (0.0, 0.0, math.pi - 0.42), (0.92, 1.0, 1.02)),
-        ("OpsRig_Right", (0.66, 0.46, 0.37), (0.0, 0.0, math.pi + 0.42), (0.92, 1.0, 1.02)),
-    ]
-    for r_name, r_loc, r_rot, r_sc in wall_rig_configs:
-        if comp_struct_tmpl:
-            st_i = bpy.data.objects.new(r_name, comp_struct_tmpl.data.copy())
-            st_i.location = r_loc
-            st_i.rotation_euler = r_rot
-            st_i.scale = r_sc
-            link_obj(st_i, ops_grp)
-        if comp_screen_tmpl:
-            sc_i = bpy.data.objects.new(f"{r_name}_Screen", comp_screen_tmpl.data.copy())
-            sc_i.location = (r_loc[0], r_loc[1] - 0.22, r_loc[2] + 0.34)
-            sc_i.rotation_euler = r_rot
-            sc_i.scale = r_sc
-            link_obj(sc_i, ops_grp)
-
-    for tmpl_c in (comp_struct_tmpl, comp_screen_tmpl):
-        if tmpl_c and tmpl_c.name in bpy.data.objects:
-            bpy.data.objects.remove(tmpl_c, do_unlink=True)
-
-    # Panoramic 5-Screen Dark Obsidian Glass Bezel Backing at y = 0.35 (Center) and y = 0.21 (Left/Right Wings)
+    # 5C. CURVED PANORAMIC ULTRA-WIDE GRAFANA & WEBGIS COMMAND VIDEO WALL (OpsVideoWallBezel + OpsVideoWall_Screen)
     mesh_wall_bezel = bpy.data.meshes.new("OpsVideoWallBezelMesh")
     bm_wb = bmesh.new()
-    add_box(bm_wb, (0.0, 0.35, 0.88), (0.96, 0.032, 0.56))
-    add_box(bm_wb, (-0.66, 0.21, 0.86), (0.48, 0.030, 0.50), rot_euler=(0.0, 0.0, 0.42))
-    add_box(bm_wb, (0.66, 0.21, 0.86), (0.48, 0.030, 0.50), rot_euler=(0.0, 0.0, -0.42))
+    add_box(bm_wb, (0.0, 0.44, 0.90), (1.36, 0.036, 0.78))
+    add_box(bm_wb, (-0.94, 0.29, 0.90), (0.68, 0.036, 0.78), rot_euler=(0.0, 0.0, 0.42))
+    add_box(bm_wb, (0.94, 0.29, 0.90), (0.68, 0.036, 0.78), rot_euler=(0.0, 0.0, -0.42))
+    # Support pedestals behind the curved video wall
+    add_box(bm_wb, (-0.48, 0.48, 0.46), (0.08, 0.08, 0.22))
+    add_box(bm_wb, (0.48, 0.48, 0.46), (0.08, 0.08, 0.22))
     bm_wb.normal_update()
     bm_wb.to_mesh(mesh_wall_bezel)
     bm_wb.free()
@@ -1427,89 +1708,43 @@ def build_operations_hub(root, mats, templates=None):
     wall_bezel_obj.data.materials.append(mats["ops_obsidian"])
     link_obj(wall_bezel_obj, ops_grp)
 
-    # Layer 1 on Screens (y = 0.325): Cyan Topographic Contour Map, GNSS Waveforms & Left/Right Telemetry Charts
-    mesh_scr_cyan = bpy.data.meshes.new("OpsScreenCyanTelemetryMesh")
-    bm_sc = bmesh.new()
-    add_box(bm_sc, (0.0, 0.326, 1.13), (0.90, 0.014, 0.018))
-    add_box(bm_sc, (0.0, 0.326, 0.63), (0.90, 0.014, 0.018))
-    add_box(bm_sc, (-0.44, 0.326, 0.88), (0.018, 0.014, 0.50))
-    add_box(bm_sc, (0.44, 0.326, 0.88), (0.018, 0.014, 0.50))
-    for c_idx in range(5):
-        cz = 0.78 + c_idx * 0.062
-        add_strut(bm_sc, (-0.38, 0.324, cz + 0.04), (-0.08, 0.324, cz - 0.02), radius=0.008, segs=6)
-        add_strut(bm_sc, (-0.08, 0.324, cz - 0.02), (0.22, 0.324, cz + 0.03), radius=0.008, segs=6)
-        add_strut(bm_sc, (0.22, 0.324, cz + 0.03), (0.38, 0.324, cz - 0.01), radius=0.008, segs=6)
-    for b_i in range(14):
-        bx_bar = -0.36 + b_i * 0.055
-        bh = 0.040 + 0.060 * abs(math.sin(b_i * 0.85))
-        add_box(bm_sc, (bx_bar, 0.324, 0.66 + bh * 0.5), (0.028, 0.014, bh))
-    for l_i in range(6):
-        t_off = -0.15 + l_i * 0.06
-        lx_p = -0.66 + math.cos(0.42) * t_off
-        ly_p = 0.182 + math.sin(0.42) * t_off
-        bh = 0.09 + (l_i % 3) * 0.07
-        add_box(bm_sc, (lx_p, ly_p, 0.69 + bh * 0.5), (0.032, 0.016, bh), rot_euler=(0.0, 0.0, 0.42))
-    for r_i in range(6):
-        t_off = -0.15 + r_i * 0.06
-        rx_p = 0.66 + math.cos(-0.42) * t_off
-        ry_p = 0.182 + math.sin(-0.42) * t_off
-        bh = 0.10 + ((r_i + 1) % 3) * 0.065
-        add_box(bm_sc, (rx_p, ry_p, 0.69 + bh * 0.5), (0.032, 0.016, bh), rot_euler=(0.0, 0.0, -0.42))
-    bm_sc.normal_update()
-    bm_sc.to_mesh(mesh_scr_cyan)
-    bm_sc.free()
-    scr_cyan_obj = bpy.data.objects.new("OpsScreen_CyanTelemetry", mesh_scr_cyan)
-    scr_cyan_obj.data.materials.append(mats["ops_glass_cyan"])
-    link_obj(scr_cyan_obj, ops_grp)
+    # UV-Mapped Seamless Curved 3-Panel Grafana Display Surface (y = 0.418 center, y = 0.268 left/right wings)
+    mesh_wall_scr = bpy.data.meshes.new("OpsVideoWallScreenMesh")
+    bm_ws = bmesh.new()
+    create_uv_quad_panel(bm_ws, center=(-0.93, 0.268, 0.90), width=0.64, height=0.72, yaw_rad=0.42, u0=0.0, u1=0.27)
+    create_uv_quad_panel(bm_ws, center=(0.0, 0.418, 0.90), width=1.32, height=0.72, yaw_rad=0.0, u0=0.27, u1=0.73)
+    create_uv_quad_panel(bm_ws, center=(0.93, 0.268, 0.90), width=0.64, height=0.72, yaw_rad=-0.42, u0=0.73, u1=1.0)
+    bm_ws.normal_update()
+    bm_ws.to_mesh(mesh_wall_scr)
+    bm_ws.free()
+    wall_scr_obj = bpy.data.objects.new("OpsVideoWall_Screen", mesh_wall_scr)
+    wall_scr_obj.data.materials.append(grafana_mat)
+    link_obj(wall_scr_obj, ops_grp)
 
-    # Layer 2 on Screens (y = 0.322): Amber Slip-Zone Warning Heatmap & Displacement Vector Arrows
-    mesh_scr_alert = bpy.data.meshes.new("OpsScreenAlertTelemetryMesh")
-    bm_sa = bmesh.new()
-    add_box(bm_sa, (-0.04, 0.322, 0.91), (0.30, 0.014, 0.15), rot_euler=(0.0, 0.18, 0.0))
-    add_strut(bm_sa, (-0.18, 0.320, 0.95), (0.16, 0.320, 0.85), radius=0.014, segs=8)
-    add_box(bm_sa, (-0.66, 0.180, 1.01), (0.38, 0.016, 0.048), rot_euler=(0.0, 0.0, 0.42))
-    add_box(bm_sa, (0.66, 0.180, 1.01), (0.38, 0.016, 0.048), rot_euler=(0.0, 0.0, -0.42))
-    bm_sa.normal_update()
-    bm_sa.to_mesh(mesh_scr_alert)
-    bm_sa.free()
-    scr_alert_obj = bpy.data.objects.new("OpsScreen_AlertOverlay", mesh_scr_alert)
-    scr_alert_obj.data.materials.append(mats["imu_glow"])
-    link_obj(scr_alert_obj, ops_grp)
-
-    # Layer 3 on Screens (y = 0.318): Animated Vertical Laser Scan Bar (OpsScreenScanner) & Station Target Rings
-    mesh_scanner = bpy.data.meshes.new("OpsScreenScannerMesh")
-    bm_scan = bmesh.new()
-    add_box(bm_scan, (0.0, 0.318, 0.88), (0.024, 0.016, 0.48))
-    for st_pt in ((-0.26, 0.319, 0.98), (-0.04, 0.319, 0.90), (0.20, 0.319, 0.82)):
-        add_cylinder(bm_scan, st_pt, 0.026, 0.026, 0.018, segs=14, rot_euler=(math.pi / 2, 0.0, 0.0))
-    bm_scan.normal_update()
-    bm_scan.to_mesh(mesh_scanner)
-    bm_scan.free()
-    scanner_obj = bpy.data.objects.new("OpsScreenScanner", mesh_scanner)
-    scanner_obj.data.materials.append(mats["gnss_base_dome"])
-    link_obj(scanner_obj, ops_grp)
-
-    # 6. Tapered Steel Lattice Radar & Telemetry Tower + Dual Parabolic Dish Pedestals
+    # 6. Rooftop Radar Lattice Tower, HVAC Units & Dual Parabolic Dish Pedestals (on top of Penthouse Roof z = 1.64)
     mesh_roof = bpy.data.meshes.new("OpsRoofTechMesh")
     bm_rt = bmesh.new()
-    tx, ty = 0.0, 1.42
-    tower_base_z = 1.52
-    tower_top_z = 2.34
+    tx, ty = 0.0, 0.62
+    tower_base_z = 1.64
+    tower_top_z = 2.38
     for leg_i in range(4):
         ang = leg_i * (math.pi / 2.0) + (math.pi / 4.0)
-        p_bot = (tx + math.cos(ang) * 0.18, ty + math.sin(ang) * 0.18, tower_base_z)
-        p_top = (tx + math.cos(ang) * 0.065, ty + math.sin(ang) * 0.065, tower_top_z)
-        add_strut(bm_rt, p_bot, p_top, radius=0.014, segs=6)
+        p_bot = (tx + math.cos(ang) * 0.16, ty + math.sin(ang) * 0.16, tower_base_z)
+        p_top = (tx + math.cos(ang) * 0.06, ty + math.sin(ang) * 0.06, tower_top_z)
+        add_strut(bm_rt, p_bot, p_top, radius=0.013, segs=6)
         ang_next = (leg_i + 1) * (math.pi / 2.0) + (math.pi / 4.0)
-        for z_br in (1.72, 1.92, 2.12):
+        for z_br in (1.82, 2.02, 2.20):
             t_f = (z_br - tower_base_z) / (tower_top_z - tower_base_z)
-            r_cur = 0.18 * (1 - t_f) + 0.065 * t_f
+            r_cur = 0.16 * (1 - t_f) + 0.06 * t_f
             p0 = (tx + math.cos(ang) * r_cur, ty + math.sin(ang) * r_cur, z_br)
             p1 = (tx + math.cos(ang_next) * r_cur, ty + math.sin(ang_next) * r_cur, z_br)
-            add_strut(bm_rt, p0, p1, radius=0.010, segs=6)
-    add_cylinder(bm_rt, (tx, ty, tower_top_z), 0.12, 0.10, 0.042, segs=14)
-    add_cylinder(bm_rt, (1.38, 0.68, 1.18), 0.085, 0.065, 0.14, segs=12)
-    add_cylinder(bm_rt, (-1.38, 0.55, 1.08), 0.075, 0.055, 0.12, segs=12)
+            add_strut(bm_rt, p0, p1, radius=0.009, segs=6)
+    add_cylinder(bm_rt, (tx, ty, tower_top_z), 0.11, 0.09, 0.04, segs=14)
+    # Rooftop dish pedestals & modular HVAC chiller banks
+    add_cylinder(bm_rt, (1.28, 0.62, 1.70), 0.08, 0.06, 0.14, segs=12)
+    add_cylinder(bm_rt, (-1.28, 0.55, 1.70), 0.075, 0.055, 0.12, segs=12)
+    for hvac_x in (-1.25, -0.85, -0.45):
+        add_box(bm_rt, (hvac_x, -0.35, 1.70), (0.28, 0.42, 0.12))
     bm_rt.normal_update()
     bm_rt.to_mesh(mesh_roof)
     bm_rt.free()
@@ -1550,14 +1785,14 @@ def build_operations_hub(root, mats, templates=None):
         link_obj(f_obj, d_obj)
         return d_obj
 
-    create_parabolic_dish("OpsTrackingDish", "OpsDishFeed", (1.38, 0.68, 1.26), scale_d=1.28)
-    create_parabolic_dish("OpsSecondaryDish", "OpsSecondaryDishFeed", (-1.38, 0.55, 1.15), scale_d=1.05)
+    create_parabolic_dish("OpsTrackingDish", "OpsDishFeed", (1.28, 0.62, 1.78), scale_d=1.22)
+    create_parabolic_dish("OpsSecondaryDish", "OpsSecondaryDishFeed", (-1.28, 0.55, 1.76), scale_d=1.02)
 
-    # 8. Helipad "H" Emblem + Perimeter Beacon Ring on the Hexagonal Helipad Plaza
+    # 8. Rooftop Helipad "H" Emblem + Perimeter Beacon Ring on the East Roof Deck (z = 1.66)
+    hx, hy, hz_mark = 1.05, -0.35, 1.66
     mesh_heli = bpy.data.meshes.new("OpsHelipadMarkingMesh")
     bm_h = bmesh.new()
-    hz_mark = 0.50
-    add_cylinder(bm_h, (hx, hy, hz_mark - 0.02), 0.44, 0.42, 0.035, segs=16)
+    add_cylinder(bm_h, (hx, hy, hz_mark - 0.015), 0.44, 0.42, 0.03, segs=16)
     add_box(bm_h, (hx - 0.085, hy, hz_mark), (0.034, 0.22, 0.012))
     add_box(bm_h, (hx + 0.085, hy, hz_mark), (0.034, 0.22, 0.012))
     add_box(bm_h, (hx, hy, hz_mark), (0.170, 0.036, 0.012))
@@ -1593,6 +1828,52 @@ def build_operations_hub(root, mats, templates=None):
     beacon_obj.location = (tx, ty, tower_top_z + 0.03)
     beacon_obj.data.materials.append(mats["gnss_base_dome"])
     link_obj(beacon_obj, ops_grp)
+
+    # 10. Build 3D Glowing Telemetry Conduits & High-Visibility 3D Data Packet Capsules Streaming from Sensors to Data Center
+    net_grp = bpy.data.objects.new("Telemetry_Network", None)
+    link_obj(net_grp, root)
+    link_specs = [
+        ("GNSS_Crown", (-4.35, 1.15, terrain_height(-4.35, 1.15) + 1.38), (ox, oy + 0.62, oz + 2.38), 2.35, mats["ops_glass_cyan"]),
+        ("GNSS_Mid", (-1.05, -0.45, terrain_height(-1.05, -0.45) + 1.38), (ox - 1.28, oy + 0.55, oz + 1.88), 1.95, mats["ring_lime"]),
+        ("IMU_Box", (-1.42, -0.72, terrain_height(-1.42, -0.72) + 0.35), (ox - 0.85, oy - 0.35, oz + 1.72), 1.85, mats["imu_glow"]),
+        ("Rain_Gauge", (-3.15, -1.85, terrain_height(-3.15, -1.85) + 0.80), (ox - 0.45, oy - 0.35, oz + 1.72), 1.95, mats["water_glow"]),
+        ("Piezometer", (-1.75, -2.28, terrain_height(-1.75, -2.28) + 0.38), (ox, oy - 1.48, oz + 1.56), 1.75, mats["water_glow"]),
+    ]
+    for l_idx, (l_name, p_start, p_end, arc_h, l_mat) in enumerate(link_specs):
+        p0 = Vector(p_start)
+        p2 = Vector(p_end)
+        p1 = (p0 + p2) * 0.5 + Vector((0.0, 0.0, arc_h))
+        m_cond = bpy.data.meshes.new(f"TelemetryConduit_{l_name}Mesh")
+        bm_cd = bmesh.new()
+        steps_c = 24
+        for s_i in range(steps_c):
+            t0 = s_i / steps_c
+            t1 = (s_i + 1) / steps_c
+            q0 = (1 - t0) ** 2 * p0 + 2 * (1 - t0) * t0 * p1 + (t0 ** 2) * p2
+            q1 = (1 - t1) ** 2 * p0 + 2 * (1 - t1) * t1 * p1 + (t1 ** 2) * p2
+            add_strut(bm_cd, q0, q1, radius=0.016, segs=6)
+        bm_cd.normal_update()
+        bm_cd.to_mesh(m_cond)
+        bm_cd.free()
+        cond_obj = bpy.data.objects.new(f"TelemetryConduit_{l_name}", m_cond)
+        cond_obj.data.materials.append(l_mat)
+        link_obj(cond_obj, net_grp)
+
+        # Spawn 2 Large Glowing 3D Data Packet Capsules per link (DataPacket_{l_idx}_0 and DataPacket_{l_idx}_1)
+        for p_sub in range(2):
+            m_pkt = bpy.data.meshes.new(f"DataPacket_{l_idx}_{p_sub}Mesh")
+            bm_pk = bmesh.new()
+            bmesh.ops.create_icosphere(bm_pk, subdivisions=2, radius=0.085)
+            add_cylinder(bm_pk, (0.0, 0.0, 0.0), 0.14, 0.12, 0.025, segs=18, cap_ends=False)
+            bm_pk.normal_update()
+            bm_pk.to_mesh(m_pkt)
+            bm_pk.free()
+            t_init = (l_idx * 0.17 + p_sub * 0.5) % 1.0
+            q_init = (1 - t_init) ** 2 * p0 + 2 * (1 - t_init) * t_init * p1 + (t_init ** 2) * p2
+            pkt_obj = bpy.data.objects.new(f"DataPacket_{l_idx}_{p_sub}", m_pkt)
+            pkt_obj.location = q_init
+            pkt_obj.data.materials.append(l_mat)
+            link_obj(pkt_obj, net_grp)
 
     # 10. Import Real 3D Quadcopter Drones (drone.glb - 5,223 verts) for OpsSurveyDrone & OpsRescueDrone
     drone_mat_map = {
@@ -2082,7 +2363,7 @@ def import_web_trees_and_forest(root, mats):
         (-4.4, 4.2), (-3.7, 3.6), (-3.1, 4.6), (-2.3, 4.2), (-1.4, 4.5),
         (-0.5, 4.0), (0.5, 4.3), (1.3, 3.8), (1.8, 4.4), (-5.3, 2.5),
         (-4.7, 2.9), (-4.0, 2.6), (-5.6, -1.2), (-5.1, -2.0), (-5.8, -3.4),
-        (-4.9, -4.0), (-4.1, -3.7), (-0.9, -3.8), (0.3, -4.2), (1.2, -3.9),
+        (-4.9, -4.0), (-4.1, -3.7), (-3.5, -3.8), (0.3, -4.2), (1.2, -3.9),
         (1.8, -3.5), (-2.7, 2.9), (-1.8, 3.1), (0.6, 2.9), (1.4, 2.5),
         (-7.0, -2.9), (-6.1, -4.3), (-5.4, 0.8), (-4.5, -1.1), (-3.8, -2.6),
         # Eastern Valley & Data Center Campus Perimeter
@@ -2228,7 +2509,24 @@ def build_blender_animations():
     door_left = bpy.data.objects.get("OpsDoor_Left")
     door_right = bpy.data.objects.get("OpsDoor_Right")
     holo_terrain = bpy.data.objects.get("OpsHoloTerrain")
-    scr_scanner = bpy.data.objects.get("OpsScreenScanner")
+
+    imu_box = bpy.data.objects.get("IMU_Casing")
+    imu_g_roll = bpy.data.objects.get("IMU_Gimbal_Roll")
+    imu_g_pitch = bpy.data.objects.get("IMU_Gimbal_Pitch")
+    imu_g_yaw = bpy.data.objects.get("IMU_Gimbal_Yaw")
+    rain_bucket = bpy.data.objects.get("Rain_TippingBucket")
+    rain_drops = bpy.data.objects.get("Rain_FallingDrops")
+    piezo_flow = bpy.data.objects.get("Piezo_WaterFlowParticles")
+
+    ox, oy = 5.15, -0.55
+    oz = terrain_height(ox, oy)
+    pkt_curves = [
+        (Vector((-4.35, 1.15, terrain_height(-4.35, 1.15) + 1.38)), Vector((ox, oy + 0.62, oz + 2.38)), 2.35),
+        (Vector((-1.05, -0.45, terrain_height(-1.05, -0.45) + 1.38)), Vector((ox - 1.28, oy + 0.55, oz + 1.88)), 1.95),
+        (Vector((-1.42, -0.72, terrain_height(-1.42, -0.72) + 0.35)), Vector((ox - 0.85, oy - 0.35, oz + 1.72)), 1.85),
+        (Vector((-3.15, -1.85, terrain_height(-3.15, -1.85) + 0.80)), Vector((ox - 0.45, oy - 0.35, oz + 1.72)), 1.95),
+        (Vector((-1.75, -2.28, terrain_height(-1.75, -2.28) + 0.38)), Vector((ox, oy - 1.48, oz + 1.56)), 1.75),
+    ]
 
     heli1 = bpy.data.objects.get("Rescue_Helicopter_01")
     heli1_rotor = bpy.data.objects.get("Rescue_Helicopter_01_Rotor")
@@ -2271,19 +2569,54 @@ def build_blender_animations():
         # Animate Control Room Sliding Doors (closed at frame 1, slide wide open during frames 115..165)
         door_open = 1.0 if 115 <= frame <= 165 else 0.0
         if door_left:
-            door_left.location = (-0.56 * door_open, -1.52, 0.24)
+            door_left.location = (-0.58 * door_open, -1.48, 0.24)
             door_left.keyframe_insert(data_path="location", frame=frame)
         if door_right:
-            door_right.location = (0.56 * door_open, -1.52, 0.24)
+            door_right.location = (0.58 * door_open, -1.48, 0.24)
             door_right.keyframe_insert(data_path="location", frame=frame)
         if holo_terrain:
             holo_terrain.rotation_euler = (0.0, 0.0, ang * 2.0)
-            holo_terrain.location = (0.0, -0.18, 0.66 + math.sin(ang * 2.0) * 0.025)
+            holo_terrain.location = (0.0, -0.28, 0.51 + math.sin(ang * 2.0) * 0.020)
             holo_terrain.keyframe_insert(data_path="rotation_euler", frame=frame)
             holo_terrain.keyframe_insert(data_path="location", frame=frame)
-        if scr_scanner:
-            scr_scanner.location = (math.sin(ang * 2.0) * 0.36, 0.0, 0.0)
-            scr_scanner.keyframe_insert(data_path="location", frame=frame)
+
+        # Animate Surface MEMS IMU Box Tilting & 3-Axis Gyroscope Gimbal Rings
+        if imu_box:
+            imu_box.rotation_euler = (math.sin(ang * 3.0) * 0.15, math.cos(ang * 3.0) * 0.18, 0.0)
+            imu_box.keyframe_insert(data_path="rotation_euler", frame=frame)
+        if imu_g_roll:
+            imu_g_roll.rotation_euler = (math.sin(ang * 3.0) * 0.32, 0.0, 0.0)
+            imu_g_roll.keyframe_insert(data_path="rotation_euler", frame=frame)
+        if imu_g_pitch:
+            imu_g_pitch.rotation_euler = (0.0, math.cos(ang * 3.0) * 0.32, 0.0)
+            imu_g_pitch.keyframe_insert(data_path="rotation_euler", frame=frame)
+        if imu_g_yaw:
+            imu_g_yaw.rotation_euler = (0.0, 0.0, ang * 2.0)
+            imu_g_yaw.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+        # Animate Tipping-Bucket Rain Gauge Seesaw & Falling Rain Streaks
+        if rain_bucket:
+            rain_bucket.rotation_euler = (0.0, 0.36 if math.sin(ang * 4.0) >= 0 else -0.36, 0.0)
+            rain_bucket.keyframe_insert(data_path="rotation_euler", frame=frame)
+        if rain_drops:
+            rain_drops.location = (0.0, 0.0, -((t * 4.0) % 1.0) * 0.16)
+            rain_drops.keyframe_insert(data_path="location", frame=frame)
+
+        # Animate Underground Groundwater Flow Particles across the Borehole Piezometer Probe
+        if piezo_flow:
+            piezo_flow.location = (((t * 3.0) % 1.0 - 0.5) * 0.28, 0.0, 0.0)
+            piezo_flow.keyframe_insert(data_path="location", frame=frame)
+
+        # Animate 3D Data Packet Capsules streaming along Telemetry Conduits into the Data Center
+        for l_idx, (p0, p2, arc_h) in enumerate(pkt_curves):
+            p1 = (p0 + p2) * 0.5 + Vector((0.0, 0.0, arc_h))
+            for p_sub in range(2):
+                pkt_obj = bpy.data.objects.get(f"DataPacket_{l_idx}_{p_sub}")
+                if pkt_obj:
+                    tp = (t * 2.0 + l_idx * 0.17 + p_sub * 0.5) % 1.0
+                    q_pos = (1 - tp) ** 2 * p0 + 2 * (1 - tp) * tp * p1 + (tp ** 2) * p2
+                    pkt_obj.location = q_pos
+                    pkt_obj.keyframe_insert(data_path="location", frame=frame)
 
         # Animate Primary & Secondary Rescue Helicopters and high-speed spinning rotors
         if heli1:
@@ -2661,13 +2994,13 @@ def main():
         "gnss_mid": to_three(-1.05, -0.45, terrain_height(-1.05, -0.45) + 1.42),
         "gnss_toe": to_three(1.35, 0.85, terrain_height(1.35, 0.85) + 1.42),
         "gnss_base": to_three(-5.65, -2.55, terrain_height(-5.65, -2.55) + 1.62),
-        "imu_borehole": to_three(-1.48, -0.68, terrain_height(-1.48, -0.68) + 0.52),
-        "rain_gauge": to_three(-3.25, -2.05, terrain_height(-3.25, -2.05) + 0.88),
-        "piezometer": to_three(-2.25, -TERRAIN_DEPTH / 2 + 0.32, terrain_height(-2.25, -TERRAIN_DEPTH / 2 + 0.32) + 0.46),
+        "imu_borehole": to_three(-1.42, -0.72, terrain_height(-1.42, -0.72) + 0.32),
+        "rain_gauge": to_three(-3.15, -1.85, terrain_height(-3.15, -1.85) + 0.55),
+        "piezometer": to_three(-1.75, -2.28, terrain_height(-1.75, -2.28) - 0.38),
         "ops_hub": to_three(5.15, -0.55, ops_oz + 1.65),
-        "ops_entrance": to_three(5.15, -0.55 - 1.52, ops_oz + 0.68),
-        "ops_holo_table": to_three(5.15, -0.55 - 0.18, ops_oz + 0.68),
-        "ops_control_room": to_three(5.15, -0.55 + 0.36, ops_oz + 0.86),
+        "ops_entrance": to_three(5.15, -0.55 - 1.48, ops_oz + 0.68),
+        "ops_holo_table": to_three(5.15, -0.55 - 0.28, ops_oz + 0.58),
+        "ops_control_room": to_three(5.15, -0.55 + 0.42, ops_oz + 0.88),
         "highway_gate": to_three(road_center_x(-1.65), -1.65, terrain_height(road_center_x(-1.65), -1.65) + 0.68),
     }
 

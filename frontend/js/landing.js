@@ -461,10 +461,372 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             drone2.add(lidarCone2);
         }
 
+        // 3. Create Live 60 FPS Animated Grafana & WebGIS Command Center CanvasTexture for OpsVideoWall_Screen & OpsDeskMonitors
+        let grafanaCanvas = null;
+        let grafanaCtx = null;
+        let grafanaTex = null;
+        let lastGrafanaDraw = -1;
+        if (typeof document !== 'undefined' && (nodes.OpsVideoWall_Screen || nodes.OpsDeskMonitors)) {
+            grafanaCanvas = document.createElement('canvas');
+            grafanaCanvas.width = 1024;
+            grafanaCanvas.height = 384;
+            grafanaCtx = grafanaCanvas.getContext('2d');
+            if (grafanaCtx) {
+                grafanaTex = new THREE.CanvasTexture(grafanaCanvas);
+                grafanaTex.flipY = false;
+                if (THREE.SRGBColorSpace) grafanaTex.colorSpace = THREE.SRGBColorSpace;
+                const liveScreenMat = new THREE.MeshBasicMaterial({
+                    map: grafanaTex,
+                    toneMapped: false
+                });
+                if (nodes.OpsVideoWall_Screen) nodes.OpsVideoWall_Screen.material = liveScreenMat;
+                if (nodes.OpsDeskMonitors) nodes.OpsDeskMonitors.material = liveScreenMat;
+            }
+        }
+
+        function drawLiveGrafanaDashboard(elapsed) {
+            if (!grafanaCtx || !grafanaTex) return;
+            if (elapsed - lastGrafanaDraw < 0.04) return;
+            lastGrafanaDraw = elapsed;
+            const ctx = grafanaCtx;
+            const W = 1024, H = 384;
+
+            // Deep Grafana dark-slate background
+            ctx.fillStyle = '#070e1b';
+            ctx.fillRect(0, 0, W, H);
+
+            // Top Grafana Global Navbar
+            ctx.fillStyle = '#0e192d';
+            ctx.fillRect(0, 0, W, 30);
+            ctx.fillStyle = '#ff780a';
+            ctx.beginPath();
+            ctx.arc(20, 15, 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#e2f8f5';
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText('GRAFANA LIVE // AITOGY DIGITAL TWIN · SECTOR 07', 35, 19);
+            ctx.fillStyle = '#22c55e';
+            ctx.fillText('● STREAMING 20Hz · RTK FIXED', 430, 19);
+            ctx.fillStyle = '#38bdf8';
+            const pktCount = 4820 + Math.floor(elapsed * 8);
+            ctx.fillText(`PKT #${pktCount} | Δt 12ms | FoS 1.18`, 745, 19);
+
+            const drawPanel = (x, y, w, h, title, badge, accent) => {
+                ctx.fillStyle = '#0c1628';
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeStyle = '#1e3454';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(x, y, w, h);
+                ctx.fillStyle = '#112038';
+                ctx.fillRect(x + 1, y + 1, w - 2, 22);
+                ctx.fillStyle = accent;
+                ctx.fillRect(x + 1, y + 1, 4, 22);
+                ctx.fillStyle = '#bae6fd';
+                ctx.font = 'bold 10.5px monospace';
+                ctx.fillText(title, x + 10, y + 15);
+                ctx.fillStyle = accent;
+                ctx.textAlign = 'right';
+                ctx.fillText(badge, x + w - 8, y + 15);
+                ctx.textAlign = 'left';
+                ctx.strokeStyle = 'rgba(56, 189, 248, 0.09)';
+                ctx.lineWidth = 1;
+                for (let gy = y + 42; gy < y + h - 8; gy += 24) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + 6, gy);
+                    ctx.lineTo(x + w - 6, gy);
+                    ctx.stroke();
+                }
+                for (let gx = x + 36; gx < x + w - 8; gx += 42) {
+                    ctx.beginPath();
+                    ctx.moveTo(gx, y + 24);
+                    ctx.lineTo(gx, y + h - 6);
+                    ctx.stroke();
+                }
+            };
+
+            // 1. Top-Left Panel: GNSS RTK 3D Displacement (ΔE, ΔN, ΔU)
+            const s2Val = (4.2 + Math.sin(elapsed * 1.8) * 0.4).toFixed(1);
+            drawPanel(12, 36, 264, 162, 'GNSS RTK · ΔE/ΔN/ΔU (mm)', `+${s2Val}mm`, '#2dd4bf');
+            const seriesSpecs = [
+                { col: '#f59e0b', fill: 'rgba(245, 158, 11, 0.16)', base: 145, amp: 24, freq: 2.2, speed: 2.0 },
+                { col: '#2dd4bf', fill: 'rgba(45, 212, 191, 0.12)', base: 158, amp: 14, freq: 3.1, speed: 2.6 },
+                { col: '#a3e635', fill: null, base: 174, amp: 7, freq: 1.7, speed: 1.5 }
+            ];
+            seriesSpecs.forEach(s => {
+                ctx.beginPath();
+                for (let i = 0; i <= 48; i++) {
+                    const px = 20 + (i / 48) * 248;
+                    const t = i / 48;
+                    const py = s.base - t * s.amp - Math.sin(t * 7.5 - elapsed * s.speed) * 9 - Math.cos(t * 15 - elapsed * 3.2) * 3;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.strokeStyle = s.col;
+                ctx.lineWidth = 2.2;
+                ctx.stroke();
+                if (s.fill) {
+                    ctx.lineTo(268, 190);
+                    ctx.lineTo(20, 190);
+                    ctx.closePath();
+                    ctx.fillStyle = s.fill;
+                    ctx.fill();
+                }
+            });
+
+            // 2. Bottom-Left Panel: Surface MEMS IMU 6-DoF Box (Roll / Pitch / Vibration)
+            const imuRoll = (0.14 + Math.sin(elapsed * 3.2) * 0.03).toFixed(2);
+            drawPanel(12, 206, 264, 166, 'MEMS IMU 6-DoF · ROLL/PITCH', `+${imuRoll}°`, '#f59e0b');
+            [['#f97316', 292, 18, 4.8], ['#38bdf8', 316, 12, 3.6]].forEach(([col, yMid, amp, spd], idx) => {
+                ctx.beginPath();
+                for (let i = 0; i <= 54; i++) {
+                    const px = 20 + (i / 54) * 248;
+                    const t = i / 54;
+                    const py = yMid + Math.sin(t * 18 - elapsed * spd) * amp * (0.45 + 0.55 * t) + Math.cos(t * 35 + elapsed * 6.0 + idx) * 4;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.strokeStyle = col;
+                ctx.lineWidth = 2.0;
+                ctx.stroke();
+            });
+
+            // 3. Center-Left Top Panel: Grafana Arc Gauges (FoS & Pore Water Pressure)
+            const kpaVal = (42.8 + Math.sin(elapsed * 1.5) * 1.6).toFixed(1);
+            drawPanel(284, 36, 220, 162, 'SAFETY FACTOR & PORE kPa', 'LIVE', '#a3e635');
+            const drawGauge = (cx, cy, r, frac, label, valText, col) => {
+                ctx.lineWidth = 10;
+                ctx.strokeStyle = '#1a2c47';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, Math.PI * 0.8, Math.PI * 2.2);
+                ctx.stroke();
+                ctx.strokeStyle = col;
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, Math.PI * 0.8, Math.PI * (0.8 + 1.4 * frac));
+                ctx.stroke();
+                ctx.fillStyle = '#f8fafc';
+                ctx.font = 'bold 14px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(valText, cx, cy + 4);
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px monospace';
+                ctx.fillText(label, cx, cy + 24);
+                ctx.textAlign = 'left';
+            };
+            const fosDynamic = (1.18 + Math.sin(elapsed * 1.2) * 0.03).toFixed(2);
+            drawGauge(342, 128, 36, 0.62 + Math.sin(elapsed * 1.2) * 0.04, 'FoS Index', fosDynamic, '#f59e0b');
+            drawGauge(446, 128, 36, 0.74 + Math.sin(elapsed * 1.5) * 0.05, 'Pore kPa', `${kpaVal}`, '#38bdf8');
+
+            // 4. Center-Right Top Panel: WebGIS Slope Heatmap & Active Sensor Nodes
+            drawPanel(512, 36, 224, 162, 'WEBGIS · SLIP ZONE HEATMAP', '5 NODES', '#38bdf8');
+            const hCx = 624, hCy = 126;
+            const pulseR = 1 + Math.sin(elapsed * 3.0) * 0.06;
+            [
+                [68, 'rgba(20, 184, 166, 0.24)'],
+                [48, 'rgba(234, 179, 8, 0.32)'],
+                [30, 'rgba(249, 115, 22, 0.45)'],
+                [16, 'rgba(239, 68, 68, 0.65)']
+            ].forEach(([rad, fillCol]) => {
+                ctx.fillStyle = fillCol;
+                ctx.beginPath();
+                ctx.ellipse(hCx, hCy, rad * pulseR, rad * 0.58 * pulseR, -0.18, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            [
+                [568, 104, 'S1'],
+                [616, 122, 'S2'],
+                [604, 142, 'IMU'],
+                [558, 148, 'RAIN'],
+                [652, 152, 'PIEZO']
+            ].forEach(([nx, ny, tag], idx) => {
+                const blink = 0.5 + 0.5 * Math.sin(elapsed * 5.0 + idx * 1.3);
+                ctx.fillStyle = `rgba(163, 230, 53, ${0.35 + blink * 0.65})`;
+                ctx.beginPath();
+                ctx.arc(nx, ny, 5 + blink * 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = 'bold 9px monospace';
+                ctx.fillText(tag, nx + 7, ny + 3);
+            });
+
+            // 5. Center Bottom Wide Panel: AI Multi-Sensor Fusion & Live Telemetry Packet Ticker
+            drawPanel(284, 206, 452, 166, 'AI FUSION · EARLY WARNING & PACKET STREAM', '98.4% CONF', '#2dd4bf');
+            ctx.setLineDash([7, 5]);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(294, 258);
+            ctx.lineTo(726, 258);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.beginPath();
+            for (let i = 0; i <= 64; i++) {
+                const px = 294 + (i / 64) * 432;
+                const t = i / 64;
+                const py = 338 - Math.pow(t, 1.25) * 66 - Math.sin(t * 10 - elapsed * 2.8) * 8;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.strokeStyle = '#2dd4bf';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+            ctx.lineTo(726, 344);
+            ctx.lineTo(294, 344);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(45, 212, 191, 0.18)';
+            ctx.fill();
+
+            // Live Packet Log Bar at bottom of Center Panel
+            ctx.fillStyle = '#081120';
+            ctx.fillRect(292, 346, 436, 20);
+            ctx.fillStyle = '#a3e635';
+            ctx.font = '10px monospace';
+            const tickerShift = Math.floor(elapsed * 3) % 4;
+            const logs = [
+                `[PKT#${pktCount} GNSS_S2 ΔE=+${s2Val}mm]  [PKT#${pktCount + 1} IMU Roll=+${imuRoll}°]`,
+                `[PKT#${pktCount + 1} RAIN_TB 0.2mm/tip]  [PKT#${pktCount + 2} PIEZO ${kpaVal}kPa]`,
+                `[PKT#${pktCount + 2} CORS_RTK FIXED]     [PKT#${pktCount + 3} AI_FUSION FoS=${fosDynamic}]`,
+                `[PKT#${pktCount + 3} PIEZO +1.45m H2O]   [PKT#${pktCount + 4} GATE_WARN ACTIVE]`
+            ];
+            ctx.fillText(logs[tickerShift], 298, 360);
+
+            // 6. Top-Right Panel: Tipping-Bucket Rainfall Histogram (0.2 mm / tip)
+            drawPanel(744, 36, 268, 162, 'TIPPING-BUCKET RAIN (mm/h)', '68.4 mm/h', '#38bdf8');
+            for (let b = 0; b < 16; b++) {
+                const bx = 756 + b * 15.5;
+                const bh = 24 + 86 * (0.38 + 0.62 * Math.abs(Math.sin(b * 0.55 - elapsed * 1.4)));
+                ctx.fillStyle = '#0284c7';
+                ctx.fillRect(bx, 190 - bh, 10.5, bh);
+                ctx.fillStyle = '#7dd3fc';
+                ctx.fillRect(bx, 190 - bh, 10.5, 4);
+            }
+
+            // 7. Bottom-Right Panel: Borehole Piezometer & Subsurface Groundwater Flow
+            drawPanel(744, 206, 268, 166, 'PIEZOMETER & GROUNDWATER', '+1.45 m', '#38bdf8');
+            ctx.beginPath();
+            for (let i = 0; i <= 48; i++) {
+                const px = 754 + (i / 48) * 248;
+                const t = i / 48;
+                const py = 342 - Math.pow(t, 1.1) * 76 - Math.sin(t * 9 - elapsed * 2.4) * 6;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2.4;
+            ctx.stroke();
+            ctx.lineTo(1002, 364);
+            ctx.lineTo(754, 364);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
+            ctx.fill();
+
+            grafanaTex.needsUpdate = true;
+        }
+        drawLiveGrafanaDashboard(0);
+
+        // 4. Attach Floating HUD Label Sprites to the 3D DataPacket_* Capsules in the GLB Scene
+        const glbPacketCurves = [
+            { p0: new THREE.Vector3(-4.35, 3.08, -1.15), p2: new THREE.Vector3(5.15, 2.15, -0.07), arcH: 2.35, label: 'PKT·GNSS S1', col: '#2dd4bf' },
+            { p0: new THREE.Vector3(-1.05, 1.88, 0.45), p2: new THREE.Vector3(3.87, 1.65, 0.00), arcH: 1.95, label: 'PKT·GNSS S2', col: '#a3e635' },
+            { p0: new THREE.Vector3(-1.42, 1.80, 0.72), p2: new THREE.Vector3(4.30, 1.49, 0.90), arcH: 1.85, label: 'PKT·MEMS IMU', col: '#f59e0b' },
+            { p0: new THREE.Vector3(-3.15, 2.22, 1.85), p2: new THREE.Vector3(4.70, 1.49, 0.90), arcH: 1.95, label: 'PKT·RAIN 0.2mm', col: '#38bdf8' },
+            { p0: new THREE.Vector3(-1.75, 1.82, 2.28), p2: new THREE.Vector3(5.15, 1.33, 2.03), arcH: 1.75, label: 'PKT·PIEZO kPa', col: '#38bdf8' }
+        ];
+        const glbPackets = [];
+        glbPacketCurves.forEach((spec, lIdx) => {
+            const p1 = spec.p0.clone().add(spec.p2).multiplyScalar(0.5);
+            p1.y += spec.arcH;
+            for (let pSub = 0; pSub < 2; pSub++) {
+                const pktObj = nodes[`DataPacket_${lIdx}_${pSub}`];
+                if (!pktObj) continue;
+                if (typeof document !== 'undefined' && pSub === 0) {
+                    const tagCanvas = document.createElement('canvas');
+                    tagCanvas.width = 256;
+                    tagCanvas.height = 64;
+                    const tCtx = tagCanvas.getContext('2d');
+                    if (tCtx) {
+                        tCtx.fillStyle = 'rgba(7, 18, 32, 0.88)';
+                        tCtx.fillRect(4, 8, 248, 48);
+                        tCtx.strokeStyle = spec.col;
+                        tCtx.lineWidth = 3;
+                        tCtx.strokeRect(4, 8, 248, 48);
+                        tCtx.fillStyle = spec.col;
+                        tCtx.font = 'bold 24px monospace';
+                        tCtx.textAlign = 'center';
+                        tCtx.fillText(spec.label, 128, 40);
+                        const tagTex = new THREE.CanvasTexture(tagCanvas);
+                        const sprMat = new THREE.SpriteMaterial({
+                            map: tagTex,
+                            transparent: true,
+                            depthTest: false
+                        });
+                        const spr = new THREE.Sprite(sprMat);
+                        spr.scale.set(0.68, 0.17, 1);
+                        spr.position.set(0, 0.22, 0);
+                        pktObj.add(spr);
+                    }
+                }
+                glbPackets.push({
+                    obj: pktObj,
+                    p0: spec.p0,
+                    p1,
+                    p2: spec.p2,
+                    speed: 0.34 + lIdx * 0.04,
+                    phase: (lIdx * 0.19 + pSub * 0.5) % 1.0
+                });
+            }
+        });
+
         const span = 10.0;
         const halfDepth = 5.4;
         return {
             update(elapsed) {
+                drawLiveGrafanaDashboard(elapsed);
+
+                // Animate Surface MEMS IMU Box Tilting & 3-Axis Orthogonal Gyroscope Gimbal Rings
+                if (nodes.IMU_Casing) {
+                    nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
+                    nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
+                }
+                if (nodes.IMU_Gimbal_Roll) {
+                    nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
+                }
+                if (nodes.IMU_Gimbal_Pitch) {
+                    nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
+                }
+                if (nodes.IMU_Gimbal_Yaw) {
+                    nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
+                }
+
+                // Animate Tipping-Bucket Rain Gauge Seesaw & Falling Rain Drops
+                if (nodes.Rain_TippingBucket) {
+                    const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
+                    nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
+                }
+                if (nodes.Rain_FallingDrops) {
+                    nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
+                }
+
+                // Animate Underground Groundwater Flow Streamlines & Droplets Past the Suspended Borehole Piezometer Probe
+                if (nodes.Piezo_WaterFlowParticles) {
+                    nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
+                }
+                if (nodes.Piezometer_Probe) {
+                    nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
+                }
+
+                // Animate 10 3D Data Packet Capsules Streaming Along Telemetry Conduits into the Data Center
+                glbPackets.forEach(pk => {
+                    const t = (elapsed * pk.speed + pk.phase) % 1.0;
+                    const inv = 1.0 - t;
+                    pk.obj.position.set(
+                        inv * inv * pk.p0.x + 2 * inv * t * pk.p1.x + t * t * pk.p2.x,
+                        inv * inv * pk.p0.y + 2 * inv * t * pk.p1.y + t * t * pk.p2.y,
+                        inv * inv * pk.p0.z + 2 * inv * t * pk.p1.z + t * t * pk.p2.z
+                    );
+                    pk.obj.rotation.y = elapsed * 2.5;
+                });
+
                 // Move all 12 vehicles continuously along the curved 10.8m mountain highway in their exact forward lane direction
                 activeVehicles.forEach(v => {
                     const dir = v.north ? 1.0 : -1.0;
@@ -473,8 +835,6 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     const vx = rc + v.laneX;
                     const vz = sampleRoadElevation(rawRy) + 0.030;
                     const dxDy = 0.24 * (1.5 / halfDepth) * Math.cos((rawRy / halfDepth) * 1.5);
-                    // Local +Z is front bumper. Rotating by yaw around +Y sends (0,0,+1) to (+sin(yaw), 0, +cos(yaw)).
-                    // Northbound velocity in Three.js (X, Z) is (+dxDy, -1); Southbound velocity is (-dxDy, +1).
                     const yaw = v.north ? Math.atan2(dxDy, -1.0) : Math.atan2(-dxDy, 1.0);
 
                     v.obj.position.set(vx, vz, -rawRy);
@@ -534,7 +894,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     heli2Tail.rotation.x = -elapsed * 32.0;
                 }
 
-                // Rotate Data Center Phased-Array Doppler Radar, Dual Ku-Band Dishes, Control Room 3D Hologram & Screen Scanner
+                // Rotate Data Center Phased-Array Doppler Radar, Dual Ku-Band Dishes & Control Room 3D Hologram
                 if (nodes.OpsBeaconCore) {
                     nodes.OpsBeaconCore.rotation.y = elapsed * 2.2;
                 }
@@ -548,10 +908,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 }
                 if (nodes.OpsHoloTerrain) {
                     nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
-                    nodes.OpsHoloTerrain.position.y = 0.66 + Math.sin(elapsed * 2.4) * 0.018;
-                }
-                if (nodes.OpsScreenScanner) {
-                    nodes.OpsScreenScanner.position.x = Math.sin(elapsed * 2.2) * 0.36;
+                    nodes.OpsHoloTerrain.position.y = 0.51 + Math.sin(elapsed * 2.4) * 0.016;
                 }
 
                 // Fly Autonomous Survey Quadcopter Drones across the Data Center & Landslide Slip Zone
@@ -912,35 +1269,36 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             return line;
         });
 
-        // 4. Operations Dispatch Arcs & Hero Data Packets Streaming Straight Into the Control Room Hologram Table!
+        // 4. Operations Dispatch Arcs & Hero Data Packets Streaming to the Data Center Rooftop Receiver Array!
+        const opsRoofReceiver = [5.15, 1.48, 0.90];
         const dispatchGroup = new THREE.Group();
         worldGroup.add(dispatchGroup);
         const dispatchPairs = [
-            [anchors.gnss_crown, opsHoloAnchor, 2.75, 0x5eead4],
-            [anchors.gnss_mid, opsHoloAnchor, 2.35, 0xffb020],
-            [anchors.imu_borehole, opsHoloAnchor, 2.15, 0xd7ef73],
-            [anchors.rain_gauge, opsHoloAnchor, 2.45, 0x38bdf8],
-            [anchors.piezometer, opsHoloAnchor, 1.95, 0x38bdf8],
-            [opsHoloAnchor, anchors.highway_gate, 1.15, 0xd7ef73]
+            [anchors.gnss_crown, opsRoofReceiver, 2.55, 0x5eead4],
+            [anchors.gnss_mid, opsRoofReceiver, 2.05, 0xffb020],
+            [anchors.imu_borehole, opsRoofReceiver, 1.95, 0xd7ef73],
+            [anchors.rain_gauge, opsRoofReceiver, 2.15, 0x38bdf8],
+            [anchors.piezometer, opsRoofReceiver, 1.85, 0x38bdf8],
+            [opsRoofReceiver, anchors.highway_gate, 1.15, 0xd7ef73]
         ];
         const dispatchLines = [];
         const dispatchPackets = [];
-        const pktGeo = new THREE.SphereGeometry(0.095, 12, 12);
+        const pktGeo = new THREE.SphereGeometry(0.105, 14, 14);
         dispatchPairs.forEach(([a, b, h, col], idx) => {
-            const arc = createSignalArc(a, b, h, col, 0);
+            const arc = createSignalArc(a, b, h, col, 0.38);
             dispatchGroup.add(arc);
             dispatchLines.push(arc);
             const pkt = new THREE.Mesh(pktGeo, new THREE.MeshBasicMaterial({
                 color: col,
                 transparent: true,
-                opacity: 0,
+                opacity: 0.85,
                 blending: THREE.AdditiveBlending
             }));
             dispatchGroup.add(pkt);
-            dispatchPackets.push({ mesh: pkt, curve: arc.userData.curve, speed: 0.46 + idx * 0.07, phase: idx * 0.18 });
+            dispatchPackets.push({ mesh: pkt, curve: arc.userData.curve, speed: 0.38 + idx * 0.05, phase: idx * 0.18 });
         });
 
-        // Expanding safety rings at Operations Center Entrance / Hologram & Highway Gate
+        // Expanding safety rings at Operations Center Entrance & Highway Gate
         const safetyRingGeo = new THREE.RingGeometry(0.45, 0.58, 48);
         const opsPulseRing = new THREE.Mesh(safetyRingGeo, new THREE.MeshBasicMaterial({
             color: 0xd7ef73,
@@ -954,34 +1312,40 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         opsPulseRing.position.set(opsEntranceAnchor[0], opsEntranceAnchor[1] - 0.25, opsEntranceAnchor[2]);
         worldGroup.add(opsPulseRing);
 
-        // 5. 10-Point Cinematic Video-Demo Camera Choreography:
-        //    [0..2] Visit Hilltop GNSS Crown -> Mid GNSS Rover S2 -> Subsurface IMU Borehole
-        //    [3..4] Visit Rain Gauge Station -> Cutaway Piezometer Well
-        //    [5..6] Big Zoom-Out Panorama -> Chase Data Stream Across Highway to Operations Center
-        //    [7..9] Arrive at Center Entrance (Doors Open!) -> Fly Through Open Doorway -> Ascend Into AI Control Room!
+        // 5. 12-Point Cinematic Video-Demo Camera Choreography:
+        //    [0..1] Gentle Slower Dwell on GNSS RTK Stations (Carrier-Phase ΔE/ΔN/ΔU & CORS Differential Waves)
+        //    [2..3] Close-Up Inspection of Surface MEMS IMU 6-DoF Box & 3-Axis Gyroscope Gimbal Rings
+        //    [4]    Close-Up Inspection of Cutaway Tipping-Bucket Rain Gauge (Falling Rain & Seesaw Bucket)
+        //    [5..6] Close-Up Inspection of Open-Cutaway Borehole Piezometer, Lowered Sensor Probe & Flowing Groundwater
+        //    [7..8] Wide Zoom-Out Panorama & Chasing Labeled Data Packets ([PKT GNSS], [PKT IMU], [PKT RAIN], [PKT PIEZO])
+        //    [9..11] Arrive at Modern Glass Data Center (Sliding Doors Open!) -> Fly Inside Control Room to Live Grafana Video Wall!
         const camCurve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(-3.82, 3.28, 0.72),  // 0.00: Close-up Device 1A — Hilltop GNSS Station Crown
-            new THREE.Vector3(-0.62, 2.22, 2.38),  // 0.11: Close-up Device 1B — Mid-Slope GNSS Rover S2
-            new THREE.Vector3(-1.12, 1.82, 2.68),  // 0.22: Close-up Device 1C — Subsurface IMU Borehole & Shear Vector
-            new THREE.Vector3(-2.82, 2.42, 3.88),  // 0.33: Close-up Device 2A — Automatic Weather & Rain Gauge Station
-            new THREE.Vector3(-1.92, 1.62, 6.88),  // 0.44: Close-up Device 2B — Cutaway Piezometer Groundwater Well
-            new THREE.Vector3(-0.45, 5.25, 10.65), // 0.56: BIG ZOOM-OUT — All Sensors & 8 Satellites Launching Data Stream
-            new THREE.Vector3(2.85, 2.15, 5.45),   // 0.67: CHASING DATA — Flying Alongside Telemetry Packets Toward Center
-            new THREE.Vector3(5.15, 0.58, 3.32),   // 0.78: ENTRANCE PORTAL — Sliding Doors Open Wide in Front of Camera
-            new THREE.Vector3(5.15, 0.56, 1.85),   // 0.89: DOORWAY THRESHOLD — Flying Straight Through Open Entrance Doors
-            new THREE.Vector3(5.15, 0.62, 1.22)    // 1.00: CONTROL ROOM — Inside Command Bridge Facing 5-Screen Wall & 3D Hologram
+            new THREE.Vector3(-1.55, 2.48, 2.05),  // 0.00: Gentle arrival at GNSS RTK Rover S2 & Crown RTK Link
+            new THREE.Vector3(-1.25, 2.22, 1.68),  // 0.09: Slow dwell around GNSS RTK Antenna Phase Center & ΔE/ΔN/ΔU Triad
+            new THREE.Vector3(-2.05, 2.02, 1.62),  // 0.18: Unobstructed close-up on Surface MEMS IMU 6-DoF Box & 3 Gyroscope Gimbals
+            new THREE.Vector3(-2.12, 1.98, 1.66),  // 0.27: Dwell on MEMS IMU Box Tilting & Downslope Shear Vector
+            new THREE.Vector3(-3.38, 2.18, 2.72),  // 0.36: Close-up on Cutaway Tipping-Bucket Rain Gauge & Seesaw Bucket
+            new THREE.Vector3(-2.05, 1.38, 4.35),  // 0.45: Full view of Open-Cutaway Borehole Piezometer, Winch & Lowered Probe
+            new THREE.Vector3(-1.92, 1.32, 4.25),  // 0.55: Dwell on Underground Groundwater Table & Horizontal Water Flow Streamlines
+            new THREE.Vector3(-0.65, 4.85, 9.95),  // 0.64: BIG ZOOM-OUT — All Sensors & 8 Satellites Launching Labeled Data Packets
+            new THREE.Vector3(2.55, 2.15, 5.15),   // 0.73: CHASING PACKETS — Flying Alongside Labeled Telemetry Packets to Data Center
+            new THREE.Vector3(4.95, 0.62, 3.25),   // 0.82: DATA CENTER ENTRANCE — Glass Sliding Doors Open Wide in Front of Camera
+            new THREE.Vector3(4.95, 0.62, 2.08),   // 0.91: DOORWAY THRESHOLD — Flying Through Open Glass Doors Into Control Room
+            new THREE.Vector3(4.92, 0.62, 1.68)    // 1.00: AI CONTROL ROOM — Centered in Right Viewport Facing Live 60FPS Grafana Wall
         ]);
         const lookCurve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(-4.35, 2.52, -1.15), // 0.00: Look at GNSS Station Crown HexPad, InfoPanel & Radome
-            new THREE.Vector3(-1.05, 1.52, 0.45),  // 0.11: Look at GNSS Station Mid S2
-            new THREE.Vector3(-1.48, 1.15, 0.68),  // 0.22: Look at IMU Borehole Casing & Subsurface Nodes
-            new THREE.Vector3(-3.25, 1.82, 2.05),  // 0.33: Look at Rain Gauge Collector, Anemometer & Terminal
-            new THREE.Vector3(-2.25, 0.96, 5.08),  // 0.44: Look at Piezometer Well & Rising Water Column
-            new THREE.Vector3(0.35, 1.35, 0.25),   // 0.56: Look at Full Mountain Slope & Orbital Data Stream
-            new THREE.Vector3(5.15, 0.55, 1.45),   // 0.67: Look Ahead at Operations Center Entrance
-            new THREE.Vector3(5.15, 0.52, 0.65),   // 0.78: Look Through Opening Sliding Doors Into Control Room
-            new THREE.Vector3(5.15, 0.58, 0.17),   // 0.89: Look at 5-Screen Video Wall & 3D Mountain Hologram
-            new THREE.Vector3(5.15, 0.58, 0.17)    // 1.00: Lock Onto Command Video Wall & Holographic Projector
+            new THREE.Vector3(-1.35, 1.92, 0.35),  // 0.00: Look at GNSS RTK Rover S2 & Crown Baseline
+            new THREE.Vector3(-1.22, 1.88, 0.45),  // 0.09: Lock onto GNSS RTK Radome & ΔE/ΔN/ΔU Vector Triad
+            new THREE.Vector3(-1.58, 1.68, 0.72),  // 0.18: Center Surface MEMS IMU Box, 6-DoF Chip & Gimbal Rings in open right stage
+            new THREE.Vector3(-1.56, 1.66, 0.72),  // 0.27: Dwell on MEMS IMU Box & Shear Acceleration Vector
+            new THREE.Vector3(-3.32, 1.76, 1.85),  // 0.36: Center Rain Gauge Collector Funnel, Dripping Drops & Tipping Bucket
+            new THREE.Vector3(-2.05, 0.62, 2.28),  // 0.45: Center Slotted Borehole Pipe, Suspended Probe & Groundwater Table above HUD
+            new THREE.Vector3(-1.98, 0.58, 2.28),  // 0.55: Lock onto Horizontal Groundwater Flow Streamlines Passing Sensor Probe
+            new THREE.Vector3(0.15, 1.38, 0.45),   // 0.64: Look across Full Mountain Slope & Labeled Telemetry Packet Streams
+            new THREE.Vector3(4.85, 0.72, 1.45),   // 0.73: Look ahead at Modern 2-Story Glass Data Center Building
+            new THREE.Vector3(4.85, 0.58, 0.45),   // 0.82: Look through Opening Sliding Glass Doors into Control Room
+            new THREE.Vector3(4.80, 0.60, 0.18),   // 0.91: Look at Curved 3-Panel Grafana Video Wall & 3D Hologram Table
+            new THREE.Vector3(4.78, 0.60, 0.18)    // 1.00: Lock onto Live 60FPS Grafana & WebGIS Command Video Wall
         ]);
 
         const storySatBeams = [];
@@ -1082,10 +1446,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             const step = Math.min(3, Math.floor(p * 4));
 
             // Smooth weights for each storytelling act
-            const wDetect = 1 - gsap.utils.clamp(0, 1, (p - 0.22) / 0.12);
-            const wContext = gsap.utils.clamp(0, 1, (p - 0.18) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.52) / 0.12));
-            const wVerify = gsap.utils.clamp(0, 1, (p - 0.44) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.78) / 0.12));
-            const wResponse = gsap.utils.clamp(0, 1, (p - 0.62) / 0.18);
+            const wDetect = 1 - gsap.utils.clamp(0, 1, (p - 0.24) / 0.12);
+            const wContext = gsap.utils.clamp(0, 1, (p - 0.20) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.56) / 0.12));
+            const wVerify = gsap.utils.clamp(0, 1, (p - 0.46) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.80) / 0.12));
+            const wResponse = gsap.utils.clamp(0, 1, (p - 0.64) / 0.18);
 
             // 1. Camera Spline Position & Target
             camCurve.getPoint(p, camera.position);
@@ -1095,19 +1459,16 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             // 2. Active Device Scanning Halo (highlights whichever sensor the camera is currently inspecting in Acts 1 & 2)
             let scanTarget = null;
             let scanColor = 0x5eead4;
-            if (p < 0.08) {
-                scanTarget = anchors.gnss_crown;
-                scanColor = 0x5eead4;
-            } else if (p < 0.17) {
+            if (p < 0.14) {
                 scanTarget = anchors.gnss_mid;
                 scanColor = 0xd7ef73;
-            } else if (p < 0.26) {
+            } else if (p < 0.30) {
                 scanTarget = anchors.imu_borehole;
                 scanColor = 0xffb020;
-            } else if (p < 0.38) {
+            } else if (p < 0.41) {
                 scanTarget = anchors.rain_gauge;
                 scanColor = 0x38bdf8;
-            } else if (p < 0.49) {
+            } else if (p < 0.58) {
                 scanTarget = anchors.piezometer;
                 scanColor = 0x38bdf8;
             }
@@ -1117,19 +1478,19 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 scanRingMesh.scale.setScalar(pulse);
                 scanCylMesh.position.y = 0.35 + Math.sin(elapsed * 4.0) * 0.15;
                 scanCylMat.color.setHex(scanColor);
-                scanCylMat.opacity = 0.22 + Math.abs(Math.sin(elapsed * 4.0)) * 0.16;
+                scanCylMat.opacity = 0.05 + Math.abs(Math.sin(elapsed * 4.0)) * 0.05;
                 scanRingMat.opacity = 0.65;
             } else {
                 scanCylMat.opacity = 0;
                 scanRingMat.opacity = 0;
             }
 
-            // 3. Terrain Cutaway Translucency (semi-translucent during subsurface chapters 0 & 1)
+            // 3. Terrain Cutaway Translucency (keep terrain crisp so open cutaway trench & surface sensors stand out)
             if (twinNodes.TerrainSurface) {
-                twinNodes.TerrainSurface.material.opacity = 0.68 + 0.24 * Math.max(wVerify, wResponse);
+                twinNodes.TerrainSurface.material.opacity = 0.84 + 0.12 * Math.max(wVerify, wResponse);
             }
 
-            // 4. Act 1 & 3: Borehole IMU Tilt & Unstable Wedge Shear along Slip Surface
+            // 4. Act 1 & 3: Surface MEMS IMU Box Vibration & Unstable Wedge Shear along Slip Surface
             const shearAmount = 0.04 * wDetect + 0.14 * wVerify + 0.08 * wResponse;
             if (twinNodes.UnstableWedge && initialWedgePos) {
                 twinNodes.UnstableWedge.position.x = initialWedgePos.x + shearAmount;
@@ -1142,27 +1503,26 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (twinNodes.IMU_Borehole_Assembly && initialImuPos) {
                 twinNodes.IMU_Borehole_Assembly.position.x = initialImuPos.x + shearAmount;
                 twinNodes.IMU_Borehole_Assembly.position.y = initialImuPos.y - shearAmount * 0.36;
-                twinNodes.IMU_Borehole_Assembly.rotation.z = -(0.06 * wDetect + 0.14 * wVerify);
             }
             if (twinNodes.SlipSurface?.material) {
                 twinNodes.SlipSurface.material.opacity = 0.45 + 0.45 * Math.max(wDetect, wVerify);
             }
 
-            // 5. Act 2: Rain Storm & Rising Subsurface Groundwater Table
-            rainMat.opacity = Math.max(0.06, wContext * 0.82 + wVerify * 0.25);
-            const waterRise = wContext * 0.34 + wVerify * 0.24 + wResponse * 0.14;
+            // 5. Act 2: Rain Storm & Rising Subsurface Groundwater Table in Open Cutaway Trench
+            rainMat.opacity = Math.max(0.14, wContext * 0.86 + wVerify * 0.28);
+            const waterRise = wContext * 0.26 + wVerify * 0.18 + wResponse * 0.12;
             if (twinNodes.GroundwaterTable) {
                 twinNodes.GroundwaterTable.position.y = initialGroundwaterY + waterRise;
-                twinNodes.GroundwaterTable.material.opacity = 0.48 + wContext * 0.38;
+                twinNodes.GroundwaterTable.material.opacity = 0.55 + wContext * 0.35;
             }
             if (twinNodes.PiezometerWaterColumn) {
-                twinNodes.PiezometerWaterColumn.scale.y = 1 + waterRise * 1.4;
-                twinNodes.PiezometerWaterColumn.position.y = waterRise * 0.45;
+                twinNodes.PiezometerWaterColumn.scale.y = 1 + waterRise * 0.65;
+                twinNodes.PiezometerWaterColumn.position.y = waterRise * 0.22;
             }
 
             // 6. Act 3: Multi-Sensor Baseline Triangulation Lasers & Satellite Carrier Beams
             baselineLines.forEach(line => {
-                line.material.opacity = wVerify * 0.82 + wResponse * 0.32;
+                line.material.opacity = 0.22 + wVerify * 0.68 + wResponse * 0.28;
             });
             if (twinNodes.Satellite_Constellation) {
                 twinNodes.Satellite_Constellation.position.x = -0.2 + Math.sin(elapsed * 0.42) * 0.28;
@@ -1175,20 +1535,18 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 posAttr.setXYZ(0, storySatWorldPos.x, storySatWorldPos.y, storySatWorldPos.z);
                 posAttr.setXYZ(1, target.x, target.y, target.z);
                 posAttr.needsUpdate = true;
-                beam.material.opacity = (0.12 + wVerify * 0.32 + wResponse * 0.16) + Math.max(0, Math.sin(elapsed * 2.4 + phase)) * 0.16;
+                beam.material.opacity = (0.18 + wVerify * 0.32 + wResponse * 0.16) + Math.max(0, Math.sin(elapsed * 2.4 + phase)) * 0.16;
             });
 
-            // 7. Act 3 & 4: Operations Hub Data Stream + Motorized Sliding Entrance Doors Opening + Control Room Interior!
-            const streamWeight = Math.max(wVerify * 0.75, wResponse);
+            // 7. Always-Visible Telemetry Data Packets + Motorized Sliding Entrance Doors Opening + Control Room Interior!
+            const streamWeight = Math.max(0.45, wVerify * 0.92, wResponse);
             dispatchLines.forEach(line => {
-                line.material.opacity = streamWeight * 0.86;
+                line.material.opacity = streamWeight * 0.78;
             });
             dispatchPackets.forEach(pkt => {
-                pkt.mesh.material.opacity = streamWeight * 0.96;
-                if (streamWeight > 0.02) {
-                    const t = (elapsed * pkt.speed + pkt.phase) % 1;
-                    pkt.curve.getPoint(t, pkt.mesh.position);
-                }
+                pkt.mesh.material.opacity = Math.min(1.0, streamWeight * 1.1);
+                const t = (elapsed * pkt.speed + pkt.phase) % 1;
+                pkt.curve.getPoint(t, pkt.mesh.position);
             });
 
             // Slide Operations Center Entrance Doors (OpsDoor_Left & OpsDoor_Right) wide open as camera approaches (p = 0.68 -> 0.81)!
@@ -1367,10 +1725,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         if (!story || !stage || !articles.length) return;
 
         const captions = [
-            'Thiết bị 01 · Trạm GNSS RTK đỉnh đồi & lỗ khoan IMU lấy mẫu vi dịch chuyển',
-            'Thiết bị 02 · Trạm đo mưa tự động & giếng Piezometer ghi nhận áp lực nước',
-            'Hợp nhất · Zoom toàn cảnh 8 vệ tinh & bay theo luồng dữ liệu về Center',
-            'Phòng kiểm soát · Mở cửa tự động Center & hiển thị đa màn hình điều hành AI'
+            'Thiết bị 01 · Trạm GNSS RTK (ΔE/ΔN/ΔU) & Hộp cảm biến MEMS IMU 6 trục trên mặt dốc',
+            'Thiết bị 02 · Gầu đo mưa lật (0.2mm) & Cảm biến Piezometer thả giếng khoan đón dòng nước ngầm',
+            'Xác minh · Zoom toàn cảnh & bám theo các gói tin Telemetry [PKT] bay về Toà nhà Data Center',
+            'Phòng điều hành · Mở cửa kính Toà nhà Data Center & Màn hình Grafana + WebGIS thời gian thực'
         ];
         const stepBadges = ['BƯỚC 01 / 04', 'BƯỚC 02 / 04', 'BƯỚC 03 / 04', 'BƯỚC 04 / 04'];
         const stageTransforms = [
@@ -1381,15 +1739,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         ];
 
         const getDetailedCamHud = p => {
-            if (p < 0.09) return 'CAM 01A · CẬN CẢNH TRẠM GNSS ĐỈNH ĐỒI (CROWN)';
-            if (p < 0.17) return 'CAM 01B · QUÉT TRẠM GNSS ROVER S2 SƯỜN GIỮA';
-            if (p < 0.25) return 'CAM 01C · LẤY MẪU LỖ KHOAN IMU & ĐỚI TRƯỢT';
-            if (p < 0.37) return 'CAM 02A · THU THẬP TRẠM ĐO MƯA & KHÍ TƯỢNG';
-            if (p < 0.50) return 'CAM 02B · ĐO CỘT NƯỚC NGẦM GIẾNG PIEZOMETER';
-            if (p < 0.62) return 'CAM 03A · ZOOM TOÀN CẢNH HỢP NHẤT ĐA CẢM BIẾN';
-            if (p < 0.74) return 'CAM 03B · BAY THEO LUỒNG DỮ LIỆU VỀ CENTER';
-            if (p < 0.86) return 'CAM 04A · TIẾP CẬN & MỞ CỬA TRƯỢT OPS CENTER';
-            return 'CAM 04B · PHÒNG KIỂM SOÁT AI · MÀN HÌNH & HOLOGRAM 3D';
+            if (p < 0.14) return 'CAM 01A · DỪNG NHỊP QUAN SÁT TRẠM GNSS RTK (ΔE/ΔN/ΔU)';
+            if (p < 0.29) return 'CAM 01B · CẬN CẢNH HỘP CẢM BIẾN MEMS IMU 6 TRỤC & CON QUAY';
+            if (p < 0.41) return 'CAM 02A · CẬN CẢNH GẦU ĐO MƯA LẬT 2 NGĂN (0.2MM/LẦN LẬT)';
+            if (p < 0.58) return 'CAM 02B · MẶT CẮT HỐ KHOAN PIEZOMETER & DÒNG THẤM NƯỚC NGẦM';
+            if (p < 0.69) return 'CAM 03A · ZOOM TOÀN CẢNH 8 VỆ TINH & ĐƯỜNG TRUYỀN GÓI TIN [PKT]';
+            if (p < 0.79) return 'CAM 03B · BAY BÁM THEO GÓI TIN TELEMETRY VỀ DATA CENTER';
+            if (p < 0.89) return 'CAM 04A · TIẾP CẬN TOÀ NHÀ DATA CENTER & MỞ CỬA KÍNH TRƯỢT';
+            return 'CAM 04B · PHÒNG ĐIỀU HÀNH AI · MÀN HÌNH GRAFANA & WEBGIS LIVE';
         };
 
         if (innerWidth < 901 || reducedMotion.matches) {

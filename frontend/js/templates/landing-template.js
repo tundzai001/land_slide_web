@@ -23,12 +23,12 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
             <div class="hero-copy">
                 <p class="eyebrow hero-kicker"><span class="live-dot"></span>Hệ thống quan trắc địa kỹ thuật · Mô hình 3D</p>
                 <h1 id="hero-title"><span>Nhìn thấy chuyển động.</span><br><em>Trước khi thành rủi ro.</em></h1>
-                <p class="hero-lead">Từ những vi dịch chuyển cấp milimét trong lòng sườn dốc đến bản sao số 3D thời gian thực — hợp nhất GNSS RTK, IMU lỗ khoan, lượng mưa và áp lực nước ngầm để cảnh báo sớm có căn cứ.</p>
+                <p class="hero-lead">Từ những vi dịch chuyển cấp milimét trên sườn dốc đến bản sao số 3D thời gian thực — hợp nhất GNSS RTK 2 tần số, hộp cảm biến MEMS IMU 6 trục, gầu đo mưa lật và cảm biến áp lực nước ngầm thả giếng khoan để cảnh báo sớm có căn cứ.</p>
                 <div class="hero-actions"><a class="button button-primary button-large" href="/map">Xem bản đồ realtime <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a><a class="button button-ghost button-large" href="#story">Cuộn xem câu chuyện 3D</a></div>
                 <div class="signal-proof" aria-label="Ba bước vận hành"><span><b>01</b> Phát hiện ±2mm</span><i></i><span><b>02</b> Xác minh đa tầng</span><i></i><span><b>03</b> Phản ứng tức thời</span></div>
             </div>
             <div class="hero-visual" aria-label="Mô hình địa hình quan trắc ba chiều dựng bằng Blender">
-                <div class="sensor-legend" aria-hidden="true"><span data-sensor="gnss"><i></i>GNSS RTK</span><span data-sensor="imu"><i></i>IMU Lỗ khoan</span><span data-sensor="rain"><i></i>Trạm mưa</span><span data-sensor="water"><i></i>Nước ngầm</span></div>
+                <div class="sensor-legend" aria-hidden="true"><span data-sensor="gnss"><i></i>GNSS RTK</span><span data-sensor="imu"><i></i>Hộp MEMS IMU</span><span data-sensor="rain"><i></i>Gầu đo mưa</span><span data-sensor="water"><i></i>Piezometer ngầm</span></div>
                 <div class="hero-poster" aria-hidden="true">
                     <svg class="poster-diorama" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice">
                         <defs>
@@ -52,7 +52,7 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                 <canvas id="hero-canvas" aria-hidden="true"></canvas>
                 <div class="visual-index" aria-hidden="true"><span>BLENDER 3D TWIN · SECTOR 07</span><span>LAT 21.3082° N · LON 103.9188° E</span></div>
                 <div class="floating-status"><span class="status-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg></span><div><small>Mô hình địa chất 3D thời gian thực</small><strong id="hero-live-readout">GNSS RTK Fixed · 4 trạm đồng bộ</strong></div></div>
-                <p class="visual-note"><span></span>BLENDER GLB · GNSS · IMU · PIEZOMETER</p>
+                <p class="visual-note"><span></span>BLENDER GLB · GNSS · MEMS IMU · PIEZOMETER</p>
             </div>
             <a class="scroll-cue" href="#story"><span>Cuộn xuống để lướt theo hành trình tín hiệu 3D</span><i aria-hidden="true"></i></a>
         </section>
@@ -74,47 +74,47 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                         <article data-story-step="0">
                             <span class="chapter-number">01 / 04</span>
                             <div>
-                                <p class="chapter-label">Thiết bị 01 · Quét cận cảnh Trạm GNSS RTK &amp; IMU trên đồi</p>
+                                <p class="chapter-label">Thiết bị 01 · Cận cảnh Trạm GNSS RTK &amp; Hộp cảm biến MEMS IMU 6 trục</p>
                                 <h3>Chuyển động bắt đầu rất nhỏ.</h3>
-                                <p>Camera tiếp cận từng trạm GNSS RTK trên bệ lục giác đỉnh đồi (Crown), trạm Rover sườn giữa và chuỗi cảm biến IMU lỗ khoan để ghi nhận vi dịch chuyển cấp milimét cùng biến dạng uốn dọc mặt trượt ngầm.</p>
+                                <p>Camera dừng nhịp chậm tại trạm GNSS RTK nhận sóng hiệu chỉnh vi sai từ trạm Base CORS để giải nghiệm pha sóng mang (ΔE, ΔN, ΔU), sau đó áp sát hộp cảm biến MEMS IMU gắn trên mặt dốc để quan sát chip gia tốc 3 trục và 3 vòng xoay con quay hồi chuyển Roll/Pitch/Yaw.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn phát hiện">
-                                    <div class="telemetry-chip"><span>GNSS Crown &amp; Rover S2</span><strong>+4.2 mm E · -1.8 mm Z</strong></div>
-                                    <div class="telemetry-chip"><span>IMU Lỗ khoan (-6m)</span><strong>+0.14° nghiêng trục X</strong></div>
+                                    <div class="telemetry-chip"><span>GNSS RTK (ΔE/ΔN/ΔU)</span><strong>+4.2 mm E · -1.8 mm U</strong></div>
+                                    <div class="telemetry-chip"><span>Hộp MEMS IMU 6 trục</span><strong>+0.14° Roll · 0.08g rung chấn</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="1">
                             <span class="chapter-number">02 / 04</span>
                             <div>
-                                <p class="chapter-label">Thiết bị 02 · Lấy mẫu Trạm mưa tự động &amp; Giếng Piezometer</p>
+                                <p class="chapter-label">Thiết bị 02 · Gầu đo mưa lật (Tipping-Bucket) &amp; Cảm biến Piezometer thả hố khoan</p>
                                 <h3>Không một cảm biến nào kể hết câu chuyện.</h3>
-                                <p>Góc máy lướt sang trạm khí tượng tự động và mặt cắt giếng quan trắc Piezometer khi mưa lớn thấm sâu, ghi nhận trực tiếp cột nước ngầm dâng cao làm tăng áp lực nước lỗ rỗng sát mặt trượt.</p>
+                                <p>Góc máy soi rõ từng giọt mưa rơi qua phễu thu vào gầu lật 2 ngăn (0.2 mm/lần lật), rồi hạ xuống mặt cắt địa chất mở để thấy rõ đầu dò Piezometer dây rung thả cáp ngập trong tầng nước ngầm đang chảy thấm ngang qua ống lọc.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn bối cảnh">
-                                    <div class="telemetry-chip"><span>Cường độ mưa</span><strong>68 mm/h · Tích lũy 184 mm</strong></div>
-                                    <div class="telemetry-chip"><span>Mực nước ngầm</span><strong>Dâng +1.45 m (Áp lực cao)</strong></div>
+                                    <div class="telemetry-chip"><span>Gầu đo mưa lật (0.2mm)</span><strong>68 mm/h · Tích lũy 184 mm</strong></div>
+                                    <div class="telemetry-chip"><span>Piezometer &amp; Nước ngầm</span><strong>Dâng +1.45 m · 42.8 kPa</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="2">
                             <span class="chapter-number">03 / 04</span>
                             <div>
-                                <p class="chapter-label">Xác minh · Zoom toàn cảnh &amp; Bay theo luồng dữ liệu</p>
+                                <p class="chapter-label">Xác minh · Zoom toàn cảnh &amp; Bám theo gói tin Telemetry về Data Center</p>
                                 <h3>Tách nhiễu khỏi tín hiệu cần chú ý.</h3>
-                                <p>Sau khi từng thiết bị hoàn tất thu thập dữ liệu, camera phóng rộng toàn cảnh đồng bộ 8 vệ tinh quỹ đạo cao rồi bay bám theo các xung dữ liệu quang học truyền thẳng về Trung tâm Điều hành.</p>
+                                <p>Sau khi từng thiết bị đóng gói số liệu, camera phóng rộng toàn cảnh để thấy rõ các gói tin (Data Packets) phát sáng kèm nhãn định danh [PKT GNSS], [PKT IMU], [PKT RAIN], [PKT PIEZO] chạy dọc tuyến cáp quang và sóng vô tuyến về Toà nhà Trung tâm Dữ liệu.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn xác minh">
                                     <div class="telemetry-chip"><span>Tương quan đa cảm biến</span><strong>98.4% · Đã lọc nhiễu</strong></div>
-                                    <div class="telemetry-chip"><span>Luồng truyền về Center</span><strong class="text-amber">ĐANG ĐỒNG BỘ VỀ HUB</strong></div>
+                                    <div class="telemetry-chip"><span>Luồng gói tin Telemetry</span><strong class="text-amber">4 LUỒNG PACKET LIVE</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="3">
                             <span class="chapter-number">04 / 04</span>
                             <div>
-                                <p class="chapter-label">Phản ứng · Mở cửa Center &amp; Vào Phòng Kiểm Soát AI</p>
+                                <p class="chapter-label">Phản ứng · Mở cửa Toà nhà Data Center &amp; Màn hình Grafana + WebGIS Live</p>
                                 <h3>Đúng thông tin, đến đúng người.</h3>
-                                <p>Khi camera tiến sát cổng chính Operations Center, hệ thống cửa trượt tự động mở rộng đưa góc máy bay thẳng lên Phòng Kiểm Soát trung tâm với 5 màn hình điều hành lớn và sa bàn Hologram 3D.</p>
+                                <p>Khi camera tiến sát sảnh kính Toà nhà Data Center 2 tầng, cửa kính trượt tự động mở rộng đưa góc máy bay thẳng vào Phòng Điều Hành AI với màn hình cong Grafana + WebGIS thời gian thực, 4 bàn trực kỹ sư và sa bàn Hologram 3D.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn phản ứng">
-                                    <div class="telemetry-chip"><span>AI Control Room</span><strong class="text-lime">CỬA MỞ · 5 MÀN HÌNH LIVE</strong></div>
+                                    <div class="telemetry-chip"><span>Grafana &amp; WebGIS Wall</span><strong class="text-lime">CỬA MỞ · GRAFANA LIVE 60FPS</strong></div>
                                     <div class="telemetry-chip"><span>Hành lang bảo vệ</span><strong>Kích hoạt cổng cảnh báo đèo</strong></div>
                                 </div>
                             </div>
@@ -129,23 +129,23 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                     <canvas id="story-canvas" aria-hidden="true"></canvas>
                     <div class="stage-sensors" aria-hidden="true">
                         <span data-kind="gnss">GNSS RTK</span>
-                        <span data-kind="imu">IMU Lỗ khoan</span>
-                        <span data-kind="rain">Lượng mưa</span>
-                        <span data-kind="water">Nước ngầm</span>
-                        <span data-kind="fusion">Hợp nhất 3D</span>
+                        <span data-kind="imu">Hộp MEMS IMU</span>
+                        <span data-kind="rain">Gầu đo mưa</span>
+                        <span data-kind="water">Piezometer ngầm</span>
+                        <span data-kind="fusion">Grafana Center</span>
                     </div>
                     <div class="stage-callouts" id="stage-callouts" aria-hidden="true">
                         <div class="callout-pin is-active" data-pin="gnss_mid"><i></i><div><small>GNSS ROVER S2</small><strong id="pin-gnss-val">Δ +4.2 mm</strong></div></div>
-                        <div class="callout-pin is-active" data-pin="imu_borehole"><i></i><div><small>IMU LỖ KHOAN</small><strong id="pin-imu-val">+0.14° mặt trượt</strong></div></div>
-                        <div class="callout-pin" data-pin="rain_gauge"><i></i><div><small>TRẠM MƯA</small><strong id="pin-rain-val">68 mm/h</strong></div></div>
-                        <div class="callout-pin" data-pin="piezometer"><i></i><div><small>PIEZOMETER</small><strong id="pin-water-val">Nước +1.45 m</strong></div></div>
-                        <div class="callout-pin" data-pin="ops_hub"><i></i><div><small>OPERATIONS HUB</small><strong id="pin-ops-val">Đã kích hoạt</strong></div></div>
+                        <div class="callout-pin is-active" data-pin="imu_borehole"><i></i><div><small>HỘP CẢM BIẾN IMU</small><strong id="pin-imu-val">+0.14° Roll/Pitch</strong></div></div>
+                        <div class="callout-pin" data-pin="rain_gauge"><i></i><div><small>GẦU ĐO MƯA LẬT</small><strong id="pin-rain-val">68 mm/h · 0.2mm</strong></div></div>
+                        <div class="callout-pin" data-pin="piezometer"><i></i><div><small>PIEZOMETER HỐ KHOAN</small><strong id="pin-water-val">Nước +1.45 m · 42kPa</strong></div></div>
+                        <div class="callout-pin" data-pin="ops_hub"><i></i><div><small>DATA CENTER · GRAFANA</small><strong id="pin-ops-val">Đang trực tuyến</strong></div></div>
                     </div>
                     <div class="stage-hud" aria-hidden="true">
-                        <div class="hud-top"><span>SECTOR 07 / BLENDER 3D TWIN</span><span id="hud-camera-mode">CAM 01 · CẬN CẢNH ĐỚI TRƯỢT</span></div>
+                        <div class="hud-top"><span>SECTOR 07 / BLENDER 3D TWIN</span><span id="hud-camera-mode">CAM 01 · CẬN CẢNH GNSS &amp; HỘP IMU</span></div>
                         <div class="story-progress"><span></span></div>
                         <div class="story-caption">
-                            <div><span>Trạng thái mô phỏng địa kỹ thuật</span><strong id="story-caption">Phát hiện · Vector dịch chuyển GNSS + IMU</strong></div>
+                            <div><span>Trạng thái mô phỏng địa kỹ thuật</span><strong id="story-caption">Phát hiện · Sóng mang GNSS RTK &amp; Hộp cảm biến MEMS IMU 6 trục</strong></div>
                             <span class="story-step-badge" id="story-step-badge">BƯỚC 01 / 04</span>
                         </div>
                     </div>
