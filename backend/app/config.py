@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # --- 2. CÁC CẤU HÌNH KHÁC ---
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
+    BACKUP_SIGNING_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     PRIVATE_AUTHZ_GRACE_SECONDS: int = 300
@@ -33,7 +34,9 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT_SECONDS: int = 10
     DB_COMMAND_TIMEOUT_SECONDS: int = 30
     RUN_SCHEMA_BOOTSTRAP: bool = False
-    OPERATIONS_DIR: str = ""
+    # Backup archives live outside the web root by default on Windows servers.
+    BACKUP_DIR: str = ""
+    OPERATIONS_LOG_RETENTION_DAYS: int = 365
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
 
     # The MQTT ingest spool is deliberately local and append-only.  It is a

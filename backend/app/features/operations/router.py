@@ -112,6 +112,7 @@ async def restore_backup(identifier: str, body: RestoreRequest, tasks: Backgroun
 class Schedule(BaseModel):
     frequency: Literal['disabled', 'daily', 'weekly'] = 'disabled'
     next_at: int = Field(default=0, ge=0)
+    retention_count: int = Field(default=30, ge=1, le=365)
 
 
 @router.put('/backup-schedule')

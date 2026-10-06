@@ -3,10 +3,10 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import shutil
-import sqlite3
 import tempfile
 import time
 import uuid
@@ -21,11 +21,17 @@ from . import store
 
 DATABASES = {'auth': auth_engine, 'config': config_engine, 'data': data_engine}
 lock = asyncio.Lock()
+logger = logging.getLogger(__name__)
 
 
 def directory():
-    path = store.root() / 'backups'
-    path.mkdir(mode=0o700, exist_ok=True)
+    if settings.BACKUP_DIR:
+        path = Path(settings.BACKUP_DIR)
+    elif os.name == 'nt':
+        path = Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'Aitogy' / 'Landslide' / 'backups'
+    else:
+        path = Path(__file__).resolve().parents[4] / 'runtime' / 'operations' / 'backups'
+    path.mkdir(parents=True, mode=0o700, exist_ok=True)
     return path
 
 
@@ -36,7 +42,17 @@ def backup_path(identifier):
 
 
 def sign(manifest):
-    return hmac.new(settings.SECRET_KEY.encode(), json.dumps(manifest, sort_keys=True).encode(), hashlib.sha256).hexdigest()
+    # Version 1 archives used SECRET_KEY. Keep validating them while new
+    # archives use a dedicated key when configured.
+    key = settings.BACKUP_SIGNING_KEY if manifest.get('version', 1) >= 2 else ''
+    return hmac.new((key or settings.SECRET_KEY).encode(),
+                    json.dumps(manifest, sort_keys=True).encode(), hashlib.sha256).hexdigest()
+
+
+def secure_file(path):
+    # chmod(0o600) marks files read-only on Windows; use NTFS ACLs there.
+    if os.name != 'nt':
+        os.chmod(path, 0o600)
 
 
 def digest(path):
@@ -51,8 +67,11 @@ def pg_environment(engine, database=None):
     env.update(PGHOST=url.host or 'localhost', PGPORT=str(url.port or 5432),
                PGUSER=url.username or '', PGPASSWORD=url.password or '',
                PGDATABASE=database or url.database or '', PGCONNECT_TIMEOUT='10')
-    if url.query.get('sslmode'):
-        env['PGSSLMODE'] = str(url.query['sslmode'])
+    for key in ('sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'sslcrl', 'sslcrldir',
+                'sslpassword', 'application_name', 'target_session_attrs', 'options'):
+        value = url.query.get(key)
+        if value:
+            env['PG' + key.upper()] = str(value)
     return env
 
 
@@ -62,12 +81,16 @@ async def run_tool(name, args, env):
         raise RuntimeError(f'Install PostgreSQL client tools: {name} is unavailable')
     process = await asyncio.create_subprocess_exec(binary, *args, env=env,
                                                    stdout=asyncio.subprocess.DEVNULL,
-                                                   stderr=asyncio.subprocess.PIPE)
+                                                   stderr=asyncio.subprocess.DEVNULL)
     try:
-        _, error = await process.communicate()
+        await asyncio.wait_for(process.wait(), timeout=6 * 60 * 60)
+    except asyncio.TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise RuntimeError(f'{name} exceeded the six-hour job limit') from exc
     except asyncio.CancelledError:
         if process.returncode is None:
-            process.terminate()
+            process.kill()
             await process.wait()
         raise
     if process.returncode:
@@ -82,9 +105,11 @@ def job(identifier, **updates):
     return record
 
 
-async def create(identifier):
+async def create(identifier, trigger='manual'):
+    if trigger not in {'manual', 'scheduled'}:
+        raise ValueError('Invalid backup trigger')
     async with lock:
-        await asyncio.to_thread(job, identifier, kind='backup', status='running')
+        await asyncio.to_thread(job, identifier, kind='backup', trigger=trigger, status='running')
         partial = backup_path(identifier).with_suffix('.partial')
         try:
             with tempfile.TemporaryDirectory(dir=directory()) as temp:
@@ -93,32 +118,34 @@ async def create(identifier):
                     filename = f'{label}.dump'
                     target = Path(temp) / filename
                     await run_tool('pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', str(target)], pg_environment(engine))
+                    await run_tool('pg_restore', ['--list', str(target)], pg_environment(engine))
                     files[filename] = {'sha256': await asyncio.to_thread(digest, target), 'bytes': target.stat().st_size}
-                journal = Path(temp) / 'journal.sqlite3'
-                def snapshot_journal():
-                    source = store.connect()
-                    destination = sqlite3.connect(journal)
-                    try:
-                        source.backup(destination)
-                    finally:
-                        destination.close()
-                        source.close()
-                await asyncio.to_thread(snapshot_journal)
-                files[journal.name] = {'sha256': await asyncio.to_thread(digest, journal), 'bytes': journal.stat().st_size}
-                manifest = {'version': 1, 'created_at': int(time.time()), 'files': files,
-                            'recovery_mode': 'isolated', 'snapshots': 'one snapshot per database'}
+                manifest = {'version': 2, 'created_at': int(time.time()), 'trigger': trigger,
+                            'files': files, 'recovery_mode': 'isolated',
+                            'snapshots': 'one snapshot per database'}
                 def pack():
                     with zipfile.ZipFile(partial, 'w', zipfile.ZIP_STORED) as archive:
                         archive.writestr('manifest.json', json.dumps({'manifest': manifest, 'signature': sign(manifest)}))
                         for filename in files:
                             archive.write(Path(temp) / filename, filename)
-                    os.chmod(partial, 0o600)
+                    secure_file(partial)
                     os.replace(partial, backup_path(identifier))
                 await asyncio.to_thread(pack)
+            # Verify the completed ZIP before reporting success or applying retention.
+            await asyncio.to_thread(validate_archive, backup_path(identifier))
             await asyncio.to_thread(job, identifier, status='completed', backup_id=identifier, created_at=manifest['created_at'])
             await asyncio.to_thread(store.append, 'operation_log', 'backup.completed', {'backup_id': identifier})
+            if trigger == 'scheduled':
+                schedule = await asyncio.to_thread(store.get_setting, 'backup_schedule', {})
+                try:
+                    removed = await asyncio.to_thread(prune_scheduled_backups, schedule.get('retention_count', 30))
+                    if removed:
+                        await asyncio.to_thread(store.append, 'operation_log', 'backup.retention_pruned', {'removed': removed})
+                except OSError:
+                    await asyncio.to_thread(store.append, 'operation_log', 'backup.retention_failed')
         except BaseException as exc:
             partial.unlink(missing_ok=True)
+            backup_path(identifier).unlink(missing_ok=True)
             await asyncio.to_thread(job, identifier, status='error', error=str(exc)[:500] or 'Interrupted')
             await asyncio.to_thread(store.append, 'operation_log', 'backup.failed', {'error': str(exc)[:500]})
             if isinstance(exc, asyncio.CancelledError):
@@ -132,16 +159,21 @@ def validate_archive(path, destination=None):
             raise ValueError('Invalid manifest size')
         envelope = json.loads(archive.read('manifest.json'))
         manifest = envelope['manifest']
-        if manifest.get('version') != 1 or not hmac.compare_digest(sign(manifest), str(envelope.get('signature', ''))):
+        version = manifest.get('version')
+        if version not in (1, 2) or not hmac.compare_digest(sign(manifest), str(envelope.get('signature', ''))):
             raise ValueError('Backup signature invalid; restore only backups signed by this installation')
         files = set(manifest.get('files', {}))
-        if files not in (base_files, base_files | {'journal.sqlite3'}):
+        if (files != base_files and not (version == 1 and files == base_files | {'journal.sqlite3'})):
             raise ValueError('Invalid manifest files')
+        if version == 2 and manifest.get('trigger') not in {'manual', 'scheduled'}:
+            raise ValueError('Invalid backup metadata')
         if sorted(archive.namelist()) != sorted(['manifest.json', *files]):
             raise ValueError('Backup must contain exactly the manifest and its declared files')
         for name in files:
             info = archive.getinfo(name)
-            if info.file_size != manifest['files'][name]['bytes'] or info.file_size > 50 * 1024**3:
+            if (info.compress_type != zipfile.ZIP_STORED or
+                    info.file_size != manifest['files'][name]['bytes'] or
+                    info.file_size > 50 * 1024**3):
                 raise ValueError('Invalid dump size')
             sha = hashlib.sha256()
             with archive.open(name) as source:
@@ -170,6 +202,9 @@ async def restore(identifier, backup_id):
             with tempfile.TemporaryDirectory(dir=directory()) as temp:
                 await asyncio.to_thread(validate_archive, backup_path(backup_id), temp)
                 for label, engine in DATABASES.items():
+                    await run_tool('pg_restore', ['--list', str(Path(temp) / f'{label}.dump')],
+                                   pg_environment(engine))
+                for label, engine in DATABASES.items():
                     name = f'recovery_{identifier[:16]}_{label}'
                     async with engine.connect() as connection:
                         connection = await connection.execution_options(isolation_level='AUTOCOMMIT')
@@ -178,11 +213,11 @@ async def restore(identifier, backup_id):
                     await asyncio.to_thread(job, identifier, recovered_databases=stages.copy())
                     await run_tool('pg_restore', ['--exit-on-error', '--single-transaction', '--no-owner', '--no-acl',
                                                  '--dbname', name, str(Path(temp) / f'{label}.dump')], pg_environment(engine, name))
-                journal = Path(temp) / 'journal.sqlite3'
-                if journal.exists():
+                legacy_journal = Path(temp) / 'journal.sqlite3'
+                if legacy_journal.exists():
                     recovered_journal = directory() / f'recovery_{identifier}_journal.sqlite3'
-                    await asyncio.to_thread(shutil.copyfile, journal, recovered_journal)
-                    recovered_journal.chmod(0o600)
+                    await asyncio.to_thread(shutil.copyfile, legacy_journal, recovered_journal)
+                    secure_file(recovered_journal)
                     await asyncio.to_thread(job, identifier, recovered_journal=recovered_journal.name)
             await asyncio.to_thread(job, identifier, status='completed', recovered_databases=stages, live_database_changed=False)
             await asyncio.to_thread(store.append, 'operation_log', 'restore.completed', {'databases': stages, 'live_database_changed': False})
@@ -199,14 +234,36 @@ def list_backups():
                   key=lambda item: item['created_at'], reverse=True)
 
 
+def prune_scheduled_backups(retention_count):
+    """Apply retention only to verified scheduled backups; keep manual copies."""
+    retention_count = max(1, min(int(retention_count), 365))
+    candidates = []
+    for path in directory().glob('*.zip'):
+        if not re.fullmatch(r'[0-9a-f]{32}', path.stem):
+            continue
+        try:
+            with zipfile.ZipFile(path) as archive:
+                if archive.getinfo('manifest.json').file_size > 16384:
+                    continue
+                envelope = json.loads(archive.read('manifest.json'))
+                manifest = envelope['manifest']
+                if (manifest.get('version') == 2 and manifest.get('trigger') == 'scheduled'
+                        and hmac.compare_digest(sign(manifest), str(envelope.get('signature', '')))):
+                    candidates.append((int(manifest['created_at']), path))
+        except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, json.JSONDecodeError):
+            continue
+    candidates.sort(reverse=True)
+    removed = 0
+    for _, path in candidates[retention_count:]:
+        path.unlink()
+        removed += 1
+    return removed
+
+
 def recover_interrupted_jobs():
-    db = store.connect()
-    try:
-        rows = db.execute("SELECT key, value FROM settings WHERE key LIKE 'job:%'").fetchall()
-    finally:
-        db.close()
+    rows = store.setting_items('job:')
     for row in rows:
-        record = json.loads(row['value'])
+        record = row['value']
         if record.get('status') in {'pending', 'running'}:
             record.update(status='error', error='Service restarted before the job completed', updated_at=int(time.time()))
             store.set_setting(row['key'], record)
@@ -215,15 +272,23 @@ def recover_interrupted_jobs():
 async def daemon():
     while True:
         try:
-            schedule = await asyncio.to_thread(store.get_setting, 'backup_schedule', {'frequency': 'disabled'})
-            period = {'daily': 86400, 'weekly': 604800}.get(schedule.get('frequency'))
-            if period and time.time() >= schedule.get('next_at', 0):
-                # Claim before starting to prevent retry storms after a utility/DB outage.
-                schedule['next_at'] = int(time.time()) + period
-                await asyncio.to_thread(store.set_setting, 'backup_schedule', schedule)
-                await create(uuid.uuid4().hex)
+            now = int(time.time())
+            if await asyncio.to_thread(store.claim_backup_schedule, now):
+                await create(uuid.uuid4().hex, trigger='scheduled')
+            if await asyncio.to_thread(store.claim_daily_log_cleanup, now):
+                retention = max(30, min(int(settings.OPERATIONS_LOG_RETENTION_DAYS), 3650))
+                cutoff = now - retention * 86400
+                removed = await asyncio.to_thread(store.prune_logs_before, cutoff)
+                old_jobs = await asyncio.to_thread(store.prune_old_jobs_before, cutoff)
+                if any(removed.values()) or old_jobs:
+                    await asyncio.to_thread(store.append, 'operation_log', 'operations.retention_pruned',
+                                            {'logs': removed, 'jobs': old_jobs, 'retention_days': retention})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await asyncio.to_thread(store.append, 'operation_log', 'backup.scheduler_error', {'error': type(exc).__name__})
+            try:
+                await asyncio.to_thread(store.append, 'operation_log', 'backup.scheduler_error',
+                                        {'error': type(exc).__name__})
+            except Exception:
+                logger.exception('Backup scheduler failed and PostgreSQL logging is unavailable')
         await asyncio.sleep(30)

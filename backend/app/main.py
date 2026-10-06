@@ -147,6 +147,8 @@ async def run_cors_fixed_base_failover_daemon():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Landslide Monitoring System starting...")
+    if not config.settings.BACKUP_SIGNING_KEY:
+        logger.warning("BACKUP_SIGNING_KEY is unset; backup manifests use SECRET_KEY")
 
     global gnss_rollup_task, cors_failover_task, file_cleanup_task, backup_task
 
@@ -155,7 +157,7 @@ async def lifespan(app: FastAPI):
             await asyncio.to_thread(recover_interrupted_jobs)
             await asyncio.to_thread(operations_store.append, 'operation_log', 'service.starting')
         except Exception:
-            logger.critical('Operational journal unavailable at startup', exc_info=True)
+            logger.critical('Operations PostgreSQL store unavailable at startup', exc_info=True)
         # Production startup must not acquire DDL locks. Fresh development
         # environments can opt in; production schema changes use Alembic.
         if config.settings.RUN_SCHEMA_BOOTSTRAP:
@@ -282,7 +284,8 @@ async def lifespan(app: FastAPI):
         try:
             await asyncio.to_thread(operations_store.append, 'operation_log', 'service.stopped')
         except Exception:
-            logger.critical('Operational journal unavailable at shutdown', exc_info=True)
+            logger.critical('Operations PostgreSQL store unavailable at shutdown', exc_info=True)
+        operations_store.dispose()
 
 # ============================================================================
 # FASTAPI APPLICATION SETUP

@@ -9,7 +9,8 @@ window.LegacyTemplateParts.operations = String.raw`
       <div class="operations-actions"><button class="btn btn-primary" onclick="window.adminManager.operationAction(this, 'backup')">Tạo bản sao lưu</button><button class="btn btn-outline-secondary" onclick="document.getElementById('operations-upload').click()">Tải bản sao lưu lên</button><input type="file" id="operations-upload" accept=".zip" hidden onchange="window.adminManager.uploadOperationBackup(this)"></div>
       <form class="operations-form-row" onsubmit="event.preventDefault(); window.adminManager.operationAction(this.querySelector('button'), 'schedule')">
         <div><label for="operations-frequency">Lịch tự động</label><select id="operations-frequency" class="form-select"><option value="disabled">Tắt</option><option value="daily">Hằng ngày</option><option value="weekly">Hằng tuần</option></select></div>
-        <div><label for="operations-next">Bắt đầu lúc</label><input id="operations-next" type="datetime-local" class="form-control"></div><button class="btn btn-outline-primary">Lưu lịch</button>
+        <div><label for="operations-next">Bắt đầu lúc</label><input id="operations-next" type="datetime-local" class="form-control"></div>
+        <div><label for="operations-retention">Giữ bản tự động</label><input id="operations-retention" type="number" min="1" max="365" value="30" class="form-control" aria-describedby="operations-retention-help"><small id="operations-retention-help" class="operations-note">1–365 bản; bản tạo thủ công được giữ riêng.</small></div><button class="btn btn-outline-primary">Lưu lịch</button>
       </form>
       <p class="operations-note">Phục hồi tạo CSDL riêng để kiểm tra bản sao. Chuyển hệ thống sang bản phục hồi cần quy trình quản trị riêng.</p>
       <div id="operations-job" role="status" aria-live="polite"></div>

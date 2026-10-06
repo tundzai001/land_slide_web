@@ -52,9 +52,13 @@ test('operations page works at desktop and mobile widths', async ({page}) => {
 
 test('schedule and protocol save show feedback; failures restore controls', async ({page}) => {
   await mount(page);
+  await expect(page.getByLabel('Giữ bản tự động')).toHaveValue('30');
+  await page.getByLabel('Giữ bản tự động').fill('12');
   await page.getByLabel('Lịch tự động').selectOption('daily');
   await page.getByRole('button',{name:'Lưu lịch'}).click();
   await expect(page.locator('#operations-feedback')).toContainText('Đã lưu lịch');
+  const scheduleCall = await page.evaluate(() => window.operationCalls.find(call => call.url.endsWith('/backup-schedule')));
+  expect(JSON.parse(scheduleCall.body).retention_count).toBe(12);
   await page.getByLabel('Nguồn dữ liệu tại hiện trường').selectOption('modbus_tcp');
   await expect(page.locator('#operations-profile-fields')).toBeVisible();
   await page.getByLabel('Cấu hình đọc và ánh xạ trường dữ liệu (JSON)').fill('{broken');

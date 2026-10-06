@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 from app import auth
 from app.config import settings
 from app.models.auth import BaseAuth, User
+from app.models.data import BaseData
 from app.features.operations import store, backups
 from app.features.operations.audit import AuditMiddleware
 from app.features.operations.forwarding import approved, authorize
@@ -34,8 +35,15 @@ from app.features.data_export.schemas import ExportExcelRequest
 
 @pytest.fixture(autouse=True)
 def isolated_journal(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, 'OPERATIONS_DIR', str(tmp_path / 'operations'))
+    monkeypatch.setattr(settings, 'BACKUP_DIR', str(tmp_path / 'operations' / 'backups'))
     monkeypatch.setattr(settings, 'SECRET_KEY', 'test-only-signing-key-with-at-least-32-characters')
+    monkeypatch.setattr(settings, 'BACKUP_SIGNING_KEY', 'separate-backup-signing-key-for-tests')
+    engine = create_engine(f"sqlite:///{tmp_path / 'operations.sqlite3'}")
+    BaseData.metadata.create_all(engine)
+    previous = store.configure_engine(engine)
+    yield
+    store.configure_engine(previous)
+    engine.dispose()
 
 
 def client(role='admin'):
@@ -156,6 +164,35 @@ def test_backup_validation_and_signed_upload(tmp_path):
         backups.backup_path('../escape')
 
 
+def test_postgres_store_json_schedule_lock_and_scheduled_retention():
+    store.append('audit_log', 'POST /api/admin/example', {'database_url': 'postgres://user:secret@db/app',
+                                                          'not_finite': float('nan')}, username='tester')
+    row = store.query('audit_log', username='tester')['rows'][0]
+    assert row['details'] == {'database_url': '[REDACTED]', 'not_finite': 'nan'}
+    now = 1_900_000_000
+    store.set_setting('backup_schedule', {'frequency': 'daily', 'next_at': now, 'retention_count': 1})
+    assert store.claim_backup_schedule(now) is True
+    assert store.claim_backup_schedule(now) is False
+    assert store.get_setting('backup_schedule')['next_at'] == now + 86400
+
+    import hashlib
+    for identifier, trigger, created_at in [('1' * 32, 'scheduled', 10),
+                                             ('2' * 32, 'manual', 20),
+                                             ('3' * 32, 'scheduled', 30)]:
+        values = {name: b'postgres dump' for name in ('auth.dump', 'config.dump', 'data.dump')}
+        manifest = {'version': 2, 'trigger': trigger, 'created_at': created_at,
+                    'files': {name: {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
+                              for name, data in values.items()}}
+        with zipfile.ZipFile(backups.backup_path(identifier), 'w', zipfile.ZIP_STORED) as archive:
+            archive.writestr('manifest.json', json.dumps({'manifest': manifest, 'signature': backups.sign(manifest)}))
+            for name, data in values.items():
+                archive.writestr(name, data)
+    assert backups.prune_scheduled_backups(1) == 1
+    assert not backups.backup_path('1' * 32).exists()
+    assert backups.backup_path('2' * 32).exists()
+    assert backups.backup_path('3' * 32).exists()
+
+
 def test_backup_failure_and_restart_are_observable():
     async def run():
         with patch.object(backups, 'run_tool', AsyncMock(side_effect=RuntimeError('pg_dump missing'))):
@@ -171,7 +208,10 @@ def test_backup_failure_and_restart_are_observable():
 def test_backup_creation_and_isolated_restore_never_target_live_database():
     async def run():
         async def fake_dump(name, args, env):
-            Path(args[args.index('--file') + 1]).write_bytes(b'dump')
+            if '--file' in args:
+                Path(args[args.index('--file') + 1]).write_bytes(b'dump')
+            else:
+                assert args[0] == '--list'
         with patch.object(backups, 'run_tool', side_effect=fake_dump):
             await backups.create('c' * 32)
         assert backups.job('c' * 32)['status'] == 'completed'
@@ -184,8 +224,11 @@ def test_backup_creation_and_isolated_restore_never_target_live_database():
         engine = SimpleNamespace(connect=lambda: Connection(), url=backups.auth_engine.url)
         calls = []
         async def fake_restore(name, args, env):
-            calls.append(env['PGDATABASE'])
-            assert env['PGDATABASE'].startswith('recovery_')
+            if '--dbname' in args:
+                calls.append(env['PGDATABASE'])
+                assert env['PGDATABASE'].startswith('recovery_')
+            else:
+                assert args[0] == '--list'
         with patch.object(backups, 'DATABASES', {key: engine for key in ['auth','config','data']}), patch.object(backups.shutil, 'which', return_value='/pg_restore'), patch.object(backups, 'run_tool', side_effect=fake_restore):
             await backups.restore('d' * 32, 'c' * 32)
         result = backups.job('d' * 32)

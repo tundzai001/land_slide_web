@@ -7,6 +7,7 @@ from .data import (
     IncidentMutationRequest, FileCleanupJob, BaseData,
 )
 from .pi_device import PiDevice
+from .operations import AuditLog, OperationLog, OperationsSetting
 
 # For backward compatibility and Alembic
 Base = BaseData

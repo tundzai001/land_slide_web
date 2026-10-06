@@ -40,6 +40,7 @@ class AdminOperationsFeature extends window.AdminManager {
             if (this._disposed) return;
             this.renderOperationBackups(backup.backups);
             document.getElementById('operations-frequency').value = backup.schedule.frequency;
+            document.getElementById('operations-retention').value = backup.schedule.retention_count || 30;
             const next = backup.schedule.next_at ? new Date(backup.schedule.next_at * 1000) : null;
             document.getElementById('operations-next').value = next ? new Date(next.getTime() - next.getTimezoneOffset() * 60000).toISOString().slice(0,16) : '';
             document.getElementById('operations-ntp-server').value = ntp.config.server;
@@ -105,6 +106,7 @@ class AdminOperationsFeature extends window.AdminManager {
                 await this.operationJSON('/backup-schedule', 'PUT', {
                     frequency: document.getElementById('operations-frequency').value,
                     next_at: date ? Math.floor(new Date(date).getTime() / 1000) : 0,
+                    retention_count: Number(document.getElementById('operations-retention').value || 30),
                 });
                 this.operationFeedback('Đã lưu lịch sao lưu.');
             } else if (action === 'ntp') {
