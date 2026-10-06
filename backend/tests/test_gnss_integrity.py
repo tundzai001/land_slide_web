@@ -457,7 +457,7 @@ class GnssFixedOnlyTests(unittest.TestCase):
                 def parse(_):
                     tick['ts'] += 1
                     return {'wgs': {'lat': 21.0, 'lon': 107.0, 'h': 10.0},
-                            'gga_timestamp': tick['ts'], 'num_sats': 20, 'hdop': 0.5}
+                            'gga_timestamp': tick['ts'], 'fix_quality': 4, 'num_sats': 20, 'hdop': 0.5}
                 processor._parse_gngga = parse
                 origin_before = dict(processor.origin)
                 results = []
