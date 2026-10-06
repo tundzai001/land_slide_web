@@ -22,6 +22,7 @@ async function mount(page, width = 1366) {
       let data;
       if (url.endsWith('/backups')) data = options.method === 'POST' ? {job_id:'abc'} : {backups:[],schedule:{frequency:'disabled'}};
       else if (url.endsWith('/devices')) data = [{id:7,name:'Trạm nước',device_type:'water',acquisition:{protocol:'mqtt',enabled:false}}];
+      else if (url.includes('/logs?') && url.includes('operation_log')) data = {total:1,rows:[{timestamp:1791210000,username:null,role:null,action:'service.starting',status:null,details:{}}]};
       else if (url.includes('/logs?')) data = {total:1,rows:[{timestamp:1791210000,username:'admin',role:'admin',action:'PUT /api/admin/stations/7/config',status:200,details:{changes:[{table:'stations',operation:'update',changes:{name:{old:'<script>bad</script>',new:'new'}}}]}}]};
       else if (url.endsWith('/ntp')) data = {config:{server:'ntp.internal'},last_check:null};
       else if (url.includes('/jobs/')) data = {status:'completed'};
@@ -51,6 +52,8 @@ test('operations page works at desktop and mobile widths', async ({page}) => {
   await expect(page.getByRole('button',{name:'Xem chi tiết'})).toBeFocused();
   await page.getByRole('button',{name:'Nhật ký vận hành Hệ thống đã thực hiện gì?'}).click();
   await expect(page.locator('#operations-log-description')).toContainText('Sự kiện hệ thống');
+  await expect(page.locator('#operations-logs')).toContainText('Khởi động dịch vụ');
+  await expect(page.locator('#operations-logs')).toContainText('Hệ thống');
   expect(await page.evaluate(() => window.operationCalls.at(-1).url)).toContain('kind=operation_log');
   await page.screenshot({path:'test-results/operations-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});

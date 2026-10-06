@@ -238,7 +238,8 @@ class AdminOperationsFeature extends window.AdminManager {
                 const tr = document.createElement('tr');
                 const resultLabel = row.status != null ? `${row.status < 400 ? 'Thành công' : 'Thất bại'} · ${row.status}`
                     : row.action.includes('failed') || row.action.includes('error') ? 'Thất bại' : 'Đã ghi nhận';
-                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${row.username || 'Hệ thống'} / ${row.role || '—'}`, this.operationEventLabel(row.action), resultLabel];
+                const actor = row.username || (query.get('kind') === 'audit_log' ? 'Chưa xác định' : 'Hệ thống');
+                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${actor} / ${row.role || '—'}`, this.operationEventLabel(row.action), resultLabel];
                 const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Kết quả'];
                 for (const [index, value] of values.entries()) {
                     const cell = document.createElement('td'); cell.dataset.label = labels[index]; cell.textContent = value; tr.append(cell);
@@ -272,7 +273,7 @@ class AdminOperationsFeature extends window.AdminManager {
         content.replaceChildren();
         const facts = document.createElement('dl');
         facts.className = 'drawer-facts';
-        for (const [label, value] of [['Thời gian', new Date(row.timestamp * 1000).toLocaleString('vi-VN')], ['Tài khoản', row.username || 'Hệ thống'], ['Vai trò', row.role || '—'], ['Kết quả', row.status ?? 'Đã ghi nhận'], ['Địa chỉ IP', row.ip || '—'], ['Đối tượng', row.object || '—']]) {
+        for (const [label, value] of [['Thời gian', new Date(row.timestamp * 1000).toLocaleString('vi-VN')], ['Tài khoản', row.username || (kind === 'audit_log' ? 'Chưa xác định' : 'Hệ thống')], ['Vai trò', row.role || '—'], ['Kết quả', row.status ?? 'Đã ghi nhận'], ['Địa chỉ IP', row.ip || '—'], ['Đối tượng', row.object || '—']]) {
             const item = document.createElement('div'), term = document.createElement('dt'), description = document.createElement('dd');
             term.textContent = label; description.textContent = String(value);
             item.append(term, description); facts.append(item);
