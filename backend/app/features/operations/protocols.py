@@ -1,11 +1,26 @@
 """Industrial acquisition profiles for field gateways which publish to MQTT."""
 import math
+import os
 import socket
 import struct
+import subprocess
 import time
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+
+def system_time_status():
+    """Read OS clock status without changing its configuration or time."""
+    if os.name != 'nt':
+        return {'service': 'System NTP', 'available': False, 'output': 'Kiểm tra dịch vụ chrony/systemd-timesyncd trên máy chủ.'}
+    try:
+        result = subprocess.run(['w32tm', '/query', '/status'], capture_output=True, text=True,
+                                errors='replace', timeout=5)
+        return {'service': 'Windows Time', 'available': result.returncode == 0,
+                'output': (result.stdout or result.stderr).strip()[:8000]}
+    except (OSError, subprocess.TimeoutExpired):
+        return {'service': 'Windows Time', 'available': False, 'output': 'Không đọc được trạng thái Windows Time.'}
 
 
 class Point(BaseModel):

@@ -58,6 +58,19 @@ def client(role='admin'):
     return TestClient(app)
 
 
+def test_ntp_source_is_environment_and_not_mutable_from_browser(monkeypatch):
+    monkeypatch.setattr(settings, 'NTP_SERVER', 'ntp.example.internal')
+    store.set_setting('ntp_config', {'server': 'obsolete.example.internal'})
+    with client() as browser:
+        result = browser.get('/api/admin/operations/ntp').json()
+        assert result['config'] == {'server': 'ntp.example.internal'}
+        assert result['config_source'] == 'environment'
+        assert browser.put('/api/admin/operations/ntp', json={'server': 'new.example.internal'}).status_code == 409
+        with patch('app.features.operations.router.ntp_probe', return_value={'offset_ms': 1}) as probe:
+            assert browser.post('/api/admin/operations/ntp/check', json={}).status_code == 200
+        probe.assert_called_once_with('ntp.example.internal')
+
+
 def test_admin_only_and_persistent_schedule_with_audit():
     with client('viewer') as browser:
         assert browser.get('/api/admin/operations/backups').status_code == 403

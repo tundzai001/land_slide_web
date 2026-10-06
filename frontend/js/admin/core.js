@@ -338,6 +338,7 @@ class AdminManager {
             return false;
         }
         // Hide all tab panes
+        if (tabId !== 'tab-operations') this.closeOperationInspector?.();
         document.querySelectorAll('#admin-tab-content > .tab-pane').forEach(p => {
             p.classList.remove('show', 'active');
         });
@@ -436,6 +437,7 @@ class AdminManager {
         this.applyPermissionVisibility();
         if (!this.canAccessTab(this.currentTabId)) {
             this.closeRescueInspector?.();
+            this.closeOperationInspector?.();
             window.dbManager?.closeInspector?.();
             window.dbManager?.datasetRequestController?.abort?.();
             this.switchTab(this._safeFallbackTab(), null, true, { replace: true, restore: true });

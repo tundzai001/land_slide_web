@@ -37,7 +37,7 @@ Nhật ký vận hành ghi trạng thái backup, restore, NTP và vòng đời d
 
 ## NTP
 
-Trang Vận hành lưu máy chủ NTP, gửi phép đo UDP/123 khi Admin bấm kiểm tra, hiển thị offset, thời gian khứ hồi, stratum và thời điểm kiểm tra. Phản hồi phải khớp originate timestamp, server mode và trạng thái đồng bộ hợp lệ.
+Trang Vận hành đọc máy chủ NTP từ `NTP_SERVER` trong môi trường triển khai, gửi phép đo UDP/123 khi Admin bấm kiểm tra, hiển thị offset, thời gian khứ hồi, stratum và thời điểm kiểm tra. Phản hồi phải khớp originate timestamp, server mode và trạng thái đồng bộ hợp lệ.
 
 API chỉ **đo độ lệch**, không đổi đồng hồ OS. Tải cấu hình chrony và áp dụng bằng công cụ quản trị hệ điều hành của máy chủ/gateway. Kiểm tra trạng thái đồng bộ thực bằng `chronyc tracking` và `chronyc sources -v` trên Linux. Cần cho phép UDP/123 đến máy chủ NTP được chọn. Không coi một phép đo thành công là bằng chứng OS đã đồng bộ.
 
@@ -77,3 +77,9 @@ Chuyển tiếp RTK mặc định tắt. Cấu hình bật cũ chưa được ch
 - PostgreSQL pg_restore: https://www.postgresql.org/docs/current/app-pgrestore.html
 - PyModbus 3.11.3 client: https://pymodbus.readthedocs.io/en/v3.11.3/source/client.html
 - asyncua client: https://opcua-asyncio.readthedocs.io/en/latest/api/asyncua.client.html
+
+## Cấu hình thời gian máy chủ
+
+`NTP_SERVER=pool.ntp.org` được đọc từ `backend/.env` hoặc biến môi trường lúc khởi động. Giao diện hiển thị nguồn này ở chế độ chỉ đọc; sau khi sửa cấu hình cần khởi động lại dịch vụ. Cấu hình `ntp_config` cũ trong PostgreSQL không còn được sử dụng. PostgreSQL chỉ lưu phép đo gần nhất (`ntp_status`) và nhật ký kiểm tra.
+
+Nút “Kiểm tra độ lệch” gửi phép đo NTP tới nguồn đã cấu hình, không thay đổi đồng hồ hệ điều hành. Trên Windows, Windows Time quản lý đồng bộ; kiểm tra bằng `w32tm /query /status` và `w32tm /query /configuration`. Trên Linux, dùng chrony/systemd-timesyncd. Đổi `NTP_SERVER` trong ứng dụng không tự đổi nguồn của dịch vụ thời gian hệ điều hành.

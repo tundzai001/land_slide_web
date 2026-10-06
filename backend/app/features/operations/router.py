@@ -11,10 +11,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ... import auth
+from ...config import settings
 from ...database import get_config_db
 from ...models.config import Device
 from . import backups, store
-from .protocols import AcquisitionProfile, ntp_probe
+from .protocols import AcquisitionProfile, ntp_probe, system_time_status
 
 router = APIRouter(prefix='/api/admin/operations', tags=['Operations'])
 admin = auth.require_permission(auth.Permission.MANAGE_DATABASE)
@@ -131,19 +132,19 @@ class NTPConfig(BaseModel):
 
 @router.get('/ntp')
 async def get_ntp(user=Depends(admin)):
-    return {'config': await asyncio.to_thread(store.get_setting, 'ntp_config', {'server': 'pool.ntp.org'}),
-            'last_check': await asyncio.to_thread(store.get_setting, 'ntp_status'), 'mode': 'measurement_only'}
+    return {'config': NTPConfig(server=settings.NTP_SERVER).model_dump(), 'config_source': 'environment',
+            'last_check': await asyncio.to_thread(store.get_setting, 'ntp_status'), 'mode': 'measurement_only',
+            'system_clock': await asyncio.to_thread(system_time_status)}
 
 
 @router.put('/ntp')
 async def save_ntp(body: NTPConfig, user=Depends(admin)):
-    await asyncio.to_thread(store.set_setting, 'ntp_config', body.model_dump())
-    return body
+    raise HTTPException(409, 'NTP server is managed by NTP_SERVER in backend/.env; restart the service after changing it')
 
 
 @router.post('/ntp/check')
 async def check_ntp(user=Depends(admin)):
-    config = await asyncio.to_thread(store.get_setting, 'ntp_config', {'server': 'pool.ntp.org'})
+    config = NTPConfig(server=settings.NTP_SERVER).model_dump()
     try:
         result = await asyncio.to_thread(ntp_probe, config['server'])
     except Exception as exc:
@@ -156,7 +157,7 @@ async def check_ntp(user=Depends(admin)):
 
 @router.get('/ntp/chrony-config', response_class=PlainTextResponse)
 async def chrony_config(user=Depends(admin)):
-    config = await asyncio.to_thread(store.get_setting, 'ntp_config', {'server': 'pool.ntp.org'})
+    config = NTPConfig(server=settings.NTP_SERVER).model_dump()
     return f"# Apply on the server/gateway through your OS administrator\nserver {config['server']} iburst\nmakestep 1.0 3\nrtcsync\n"
 
 

@@ -1,5 +1,27 @@
 (() => {
 class AdminOperationsFeature extends window.AdminManager {
+    selectOperationView(view) {
+        this.closeOperationInspector();
+        this.operationView = view;
+        const logs = ['audit_log', 'operation_log'].includes(view);
+        document.querySelectorAll('[data-ops-tab]').forEach(button => {
+            button.classList.toggle('is-active', button.dataset.opsTab === view);
+            button.setAttribute('aria-pressed', String(button.dataset.opsTab === view));
+        });
+        document.querySelectorAll('[data-ops-view]').forEach(panel => {
+            panel.hidden = panel.dataset.opsView !== (logs ? 'logs' : view);
+        });
+        if (logs) {
+            document.getElementById('operations-log-kind').value = view;
+            document.getElementById('audit-heading').textContent = view === 'audit_log' ? 'Audit log' : 'Nhật ký vận hành';
+            document.getElementById('operations-log-description').textContent = view === 'audit_log'
+                ? 'Ghi vết thao tác người dùng: tài khoản, hành động, đối tượng và dữ liệu trước/sau thay đổi.'
+                : 'Sự kiện hệ thống: khởi động dịch vụ, sao lưu, phục hồi, kiểm tra NTP và lỗi tác vụ.';
+            this.operationLogOffset = 0;
+            void this.loadOperationLogs();
+        }
+    }
+
     operationFeedback(message, error = false) {
         const target = document.getElementById('operations-feedback');
         if (!target) return;
@@ -28,6 +50,16 @@ class AdminOperationsFeature extends window.AdminManager {
         })).json();
     }
 
+    operationEventLabel(action) {
+        return {
+            'service.starting': 'Khởi động dịch vụ', 'service.stopped': 'Dừng dịch vụ',
+            'backup.completed': 'Sao lưu hoàn tất', 'backup.failed': 'Sao lưu thất bại',
+            'restore.completed': 'Phục hồi hoàn tất', 'restore.failed': 'Phục hồi thất bại',
+            'backup.schedule': 'Thay đổi lịch sao lưu', 'ntp.checked': 'Kiểm tra NTP', 'ntp.failed': 'Kiểm tra NTP thất bại',
+            'backup.retention_pruned': 'Dọn bản sao lưu cũ', 'operations.retention_pruned': 'Dọn nhật ký cũ',
+        }[action] || action;
+    }
+
     async loadOperations() {
         if (!this.canAccessTab('tab-operations')) return;
         this.operationFeedback('Đang tải thông tin vận hành…');
@@ -41,9 +73,12 @@ class AdminOperationsFeature extends window.AdminManager {
             this.renderOperationBackups(backup.backups);
             document.getElementById('operations-frequency').value = backup.schedule.frequency;
             document.getElementById('operations-retention').value = backup.schedule.retention_count || 30;
+            document.getElementById('operations-schedule-label').textContent = { disabled: 'Đang tắt', daily: 'Hằng ngày', weekly: 'Hằng tuần' }[backup.schedule.frequency] || 'Đang tắt';
             const next = backup.schedule.next_at ? new Date(backup.schedule.next_at * 1000) : null;
             document.getElementById('operations-next').value = next ? new Date(next.getTime() - next.getTimezoneOffset() * 60000).toISOString().slice(0,16) : '';
             document.getElementById('operations-ntp-server').value = ntp.config.server;
+            document.getElementById('operations-system-clock').textContent = ntp.system_clock?.output || 'Chưa đọc được trạng thái dịch vụ thời gian của hệ điều hành.';
+            document.getElementById('operations-system-clock-label').textContent = ntp.system_clock?.service || 'Dịch vụ thời gian hệ điều hành';
             this.renderOperationNTP(ntp.last_check);
             this.operationDevices = devices;
             const select = document.getElementById('operations-device');
@@ -53,7 +88,7 @@ class AdminOperationsFeature extends window.AdminManager {
             if (devices.some(device => String(device.id) === selected)) select.value = selected;
             this.selectOperationDevice();
             await this.loadOperationLogs();
-            this.operationFeedback(`Cập nhật lúc ${new Date().toLocaleTimeString('vi-VN')}.`);
+            this.operationFeedback(`Cập nhật ${new Date().toLocaleTimeString('vi-VN')}`);
             const job = sessionStorage.getItem('operations-active-job');
             if (job) this.watchOperationJob(job);
         } catch (error) { this.operationFeedback(error.message, true); }
@@ -62,7 +97,13 @@ class AdminOperationsFeature extends window.AdminManager {
     renderOperationBackups(rows) {
         const container = document.getElementById('operations-backups');
         container.replaceChildren();
-        if (!rows.length) { container.textContent = 'Chưa có bản sao lưu. Chọn “Tạo bản sao lưu” để bắt đầu.'; return; }
+        document.getElementById('operations-backup-count').textContent = String(rows.length);
+        document.getElementById('operations-backup-latest').textContent = rows.length
+            ? new Date(Math.max(...rows.map(row => row.created_at)) * 1000).toLocaleString('vi-VN') : 'Chưa có bản sao lưu';
+        if (!rows.length) {
+            container.innerHTML = '<div class="operations-empty"><i class="bi bi-database" aria-hidden="true"></i><strong>Chưa có bản sao lưu</strong><p>Tạo bản sao đầu tiên để bảo vệ dữ liệu tài khoản, cấu hình và quan trắc.</p></div>';
+            return;
+        }
         for (const row of rows) {
             const item = document.createElement('div');
             item.className = 'operations-backup-row';
@@ -108,9 +149,9 @@ class AdminOperationsFeature extends window.AdminManager {
                     next_at: date ? Math.floor(new Date(date).getTime() / 1000) : 0,
                     retention_count: Number(document.getElementById('operations-retention').value || 30),
                 });
+                document.getElementById('operations-schedule-label').textContent = { disabled: 'Đang tắt', daily: 'Hằng ngày', weekly: 'Hằng tuần' }[document.getElementById('operations-frequency').value];
                 this.operationFeedback('Đã lưu lịch sao lưu.');
             } else if (action === 'ntp') {
-                await this.operationJSON('/ntp', 'PUT', { server: document.getElementById('operations-ntp-server').value.trim() });
                 this.renderOperationNTP(await this.operationJSON('/ntp/check', 'POST', {}));
                 this.operationFeedback('Đã cập nhật phép đo NTP.');
             } else if (action === 'profile') {
@@ -181,6 +222,7 @@ class AdminOperationsFeature extends window.AdminManager {
     }
 
     async loadOperationLogs() {
+        const request = this.operationLogRequest = (this.operationLogRequest || 0) + 1;
         const offset = this.operationLogOffset || 0;
         const query = new URLSearchParams({ kind: document.getElementById('operations-log-kind').value,
             offset, limit: 25, username: document.getElementById('operations-log-user').value.trim() });
@@ -190,18 +232,24 @@ class AdminOperationsFeature extends window.AdminManager {
         }
         try {
             const result = await (await this.operationRequest(`/logs?${query}`)).json();
+            if (request !== this.operationLogRequest || this._disposed) return;
             const body = document.getElementById('operations-logs'); body.replaceChildren();
             for (const row of result.rows) {
                 const tr = document.createElement('tr');
-                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${row.username || 'Hệ thống'} / ${row.role || '—'}`, row.action, row.status ?? 'Đã ghi'];
+                const resultLabel = row.status != null ? `${row.status < 400 ? 'Thành công' : 'Thất bại'} · ${row.status}`
+                    : row.action.includes('failed') || row.action.includes('error') ? 'Thất bại' : 'Đã ghi nhận';
+                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${row.username || 'Hệ thống'} / ${row.role || '—'}`, this.operationEventLabel(row.action), resultLabel];
                 const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Kết quả'];
                 for (const [index, value] of values.entries()) {
                     const cell = document.createElement('td'); cell.dataset.label = labels[index]; cell.textContent = value; tr.append(cell);
+                    if (index === 3) cell.className = resultLabel.startsWith('Thất bại') ? 'operations-result is-error' : 'operations-result';
                 }
-                const cell = document.createElement('td'), details = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre');
+                const cell = document.createElement('td'), details = document.createElement('button');
                 cell.className = 'operations-log-detail';
-                summary.textContent = 'Xem chi tiết'; pre.textContent = JSON.stringify({ ip: row.ip, object: row.object, ...row.details }, null, 2);
-                details.append(summary, pre); cell.append(details); tr.append(cell); body.append(tr);
+                details.className = 'btn btn-outline-secondary operations-detail-button';
+                details.textContent = 'Xem chi tiết';
+                details.onclick = () => this.openOperationInspector(row, details, query.get('kind'));
+                cell.append(details); tr.append(cell); body.append(tr);
             }
             if (!result.rows.length) { const tr = body.insertRow(); const cell = tr.insertCell(); cell.colSpan = 5; cell.textContent = 'Không có nhật ký phù hợp.'; }
             document.getElementById('operations-log-count').textContent = `${result.total ? offset + 1 : 0}–${offset + result.rows.length} / ${result.total}`;
@@ -213,6 +261,65 @@ class AdminOperationsFeature extends window.AdminManager {
     operationLogPage(direction) {
         this.operationLogOffset = Math.max(0, (this.operationLogOffset || 0) + direction * 25);
         void this.loadOperationLogs();
+    }
+
+    openOperationInspector(row, trigger, kind) {
+        const drawer = document.getElementById('operations-inspector');
+        const content = document.getElementById('operations-inspector-content');
+        this.operationInspectorTrigger = trigger;
+        document.getElementById('operations-inspector-kind').textContent = kind === 'audit_log' ? 'AUDIT LOG · THAO TÁC NGƯỜI DÙNG' : 'NHẬT KÝ VẬN HÀNH · SỰ KIỆN HỆ THỐNG';
+        document.getElementById('operations-inspector-title').textContent = row.action;
+        content.replaceChildren();
+        const facts = document.createElement('dl');
+        facts.className = 'drawer-facts';
+        for (const [label, value] of [['Thời gian', new Date(row.timestamp * 1000).toLocaleString('vi-VN')], ['Tài khoản', row.username || 'Hệ thống'], ['Vai trò', row.role || '—'], ['Kết quả', row.status ?? 'Đã ghi nhận'], ['Địa chỉ IP', row.ip || '—'], ['Đối tượng', row.object || '—']]) {
+            const item = document.createElement('div'), term = document.createElement('dt'), description = document.createElement('dd');
+            term.textContent = label; description.textContent = String(value);
+            item.append(term, description); facts.append(item);
+        }
+        content.append(facts);
+        const changes = row.details?.changes;
+        if (Array.isArray(changes)) {
+            for (const change of changes) {
+                const heading = document.createElement('h6');
+                heading.textContent = `${change.table || 'Dữ liệu'} · ${change.operation || 'Thay đổi'}`;
+                const compare = document.createElement('div'); compare.className = 'operations-change-grid';
+                const before = change.changes ? Object.fromEntries(Object.entries(change.changes).map(([key, v]) => [key, v.old])) : change.old;
+                const after = change.changes ? Object.fromEntries(Object.entries(change.changes).map(([key, v]) => [key, v.new])) : change.new;
+                for (const [label, value] of [['Trước thay đổi', before], ['Sau thay đổi', after]]) {
+                    const section = document.createElement('section'), title = document.createElement('strong'), pre = document.createElement('pre');
+                    title.textContent = label; pre.textContent = JSON.stringify(value ?? null, null, 2);
+                    section.append(title, pre); compare.append(section);
+                }
+                content.append(heading, compare);
+            }
+        }
+        const raw = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre');
+        raw.className = 'operations-raw-detail'; summary.textContent = 'Dữ liệu sự kiện (JSON)';
+        pre.textContent = JSON.stringify(row.details || {}, null, 2);
+        raw.append(summary, pre); raw.open = !Array.isArray(changes) || !changes.length; content.append(raw);
+        drawer.inert = false; drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false');
+        drawer.showModal();
+        drawer.onkeydown = event => {
+            if (event.key !== 'Tab') return;
+            const controls = Array.from(drawer.querySelectorAll('button, summary')).filter(el => el.getClientRects().length);
+            const first = controls[0], last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        };
+        drawer.onclick = event => {
+            if (event.target !== drawer) return;
+            const bounds = drawer.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) this.closeOperationInspector();
+        };
+    }
+
+    closeOperationInspector() {
+        const drawer = document.getElementById('operations-inspector');
+        if (!drawer?.classList.contains('open')) return;
+        drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); drawer.inert = true;
+        drawer.close();
+        this.operationInspectorTrigger?.focus();
     }
 
     selectOperationDevice() {

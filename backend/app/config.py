@@ -1,6 +1,7 @@
 # backend/app/config.py
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     # Backup archives live outside the web root by default on Windows servers.
     BACKUP_DIR: str = ""
     OPERATIONS_LOG_RETENTION_DAYS: int = 365
+    NTP_SERVER: str = Field(default="pool.ntp.org", min_length=1, max_length=253, pattern=r'^[A-Za-z0-9.-]+$')
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
 
     # The MQTT ingest spool is deliberately local and append-only.  It is a

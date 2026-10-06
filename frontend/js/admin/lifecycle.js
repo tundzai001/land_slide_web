@@ -16,6 +16,7 @@ class AdminLifecycleFeature extends window.AdminManager {
 
     dispose() {
         if (this._disposed) return;
+        this.closeOperationInspector?.();
         this._disposed = true;
         this._refreshIntervals.forEach(clearInterval);
         this._refreshIntervals = [];
