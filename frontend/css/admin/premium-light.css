@@ -845,3 +845,16 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
 [data-theme="dark"] #stationConfigModal .btn-close {
     filter: invert(1) grayscale(1);
 }
+
+/* Compact downloads remain below the main navigation. */
+.sidebar-guides { flex-shrink: 0; padding: 10px 12px 16px; border-top: 1px solid var(--border-color); }
+.sidebar-guides button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: .78rem; text-align: left; cursor: pointer; transition: background 160ms ease, color 160ms ease, transform 120ms ease; }
+.sidebar-guides button:hover { background: var(--surface-hover); color: var(--accent-primary); }
+.sidebar-guides button:active { transform: translateY(1px); }
+.sidebar-guides button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.sidebar-guides button:disabled { opacity: .65; cursor: wait; }
+.sidebar-guides i { flex-shrink: 0; font-size: 1rem; }
+.sidebar-guide-status { display: block; font-size: .72rem; color: var(--text-secondary); padding-inline: 12px; }
+.sidebar-guide-status:empty { display: none; }
+@media (max-width: 999px) { .sidebar-guides button { justify-content: center; padding-inline: 4px; } .sidebar-guides button span { display: none; } .sidebar-guide-status { padding: 0; overflow-wrap: anywhere; } }
+@media (prefers-reduced-motion: reduce) { .sidebar-guides button { transition: none; transform: none; } }

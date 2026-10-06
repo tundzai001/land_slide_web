@@ -65,10 +65,9 @@ class AdminOperationsFeature extends window.AdminManager {
         if (!this.canAccessTab('tab-operations')) return;
         this.operationFeedback('Đang tải thông tin vận hành…');
         try {
-            const [backup, ntp, devices, logOptions] = await Promise.all([
+            const [backup, ntp, logOptions] = await Promise.all([
                 this.operationRequest('/backups').then(r => r.json()),
                 this.operationRequest('/ntp').then(r => r.json()),
-                this.operationRequest('/devices').then(r => r.json()),
                 this.operationRequest('/log-options').then(r => r.json()),
             ]);
             if (this._disposed) return;
@@ -84,13 +83,6 @@ class AdminOperationsFeature extends window.AdminManager {
             document.getElementById('operations-system-clock').textContent = ntp.system_clock?.output || 'Chưa đọc được trạng thái dịch vụ thời gian của hệ điều hành.';
             document.getElementById('operations-system-clock-label').textContent = ntp.system_clock?.service || 'Dịch vụ thời gian hệ điều hành';
             this.renderOperationNTP(ntp.last_check);
-            this.operationDevices = devices;
-            const select = document.getElementById('operations-device');
-            const selected = select.value;
-            select.replaceChildren(...devices.map(device => new Option(`${device.name} · ${device.device_type} · #${device.id}`, String(device.id))));
-            if (!devices.length) select.add(new Option('Chưa có thiết bị MQTT', ''));
-            if (devices.some(device => String(device.id) === selected)) select.value = selected;
-            this.selectOperationDevice();
             await this.loadOperationLogs();
             this.operationFeedback(`Cập nhật ${new Date().toLocaleTimeString('vi-VN')}`);
             const job = sessionStorage.getItem('operations-active-job');
@@ -161,17 +153,6 @@ class AdminOperationsFeature extends window.AdminManager {
                 this.operationFeedback('Đã lưu lịch sao lưu.');
             } else if (action === 'ntp') {
                 this.renderOperationNTP(await this.operationJSON('/ntp/check', 'POST', {}));
-            } else if (action === 'profile') {
-                const device = document.getElementById('operations-device').value;
-                if (!device) throw new Error('Chọn thiết bị MQTT trước khi lưu.');
-                const protocol = document.getElementById('operations-protocol').value;
-                const value = protocol === 'mqtt' ? { protocol, enabled: false }
-                    : { ...JSON.parse(document.getElementById('operations-profile').value), protocol,
-                        enabled: document.getElementById('operations-profile-enabled').checked };
-                await this.operationJSON(`/devices/${device}/acquisition`, 'PUT', value);
-                const row = this.operationDevices.find(item => String(item.id) === device);
-                if (row) row.acquisition = value;
-                this.operationFeedback(protocol === 'mqtt' ? 'Đã lưu nguồn MQTT hiện có.' : 'Đã lưu. Tải cấu hình và triển khai tại gateway để bắt đầu đọc thiết bị.');
             }
         } catch (error) {
             if (action === 'ntp') {
@@ -211,13 +192,29 @@ class AdminOperationsFeature extends window.AdminManager {
         void poll();
     }
 
-    async operationDownload(path, filename) {
+    async downloadGuide(button, kind) {
+        const status = button.closest('.sidebar-guides').querySelector('[role="status"]');
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        status.textContent = 'Đang tải tài liệu…';
+        try {
+            const name = kind === 'user' ? 'huong-dan-su-dung-web.pdf' : 'huong-dan-van-hanh-tich-hop.pdf';
+            await this.operationDownload(`/${kind === 'user' ? 'user' : 'integration'}-guide/download`, name, true);
+            status.textContent = 'Đã tải tài liệu.';
+        } catch (error) { status.textContent = error.message; }
+        finally { button.disabled = false; button.removeAttribute('aria-busy'); }
+    }
+
+    async operationDownload(path, filename, propagateError = false) {
         try {
             const blob = await (await this.operationRequest(path)).blob();
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob); link.download = filename; link.click();
             setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-        } catch (error) { this.operationFeedback(error.message, true); }
+        } catch (error) {
+            if (propagateError) throw error;
+            this.operationFeedback(error.message, true);
+        }
     }
 
     async uploadOperationBackup(input) {
@@ -373,42 +370,6 @@ class AdminOperationsFeature extends window.AdminManager {
         drawer.close();
         this.operationInspectorTrigger?.focus();
     }
-
-    selectOperationDevice() {
-        const id = document.getElementById('operations-device').value;
-        const device = this.operationDevices?.find(item => String(item.id) === id);
-        document.getElementById('operations-save-profile').disabled = !device;
-        const profile = device?.acquisition || { protocol: 'mqtt', enabled: false };
-        document.getElementById('operations-protocol').value = profile.protocol;
-        document.getElementById('operations-profile').value = JSON.stringify(profile, null, 2);
-        document.getElementById('operations-profile-enabled').checked = !!profile.enabled;
-        document.getElementById('operations-profile-fields').hidden = profile.protocol === 'mqtt';
-    }
-
-    changeOperationProtocol() {
-        const protocol = document.getElementById('operations-protocol').value;
-        document.getElementById('operations-profile-fields').hidden = protocol === 'mqtt';
-        const id = document.getElementById('operations-device').value;
-        const device = this.operationDevices?.find(item => String(item.id) === id);
-        const field = { water: 'water_level', rain: 'rainfall_mm', imu: 'roll' }[device?.device_type] || 'value';
-        const profile = device?.acquisition?.protocol === protocol ? device.acquisition : {
-            protocol, enabled: false, poll_seconds: 5,
-            ...(protocol === 'modbus_tcp' ? { host: '', port: 502, unit_id: 1 } : {}),
-            ...(protocol === 'modbus_rtu' ? { serial_port: '/dev/ttyUSB0', baudrate: 9600, parity: 'N', stopbits: 1, unit_id: 1 } : {}),
-            ...(protocol === 'opcua' ? { endpoint: 'opc.tcp://gateway.local:4840', security: '' } : {}),
-            points: [{ field, address: 0, node_id: protocol === 'opcua' ? 'ns=2;s=Measurement' : '', data_type: 'float32', scale: 1, offset: 0 }],
-        };
-        document.getElementById('operations-profile').value = JSON.stringify(profile, null, 2);
-        document.getElementById('operations-profile-enabled').checked = !!profile.enabled;
-    }
-
-    downloadGatewayProfile() {
-        const id = document.getElementById('operations-device').value;
-        if (!id) { this.operationFeedback('Chọn thiết bị để tải cấu hình gateway.', true); return; }
-        return this.operationDownload(`/gateway-config?device_id=${encodeURIComponent(id)}`, `gateway-device-${id}.json`);
-    }
-
-
 }
 window.applyAdminFeature(AdminOperationsFeature);
 })();

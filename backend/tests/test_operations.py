@@ -367,14 +367,15 @@ def test_relative_backup_directory_is_anchored_to_backend(tmp_path, monkeypatch)
     assert backups.directory() == tmp_path / 'backend/backups'
 
 
-def test_integration_pdf_download_is_admin_only_and_audited():
+@pytest.mark.parametrize('guide', ['integration', 'user'])
+def test_pdf_download_is_admin_only_and_audited(guide):
     with client('viewer') as browser:
-        assert browser.get('/api/admin/operations/integration-guide/download').status_code == 403
+        assert browser.get(f'/api/admin/operations/{guide}-guide/download').status_code == 403
     with client() as browser:
-        response = browser.get('/api/admin/operations/integration-guide/download')
+        response = browser.get(f'/api/admin/operations/{guide}-guide/download')
         assert response.status_code == 200
         assert response.headers['content-type'] == 'application/pdf'
         assert 'attachment;' in response.headers['content-disposition']
         assert response.content.startswith(b'%PDF-')
-    rows = store.query('audit_log', username='tester', action='GET /api/admin/operations/integration-guide/download')['rows']
+    rows = store.query('audit_log', username='tester', action=f'GET /api/admin/operations/{guide}-guide/download')['rows']
     assert {row['status'] for row in rows} == {200, 403}

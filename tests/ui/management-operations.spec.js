@@ -382,3 +382,43 @@ test('rescue queue prioritizes pending cases and becomes a bottom sheet on mobil
   expect(drawer.bottom).toBe('0px');
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 });
+
+test('sidebar guides download directly with loading feedback', async ({page}) => {
+  await mountManagement(page);
+  await page.addScriptTag({ content: source('frontend/js/admin/core.js') });
+  await page.addScriptTag({ content: source('frontend/js/admin/operations.js') });
+  await page.evaluate(() => {
+    window.adminManager = Object.create(window.AdminManager.prototype);
+    window.adminManager.token = 'test';
+    window.guideRequests = [];
+    window.fetch = async url => {
+      window.guideRequests.push(String(url));
+      return new Response('%PDF-1.4\n', {headers:{'Content-Type':'application/pdf'}});
+    };
+  });
+  for (const [label, filename, endpoint] of [
+    ['Tải hướng dẫn tích hợp PDF','huong-dan-van-hanh-tich-hop.pdf','integration'],
+    ['Tải hướng dẫn sử dụng PDF','huong-dan-su-dung-web.pdf','user'],
+  ]) {
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByTitle(label, {exact:true}).click();
+    expect((await downloadEvent).suggestedFilename()).toBe(filename);
+    await expect(page.locator('.sidebar-guide-status')).toHaveText('Đã tải tài liệu.');
+    expect(await page.evaluate(() => window.guideRequests.at(-1))).toBe(`/api/admin/operations/${endpoint}-guide/download`);
+  }
+  await page.evaluate(() => { window.fetch = async () => new Response(JSON.stringify({detail:'Không đủ quyền tải tài liệu.'}), {status:403}); });
+  await page.getByTitle('Tải hướng dẫn sử dụng PDF', {exact:true}).click();
+  await expect(page.locator('.sidebar-guide-status')).toHaveText('Không đủ quyền tải tài liệu.');
+  await expect(page.getByTitle('Tải hướng dẫn sử dụng PDF', {exact:true})).toBeEnabled();
+  await page.addStyleTag({content:'.tab-pane{display:none}.tab-pane.active{display:block}'});
+  await page.evaluate(() => {
+    document.querySelector('#user-table-body').innerHTML = '<tr><td>1</td><td>demo-admin</td><td>Quản trị viên</td><td>Admin</td><td>Hoạt động</td><td>Chỉnh sửa</td></tr><tr><td>2</td><td>demo-viewer</td><td>Người quan trắc</td><td>Viewer</td><td>Hoạt động</td><td>Chỉnh sửa</td></tr>';
+    document.querySelector('.sidebar-guide-status').textContent = '';
+  });
+  await page.screenshot({path:'test-results/management-guides.png',animations:'disabled'});
+  const footer = await page.locator('.sidebar-guides').boundingBox();
+  expect(footer.y + footer.height).toBeCloseTo(900, 0);
+  await page.setViewportSize({width:390,height:844});
+  await expect(page.getByTitle('Tải hướng dẫn sử dụng PDF', {exact:true})).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

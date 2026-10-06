@@ -6,9 +6,9 @@ Thiết bị hiện tại tiếp tục gửi dữ liệu lên MQTT. Không cần
 
 Mở **Quản trị → Vận hành** bằng tài khoản Admin. API tương ứng ở `/api/admin/operations`; tài liệu OpenAPI ở `/docs`. Các thao tác cần `Authorization: Bearer <token>`. Operator/viewer không có quyền quản trị các mục này.
 
-## Đọc tài liệu và cấu hình nâng cao
+## Đọc tài liệu
 
-Trong tab Kết nối & thời gian, chọn **Tải hướng dẫn PDF** để đọc hoặc lưu tài liệu. Mục **Cấu hình gateway nâng cao** mặc định thu gọn. Nếu tất cả thiết bị đã gửi dữ liệu qua MQTT thì không cần sử dụng mục này. Lưu một profile ở đây chỉ lưu cấu hình đọc; phải tải JSON và triển khai chương trình bridge lên gateway mới có hiệu lực.
+Cuối cột trái, chọn **Hướng dẫn tích hợp** để tải PDF này hoặc **Hướng dẫn sử dụng** để tải cẩm nang thao tác web. Thiết bị gửi MQTT tiếp tục dùng cấu hình trạm hiện có.
 
 ## Sao lưu nóng
 
@@ -48,10 +48,10 @@ API chỉ **đo độ lệch**, không đổi đồng hồ OS. Cấu hình dịc
 ## Modbus/OPC UA qua gateway MQTT
 
 1. Giữ cấu hình thiết bị và MQTT topic hiện có trong trang trạm.
-2. Mở Cấu hình gateway nâng cao tại tab Kết nối & thời gian, chọn thiết bị và giao thức tại hiện trường. Địa chỉ IP/serial/node ID ở đây thuộc gateway, không phải kết nối từ backend tới thiết bị.
+2. Nếu cần tích hợp thiết bị Modbus/OPC UA mới, kỹ thuật viên chuẩn bị tệp JSON cho bridge tại gateway. Địa chỉ IP/serial/node ID thuộc mạng hiện trường, không phải kết nối từ backend tới thiết bị.
 3. Cấu hình `points`: tên trường, địa chỉ thanh ghi 0-based hoặc OPC UA node ID, kiểu dữ liệu, thứ tự word/byte, scale và offset. Modbus hỗ trợ đọc holding/input registers, uint16/int16/uint32/int32/float32/float64. Bridge chỉ đọc.
 4. Nước cần `water_level` theo mét; mưa cần `rainfall_mm`; IMU cần đủ `roll`, `pitch`, `yaw` theo độ. GNSS tiếp tục dùng bộ nhận MQTT/NMEA hiện có.
-5. Đặt `enabled: true`, lưu và tải JSON của thiết bị. Việc lưu không tự triển khai lên gateway.
+5. Tệp JSON gồm `version: 1` và danh sách `devices`; mỗi thiết bị có `device_id`, `sensor_type`, `topic`, `profile`. Đặt `enabled: true` trong profile và triển khai tệp lên gateway.
 6. Trên gateway, cài `python -m pip install -r field_unit/requirements-industrial.txt`, đặt `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CLIENT_ID` riêng cho gateway. Khi dùng TLS, đặt `MQTT_TLS_CA` tới CA tin cậy.
 7. Chạy `python field_unit/industrial_bridge.py --config gateway-device-7.json`. Dùng trình quản lý dịch vụ của gateway để tự khởi động lại.
 

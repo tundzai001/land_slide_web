@@ -22,13 +22,11 @@ async function mount(page, width = 1366) {
       let data;
       if (url.endsWith('/backups')) data = options.method === 'POST' ? {job_id:'abc'} : {backups:[],schedule:{frequency:'disabled'}};
       else if (url.endsWith('/log-options')) data = {accounts:[{username:'admin',full_name:'Administrator',is_active:true},{username:'new-user',is_active:true}],journals:{audit_log:{actions:['PUT /api/admin/stations/7/config'],usernames:['admin']},operation_log:{actions:['service.starting'],usernames:[]}}};
-      else if (url.endsWith('/devices')) data = [{id:7,name:'Trạm nước',device_type:'water',acquisition:{protocol:'mqtt',enabled:false}}];
       else if (url.includes('/logs?') && url.includes('operation_log')) data = {total:1,rows:[{timestamp:1791210000,username:null,role:null,action:'service.starting',status:null,details:{}}]};
       else if (url.includes('/logs?')) data = {total:1,rows:[{timestamp:1791210000,username:'admin',role:'admin',action:'PUT /api/admin/stations/7/config',status:200,details:{changes:[{table:'stations',operation:'update',changes:{name:{old:'<script>bad</script>',new:'new'}}}]}}]};
       else if (url.endsWith('/ntp')) data = {config:{server:'ntp.internal'},last_check:null};
       else if (url.includes('/jobs/')) data = {status:'completed'};
       else if (url.endsWith('/backup-schedule')) data = JSON.parse(options.body);
-      else if (url.endsWith('/acquisition')) data = {status:'saved'};
       else if (url.endsWith('/ntp/check')) return new Response(JSON.stringify({detail:'NTP unavailable'}),{status:502});
       else data = {};
       return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});
@@ -65,7 +63,7 @@ test('operations page works at desktop and mobile widths', async ({page}) => {
   await page.screenshot({path:'test-results/operations-mobile.png',fullPage:true,animations:'disabled'});
 });
 
-test('schedule and protocol save show feedback; failures restore controls', async ({page}) => {
+test('schedule save and NTP errors work without gateway controls', async ({page}) => {
   await mount(page);
   await page.locator('.operations-schedule summary').click();
   await expect(page.getByLabel('Giữ bản tự động')).toHaveValue('30');
@@ -75,21 +73,11 @@ test('schedule and protocol save show feedback; failures restore controls', asyn
   await expect(page.locator('#operations-feedback')).toContainText('Đã lưu lịch');
   const scheduleCall = await page.evaluate(() => window.operationCalls.find(call => call.url.endsWith('/backup-schedule')));
   expect(JSON.parse(scheduleCall.body).retention_count).toBe(12);
-  await page.getByRole('button',{name:'Kết nối & thời gian NTP và tài liệu'}).click();
-  await expect(page.getByLabel('Nguồn dữ liệu tại hiện trường')).toBeHidden();
-  await expect(page.getByRole('button', {name:'Tải hướng dẫn PDF'})).toBeVisible();
+  await page.getByRole('button',{name:'Thời gian hệ thống Đồng hồ máy chủ'}).click();
+  await expect(page.locator('.operations-gateway')).toHaveCount(0);
+  await expect(page.locator('#integration-heading')).toHaveCount(0);
+  expect(await page.evaluate(() => window.operationCalls.some(call => call.url.endsWith('/devices')))).toBe(false);
   await page.screenshot({path:'test-results/operations-integration.png',fullPage:true,animations:'disabled'});
-  await page.locator('.operations-gateway summary').click();
-  await page.getByLabel('Nguồn dữ liệu tại hiện trường').selectOption('modbus_tcp');
-  await expect(page.locator('#operations-profile-fields')).toBeVisible();
-  await page.getByLabel('Cấu hình đọc và ánh xạ trường dữ liệu (JSON)').fill('{broken');
-  await page.getByRole('button',{name:'Lưu cấu hình',exact:true}).click();
-  await expect(page.locator('#operations-feedback')).toHaveAttribute('role','alert');
-  await expect(page.getByRole('button',{name:'Lưu cấu hình',exact:true})).toBeEnabled();
-  await page.getByLabel('Nguồn dữ liệu tại hiện trường').selectOption('mqtt');
-  await expect(page.locator('#operations-profile-fields')).toBeHidden();
-  await page.getByRole('button',{name:'Lưu cấu hình',exact:true}).click();
-  await expect(page.locator('#operations-feedback')).toContainText('Đã lưu nguồn MQTT');
   await expect(page.getByLabel('Máy chủ NTP')).toHaveAttribute('readonly','');
   await page.getByRole('button',{name:'Kiểm tra độ lệch'}).click();
   await expect(page.locator('#operations-ntp-status')).toContainText('NTP unavailable');

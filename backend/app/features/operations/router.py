@@ -224,3 +224,9 @@ async def integration_guide(user=Depends(admin)):
 async def download_integration_guide(user=Depends(admin)):
     path = Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.pdf'
     return FileResponse(path, filename='huong-dan-van-hanh-tich-hop.pdf', media_type='application/pdf')
+
+
+@router.get('/user-guide/download')
+async def download_user_guide(user=Depends(admin)):
+    path = Path(__file__).resolve().parents[4] / 'docs' / 'USER_GUIDE.pdf'
+    return FileResponse(path, filename='huong-dan-su-dung-web.pdf', media_type='application/pdf')

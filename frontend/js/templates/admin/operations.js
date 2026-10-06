@@ -5,9 +5,9 @@ window.LegacyTemplateParts.operations = String.raw`
   <div id="operations-feedback" role="status" aria-live="polite" tabindex="-1" hidden></div>
   <nav class="operations-nav" aria-label="Chức năng vận hành">
     <button class="operations-nav-item is-active" data-ops-tab="backup" aria-pressed="true" onclick="window.adminManager.selectOperationView('backup')"><i class="bi bi-database-check" aria-hidden="true"></i><span><strong>Sao lưu & phục hồi</strong><small>Bảo vệ dữ liệu quan trắc</small></span></button>
-    <button class="operations-nav-item " data-ops-tab="audit_log" aria-pressed="false" onclick="window.adminManager.selectOperationView('audit_log')"><i class="bi bi-shield-check" aria-hidden="true"></i><span><strong>Audit log</strong><small>Ai đã thay đổi điều gì?</small></span></button>
-    <button class="operations-nav-item " data-ops-tab="operation_log" aria-pressed="false" onclick="window.adminManager.selectOperationView('operation_log')"><i class="bi bi-activity" aria-hidden="true"></i><span><strong>Nhật ký vận hành</strong><small>Hệ thống đã thực hiện gì?</small></span></button>
-    <button class="operations-nav-item " data-ops-tab="integration" aria-pressed="false" onclick="window.adminManager.selectOperationView('integration')"><i class="bi bi-hdd-network" aria-hidden="true"></i><span><strong>Kết nối & thời gian</strong><small>NTP và tài liệu</small></span></button>
+    <button class="operations-nav-item" data-ops-tab="audit_log" aria-pressed="false" onclick="window.adminManager.selectOperationView('audit_log')"><i class="bi bi-shield-check" aria-hidden="true"></i><span><strong>Audit log</strong><small>Ai đã thay đổi điều gì?</small></span></button>
+    <button class="operations-nav-item" data-ops-tab="operation_log" aria-pressed="false" onclick="window.adminManager.selectOperationView('operation_log')"><i class="bi bi-activity" aria-hidden="true"></i><span><strong>Nhật ký vận hành</strong><small>Hệ thống đã thực hiện gì?</small></span></button>
+    <button class="operations-nav-item" data-ops-tab="integration" aria-pressed="false" onclick="window.adminManager.selectOperationView('integration')"><i class="bi bi-hdd-network" aria-hidden="true"></i><span><strong>Thời gian hệ thống</strong><small>Đồng hồ máy chủ</small></span></button>
   </nav>
   <div class="operations-grid">
     <section class="operations-card operations-wide" data-ops-view="backup" aria-labelledby="backup-heading">
@@ -24,7 +24,7 @@ window.LegacyTemplateParts.operations = String.raw`
       <div id="operations-job" role="status" aria-live="polite"></div>
       <div id="operations-backups" class="operations-list">Đang tải bản sao lưu…</div>
     </section>
-    <section class="operations-card" data-ops-view="integration" hidden aria-labelledby="ntp-heading">
+    <section class="operations-card operations-wide" data-ops-view="integration" hidden aria-labelledby="ntp-heading">
       <div class="operations-card-heading"><i class="bi bi-clock-history" aria-hidden="true"></i><div><h5 id="ntp-heading">Kiểm tra thời gian NTP</h5><p>Đo độ lệch đồng hồ máy chủ với nguồn NTP.</p></div></div>
       <form onsubmit="event.preventDefault(); window.adminManager.operationAction(this.querySelector('button'), 'ntp')">
         <label for="operations-ntp-server">Máy chủ NTP</label><input id="operations-ntp-server" class="form-control" readonly value="pool.ntp.org">
@@ -47,24 +47,6 @@ window.LegacyTemplateParts.operations = String.raw`
       </form>
       <div class="operations-table-wrap"><table class="table"><thead><tr><th>Thời gian</th><th>Tài khoản / Vai trò</th><th>Hành động</th><th>Method</th><th>Kết quả</th><th>Chi tiết</th></tr></thead><tbody id="operations-logs"><tr><td colspan="6">Đang tải nhật ký…</td></tr></tbody></table></div>
       <div class="operations-pagination"><span id="operations-log-count"></span><button id="operations-log-prev" class="btn btn-outline-secondary" onclick="window.adminManager.operationLogPage(-1)">Trước</button><button id="operations-log-next" class="btn btn-outline-secondary" onclick="window.adminManager.operationLogPage(1)">Sau</button></div>
-    </section>
-    <section class="operations-card" data-ops-view="integration" hidden aria-labelledby="integration-heading">
-      <div class="operations-card-heading"><i class="bi bi-hdd-network" aria-hidden="true"></i><div><h5 id="integration-heading">Tài liệu hướng dẫn</h5><p>Hướng dẫn vận hành và tích hợp thiết bị.</p></div></div>
-      <div class="operations-actions"><button class="btn btn-primary" onclick="window.adminManager.operationDownload('/integration-guide/download', 'huong-dan-van-hanh-tich-hop.pdf')"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i> Tải hướng dẫn PDF</button></div>
-      <details class="operations-guide operations-gateway"><summary>Cấu hình gateway nâng cao</summary>
-      <p class="operations-note">Chỉ dùng khi cần đọc thiết bị Modbus/OPC UA rồi chuyển dữ liệu sang MQTT. Thiết bị đã gửi MQTT không cần cấu hình thêm.</p>
-      <div class="operations-form-row">
-        <div><label for="operations-device">Thiết bị MQTT</label><select id="operations-device" class="form-select" onchange="window.adminManager.selectOperationDevice()"><option value="">Đang tải thiết bị…</option></select></div>
-        <div><label for="operations-protocol">Nguồn dữ liệu tại hiện trường</label><select id="operations-protocol" class="form-select" onchange="window.adminManager.changeOperationProtocol()"><option value="mqtt">MQTT hiện có</option><option value="modbus_tcp">Modbus TCP qua gateway</option><option value="modbus_rtu">Modbus RTU qua gateway</option><option value="opcua">OPC UA qua gateway</option></select></div>
-      </div>
-      <div id="operations-profile-fields" hidden>
-        <p class="operations-note">Địa chỉ bên dưới thuộc mạng hiện trường. Máy chủ chỉ nhận MQTT. Lưu cấu hình rồi tải và triển khai lên gateway khi cần.</p>
-        <label class="operations-enable" for="operations-profile-enabled"><input id="operations-profile-enabled" type="checkbox">Cho phép gateway đọc thiết bị sau khi triển khai</label>
-        <label for="operations-profile">Cấu hình đọc và ánh xạ trường dữ liệu (JSON)</label><textarea id="operations-profile" class="form-control operations-code" rows="10" spellcheck="false" aria-describedby="operations-profile-hint"></textarea>
-        <p id="operations-profile-hint" class="operations-note">Nước: water_level (m); mưa: rainfall_mm; IMU: roll, pitch, yaw (độ). Địa chỉ thanh ghi Modbus bắt đầu từ 0.</p>
-      </div>
-      <div class="operations-actions"><button id="operations-save-profile" class="btn btn-primary" onclick="window.adminManager.operationAction(this, 'profile')">Lưu cấu hình</button><button class="btn btn-outline-secondary" onclick="window.adminManager.downloadGatewayProfile()">Tải cấu hình gateway</button></div>
-      </details>
     </section>
   </div>
 </div>

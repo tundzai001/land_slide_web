@@ -19,9 +19,6 @@
 .operations-table-wrap summary { min-height:44px; display:flex; align-items:center; cursor:pointer; }
 #tab-operations > .ops-page-header > .btn { align-self:flex-start; flex-shrink:0; white-space:nowrap; }
 .operations-card pre { white-space:pre-wrap; overflow-wrap:anywhere; color:inherit; margin:12px 0; max-width:100%; }
-.operations-code { font-family:ui-monospace,monospace; font-size:14px; }
-.operations-card label.operations-enable { display:flex; align-items:center; gap:12px; min-height:44px; }
-.operations-enable input { width:20px; height:20px; min-width:20px; min-height:20px; flex-shrink:0; }
 .operations-pagination { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
 .operations-pagination > span { margin-right:auto; font-size:14px; }
 .operations-backup-row { border-top:1px solid var(--border-color,#d5e3e1); padding:12px 0; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
