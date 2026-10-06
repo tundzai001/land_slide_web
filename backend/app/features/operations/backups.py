@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 def directory():
     if settings.BACKUP_DIR:
         path = Path(settings.BACKUP_DIR)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[3] / path
     elif os.name == 'nt':
         path = Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'Aitogy' / 'Landslide' / 'backups'
     else:

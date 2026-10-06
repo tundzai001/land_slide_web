@@ -25,3 +25,6 @@ frontend/js/dist/
 # OS/editor artifacts
 .DS_Store
 Thumbs.db
+
+# Local database backup archives
+/backend/backups/

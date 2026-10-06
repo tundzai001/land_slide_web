@@ -358,3 +358,10 @@ def test_log_options_returns_current_accounts_and_backup_location():
         backup = browser.get('/api/admin/operations/backups').json()
         assert backup['storage']['format'] == 'ZIP'
         assert backup['storage']['directory'] == str(backups.directory().resolve())
+
+
+def test_relative_backup_directory_is_anchored_to_backend(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'BACKUP_DIR', 'backups')
+    monkeypatch.setattr(backups, '__file__', str(tmp_path / 'backend/app/features/operations/backups.py'))
+    monkeypatch.chdir(tmp_path)
+    assert backups.directory() == tmp_path / 'backend/backups'
