@@ -14,10 +14,13 @@ class GnssPayloadMixin:
     def _monitoring_paused_for_adjustment(self, project_id: int, station_id: int) -> bool:
         contexts = getattr(self, "adjustment_run_contexts", {})
         for run_id, session in self.round_robin_manager._sessions.items():
-            if self.adjustment_phase.get(run_id) not in {"FREE_NETWORK", "PAUSED"}:
+            # Seed handover changes correction sources before the public phase
+            # exists. A failed restore keeps its snapshot and remains paused.
+            if (self.adjustment_phase.get(run_id) not in {"STARTING", "COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}
+                    and not session.get("seed_topology_snapshots")):
                 continue
             context = contexts.get(run_id) or {}
-            if int(context.get("project_id") or run_id) != int(project_id):
+            if int(context.get("project_id") or session.get("monitoring_project_id") or run_id) != int(project_id):
                 continue
             if any(
                 int(station_id) in cluster.get("stations", ())

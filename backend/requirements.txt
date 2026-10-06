@@ -42,6 +42,7 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.8.0
 uvicorn==0.38.0
+websockets==16.1.1
 zope.event==6.1
 zope.interface==8.1.1
 

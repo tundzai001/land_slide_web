@@ -206,6 +206,9 @@ async def start_gnss_adjustment(
                     mqtt_service.round_robin_manager.configure_project(
                         session_id, active_clusters
                     )
+                # Scope monitoring isolation before the seed handover starts,
+                # including scheduler runs whose session ID is not a project ID.
+                mqtt_service.round_robin_manager._sessions[session_id]["monitoring_project_id"] = int(project.id)
                 seed_topology = (
                     await mqtt_service.round_robin_manager.prepare_common_fixed_base_seed(
                         session_id

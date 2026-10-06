@@ -39,9 +39,11 @@ class GnssFixedOnlyTests(unittest.TestCase):
             )
 
         with patch("app.mqtt.bridge.sensor_pipeline.gnss.manager.broadcast", new_callable=AsyncMock) as broadcast:
-            asyncio.run(process(5))
-            processor.process_gngga.assert_not_called()
-            bridge._touch_active_alert.assert_awaited_once()
+            for phase in ["STARTING", "COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"]:
+                bridge.adjustment_phase[-3001] = phase
+                asyncio.run(process(5))
+                processor.process_gngga.assert_not_called()
+            self.assertEqual(bridge._touch_active_alert.await_count, 4)
             self.assertEqual(broadcast.await_args.args[0]["data"]["status"], "ADJUSTMENT_IN_PROGRESS")
             self.assertFalse(bridge._sensor_buffer)
             asyncio.run(process(9))
@@ -49,6 +51,21 @@ class GnssFixedOnlyTests(unittest.TestCase):
             bridge.adjustment_phase[-3001] = "COMPLETED"
             asyncio.run(process(5))
             self.assertEqual(processor.process_gngga.call_count, 2)
+
+    def test_seed_handover_and_failed_restore_pause_only_affected_monitoring(self):
+        bridge = MQTTBridge.__new__(MQTTBridge)
+        bridge.round_robin_manager = Mock()
+        bridge.round_robin_manager._sessions = {-3001: {
+            "clusters": [{"stations": [5, 7]}], "monitoring_project_id": 3,
+            "seed_topology_snapshots": {"base": {"service_config": {}}},
+        }}
+        bridge.adjustment_phase = {-3001: "ERROR"}
+        bridge.adjustment_run_contexts = {}
+        self.assertTrue(bridge._monitoring_paused_for_adjustment(3, 5))
+        self.assertFalse(bridge._monitoring_paused_for_adjustment(4, 5))
+        self.assertFalse(bridge._monitoring_paused_for_adjustment(3, 9))
+        bridge.round_robin_manager._sessions[-3001]["seed_topology_snapshots"] = {}
+        self.assertFalse(bridge._monitoring_paused_for_adjustment(3, 5))
 
     def test_cors_reference_event_reaches_only_affected_gnss_processors(self):
         bridge = MQTTBridge.__new__(MQTTBridge)
@@ -422,6 +439,69 @@ class GnssFixedOnlyTests(unittest.TestCase):
             "adv_x", "adv_y", "adv_h", "adv_dx", "adv_dy", "adv_dh",
             "adv_vdx", "adv_vdy", "adv_vdh",
         })
+
+    def test_stale_adjustment_reference_recovers_only_near_immutable_origin(self):
+        for raw_position, should_recover in [(np.array([0.015, 0.005, 0.02]), True), (np.array([0.08, 0.0, 0.0]), False)]:
+            with self.subTest(raw_position=raw_position):
+                processor = self._processor_without_db()
+                offset = np.array([0.005, 0.0, 0.01])
+                processor.tracking_offset_enu = offset.copy()
+                processor.history = deque([{'ts': 1_700_000_000.0, 'pos_enu': np.array([0.4, 0.0, 0.5])}], maxlen=1200)
+                processor.reacquire_candidates = deque(maxlen=10)
+                processor.max_step_distance_m, processor.max_step_vertical_m = 0.2, 0.15
+                processor._gngga_to_ecef = lambda *_: raw_position.copy()
+                tick = {'ts': 1_700_100_000.0}
+                def parse(_):
+                    tick['ts'] += 1
+                    return {'wgs': {'lat': 21.0, 'lon': 107.0, 'h': 10.0},
+                            'gga_timestamp': tick['ts'], 'num_sats': 20, 'hdop': 0.5}
+                processor._parse_gngga = parse
+                origin_before = dict(processor.origin)
+                results = []
+                for _ in range(66):
+                    result = processor._handle_processing('$GNGGA,TEST', 4, {})
+                    results.append(result['status'])
+                self.assertNotIn('WARMING_UP', results[:65])
+                if should_recover:
+                    self.assertEqual(results[-1], 'WARMING_UP')
+                    np.testing.assert_allclose(processor.history[-1]['pos_enu'], raw_position - offset)
+                    self.assertFalse(processor.disp_state_ready)
+                else:
+                    self.assertEqual(results[-1], 'UNVERIFIED_POSITION_SHIFT')
+                    self.assertEqual(processor.history[-1]['ts'], 1_700_000_000.0)
+                np.testing.assert_array_equal(processor.tracking_offset_enu, offset)
+                for key in ['lat', 'lon', 'h']:
+                    self.assertEqual(processor.origin[key], origin_before[key])
+                np.testing.assert_array_equal(processor.origin['ecef'], origin_before['ecef'])
+
+    def test_repeated_rejects_are_summarized_without_accepting_shifted_samples(self):
+        processor = self._processor_without_db()
+        processor.history = deque([{"ts": 1_700_000_000.0, "pos_enu": np.zeros(3)}], maxlen=31)
+        processor.reacquire_candidates = deque(maxlen=10)
+        processor.max_step_distance_m = 0.2
+        processor.max_step_vertical_m = 0.15
+        processor._gngga_to_ecef = lambda *_: np.array([1.0, 0.0, 0.0])
+        tick = {"ts": 1_700_100_000.0}
+        def parse(_):
+            tick["ts"] += 1
+            return {"wgs": {"lat": 21.0, "lon": 107.0, "h": 10.0},
+                    "gga_timestamp": tick["ts"], "num_sats": 20, "hdop": 0.5}
+        processor._parse_gngga = parse
+        with patch('processors.gnss.processing.logger.warning') as warning, patch('processors.gnss.processing.time.monotonic', return_value=0.0) as clock:
+            for _ in range(1000):
+                result = processor._handle_processing('$GNGGA,TEST', 4, {})
+            self.assertEqual(warning.call_count, 2)  # initial spike, then stable shifted cluster
+            self.assertEqual(result['status'], 'UNVERIFIED_POSITION_SHIFT')
+            clock.return_value = 299.0
+            processor._handle_processing('$GNGGA,TEST', 4, {})
+            self.assertEqual(warning.call_count, 2)
+            clock.return_value = 300.0
+            processor._handle_processing('$GNGGA,TEST', 4, {})
+            self.assertEqual(warning.call_count, 3)
+        self.assertEqual(processor.history[-1]['ts'], 1_700_000_000.0)
+        np.testing.assert_array_equal(processor.history[-1]['pos_enu'], np.zeros(3))
+        np.testing.assert_array_equal(processor.tracking_offset_enu, np.zeros(3))
+        self.assertEqual(processor.stats['spike_rejected'], 1002)
 
     def test_persistent_shifted_cluster_is_quarantined_without_reacquire(self):
         processor = self._processor_without_db()

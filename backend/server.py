@@ -12,6 +12,7 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8001,
         reload=False,
+        ws="websockets-sansio",
         proxy_headers=True,
         forwarded_allow_ips="127.0.0.1",
     )

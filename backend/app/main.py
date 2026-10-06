@@ -108,6 +108,9 @@ async def run_cors_fixed_base_failover_daemon():
         2.0,
         float(config.settings.GNSS_CORS_FAILOVER_POLL_SECONDS),
     )
+    retry_seconds = poll_seconds
+    last_error_kind = None
+    last_error_log_at = 0.0
     while True:
         try:
             async with ConfigSessionLocal() as db_config:
@@ -128,17 +131,25 @@ async def run_cors_fixed_base_failover_daemon():
             cors_failover_status[:] = await (
                 mqtt_service.round_robin_manager.reconcile_cors_failover_pairs(clusters)
             )
+            if last_error_kind is not None:
+                logger.info("CORS fixed-base failover connection recovered")
+            retry_seconds = poll_seconds
+            last_error_kind = None
             await asyncio.sleep(poll_seconds)
         except asyncio.CancelledError:
             logger.info("CORS fixed-base failover daemon cancelled")
             raise
         except Exception as exc:
-            logger.error(
-                "CORS fixed-base failover reconciliation failed: %s",
-                exc,
-                exc_info=True,
-            )
-            await asyncio.sleep(poll_seconds)
+            retry_seconds = min(max(60.0, poll_seconds), retry_seconds * 2.0)
+            now = time.monotonic()
+            detail = str(exc).strip() or type(exc).__name__
+            error_kind = detail.split(':', 1)[0]
+            if error_kind != last_error_kind or now - last_error_log_at >= 300.0:
+                logger.warning("CORS fixed-base failover unavailable; retry in %.0fs: %s",
+                               retry_seconds, detail.splitlines()[0][:240])
+                last_error_log_at = now
+            last_error_kind = error_kind
+            await asyncio.sleep(retry_seconds)
 
 
 # ============================================================================

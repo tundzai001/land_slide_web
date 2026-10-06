@@ -380,17 +380,12 @@ class GNSSProcessingMixin:
         # that would silently move the accepted trajectory away from the locked origin.
         if not hasattr(self, '_consecutive_rejects'):
             self._consecutive_rejects = 0
-        if not hasattr(self, '_last_stale_reject_log_ts'):
-            self._last_stale_reject_log_ts = 0.0
-        if not hasattr(self, '_last_bad_fix_log_ts'):
-            self._last_bad_fix_log_ts = 0.0
 
         # Dynamic step limits based on fix quality
         current_max_2d = self.max_step_distance_m if is_trusted_fix else self.max_step_distance_m * 0.5
         current_max_u = self.max_step_vertical_m if is_trusted_fix else self.max_step_vertical_m * 0.5
 
         is_spike = step_2d_m > current_max_2d or step_u_m > current_max_u
-        stale_reference = dt > 60.0
 
         if is_spike:
             quarantine_started = not self.reacquire_candidates
@@ -411,6 +406,7 @@ class GNSSProcessingMixin:
             candidate_offset_2d_m = None
             candidate_offset_u_m = None
             shift_data = None
+            refusal_reasons = []
             if len(self.reacquire_candidates) >= 6:
                 candidate_positions = np.array([c['pos_enu'] for c in self.reacquire_candidates], dtype=float)
                 candidate_center = np.median(candidate_positions, axis=0)
@@ -424,6 +420,48 @@ class GNSSProcessingMixin:
                 )
                 persistent_shift_duration_s = ts - getattr(self, "_shift_started_at", ts)
                 persistent_shift_duration_ok = persistent_shift_duration_s >= 60.0
+
+                # A stale checkpoint may contain a temporary adjustment-frame
+                # position. Recover only a continuous FIXED cluster that returns
+                # to the immutable origin; do not compensate or zero its samples.
+                tracking_offset = getattr(self, 'tracking_offset_enu', np.zeros(3, dtype=float))
+                raw_candidates = candidate_positions + tracking_offset
+                old_raw_position = p_old['pos_enu'] + tracking_offset
+                candidate_times = [c['ts'] for c in self.reacquire_candidates]
+                returned_to_origin = bool(
+                    dt > 60.0 and persistent_offset
+                    and (np.linalg.norm(old_raw_position[:2]) > 0.03 or abs(old_raw_position[2]) > 0.05)
+                    and np.max(np.linalg.norm(raw_candidates[:, :2], axis=1)) <= 0.03
+                    and np.max(np.abs(raw_candidates[:, 2])) <= 0.05
+                    and np.max(np.diff(candidate_times)) <= integrity_cfg['origin_max_gap_s']
+                )
+                if returned_to_origin:
+                    if getattr(self, '_locked_origin_return_started_at', None) is None:
+                        self._locked_origin_return_started_at = ts
+                    if ts - self._locked_origin_return_started_at >= 60.0:
+                        self.history.clear()
+                        self.history.extend({'ts': c['ts'], 'pos_enu': c['pos_enu'].copy()}
+                                            for c in self.reacquire_candidates)
+                        self.reacquire_candidates.clear()
+                        self.velocity_history.clear()
+                        self.v_state_ready = False
+                        self.disp_state_ready = False
+                        self._consecutive_rejects = 0
+                        self._shift_started_at = None
+                        self._quarantine_checkpointed = False
+                        self._last_reject_log_state = None
+                        self._locked_origin_return_started_at = None
+                        self._schedule_runtime_state_save(force=True)
+                        logger.info("[%s] Monitoring reference recovered after 60s of stable FIXED samples near locked origin; origin and tracking offset unchanged", self._log_prefix())
+                        return {
+                            'type': 'gnss_status', 'status': 'WARMING_UP',
+                            'fix_quality': fix_quality, 'fix_mode': self._fix_mode(fix_quality),
+                            'raw_payload': raw_payload or gngga_string,
+                            'data': {'integrity_state': 'WARMING_UP', 'position_quality_reliable': False},
+                            'message': 'Stable FIXED measurements returned to locked origin; rebuilding monitoring windows',
+                        }
+                else:
+                    self._locked_origin_return_started_at = None
 
                 # ── Guard: reject reacquire for unrealistic offsets ──
                 # A real tracking shift (e.g. GNSS base station switchover) is
@@ -518,47 +556,30 @@ class GNSSProcessingMixin:
                     if not getattr(self, "_quarantine_checkpointed", False):
                         self._quarantine_checkpointed = True
                         self._schedule_runtime_state_save(force=True)
-                    # Log why reacquire was refused (only once per 60s to reduce spam).
-                    if not hasattr(self, '_last_reacquire_refused_log_ts'):
-                        self._last_reacquire_refused_log_ts = 0.0
-                    if (ts - self._last_reacquire_refused_log_ts) >= 60.0:
-                        self._last_reacquire_refused_log_ts = ts
-                        reasons = []
-                        if offset_too_large:
-                            reasons.append(f"offset too large (2d={candidate_offset_2d_m:.3f}m max={REACQUIRE_MAX_OFFSET_2D_M}m, U={candidate_offset_u_m:.3f}m max={REACQUIRE_MAX_OFFSET_U_M}m)")
-                        if accumulated_too_much:
-                            reasons.append(f"proposed tracking offset {np.linalg.norm(proposed_tracking_offset):.3f}m exceeds cap {TRACKING_OFFSET_CAP_M}m")
-                        if in_cooldown:
-                            reasons.append(f"cooldown active ({ts - last_reacquire_ts:.0f}s < {REACQUIRE_COOLDOWN_S:.0f}s)")
-                        if not reacquire_allowed:
-                            reasons.append("reference change not confirmed; possible real ground movement")
-                        logger.warning(
-                            f"[{self._log_prefix()}] Reacquire REFUSED: {'; '.join(reasons)}. "
-                            "Origin and displacement remain frozen at last accepted values."
-                        )
+                    if offset_too_large:
+                        refusal_reasons.append("shift exceeds automatic compensation limits")
+                    if accumulated_too_much:
+                        refusal_reasons.append("accumulated tracking offset exceeds cap")
+                    if in_cooldown:
+                        refusal_reasons.append("compensation cooldown active")
+                    if not reacquire_allowed:
+                        refusal_reasons.append("reference change not confirmed; possible ground movement")
 
-                if persistent_offset and (ts - self._last_bad_fix_log_ts) >= 30.0:
-                    logger.warning(
-                        f"[{self._log_prefix()}] Persistent shifted GNSS cluster quarantined: "
-                        f"offset2d={candidate_offset_2d_m:.3f}m, offsetU={candidate_offset_u_m:.3f}m, "
-                        f"spread2d={candidate_xy_spread:.3f}m, spreadU={candidate_u_spread:.3f}m. "
-                        "Tracking and displacement remain at the last accepted FIXED position."
-                    )
-
-            if (ts - self._last_bad_fix_log_ts) >= 30.0:
-                self._last_bad_fix_log_ts = ts
+            # Report a new state immediately, then one reminder per five minutes.
+            # Receiver timestamps must not control console rate limiting.
+            reject_state = "UNVERIFIED_POSITION_SHIFT" if persistent_offset else "UNSTABLE_FIX"
+            log_now = time.monotonic()
+            if (getattr(self, '_last_reject_log_state', None) != reject_state
+                    or log_now - getattr(self, '_last_reject_log_monotonic', 0.0) >= 300.0):
+                self._last_reject_log_state = reject_state
+                self._last_reject_log_monotonic = log_now
                 logger.warning(
-                    f"[{self._log_prefix()}] Bad fix rejected (#{self._consecutive_rejects}): "
-                    f"step2d={step_2d_m:.3f}m (max={current_max_2d}m), "
-                    f"stepU={step_u_m:.3f}m (max={current_max_u}m), quality={fix_quality}"
-                )
-
-            if stale_reference and (ts - self._last_stale_reject_log_ts) >= 30.0:
-                self._last_stale_reject_log_ts = ts
-                logger.warning(
-                    f"[{self._log_prefix()}] Stale reference after reject: dt={dt:.1f}s. "
-                    "Keeping locked origin and last accepted displacement; "
-                    "a stable shifted cluster still requires a verified reference change or manual calibration."
+                    "[%s] GNSS measurement quarantined: state=%s, rejected=%s, "
+                    "step2d=%.3fm (max=%.3fm), stepU=%.3fm (max=%.3fm), "
+                    "quality=%s, last_trusted_age=%.1fs. %s. Locked origin and trusted displacement preserved.",
+                    self._log_prefix(), reject_state, self._consecutive_rejects,
+                    step_2d_m, current_max_2d, step_u_m, current_max_u, fix_quality, dt,
+                    "; ".join(refusal_reasons) or "Waiting for verified stable measurements",
                 )
             return {
                 "type": "gnss_status",
@@ -579,6 +600,8 @@ class GNSSProcessingMixin:
 
         # Good sample accepted — reset consecutive reject counter
         quarantine_cleared = bool(self.reacquire_candidates)
+        self._locked_origin_return_started_at = None
+        self._last_reject_log_state = None
         self._consecutive_rejects = 0
         self._shift_started_at = None
         self.reacquire_candidates.clear()
