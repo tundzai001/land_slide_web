@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT_SECONDS: int = 10
     DB_COMMAND_TIMEOUT_SECONDS: int = 30
     RUN_SCHEMA_BOOTSTRAP: bool = False
+    OPERATIONS_DIR: str = ""
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
 
     # The MQTT ingest spool is deliberately local and append-only.  It is a

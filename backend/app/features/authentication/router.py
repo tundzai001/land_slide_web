@@ -56,9 +56,17 @@ async def login(
         data={"sub": user.username, "role": user.role},
         expires_delta=expires
     )
+    from ..operations.store import actor
+    actor(user)
     
     logger.info(f"✅ Login successful: {user.username} (remember_me={remember_me})")
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/api/auth/logout")
+async def logout(current_user: model_auth.User = Depends(auth.get_current_user)):
+    # JWT logout remains client-side; this endpoint records the session exit.
+    return {"status": "success"}
 
 @router.get("/api/auth/me", response_model=schemas.UserResponse)
 async def get_current_user_info(

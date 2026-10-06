@@ -902,7 +902,8 @@ class DatabaseManager {
                 if (document.getElementById('sensor-water')?.checked) sensorTypes.push('water');
             }
             
-            const payload = { 
+            const payload = {
+                format: document.getElementById('export-format')?.value || 'csv',
                 tables: uniqueTables,
                 project_ids: effectiveProjectIds,
                 station_ids: stationIds,

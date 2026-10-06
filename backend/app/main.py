@@ -72,6 +72,11 @@ from .features.stations import router as stations_router
 from .features.simulation import router as simulations_router
 from .features.incidents import router as incidents_router
 from .features.health import router as health_router
+from .features.operations import router as operations_router
+from .features.operations.audit import AuditMiddleware
+from .features.operations.backups import daemon as run_backup_daemon
+from .features.operations.backups import recover_interrupted_jobs
+from .features.operations import store as operations_store
 from .models import auth as model_auth
 from .models import config as model_config
 from .models import data as model_data
@@ -93,6 +98,7 @@ logger = logging.getLogger(__name__)
 gnss_rollup_task: Optional[asyncio.Task] = None
 cors_failover_task: Optional[asyncio.Task] = None
 file_cleanup_task: Optional[asyncio.Task] = None
+backup_task: Optional[asyncio.Task] = None
 
 
 async def run_cors_fixed_base_failover_daemon():
@@ -142,9 +148,14 @@ async def run_cors_fixed_base_failover_daemon():
 async def lifespan(app: FastAPI):
     logger.info("🚀 Landslide Monitoring System starting...")
 
-    global gnss_rollup_task, cors_failover_task, file_cleanup_task
+    global gnss_rollup_task, cors_failover_task, file_cleanup_task, backup_task
 
     try:
+        try:
+            await asyncio.to_thread(recover_interrupted_jobs)
+            await asyncio.to_thread(operations_store.append, 'operation_log', 'service.starting')
+        except Exception:
+            logger.critical('Operational journal unavailable at startup', exc_info=True)
         # Production startup must not acquire DDL locks. Fresh development
         # environments can opt in; production schema changes use Alembic.
         if config.settings.RUN_SCHEMA_BOOTSTRAP:
@@ -231,6 +242,7 @@ async def lifespan(app: FastAPI):
             run_cors_fixed_base_failover_daemon()
         )
         file_cleanup_task = asyncio.create_task(run_file_cleanup_daemon())
+        backup_task = asyncio.create_task(run_backup_daemon())
         logger.info("✓ GNSS rollup daemon started")
 
         logger.info("=" * 60)
@@ -243,6 +255,10 @@ async def lifespan(app: FastAPI):
         logger.info("🛑 Shutting down...")
         from .infrastructure.scheduler import stop_scheduler
         stop_scheduler()
+        if backup_task and not backup_task.done():
+            backup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await backup_task
         if gnss_rollup_task and not gnss_rollup_task.done():
             gnss_rollup_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -263,6 +279,10 @@ async def lifespan(app: FastAPI):
         await config_engine.dispose()
         await data_engine.dispose()
         logger.info("✅ Shutdown complete")
+        try:
+            await asyncio.to_thread(operations_store.append, 'operation_log', 'service.stopped')
+        except Exception:
+            logger.critical('Operational journal unavailable at shutdown', exc_info=True)
 
 # ============================================================================
 # FASTAPI APPLICATION SETUP
@@ -300,6 +320,7 @@ app.add_middleware(
     ],
 )
 app.add_middleware(CharsetMiddleware)
+app.add_middleware(AuditMiddleware)
 app.include_router(authentication_router.router)
 app.include_router(users_router.router)
 app.include_router(device_admin_router.router)
@@ -319,6 +340,7 @@ app.include_router(stations_router.router)
 app.include_router(simulations_router.router)
 app.include_router(incidents_router.router)
 app.include_router(health_router.router)
+app.include_router(operations_router.router)
 
 # ── Anti-cache middleware for frontend assets ──
 app.add_middleware(VersionedAssetCacheMiddleware)

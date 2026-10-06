@@ -251,6 +251,11 @@ class AuthManager {
     }
 
     logout(redirect = true) {
+        if (this.token) {
+            void fetch('/api/auth/logout', {
+                method: 'POST', headers: { Authorization: `Bearer ${this.token}` }, keepalive: true,
+            }).catch(() => {});
+        }
         // Clear interval
         if (this.tokenCheckInterval) {
             clearInterval(this.tokenCheckInterval);

@@ -56,6 +56,11 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     <span>Cứu hộ</span>
                 </a>
             </div>
+            <div class="nav-item">
+                <a class="nav-link" href="#" data-tab="tab-operations" onclick="event.preventDefault(); window.adminManager?.switchTab('tab-operations', this)">
+                    <i class="bi bi-journal-check" aria-hidden="true"></i><span>Vận hành</span>
+                </a>
+            </div>
             <div class="nav-item mt-5">
                 <a class="nav-link text-danger" href="#" id="logout-btn">
                     <i class="bi bi-box-arrow-left"></i>
@@ -158,6 +163,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             </div>
 
             <!-- TAB 3: DATABASE -->
+            ${window.LegacyTemplateParts.operations || ''}
             <div class="tab-pane fade" id="tab-database">
                 <header class="ops-page-header">
                     <div><span class="ops-eyebrow">DATA OPERATIONS</span><h4><i class="bi bi-database me-2"></i>Data Explorer</h4><p>Kiểm tra cấu hình, dữ liệu cảm biến và cảnh báo trong cùng một workspace.</p></div>

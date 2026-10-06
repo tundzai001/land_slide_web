@@ -121,6 +121,8 @@ async def get_current_user(
     
     if user is None or not user.is_active:
         raise credentials_exception
+    from .features.operations.store import actor
+    actor(user)
     return user
 
 # --- Phân quyền ---

@@ -491,6 +491,8 @@ class AdminStationWizardFeature extends window.AdminManager {
 
             // ✅ LOAD GNSS RTK FORWARDING
             const fwdCfg = cfg.gnss_rtk_forwarding || {};
+            const approvalEl = document.getElementById('gnss-forwarding-approval');
+            if (approvalEl) approvalEl.value = fwdCfg.approval?.reference || '';
             const fwdFields = fwdCfg.fields || {};
             const setToggle = (id, val, defaultVal = true) => {
                 const el = document.getElementById(id);

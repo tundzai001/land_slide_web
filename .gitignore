@@ -19,6 +19,7 @@ backend/static/adjustments/
 backend/static/uploads/
 frontend/js/dist/
 /config.db
+/runtime/operations/
 *.log
 
 # OS/editor artifacts

@@ -512,6 +512,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
             name: name,
             sensors: sensors,
             config: config,
+            owner_authorization: document.getElementById('gnss-forwarding-approval')?.value?.trim() || '',
             location: null
         };
 

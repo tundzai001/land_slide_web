@@ -187,6 +187,7 @@
             <div class="admin-more-sheet" hidden>
                 <button type="button" data-tab="tab-users"><i class="bi bi-people"></i> Người dùng</button>
                 <button type="button" data-tab="tab-simulations"><i class="bi bi-boxes"></i> Simulation audit</button>
+                <button type="button" data-tab="tab-operations"><i class="bi bi-journal-check"></i> Vận hành</button>
                 <button type="button" data-logout-action><i class="bi bi-box-arrow-right"></i> Đăng xuất</button>
             </div>`;
         const more = navigation.querySelector('.admin-more-sheet');

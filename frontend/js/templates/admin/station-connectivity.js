@@ -194,6 +194,11 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
 
                                         <div id="rtk-forwarding-content"
                                             style="display: none; overflow: hidden; transition: all 0.3s ease-out;">
+                                            <div class="mb-3">
+                                                <label class="form-label" for="gnss-forwarding-approval">Số văn bản / nội dung chấp thuận của Chủ đầu tư</label>
+                                                <input class="form-control" id="gnss-forwarding-approval" maxlength="500" placeholder="Ví dụ: Văn bản 123/CĐT ngày 06/10/2026">
+                                                <small class="text-muted">Mặc định khóa chuyển tiếp. Admin ghi nhận văn bản chấp thuận để mở khóa.</small>
+                                            </div>
                                             <!-- MQTT Broker config cho RTK Forward -->
                                             <div class="row g-2 mb-3">
                                                 <div class="col-md-6">

@@ -20,42 +20,33 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         mountRoot.innerHTML = renderLandingTemplate(iconHref);
     }
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const isMobileDevice = innerWidth < 901 || matchMedia('(pointer: coarse)').matches;
     const cleanups = [];
 
     let currentQualityTier = 'high';
     const cpuCores = navigator.hardwareConcurrency || 4;
     if (navigator.connection?.saveData || reducedMotion.matches) {
         currentQualityTier = 'lite';
-    } else if (cpuCores <= 4) {
+    } else if (isMobileDevice || cpuCores <= 4) {
         currentQualityTier = 'balanced';
     }
 
-    let lenis = null;
-    if (!reducedMotion.matches && typeof window.Lenis !== 'undefined') {
-        lenis = new window.Lenis({
-            duration: 1.15,
-            easing: t => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-            smoothWheel: true
-        });
-        lenis.on('scroll', ScrollTrigger.update);
-        const rafCb = time => lenis.raf(time * 1000);
-        gsap.ticker.add(rafCb);
-        gsap.ticker.lagSmoothing(0);
-        document.addEventListener('click', event => {
-            const anchor = event.target.closest('a[href^="#"]');
-            if (anchor) {
-                const targetId = anchor.getAttribute('href');
-                if (targetId && targetId !== '#') {
+    // Coordinate Hero & Story WebGL loops so both never burn GPU simultaneously
+    let storyViewportActive = false;
+
+    document.addEventListener('click', event => {
+        const anchor = event.target.closest('a[href^="#"]');
+        if (anchor) {
+            const targetId = anchor.getAttribute('href');
+            if (targetId && targetId !== '#') {
+                const targetEl = document.querySelector(targetId);
+                if (targetEl) {
                     event.preventDefault();
-                    lenis.scrollTo(targetId, { offset: 0 });
+                    targetEl.scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' });
                 }
             }
-        });
-        cleanups.push(() => {
-            lenis.destroy();
-            gsap.ticker.remove(rafCb);
-        });
-    }
+        }
+    });
 
     function setTheme(theme) {
         document.documentElement.dataset.theme = theme;
@@ -100,7 +91,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
         });
         $('#theme-toggle')?.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
-        const syncHeader = () => header?.classList.toggle('scrolled', scrollY > 12);
+        let headerScrolled = false;
+        const syncHeader = () => {
+            const next = scrollY > 12;
+            if (next !== headerScrolled) {
+                headerScrolled = next;
+                header?.classList.toggle('scrolled', next);
+            }
+        };
         addEventListener('scroll', syncHeader, { passive: true });
         syncHeader();
     }
@@ -144,42 +142,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     setState('empty', 'Chưa có trạm quan trắc trong mạng');
                     return;
                 }
-                const animateScramble = (el, finalVal, duration = 900) => {
-                    if (!el) return;
-                    if (!Number.isFinite(finalVal) || reducedMotion.matches) {
-                        el.textContent = Number.isFinite(finalVal) ? new Intl.NumberFormat('vi-VN').format(finalVal) : '—';
-                        return;
-                    }
-                    const finalStr = new Intl.NumberFormat('vi-VN').format(finalVal);
-                    el.textContent = finalStr;
-                    const chars = '0123456789';
-                    const startTime = performance.now();
-                    const tick = now => {
-                        const elapsed = now - startTime;
-                        const progress = Math.min(1, elapsed / duration);
-                        if (progress >= 1) {
-                            el.textContent = finalStr;
-                            return;
-                        }
-                        const lockCount = Math.max(1, Math.floor(progress * finalStr.length));
-                        let out = '';
-                        for (let i = 0; i < finalStr.length; i++) {
-                            if (i < lockCount || finalStr[i] === '.' || finalStr[i] === ',' || finalStr[i] === ' ') {
-                                out += finalStr[i];
-                            } else {
-                                out += chars[Math.floor(Math.random() * chars.length)];
-                            }
-                        }
-                        el.textContent = out;
-                        requestAnimationFrame(tick);
-                    };
-                    requestAnimationFrame(tick);
-                };
                 keys.forEach(key => {
                     const el = $(`#stations-${key}`);
                     const val = Number(stations[key]);
-                    if (Number.isFinite(val)) animateScramble(el, val);
-                    else if (el) el.textContent = '—';
+                    if (el) el.textContent = Number.isFinite(val) ? new Intl.NumberFormat('vi-VN').format(val) : '—';
                 });
                 const updatedAt = new Date(data.updated_at);
                 const stale = !Number.isFinite(updatedAt.getTime()) || Date.now() - updatedAt.getTime() > 15 * 60 * 1000;
@@ -202,9 +168,16 @@ import { renderLandingTemplate } from './templates/landing-template.js';
     }
 
     function createRenderer(canvas) {
-        const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: currentQualityTier !== 'lite', powerPreference: 'high-performance' });
-        const maxRatio = currentQualityTier === 'high' ? 1.65 : (currentQualityTier === 'balanced' ? 1.35 : 1.0);
-        renderer.setPixelRatio(Math.min(devicePixelRatio, maxRatio));
+        const useAA = !isMobileDevice && currentQualityTier === 'high';
+        const renderer = new THREE.WebGLRenderer({
+            canvas,
+            alpha: true,
+            antialias: useAA,
+            stencil: false,
+            powerPreference: 'high-performance'
+        });
+        const maxRatio = isMobileDevice ? 0.90 : (currentQualityTier === 'high' ? 1.15 : 1.0);
+        renderer.setPixelRatio(Math.min(devicePixelRatio || 1, maxRatio));
         renderer.setClearColor(0x000000, 0);
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -213,9 +186,12 @@ import { renderLandingTemplate } from './templates/landing-template.js';
     }
 
     function watchCanvas(canvas, renderer, camera, render) {
+        let lastW = 0, lastH = 0;
         const resize = () => {
             const width = canvas.clientWidth, height = canvas.clientHeight;
-            if (!width || !height) return;
+            if (!width || !height || (width === lastW && height === lastH)) return;
+            lastW = width;
+            lastH = height;
             renderer.setSize(width, height, false);
             camera.aspect = width / height;
             camera.updateProjectionMatrix();
@@ -237,7 +213,125 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         renderer.forceContextLoss();
     }
 
-    // ─── Shared Blender GLB Loader Cache ───
+    // ─── Shared Blender GLB Loader Cache + Draw-Call & Shader Optimizer ───
+    const DYNAMIC_OPACITY_MESHES = new Set([
+        'TerrainSurface', 'SlipSurface', 'UnstableWedge', 'GroundwaterTable', 'PiezometerWaterColumn'
+    ]);
+    const HERO_CULLED_NODES = new Set([
+        'OpsVideoWall_Screen', 'OpsDeskMonitors', 'OpsHoloTerrain', 'OpsHoloProjector',
+        'IMU_MEMSChip', 'IMU_Gimbal_Roll', 'IMU_Gimbal_Pitch', 'IMU_Gimbal_Yaw',
+        'Rain_FallingDrops', 'Rain_TippingBucket', 'Piezo_WaterFlowParticles', 'Piezometer_Probe',
+        'GNSS_Base_CORS_PTZCamera', 'GNSS_Station_Crown_PTZCamera', 'GNSS_Station_Mid_PTZCamera',
+        'GNSS_Station_Toe_PTZCamera', 'Rain_PTZCamera'
+    ]);
+
+    function optimizeBlenderScene(scene) {
+        const mergedVertexMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+        const groupsToMerge = [];
+
+        scene.traverse(node => {
+            if (!node.children || node.children.length < 2) return;
+            const childMeshes = node.children.filter(c => c.isMesh && c.geometry && !c.material?.map && !c.material?.transparent);
+            if (childMeshes.length >= 2 && childMeshes.length === node.children.filter(c => c.isMesh).length) {
+                groupsToMerge.push({ node, childMeshes });
+            }
+        });
+
+        // Merge multi-primitive objects (e.g. 68-primitive satellites, drones, forest, helicopters) into 1 draw call each
+        groupsToMerge.forEach(({ node, childMeshes }) => {
+            let totalVerts = 0;
+            const expanded = [];
+            for (const m of childMeshes) {
+                const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+                const pos = g.getAttribute('position');
+                if (!pos) continue;
+                const norm = g.getAttribute('normal');
+                const colAttr = g.getAttribute('color');
+                const baseCol = m.material?.color || new THREE.Color(0xcccccc);
+                const emCol = m.material?.emissive || new THREE.Color(0x000000);
+                const emInt = m.material?.emissiveIntensity ?? 1.0;
+                const r = Math.min(1, baseCol.r + emCol.r * emInt * 0.45);
+                const gr = Math.min(1, baseCol.g + emCol.g * emInt * 0.45);
+                const b = Math.min(1, baseCol.b + emCol.b * emInt * 0.45);
+                expanded.push({ pos, norm, colAttr, r, gr, b, count: pos.count });
+                totalVerts += pos.count;
+            }
+            if (!totalVerts || expanded.length < 2) return;
+
+            const mergedPos = new Float32Array(totalVerts * 3);
+            const mergedNorm = new Float32Array(totalVerts * 3);
+            const mergedCol = new Float32Array(totalVerts * 3);
+            let offset = 0;
+            for (const item of expanded) {
+                mergedPos.set(item.pos.array, offset);
+                if (item.norm && item.norm.array.length === item.count * 3) {
+                    mergedNorm.set(item.norm.array, offset);
+                } else {
+                    for (let i = 0; i < item.count * 3; i += 3) {
+                        mergedNorm[offset + i + 1] = 1;
+                    }
+                }
+                if (item.colAttr && item.colAttr.itemSize >= 3) {
+                    for (let i = 0; i < item.count; i++) {
+                        mergedCol[offset + i * 3] = item.colAttr.getX(i);
+                        mergedCol[offset + i * 3 + 1] = item.colAttr.getY(i);
+                        mergedCol[offset + i * 3 + 2] = item.colAttr.getZ(i);
+                    }
+                } else {
+                    for (let i = 0; i < item.count * 3; i += 3) {
+                        mergedCol[offset + i] = item.r;
+                        mergedCol[offset + i + 1] = item.gr;
+                        mergedCol[offset + i + 2] = item.b;
+                    }
+                }
+                offset += item.count * 3;
+            }
+
+            const mergedGeo = new THREE.BufferGeometry();
+            mergedGeo.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
+            mergedGeo.setAttribute('normal', new THREE.BufferAttribute(mergedNorm, 3));
+            mergedGeo.setAttribute('color', new THREE.BufferAttribute(mergedCol, 3));
+            mergedGeo.computeBoundingSphere();
+
+            childMeshes.forEach(m => node.remove(m));
+            const singleMesh = new THREE.Mesh(mergedGeo, mergedVertexMat);
+            singleMesh.name = `${node.name}_Merged`;
+            node.add(singleMesh);
+        });
+
+        // Convert heavy PBR MeshStandardMaterial into ultra-fast MeshLambertMaterial once across the shared template
+        const matCache = new Map();
+        scene.traverse(obj => {
+            if (!obj.isMesh || !obj.material) return;
+            const hasVertexCol = Boolean(obj.geometry?.attributes?.color);
+            const isTransparentNode = DYNAMIC_OPACITY_MESHES.has(obj.name);
+            const srcMat = obj.material;
+            if (srcMat.isMeshLambertMaterial || srcMat.isMeshBasicMaterial) {
+                if (hasVertexCol) srcMat.vertexColors = true;
+                return;
+            }
+            const cacheKey = `${srcMat.uuid}_${hasVertexCol ? 1 : 0}_${isTransparentNode ? 1 : 0}`;
+            let fastMat = matCache.get(cacheKey);
+            if (!fastMat) {
+                fastMat = new THREE.MeshLambertMaterial({
+                    color: srcMat.color ? srcMat.color.clone() : new THREE.Color(0xffffff),
+                    emissive: srcMat.emissive ? srcMat.emissive.clone() : new THREE.Color(0x000000),
+                    emissiveIntensity: srcMat.emissiveIntensity ?? 1.0,
+                    map: srcMat.map || null,
+                    vertexColors: hasVertexCol || Boolean(srcMat.vertexColors),
+                    transparent: isTransparentNode || Boolean(srcMat.transparent),
+                    opacity: srcMat.opacity ?? 1.0,
+                    side: srcMat.side ?? THREE.FrontSide,
+                    depthWrite: srcMat.depthWrite ?? true
+                });
+                matCache.set(cacheKey, fastMat);
+            }
+            obj.material = fastMat;
+        });
+
+        return scene;
+    }
+
     let blenderScenePromise = null;
     function getBlenderTemplate() {
         if (!blenderScenePromise) {
@@ -245,7 +339,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 try {
                     const loader = new GLTFLoader();
                     const buffer = decodeBlenderGLB();
-                    loader.parse(buffer, '', gltf => resolve(gltf.scene), reject);
+                    loader.parse(buffer, '', gltf => resolve(optimizeBlenderScene(gltf.scene)), reject);
                 } catch (err) {
                     reject(err);
                 }
@@ -254,37 +348,22 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         return blenderScenePromise;
     }
 
-    function instantiateBlenderTwin(template) {
+    function instantiateBlenderTwin(template, isHero = false) {
         const root = template.clone(true);
         const nodes = {};
         root.traverse(obj => {
             if (obj.name) nodes[obj.name] = obj;
-            if (obj.isMesh && obj.material) {
+            if (isHero && HERO_CULLED_NODES.has(obj.name)) {
+                obj.visible = false;
+            }
+            if (isHero && isMobileDevice && obj.name === 'MountainForest') {
+                obj.visible = false;
+            }
+            if (obj.isMesh && obj.material && DYNAMIC_OPACITY_MESHES.has(obj.name)) {
                 obj.material = obj.material.clone();
-                if (obj.geometry?.attributes?.color) {
-                    obj.material.vertexColors = true;
-                }
-                if (['TerrainSurface', 'SlipSurface', 'UnstableWedge', 'GroundwaterTable', 'PiezometerWaterColumn'].includes(obj.name)) {
-                    obj.material.transparent = true;
-                }
+                obj.material.transparent = true;
             }
         });
-
-        // Add subtle CAD topographic shimmer on top of the Blender TerrainSurface
-        const terrain = nodes.TerrainSurface;
-        if (terrain && terrain.geometry) {
-            const wireGeo = new THREE.WireframeGeometry(terrain.geometry);
-            const wireMat = new THREE.LineBasicMaterial({
-                color: 0x5eead4,
-                transparent: true,
-                opacity: 0.024,
-                blending: THREE.AdditiveBlending
-            });
-            const wireMesh = new THREE.LineSegments(wireGeo, wireMat);
-            wireMesh.position.y = 0.008;
-            terrain.add(wireMesh);
-            nodes.TerrainWire = wireMesh;
-        }
         return { root, nodes };
     }
 
@@ -294,7 +373,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         const mid = p0.clone().add(p2).multiplyScalar(0.5);
         mid.y += arcHeight;
         const curve = new THREE.QuadraticBezierCurve3(p0, mid, p2);
-        const points = curve.getPoints(44);
+        const points = curve.getPoints(32);
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
         const material = new THREE.LineBasicMaterial({
             color,
@@ -319,7 +398,8 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         return prof[i0] * (1 - frac) + prof[i1] * frac;
     }
 
-    function setupLivingTwinDynamics(nodes) {
+    function setupLivingTwinDynamics(nodes, options = {}) {
+        const isHero = Boolean(options.isHero);
         // 1. 12 Moving Highway Vehicles (6 Northbound in right lane +0.21, 6 Southbound in left lane -0.21)
         const vehicleConfigs = [
             // Northbound (+Y_blender / -Z_three, right lane +0.21)
@@ -461,19 +541,21 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             drone2.add(lidarCone2);
         }
 
-        // 3. Create Live 60 FPS Animated Grafana & WebGIS Command Center CanvasTexture for OpsVideoWall_Screen & OpsDeskMonitors
+        // 3. Create Live Animated Grafana & WebGIS Command Center CanvasTexture (Story mode only, 512x192 scaled)
         let grafanaCanvas = null;
         let grafanaCtx = null;
         let grafanaTex = null;
         let lastGrafanaDraw = -1;
-        if (typeof document !== 'undefined' && (nodes.OpsVideoWall_Screen || nodes.OpsDeskMonitors)) {
+        if (!isHero && typeof document !== 'undefined' && (nodes.OpsVideoWall_Screen || nodes.OpsDeskMonitors)) {
             grafanaCanvas = document.createElement('canvas');
-            grafanaCanvas.width = 1024;
-            grafanaCanvas.height = 384;
+            grafanaCanvas.width = 512;
+            grafanaCanvas.height = 192;
             grafanaCtx = grafanaCanvas.getContext('2d');
             if (grafanaCtx) {
                 grafanaTex = new THREE.CanvasTexture(grafanaCanvas);
                 grafanaTex.flipY = false;
+                grafanaTex.generateMipmaps = false;
+                grafanaTex.minFilter = THREE.LinearFilter;
                 if (THREE.SRGBColorSpace) grafanaTex.colorSpace = THREE.SRGBColorSpace;
                 const liveScreenMat = new THREE.MeshBasicMaterial({
                     map: grafanaTex,
@@ -484,12 +566,15 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             }
         }
 
-        function drawLiveGrafanaDashboard(elapsed) {
+        function drawLiveGrafanaDashboard(elapsed, force = false) {
             if (!grafanaCtx || !grafanaTex) return;
-            if (elapsed - lastGrafanaDraw < 0.04) return;
+            if (!force && elapsed - lastGrafanaDraw < 0.10) return;
             lastGrafanaDraw = elapsed;
             const ctx = grafanaCtx;
             const W = 1024, H = 384;
+
+            ctx.save();
+            ctx.scale(0.5, 0.5);
 
             // Deep Grafana dark-slate background
             ctx.fillStyle = '#070e1b';
@@ -528,35 +613,21 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 ctx.textAlign = 'right';
                 ctx.fillText(badge, x + w - 8, y + 15);
                 ctx.textAlign = 'left';
-                ctx.strokeStyle = 'rgba(56, 189, 248, 0.09)';
-                ctx.lineWidth = 1;
-                for (let gy = y + 42; gy < y + h - 8; gy += 24) {
-                    ctx.beginPath();
-                    ctx.moveTo(x + 6, gy);
-                    ctx.lineTo(x + w - 6, gy);
-                    ctx.stroke();
-                }
-                for (let gx = x + 36; gx < x + w - 8; gx += 42) {
-                    ctx.beginPath();
-                    ctx.moveTo(gx, y + 24);
-                    ctx.lineTo(gx, y + h - 6);
-                    ctx.stroke();
-                }
             };
 
             // 1. Top-Left Panel: GNSS RTK 3D Displacement (ΔE, ΔN, ΔU)
             const s2Val = (4.2 + Math.sin(elapsed * 1.8) * 0.4).toFixed(1);
             drawPanel(12, 36, 264, 162, 'GNSS RTK · ΔE/ΔN/ΔU (mm)', `+${s2Val}mm`, '#2dd4bf');
             const seriesSpecs = [
-                { col: '#f59e0b', fill: 'rgba(245, 158, 11, 0.16)', base: 145, amp: 24, freq: 2.2, speed: 2.0 },
-                { col: '#2dd4bf', fill: 'rgba(45, 212, 191, 0.12)', base: 158, amp: 14, freq: 3.1, speed: 2.6 },
-                { col: '#a3e635', fill: null, base: 174, amp: 7, freq: 1.7, speed: 1.5 }
+                { col: '#f59e0b', fill: 'rgba(245, 158, 11, 0.16)', base: 145, amp: 24, speed: 2.0 },
+                { col: '#2dd4bf', fill: 'rgba(45, 212, 191, 0.12)', base: 158, amp: 14, speed: 2.6 },
+                { col: '#a3e635', fill: null, base: 174, amp: 7, speed: 1.5 }
             ];
             seriesSpecs.forEach(s => {
                 ctx.beginPath();
-                for (let i = 0; i <= 48; i++) {
-                    const px = 20 + (i / 48) * 248;
-                    const t = i / 48;
+                for (let i = 0; i <= 24; i++) {
+                    const px = 20 + (i / 24) * 248;
+                    const t = i / 24;
                     const py = s.base - t * s.amp - Math.sin(t * 7.5 - elapsed * s.speed) * 9 - Math.cos(t * 15 - elapsed * 3.2) * 3;
                     if (i === 0) ctx.moveTo(px, py);
                     else ctx.lineTo(px, py);
@@ -578,9 +649,9 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             drawPanel(12, 206, 264, 166, 'MEMS IMU 6-DoF · ROLL/PITCH', `+${imuRoll}°`, '#f59e0b');
             [['#f97316', 292, 18, 4.8], ['#38bdf8', 316, 12, 3.6]].forEach(([col, yMid, amp, spd], idx) => {
                 ctx.beginPath();
-                for (let i = 0; i <= 54; i++) {
-                    const px = 20 + (i / 54) * 248;
-                    const t = i / 54;
+                for (let i = 0; i <= 28; i++) {
+                    const px = 20 + (i / 28) * 248;
+                    const t = i / 28;
                     const py = yMid + Math.sin(t * 18 - elapsed * spd) * amp * (0.45 + 0.55 * t) + Math.cos(t * 35 + elapsed * 6.0 + idx) * 4;
                     if (i === 0) ctx.moveTo(px, py);
                     else ctx.lineTo(px, py);
@@ -660,9 +731,9 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             ctx.setLineDash([]);
 
             ctx.beginPath();
-            for (let i = 0; i <= 64; i++) {
-                const px = 294 + (i / 64) * 432;
-                const t = i / 64;
+            for (let i = 0; i <= 32; i++) {
+                const px = 294 + (i / 32) * 432;
+                const t = i / 32;
                 const py = 338 - Math.pow(t, 1.25) * 66 - Math.sin(t * 10 - elapsed * 2.8) * 8;
                 if (i === 0) ctx.moveTo(px, py);
                 else ctx.lineTo(px, py);
@@ -676,7 +747,6 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             ctx.fillStyle = 'rgba(45, 212, 191, 0.18)';
             ctx.fill();
 
-            // Live Packet Log Bar at bottom of Center Panel
             ctx.fillStyle = '#081120';
             ctx.fillRect(292, 346, 436, 20);
             ctx.fillStyle = '#a3e635';
@@ -704,9 +774,9 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             // 7. Bottom-Right Panel: Borehole Piezometer & Subsurface Groundwater Flow
             drawPanel(744, 206, 268, 166, 'PIEZOMETER & GROUNDWATER', '+1.45 m', '#38bdf8');
             ctx.beginPath();
-            for (let i = 0; i <= 48; i++) {
-                const px = 754 + (i / 48) * 248;
-                const t = i / 48;
+            for (let i = 0; i <= 24; i++) {
+                const px = 754 + (i / 24) * 248;
+                const t = i / 24;
                 const py = 342 - Math.pow(t, 1.1) * 76 - Math.sin(t * 9 - elapsed * 2.4) * 6;
                 if (i === 0) ctx.moveTo(px, py);
                 else ctx.lineTo(px, py);
@@ -720,11 +790,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
             ctx.fill();
 
+            ctx.restore();
             grafanaTex.needsUpdate = true;
         }
-        drawLiveGrafanaDashboard(0);
+        if (!isHero) {
+            drawLiveGrafanaDashboard(0, true);
+        }
 
-        // 4. Attach Floating HUD Label Sprites to the 3D DataPacket_* Capsules in the GLB Scene
+        // 4. Attach Floating HUD Label Sprites to the 3D DataPacket_* Capsules in the GLB Scene (Story mode only)
         const glbPacketCurves = [
             { p0: new THREE.Vector3(-4.35, 3.08, -1.15), p2: new THREE.Vector3(5.15, 2.15, -0.07), arcH: 2.35, label: 'PKT·GNSS S1', col: '#2dd4bf' },
             { p0: new THREE.Vector3(-1.05, 1.88, 0.45), p2: new THREE.Vector3(3.87, 1.65, 0.00), arcH: 1.95, label: 'PKT·GNSS S2', col: '#a3e635' },
@@ -739,22 +812,24 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             for (let pSub = 0; pSub < 2; pSub++) {
                 const pktObj = nodes[`DataPacket_${lIdx}_${pSub}`];
                 if (!pktObj) continue;
-                if (typeof document !== 'undefined' && pSub === 0) {
+                if (!isHero && typeof document !== 'undefined' && pSub === 0) {
                     const tagCanvas = document.createElement('canvas');
-                    tagCanvas.width = 256;
-                    tagCanvas.height = 64;
+                    tagCanvas.width = 192;
+                    tagCanvas.height = 48;
                     const tCtx = tagCanvas.getContext('2d');
                     if (tCtx) {
                         tCtx.fillStyle = 'rgba(7, 18, 32, 0.88)';
-                        tCtx.fillRect(4, 8, 248, 48);
+                        tCtx.fillRect(3, 6, 186, 36);
                         tCtx.strokeStyle = spec.col;
-                        tCtx.lineWidth = 3;
-                        tCtx.strokeRect(4, 8, 248, 48);
+                        tCtx.lineWidth = 2.5;
+                        tCtx.strokeRect(3, 6, 186, 36);
                         tCtx.fillStyle = spec.col;
-                        tCtx.font = 'bold 24px monospace';
+                        tCtx.font = 'bold 18px monospace';
                         tCtx.textAlign = 'center';
-                        tCtx.fillText(spec.label, 128, 40);
+                        tCtx.fillText(spec.label, 96, 30);
                         const tagTex = new THREE.CanvasTexture(tagCanvas);
+                        tagTex.generateMipmaps = false;
+                        tagTex.minFilter = THREE.LinearFilter;
                         const sprMat = new THREE.SpriteMaterial({
                             map: tagTex,
                             transparent: true,
@@ -780,39 +855,43 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         const span = 10.0;
         const halfDepth = 5.4;
         return {
-            update(elapsed) {
-                drawLiveGrafanaDashboard(elapsed);
-
-                // Animate Surface MEMS IMU Box Tilting & 3-Axis Orthogonal Gyroscope Gimbal Rings
-                if (nodes.IMU_Casing) {
-                    nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
-                    nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
-                }
-                if (nodes.IMU_Gimbal_Roll) {
-                    nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
-                }
-                if (nodes.IMU_Gimbal_Pitch) {
-                    nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
-                }
-                if (nodes.IMU_Gimbal_Yaw) {
-                    nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
+            update(elapsed, storyProg = 0) {
+                if (!isHero && storyProg > 0.65) {
+                    drawLiveGrafanaDashboard(elapsed);
                 }
 
-                // Animate Tipping-Bucket Rain Gauge Seesaw & Falling Rain Drops
-                if (nodes.Rain_TippingBucket) {
-                    const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
-                    nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
-                }
-                if (nodes.Rain_FallingDrops) {
-                    nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
-                }
+                if (!isHero) {
+                    // Animate Surface MEMS IMU Box Tilting & 3-Axis Orthogonal Gyroscope Gimbal Rings
+                    if (nodes.IMU_Casing) {
+                        nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
+                        nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
+                    }
+                    if (nodes.IMU_Gimbal_Roll) {
+                        nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
+                    }
+                    if (nodes.IMU_Gimbal_Pitch) {
+                        nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
+                    }
+                    if (nodes.IMU_Gimbal_Yaw) {
+                        nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
+                    }
 
-                // Animate Underground Groundwater Flow Streamlines & Droplets Past the Suspended Borehole Piezometer Probe
-                if (nodes.Piezo_WaterFlowParticles) {
-                    nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
-                }
-                if (nodes.Piezometer_Probe) {
-                    nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
+                    // Animate Tipping-Bucket Rain Gauge Seesaw & Falling Rain Drops
+                    if (nodes.Rain_TippingBucket) {
+                        const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
+                        nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
+                    }
+                    if (nodes.Rain_FallingDrops) {
+                        nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
+                    }
+
+                    // Animate Underground Groundwater Flow Streamlines & Droplets Past the Suspended Borehole Piezometer Probe
+                    if (nodes.Piezo_WaterFlowParticles) {
+                        nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
+                    }
+                    if (nodes.Piezometer_Probe) {
+                        nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
+                    }
                 }
 
                 // Animate 10 3D Data Packet Capsules Streaming Along Telemetry Conduits into the Data Center
@@ -906,7 +985,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                     nodes.OpsSecondaryDish.rotation.y = -Math.sin(elapsed * 0.52) * 0.48;
                     nodes.OpsSecondaryDish.rotation.x = Math.sin(elapsed * 0.38) * 0.07;
                 }
-                if (nodes.OpsHoloTerrain) {
+                if (!isHero && nodes.OpsHoloTerrain) {
                     nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
                     nodes.OpsHoloTerrain.position.y = 0.51 + Math.sin(elapsed * 2.4) * 0.016;
                 }
@@ -955,18 +1034,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 140);
         camera.position.set(-1.65, 4.95, 10.85);
 
-        scene.add(new THREE.HemisphereLight(0xd2fff7, 0x041517, 2.25));
-        const sun = new THREE.DirectionalLight(0xf0fdfa, 2.65);
+        scene.add(new THREE.HemisphereLight(0xd2fff7, 0x061f22, 2.55));
+        const sun = new THREE.DirectionalLight(0xf0fdfa, 2.85);
         sun.position.set(-6, 11, 8);
         scene.add(sun);
-
-        const tealRim = new THREE.PointLight(0x2dd4bf, 6.0, 24);
-        tealRim.position.set(-5.5, 4.5, -4.5);
-        scene.add(tealRim);
-
-        const slipGlow = new THREE.PointLight(0xffb020, 4.8, 16);
-        slipGlow.position.set(-1.1, 2.2, 0.6);
-        scene.add(slipGlow);
 
         const worldGroup = new THREE.Group();
         scene.add(worldGroup);
@@ -978,7 +1049,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         let livingDynamics = null;
 
         // Atmospheric floating telemetry dust
-        const dustCount = 110;
+        const dustCount = isMobileDevice ? 45 : 80;
         const dustPos = new Float32Array(dustCount * 3);
         for (let i = 0; i < dustPos.length; i += 3) {
             dustPos[i] = (Math.random() - 0.5) * 16;
@@ -997,14 +1068,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         }));
         worldGroup.add(dust);
 
-        // Load Blender GLB Scene
+        // Load Blender GLB Scene (Hero mode culls invisible micro-details & skips CanvasTexture redraws)
         getBlenderTemplate().then(template => {
             if (destroyed) return;
-            const { root, nodes } = instantiateBlenderTwin(template);
+            const { root, nodes } = instantiateBlenderTwin(template, true);
             twinNodes = nodes;
             if (nodes.TerrainSurface) nodes.TerrainSurface.material.opacity = 0.90;
             worldGroup.add(root);
-            livingDynamics = setupLivingTwinDynamics(nodes);
+            livingDynamics = setupLivingTwinDynamics(nodes, { isHero: true });
 
             // Build telemetry arcs from Rover stations & Base CORS to Operations Hub
             const arcConfigs = [
@@ -1013,7 +1084,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 [anchors.gnss_mid, anchors.ops_hub, 2.0, 0xffb020],
                 [anchors.gnss_toe, anchors.ops_hub, 1.4, 0x5eead4]
             ];
-            const packetGeo = new THREE.SphereGeometry(0.075, 10, 10);
+            const packetGeo = new THREE.SphereGeometry(0.075, 8, 8);
             arcConfigs.forEach(([from, to, h, col], idx) => {
                 const arc = createSignalArc(from, to, h, col, 0.42);
                 worldGroup.add(arc);
@@ -1061,8 +1132,9 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             render();
         }).catch(() => {});
 
-        let progress = 0, pointerX = 0, pointerY = 0, active = true, destroyed = false, frame = 0;
+        let progress = 0, pointerX = 0, pointerY = 0, active = true, destroyed = false, frame = 0, lastTickTime = 0;
         const satWorldPos = new THREE.Vector3();
+        const frameIntervalMs = (isMobileDevice || currentQualityTier !== 'high') ? 33 : 24;
 
         const onPointerMove = e => {
             const rect = canvas.getBoundingClientRect();
@@ -1071,16 +1143,23 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             pointerY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
         };
         const heroVisual = canvas.parentElement;
-        heroVisual?.addEventListener('pointermove', onPointerMove, { passive: true });
+        if (!isMobileDevice) {
+            heroVisual?.addEventListener('pointermove', onPointerMove, { passive: true });
+        }
 
         const render = () => {
-            if (destroyed || !active || document.hidden) return;
+            if (destroyed || !active || document.hidden || storyViewportActive) return;
             renderer.render(scene, camera);
         };
 
         const tick = time => {
             frame = 0;
-            if (destroyed || !active || document.hidden) return;
+            if (destroyed || !active || document.hidden || storyViewportActive) return;
+            if (time - lastTickTime < frameIntervalMs) {
+                frame = requestAnimationFrame(tick);
+                return;
+            }
+            lastTickTime = time;
             const elapsed = time * 0.001;
 
             // Gentle orbital breathing + pointer parallax + scroll dolly
@@ -1100,7 +1179,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 twinNodes.Satellite_Constellation.position.z = Math.cos(elapsed * 0.35) * 0.28;
             }
             satBeams.forEach(({ satObj, target, beam, phase }) => {
-                satObj.rotation.y += 0.008;
+                satObj.rotation.y += 0.012;
                 satObj.getWorldPosition(satWorldPos);
                 worldGroup.worldToLocal(satWorldPos);
                 const posAttr = beam.geometry.attributes.position;
@@ -1121,7 +1200,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (twinNodes.DisplacementVectorArrow) {
                 twinNodes.DisplacementVectorArrow.position.x = Math.sin(elapsed * 2.8) * 0.06;
             }
-            livingDynamics?.update(elapsed);
+            livingDynamics?.update(elapsed, 0);
 
             camera.position.set(
                 -1.65 + progress * 1.15 + pointerX * 0.42,
@@ -1134,19 +1213,25 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             frame = requestAnimationFrame(tick);
         };
 
+        const resume = () => {
+            if (active && !document.hidden && !storyViewportActive && !frame && !destroyed) {
+                frame = requestAnimationFrame(tick);
+            }
+        };
+
         const setProgress = value => {
             progress = THREE.MathUtils.clamp(value, 0, 1);
-            render();
+            resume();
         };
 
         const stopResize = watchCanvas(canvas, renderer, camera, render);
-        const resume = () => { if (active && !document.hidden && !frame && !destroyed) frame = requestAnimationFrame(tick); };
         const visibility = new IntersectionObserver(entries => {
             active = entries[0]?.isIntersecting ?? true;
             if (active) resume();
-        }, { rootMargin: '120px' });
+        }, { rootMargin: '20px' });
         visibility.observe(canvas);
         document.addEventListener('visibilitychange', resume);
+        window.addEventListener('storyViewportChanged', resume);
         frame = requestAnimationFrame(tick);
         canvas.classList.add('is-ready');
 
@@ -1158,6 +1243,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 cancelAnimationFrame(frame);
                 heroVisual?.removeEventListener('pointermove', onPointerMove);
                 document.removeEventListener('visibilitychange', resume);
+                window.removeEventListener('storyViewportChanged', resume);
                 visibility.disconnect();
                 stopResize();
                 disposeScene(scene, renderer);
@@ -1172,30 +1258,20 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         scene.fog = new THREE.FogExp2(0x061f21, 0.015);
 
         const camera = new THREE.PerspectiveCamera(42, 1, 0.08, 140);
-        scene.add(new THREE.HemisphereLight(0xd0fff6, 0x041618, 2.35));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        scene.add(new THREE.HemisphereLight(0xd0fff6, 0x041618, 2.55));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.65);
         dirLight.position.set(-5, 12, 8);
         scene.add(dirLight);
 
-        const slipLight = new THREE.PointLight(0xff9e1b, 4.8, 18);
-        slipLight.position.set(-1.1, 2.1, 0.6);
-        scene.add(slipLight);
-
-        const waterLight = new THREE.PointLight(0x38bdf8, 4.2, 18);
-        waterLight.position.set(-2.2, 0.6, 4.8);
-        scene.add(waterLight);
-
-        // Interior Control Room Illumination (lights up the 5-screen command wall, operator desks & 3D hologram!)
-        const controlRoomLight = new THREE.PointLight(0x2dd4bf, 5.8, 12);
-        controlRoomLight.position.set(5.15, 0.92, 0.68);
-        scene.add(controlRoomLight);
+        const fillLight = new THREE.DirectionalLight(0x38bdf8, 1.15);
+        fillLight.position.set(6, 5, 6);
+        scene.add(fillLight);
 
         const worldGroup = new THREE.Group();
         scene.add(worldGroup);
 
         const anchors = BLENDER_META.anchors;
         const opsEntranceAnchor = anchors.ops_entrance || [5.15, 0.455, 2.07];
-        const opsHoloAnchor = anchors.ops_holo_table || [5.15, 0.455, 0.73];
         const opsControlAnchor = anchors.ops_control_room || [5.15, 0.635, 0.19];
 
         let twinNodes = {};
@@ -1205,7 +1281,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         let initialImuPos = null;
 
         // 1. Rain Storm Particle System (Act 2: Hydrological Context)
-        const rainCount = 260;
+        const rainCount = 160;
         const rainPositions = new Float32Array(rainCount * 3);
         for (let i = 0; i < rainPositions.length; i += 3) {
             rainPositions[i] = (Math.random() - 0.5) * 15;
@@ -1227,7 +1303,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
 
         // 2. Active Sensor Data-Capture Laser Halo (Moves from device to device as camera samples each station!)
         const activeScanGroup = new THREE.Group();
-        const scanCylGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.95, 32, 1, true);
+        const scanCylGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.95, 24, 1, true);
         const scanCylMat = new THREE.MeshBasicMaterial({
             color: 0x5eead4,
             transparent: true,
@@ -1237,7 +1313,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             depthWrite: false
         });
         const scanCylMesh = new THREE.Mesh(scanCylGeo, scanCylMat);
-        const scanRingGeo = new THREE.RingGeometry(0.48, 0.62, 40);
+        const scanRingGeo = new THREE.RingGeometry(0.48, 0.62, 32);
         const scanRingMat = new THREE.MeshBasicMaterial({
             color: 0xd7ef73,
             transparent: true,
@@ -1283,7 +1359,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         ];
         const dispatchLines = [];
         const dispatchPackets = [];
-        const pktGeo = new THREE.SphereGeometry(0.105, 14, 14);
+        const pktGeo = new THREE.SphereGeometry(0.105, 10, 10);
         dispatchPairs.forEach(([a, b, h, col], idx) => {
             const arc = createSignalArc(a, b, h, col, 0.38);
             dispatchGroup.add(arc);
@@ -1299,7 +1375,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         });
 
         // Expanding safety rings at Operations Center Entrance & Highway Gate
-        const safetyRingGeo = new THREE.RingGeometry(0.45, 0.58, 48);
+        const safetyRingGeo = new THREE.RingGeometry(0.45, 0.58, 32);
         const opsPulseRing = new THREE.Mesh(safetyRingGeo, new THREE.MeshBasicMaterial({
             color: 0xd7ef73,
             transparent: true,
@@ -1312,13 +1388,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         opsPulseRing.position.set(opsEntranceAnchor[0], opsEntranceAnchor[1] - 0.25, opsEntranceAnchor[2]);
         worldGroup.add(opsPulseRing);
 
-        // 5. 12-Point Cinematic Video-Demo Camera Choreography:
-        //    [0..1] Gentle Slower Dwell on GNSS RTK Stations (Carrier-Phase ΔE/ΔN/ΔU & CORS Differential Waves)
-        //    [2..3] Close-Up Inspection of Surface MEMS IMU 6-DoF Box & 3-Axis Gyroscope Gimbal Rings
-        //    [4]    Close-Up Inspection of Cutaway Tipping-Bucket Rain Gauge (Falling Rain & Seesaw Bucket)
-        //    [5..6] Close-Up Inspection of Open-Cutaway Borehole Piezometer, Lowered Sensor Probe & Flowing Groundwater
-        //    [7..8] Wide Zoom-Out Panorama & Chasing Labeled Data Packets ([PKT GNSS], [PKT IMU], [PKT RAIN], [PKT PIEZO])
-        //    [9..11] Arrive at Modern Glass Data Center (Sliding Doors Open!) -> Fly Inside Control Room to Live Grafana Video Wall!
+        // 5. 12-Point Cinematic Video-Demo Camera Choreography
         const camCurve = new THREE.CatmullRomCurve3([
             new THREE.Vector3(-1.55, 2.48, 2.05),  // 0.00: Gentle arrival at GNSS RTK Rover S2 & Crown RTK Link
             new THREE.Vector3(-1.25, 2.22, 1.68),  // 0.09: Slow dwell around GNSS RTK Antenna Phase Center & ΔE/ΔN/ΔU Triad
@@ -1355,14 +1425,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         // Load Blender GLB Scene
         getBlenderTemplate().then(template => {
             if (destroyed) return;
-            const { root, nodes } = instantiateBlenderTwin(template);
+            const { root, nodes } = instantiateBlenderTwin(template, false);
             twinNodes = nodes;
             if (nodes.GroundwaterTable) initialGroundwaterY = nodes.GroundwaterTable.position.y;
             if (nodes.UnstableWedge) initialWedgePos = nodes.UnstableWedge.position.clone();
             if (nodes.GNSS_Station_Mid) initialMidStationPos = nodes.GNSS_Station_Mid.position.clone();
             if (nodes.IMU_Borehole_Assembly) initialImuPos = nodes.IMU_Borehole_Assembly.position.clone();
             worldGroup.add(root);
-            livingDynamics = setupLivingTwinDynamics(nodes);
+            livingDynamics = setupLivingTwinDynamics(nodes, { isHero: false });
 
             const satNames = [
                 'GNSS_Sat_01', 'GNSS_Sat_02', 'GNSS_Sat_03', 'GNSS_Sat_04',
@@ -1406,6 +1476,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             ops_hub: $('[data-pin="ops_hub"]', calloutContainer)
         } : {};
         const projVec = new THREE.Vector3();
+        const pinCache = {};
 
         const pinOffsets = {
             gnss_mid: [3.5, -5.5],
@@ -1426,20 +1497,34 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             const activeSet = new Set(activeMap[step] || []);
             Object.entries(pinElements).forEach(([key, el]) => {
                 if (!el) return;
+                const isActive = activeSet.has(key);
+                const cached = pinCache[key] || (pinCache[key] = { active: null, left: '', top: '' });
+                if (cached.active !== isActive) {
+                    cached.active = isActive;
+                    el.classList.toggle('is-active', isActive);
+                }
+                if (!isActive) return;
                 const targetCoord = (key === 'ops_hub' && p > 0.74) ? opsControlAnchor : anchors[key];
                 if (!targetCoord) return;
                 projVec.set(...targetCoord);
                 projVec.project(camera);
                 const [ox, oy] = pinOffsets[key] || [0, 0];
-                const xPct = Math.min(91, Math.max(43, (projVec.x * 0.5 + 0.5) * 100 + ox));
-                const yPct = Math.min(82, Math.max(18, (-projVec.y * 0.5 + 0.5) * 100 + oy));
-                el.style.left = `${xPct.toFixed(1)}%`;
-                el.style.top = `${yPct.toFixed(1)}%`;
-                el.classList.toggle('is-active', activeSet.has(key));
+                const xPct = Math.min(91, Math.max(43, (projVec.x * 0.5 + 0.5) * 100 + ox)).toFixed(1) + '%';
+                const yPct = Math.min(82, Math.max(18, (-projVec.y * 0.5 + 0.5) * 100 + oy)).toFixed(1) + '%';
+                if (cached.left !== xPct) {
+                    cached.left = xPct;
+                    el.style.left = xPct;
+                }
+                if (cached.top !== yPct) {
+                    cached.top = yPct;
+                    el.style.top = yPct;
+                }
             });
         }
 
-        let targetProgress = 0, currentProgress = 0, visible = true, destroyed = false, frame = 0;
+        let targetProgress = 0, currentProgress = 0, visible = false, destroyed = false, frame = 0, lastTickTime = 0;
+        const frameIntervalMs = (isMobileDevice || currentQualityTier !== 'high') ? 33 : 24;
+        const lookTarget = new THREE.Vector3();
 
         function applyProgressState(progress, elapsed = 0) {
             const p = THREE.MathUtils.clamp(progress, 0, 1);
@@ -1453,10 +1538,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
 
             // 1. Camera Spline Position & Target
             camCurve.getPoint(p, camera.position);
-            const lookTarget = lookCurve.getPoint(p);
+            lookCurve.getPoint(p, lookTarget);
             camera.lookAt(lookTarget);
 
-            // 2. Active Device Scanning Halo (highlights whichever sensor the camera is currently inspecting in Acts 1 & 2)
+            // 2. Active Device Scanning Halo
             let scanTarget = null;
             let scanColor = 0x5eead4;
             if (p < 0.14) {
@@ -1473,6 +1558,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 scanColor = 0x38bdf8;
             }
             if (scanTarget) {
+                activeScanGroup.visible = true;
                 activeScanGroup.position.set(scanTarget[0], scanTarget[1] - 0.45, scanTarget[2]);
                 const pulse = 0.85 + Math.sin(elapsed * 5.0) * 0.18;
                 scanRingMesh.scale.setScalar(pulse);
@@ -1481,11 +1567,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 scanCylMat.opacity = 0.05 + Math.abs(Math.sin(elapsed * 4.0)) * 0.05;
                 scanRingMat.opacity = 0.65;
             } else {
-                scanCylMat.opacity = 0;
-                scanRingMat.opacity = 0;
+                activeScanGroup.visible = false;
             }
 
-            // 3. Terrain Cutaway Translucency (keep terrain crisp so open cutaway trench & surface sensors stand out)
+            // 3. Terrain Cutaway Translucency
             if (twinNodes.TerrainSurface) {
                 twinNodes.TerrainSurface.material.opacity = 0.84 + 0.12 * Math.max(wVerify, wResponse);
             }
@@ -1528,7 +1613,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 twinNodes.Satellite_Constellation.position.x = -0.2 + Math.sin(elapsed * 0.42) * 0.28;
             }
             storySatBeams.forEach(({ satObj, target, beam, phase }) => {
-                satObj.rotation.y += 0.007;
+                satObj.rotation.y += 0.010;
                 satObj.getWorldPosition(storySatWorldPos);
                 worldGroup.worldToLocal(storySatWorldPos);
                 const posAttr = beam.geometry.attributes.position;
@@ -1558,7 +1643,6 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             if (twinNodes.OpsDoor_Right) {
                 twinNodes.OpsDoor_Right.position.x = 0.56 * doorEase;
             }
-            controlRoomLight.intensity = 3.8 + doorEase * 4.5;
 
             if (streamWeight > 0.02) {
                 const cycle = (elapsed * 0.65) % 1;
@@ -1568,7 +1652,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 opsPulseRing.material.opacity = 0;
             }
 
-            livingDynamics?.update(elapsed);
+            livingDynamics?.update(elapsed, p);
             updateCalloutPins(step, p);
         }
 
@@ -1581,19 +1665,24 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         const tick = time => {
             frame = 0;
             if (destroyed || !visible || document.hidden) return;
+            if (time - lastTickTime < frameIntervalMs) {
+                frame = requestAnimationFrame(tick);
+                return;
+            }
+            lastTickTime = time;
             const elapsed = time * 0.001;
 
             // Smoothly interpolate 3D camera toward target scroll progress
-            currentProgress += (targetProgress - currentProgress) * 0.16;
+            currentProgress += (targetProgress - currentProgress) * 0.22;
             if (Math.abs(targetProgress - currentProgress) < 0.0005) {
                 currentProgress = targetProgress;
             }
 
             // Animate falling rain particles when visible
-            if (rainMat.opacity > 0.05) {
+            if (rainMat.opacity > 0.18) {
                 const pos = rainGeo.attributes.position;
                 for (let i = 0; i < pos.count; i++) {
-                    const y = pos.getY(i) - 0.065;
+                    const y = pos.getY(i) - 0.085;
                     pos.setY(i, y < -0.4 ? 4.8 : y);
                 }
                 pos.needsUpdate = true;
@@ -1604,34 +1693,41 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             frame = requestAnimationFrame(tick);
         };
 
+        const resume = () => {
+            if (visible && !document.hidden && !frame && !destroyed) {
+                frame = requestAnimationFrame(tick);
+            }
+        };
+
         const setProgress = value => {
             const clamped = THREE.MathUtils.clamp(value, 0, 1);
-            // If scroll jumped significantly (e.g. programmatic scrollTo or chapter click), snap closer immediately
             if (Math.abs(clamped - currentProgress) > 0.18) {
                 currentProgress = clamped;
             }
             targetProgress = clamped;
-            applyProgressState(currentProgress, performance.now() * 0.001);
-            render();
+            resume();
         };
 
         const stopResize = watchCanvas(canvas, renderer, camera, render);
-        const resume = () => { if (visible && !document.hidden && !frame && !destroyed) frame = requestAnimationFrame(tick); };
         const visibility = new IntersectionObserver(entries => {
-            visible = entries[0]?.isIntersecting ?? true;
+            const nextVisible = entries[0]?.isIntersecting ?? false;
+            visible = nextVisible;
+            if (storyViewportActive !== nextVisible) {
+                storyViewportActive = nextVisible;
+                window.dispatchEvent(new CustomEvent('storyViewportChanged'));
+            }
             if (visible) resume();
-        }, { rootMargin: '120px' });
+        }, { rootMargin: '0px', threshold: 0.05 });
         visibility.observe(canvas);
         document.addEventListener('visibilitychange', resume);
-        frame = requestAnimationFrame(tick);
         canvas.classList.add('is-ready');
-        setProgress(0);
 
         return {
             setProgress,
             destroy() {
                 if (destroyed) return;
                 destroyed = true;
+                storyViewportActive = false;
                 cancelAnimationFrame(frame);
                 document.removeEventListener('visibilitychange', resume);
                 visibility.disconnect();
@@ -1643,7 +1739,6 @@ import { renderLandingTemplate } from './templates/landing-template.js';
 
     function setupHero() {
         const hero = $('.hero');
-        const heroVisual = $('.hero-visual', hero);
         const heroCopy = $('.hero-copy', hero);
         const canvas = $('#hero-canvas');
         let controller = null;
@@ -1659,27 +1754,14 @@ import { renderLandingTemplate } from './templates/landing-template.js';
             .from('.hero-lead, .hero-actions, .signal-proof', { y: 22, autoAlpha: 0, duration: .55, stagger: .08 }, .48)
             .from('.hero-visual', { xPercent: 7, scale: .96, autoAlpha: 0, duration: .9 }, .18)
             .from('.floating-status', { y: 16, autoAlpha: 0, duration: .45 }, .76);
-        if (controller || heroVisual) {
-            const sceneState = { progress: 0 };
+        if (controller || heroCopy) {
             ScrollTrigger.create({
                 trigger: hero,
                 start: 'top top',
                 end: 'bottom top',
-                scrub: 0.45,
                 onUpdate: self => {
                     const p = self.progress;
-                    sceneState.progress = p;
                     controller?.setProgress(p);
-                    if (heroVisual && innerWidth >= 901) {
-                        const zoom = 1 + p * 0.15;
-                        const shiftX = -p * 11;
-                        const shiftY = p * 6;
-                        heroVisual.style.transform = p > 0.002 ? `translate3d(${shiftX.toFixed(2)}%, ${shiftY.toFixed(2)}%, 0) scale(${zoom.toFixed(3)})` : '';
-                    }
-                    if (heroCopy && innerWidth >= 901) {
-                        heroCopy.style.transform = p > 0.002 ? `translate3d(0, ${(-p * 36).toFixed(1)}px, 0)` : '';
-                        heroCopy.style.opacity = p > 0.002 ? String(Math.max(0.18, 1 - p * 0.78)) : '';
-                    }
                 }
             });
         }
@@ -1768,13 +1850,26 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         }
 
         const pinOpsVal = $('#pin-ops-val', story);
+        let lastStep = -1;
+        let lastHudText = '';
+        let lastOpsValText = '';
+        let lastZoomEase = -1;
 
         const applyStoryProgress = rawProgress => {
             const progress = THREE.MathUtils.clamp(rawProgress, 0, 1);
             const step = Math.min(3, Math.floor(progress * 4));
-            story.dataset.step = String(step);
-            stage.dataset.pose = String(step);
             story.style.setProperty('--story-progress', progress.toFixed(4));
+
+            if (step !== lastStep) {
+                lastStep = step;
+                story.dataset.step = String(step);
+                stage.dataset.pose = String(step);
+                if (caption) caption.textContent = captions[step];
+                if (stepBadge) stepBadge.textContent = stepBadges[step];
+                articles.forEach((article, index) => {
+                    article.setAttribute('aria-hidden', index === step ? 'false' : 'true');
+                });
+            }
 
             // Smooth zoom-out expansion as user scrolls from Hero right-card into the full-bleed Story theater
             const entryRaw = THREE.MathUtils.clamp(
@@ -1783,30 +1878,35 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 1
             );
             const zoomEase = entryRaw * entryRaw * (3 - 2 * entryRaw);
-            const pose = stageTransforms[step];
-            const curScale = 0.60 + (pose.scale - 0.60) * zoomEase;
-            const curX = 18.0 * (1 - zoomEase) + pose.x * zoomEase;
-            const curY = -3.5 * (1 - zoomEase) + pose.y * zoomEase;
-            const curRadius = 28 * (1 - zoomEase) + pose.radius * zoomEase;
+            if (Math.abs(zoomEase - lastZoomEase) > 0.004 || step !== lastStep) {
+                lastZoomEase = zoomEase;
+                const pose = stageTransforms[step];
+                const curScale = 0.60 + (pose.scale - 0.60) * zoomEase;
+                const curX = 18.0 * (1 - zoomEase) + pose.x * zoomEase;
+                const curY = -3.5 * (1 - zoomEase) + pose.y * zoomEase;
+                const curRadius = 28 * (1 - zoomEase) + pose.radius * zoomEase;
 
-            stage.style.setProperty('--stage-scale', curScale.toFixed(3));
-            stage.style.setProperty('--stage-x', `${curX.toFixed(2)}%`);
-            stage.style.setProperty('--stage-y', `${curY.toFixed(2)}%`);
-            stage.style.setProperty('--stage-radius', `${curRadius.toFixed(1)}px`);
-            story.style.setProperty('--hud-opacity', zoomEase.toFixed(3));
-
-            if (caption) caption.textContent = captions[step];
-            if (camMode) camMode.textContent = getDetailedCamHud(progress);
-            if (stepBadge) stepBadge.textContent = stepBadges[step];
-            if (pinOpsVal) {
-                pinOpsVal.textContent = progress > 0.84
-                    ? 'Control Room · 5 Màn hình Live'
-                    : (progress > 0.68 ? 'Đang mở cửa cổng chính…' : 'Đang nhận luồng gói tin');
+                stage.style.setProperty('--stage-scale', curScale.toFixed(3));
+                stage.style.setProperty('--stage-x', `${curX.toFixed(2)}%`);
+                stage.style.setProperty('--stage-y', `${curY.toFixed(2)}%`);
+                stage.style.setProperty('--stage-radius', `${curRadius.toFixed(1)}px`);
+                story.style.setProperty('--hud-opacity', zoomEase.toFixed(3));
             }
 
-            articles.forEach((article, index) => {
-                article.setAttribute('aria-hidden', index === step ? 'false' : 'true');
-            });
+            const nextHud = getDetailedCamHud(progress);
+            if (camMode && nextHud !== lastHudText) {
+                lastHudText = nextHud;
+                camMode.textContent = nextHud;
+            }
+            if (pinOpsVal) {
+                const nextOpsVal = progress > 0.84
+                    ? 'Control Room · 5 Màn hình Live'
+                    : (progress > 0.68 ? 'Đang mở cửa cổng chính…' : 'Đang nhận luồng gói tin');
+                if (nextOpsVal !== lastOpsValText) {
+                    lastOpsValText = nextOpsVal;
+                    pinOpsVal.textContent = nextOpsVal;
+                }
+            }
 
             controller?.setProgress(progress);
         };
@@ -1822,100 +1922,24 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         addEventListener('scroll', onNativeScroll, { passive: true });
         cleanups.push(() => removeEventListener('scroll', onNativeScroll));
 
-        const trigger = ScrollTrigger.create({
-            trigger: story,
-            start: 'top top',
-            end: 'bottom bottom',
-            onUpdate: self => applyStoryProgress(self.progress)
-        });
-        cleanups.push(() => trigger.kill());
-
         applyStoryProgress(computeScrollProgress());
     }
 
     function setupFinalMotion() {
-        if (reducedMotion.matches) return;
-        gsap.to('.cta-contours span', {
-            rotate: '+=18',
-            scale: 1.08,
-            stagger: .08,
-            ease: 'none',
-            scrollTrigger: { trigger: '.final-cta', start: 'top bottom', end: 'bottom top', scrub: 1 }
-        });
+        // Lightweight static contours — no continuous scroll-scrubbing rotation
     }
 
     function setupPageMotion() {
         if (reducedMotion.matches) return;
         gsap.to('.scroll-progress-fill', { scaleY: 1, ease: 'none', scrollTrigger: { start: 'top top', end: 'max', scrub: .2 } });
-        gsap.to('.hero-grid', { yPercent: -12, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 1 } });
-        gsap.to('.hero-aurora-a', { yPercent: -24, xPercent: 8, ease: 'none', scrollTrigger: { start: 'top top', end: 'max', scrub: 1.2 } });
-        gsap.to('.hero-aurora-b', { yPercent: -14, xPercent: -10, ease: 'none', scrollTrigger: { start: 'top top', end: 'max', scrub: 1.5 } });
     }
 
     function setupCardTilt() {
-        if (reducedMotion.matches || matchMedia('(hover: none)').matches) return;
-        $$('.metric-card').forEach(card => {
-            const shine = $('.card-shine', card);
-            let bounds = null;
-            const onEnter = () => { bounds = card.getBoundingClientRect(); };
-            const onMove = event => {
-                if (!bounds) bounds = card.getBoundingClientRect();
-                const x = (event.clientX - bounds.left) / bounds.width - 0.5;
-                const y = (event.clientY - bounds.top) / bounds.height - 0.5;
-                gsap.to(card, {
-                    rotateX: -y * 12,
-                    rotateY: x * 12,
-                    z: 6,
-                    duration: 0.25,
-                    ease: 'power1.out',
-                    transformPerspective: 800
-                });
-                if (shine) {
-                    const px = Math.round((x + 0.5) * 100);
-                    const py = Math.round((y + 0.5) * 100);
-                    shine.style.background = `radial-gradient(circle at ${px}% ${py}%, rgba(13,148,136,.22) 0%, transparent 60%)`;
-                }
-            };
-            const onLeave = () => {
-                bounds = null;
-                gsap.to(card, { rotateX: 0, rotateY: 0, z: 0, duration: 0.45, ease: 'power2.out' });
-            };
-            card.addEventListener('mouseenter', onEnter);
-            card.addEventListener('mousemove', onMove);
-            card.addEventListener('mouseleave', onLeave);
-            cleanups.push(() => {
-                card.removeEventListener('mouseenter', onEnter);
-                card.removeEventListener('mousemove', onMove);
-                card.removeEventListener('mouseleave', onLeave);
-            });
-        });
+        // Kept lightweight via CSS hover transitions
     }
 
     function setupMagneticButtons() {
-        if (reducedMotion.matches || matchMedia('(hover: none)').matches) return;
-        const targets = $$('.hero-actions .button, .header-cta, .final-cta .button');
-        targets.forEach(btn => {
-            let bounds = null;
-            const onEnter = () => { bounds = btn.getBoundingClientRect(); };
-            const onMove = event => {
-                if (!bounds) bounds = btn.getBoundingClientRect();
-                const dx = (event.clientX - (bounds.left + bounds.width / 2)) * 0.28;
-                const dy = (event.clientY - (bounds.top + bounds.height / 2)) * 0.28;
-                gsap.to(btn, { x: dx, y: dy, scale: 1.04, duration: 0.25, ease: 'power1.out' });
-            };
-            const onLeave = () => {
-                bounds = null;
-                gsap.to(btn, { x: 0, y: 0, scale: 1, duration: 0.65, ease: 'elastic.out(1.1, 0.4)' });
-            };
-            btn.addEventListener('mouseenter', onEnter);
-            btn.addEventListener('mousemove', onMove);
-            btn.addEventListener('mouseleave', onLeave);
-            cleanups.push(() => {
-                btn.removeEventListener('mouseenter', onEnter);
-                btn.removeEventListener('mousemove', onMove);
-                btn.removeEventListener('mouseleave', onLeave);
-            });
-        });
+        // Kept lightweight via CSS hover transitions
     }
 
     function setupPerformanceGuard() {
@@ -1943,7 +1967,7 @@ import { renderLandingTemplate } from './templates/landing-template.js';
                 const fps = Math.round((frames * 1000) / (now - lastTime));
                 frames = 0;
                 lastTime = now;
-                if (fps < 32) {
+                if (fps < 28) {
                     slowCount++;
                     if (slowCount >= 2 && currentQualityTier !== 'lite') {
                         if (toastText) toastText.textContent = 'Thiết bị đang chạy chậm. Bạn có muốn giảm hiệu ứng để mượt hơn?';

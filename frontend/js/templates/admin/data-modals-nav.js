@@ -91,6 +91,10 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
                 <div class="modal-body export-body">
                     <div class="export-layout">
                         <section class="export-panel export-scope-panel">
+                            <div class="export-field">
+                                <label class="form-label" for="export-format">Định dạng trong gói ZIP</label>
+                                <select class="form-select" id="export-format"><option value="csv">CSV (.csv)</option><option value="both">CSV + Excel (.xlsx)</option></select>
+                            </div>
                             <div class="export-section-title"><span class="export-step">01</span><span class="export-section-copy"><strong>Phạm vi dữ liệu</strong><small>Khoanh vùng dữ liệu cần đóng gói</small></span></div>
                             <div class="export-field">
                                 <label class="form-label" for="export-project-select">Dự án</label>

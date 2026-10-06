@@ -369,6 +369,8 @@ class AdminManager {
             this.loadProjects?.();
         } else if (tabId === 'tab-database') {
             window.dbManager?.loadAllData?.();
+        } else if (tabId === 'tab-operations') {
+            this.loadOperations?.();
         } else if (tabId === 'tab-simulations') {
             this.loadSimulationRuns?.();
         } else if (tabId === 'tab-pi') {
@@ -391,6 +393,7 @@ class AdminManager {
             'tab-users': 'MANAGE_USERS',
             'tab-projects': 'VIEW_STATIONS',
             'tab-database': 'MANAGE_DATABASE',
+            'tab-operations': 'MANAGE_DATABASE',
             'tab-simulations': 'MANAGE_SIMULATIONS',
             'tab-pi': 'VIEW_FIELD_DEVICES',
             'tab-rescue': 'MANAGE_RESCUE',
@@ -458,6 +461,7 @@ class AdminManager {
         const initialTab = requested && this.canAccessTab(requested) ? requested : this._safeFallbackTab();
         const initialControl = Array.from(document.querySelectorAll('[data-tab]')).find(el => el.dataset.tab === initialTab) || null;
         this.switchTab(initialTab, initialControl, false, { replace: true, restore: true });
+        if (initialTab === 'tab-operations') this.loadOperations?.();
         if (this.canAccessTab('tab-projects')) this.loadProjects?.();
         if (this.canAccessTab('tab-users')) this.loadUsers?.();
         if (this.hasPermission('VIEW_INCIDENTS')) {

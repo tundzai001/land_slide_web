@@ -51,7 +51,7 @@ const groups = {
   'admin.min.css': [
     'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/configuration.css',
     'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/pi-devices.css',
-    'css/admin/incidents.css', 'css/admin/simulations.css', 'css/admin/premium-light.css'
+    'css/admin/incidents.css', 'css/admin/simulations.css', 'css/admin/premium-light.css', 'css/admin/operations.css'
   ],
   'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js', 'js/incident-store.js'],
   'map-app.min.js': [
@@ -63,13 +63,13 @@ const groups = {
     'js/map/analysis.js', 'js/map/ui-alerts.js', 'js/map/tools.js'
   ],
   'admin-app.min.js': [
-    'js/templates/admin/pi-devices.js', 'js/templates/admin/shell.js',
+    'js/templates/admin/pi-devices.js', 'js/templates/admin/operations.js', 'js/templates/admin/shell.js',
     'js/templates/admin/gnss-project-modals.js',
     'js/templates/admin/station-wizard-shell.js', 'js/templates/admin/station-basic.js',
     'js/templates/admin/station-connectivity.js', 'js/templates/admin/station-alerts.js',
     'js/templates/admin/station-storage.js', 'js/templates/admin/data-modals-nav.js',
     'js/templates/admin-template.js', 'js/toast-notifications.js',
-    'js/admin/core.js', 'js/admin/navigation.js', 'js/admin/projects.js',
+    'js/admin/core.js', 'js/admin/operations.js', 'js/admin/navigation.js', 'js/admin/projects.js',
     'js/admin/project-config.js', 'js/admin/stations.js', 'js/admin/station-wizard.js',
     'js/admin/station-presets.js', 'js/admin/forwarding-controls.js',
     'js/admin/velocity.js', 'js/admin/origin.js', 'js/admin/provisioning.js',

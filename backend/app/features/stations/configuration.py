@@ -73,6 +73,12 @@ async def update_station_config(
             logger.info(f"📋 [CONFIG] After merge, offline_thresholds: {current_config.get('offline_thresholds')}")
 
             station.config = current_config  # Assign NEW dict object
+            from ..operations.forwarding import authorize
+            forwarding = current_config.get('gnss_rtk_forwarding')
+            if isinstance(forwarding, dict):
+                current_config['gnss_rtk_forwarding'] = authorize(
+                    station_id, forwarding, current_user, config_data.get('owner_authorization', '')
+                )
             flag_modified(station, 'config')  # Force SQLAlchemy to detect change
 
         # ✅ SYNC DEVICES từ sensors payload

@@ -1,0 +1,5 @@
+# Optional gateway only; existing MQTT-only installations need no new driver.
+paho-mqtt==2.1.0
+pymodbus==3.11.3
+pyserial==3.5
+asyncua==1.1.8

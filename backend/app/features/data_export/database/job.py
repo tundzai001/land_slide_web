@@ -611,6 +611,10 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
 
         # ZipFile is closed automatically by the context manager, finishing the compression.
 
+        if request.format == 'both':
+            from .formats import add_excel_files
+            EXPORT_TASKS[task_id]["message"] = "Đang tạo Excel từ các dataset CSV..."
+            await asyncio.to_thread(add_excel_files, filepath)
         EXPORT_TASKS[task_id]["status"] = "completed"
         EXPORT_TASKS[task_id]["percent"] = 100
         EXPORT_TASKS[task_id]["message"] = "Hoàn thành!"

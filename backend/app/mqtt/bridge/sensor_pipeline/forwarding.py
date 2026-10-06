@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
+
+from app.features.operations.forwarding import approved
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +17,7 @@ class SensorForwardingMixin:
     ) -> None:
         if sensor_type == 'gnss' and processed_data.get('forwarding_data'):
             fwd_cfg = info.get('forwarding', {})
-            if fwd_cfg.get('enabled') and fwd_cfg.get('rtk_topic'):
+            if approved(station_id, fwd_cfg) and fwd_cfg.get('rtk_topic'):
                 try:
                     target_topic = fwd_cfg['rtk_topic']
                     # Check for external broker config
@@ -24,7 +27,7 @@ class SensorForwardingMixin:
                     fwd_pass = fwd_cfg.get('password')
 
                     # Take the full payload as structured in gnss_processor.py
-                    payload = processed_data['forwarding_data']
+                    payload = copy.deepcopy(processed_data['forwarding_data'])
                     fields_cfg = fwd_cfg.get('fields', {})
 
                     if fields_cfg and 'data' in payload:
