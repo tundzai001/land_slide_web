@@ -277,6 +277,33 @@ def test_ntp_rejects_spoofed_originate_and_unsynchronized_server():
             ntp_probe('test.local')
 
 
+def test_ntp_retries_an_unreachable_pool_peer():
+    class PeerSocket:
+        def __init__(self): self.address = None
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def settimeout(self, value): pass
+        def connect(self, address): self.address = address
+        def send(self, request): self.request = request
+        def recv(self, size):
+            if self.address[0] == '192.0.2.1':
+                raise TimeoutError()
+            packet = bytearray(48)
+            packet[0], packet[1] = 0x24, 2
+            packet[24:32] = packet[32:40] = packet[40:48] = self.request[40:48]
+            return bytes(packet)
+    peers = [(socket.AF_INET, 2, 0, '', (ip, 123)) for ip in ['192.0.2.1', '192.0.2.2']]
+    with patch.object(socket, 'getaddrinfo', return_value=peers), patch.object(socket, 'socket', side_effect=lambda *args: PeerSocket()):
+        assert ntp_probe('pool.test')['stratum'] == 2
+
+
+def test_ntp_timeout_returns_actionable_error():
+    with client() as browser, patch('app.features.operations.router.ntp_probe', side_effect=TimeoutError()):
+        result = browser.post('/api/admin/operations/ntp/check', json={})
+        assert result.status_code == 502
+        assert 'UDP cổng 123' in result.json()['detail']
+
+
 def test_industrial_profile_rejects_invalid_mapping_and_keeps_mqtt_default():
     assert AcquisitionProfile(protocol='mqtt', enabled=True).enabled is False
     with pytest.raises(ValidationError):

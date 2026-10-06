@@ -27,12 +27,11 @@ window.LegacyTemplateParts.operations = String.raw`
     <section class="operations-card" data-ops-view="integration" hidden aria-labelledby="ntp-heading">
       <div class="operations-card-heading"><i class="bi bi-clock-history" aria-hidden="true"></i><div><h5 id="ntp-heading">Kiểm tra thời gian NTP</h5><p>Đo độ lệch đồng hồ máy chủ với nguồn NTP.</p></div></div>
       <form onsubmit="event.preventDefault(); window.adminManager.operationAction(this.querySelector('button'), 'ntp')">
-        <label for="operations-ntp-server">Máy chủ NTP</label><input id="operations-ntp-server" class="form-control" readonly aria-describedby="operations-ntp-source" value="pool.ntp.org">
+        <label for="operations-ntp-server">Máy chủ NTP</label><input id="operations-ntp-server" class="form-control" readonly value="pool.ntp.org">
         <div class="operations-actions"><button class="btn btn-outline-primary">Kiểm tra độ lệch</button></div>
       </form>
-      <p id="operations-ntp-source" class="operations-note">Nguồn kiểm tra được cấu hình bằng NTP_SERVER trong backend/.env. Kết quả đo lưu trong PostgreSQL.</p>
-      <div id="operations-ntp-status" class="operations-note">Chưa kiểm tra.</div>
-      <p class="operations-note">Giờ máy chủ do Windows Time hoặc dịch vụ NTP của hệ điều hành đồng bộ. Kiểm tra tại đây chỉ đo độ lệch, không chỉnh giờ máy chủ.</p>
+      <div id="operations-ntp-status" class="operations-note" role="status" aria-live="polite">Chưa kiểm tra.</div>
+      <p class="operations-note">Phép đo không thay đổi giờ máy chủ.</p>
       <details class="operations-guide"><summary id="operations-system-clock-label">Dịch vụ thời gian hệ điều hành</summary><pre id="operations-system-clock"></pre></details>
     </section>
     <section class="operations-card operations-wide" data-ops-view="logs" hidden aria-labelledby="audit-heading">

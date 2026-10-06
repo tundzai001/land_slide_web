@@ -87,7 +87,7 @@ test('schedule and protocol save show feedback; failures restore controls', asyn
   await expect(page.locator('#operations-feedback')).toContainText('Đã lưu nguồn MQTT');
   await expect(page.getByLabel('Máy chủ NTP')).toHaveAttribute('readonly','');
   await page.getByRole('button',{name:'Kiểm tra độ lệch'}).click();
-  await expect(page.locator('#operations-feedback')).toContainText('NTP unavailable');
+  await expect(page.locator('#operations-ntp-status')).toContainText('NTP unavailable');
   await expect(page.getByRole('button',{name:'Kiểm tra độ lệch'})).toBeEnabled();
   expect(await page.evaluate(() => window.operationCalls.some(call => call.url.endsWith('/ntp') && call.method === 'PUT'))).toBe(false);
 });

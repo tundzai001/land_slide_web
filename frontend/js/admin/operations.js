@@ -124,9 +124,12 @@ class AdminOperationsFeature extends window.AdminManager {
     }
 
     renderOperationNTP(status) {
-        document.getElementById('operations-ntp-status').textContent = status
+        const target = document.getElementById('operations-ntp-status');
+        target.classList.remove('text-danger');
+        target.setAttribute('role', 'status');
+        target.textContent = status
             ? `Đo lúc ${new Date(status.checked_at * 1000).toLocaleString('vi-VN')}: lệch ${Number(status.offset_ms).toFixed(2)} ms · khứ hồi ${Number(status.round_trip_ms).toFixed(2)} ms · stratum ${status.stratum}.`
-            : 'Chưa có phép đo. Chọn “Lưu & kiểm tra” để đo độ lệch.';
+            : 'Chưa có phép đo. Chọn “Kiểm tra độ lệch” để bắt đầu.';
     }
 
     async operationAction(button, action, id) {
@@ -153,7 +156,6 @@ class AdminOperationsFeature extends window.AdminManager {
                 this.operationFeedback('Đã lưu lịch sao lưu.');
             } else if (action === 'ntp') {
                 this.renderOperationNTP(await this.operationJSON('/ntp/check', 'POST', {}));
-                this.operationFeedback('Đã cập nhật phép đo NTP.');
             } else if (action === 'profile') {
                 const device = document.getElementById('operations-device').value;
                 if (!device) throw new Error('Chọn thiết bị MQTT trước khi lưu.');
@@ -166,7 +168,14 @@ class AdminOperationsFeature extends window.AdminManager {
                 if (row) row.acquisition = value;
                 this.operationFeedback(protocol === 'mqtt' ? 'Đã lưu nguồn MQTT hiện có.' : 'Đã lưu. Tải cấu hình và triển khai tại gateway để bắt đầu đọc thiết bị.');
             }
-        } catch (error) { this.operationFeedback(error.message, true); }
+        } catch (error) {
+            if (action === 'ntp') {
+                const target = document.getElementById('operations-ntp-status');
+                target.textContent = error.message;
+                target.classList.add('text-danger');
+                target.setAttribute('role', 'alert');
+            } else this.operationFeedback(error.message, true);
+        }
         finally { button.disabled = false; button.textContent = label; }
     }
 

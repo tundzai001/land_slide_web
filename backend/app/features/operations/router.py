@@ -1,5 +1,6 @@
 """Admin-only operational tools and field gateway configuration."""
 import asyncio
+import socket
 import time
 import uuid
 from pathlib import Path
@@ -149,7 +150,15 @@ async def check_ntp(user=Depends(admin)):
         result = await asyncio.to_thread(ntp_probe, config['server'])
     except Exception as exc:
         await asyncio.to_thread(store.append, 'operation_log', 'ntp.failed', {'error': type(exc).__name__})
-        raise HTTPException(502, 'NTP check failed; verify UDP/123 and the configured server')
+        if isinstance(exc, socket.gaierror):
+            message = 'Không tìm được địa chỉ máy chủ NTP. Kiểm tra tên máy chủ và DNS.'
+        elif isinstance(exc, TimeoutError):
+            message = 'Máy chủ NTP không phản hồi. Quản trị viên cần kiểm tra kết nối UDP cổng 123 hoặc chọn nguồn NTP truy cập được.'
+        elif isinstance(exc, ValueError):
+            message = 'Nguồn NTP trả về dữ liệu không hợp lệ hoặc chưa đồng bộ. Cần kiểm tra nguồn thời gian.'
+        else:
+            message = 'Không kết nối được máy chủ NTP. Cần kiểm tra kết nối mạng của máy chủ.'
+        raise HTTPException(502, message) from exc
     await asyncio.to_thread(store.set_setting, 'ntp_status', result)
     await asyncio.to_thread(store.append, 'operation_log', 'ntp.checked', result)
     return result

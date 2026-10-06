@@ -84,16 +84,25 @@ class AcquisitionProfile(BaseModel):
 def ntp_probe(server):
     """Measure offset only; OS clock discipline is managed by chrony/system NTP."""
     epoch = 2208988800
-    sent = time.time()
-    request = bytearray(48)
-    request[0] = 0x23  # NTP v4, client mode
-    struct.pack_into('!II', request, 40, int(sent) + epoch, int((sent % 1) * 2**32))
-    family, _, _, _, address = socket.getaddrinfo(server, 123, type=socket.SOCK_DGRAM)[0]
-    with socket.socket(family, socket.SOCK_DGRAM) as client:
-        client.settimeout(3)
-        client.connect(address)
-        client.send(request)
-        packet = client.recv(512)
+    # Pools resolve to several peers; one unreachable peer must not fail the check.
+    peers = socket.getaddrinfo(server, 123, type=socket.SOCK_DGRAM)
+    last_error = TimeoutError('No NTP peer responded')
+    for family, _, _, _, address in peers[:4]:
+        sent = time.time()
+        request = bytearray(48)
+        request[0] = 0x23  # NTP v4, client mode
+        struct.pack_into('!II', request, 40, int(sent) + epoch, int((sent % 1) * 2**32))
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as client:
+                client.settimeout(2)
+                client.connect(address)
+                client.send(request)
+                packet = client.recv(512)
+            break
+        except OSError as exc:
+            last_error = exc
+    else:
+        raise last_error
     received = time.time()
     if len(packet) < 48 or packet[0] & 7 != 4 or packet[0] >> 6 == 3 or not 1 <= packet[1] <= 15:
         raise ValueError('NTP server returned an unsynchronized or invalid response')
