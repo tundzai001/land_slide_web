@@ -22,7 +22,6 @@ window.LegacyTemplateParts.operations = String.raw`
       </form></details>
       <p class="operations-note">Phục hồi tạo CSDL riêng để kiểm tra bản sao. Chuyển hệ thống sang bản phục hồi cần quy trình quản trị riêng.</p>
       <div id="operations-job" role="status" aria-live="polite"></div>
-      <div class="operations-backup-info"><strong>Bản sao gồm những gì?</strong><p>Tài khoản và phân quyền, cấu hình trạm/thiết bị, dữ liệu quan trắc và nhật ký. Tệp ZIP chứa auth.dump, config.dump, data.dump và thông tin kiểm tra toàn vẹn.</p><span>Lưu trên máy chủ</span><code id="operations-backup-directory">Đang tải vị trí lưu…</code><p>Chọn “Tải về” ở từng bản sao để lưu thêm trên máy của bạn. Bản sao này không bao gồm mã nguồn, tệp tải lên và cấu hình triển khai.</p></div>
       <div id="operations-backups" class="operations-list">Đang tải bản sao lưu…</div>
     </section>
     <section class="operations-card" data-ops-view="integration" hidden aria-labelledby="ntp-heading">

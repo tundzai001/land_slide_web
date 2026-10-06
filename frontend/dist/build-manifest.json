@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "build": "d0ab22318f4d",
-  "generated_at": "2026-10-06T14:40:43.759Z",
+  "build": "aab24acbbbb6",
+  "generated_at": "2026-10-06T14:56:12.419Z",
   "assets": {
     "admin-app.min.js": {
-      "bytes": 495721,
-      "sha256": "4598d7a319afc402c158ec401b2bb7739eb58f655cec871ad5f3c45750c60adf"
+      "bytes": 494975,
+      "sha256": "2fc1b0efc1bbe2efa89ba95795e432bfcfadac2ab1c27094bec4b271cf0f3c90"
     },
     "admin.min.css": {
-      "bytes": 120958,
-      "sha256": "312bd4c333fd0b2206beb6d45c0de046f2c18d11eaf16cf26342010827d8f931"
+      "bytes": 120523,
+      "sha256": "36b1c0e8ff08a75124aca10df6f06b80b31cbc76155fad1165c1ca52efc3757c"
     },
     "aitogy.png": {
       "bytes": 202093,
@@ -21,11 +21,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 17234,
-      "sha256": "9bfbcb9ae0059904dd95af1358b655e091f6f5955e21c750d1846f7c6b11edc1"
+      "sha256": "66b5fd91e158c88f2a62fbe95e33e83673f3048faa7f275d016369d8a942964e"
     },
     "app.html": {
       "bytes": 993,
-      "sha256": "8239c6b9d2f20c5ef433ba438701e75169b47a5ee264076441c6b8054df9e6cf"
+      "sha256": "7387eb1ab2b713d079029866ac67ddaaed10e00f80e92dded314cc0e0c7981fa"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -33,7 +33,7 @@
     },
     "index.html": {
       "bytes": 4337,
-      "sha256": "947f4d6f7b335587b551fab531daf40f440d488373c97faed641465d049375f4"
+      "sha256": "fa09bf8877c4fe7f5917c7b5c1de53d9804b9a406bd4f4cbd464e015b47ff10d"
     },
     "landing.min.css": {
       "bytes": 31743,
@@ -49,11 +49,11 @@
     },
     "map-app.min.js": {
       "bytes": 433127,
-      "sha256": "a46e4d5d9e62375a961dba5bac350b4030034eeda4a8212ca066c8d3411b7e48"
+      "sha256": "53e5a854529f92801dca6cbf10c63719a9d16897c705adfa8904da8946e48e2d"
     },
     "map.html": {
       "bytes": 2825,
-      "sha256": "0f03dc9690767dd8447d990c6db4cdf411d7f66d511937f7a82ed6690f02485e"
+      "sha256": "9c763ad34d566a26fe4d6fb81e6f0905e0a9669ca86d4cd3c64e2f87507fe655"
     },
     "map.min.css": {
       "bytes": 153164,

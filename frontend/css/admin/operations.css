@@ -106,10 +106,6 @@
 .operations-card[data-ops-view="integration"] .operations-form-row { grid-template-columns:1fr; }
 
 /* Motion confirms navigation and work in progress without moving page layout. */
-.operations-backup-info { padding:16px 18px; margin:18px 0; border:1px solid var(--admin-border); border-radius:12px; background:var(--admin-surface-muted); font-size:13px; line-height:1.65; }
-.operations-backup-info > strong,.operations-backup-info > span,.operations-backup-info > code { display:block; }
-.operations-backup-info > code { overflow-wrap:anywhere; color:var(--admin-primary); margin:4px 0 10px; }
-.operations-backup-info p:last-child { margin-bottom:0; }
 .operations-log-filters { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .operations-nav-item,.operations-card .btn { transition:transform 160ms ease,background-color 160ms ease,border-color 160ms ease,box-shadow 160ms ease; }
 .operations-nav-item:hover { transform:translateY(-2px); box-shadow:0 5px 16px rgb(15 42 46 / 7%); }

@@ -74,7 +74,6 @@ class AdminOperationsFeature extends window.AdminManager {
             if (this._disposed) return;
             this.operationLogOptions = logOptions;
             this.renderOperationLogFilters();
-            document.getElementById('operations-backup-directory').textContent = backup.storage?.directory || 'Chưa đọc được vị trí lưu';
             this.renderOperationBackups(backup.backups);
             document.getElementById('operations-frequency').value = backup.schedule.frequency;
             document.getElementById('operations-retention').value = backup.schedule.retention_count || 30;
