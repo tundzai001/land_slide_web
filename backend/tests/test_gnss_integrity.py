@@ -443,7 +443,10 @@ class GnssFixedOnlyTests(unittest.TestCase):
     def test_stale_adjustment_reference_recovers_only_near_immutable_origin(self):
         for raw_position, should_recover in [(np.array([0.015, 0.005, 0.02]), True), (np.array([0.08, 0.0, 0.0]), False)]:
             with self.subTest(raw_position=raw_position):
-                processor = self._processor_without_db()
+                with patch.object(GNSSVelocityProcessor, '_schedule_load_origin'):
+                    processor = GNSSVelocityProcessor(99, None)
+                processor.origin = {'lat': 21.0, 'lon': 107.0, 'h': 10.0,
+                                    'R': np.eye(3), 'ecef': np.zeros(3)}
                 offset = np.array([0.005, 0.0, 0.01])
                 processor.tracking_offset_enu = offset.copy()
                 processor.history = deque([{'ts': 1_700_000_000.0, 'pos_enu': np.array([0.4, 0.0, 0.5])}], maxlen=1200)
@@ -466,6 +469,11 @@ class GnssFixedOnlyTests(unittest.TestCase):
                     self.assertEqual(results[-1], 'WARMING_UP')
                     np.testing.assert_allclose(processor.history[-1]['pos_enu'], raw_position - offset)
                     self.assertFalse(processor.disp_state_ready)
+                    self.assertFalse(processor._velocity_confirmation_history)
+                    for _ in range(40):
+                        result = processor._handle_processing('$GNGGA,TEST', 4, {})
+                    self.assertEqual(result['type'], 'gnss_processed')
+                    np.testing.assert_allclose(processor.disp_enu_state, raw_position - offset)
                 else:
                     self.assertEqual(results[-1], 'UNVERIFIED_POSITION_SHIFT')
                     self.assertEqual(processor.history[-1]['ts'], 1_700_000_000.0)

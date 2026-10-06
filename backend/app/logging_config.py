@@ -98,5 +98,7 @@ def install_heartbeat_filter() -> None:
     access_logger = logging.getLogger("uvicorn.access")
     if not any(isinstance(item, HeartbeatFilter) for item in access_logger.filters):
         access_logger.addFilter(HeartbeatFilter())
-    if not any(isinstance(item, SensitiveQueryFilter) for item in access_logger.filters):
-        access_logger.addFilter(SensitiveQueryFilter())
+    for logger_name in ("uvicorn.access", "uvicorn.error"):
+        framework_logger = logging.getLogger(logger_name)
+        if not any(isinstance(item, SensitiveQueryFilter) for item in framework_logger.filters):
+            framework_logger.addFilter(SensitiveQueryFilter())

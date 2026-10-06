@@ -443,7 +443,8 @@ class GNSSProcessingMixin:
                         self.history.extend({'ts': c['ts'], 'pos_enu': c['pos_enu'].copy()}
                                             for c in self.reacquire_candidates)
                         self.reacquire_candidates.clear()
-                        self.velocity_history.clear()
+                        self._velocity_confirmation_history.clear()
+                        self.last_significant_motion_ts = 0.0
                         self.v_state_ready = False
                         self.disp_state_ready = False
                         self._consecutive_rejects = 0
