@@ -218,3 +218,9 @@ async def gateway_config(device_id: int = Query(..., ge=1), db=Depends(get_confi
 @router.get('/integration-guide', response_class=PlainTextResponse)
 async def integration_guide(user=Depends(admin)):
     return (Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.md').read_text(encoding='utf-8')
+
+
+@router.get('/integration-guide/download')
+async def download_integration_guide(user=Depends(admin)):
+    path = Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.pdf'
+    return FileResponse(path, filename='huong-dan-van-hanh-tich-hop.pdf', media_type='application/pdf')

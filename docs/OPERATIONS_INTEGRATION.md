@@ -6,6 +6,10 @@ Thiết bị hiện tại tiếp tục gửi dữ liệu lên MQTT. Không cần
 
 Mở **Quản trị → Vận hành** bằng tài khoản Admin. API tương ứng ở `/api/admin/operations`; tài liệu OpenAPI ở `/docs`. Các thao tác cần `Authorization: Bearer <token>`. Operator/viewer không có quyền quản trị các mục này.
 
+## Đọc tài liệu và cấu hình nâng cao
+
+Trong tab Kết nối & thời gian, chọn **Tải hướng dẫn PDF** để đọc hoặc lưu tài liệu. Mục **Cấu hình gateway nâng cao** mặc định thu gọn. Nếu tất cả thiết bị đã gửi dữ liệu qua MQTT thì không cần sử dụng mục này. Lưu một profile ở đây chỉ lưu cấu hình đọc; phải tải JSON và triển khai chương trình bridge lên gateway mới có hiệu lực.
+
 ## Sao lưu nóng
 
 Chạy ứng dụng một worker như cấu hình hiện tại: vòng đời MQTT và các daemon được khởi tạo theo process. Dùng nhiều worker sẽ nhân đôi các daemon này; cần thiết kế leader/lease trước khi scale.
@@ -39,12 +43,12 @@ Nhật ký vận hành ghi trạng thái backup, restore, NTP và vòng đời d
 
 Trang Vận hành đọc máy chủ NTP từ `NTP_SERVER` trong môi trường triển khai, gửi phép đo UDP/123 khi Admin bấm kiểm tra, hiển thị offset, thời gian khứ hồi, stratum và thời điểm kiểm tra. Phản hồi phải khớp originate timestamp, server mode và trạng thái đồng bộ hợp lệ.
 
-API chỉ **đo độ lệch**, không đổi đồng hồ OS. Tải cấu hình chrony và áp dụng bằng công cụ quản trị hệ điều hành của máy chủ/gateway. Kiểm tra trạng thái đồng bộ thực bằng `chronyc tracking` và `chronyc sources -v` trên Linux. Cần cho phép UDP/123 đến máy chủ NTP được chọn. Không coi một phép đo thành công là bằng chứng OS đã đồng bộ.
+API chỉ **đo độ lệch**, không đổi đồng hồ OS. Cấu hình dịch vụ thời gian bằng công cụ quản trị hệ điều hành của máy chủ/gateway. Kiểm tra trạng thái đồng bộ thực bằng `chronyc tracking` và `chronyc sources -v` trên Linux. Cần cho phép UDP/123 đến máy chủ NTP được chọn. Không coi một phép đo thành công là bằng chứng OS đã đồng bộ.
 
 ## Modbus/OPC UA qua gateway MQTT
 
 1. Giữ cấu hình thiết bị và MQTT topic hiện có trong trang trạm.
-2. Chọn thiết bị ở trang Vận hành, chọn giao thức tại hiện trường. Địa chỉ IP/serial/node ID ở đây thuộc gateway, không phải kết nối từ backend tới thiết bị.
+2. Mở Cấu hình gateway nâng cao tại tab Kết nối & thời gian, chọn thiết bị và giao thức tại hiện trường. Địa chỉ IP/serial/node ID ở đây thuộc gateway, không phải kết nối từ backend tới thiết bị.
 3. Cấu hình `points`: tên trường, địa chỉ thanh ghi 0-based hoặc OPC UA node ID, kiểu dữ liệu, thứ tự word/byte, scale và offset. Modbus hỗ trợ đọc holding/input registers, uint16/int16/uint32/int32/float32/float64. Bridge chỉ đọc.
 4. Nước cần `water_level` theo mét; mưa cần `rainfall_mm`; IMU cần đủ `roll`, `pitch`, `yaw` theo độ. GNSS tiếp tục dùng bộ nhận MQTT/NMEA hiện có.
 5. Đặt `enabled: true`, lưu và tải JSON của thiết bị. Việc lưu không tự triển khai lên gateway.

@@ -56,13 +56,13 @@ test('operations page works at desktop and mobile widths', async ({page}) => {
   await expect(page.locator('#operations-logs')).toContainText('Khởi động dịch vụ');
   await expect(page.locator('#operations-logs')).toContainText('Hệ thống');
   expect(await page.evaluate(() => window.operationCalls.at(-1).url)).toContain('kind=operation_log');
-  await page.screenshot({path:'test-results/operations-desktop.png',fullPage:true});
+  await page.screenshot({path:'test-results/operations-desktop.png',fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button',{name:'Sao lưu & phục hồi Bảo vệ dữ liệu quan trắc'}).click();
   await page.locator('.operations-schedule summary').click();
   await expect(page.locator('#operations-frequency')).toHaveCSS('min-height','44px');
-  await page.screenshot({path:'test-results/operations-mobile.png',fullPage:true});
+  await page.screenshot({path:'test-results/operations-mobile.png',fullPage:true,animations:'disabled'});
 });
 
 test('schedule and protocol save show feedback; failures restore controls', async ({page}) => {
@@ -75,7 +75,11 @@ test('schedule and protocol save show feedback; failures restore controls', asyn
   await expect(page.locator('#operations-feedback')).toContainText('Đã lưu lịch');
   const scheduleCall = await page.evaluate(() => window.operationCalls.find(call => call.url.endsWith('/backup-schedule')));
   expect(JSON.parse(scheduleCall.body).retention_count).toBe(12);
-  await page.getByRole('button',{name:'Kết nối & thời gian MQTT, gateway và NTP'}).click();
+  await page.getByRole('button',{name:'Kết nối & thời gian NTP và tài liệu'}).click();
+  await expect(page.getByLabel('Nguồn dữ liệu tại hiện trường')).toBeHidden();
+  await expect(page.getByRole('button', {name:'Tải hướng dẫn PDF'})).toBeVisible();
+  await page.screenshot({path:'test-results/operations-integration.png',fullPage:true,animations:'disabled'});
+  await page.locator('.operations-gateway summary').click();
   await page.getByLabel('Nguồn dữ liệu tại hiện trường').selectOption('modbus_tcp');
   await expect(page.locator('#operations-profile-fields')).toBeVisible();
   await page.getByLabel('Cấu hình đọc và ánh xạ trường dữ liệu (JSON)').fill('{broken');
@@ -96,7 +100,7 @@ test('schedule and protocol save show feedback; failures restore controls', asyn
 
 test('inspectors keep detail readable in dark mode and on narrow screens', async ({page}) => {
   await mount(page);
-  await page.screenshot({path:'test-results/operations-backup.png',fullPage:true});
+  await page.screenshot({path:'test-results/operations-backup.png',fullPage:true,animations:'disabled'});
   for (const width of [375, 768, 1366]) {
     await page.setViewportSize({width,height:900});
     await page.evaluate(() => document.documentElement.dataset.theme='dark');
@@ -106,7 +110,7 @@ test('inspectors keep detail readable in dark mode and on narrow screens', async
     await expect(page.getByText('Trước thay đổi',{exact:true})).toBeVisible();
     await expect(page.getByText('Sau thay đổi',{exact:true})).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({path:`test-results/operations-detail-dark-${width}.png`,fullPage:true});
+    await page.screenshot({path:`test-results/operations-detail-dark-${width}.png`,fullPage:true,animations:'disabled'});
     await page.keyboard.press('Shift+Tab');
     await expect(page.getByRole('button',{name:'Đóng chi tiết',exact:true})).toBeFocused();
     await page.keyboard.press('Escape');

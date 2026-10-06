@@ -365,3 +365,16 @@ def test_relative_backup_directory_is_anchored_to_backend(tmp_path, monkeypatch)
     monkeypatch.setattr(backups, '__file__', str(tmp_path / 'backend/app/features/operations/backups.py'))
     monkeypatch.chdir(tmp_path)
     assert backups.directory() == tmp_path / 'backend/backups'
+
+
+def test_integration_pdf_download_is_admin_only_and_audited():
+    with client('viewer') as browser:
+        assert browser.get('/api/admin/operations/integration-guide/download').status_code == 403
+    with client() as browser:
+        response = browser.get('/api/admin/operations/integration-guide/download')
+        assert response.status_code == 200
+        assert response.headers['content-type'] == 'application/pdf'
+        assert 'attachment;' in response.headers['content-disposition']
+        assert response.content.startswith(b'%PDF-')
+    rows = store.query('audit_log', username='tester', action='GET /api/admin/operations/integration-guide/download')['rows']
+    assert {row['status'] for row in rows} == {200, 403}

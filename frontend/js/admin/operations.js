@@ -408,10 +408,7 @@ class AdminOperationsFeature extends window.AdminManager {
         return this.operationDownload(`/gateway-config?device_id=${encodeURIComponent(id)}`, `gateway-device-${id}.json`);
     }
 
-    async showIntegrationGuide() {
-        try { document.getElementById('operations-guide-content').textContent = await (await this.operationRequest('/integration-guide')).text(); }
-        catch (error) { this.operationFeedback(error.message, true); }
-    }
+
 }
 window.applyAdminFeature(AdminOperationsFeature);
 })();
