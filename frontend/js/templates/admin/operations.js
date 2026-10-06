@@ -13,7 +13,7 @@ window.LegacyTemplateParts.operations = String.raw`
     <section class="operations-card operations-wide" data-ops-view="backup" aria-labelledby="backup-heading">
       <div class="operations-card-heading"><i class="bi bi-database-check" aria-hidden="true"></i><div><h5 id="backup-heading">Sao lưu & phục hồi</h5><p>Thu thập MQTT tiếp tục trong lúc sao lưu.</p></div></div>
       <div class="operations-actions"><button class="btn btn-primary" onclick="window.adminManager.operationAction(this, 'backup')">Tạo bản sao lưu</button><button class="btn btn-outline-secondary" onclick="document.getElementById('operations-upload').click()">Tải bản sao lưu lên</button><input type="file" id="operations-upload" accept=".zip" hidden onchange="window.adminManager.uploadOperationBackup(this)"></div>
-      <div class="operations-backup-overview"><div><span>Bản sao trên máy chủ</span><strong id="operations-backup-count">—</strong></div><div><span>Bản sao gần nhất</span><strong id="operations-backup-latest">Chưa có dữ liệu</strong></div><div><span>Lưu trữ</span><strong>PostgreSQL · 3 database</strong></div></div>
+      <div class="operations-backup-overview"><div><span>Bản sao trên máy chủ</span><strong id="operations-backup-count">—</strong></div><div><span>Bản sao gần nhất</span><strong id="operations-backup-latest">Chưa có dữ liệu</strong></div><div><span>Lưu trữ</span><strong>ZIP · 3 bản sao PostgreSQL</strong></div></div>
       <details class="operations-schedule"><summary><i class="bi bi-calendar2-week" aria-hidden="true"></i>Lịch sao lưu tự động <span id="operations-schedule-label">Đang tải…</span></summary>
       <form class="operations-form-row" onsubmit="event.preventDefault(); window.adminManager.operationAction(this.querySelector('button'), 'schedule')">
         <div><label for="operations-frequency">Lịch tự động</label><select id="operations-frequency" class="form-select"><option value="disabled">Tắt</option><option value="daily">Hằng ngày</option><option value="weekly">Hằng tuần</option></select></div>
@@ -22,6 +22,7 @@ window.LegacyTemplateParts.operations = String.raw`
       </form></details>
       <p class="operations-note">Phục hồi tạo CSDL riêng để kiểm tra bản sao. Chuyển hệ thống sang bản phục hồi cần quy trình quản trị riêng.</p>
       <div id="operations-job" role="status" aria-live="polite"></div>
+      <div class="operations-backup-info"><strong>Bản sao gồm những gì?</strong><p>Tài khoản và phân quyền, cấu hình trạm/thiết bị, dữ liệu quan trắc và nhật ký. Tệp ZIP chứa auth.dump, config.dump, data.dump và thông tin kiểm tra toàn vẹn.</p><span>Lưu trên máy chủ</span><code id="operations-backup-directory">Đang tải vị trí lưu…</code><p>Chọn “Tải về” ở từng bản sao để lưu thêm trên máy của bạn. Bản sao này không bao gồm mã nguồn, tệp tải lên và cấu hình triển khai.</p></div>
       <div id="operations-backups" class="operations-list">Đang tải bản sao lưu…</div>
     </section>
     <section class="operations-card" data-ops-view="integration" hidden aria-labelledby="ntp-heading">
@@ -38,12 +39,14 @@ window.LegacyTemplateParts.operations = String.raw`
       <div class="operations-card-heading"><i class="bi bi-journal-text" aria-hidden="true"></i><div><h5 id="audit-heading">Audit log</h5><p id="operations-log-description">Ghi vết thao tác người dùng: tài khoản, hành động, đối tượng và dữ liệu trước/sau thay đổi.</p></div></div>
       <form class="operations-log-filters" onsubmit="event.preventDefault(); window.adminManager.operationLogOffset=0; window.adminManager.loadOperationLogs()">
         <input type="hidden" id="operations-log-kind" value="audit_log">
-        <div><label for="operations-log-user">Tài khoản</label><input id="operations-log-user" class="form-control" placeholder="Tất cả"></div>
+        <div><label for="operations-log-user">Tài khoản</label><select id="operations-log-user" class="form-select"><option value="">Tất cả tài khoản</option></select></div>
+        <div><label for="operations-log-action">Hành động</label><select id="operations-log-action" class="form-select"><option value="">Tất cả hành động</option></select></div>
+        <div><label for="operations-log-method">HTTP method</label><select id="operations-log-method" class="form-select"><option value="">Tất cả method</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></div>
         <div><label for="operations-log-start">Từ thời điểm</label><input id="operations-log-start" type="datetime-local" class="form-control"></div>
         <div><label for="operations-log-end">Đến thời điểm</label><input id="operations-log-end" type="datetime-local" class="form-control"></div>
         <button class="btn btn-outline-primary">Lọc nhật ký</button>
       </form>
-      <div class="operations-table-wrap"><table class="table"><thead><tr><th>Thời gian</th><th>Tài khoản / Vai trò</th><th>Hành động</th><th>Kết quả</th><th>Chi tiết</th></tr></thead><tbody id="operations-logs"><tr><td colspan="5">Đang tải nhật ký…</td></tr></tbody></table></div>
+      <div class="operations-table-wrap"><table class="table"><thead><tr><th>Thời gian</th><th>Tài khoản / Vai trò</th><th>Hành động</th><th>Method</th><th>Kết quả</th><th>Chi tiết</th></tr></thead><tbody id="operations-logs"><tr><td colspan="6">Đang tải nhật ký…</td></tr></tbody></table></div>
       <div class="operations-pagination"><span id="operations-log-count"></span><button id="operations-log-prev" class="btn btn-outline-secondary" onclick="window.adminManager.operationLogPage(-1)">Trước</button><button id="operations-log-next" class="btn btn-outline-secondary" onclick="window.adminManager.operationLogPage(1)">Sau</button></div>
     </section>
     <section class="operations-card" data-ops-view="integration" hidden aria-labelledby="integration-heading">

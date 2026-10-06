@@ -104,3 +104,28 @@
 .operations-result { color:var(--admin-primary); font-weight:600; white-space:nowrap; }
 .operations-result.is-error { color:var(--admin-danger); }
 .operations-card[data-ops-view="integration"] .operations-form-row { grid-template-columns:1fr; }
+
+/* Motion confirms navigation and work in progress without moving page layout. */
+.operations-backup-info { padding:16px 18px; margin:18px 0; border:1px solid var(--admin-border); border-radius:12px; background:var(--admin-surface-muted); font-size:13px; line-height:1.65; }
+.operations-backup-info > strong,.operations-backup-info > span,.operations-backup-info > code { display:block; }
+.operations-backup-info > code { overflow-wrap:anywhere; color:var(--admin-primary); margin:4px 0 10px; }
+.operations-backup-info p:last-child { margin-bottom:0; }
+.operations-log-filters { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.operations-nav-item,.operations-card .btn { transition:transform 160ms ease,background-color 160ms ease,border-color 160ms ease,box-shadow 160ms ease; }
+.operations-nav-item:hover { transform:translateY(-2px); box-shadow:0 5px 16px rgb(15 42 46 / 7%); }
+.operations-nav-item:active,.operations-card .btn:active { transform:scale(.98); }
+.operations-card[data-ops-view]:not([hidden]) { animation:operations-enter 240ms ease-out; }
+.operations-inspector[open] { animation:operations-drawer-enter 260ms cubic-bezier(.2,.8,.2,1); }
+.operations-inspector[open]::backdrop { animation:operations-fade 220ms ease-out; }
+.operations-table-wrap { position:relative; transition:opacity 160ms ease; }
+.operations-table-wrap[aria-busy="true"] { opacity:.5; }
+.operations-table-wrap[aria-busy="true"]::before { content:''; position:absolute; inset:0 0 auto; height:3px; background:var(--admin-primary); transform-origin:left; animation:operations-progress 900ms ease-in-out infinite alternate; }
+.operations-card .btn[aria-busy="true"]::before { content:''; display:inline-block; width:14px; height:14px; margin-right:8px; vertical-align:-2px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:operations-spin 700ms linear infinite; }
+@keyframes operations-enter { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+@keyframes operations-drawer-enter { from { opacity:.5; transform:translateX(48px); } to { opacity:1; transform:translateX(0); } }
+@keyframes operations-fade { from { opacity:0; } to { opacity:1; } }
+@keyframes operations-progress { from { transform:scaleX(.1); } to { transform:scaleX(1); } }
+@keyframes operations-spin { to { transform:rotate(360deg); } }
+@media(max-width:1100px) { .operations-log-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:767px) { .operations-log-filters { grid-template-columns:1fr; } @keyframes operations-drawer-enter { from { opacity:.5; transform:translateY(48px); } to { opacity:1; transform:translateY(0); } } }
+@media(prefers-reduced-motion:reduce) { .operations-nav-item,.operations-card .btn,.operations-table-wrap { transition:none; } .operations-card[data-ops-view]:not([hidden]),.operations-inspector[open],.operations-inspector[open]::backdrop,.operations-table-wrap::before,.operations-card .btn[aria-busy="true"]::before { animation:none; } .operations-nav-item:hover,.operations-nav-item:active,.operations-card .btn:active { transform:none; } }

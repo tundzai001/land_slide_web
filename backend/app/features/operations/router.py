@@ -13,8 +13,9 @@ from sqlalchemy import select
 
 from ... import auth
 from ...config import settings
-from ...database import get_config_db
+from ...database import get_config_db, get_auth_db
 from ...models.config import Device
+from ...models.auth import User
 from . import backups, store
 from .protocols import AcquisitionProfile, ntp_probe, system_time_status
 
@@ -25,15 +26,25 @@ admin = auth.require_permission(auth.Permission.MANAGE_DATABASE)
 @router.get('/logs')
 async def logs(kind: Literal['audit_log', 'operation_log'] = 'audit_log', offset: int = Query(0, ge=0),
                limit: int = Query(50, ge=1, le=200), action: str = '', username: str = '',
-               start: int = Query(0, ge=0), end: int = Query(0, ge=0), user=Depends(admin)):
-    return await asyncio.to_thread(store.query, kind, offset, limit, action, username, start, end)
+               start: int = Query(0, ge=0), end: int = Query(0, ge=0),
+               method: str = Query('', pattern=r'^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)?$'), user=Depends(admin)):
+    return await asyncio.to_thread(store.query, kind, offset, limit, action, username, start, end, method)
+
+
+@router.get('/log-options')
+async def log_options(user=Depends(admin), db=Depends(get_auth_db)):
+    accounts = (await db.execute(select(User.username, User.full_name, User.is_active).order_by(User.username))).mappings().all()
+    return {'accounts': [dict(row) for row in accounts],
+            'journals': await asyncio.to_thread(store.log_options)}
 
 
 @router.get('/backups')
 async def list_backups(user=Depends(admin)):
     return {'backups': await asyncio.to_thread(backups.list_backups),
             'schedule': await asyncio.to_thread(store.get_setting, 'backup_schedule', {'frequency': 'disabled'}),
-            'recovery_mode': 'isolated'}
+            'recovery_mode': 'isolated',
+            'storage': {'directory': str(backups.directory().resolve()), 'format': 'ZIP',
+                        'files': ['auth.dump', 'config.dump', 'data.dump', 'manifest.json']}}
 
 
 @router.post('/backups')

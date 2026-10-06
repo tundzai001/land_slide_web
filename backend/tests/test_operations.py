@@ -329,3 +329,32 @@ def test_csv_excel_scope_unicode_formula_and_invalid_dates(tmp_path):
         assert workbook.active['B2'].value == '=1+1'
         assert workbook.active['B2'].data_type == 's'
         assert 'station/water.csv' in archive.namelist()
+
+
+def test_log_filters_combine_actor_action_and_http_method():
+    store.append('audit_log', 'POST /api/users', username='admin')
+    store.append('audit_log', 'GET /api/export', username='admin')
+    store.append('audit_log', 'POST /api/users', username='operator')
+    with client() as browser:
+        result = browser.get('/api/admin/operations/logs', params={
+            'kind': 'audit_log', 'username': 'admin', 'action': 'POST /api/users', 'method': 'POST'}).json()
+        assert result['total'] == 1
+        assert result['rows'][0]['username'] == 'admin'
+        assert browser.get('/api/admin/operations/logs', params={'method': 'GET'}).json()['total'] == 1
+        assert browser.get('/api/admin/operations/logs', params={'method': 'INVALID'}).status_code == 422
+    assert store.log_options()['audit_log']['usernames'] == ['admin', 'operator']
+
+
+def test_log_options_returns_current_accounts_and_backup_location():
+    from app.database import get_auth_db
+    from unittest.mock import AsyncMock
+    db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: [
+        {'username': 'new-user', 'full_name': 'New User', 'is_active': True}]))))
+    with client() as browser:
+        browser.app.dependency_overrides[get_auth_db] = lambda: db
+        response = browser.get('/api/admin/operations/log-options')
+        assert response.status_code == 200
+        assert response.json()['accounts'][0]['username'] == 'new-user'
+        backup = browser.get('/api/admin/operations/backups').json()
+        assert backup['storage']['format'] == 'ZIP'
+        assert backup['storage']['directory'] == str(backups.directory().resolve())

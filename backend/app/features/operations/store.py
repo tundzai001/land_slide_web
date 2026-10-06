@@ -87,13 +87,15 @@ def append(table, action, details=None, **fields):
         request_audit.reset(token)
 
 
-def query(table, offset=0, limit=50, action='', username='', start=0, end=0):
+def query(table, offset=0, limit=50, action='', username='', start=0, end=0, method=''):
     model = {'audit_log': AuditLog, 'operation_log': OperationLog}.get(table)
     if model is None:
         raise ValueError('Unknown journal')
     filters = []
     if action:
         filters.append(model.action == action)
+    if method:
+        filters.append(model.action.startswith(method + ' '))
     if username:
         filters.append(model.username == username)
     if start:
@@ -107,6 +109,14 @@ def query(table, offset=0, limit=50, action='', username='', start=0, end=0):
         return {'total': total, 'offset': offset, 'rows': [
             {column.name: getattr(row, column.name) for column in model.__table__.columns}
             for row in rows]}
+
+
+def log_options():
+    with _sessions() as db:
+        return {name: {
+            'actions': list(db.scalars(select(model.action).distinct().order_by(model.action))),
+            'usernames': list(db.scalars(select(model.username).where(model.username.is_not(None)).distinct().order_by(model.username))),
+        } for name, model in [('audit_log', AuditLog), ('operation_log', OperationLog)]}
 
 
 def get_setting(key, default=None):

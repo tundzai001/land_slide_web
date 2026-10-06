@@ -21,6 +21,7 @@ async function mount(page, width = 1366) {
       window.operationCalls.push({url:String(url),method:options.method || 'GET',body:options.body});
       let data;
       if (url.endsWith('/backups')) data = options.method === 'POST' ? {job_id:'abc'} : {backups:[],schedule:{frequency:'disabled'}};
+      else if (url.endsWith('/log-options')) data = {accounts:[{username:'admin',full_name:'Administrator',is_active:true},{username:'new-user',is_active:true}],journals:{audit_log:{actions:['PUT /api/admin/stations/7/config'],usernames:['admin']},operation_log:{actions:['service.starting'],usernames:[]}}};
       else if (url.endsWith('/devices')) data = [{id:7,name:'Trạm nước',device_type:'water',acquisition:{protocol:'mqtt',enabled:false}}];
       else if (url.includes('/logs?') && url.includes('operation_log')) data = {total:1,rows:[{timestamp:1791210000,username:null,role:null,action:'service.starting',status:null,details:{}}]};
       else if (url.includes('/logs?')) data = {total:1,rows:[{timestamp:1791210000,username:'admin',role:'admin',action:'PUT /api/admin/stations/7/config',status:200,details:{changes:[{table:'stations',operation:'update',changes:{name:{old:'<script>bad</script>',new:'new'}}}]}}]};
@@ -111,4 +112,26 @@ test('inspectors keep detail readable in dark mode and on narrow screens', async
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toBeHidden();
   }
+});
+
+
+test('account, action and method filters submit together and motion respects preference', async ({page}) => {
+  await mount(page);
+  await page.getByRole('button',{name:'Audit log Ai đã thay đổi điều gì?'}).click();
+  await expect(page.locator('#operations-log-user option[value="new-user"]')).toHaveCount(1);
+  await page.getByLabel('Tài khoản', {exact:true}).selectOption('admin');
+  await page.getByLabel('Hành động', {exact:true}).selectOption('PUT /api/admin/stations/7/config');
+  await page.getByLabel('HTTP method').selectOption('PUT');
+  await page.getByRole('button',{name:'Lọc nhật ký'}).click();
+  const url = await page.evaluate(() => window.operationCalls.at(-1).url);
+  const params = new URL(url,'http://test').searchParams;
+  expect(params.get('username')).toBe('admin');
+  expect(params.get('action')).toBe('PUT /api/admin/stations/7/config');
+  expect(params.get('method')).toBe('PUT');
+  await expect(page.locator('.operations-card[data-ops-view="logs"]')).toHaveCSS('animation-name','operations-enter');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await expect(page.locator('.operations-card[data-ops-view="logs"]')).toHaveCSS('animation-name','none');
+  await page.getByRole('button',{name:'Nhật ký vận hành Hệ thống đã thực hiện gì?'}).click();
+  await expect(page.getByLabel('HTTP method')).toBeDisabled();
+  await expect(page.getByLabel('Hành động', {exact:true})).toHaveValue('');
 });

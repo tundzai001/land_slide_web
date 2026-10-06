@@ -17,6 +17,7 @@ class AdminOperationsFeature extends window.AdminManager {
             document.getElementById('operations-log-description').textContent = view === 'audit_log'
                 ? 'Ghi vết thao tác người dùng: tài khoản, hành động, đối tượng và dữ liệu trước/sau thay đổi.'
                 : 'Sự kiện hệ thống: khởi động dịch vụ, sao lưu, phục hồi, kiểm tra NTP và lỗi tác vụ.';
+            this.renderOperationLogFilters();
             this.operationLogOffset = 0;
             void this.loadOperationLogs();
         }
@@ -64,12 +65,16 @@ class AdminOperationsFeature extends window.AdminManager {
         if (!this.canAccessTab('tab-operations')) return;
         this.operationFeedback('Đang tải thông tin vận hành…');
         try {
-            const [backup, ntp, devices] = await Promise.all([
+            const [backup, ntp, devices, logOptions] = await Promise.all([
                 this.operationRequest('/backups').then(r => r.json()),
                 this.operationRequest('/ntp').then(r => r.json()),
                 this.operationRequest('/devices').then(r => r.json()),
+                this.operationRequest('/log-options').then(r => r.json()),
             ]);
             if (this._disposed) return;
+            this.operationLogOptions = logOptions;
+            this.renderOperationLogFilters();
+            document.getElementById('operations-backup-directory').textContent = backup.storage?.directory || 'Chưa đọc được vị trí lưu';
             this.renderOperationBackups(backup.backups);
             document.getElementById('operations-frequency').value = backup.schedule.frequency;
             document.getElementById('operations-retention').value = backup.schedule.retention_count || 30;
@@ -136,6 +141,7 @@ class AdminOperationsFeature extends window.AdminManager {
         if (button.disabled) return;
         if (action === 'restore' && !window.confirm('Phục hồi bản sao vào ba CSDL riêng để kiểm tra? Thu thập MQTT tiếp tục trên CSDL hiện tại.')) return;
         button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
         const label = button.textContent;
         button.textContent = 'Đang xử lý…';
         try {
@@ -176,7 +182,7 @@ class AdminOperationsFeature extends window.AdminManager {
                 target.setAttribute('role', 'alert');
             } else this.operationFeedback(error.message, true);
         }
-        finally { button.disabled = false; button.textContent = label; }
+        finally { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = label; }
     }
 
     watchOperationJob(id) {
@@ -230,15 +236,39 @@ class AdminOperationsFeature extends window.AdminManager {
         finally { input.disabled = false; input.value = ''; }
     }
 
+    renderOperationLogFilters() {
+        const kind = document.getElementById('operations-log-kind').value;
+        const options = this.operationLogOptions || {};
+        const journal = options.journals?.[kind] || {};
+        const accounts = new Map((options.accounts || []).map(user => [user.username,
+            `${user.username}${user.full_name ? ' · ' + user.full_name : ''}${user.is_active ? '' : ' · Đã khóa'}`]));
+        for (const username of journal.usernames || []) if (!accounts.has(username)) accounts.set(username, `${username} · Tài khoản cũ`);
+        for (const [field, entries, all] of [
+            ['user', Array.from(accounts), 'Tất cả tài khoản'],
+            ['action', (journal.actions || []).map(action => [action, this.operationEventLabel(action)]), 'Tất cả hành động'],
+        ]) {
+            const select = document.getElementById(`operations-log-${field}`), previous = select.value;
+            select.replaceChildren(new Option(all, ''), ...entries.map(([value, label]) => new Option(label, value)));
+            select.value = entries.some(([value]) => value === previous) ? previous : '';
+        }
+        const method = document.getElementById('operations-log-method');
+        method.disabled = kind !== 'audit_log';
+        if (method.disabled) method.value = '';
+    }
+
     async loadOperationLogs() {
         const request = this.operationLogRequest = (this.operationLogRequest || 0) + 1;
         const offset = this.operationLogOffset || 0;
         const query = new URLSearchParams({ kind: document.getElementById('operations-log-kind').value,
-            offset, limit: 25, username: document.getElementById('operations-log-user').value.trim() });
+            offset, limit: 25, username: document.getElementById('operations-log-user').value,
+            action: document.getElementById('operations-log-action').value,
+            method: document.getElementById('operations-log-method').value });
         for (const field of ['start','end']) {
             const value = document.getElementById(`operations-log-${field}`).value;
             if (value) query.set(field, Math.floor(new Date(value).getTime() / 1000));
         }
+        const table = document.querySelector('.operations-table-wrap');
+        table.setAttribute('aria-busy', 'true');
         try {
             const result = await (await this.operationRequest(`/logs?${query}`)).json();
             if (request !== this.operationLogRequest || this._disposed) return;
@@ -248,11 +278,11 @@ class AdminOperationsFeature extends window.AdminManager {
                 const resultLabel = row.status != null ? `${row.status < 400 ? 'Thành công' : 'Thất bại'} · ${row.status}`
                     : row.action.includes('failed') || row.action.includes('error') ? 'Thất bại' : 'Đã ghi nhận';
                 const actor = row.username || (query.get('kind') === 'audit_log' ? 'Chưa xác định' : 'Hệ thống');
-                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${actor} / ${row.role || '—'}`, this.operationEventLabel(row.action), resultLabel];
-                const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Kết quả'];
+                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${actor} / ${row.role || '—'}`, this.operationEventLabel(row.action), /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /.exec(row.action)?.[1] || '—', resultLabel];
+                const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Method', 'Kết quả'];
                 for (const [index, value] of values.entries()) {
                     const cell = document.createElement('td'); cell.dataset.label = labels[index]; cell.textContent = value; tr.append(cell);
-                    if (index === 3) cell.className = resultLabel.startsWith('Thất bại') ? 'operations-result is-error' : 'operations-result';
+                    if (index === 4) cell.className = resultLabel.startsWith('Thất bại') ? 'operations-result is-error' : 'operations-result';
                 }
                 const cell = document.createElement('td'), details = document.createElement('button');
                 cell.className = 'operations-log-detail';
@@ -261,11 +291,12 @@ class AdminOperationsFeature extends window.AdminManager {
                 details.onclick = () => this.openOperationInspector(row, details, query.get('kind'));
                 cell.append(details); tr.append(cell); body.append(tr);
             }
-            if (!result.rows.length) { const tr = body.insertRow(); const cell = tr.insertCell(); cell.colSpan = 5; cell.textContent = 'Không có nhật ký phù hợp.'; }
+            if (!result.rows.length) { const tr = body.insertRow(); const cell = tr.insertCell(); cell.colSpan = 6; cell.textContent = 'Không có nhật ký phù hợp.'; }
             document.getElementById('operations-log-count').textContent = `${result.total ? offset + 1 : 0}–${offset + result.rows.length} / ${result.total}`;
             document.getElementById('operations-log-prev').disabled = offset === 0;
             document.getElementById('operations-log-next').disabled = offset + 25 >= result.total;
         } catch (error) { this.operationFeedback(error.message, true); }
+        finally { if (request === this.operationLogRequest) table.setAttribute('aria-busy', 'false'); }
     }
 
     operationLogPage(direction) {
@@ -274,6 +305,8 @@ class AdminOperationsFeature extends window.AdminManager {
     }
 
     openOperationInspector(row, trigger, kind) {
+        this.operationInspectorAnimation?.cancel();
+        this.operationInspectorAnimation = null;
         const drawer = document.getElementById('operations-inspector');
         const content = document.getElementById('operations-inspector-content');
         this.operationInspectorTrigger = trigger;
@@ -324,9 +357,19 @@ class AdminOperationsFeature extends window.AdminManager {
         };
     }
 
-    closeOperationInspector() {
+    async closeOperationInspector() {
         const drawer = document.getElementById('operations-inspector');
-        if (!drawer?.classList.contains('open')) return;
+        if (!drawer?.classList.contains('open') || this.operationInspectorAnimation) return;
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            const animation = drawer.animate([{opacity:1, transform:'translate(0)'},
+                {opacity:0, transform:window.matchMedia('(max-width:767px)').matches ? 'translateY(32px)' : 'translateX(32px)'}],
+                {duration:180, easing:'ease-in', fill:'forwards'});
+            this.operationInspectorAnimation = animation;
+            await animation.finished.catch(() => {});
+            if (this.operationInspectorAnimation !== animation) return;
+            this.operationInspectorAnimation = null;
+            animation.cancel();
+        }
         drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); drawer.inert = true;
         drawer.close();
         this.operationInspectorTrigger?.focus();
