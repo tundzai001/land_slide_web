@@ -83,3 +83,9 @@ Chuyển tiếp RTK mặc định tắt. Cấu hình bật cũ chưa được ch
 `NTP_SERVER=pool.ntp.org` được đọc từ `backend/.env` hoặc biến môi trường lúc khởi động. Giao diện hiển thị nguồn này ở chế độ chỉ đọc; sau khi sửa cấu hình cần khởi động lại dịch vụ. Cấu hình `ntp_config` cũ trong PostgreSQL không còn được sử dụng. PostgreSQL chỉ lưu phép đo gần nhất (`ntp_status`) và nhật ký kiểm tra.
 
 Nút “Kiểm tra độ lệch” gửi phép đo NTP tới nguồn đã cấu hình, không thay đổi đồng hồ hệ điều hành. Trên Windows, Windows Time quản lý đồng bộ; kiểm tra bằng `w32tm /query /status` và `w32tm /query /configuration`. Trên Linux, dùng chrony/systemd-timesyncd. Đổi `NTP_SERVER` trong ứng dụng không tự đổi nguồn của dịch vụ thời gian hệ điều hành.
+
+### Môi trường Python riêng trên Windows
+
+Server Landslide dùng môi trường riêng ở `C:\ProgramData\Aitogy\Landslide\venv`, cài từ `backend/requirements.txt`. Không dùng Python packages chung với ứng dụng khác: phiên bản `paho-mqtt` phải là 2.1.0 để hỗ trợ `CallbackAPIVersion.VERSION2`.
+
+Chạy migration bằng `C:\ProgramData\Aitogy\Landslide\venv\Scripts\python.exe -m alembic upgrade head` tại thư mục `backend`. Lệnh khởi động trong `C:\ProgramData\Aitogy\Landslide\run.cmd` dùng đường dẫn Python tuyệt đối; tác vụ `LandslideWebVisible` mở CMD trong phiên desktop Administrator đang đăng nhập. Khi cập nhật dependencies, chạy pip bằng chính Python trong môi trường này.
