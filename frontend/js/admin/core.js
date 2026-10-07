@@ -515,7 +515,7 @@ class AdminManager {
         }
 
         // Setup sensor checkboxes
-        ['gnss', 'rain', 'water', 'imu'].forEach(type => {
+        (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']).forEach(type => {
             const cb = document.getElementById(`edit-${type}`);
             if (cb) {
                 cb.addEventListener('change', (e) => {
@@ -526,7 +526,7 @@ class AdminManager {
                         this.loadAICasterUsers();
                     }
 
-                    const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t =>
+                    const anyChecked = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']).some(t =>
                         document.getElementById(`edit-${t}`)?.checked
                     );
                     const emptyState = document.getElementById('mqtt-empty-state');

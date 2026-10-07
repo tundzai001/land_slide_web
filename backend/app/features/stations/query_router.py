@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.shared.sensor_catalog import SENSOR_CATALOG
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from .common import (
     calculate_station_location,
     is_offline_display_enabled,
 )
+from .history_query import build_sensor_history_query, history_payload
 from .topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_mqtt_topic
 
 router = APIRouter(tags=["Stations"])
@@ -169,6 +171,8 @@ async def create_station_in_project(
         if exist.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Mã trạm đã tồn tại")
 
+        if set(station_data.sensors or {}) - set(SENSOR_CATALOG) or any(not isinstance(info, dict) for info in (station_data.sensors or {}).values()):
+            raise HTTPException(status_code=422, detail='Loại cảm biến hoặc cấu hình cảm biến không hợp lệ')
         requested_topics = [
             normalize_mqtt_topic(info.get("topic"))
             for info in (station_data.sensors or {}).values()
@@ -422,7 +426,7 @@ async def get_station_history(
     if project_filter_ids is not None and station.project_id not in project_filter_ids:
         raise HTTPException(status_code=403, detail="Station not allowed")
 
-    allowed_types = {"gnss", "rain", "water", "imu", "gnss_adjusted"}
+    allowed_types = set(SENSOR_CATALOG) | {"gnss_adjusted"}
     requested_types = {
         value.strip().lower()
         for value in sensor_types.split(",")
@@ -432,86 +436,10 @@ async def get_station_history(
         raise HTTPException(status_code=400, detail="No valid sensor types requested")
 
     cutoff = int(time.time()) - int(hours * 3600)
-    # Spread points across the requested interval instead of returning only
-    # the newest N rows. Keep time edges and value extrema per bucket so short
-    # peaks remain visible on long-range charts.
-    sample_buckets = max(1, min(500, max(1, limit // 4)))
-    bucketed = (
-        select(
-            model_data.SensorData.id.label("id"),
-            model_data.SensorData.sensor_type.label("sensor_type"),
-            model_data.SensorData.timestamp.label("timestamp"),
-            model_data.SensorData.data.label("data"),
-            model_data.SensorData.value_1.label("value_1"),
-            model_data.SensorData.value_2.label("value_2"),
-            model_data.SensorData.value_3.label("value_3"),
-            func.ntile(sample_buckets).over(
-                partition_by=model_data.SensorData.sensor_type,
-                order_by=(model_data.SensorData.timestamp.asc(), model_data.SensorData.id.asc()),
-            ).label("bucket"),
-        )
-        .where(
-            and_(
-                model_data.SensorData.station_id == station_id,
-                model_data.SensorData.sensor_type.in_(sorted(requested_types)),
-                model_data.SensorData.timestamp >= cutoff,
-            )
-        )
-        .subquery()
-    )
-    sampled = (
-        select(
-            bucketed,
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(bucketed.c.timestamp.asc(), bucketed.c.id.asc()),
-            ).label("first_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(bucketed.c.timestamp.desc(), bucketed.c.id.desc()),
-            ).label("last_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(func.coalesce(bucketed.c.value_1, 0.0).asc(), bucketed.c.timestamp.asc()),
-            ).label("value_1_low_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(func.coalesce(bucketed.c.value_1, 0.0).desc(), bucketed.c.timestamp.asc()),
-            ).label("value_1_high_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(func.coalesce(bucketed.c.value_2, 0.0).asc(), bucketed.c.timestamp.asc()),
-            ).label("value_2_low_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(func.coalesce(bucketed.c.value_2, 0.0).desc(), bucketed.c.timestamp.asc()),
-            ).label("value_2_high_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(func.coalesce(bucketed.c.value_3, 0.0).asc(), bucketed.c.timestamp.asc()),
-            ).label("value_3_low_rank"),
-            func.row_number().over(
-                partition_by=(bucketed.c.sensor_type, bucketed.c.bucket),
-                order_by=(func.coalesce(bucketed.c.value_3, 0.0).desc(), bucketed.c.timestamp.asc()),
-            ).label("value_3_high_rank"),
-        )
-        .subquery()
-    )
-    keep_sample = or_(
-        sampled.c.first_rank == 1,
-        sampled.c.last_rank == 1,
-        sampled.c.value_1_low_rank == 1,
-        sampled.c.value_1_high_rank == 1,
-        sampled.c.value_2_low_rank == 1,
-        sampled.c.value_2_high_rank == 1,
-        sampled.c.value_3_low_rank == 1,
-        sampled.c.value_3_high_rank == 1,
-    )
-    history_result = await db_data.execute(
-        select(sampled.c.sensor_type, sampled.c.timestamp, sampled.c.data)
-        .where(keep_sample)
-        .order_by(sampled.c.sensor_type.asc(), sampled.c.timestamp.asc())
-    )
+    dialect = db_data.bind.dialect.name
+    history_result = await db_data.execute(build_sensor_history_query(
+        model_data.SensorData.__table__, station_id, requested_types, cutoff, limit, dialect
+    ))
     sensors = {sensor_type: {"history": []} for sensor_type in requested_types}
     for sensor_type, timestamp, data in history_result.all():
         sensors[str(sensor_type)]["history"].append(
@@ -625,7 +553,8 @@ async def get_station_detail(
             history = []
             if include_history:
                 history_result = await db_data.execute(
-                    select(model_data.SensorData)
+                    select(model_data.SensorData.timestamp,
+                           history_payload(model_data.SensorData.data, db_data.bind.dialect.name).label("data"))
                     .where(
                         and_(
                             model_data.SensorData.station_id == station_id,
@@ -636,7 +565,7 @@ async def get_station_detail(
                     .order_by(desc(model_data.SensorData.timestamp))
                     .limit(500)
                 )
-                history = history_result.scalars().all()
+                history = history_result.all()
                 if sensor_type == 'gnss':
                     history = [
                         h for h in history

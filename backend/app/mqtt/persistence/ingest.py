@@ -9,6 +9,7 @@ import logging
 import time
 from typing import Any
 
+from app.shared.sensor_catalog import MONITORING_TYPES, SENSOR_CATALOG
 from app.config import settings
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import data as model_data
@@ -60,7 +61,15 @@ class SensorIngestPersistenceMixin:
         only used for retry/redelivery dedupe; rows without a stable identity
         remain at-least-once.
         """
+        identity_timestamp = int(timestamp or 0)
+        stable_measurement = None
+        if sensor_type in MONITORING_TYPES and isinstance(processed_data, dict):
+            stable_measurement = processed_data.get('measured_at') or (processed_data.get('waveform') or {}).get('start_at')
         normalized = source_payload
+        if stable_measurement is not None:
+            identity_timestamp = stable_measurement
+            normalized = json.dumps({key:value for key,value in processed_data.items() if key != 'received_at'},
+                                    ensure_ascii=False, sort_keys=True, separators=(',', ':'))
         if not normalized:
             normalized = json.dumps(
                 processed_data if processed_data is not None else {},
@@ -74,7 +83,7 @@ class SensorIngestPersistenceMixin:
                 str(int(device_id or 0)),
                 str(int(station_id or 0)),
                 str(sensor_type or ""),
-                str(int(timestamp or 0)),
+                str(identity_timestamp),
                 normalized,
             ]
         )
@@ -105,19 +114,21 @@ class SensorIngestPersistenceMixin:
             if dialect == "postgresql":
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-                statement = pg_insert(model_data.SensorData.__table__).values(rows)
-                # Spool replay may meet either the ingest identity or an
-                # already persisted adjustment representative.
-                statement = statement.on_conflict_do_nothing()
-                result = await db.execute(statement)
+                # Bound statement parameters and payload size during bursts.
+                inserted = 0
+                for offset in range(0, len(rows), 256):
+                    chunk = rows[offset:offset + 256]
+                    statement = pg_insert(model_data.SensorData.__table__).values(chunk)
+                    statement = statement.on_conflict_do_nothing()
+                    result = await db.execute(statement)
+                    count = getattr(result, 'rowcount', None)
+                    inserted += count if isinstance(count, int) and count >= 0 else len(chunk)
             else:
                 result = await db.execute(model_data.SensorData.__table__.insert(), rows)
             await db.commit()
             rowcount = getattr(result, "rowcount", None)
-            metrics["inserted"] = (
-                int(rowcount)
-                if isinstance(rowcount, int) and rowcount >= 0
-                else len(rows)
+            metrics["inserted"] = inserted if dialect == 'postgresql' else (
+                int(rowcount) if isinstance(rowcount, int) and rowcount >= 0 else len(rows)
             )
             metrics["deduped"] = max(0, len(rows) - metrics["inserted"])
         return metrics
@@ -132,24 +143,31 @@ class SensorIngestPersistenceMixin:
                 batch_ids.add(existing)
                 continue
             new_records.append(record)
-        if new_records:
+        for offset in range(0, len(new_records), 256):
+            chunk = new_records[offset:offset + 256]
             batch_id = hashlib.sha256(
-                f"{time.time_ns()}:{id(sensor_batch)}".encode("ascii")
+                f"{time.time_ns()}:{id(sensor_batch)}:{offset}".encode("ascii")
             ).hexdigest()[:32]
-            for record in new_records:
+            for record in chunk:
                 record["_spool_id"] = batch_id
             payload = [
                 {key: value for key, value in record.items() if not str(key).startswith("_")}
-                for record in new_records
+                for record in chunk
             ]
-            persisted = await spool.append(batch_id, payload, reason)
+            try:
+                persisted = await spool.append(batch_id, payload, reason)
+            except Exception as exc:
+                logger.error('Ingest spool write failed; retaining batch in RAM: %s', type(exc).__name__)
+                persisted = False
             if persisted:
                 batch_ids.add(batch_id)
                 self._ingest_spool_ids = getattr(self, "_ingest_spool_ids", set())
                 self._ingest_spool_ids.add(batch_id)
             else:
-                self._ingest_metrics["spool_rejected"] = self._ingest_metrics.get("spool_rejected", 0) + len(new_records)
-                logger.critical("Ingest spool hard limit reached; retaining %s rows in RAM", len(new_records))
+                for record in chunk:
+                    record.pop('_spool_id', None)
+                self._ingest_metrics["spool_rejected"] = self._ingest_metrics.get("spool_rejected", 0) + len(chunk)
+                logger.critical("Ingest spool unavailable or full; retaining %s rows in RAM", len(chunk))
         return batch_ids
     async def _drain_ingest_spool_loop(self):
         self._ensure_ingest_metrics()
@@ -158,7 +176,7 @@ class SensorIngestPersistenceMixin:
         while True:
             await asyncio.sleep(retry_seconds)
             envelopes = await self._get_ingest_spool().pending(
-                limit=max(1, int(getattr(settings, "INGEST_SPOOL_BATCH_SIZE", 256)))
+                limit=1
             )
             for envelope in envelopes:
                 batch_id = str(envelope.get("batch_id") or "")
@@ -250,13 +268,15 @@ class SensorIngestPersistenceMixin:
             except Exception as e:
                 logger.error(f"❌ Bulk sensor flush error: {e}")
                 # The batch is removed from RAM before the transaction so the
-                # MQTT callback can keep accepting data.  Put it back when the
-                # write fails; otherwise a short DB outage silently loses the
-                # measurements that arrived during that window.
+                # MQTT callback can keep accepting data. Hand failures to disk,
+                # retaining RAM only when that durable handoff is unavailable.
                 self._ingest_metrics["commit_unknown_retries"] += 1
-                await self._spool_failed_sensor_batch(sensor_batch, type(e).__name__)
+                durable_ids = await self._spool_failed_sensor_batch(sensor_batch, type(e).__name__)
                 async with self._buffer_lock:
-                    self._sensor_buffer[0:0] = sensor_batch
+                    # The drain loop owns durable batches. Keep only records
+                    # that could not reach disk; duplicating spool data in RAM
+                    # makes long DB outages exhaust server memory.
+                    self._sensor_buffer[0:0] = [row for row in sensor_batch if row.get('_spool_id') not in durable_ids]
 
         # 2. Batch update Device.last_data_time + Station.last_update / status
         if latest_cache_batch:
@@ -264,19 +284,14 @@ class SensorIngestPersistenceMixin:
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
                 async with DataSessionLocal() as db:
-                    stmt = pg_insert(model_data.LatestSensorCache).values(latest_cache_batch)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["station_id", "sensor_type"],
-                        set_={
-                            "timestamp": stmt.excluded.timestamp,
-                            "data": stmt.excluded.data,
-                        },
-                        where=(
-                            model_data.LatestSensorCache.timestamp
-                            <= stmt.excluded.timestamp
-                        ),
-                    )
-                    await db.execute(stmt)
+                    for offset in range(0, len(latest_cache_batch), 256):
+                        stmt = pg_insert(model_data.LatestSensorCache).values(latest_cache_batch[offset:offset + 256])
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=["station_id", "sensor_type"],
+                            set_={"timestamp": stmt.excluded.timestamp, "data": stmt.excluded.data},
+                            where=(model_data.LatestSensorCache.timestamp <= stmt.excluded.timestamp),
+                        )
+                        await db.execute(stmt)
                     await db.commit()
             except Exception as exc:
                 logger.error("Latest sensor cache bulk UPSERT failed: %s", exc)
@@ -337,6 +352,13 @@ class SensorIngestPersistenceMixin:
             val_3 = processed_data.get('yaw', 0.0) or 0.0
             val_4 = processed_data.get('total_accel', 0.0) or 0.0
             val_5 = processed_data.get('battery', 0.0) or 0.0
+
+        if sensor_type in MONITORING_TYPES:
+            values = (list(processed_data['points'].values()) if sensor_type == 'extensometer' else
+                      [processed_data.get(field) for field in SENSOR_CATALOG[sensor_type]['fields']])
+            if processed_data.get('quality') == 'invalid':
+                values = []  # Keep evidence in JSON, exclude invalid values from numeric summaries.
+            val_1, val_2, val_3, val_4, val_5 = (values + [None] * 5)[:5]
 
         sensor_record = {
             "station_id": station_id,

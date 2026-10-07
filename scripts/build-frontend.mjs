@@ -32,6 +32,7 @@ for (const relativePath of sourceFiles) {
 for (const buildInput of [fileURLToPath(import.meta.url), path.join(projectRoot, 'package-lock.json')]) {
   versionHash.update(await readFile(buildInput));
 }
+versionHash.update(await readFile(path.join(projectRoot, 'backend/app/shared/sensor_catalog.json')));
 const buildVersion = versionHash.digest('hex').slice(0, 12);
 
 const groups = {
@@ -53,7 +54,7 @@ const groups = {
     'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/pi-devices.css',
     'css/admin/incidents.css', 'css/admin/simulations.css', 'css/admin/premium-light.css', 'css/admin/operations.css'
   ],
-  'shared.min.js': ['js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js', 'js/incident-store.js'],
+  'shared.min.js': ['js/sensor-catalog.js', 'js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js', 'js/incident-store.js'],
   'map-app.min.js': [
     'js/templates/map/shell.js', 'js/templates/map/station-panels.js',
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
@@ -95,6 +96,10 @@ async function minify(outputName, files) {
   // Several route-critical selectors are the first rule in their module.
   const separator = loader === 'css' ? '\n' : '\n;\n';
   let source = (await concatenate(files, separator)).replaceAll('__BUILD_VERSION__', buildVersion);
+  if (outputName === 'shared.min.js') {
+    const catalog = JSON.parse(await readFile(path.join(projectRoot, 'backend/app/shared/sensor_catalog.json'), 'utf8'));
+    source = `window.SensorCatalog = ${JSON.stringify(catalog)};\n` + source;
+  }
   const transformed = await esbuild.transform(source, {
     loader,
     target: loader === 'css' ? undefined : 'es2019',

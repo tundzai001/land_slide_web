@@ -7,6 +7,8 @@ import json
 import logging
 from typing import Any
 
+from app.shared.sensor_catalog import MONITORING_TYPES, process_monitoring_payload
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,8 +29,15 @@ class OtherSensorPayloadMixin:
         sensor_type = info["type"]
         processed_data = None
         try:
+            if sensor_type in MONITORING_TYPES and len(raw_payload.encode('utf-8')) > 256 * 1024:
+                logger.warning('Monitoring payload exceeds 256 KiB: station=%s type=%s', station_id, sensor_type)
+                return None
             payload_json = json.loads(raw_payload)
-            if sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
+            if sensor_type in MONITORING_TYPES:
+                processed_data = process_monitoring_payload(sensor_type, payload_json)
+                if processed_data is not None:
+                    processed_data['received_at'] = current_timestamp
+            elif sensor_type == 'rain': processed_data = processor.process(payload_json, current_timestamp)
             elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
             elif sensor_type == 'imu': 
                 processed_data = processor.process(payload_json, station_config)

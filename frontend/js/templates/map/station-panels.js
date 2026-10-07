@@ -33,6 +33,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
 
             <!--REALTIME VIEW -->
             <div id="realtime-view">
+                <div id="monitoring-sensor-values" class="monitoring-values"></div>
                 <!-- COMPACT SENSOR DATA -->
                 <div class="sensor-compact">
                     <!-- GNSS -->
@@ -203,6 +204,13 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                 <span class="charts-point-meta" id="charts-point-meta">Mặc định 24 giờ</span>
             </div>
 
+            ${(window.SensorCatalog || []).filter(sensor => !sensor.legacy && sensor.key !== 'extensometer').map(sensor => sensor.fields.map(field => `
+                <div class="chart-box" id="chart-box-${sensor.key}-${field}">
+                    <div class="chart-title">${sensor.metrics?.find(metric => metric.field === field)?.label || sensor.label} (${sensor.unit})</div>
+                    <div class="chart-canvas-wrap"><canvas id="chart-${sensor.key}-${field}"></canvas></div>
+                </div>`).join('')).join('')}
+            <div id="extensometer-charts"></div>
+            <div id="accelerometer-waveform-charts"></div>
             <!-- GNSS Chart -->
             <div class="chart-box" id="chart-box-gnss">
                 <div class="chart-title"><i class="bi bi-speedometer2"></i><span>Vận tốc GNSS</span></div>

@@ -10,7 +10,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
         <div class="sidebar-brand" role="link" tabindex="0" onclick="window.location.href='/map'" onkeydown="if(event.key==='Enter') window.location.href='/map'"
             title="Về trang bản đồ">
             <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
-            <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
+            <span class="app-brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span>
         </div>
 
         <nav>

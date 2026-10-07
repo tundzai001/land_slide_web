@@ -741,3 +741,19 @@ input[type="number"] {
         min-height: 0;
     }
 }
+
+/* Monitoring catalog: native checkboxes preserve keyboard and multi-selection. */
+.monitoring-picker { border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-bottom: 24px; min-width: 0; }
+.monitoring-picker legend { font-size: 1rem; font-weight: 700; }
+.monitoring-picker p, .monitoring-choice small { color: var(--text-secondary); }
+.monitoring-picker-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.monitoring-picker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 8px; }
+.monitoring-choice { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: background-color 150ms, border-color 150ms; }
+.monitoring-choice[hidden] { display: none; }
+.monitoring-choice small, .monitoring-choice strong { display: block; }
+.monitoring-choice small { font-size: 12px; }
+.monitoring-choice input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent-primary); }
+.monitoring-choice:hover, .monitoring-choice:has(input:checked) { background: var(--bg-tertiary); border-color: var(--accent-primary); }
+.monitoring-choice:focus-within { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+.monitoring-picker-actions button { min-height: 44px; }
+@media (prefers-reduced-motion: reduce) { .monitoring-choice { transition: none; } }

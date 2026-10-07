@@ -43,10 +43,9 @@ class IngestSpool:
     def _ensure_directory(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
 
-    def _read_sync(self) -> list[dict[str, Any]]:
+    def _iter_sync(self):
         if not self.path.exists():
-            return []
-        rows: list[dict[str, Any]] = []
+            return
         with self.path.open("r", encoding="utf-8") as handle:
             for raw in handle:
                 raw = raw.strip()
@@ -60,7 +59,14 @@ class IngestSpool:
                     logger.warning("Ignoring torn ingest spool line")
                     continue
                 if isinstance(value, dict) and value.get("batch_id") and isinstance(value.get("records"), list):
-                    rows.append(value)
+                    yield value
+
+    def _read_sync(self, limit=None) -> list[dict[str, Any]]:
+        rows = []
+        for value in self._iter_sync():
+            rows.append(value)
+            if limit is not None and len(rows) >= limit:
+                break
         return rows
 
     def _append_sync(self, batch_id: str, records: list[dict[str, Any]], reason: str | None) -> bool:
@@ -86,21 +92,22 @@ class IngestSpool:
         if not batch_ids or not self.path.exists():
             return
         with self._file_lock:
-            rows = [row for row in self._read_sync() if str(row.get("batch_id")) not in batch_ids]
-            if rows:
-                self._ensure_directory()
-                tmp = self.path.with_suffix(f".tmp-{uuid.uuid4().hex}")
-                with tmp.open("w", encoding="utf-8", newline="\n") as handle:
-                    for row in rows:
-                        handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
+            self._ensure_directory()
+            tmp = self.path.with_suffix(f".tmp-{uuid.uuid4().hex}")
+            retained = 0
+            with tmp.open("w", encoding="utf-8", newline="\n") as handle:
+                for row in self._iter_sync():
+                    if str(row.get("batch_id")) in batch_ids:
+                        continue
+                    handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    retained += 1
+                handle.flush()
+                os.fsync(handle.fileno())
+            if retained:
                 os.replace(tmp, self.path)
             else:
-                try:
-                    self.path.unlink()
-                except FileNotFoundError:
-                    pass
+                tmp.unlink(missing_ok=True)
+                self.path.unlink(missing_ok=True)
 
     async def append(self, batch_id: str, records: list[dict[str, Any]], reason: str | None = None) -> bool:
         return await asyncio.to_thread(self._append_sync, batch_id, records, reason)
@@ -108,7 +115,7 @@ class IngestSpool:
     async def pending(self, limit: int = 1) -> list[dict[str, Any]]:
         def read() -> list[dict[str, Any]]:
             with self._file_lock:
-                return self._read_sync()[: max(1, int(limit))]
+                return self._read_sync(limit=max(1, int(limit)))
         return await asyncio.to_thread(read)
 
     async def acknowledge(self, *batch_ids: str) -> None:
@@ -117,12 +124,16 @@ class IngestSpool:
     async def stats(self) -> dict[str, Any]:
         def inspect() -> dict[str, Any]:
             with self._file_lock:
-                rows = self._read_sync()
+                batches = records = oldest = 0
+                for row in self._iter_sync():
+                    batches += 1
+                    records += len(row.get("records") or [])
+                    created = int(row.get("created_at") or 0)
+                    oldest = min(oldest, created) if batches > 1 else created
                 size = self.path.stat().st_size if self.path.exists() else 0
-            oldest = min((int(row.get("created_at") or 0) for row in rows), default=0)
             return {
-                "batches": len(rows),
-                "records": sum(len(row.get("records") or []) for row in rows),
+                "batches": batches,
+                "records": records,
                 "bytes": size,
                 "oldest_age_seconds": max(0, int(time.time()) - oldest) if oldest else 0,
                 "path": str(self.path),

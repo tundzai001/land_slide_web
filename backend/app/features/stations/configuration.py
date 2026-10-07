@@ -7,6 +7,7 @@ import logging
 import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.ext.asyncio import AsyncSession
 from ... import auth
 from ...database import get_config_db
@@ -14,6 +15,7 @@ from ...models import auth as model_auth
 from ...models import config as model_config
 from .topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_mqtt_topic
 from .defaults import get_default_station_config
+from app.shared.sensor_catalog import SENSOR_CATALOG
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 logger = logging.getLogger(__name__)
@@ -44,7 +46,6 @@ async def update_station_config(
         # Update config JSON — ⚠️ PHẢI deepcopy để SQLAlchemy detect thay đổi
         if 'config' in config_data:
             import copy
-            from sqlalchemy.orm.attributes import flag_modified
 
             current_config = copy.deepcopy(station.config) if station.config else get_default_station_config()
             new_config = config_data['config']
@@ -84,6 +85,8 @@ async def update_station_config(
         # ✅ SYNC DEVICES từ sensors payload
         if 'sensors' in config_data and isinstance(config_data['sensors'], dict):
             sensors = config_data['sensors']
+            if set(sensors) - set(SENSOR_CATALOG) or any(not isinstance(info, dict) for info in sensors.values()):
+                raise HTTPException(status_code=422, detail='Loại cảm biến hoặc cấu hình cảm biến không hợp lệ')
             requested_topics = [
                 normalize_mqtt_topic(info.get('topic'))
                 for info in sensors.values()
@@ -180,7 +183,7 @@ async def update_station_config(
 
         # ✅ AUTO-COMPUTE station location from average of sensor coordinate origins
         final_config = station.config or {}
-        origin_keys = ['gnss_origin', 'rain_origin', 'water_origin', 'imu_origin']
+        origin_keys = [f'{sensor_type}_origin' for sensor_type in SENSOR_CATALOG]
         lats, lons = [], []
         for key in origin_keys:
             origin = final_config.get(key, {})

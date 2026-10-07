@@ -1,8 +1,8 @@
-# Aitogy Landslide Monitor — Design System
+# Aitogy Monitoring — Design System
 
 ## Product direction
 
-Teal Operations for a public-safety monitoring product: calm, precise and data-first. Aitogy is the masterbrand; Landslide Monitor is the product. “Bản đồ” is a destination, not a brand. Red and amber communicate operational risk only. Aitogy orange is brand-only.
+Teal Operations for a public-safety monitoring product: calm, precise and data-first. Aitogy is the masterbrand; Monitoring is the product name in every header, login screen and footer. Monitoring covers dam, structural, geotechnical and environmental monitoring. “Bản đồ” is a destination, not a brand. Red and amber communicate operational risk only. Aitogy orange is brand-only.
 
 ## Semantic tokens
 

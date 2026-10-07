@@ -62,3 +62,15 @@ main{max-width:var(--max);margin:auto}.eyebrow,.overline{margin:0 0 18px;color:v
 @media(hover:hover){.button-primary,.button-inverse,.button-large{transition:transform .35s cubic-bezier(.22,.68,0,1.1),background .22s,border-color .22s,color .22s,box-shadow .22s}}
 /* ── Quality Tier Toast ── */
 .quality-toast{position:fixed;z-index:50;bottom:24px;right:24px;max-width:340px;padding:16px 20px;background:var(--surface-strong);border:1px solid var(--line);border-radius:var(--radius-md);box-shadow:var(--shadow);font-size:13px;color:var(--ink);transform:translateY(120%);opacity:0;transition:transform .45s cubic-bezier(.22,.68,0,1.1),opacity .35s ease;pointer-events:none}.quality-toast.is-visible{transform:translateY(0);opacity:1;pointer-events:auto}.quality-toast button{min-height:44px;min-width:44px;margin-top:10px;padding:8px 16px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);cursor:pointer;font-size:12px;font-weight:600}.quality-toast button:hover{background:var(--teal-soft)}.quality-toast .toast-dismiss{position:absolute;top:4px;right:4px;width:44px;height:44px;margin:0;padding:0;display:grid;place-items:center;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:18px;border-radius:50%}.quality-toast .toast-dismiss:hover{background:var(--surface)}
+
+/* Monitoring covers the whole facility and its surrounding environment. */
+.monitoring-scopes { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0; padding:0; list-style:none; }
+.monitoring-scopes li { padding:7px 11px; border:1px solid var(--line); border-radius:999px; color:var(--ink); background:var(--surface); font-size:12px; line-height:1.4; }
+@media (max-width:560px) {
+    .brand-product { display:grid; }
+    .brand-product strong { font-size:14px; }
+    .brand-product small { font-size:9px; }
+    .brand { gap:8px; }
+    .brand-plate { width:64px; }
+    .signal-proof { flex-wrap:wrap; justify-content:flex-start; }
+}

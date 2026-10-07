@@ -11,7 +11,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
             <a href="#" class="brand-text" data-map-home>
                 <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
-                <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
+                <span class="app-brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span>
             </a>
 
             <button type="button" id="btn-digital-twin" class="btn btn-sm map-simulation-nav"

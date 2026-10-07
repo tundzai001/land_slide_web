@@ -34,8 +34,12 @@ class SensorPersistenceMixin:
         current_timestamp: int,
     ) -> None:
         save_data_now = False
+        is_waveform = sensor_type == 'accelerometer' and bool(processed_data.get('waveform'))
 
-        if is_dangerous:
+        if is_waveform:
+            # Preserve every waveform chunk, including pre/post-trigger samples.
+            save_data_now = True
+        elif is_dangerous:
             # ✅ ALERT → Lưu ngay lập tức / không quan tâm chu kỳ
             save_data_now = True
             logger.warning(f"⚠️ [FORCED SAVE] Alert detected - saving immediately")

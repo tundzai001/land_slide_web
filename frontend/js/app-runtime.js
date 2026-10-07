@@ -69,28 +69,28 @@
 
     function renderLogin() {
         document.documentElement.dataset.appView = 'login';
-        document.title = 'Đăng nhập · Landslide Monitor';
+        document.title = 'Đăng nhập · Monitoring';
         root.innerHTML = `
         <main class="login-page">
             <section class="login-visual" aria-hidden="true">
                 <div class="login-brand">
                     <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
-                    <span class="app-brand-product"><strong>Landslide</strong><small>Monitor</small></span>
+                    <span class="app-brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span>
                 </div>
                 <div class="login-network">
-                    <div class="login-network-label"><span></span> Hệ thống đang vận hành</div>
+                    <div class="login-network-label"><span></span> Mạng quan trắc đa cảm biến</div>
                     <svg viewBox="0 0 720 420" role="presentation">
                         <path class="login-contour" d="M-30 90C110 8 215 170 356 86s264-38 410 48M-42 156c132-76 252 92 388 5s267-43 418 31M-28 238c135-70 244 83 384 6s272-36 408 35M-18 326c143-60 248 69 388 8s260-30 392 27" />
                         <path class="login-route login-route-a" d="M103 303 245 151 397 272 571 113" />
                         <path class="login-route login-route-b" d="M245 151 522 329 571 113" />
                         <g class="login-node"><circle cx="103" cy="303" r="9"/><circle cx="245" cy="151" r="9"/><circle cx="397" cy="272" r="9"/><circle cx="522" cy="329" r="9"/><circle cx="571" cy="113" r="9"/></g>
                     </svg>
-                    <div class="login-signal-card"><span>Chuyển dịch hiện tại</span><strong>0.13 <small>mm/s</small></strong><em><i class="bi bi-check-circle-fill"></i> Trong ngưỡng an toàn</em></div>
+                    <div class="login-signal-card"><span>Quan trắc công trình</span><strong>Đa cảm biến</strong><em><i class="bi bi-diagram-3"></i> Đập · Công trình · Môi trường</em></div>
                 </div>
                 <div class="login-visual-copy">
                     <div class="login-kicker">Không gian điều hành</div>
                     <h1>Nhìn rõ thay đổi.<br>Phản ứng đúng lúc.</h1>
-                    <p>Mỗi tín hiệu tại công trình được đặt trong đúng bối cảnh để đội ngũ vận hành đưa ra quyết định tự tin hơn.</p>
+                    <p>Quản lý dự án, trạm và cảm biến. Theo dõi dữ liệu quan trắc đập, công trình và môi trường trong cùng một không gian.</p>
                 </div>
             </section>
             <section class="login-panel">
@@ -251,7 +251,7 @@
         document.documentElement.dataset.appView = view;
         if (view === 'admin') root.setAttribute('data-private-content', '');
         else root.removeAttribute('data-private-content');
-        document.title = view === 'map' ? 'Bản đồ realtime · Landslide Monitor' : 'Quản trị · Landslide Monitor';
+        document.title = view === 'map' ? 'Bản đồ realtime · Monitoring' : 'Quản trị · Monitoring';
         await Promise.all((view === 'map' ? mapStyles : adminStyles).concat(sharedStyles).map(loadStyle));
         await loadScript('/assets/shared.min.js?v=__BUILD_VERSION__');
         await loadScript(CDN.bootstrapJs);

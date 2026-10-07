@@ -111,7 +111,7 @@ class AdminOperationsFeature extends window.AdminManager {
             info.append(title, size);
             const download = document.createElement('button');
             download.className = 'btn btn-outline-primary'; download.textContent = 'Tải xuống';
-            download.onclick = () => this.operationDownload(`/backups/${row.id}/download`, `landslide_${row.id}.zip`);
+            download.onclick = () => this.operationDownload(`/backups/${row.id}/download`, `monitoring_${row.id}.zip`);
             const restore = document.createElement('button');
             restore.className = 'btn btn-outline-secondary'; restore.textContent = 'Phục hồi vào CSDL riêng';
             restore.onclick = () => this.operationAction(restore, 'restore', row.id);

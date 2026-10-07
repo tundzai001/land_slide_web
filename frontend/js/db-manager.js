@@ -282,6 +282,7 @@ class DatabaseManager {
                     { value: 'imu', label: 'IMU' },
                     { value: 'rain', label: 'Mưa' },
                     { value: 'water', label: 'Mực nước' },
+                    ...(window.SensorCatalog || []).filter(sensor => !sensor.legacy).map(sensor => ({value: sensor.key, label: sensor.label})),
                 ]),
             ],
             gnss_adjustments: [
@@ -900,6 +901,9 @@ class DatabaseManager {
                 if (document.getElementById('sensor-imu')?.checked) sensorTypes.push('imu');
                 if (document.getElementById('sensor-rain')?.checked) sensorTypes.push('rain');
                 if (document.getElementById('sensor-water')?.checked) sensorTypes.push('water');
+                (window.SensorCatalog || []).filter(sensor => !sensor.legacy).forEach(sensor => {
+                    if (document.getElementById(`sensor-${sensor.key}`)?.checked) sensorTypes.push(sensor.key);
+                });
             }
             
             const payload = {
@@ -1073,7 +1077,7 @@ class DatabaseManager {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = state.filename || `landslide_backup_${Date.now()}.zip`;
+            link.download = state.filename || `monitoring_backup_${Date.now()}.zip`;
             document.body.appendChild(link);
             link.click();
             link.remove();

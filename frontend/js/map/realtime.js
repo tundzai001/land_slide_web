@@ -785,6 +785,9 @@ function updateRealtimeSensorValues(message) {
         currentStationData.sensors ||= {};
         currentStationData.sensors[sensor_type] ||= {};
         currentStationData.sensors[sensor_type].latest = data;
+        if ((window.SensorCatalog || []).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
+            currentStationData.sensors[sensor_type].is_online = true;
+        }
         currentStationData.sensors[sensor_type].latest_timestamp = Number(timestamp || Date.now() / 1000);
     }
 
@@ -803,6 +806,23 @@ function updateRealtimeSensorValues(message) {
         return;
     }
 
+    if ((window.SensorCatalog || []).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
+        renderMonitoringSensors(currentStationData);
+        const spec = window.SensorCatalog.find(sensor => sensor.key === sensor_type);
+        const fields = sensor_type === 'extensometer' ? [...document.querySelectorAll('#extensometer-charts canvas')].map(canvas => canvas.dataset.point) : spec.fields;
+        if (chartsVisible && sensor_type === 'accelerometer') renderAccelerometerWaveform(currentStationData.sensors.accelerometer);
+        if (chartsVisible) fields.forEach((field, index) => {
+            const chart = charts[sensor_type === 'extensometer' ? `chart-extensometer-${index}` : `chart-${sensor_type}-${field}`];
+            if (!chart) return;
+            chart.data.labels.push(new Date(normalizeEpochMs(data.measured_at || timestamp)).toLocaleTimeString('vi-VN'));
+            chart.data.datasets[0].data.push(data.quality === 'invalid' ? null : (sensor_type === 'extensometer' ? data.points?.[field] : data[field]) ?? null);
+            if (chart.data.labels.length > 2000) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update('none');
+        });
+    }
     //console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
 
     if (sensor_type === 'gnss' && data) {

@@ -1,5 +1,5 @@
 // =====================================================
-const CHART_SENSOR_TYPES = Object.freeze(['gnss', 'rain', 'water', 'imu']);
+const CHART_SENSOR_TYPES = Object.freeze(window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
 const CHART_RANGE_OPTIONS = Object.freeze([
     { hours: 24, label: '24 giờ' },
     { hours: 24 * 7, label: '7 ngày' },
@@ -609,7 +609,63 @@ function resetStationSensorCards() {
     clearGnssEvaluationSummary();
 }
 
+function renderMonitoringSensors(data) {
+    const container = document.getElementById('monitoring-sensor-values');
+    if (!container) return;
+    container.replaceChildren();
+    for (const spec of (window.SensorCatalog || []).filter(sensor => !sensor.legacy)) {
+        const sensor = data.sensors?.[spec.key];
+        if (!sensor) continue;
+        const card = document.createElement('section');
+        card.className = 'monitoring-value-card';
+        const title = document.createElement('strong');
+        title.textContent = spec.label;
+        card.append(title);
+        const status = document.createElement('small');
+        status.textContent = !sensor.latest ? 'Chưa có dữ liệu' : sensor.is_online && data.mqtt_connected !== false ? 'Đang nhận dữ liệu' : 'Dữ liệu cuối · mất kết nối';
+        card.append(status);
+        const quality = document.createElement('small');
+        quality.textContent = ({valid:'Chất lượng: hợp lệ', suspect:'Chất lượng: cần kiểm tra', invalid:'Chất lượng: không hợp lệ'})[sensor.latest?.quality] || 'Chất lượng: chưa xác định';
+        card.append(quality);
+        const metrics = spec.key === 'extensometer'
+            ? Object.keys(sensor.latest?.points || {}).map(field => ({field, label: `Điểm ${field}`, unit: spec.unit, decimals:3}))
+            : (spec.metrics || spec.fields.map(field => ({field, label: field.toUpperCase(), unit: spec.unit, decimals:4})));
+        const optional = (spec.optional_metrics || []).filter(metric => sensor.latest?.[metric.field] !== undefined);
+        for (const metric of [...metrics, ...optional]) {
+            const field = metric.field;
+            const row = document.createElement('div');
+            const value = spec.key === 'extensometer' ? sensor.latest.points[field] : sensor.latest?.[field];
+            const actualValue = optional.includes(metric) ? sensor.latest?.[field] : value;
+            const numeric = sensor.latest?.quality !== 'invalid' && typeof actualValue === 'number' && Number.isFinite(actualValue);
+            row.textContent = `${metric.label}: ${numeric ? actualValue.toLocaleString('vi-VN', {maximumFractionDigits: metric.decimals}) : '—'} ${metric.unit}`;
+            card.append(row);
+        }
+        for (const text of [spec.note, sensor.latest?.location_label, sensor.latest?.axis_convention,
+            sensor.latest?.reference_id && `Mốc: ${sensor.latest.reference_id}`,
+            sensor.latest?.serial_number && `Thiết bị: ${sensor.latest.serial_number}`,
+            sensor.latest?.calibration_id && `Hiệu chuẩn: ${sensor.latest.calibration_id}`,
+            sensor.latest?.event_id && `Sự kiện: ${sensor.latest.event_id}`]) {
+            if (!text) continue;
+            const detail = document.createElement('small');
+            detail.textContent = text;
+            card.append(detail);
+        }
+        if (sensor.latest?.measured_at) {
+            const measured = document.createElement('small');
+            measured.textContent = `Đo: ${new Date(sensor.latest.measured_at * 1000).toLocaleString('vi-VN')}`;
+            card.append(measured);
+        }
+        if (sensor.latest_timestamp) {
+            const timestamp = document.createElement('small');
+            timestamp.textContent = `Nhận: ${new Date(sensor.latest_timestamp * 1000).toLocaleString('vi-VN')}`;
+            card.append(timestamp);
+        }
+        container.append(card);
+    }
+}
+
 function updateSidebarUI(data) {
+    renderMonitoringSensors(data);
     clearGnssEvaluationSummary();
     updateChartsAvailability(data);
     setText('st-name', data.name);
@@ -862,11 +918,46 @@ function updateSidebarUI(data) {
 }
 
 function destroyStationCharts() {
-    ['chart-gnss', 'chart-rain', 'chart-water', 'chart-imu'].forEach(id => {
+    [...Object.keys(charts).filter(id => id.startsWith('chart-extensometer-') || id.startsWith('chart-waveform-')), 'chart-gnss', 'chart-rain', 'chart-water', 'chart-imu', ...(window.SensorCatalog || []).filter(sensor => !sensor.legacy).flatMap(sensor => sensor.fields.map(field => `chart-${sensor.key}-${field}`))].forEach(id => {
         if (!charts[id]) return;
         charts[id].destroy();
         delete charts[id];
     });
+}
+
+function renderAccelerometerWaveform(sensor) {
+    const container = document.getElementById('accelerometer-waveform-charts');
+    if (!container) return;
+    Object.keys(charts).filter(id => id.startsWith('chart-waveform-')).forEach(id => {
+        charts[id].destroy(); delete charts[id];
+    });
+    container.replaceChildren();
+    const latest = sensor?.latest;
+    const wave = latest?.waveform;
+    if (!wave || latest.quality === 'invalid') return;
+    for (const axis of ['x', 'y', 'z']) {
+        const values = wave[axis];
+        if (!Array.isArray(values) || !values.length || !(wave.sample_rate_hz > 0)) continue;
+        const box = document.createElement('div');
+        box.className = 'chart-box';
+        const title = document.createElement('div');
+        title.className = 'chart-title';
+        title.textContent = `Dạng sóng ${axis.toUpperCase()} · ${wave.sample_rate_hz} Hz${latest.event_id ? ` · ${latest.event_id}` : ''}`;
+        const summary = document.createElement('small');
+        summary.textContent = `${values.length} mẫu · ${(values.length / wave.sample_rate_hz).toLocaleString('vi-VN')} s · Đỉnh |a|: ${Math.max(...values.map(Math.abs)).toLocaleString('vi-VN', {maximumFractionDigits:3})} m/s² · Bắt đầu: ${new Date(wave.start_at * 1000).toLocaleString('vi-VN')}`;
+        const wrap = document.createElement('div');
+        wrap.className = 'chart-canvas-wrap';
+        const canvas = document.createElement('canvas');
+        canvas.id = `chart-waveform-${axis}`;
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', `${title.textContent}. ${summary.textContent}`);
+        wrap.append(canvas); box.append(title, summary, wrap); container.append(box);
+        charts[canvas.id] = new Chart(canvas, {
+            type:'line',
+            data:{datasets:[{label:`Gia tốc ${axis.toUpperCase()} (m/s²)`, data:values.map((value, index) => ({x:index * 1000 / wave.sample_rate_hz,y:value})), borderColor:'#0f766e', borderWidth:1.5, pointRadius:0}]},
+            options:{animation:false, responsive:true, maintainAspectRatio:false, scales:{x:{type:'linear', title:{display:true,text:'Thời gian trong gói (ms)'}},y:{title:{display:true,text:'m/s²'}}}}
+        });
+    }
 }
 
 function renderCharts(data) {
@@ -874,6 +965,7 @@ function renderCharts(data) {
 
     updateChartsAvailability(data);
     updateChartRangeControls();
+    renderAccelerometerWaveform(data.sensors.accelerometer);
 
     console.log('📊 [CHARTS] Rendering charts for station devices...');
 
@@ -916,6 +1008,41 @@ function renderCharts(data) {
         renderImuChart(data.sensors.imu.history || []);
     }
 
+    for (const spec of (window.SensorCatalog || []).filter(sensor => !sensor.legacy && sensor.key !== 'extensometer')) {
+        for (const field of spec.fields) {
+            const boxId = `chart-box-${spec.key}-${field}`;
+            allChartIds.push(boxId);
+            if (data.sensors[spec.key]) {
+                activeChartBoxIds.push(boxId);
+                const metric = spec.metrics?.find(metric => metric.field === field);
+                const history = (data.sensors[spec.key].history || []).map(row => ({timestamp: row.data?.measured_at || row.timestamp, data: row.data?.quality === 'invalid' ? {} : row.data}));
+                renderChart(`chart-${spec.key}-${field}`, history, field, '#0f766e', `${metric?.label || spec.label} (${spec.unit})`);
+            }
+        }
+    }
+    const extensometerContainer = document.getElementById('extensometer-charts');
+    if (extensometerContainer) {
+        Object.keys(charts).filter(id => id.startsWith('chart-extensometer-')).forEach(id => { charts[id].destroy(); delete charts[id]; });
+        extensometerContainer.replaceChildren();
+        const sensor = data.sensors.extensometer;
+        const history = sensor?.history || [];
+        const points = [...new Set([...Object.keys(sensor?.latest?.points || {}), ...history.flatMap(row => Object.keys(row.data?.points || {}))])];
+        points.forEach((point, index) => {
+            const box = document.createElement('div');
+            box.className = 'chart-box';
+            const title = document.createElement('div');
+            title.className = 'chart-title';
+            title.textContent = `Giãn kế · ${point} (mm)`;
+            const wrap = document.createElement('div');
+            wrap.className = 'chart-canvas-wrap';
+            const canvas = document.createElement('canvas');
+            canvas.id = `chart-extensometer-${index}`;
+            canvas.dataset.point = point;
+            wrap.append(canvas); box.append(title, wrap); extensometerContainer.append(box);
+            activeChartBoxIds.push(canvas.id);
+            renderChart(canvas.id, history.map(row => ({timestamp: row.data?.measured_at || row.timestamp, data: {value: row.data?.quality === 'invalid' ? null : row.data?.points?.[point]}})), 'value', '#0f766e', `${point} (mm)`);
+        });
+    }
     const pointMeta = document.getElementById('charts-point-meta');
     if (pointMeta) {
         const totalPoints = CHART_SENSOR_TYPES.reduce(

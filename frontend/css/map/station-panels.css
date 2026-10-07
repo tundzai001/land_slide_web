@@ -675,3 +675,10 @@ body.map-is-moving .detail-sidebar,
         box-shadow: 0 4px 24px rgba(220, 38, 38, 0.7), 0 0 40px rgba(220, 38, 38, 0.3);
     }
 }
+
+.monitoring-values { display: grid; gap: 8px; margin-bottom: 12px; }
+.monitoring-values:empty { display: none; }
+.monitoring-value-card { min-width: 0; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); color: var(--text-primary); }
+.monitoring-value-card strong, .monitoring-value-card small { display: block; }
+.monitoring-value-card small { color: var(--text-secondary); font-size: 12px; margin: 4px 0; }
+.monitoring-value-card div { font-size: 20px; font-variant-numeric: tabular-nums; }

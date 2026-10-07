@@ -91,13 +91,14 @@ async def _load_station_runtime_maps(
         active_keys.add((int(device.station_id), str(device.device_type)))
 
     cache_result = await db_data.execute(
-        select(model_data.LatestSensorCache).where(
+        select(model_data.LatestSensorCache.station_id, model_data.LatestSensorCache.sensor_type,
+               model_data.LatestSensorCache.timestamp).where(
             model_data.LatestSensorCache.station_id.in_(station_ids)
         )
     )
     latest_by_key = {
         (int(row.station_id), str(row.sensor_type)): int(row.timestamp or 0)
-        for row in cache_result.scalars().all()
+        for row in cache_result.all()
     }
 
     # A cache miss is expected only during migration/recovery. Resolve every

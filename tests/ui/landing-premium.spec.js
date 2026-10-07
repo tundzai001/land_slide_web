@@ -7,10 +7,14 @@ const landingTemplateSource = readFileSync(join(__dirname, '..', '..', 'frontend
 const landingCss = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landing.min.css'));
 const landingJs = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landing.min.js'));
 
+test.beforeEach(async ({page}) => {
+  await page.route('**/assets/aitogy.png*', route => route.fulfill({contentType:'image/png',body:readFileSync(join(__dirname, '../..', 'frontend/assets/aitogy.png'))}));
+});
+
 test('index is semantic and progressively enhanced without React', async () => {
   expect(indexSource).toContain('<div id="landing-root"></div>');
   expect(indexSource).toContain('rel="canonical"');
-  expect(indexSource).toContain('Quan trắc sạt lở đất realtime');
+  expect(indexSource).toContain('Quan trắc công trình, đập và môi trường');
   expect(indexSource).toContain('"@type":"WebPage"');
   expect(indexSource).toContain('og:image:alt');
   expect(indexSource).toContain('rel="icon"');
@@ -18,7 +22,7 @@ test('index is semantic and progressively enhanced without React', async () => {
   expect(indexSource).not.toContain('ReactDOM');
   expect(landingTemplateSource).toContain('<main id="main">');
   expect(landingTemplateSource).toContain('<section class="hero"');
-  expect(landingTemplateSource).toContain('Nhìn thấy chuyển động');
+  expect(landingTemplateSource).toContain('Toàn cảnh quan trắc');
   expect(landingTemplateSource).toContain('<address class="footer-contact"');
   expect(landingTemplateSource).toContain('aitogyaitogy@gmail.com');
   expect(landingCss.toString()).toContain('.story-enhanced .story-stage');
@@ -58,7 +62,7 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     }));
     await page.goto('/');
     await expect(page.locator('#main')).not.toBeEmpty();
-    await expect(page.locator('h1')).toContainText('Nhìn thấy chuyển động');
+    await expect(page.locator('h1')).toContainText('Toàn cảnh quan trắc');
     await expect(page.locator('#stations-total')).toHaveText('59');
 
     const contract = await page.evaluate(() => ({

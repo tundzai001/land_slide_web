@@ -11,6 +11,10 @@ const loginCss = readFileSync(join(root, 'frontend/css/login.css'), 'utf8');
 async function openLogin(page) {
   await page.route('https://app.test/**', async route => {
     const url = new URL(route.request().url());
+    if (url.pathname === '/assets/aitogy.png') {
+      await route.fulfill({status:200, contentType:'image/png', body:readFileSync(join(root, 'frontend/assets/aitogy.png'))});
+      return;
+    }
     if (url.pathname === '/assets/login.min.css') {
       await route.fulfill({ status: 200, contentType: 'text/css', body: loginCss });
       return;
@@ -27,6 +31,7 @@ async function openLogin(page) {
   await page.addScriptTag({ content: sessionSource });
   await page.addScriptTag({ content: runtimeSource });
   await expect(page.locator('.login-card')).toBeVisible();
+  await expect(page.locator('.login-brand .app-brand-product strong')).toHaveText('Monitoring');
 }
 
 test('production login keeps controls proportioned and responsive', async ({ page }) => {

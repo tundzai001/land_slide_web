@@ -576,3 +576,21 @@ html[data-theme="dark"] .map-status-legend {
 .status-dot.is-safe { background: var(--accent-success); border-radius: 50%; }
 .status-dot.is-warning { background: var(--accent-warning); border-radius: 3px; transform: rotate(45deg); }
 .status-dot.is-critical { background: var(--accent-danger); clip-path: polygon(50% 0,100% 100%,0 100%); border-radius: 0; }
+
+
+/* Keep the product name visible in compact map navigation. */
+@media (max-width:900px) {
+    .top-navbar .brand-text .app-brand-product { display:grid; }
+    .top-navbar .brand-text .app-brand-plate { width:36px; }
+    .top-navbar .brand-text .app-brand-product strong { font-size:.78rem; }
+    .top-navbar .brand-text .app-brand-product small { font-size:.56rem; letter-spacing:.08em; }
+    .top-navbar .brand-text { max-width:140px; padding:0 !important; gap:7px !important; }
+}
+@media (max-width:560px) {
+    .top-navbar .layer-toggle-switch { display:none !important; }
+}
+@media (max-width:380px) {
+    .top-navbar .brand-text .app-brand-plate { width:30px; }
+    .top-navbar .brand-text .app-brand-product strong { font-size:.72rem; }
+    .top-navbar .brand-text { max-width:118px; }
+}

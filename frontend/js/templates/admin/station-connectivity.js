@@ -16,33 +16,44 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                 Kiểm tra tọa độ
                             </div>
 
-                            <h6 class="mb-3">1. Chọn thiết bị cần kích hoạt:</h6>
-                            <div class="station-sensor-picker mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="edit-gnss">
-                                    <label class="form-check-label" for="edit-gnss"><i
-                                            class="bi bi-geo-alt-fill text-danger me-1"></i>
-                                        GNSS</label>
+                            <fieldset class="monitoring-picker">
+                                <legend>Chọn cảm biến quan trắc</legend>
+                                <p>Chọn nhiều loại cho cùng một trạm. Mỗi loại có kết nối riêng.</p>
+                                <label for="sensor-catalog-search">Tìm cảm biến</label>
+                                <input id="sensor-catalog-search" type="search" class="form-control" placeholder="Tên cảm biến hoặc nhóm quan trắc" oninput="window.filterSensorCatalog(this.value)">
+                                <div class="monitoring-picker-actions">
+                                    <button type="button" class="btn btn-outline-primary" onclick="window.selectSensorGroup('Thân đập')">Chọn nhóm thân đập</button>
+                                    <button type="button" class="btn btn-outline-primary" onclick="window.selectSensorGroup('Thấm & nền đập')">Chọn nhóm thấm</button>
                                 </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="edit-rain">
-                                    <label class="form-check-label" for="edit-rain"><i
-                                            class="bi bi-cloud-rain-fill me-1"
-                                            style="color: var(--accent-primary);"></i> Rain</label>
+                                <div class="monitoring-picker-grid">
+                                ${(window.SensorCatalog || [{key:'gnss',label:'GNSS'}, {key:'rain',label:'Lượng mưa'}, {key:'water',label:'Mực nước'}, {key:'imu',label:'IMU'}]).map(sensor => `
+                                    <label class="monitoring-choice" data-sensor-choice>
+                                        <input type="checkbox" id="edit-${sensor.key}">
+                                        <span><strong>${sensor.label}</strong><small>${sensor.group || ''}</small></span>
+                                    </label>`).join('')}
                                 </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="edit-water">
-                                    <label class="form-check-label" for="edit-water"><i class="bi bi-water me-1"
-                                            style="color: var(--accent-info);"></i> Water</label>
-                                </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="edit-imu">
-                                    <label class="form-check-label" for="edit-imu"><i class="bi bi-compass-fill me-1"
-                                            style="color: var(--accent-warning);"></i> IMU</label>
-                                </div>
-                            </div>
+                            </fieldset>
 
                             <h6 class="mb-3">2. Cấu hình MQTT & Tọa độ theo cảm biến:</h6>
+
+                            ${(window.SensorCatalog || []).filter(sensor => !sensor.legacy).map(sensor => `
+                            <section id="mqtt-${sensor.key}-section" class="sensor-config-section" style="display:none">
+                                <div class="sensor-config-header">${sensor.label} · ${sensor.unit}</div>
+                                <div class="sensor-config-body">
+                                    <label class="form-label" for="topic-${sensor.key}">MQTT Topic</label>
+                                    <input class="form-control" id="topic-${sensor.key}" placeholder="station/ST01/${sensor.key}">
+                                    <div class="row g-2 mt-2">
+                                        <div class="col-md-8"><label for="cfg-${sensor.key}-mqtt-host">MQTT Broker</label><input class="form-control" id="cfg-${sensor.key}-mqtt-host" placeholder="Dùng broker mặc định"></div>
+                                        <div class="col-md-4"><label for="cfg-${sensor.key}-mqtt-port">Port</label><input type="number" min="1" max="65535" class="form-control" id="cfg-${sensor.key}-mqtt-port" placeholder="1883"></div>
+                                        <div class="col-md-6"><label for="cfg-${sensor.key}-mqtt-user">Tài khoản</label><input class="form-control" id="cfg-${sensor.key}-mqtt-user" autocomplete="off"></div>
+                                        <div class="col-md-6"><label for="cfg-${sensor.key}-mqtt-pass">Mật khẩu</label><input type="password" class="form-control" id="cfg-${sensor.key}-mqtt-pass" autocomplete="new-password"></div>
+                                    </div>
+                                    <label class="monitoring-choice"><input type="checkbox" id="cfg-${sensor.key}-mqtt-tls"> Mã hóa TLS</label>
+                                    <div class="row g-2 mt-2">
+                                        ${[['lat','Vĩ độ',-90,90],['lon','Kinh độ',-180,180],['h','Cao độ (m)',-1000,10000]].map(([axis,label,min,max]) => `<div class="col-md-4"><label for="origin-${sensor.key}-${axis}">${label}</label><input class="form-control" type="number" step="any" min="${min}" max="${max}" id="origin-${sensor.key}-${axis}"></div>`).join('')}
+                                    </div>
+                                </div>
+                            </section>`).join('')}
 
                             <div id="mqtt-gnss-section" class="sensor-config-section" style="display: none;">
                                 <div class="sensor-config-header">

@@ -5,7 +5,7 @@ class AdminStationWizardFeature extends window.AdminManager {
     // =========================================================================
 
     bindMqttTopicValidation() {
-        ['gnss', 'rain', 'water', 'imu'].forEach(type => {
+        (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']).forEach(type => {
             const input = document.getElementById(`topic-${type}`);
             if (!input || input.dataset.topicValidationBound === 'true') return;
             input.dataset.topicValidationBound = 'true';
@@ -20,7 +20,7 @@ class AdminStationWizardFeature extends window.AdminManager {
     }
 
     getActiveMqttTopicInputs() {
-        return ['gnss', 'rain', 'water', 'imu']
+        return (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu'])
             .filter(type => document.getElementById(`edit-${type}`)?.checked)
             .map(type => document.getElementById(`topic-${type}`))
             .filter(Boolean);
@@ -145,7 +145,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         this.updateOriginActionButtons(false);
 
         // Reset sub-sensor coordinates
-        ['rain', 'water', 'imu'].forEach(s => {
+        (window.sensorTypes?.() || ['rain', 'water', 'imu']).filter(type => type !== 'gnss').forEach(s => {
             const lat = document.getElementById(`origin-${s}-lat`);
             const lon = document.getElementById(`origin-${s}-lon`);
             const h = document.getElementById(`origin-${s}-h`);
@@ -162,7 +162,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (processingStorageEl) processingStorageEl.checked = true;
         document.getElementById('modal-title').textContent = 'Thêm Trạm Mới';
 
-        ['gnss', 'rain', 'water', 'imu'].forEach(sensor => {
+        (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']).forEach(sensor => {
             const checkbox = document.getElementById(`edit-${sensor}`);
             if (checkbox) checkbox.checked = false;
             const section = document.getElementById(`mqtt-${sensor}-section`);
@@ -248,7 +248,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             document.getElementById('edit-name').value = stationData.name || '';
 
             // STEP 2: Sensors & MQTT
-            const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
+            const sensorTypes = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
             sensorTypes.forEach(type => {
                 const checkbox = document.getElementById(`edit-${type}`);
                 const section = document.getElementById(`mqtt-${type}-section`);
@@ -310,7 +310,7 @@ class AdminStationWizardFeature extends window.AdminManager {
                 });
 
                 // Show empty state if no active devices
-                const anyChecked = ['gnss', 'rain', 'water', 'imu'].some(t => document.getElementById(`edit-${t}`)?.checked);
+                const anyChecked = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']).some(t => document.getElementById(`edit-${t}`)?.checked);
                 const emptyState = document.getElementById('mqtt-empty-state');
                 if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
                 if (gnssDevice) {
@@ -569,7 +569,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             }
 
             // Load extra sensor origins
-            ['rain', 'water', 'imu'].forEach(s => {
+            (window.sensorTypes?.() || ['rain', 'water', 'imu']).filter(type => type !== 'gnss').forEach(s => {
                 const sOrigin = cfg[`${s}_origin`] || {};
                 const latEl = document.getElementById(`origin-${s}-lat`);
                 const lonEl = document.getElementById(`origin-${s}-lon`);
@@ -677,13 +677,8 @@ class AdminStationWizardFeature extends window.AdminManager {
     }
 
     syncMqttSectionsForStep() {
-        const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
-        const sectionByType = {
-            gnss: document.getElementById('mqtt-gnss-section'),
-            rain: document.getElementById('mqtt-rain-section'),
-            water: document.getElementById('mqtt-water-section'),
-            imu: document.getElementById('mqtt-imu-section')
-        };
+        const sensorTypes = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
+        const sectionByType = Object.fromEntries(sensorTypes.map(type => [type, document.getElementById(`mqtt-${type}-section`)]));
         const emptyState = document.getElementById('mqtt-empty-state');
 
         // Never show MQTT blocks outside step 2.

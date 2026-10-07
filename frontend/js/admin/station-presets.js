@@ -256,7 +256,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
         }
 
         const sensors = {};
-        const sensorTypes = ['gnss', 'rain', 'water', 'imu'];
+        const sensorTypes = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
         let hasError = false;
 
         sensorTypes.forEach(type => {
@@ -299,7 +299,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                         sensors[type].lon = parseFloat(lon);
                         sensors[type].h = parseFloat(h) || 0;
                     }
-                } else if (['rain', 'water', 'imu'].includes(type)) {
+                } else {
                     const lat = document.getElementById(`origin-${type}-lat`)?.value;
                     const lon = document.getElementById(`origin-${type}-lon`)?.value;
                     const h = document.getElementById(`origin-${type}-h`)?.value;
@@ -507,6 +507,12 @@ class AdminStationPresetsFeature extends window.AdminManager {
         };
 
 
+        for (const sensor of (window.SensorCatalog || []).filter(sensor => !sensor.legacy)) {
+            config[`${sensor.key}_origin`] = Object.fromEntries(['lat', 'lon', 'h'].map(axis => {
+                const value = document.getElementById(`origin-${sensor.key}-${axis}`)?.value;
+                return [axis, value === '' || value == null ? null : Number(value)];
+            }));
+        }
         const payload = {
             station_code: code,
             name: name,

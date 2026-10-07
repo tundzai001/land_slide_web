@@ -1807,10 +1807,10 @@ import { renderLandingTemplate } from './templates/landing-template.js';
         if (!story || !stage || !articles.length) return;
 
         const captions = [
-            'Thiết bị 01 · Trạm GNSS RTK (ΔE/ΔN/ΔU) & Hộp cảm biến MEMS IMU 6 trục trên mặt dốc',
-            'Thiết bị 02 · Gầu đo mưa lật (0.2mm) & Cảm biến Piezometer thả giếng khoan đón dòng nước ngầm',
-            'Xác minh · Zoom toàn cảnh & bám theo các gói tin Telemetry [PKT] bay về Toà nhà Data Center',
-            'Phòng điều hành · Mở cửa kính Toà nhà Data Center & Màn hình Grafana + WebGIS thời gian thực'
+            'Chuyển vị · GNSS, đo nghiêng và biến dạng công trình',
+            'Thủy văn · Lượng mưa, mực nước và áp lực thấm',
+            'Thu thập · Dữ liệu cảm biến về hệ thống quan trắc',
+            'Vận hành · Bản đồ, biểu đồ và lịch sử quan trắc'
         ];
         const stepBadges = ['BƯỚC 01 / 04', 'BƯỚC 02 / 04', 'BƯỚC 03 / 04', 'BƯỚC 04 / 04'];
         const stageTransforms = [

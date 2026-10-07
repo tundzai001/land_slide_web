@@ -5,7 +5,7 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
     <a class="skip-link" href="#main">Bỏ qua đến nội dung chính</a>
     <header class="site-header">
         <div class="header-inner">
-            <a class="brand" href="/" aria-label="Aitogy Landslide Monitor — Trang chủ"><span class="brand-plate"><img src="${logoUrl}" width="759" height="329" alt="Aitogy"></span><span class="brand-rule" aria-hidden="true"></span><span class="brand-product"><strong>Landslide</strong><small>Monitor</small></span></a>
+            <a class="brand" href="/" aria-label="Aitogy Monitoring — Trang chủ"><span class="brand-plate"><img src="${logoUrl}" width="759" height="329" alt="Aitogy"></span><span class="brand-rule" aria-hidden="true"></span><span class="brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span></a>
             <nav class="desktop-nav" aria-label="Điều hướng chính"><a href="#story"><span>01</span> Hành trình tín hiệu</a><a href="#network"><span>02</span> Trạng thái mạng</a><a href="#response"><span>03</span> Hành động</a></nav>
             <div class="header-actions">
                 <button class="icon-button" id="theme-toggle" type="button" aria-label="Chuyển giao diện tối"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36-1.42 1.42M7.06 16.94l-1.42 1.42m12.72 0-1.42-1.42M7.06 7.06 5.64 5.64"/><circle cx="12" cy="12" r="4"/></svg></button>
@@ -21,11 +21,12 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
             <div class="hero-grid" aria-hidden="true"></div>
             <div class="hero-aurora hero-aurora-a" aria-hidden="true"></div><div class="hero-aurora hero-aurora-b" aria-hidden="true"></div>
             <div class="hero-copy">
-                <p class="eyebrow hero-kicker"><span class="live-dot"></span>Hệ thống quan trắc địa kỹ thuật · Mô hình 3D</p>
-                <h1 id="hero-title"><span>Nhìn thấy chuyển động.</span><br><em>Trước khi thành rủi ro.</em></h1>
-                <p class="hero-lead">Từ những vi dịch chuyển cấp milimét trên sườn dốc đến bản sao số 3D thời gian thực — hợp nhất GNSS RTK 2 tần số, hộp cảm biến MEMS IMU 6 trục, gầu đo mưa lật và cảm biến áp lực nước ngầm thả giếng khoan để cảnh báo sớm có căn cứ.</p>
+                <p class="eyebrow hero-kicker"><span class="live-dot"></span>MONITORING · QUAN TRẮC ĐA CẢM BIẾN</p>
+                <h1 id="hero-title"><span>Toàn cảnh quan trắc.</span><br><em>Trong một nền tảng.</em></h1>
+                <p class="hero-lead">Theo dõi đập, công trình và môi trường theo thời gian thực. Kết nối cảm biến, xem lịch sử và phân tích dữ liệu tại từng điểm quan trắc.</p>
                 <div class="hero-actions"><a class="button button-primary button-large" href="/map">Xem bản đồ realtime <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a><a class="button button-ghost button-large" href="#story">Cuộn xem câu chuyện 3D</a></div>
-                <div class="signal-proof" aria-label="Ba bước vận hành"><span><b>01</b> Phát hiện ±2mm</span><i></i><span><b>02</b> Xác minh đa tầng</span><i></i><span><b>03</b> Phản ứng tức thời</span></div>
+                <ul class="monitoring-scopes" aria-label="Phạm vi quan trắc"><li>Đập &amp; hồ chứa</li><li>Thân &amp; nền đập</li><li>Công trình</li><li>Môi trường</li></ul>
+                <div class="signal-proof" aria-label="Ba bước vận hành"><span><b>01</b> Thu thập dữ liệu</span><i></i><span><b>02</b> Theo dõi liên tục</span><i></i><span><b>03</b> Phân tích lịch sử</span></div>
             </div>
             <div class="hero-visual" aria-label="Mô hình địa hình quan trắc ba chiều dựng bằng Blender">
                 <div class="sensor-legend" aria-hidden="true"><span data-sensor="gnss"><i></i>GNSS RTK</span><span data-sensor="imu"><i></i>Hộp MEMS IMU</span><span data-sensor="rain"><i></i>Gầu đo mưa</span><span data-sensor="water"><i></i>Piezometer ngầm</span></div>
@@ -51,8 +52,8 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                 </div>
                 <canvas id="hero-canvas" aria-hidden="true"></canvas>
                 <div class="visual-index" aria-hidden="true"><span>BLENDER 3D TWIN · SECTOR 07</span><span>LAT 21.3082° N · LON 103.9188° E</span></div>
-                <div class="floating-status"><span class="status-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg></span><div><small>Mô hình địa chất 3D thời gian thực</small><strong id="hero-live-readout">GNSS RTK Fixed · 4 trạm đồng bộ</strong></div></div>
-                <p class="visual-note"><span></span>BLENDER GLB · GNSS · MEMS IMU · PIEZOMETER</p>
+                <div class="floating-status"><span class="status-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg></span><div><small>Minh họa mạng quan trắc</small><strong id="hero-live-readout">Đa cảm biến · Cùng một hệ thống</strong></div></div>
+                <p class="visual-note"><span></span>CHUYỂN VỊ · THẤM · MỰC NƯỚC · RUNG CHẤN</p>
             </div>
             <a class="scroll-cue" href="#story"><span>Cuộn xuống để lướt theo hành trình tín hiệu 3D</span><i aria-hidden="true"></i></a>
         </section>
@@ -61,7 +62,7 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
             <div class="story-shell">
                 <div class="story-copy">
                     <header class="story-heading">
-                        <p class="overline">Hành trình kể chuyện động 3D · 04 Giai đoạn</p>
+                        <p class="overline">Luồng dữ liệu quan trắc · 04 Giai đoạn</p>
                         <h2 id="story-title">Dữ liệu chỉ có ý nghĩa<br>khi dẫn tới quyết định.</h2>
                         <div class="story-stepper" aria-hidden="true">
                             <span class="step-pill" data-step-indicator="0"><b>01</b> Phát hiện</span>
@@ -74,48 +75,48 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                         <article data-story-step="0">
                             <span class="chapter-number">01 / 04</span>
                             <div>
-                                <p class="chapter-label">Thiết bị 01 · Cận cảnh Trạm GNSS RTK &amp; Hộp cảm biến MEMS IMU 6 trục</p>
-                                <h3>Chuyển động bắt đầu rất nhỏ.</h3>
-                                <p>Camera dừng nhịp chậm tại trạm GNSS RTK nhận sóng hiệu chỉnh vi sai từ trạm Base CORS để giải nghiệm pha sóng mang (ΔE, ΔN, ΔU), sau đó áp sát hộp cảm biến MEMS IMU gắn trên mặt dốc để quan sát chip gia tốc 3 trục và 3 vòng xoay con quay hồi chuyển Roll/Pitch/Yaw.</p>
-                                <div class="chapter-telemetry" aria-label="Thông số giai đoạn phát hiện">
-                                    <div class="telemetry-chip"><span>GNSS RTK (ΔE/ΔN/ΔU)</span><strong>+4.2 mm E · -1.8 mm U</strong></div>
-                                    <div class="telemetry-chip"><span>Hộp MEMS IMU 6 trục</span><strong>+0.14° Roll · 0.08g rung chấn</strong></div>
+                                <p class="chapter-label">Chuyển vị &amp; biến dạng</p>
+                                <h3>Theo dõi từng thay đổi của công trình.</h3>
+                                <p>Kết hợp GNSS, đo nghiêng, đo dọi, khe co giãn và giãn kế đa điểm để theo dõi chuyển vị, biến dạng tại thân đập và các vị trí quan trắc.</p>
+                                <div class="chapter-telemetry" aria-label="Ví dụ dữ liệu chuyển vị">
+                                    <div class="telemetry-chip"><span>Ví dụ · GNSS RTK</span><strong>+4.2 mm E · -1.8 mm U</strong></div>
+                                    <div class="telemetry-chip"><span>Ví dụ · Đo nghiêng / IMU</span><strong>+0.14° Roll · 0.08g rung chấn</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="1">
                             <span class="chapter-number">02 / 04</span>
                             <div>
-                                <p class="chapter-label">Thiết bị 02 · Gầu đo mưa lật (Tipping-Bucket) &amp; Cảm biến Piezometer thả hố khoan</p>
+                                <p class="chapter-label">Thấm, thủy văn &amp; môi trường</p>
                                 <h3>Không một cảm biến nào kể hết câu chuyện.</h3>
-                                <p>Góc máy soi rõ từng giọt mưa rơi qua phễu thu vào gầu lật 2 ngăn (0.2 mm/lần lật), rồi hạ xuống mặt cắt địa chất mở để thấy rõ đầu dò Piezometer dây rung thả cáp ngập trong tầng nước ngầm đang chảy thấm ngang qua ống lọc.</p>
-                                <div class="chapter-telemetry" aria-label="Thông số giai đoạn bối cảnh">
-                                    <div class="telemetry-chip"><span>Gầu đo mưa lật (0.2mm)</span><strong>68 mm/h · Tích lũy 184 mm</strong></div>
-                                    <div class="telemetry-chip"><span>Piezometer &amp; Nước ngầm</span><strong>Dâng +1.45 m · 42.8 kPa</strong></div>
+                                <p>Theo dõi áp lực thấm, lưu lượng thấm, mực nước hồ, lượng mưa và nhiệt độ. Xem từng thông số theo đúng đơn vị và vị trí lắp đặt.</p>
+                                <div class="chapter-telemetry" aria-label="Ví dụ dữ liệu thủy văn">
+                                    <div class="telemetry-chip"><span>Ví dụ · Lượng mưa</span><strong>68 mm/h · Tích lũy 184 mm</strong></div>
+                                    <div class="telemetry-chip"><span>Ví dụ · Mực nước / áp lực thấm</span><strong>Dâng +1.45 m · 42.8 kPa</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="2">
                             <span class="chapter-number">03 / 04</span>
                             <div>
-                                <p class="chapter-label">Xác minh · Zoom toàn cảnh &amp; Bám theo gói tin Telemetry về Data Center</p>
-                                <h3>Tách nhiễu khỏi tín hiệu cần chú ý.</h3>
-                                <p>Sau khi từng thiết bị đóng gói số liệu, camera phóng rộng toàn cảnh để thấy rõ các gói tin (Data Packets) phát sáng kèm nhãn định danh [PKT GNSS], [PKT IMU], [PKT RAIN], [PKT PIEZO] chạy dọc tuyến cáp quang và sóng vô tuyến về Toà nhà Trung tâm Dữ liệu.</p>
+                                <p class="chapter-label">Thu thập &amp; lưu trữ tập trung</p>
+                                <h3>Mỗi điểm đo có một dòng lịch sử.</h3>
+                                <p>Dữ liệu từ các cảm biến được tập hợp theo dự án và trạm. Trạng thái kết nối, thời điểm cập nhật và dữ liệu lịch sử giúp đội ngũ vận hành theo dõi từng điểm đo.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn xác minh">
-                                    <div class="telemetry-chip"><span>Tương quan đa cảm biến</span><strong>98.4% · Đã lọc nhiễu</strong></div>
-                                    <div class="telemetry-chip"><span>Luồng gói tin Telemetry</span><strong class="text-amber">4 LUỒNG PACKET LIVE</strong></div>
+                                    <div class="telemetry-chip"><span>Dữ liệu đa cảm biến</span><strong>Theo dự án và trạm</strong></div>
+                                    <div class="telemetry-chip"><span>Trạng thái dữ liệu</span><strong>Thời điểm cập nhật · Kết nối</strong></div>
                                 </div>
                             </div>
                         </article>
                         <article data-story-step="3">
                             <span class="chapter-number">04 / 04</span>
                             <div>
-                                <p class="chapter-label">Phản ứng · Mở cửa Toà nhà Data Center &amp; Màn hình Grafana + WebGIS Live</p>
+                                <p class="chapter-label">Không gian vận hành</p>
                                 <h3>Đúng thông tin, đến đúng người.</h3>
-                                <p>Khi camera tiến sát sảnh kính Toà nhà Data Center 2 tầng, cửa kính trượt tự động mở rộng đưa góc máy bay thẳng vào Phòng Điều Hành AI với màn hình cong Grafana + WebGIS thời gian thực, 4 bàn trực kỹ sư và sa bàn Hologram 3D.</p>
+                                <p>Xem trạng thái công trình trên bản đồ, theo dõi biểu đồ và truy xuất dữ liệu theo thời gian. Quản lý thiết bị và xuất báo cáo trong cùng một không gian.</p>
                                 <div class="chapter-telemetry" aria-label="Thông số giai đoạn phản ứng">
-                                    <div class="telemetry-chip"><span>Grafana &amp; WebGIS Wall</span><strong class="text-lime">CỬA MỞ · GRAFANA LIVE 60FPS</strong></div>
-                                    <div class="telemetry-chip"><span>Hành lang bảo vệ</span><strong>Kích hoạt cổng cảnh báo đèo</strong></div>
+                                    <div class="telemetry-chip"><span>Không gian giám sát</span><strong class="text-lime">Bản đồ · Biểu đồ · Lịch sử</strong></div>
+                                    <div class="telemetry-chip"><span>Quản lý dữ liệu</span><strong>Thiết bị · Điểm đo · Báo cáo</strong></div>
                                 </div>
                             </div>
                         </article>
@@ -145,7 +146,7 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
                         <div class="hud-top"><span>SECTOR 07 / BLENDER 3D TWIN</span><span id="hud-camera-mode">CAM 01 · CẬN CẢNH GNSS &amp; HỘP IMU</span></div>
                         <div class="story-progress"><span></span></div>
                         <div class="story-caption">
-                            <div><span>Trạng thái mô phỏng địa kỹ thuật</span><strong id="story-caption">Phát hiện · Sóng mang GNSS RTK &amp; Hộp cảm biến MEMS IMU 6 trục</strong></div>
+                            <div><span>Minh họa luồng dữ liệu quan trắc</span><strong id="story-caption">Chuyển vị · GNSS, đo nghiêng và biến dạng công trình</strong></div>
                             <span class="story-step-badge" id="story-step-badge">BƯỚC 01 / 04</span>
                         </div>
                     </div>
@@ -167,12 +168,12 @@ export function renderLandingTemplate(logoUrl = '/assets/aitogy.png') {
         <section class="final-cta reveal" id="response" aria-labelledby="cta-title">
             <div class="cta-contours" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="cta-copy"><p class="overline">Từ nhận biết đến hành động</p><h2 id="cta-title">Thấy toàn cảnh.<br><em>Đi đúng bước tiếp theo.</em></h2><p>Mở không gian vận hành để xem từng khu vực, từng điểm quan trắc và trạng thái mới nhất.</p><div class="hero-actions"><a class="button button-inverse button-large" href="/map">Mở bản đồ realtime <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a><a class="button button-outline button-large" href="/login?return_to=%2Fmanagement">Đăng nhập vận hành</a></div></div>
-            <div class="cta-meta" aria-hidden="true"><span>AITOGY / LANDSLIDE MONITOR</span><span>CONTINUOUS OBSERVATION</span></div>
+            <div class="cta-meta" aria-hidden="true"><span>AITOGY / MONITORING</span><span>CONTINUOUS OBSERVATION</span></div>
         </section>
     </main>
 
     <footer class="site-footer">
-        <div class="footer-intro"><a class="brand footer-brand" href="/"><span class="brand-plate"><img src="${logoUrl}" width="759" height="329" alt="Aitogy"></span><span class="brand-product"><strong>Landslide</strong><small>Monitor</small></span></a><p>Quan trắc liên tục để hành động sớm hơn.</p></div>
+        <div class="footer-intro"><a class="brand footer-brand" href="/"><span class="brand-plate"><img src="${logoUrl}" width="759" height="329" alt="Aitogy"></span><span class="brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span></a><p>Một nền tảng cho quan trắc đập, công trình và môi trường.</p></div>
         <address class="footer-contact" aria-label="Thông tin liên hệ Aitogy"><strong>Liên hệ Aitogy</strong><a href="tel:+84912844919"><span>Điện thoại</span>+84 912 844 919</a><a href="mailto:aitogyaitogy@gmail.com"><span>Email</span>aitogyaitogy@gmail.com</a><a href="https://www.google.com/maps/search/?api=1&amp;query=S%E1%BB%91%2016B%20Ng%C3%B5%20187%20ph%E1%BB%91%20Mai%20D%E1%BB%8Bch%2C%20Ph%C6%B0%E1%BB%9Dng%20Ph%C3%BA%20Di%E1%BB%85n%2C%20H%C3%A0%20N%E1%BB%99i" target="_blank" rel="noopener noreferrer"><span>Địa chỉ</span>Số 16B Ngõ 187 phố Mai Dịch, Phường Phú Diễn, Hà Nội</a></address>
         <div class="footer-meta"><a href="https://www.facebook.com/profile.php?id=100062949955358" target="_blank" rel="noopener noreferrer">Facebook</a><span>© 2026 Aitogy</span></div>
     </footer>

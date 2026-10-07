@@ -16,11 +16,12 @@ from ...models import config as model_config
 from ...models import data as model_data
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 from ...shared.station_policy import get_offline_threshold
+from ...shared.sensor_catalog import SENSOR_CATALOG
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PUBLIC_SENSOR_TYPES = ("gnss", "imu", "rain", "water")
+PUBLIC_SENSOR_TYPES = tuple(SENSOR_CATALOG)
 INTERNAL_SENSOR_TYPES = (
     "gnss_audit",
     "gnss_adjusted",

@@ -1,0 +1,353 @@
+[
+  {
+    "key": "gnss",
+    "label": "GNSS",
+    "group": "Chuyển vị",
+    "field": "speed_2d_mm_s",
+    "fields": [
+      "speed_2d_mm_s"
+    ],
+    "unit": "mm/s",
+    "legacy": true
+  },
+  {
+    "key": "rain",
+    "label": "Lượng mưa",
+    "group": "Khí tượng & thủy văn",
+    "field": "intensity_mm_h",
+    "fields": [
+      "intensity_mm_h"
+    ],
+    "unit": "mm/h",
+    "legacy": true
+  },
+  {
+    "key": "water",
+    "label": "Mực nước",
+    "group": "Khí tượng & thủy văn",
+    "field": "water_level",
+    "fields": [
+      "water_level"
+    ],
+    "unit": "m",
+    "legacy": true
+  },
+  {
+    "key": "imu",
+    "label": "IMU",
+    "group": "Chuyển vị",
+    "field": "roll",
+    "fields": [
+      "roll"
+    ],
+    "unit": "°",
+    "legacy": true
+  },
+  {
+    "key": "piezometer",
+    "label": "Áp lực thấm",
+    "group": "Thấm & nền đập",
+    "field": "pressure",
+    "fields": [
+      "pressure"
+    ],
+    "unit": "kPa",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "pressure",
+        "label": "Áp lực thấm",
+        "unit": "kPa",
+        "decimals": 3
+      }
+    ],
+    "note": "Áp lực tại vị trí lắp đặt",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  },
+  {
+    "key": "jointmeter",
+    "label": "Khe co giãn",
+    "group": "Thân đập",
+    "field": "displacement",
+    "fields": [
+      "displacement"
+    ],
+    "unit": "mm",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "displacement",
+        "label": "Độ mở khe",
+        "unit": "mm",
+        "decimals": 3
+      }
+    ],
+    "note": "Theo mốc và chiều dương đã cấu hình tại gateway",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  },
+  {
+    "key": "pendulum",
+    "label": "Đo dọi",
+    "group": "Chuyển vị",
+    "field": "x",
+    "fields": [
+      "x",
+      "y"
+    ],
+    "unit": "mm",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "x",
+        "label": "Chuyển vị X",
+        "unit": "mm",
+        "decimals": 3
+      },
+      {
+        "field": "y",
+        "label": "Chuyển vị Y",
+        "unit": "mm",
+        "decimals": 3
+      }
+    ],
+    "note": "Theo hệ trục và mốc của thiết bị",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  },
+  {
+    "key": "tiltmeter",
+    "label": "Đo nghiêng",
+    "group": "Chuyển vị",
+    "field": "x",
+    "fields": [
+      "x",
+      "y",
+      "z"
+    ],
+    "unit": "°",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "x",
+        "label": "Góc nghiêng X",
+        "unit": "°",
+        "decimals": 3
+      },
+      {
+        "field": "y",
+        "label": "Góc nghiêng Y",
+        "unit": "°",
+        "decimals": 3
+      },
+      {
+        "field": "z",
+        "label": "Góc nghiêng Z",
+        "unit": "°",
+        "decimals": 3
+      }
+    ],
+    "note": "Theo hệ trục và mốc của thiết bị",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  },
+  {
+    "key": "seepage",
+    "label": "Lưu lượng thấm",
+    "group": "Thấm & nền đập",
+    "field": "flow",
+    "fields": [
+      "flow"
+    ],
+    "unit": "L/s",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "flow",
+        "label": "Lưu lượng thấm",
+        "unit": "L/s",
+        "decimals": 3
+      }
+    ],
+    "note": "Lưu lượng đã quy đổi tại gateway",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      },
+      {
+        "field": "head",
+        "label": "Cột nước đo lưu lượng",
+        "unit": "m",
+        "decimals": 3
+      }
+    ]
+  },
+  {
+    "key": "accelerometer",
+    "label": "Gia tốc / rung chấn",
+    "group": "Thân đập",
+    "field": "x",
+    "fields": [
+      "x",
+      "y",
+      "z"
+    ],
+    "unit": "m/s²",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "x",
+        "label": "Gia tốc X",
+        "unit": "m/s²",
+        "decimals": 3
+      },
+      {
+        "field": "y",
+        "label": "Gia tốc Y",
+        "unit": "m/s²",
+        "decimals": 3
+      },
+      {
+        "field": "z",
+        "label": "Gia tốc Z",
+        "unit": "m/s²",
+        "decimals": 3
+      }
+    ],
+    "note": "Giá trị tức thời; dạng sóng hiển thị riêng khi được gửi",
+    "optional_metrics": []
+  },
+  {
+    "key": "stress",
+    "label": "Ứng suất",
+    "group": "Thân đập",
+    "field": "stress",
+    "fields": [
+      "stress"
+    ],
+    "unit": "kPa",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "stress",
+        "label": "Ứng suất",
+        "unit": "kPa",
+        "decimals": 3
+      }
+    ],
+    "note": "Ứng suất đã quy đổi tại gateway",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  },
+  {
+    "key": "temperature",
+    "label": "Nhiệt độ",
+    "group": "Thân đập",
+    "field": "temperature",
+    "fields": [
+      "temperature"
+    ],
+    "unit": "°C",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ],
+    "note": "Nhiệt độ tại vị trí lắp đặt",
+    "optional_metrics": []
+  },
+  {
+    "key": "strain",
+    "label": "Biến dạng",
+    "group": "Thân đập",
+    "field": "strain",
+    "fields": [
+      "strain"
+    ],
+    "unit": "µε",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "strain",
+        "label": "Biến dạng",
+        "unit": "µε",
+        "decimals": 2
+      }
+    ],
+    "note": "Theo mốc và quy ước bù nhiệt của gateway",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  },
+  {
+    "key": "extensometer",
+    "label": "Giãn kế đa điểm",
+    "group": "Thân đập",
+    "field": "points",
+    "fields": [
+      "points"
+    ],
+    "unit": "mm",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "points",
+        "label": "Chuyển vị điểm neo",
+        "unit": "mm",
+        "decimals": 3
+      }
+    ],
+    "note": "Mỗi điểm neo được lưu và vẽ riêng",
+    "optional_metrics": [
+      {
+        "field": "temperature",
+        "label": "Nhiệt độ cảm biến",
+        "unit": "°C",
+        "decimals": 2
+      }
+    ]
+  }
+]

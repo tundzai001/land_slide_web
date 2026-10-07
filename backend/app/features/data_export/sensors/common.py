@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from ..cells import excel_chunks
+from app.shared.sensor_catalog import MONITORING_TYPES, SENSOR_CATALOG, METADATA_FIELDS
 
 COMMON_HEADERS = (
     "id",
@@ -61,7 +62,7 @@ def build_sensor_export(
         sensor_type,
         "audit" if sensor_type == "gnss_audit" else "measurement",
     ]
-    row.extend(payload.get(field) for field in payload_fields)
+    row.extend(excel_chunks(payload.get(field))[0] if isinstance(payload.get(field), (dict, list)) else payload.get(field) for field in payload_fields)
     if include_forward_payload:
         row.extend(excel_chunks(payload.get("forward_payload"), 8))
     row.extend(getattr(record, field, None) for field in VALUE_HEADERS)
@@ -95,4 +96,9 @@ def export_sensor_record(
         from .water import export_record
 
         return export_record(record, mapping)
+    if sensor_type in MONITORING_TYPES:
+        return build_sensor_export(record, mapping, sensor_type,
+                                   payload_fields=(*SENSOR_CATALOG[sensor_type]['fields'], 'unit',
+                                                   *(metric['field'] for metric in SENSOR_CATALOG[sensor_type].get('optional_metrics', [])),
+                                                   *METADATA_FIELDS, 'received_at'))
     return None
