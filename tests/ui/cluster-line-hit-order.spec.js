@@ -45,6 +45,10 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
 
     const fakeMap = {
       on() {},
+      getZoom() { return 16; },
+      getSize() { return { x: 1280, y: 720 }; },
+      getContainer() { return document.getElementById('map'); },
+      hasLayer() { return true; },
       setView() { return this; },
       addLayer() {},
       removeLayer() {},

@@ -14,6 +14,108 @@ function createStationClusterGroup() {
     return L.layerGroup();
 }
 
+let projectMapGroups = [];
+
+function getProjectMapPadding() {
+    const leafletMap = getLeafletMap();
+    const size = leafletMap.getSize();
+    const topBar = document.querySelector('.top-navbar');
+    const bottomNav = document.getElementById('map-bottom-nav');
+    const mapRect = leafletMap.getContainer().getBoundingClientRect();
+    const top = topBar ? Math.max(0, topBar.getBoundingClientRect().bottom - mapRect.top) : 0;
+    const bottom = bottomNav && getComputedStyle(bottomNav).display !== 'none'
+        ? Math.max(0, mapRect.bottom - bottomNav.getBoundingClientRect().top) : 0;
+    return {
+        paddingTopLeft: [Math.min(60, size.x / 8), Math.min(top + 40, size.y / 3)],
+        paddingBottomRight: [Math.min(90, size.x / 5), Math.min(bottom + 60, size.y / 3)],
+    };
+}
+
+function refreshProjectMapVisibility() {
+    const leafletMap = getLeafletMap();
+    if (!leafletMap || !stationClusterGroup) return;
+    const zoom = leafletMap.getZoom();
+    const visibleStations = new Set();
+    const detailedProjects = new Set();
+    const padding = getProjectMapPadding();
+    projectMapGroups.forEach(group => {
+        const detailZoom = Math.min(13, leafletMap.getBoundsZoom(group.bounds, false, [
+            padding.paddingTopLeft[0] + padding.paddingBottomRight[0],
+            padding.paddingTopLeft[1] + padding.paddingBottomRight[1],
+        ]));
+        const detailed = zoom >= detailZoom;
+        if (detailed) {
+            detailedProjects.add(String(group.id));
+            group.stationIds.forEach(id => visibleStations.add(String(id)));
+        }
+        if (showStationMarkers && !detailed) {
+            if (!leafletMap.hasLayer(group.marker)) group.marker.addTo(leafletMap);
+        } else {
+            leafletMap.removeLayer(group.marker);
+        }
+    });
+    allStations.forEach(station => {
+        const marker = markers[station.id];
+        if (!marker) return;
+        const detailed = visibleStations.has(String(station.id)) || zoom >= 13;
+        if (showStationMarkers && detailed) stationClusterGroup.addLayer(marker);
+        else stationClusterGroup.removeLayer(marker);
+    });
+    clusterPolylines.forEach(line => {
+        if (showStationMarkers && (detailedProjects.has(String(line.projectId)) || zoom >= 13)) {
+            if (!leafletMap.hasLayer(line)) line.addTo(leafletMap);
+        } else leafletMap.removeLayer(line);
+    });
+}
+
+function createProjectMapGroup(project) {
+    const stations = allStations.filter(station => (
+        String(station.project_id) === String(project.id) && hasValidLatLon(station.location)
+    ));
+    if (!stations.length) return null;
+    const points = stations.map(station => [Number(station.location.lat), Number(station.location.lon)]);
+    const center = points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
+        .map(value => value / points.length);
+    const bounds = L.latLngBounds(points);
+    const name = String(project.name || 'Dự án');
+    const tooltip = document.createElement('span');
+    tooltip.textContent = name;
+    const marker = L.marker(center, {
+        title: name,
+        alt: `${name}: xem toàn bộ ${stations.length} trạm cảm biến`,
+        icon: L.divIcon({
+            className: 'project-map-marker',
+            html: `<span class="project-map-point" aria-hidden="true">${stations.length}</span>`,
+            iconSize: [44, 44],
+            iconAnchor: [22, 22],
+        }),
+    }).bindTooltip(tooltip, { direction: 'top', offset: [0, -18], className: 'project-map-tooltip' });
+    marker.on('add', () => {
+        marker.getElement()?.setAttribute('aria-label', `${name}: xem toàn bộ ${stations.length} trạm cảm biến`);
+    });
+    marker.on('keydown', event => {
+        if (!['Enter', ' '].includes(event.originalEvent.key)) return;
+        L.DomEvent.stop(event.originalEvent);
+        marker.fire('click');
+    });
+    marker.on('click', () => {
+        const leafletMap = getLeafletMap();
+        setStationListSidebarOpen(document.getElementById('station-list-sidebar'), false);
+        setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
+        setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
+        setChartsPanelOpen(document.getElementById('charts-panel'), false);
+        document.getElementById('longterm-overlay')?.classList.remove('active');
+        leafletMap.fitBounds(bounds, {
+            ...getProjectMapPadding(),
+            maxZoom: 16,
+            animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+            duration: 0.4,
+        });
+        refreshProjectMapVisibility();
+    });
+    return { id: project.id, marker, bounds, stationIds: stations.map(station => station.id) };
+}
+
 function initMap() {
     try {
         map = L.map('map', {
@@ -32,6 +134,7 @@ function initMap() {
 
         map.on('movestart zoomstart', beginMapInteraction);
         map.on('moveend zoomend', endMapInteraction);
+        map.on('zoomend resize', refreshProjectMapVisibility);
 
         stationClusterGroup = createStationClusterGroup();
         map.addLayer(stationClusterGroup);
@@ -71,7 +174,11 @@ function findStationByClusterToken(token) {
 }
 
 function hasValidLatLon(location) {
-    return Number.isFinite(Number(location?.lat)) && Number.isFinite(Number(location?.lon));
+    return location?.lat != null && location?.lon != null
+        && String(location.lat).trim() !== '' && String(location.lon).trim() !== ''
+        && Number.isFinite(Number(location.lat)) && Number.isFinite(Number(location.lon))
+        && Math.abs(Number(location.lat)) <= 90 && Math.abs(Number(location.lon)) <= 180
+        && !(Number(location.lat) === 0 && Number(location.lon) === 0);
 }
 
 async function loadProjectsAndClusters() {
@@ -102,6 +209,7 @@ async function loadProjectsAndClusters() {
             })),
             stations: allStations.map(station => [
                 station.id,
+                station.project_id,
                 station.station_code,
                 station.name,
                 station.location?.lat,
@@ -113,8 +221,10 @@ async function loadProjectsAndClusters() {
         const leafletMap = getLeafletMap();
         if (leafletMap) {
             clusterPolylines.forEach(p => leafletMap.removeLayer(p));
+            projectMapGroups.forEach(group => leafletMap.removeLayer(group.marker));
         }
         clusterPolylines = [];
+        projectMapGroups = projects.map(createProjectMapGroup).filter(Boolean);
         
         const colors = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];
         let colorIdx = 0;
@@ -162,6 +272,8 @@ async function loadProjectsAndClusters() {
                         opacity: 0,
                         pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
                     });
+                    polyline.projectId = proj.id;
+                    hitbox.projectId = proj.id;
 
                     const clickHandler = (e) => {
                         // A normal cluster and a total cluster can share the exact
@@ -191,6 +303,7 @@ async function loadProjectsAndClusters() {
                 }
             });
         });
+        refreshProjectMapVisibility();
         clusterRenderSignature = nextRenderSignature;
     } catch (e) {
         console.error('Error loading projects and clusters:', e);
@@ -268,8 +381,16 @@ async function loadStations() {
         }
         allStations = stations;
 
+        const validStationIds = new Set(stations.filter(station => hasValidLatLon(station.location)).map(station => String(station.id)));
+        Object.entries(markers).forEach(([id, marker]) => {
+            if (validStationIds.has(id)) return;
+            stationClusterGroup?.removeLayer(marker);
+            delete markers[id];
+            delete stationStateCache[id];
+            delete markerAlertState[id];
+        });
         stations.forEach(station => {
-            if (station.location && station.location.lat && station.location.lon) {
+            if (hasValidLatLon(station.location)) {
                 updateMarker(station);
             }
 
@@ -298,6 +419,7 @@ async function loadStations() {
 
         renderStationList(stations);
         ensureGlobalAlertBannerFromStations(stations);
+        refreshProjectMapVisibility();
         loadProjectsAndClusters();
 
     } catch (e) {
@@ -484,6 +606,7 @@ function getRiskBadgeClass(level) {
 let stationStateCache = {};
 
 function updateMarker(station) {
+    if (!hasValidLatLon(station.location)) return;
     const colors = {
         'CRITICAL': '#fa5252',
         'MEDIUM': '#ffd43b',
@@ -538,7 +661,7 @@ function updateMarker(station) {
         const marker = L.marker([station.location.lat, station.location.lon], { icon })
             .bindTooltip(station.name, { direction: 'top', offset: [0, -10] });
 
-        if (stationClusterGroup) {
+        if (stationClusterGroup && showStationMarkers && getLeafletMap()?.getZoom() >= 13) {
             stationClusterGroup.addLayer(marker);
         }
 

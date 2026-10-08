@@ -40,12 +40,13 @@ function setupMarkerLayerControls() {
         if (layerHeatmap.checked !== heatmapVisible) void toggleHeatmap();
     });
 
-    // Mặc định bật cả 2
+    // Show projects and rescue requests; CORS bases are opt-in.
     showStationMarkers = true;
     showRescueMarkers = true;
-    showCorsBaseMarkers = true;
+    showCorsBaseMarkers = false;
     if (layerStation) layerStation.checked = true;
     if (layerRescue) layerRescue.checked = true;
+    if (layerCors) layerCors.checked = false;
 
     toggleStationMarkersDisplay();
     toggleRescueMarkersDisplay();
@@ -132,6 +133,8 @@ function toggleStationMarkersDisplay() {
             leafletMap.removeLayer(stationClusterGroup);
         }
     }
+
+    refreshProjectMapVisibility();
 
     Object.values(corsBaseMarkers).forEach(marker => {
         if (showCorsBaseMarkers) {

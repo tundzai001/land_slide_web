@@ -59,6 +59,55 @@ textarea:focus-visible {
     box-shadow: var(--map-focus) !important;
 }
 
+.project-map-marker {
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    border-radius: 50%;
+}
+
+.project-map-point {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 3px solid var(--map-surface);
+    background: var(--map-teal);
+    color: var(--map-surface);
+    font: 700 13px/1 Inter, "Segoe UI", sans-serif;
+    box-shadow: var(--map-shadow-panel);
+    transition: transform 160ms ease, background 160ms ease;
+}
+
+.project-map-marker:hover .project-map-point,
+.project-map-marker:focus-visible .project-map-point {
+    transform: scale(1.12);
+    background: var(--map-blue-dark);
+}
+
+.project-map-marker:focus-visible {
+    outline: 3px solid var(--map-teal);
+    outline-offset: 2px;
+}
+
+.project-map-marker:active .project-map-point {
+    transform: scale(0.94);
+}
+
+.project-map-tooltip {
+    background: var(--map-surface);
+    color: var(--map-text);
+    border-color: var(--map-line);
+    font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .project-map-point { transition: none; }
+}
+
 /* ---------- Application bar ---------- */
 .top-navbar {
     top: 10px !important;

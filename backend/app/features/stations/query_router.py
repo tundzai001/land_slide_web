@@ -363,6 +363,7 @@ async def get_stations(
                 "location": station.location,
                 "status": computed_status,
                 "offline_display_enabled": offline_display_enabled,
+                "project_id": station.project_id,
                 "last_update": station.last_update,
                 "risk_level": computed_risk
             })
