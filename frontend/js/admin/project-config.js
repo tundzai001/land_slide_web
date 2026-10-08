@@ -18,6 +18,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         document.getElementById('project-config-name').value = project.name || '';
         document.getElementById('project-config-description').value = project.description || '';
         document.getElementById('project-config-location').value = locationText;
+        this.setupProjectMapPosition('project-config', project.location);
 
         document.getElementById('projectConfigModalTitle').textContent = `Chỉnh sửa dự án: ${project.name}`;
         const clustersContainer = document.getElementById('project-gnss-clusters-container');
@@ -52,6 +53,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
             const [stations] = await Promise.all([stationsPromise, this.fetchCorsStations()]);
             if (this.currentProjectId !== projectId) return;
             this.projectStationsData = stations;
+            this.syncProjectMapPosition('project-config', true);
         } catch (e) {
             console.error('Error fetching project stations:', e);
             clustersContainer.innerHTML = `
@@ -368,6 +370,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
     }
 
     async saveProjectConfig() {
+        if (document.getElementById('project-config-save-btn')?.disabled) return;
         const projectId = this.currentProjectId;
         if (!projectId) return;
 
@@ -375,6 +378,8 @@ class AdminProjectConfigFeature extends window.AdminManager {
         const projectName = document.getElementById('project-config-name')?.value.trim() || '';
         const projectDescription = document.getElementById('project-config-description')?.value.trim() || '';
         const projectLocation = document.getElementById('project-config-location')?.value.trim() || '';
+        const mapPosition = this.collectProjectMapPosition('project-config');
+        if (!mapPosition) return;
         if (!projectCode || !projectName) {
             window.toast?.error('Mã dự án và tên dự án không được để trống');
             document.getElementById(!projectCode ? 'project-config-code' : 'project-config-name')?.focus();
@@ -451,6 +456,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         }
 
         try {
+            this.setProjectSaveBusy('project-config', true);
             const res = await fetch(`/api/admin/projects/${projectId}`, {
                 method: 'PUT',
                 headers: {
@@ -462,6 +468,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
                     name: projectName,
                     description: projectDescription || null,
                     location: projectLocation || null,
+                    map_position: mapPosition,
                     gnss_clusters: clusters,
                     auto_adjustment_config: typeof this.collectAutoAdjustmentConfig === 'function' ? this.collectAutoAdjustmentConfig() : undefined
                 })
@@ -477,6 +484,8 @@ class AdminProjectConfigFeature extends window.AdminManager {
             await this.loadProjects();
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
+        } finally {
+            this.setProjectSaveBusy('project-config', false);
         }
     }
 

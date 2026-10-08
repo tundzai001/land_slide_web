@@ -7,6 +7,8 @@ import logging
 import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from ...shared.project_location import refresh_project_map_position
+from ...shared.station_policy import check_operator_station_access
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.ext.asyncio import AsyncSession
 from ... import auth
@@ -28,6 +30,7 @@ async def update_station_config(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
+        await check_operator_station_access(current_user, station_id, db)
         result = await db.execute(
             select(model_config.Station).where(model_config.Station.id == station_id)
         )
@@ -203,6 +206,7 @@ async def update_station_config(
             logger.info(f"📍 [LOCATION] Auto-set station {station_id} location to ({avg_lat:.6f}, {avg_lon:.6f}) from {len(lats)} origins")
 
         station.updated_at = int(time.time())
+        await refresh_project_map_position(db, station.project_id)
         await db.commit()
 
         return {"status": "success", "message": f"Updated station {station_id}"}

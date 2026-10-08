@@ -182,6 +182,11 @@ async def lifespan(app: FastAPI):
                 logger.info("Database schema bootstrap complete: %s", label)
 
         try:
+            from .shared.project_location import backfill_project_map_positions
+            async with asyncio.timeout(30):
+                async with ConfigSessionLocal() as db_config:
+                    await backfill_project_map_positions(db_config)
+
             interrupted = await simulations_router.recover_interrupted_runs()
             if interrupted:
                 logger.warning("Marked %s unfinished simulation run(s) as interrupted", interrupted)

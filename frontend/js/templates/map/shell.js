@@ -37,7 +37,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <button type="button" id="layer-popover-toggle" class="map-icon-button" aria-label="Chọn lớp bản đồ" aria-expanded="false" aria-controls="layer-popover"><i class="bi bi-layers"></i></button>
                 <fieldset id="layer-popover" class="map-layer-popover" hidden><legend>Lớp hiển thị</legend>
                     <label><input type="checkbox" id="layer-station" checked><span><i class="bi bi-broadcast-pin"></i> Trạm quan trắc</span></label>
-                    <label><input type="checkbox" id="layer-cors"><span><i class="bi bi-crosshair"></i> Trạm CORS base</span></label>
+                    <label><input type="checkbox" id="layer-cors" checked><span><i class="bi bi-crosshair"></i> Trạm CORS base</span></label>
                     <label><input type="checkbox" id="layer-rescue" checked><span><i class="bi bi-life-preserver"></i> Yêu cầu cứu hộ</span></label>
                     <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Heatmap cứu hộ</span></label>
                 </fieldset>

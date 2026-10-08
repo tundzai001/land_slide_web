@@ -757,3 +757,14 @@ input[type="number"] {
 .monitoring-choice:focus-within { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
 .monitoring-picker-actions button { min-height: 44px; }
 @media (prefers-reduced-motion: reduce) { .monitoring-choice { transition: none; } }
+.project-map-position {
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--surface-subtle);
+}
+.project-map-position legend { float: left; width: 100%; margin: 0 0 12px; padding: 0; font-size: 1rem; color: var(--on-surface); }
+.project-map-position input { letter-spacing: normal; font-variant-numeric: tabular-nums; }
+.project-map-position input[readonly] { background: var(--surface-hover); color: var(--text-secondary); }
+.project-map-position input[aria-invalid="true"] { border-color: var(--accent-danger); }

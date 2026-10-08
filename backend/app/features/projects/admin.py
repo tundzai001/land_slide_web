@@ -13,9 +13,24 @@ from ...database import get_config_db
 from ...models import auth as model_auth
 from ...models import config as model_config
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
+from ...shared.access import user_project_filter_ids
+from ...shared.project_location import save_project_map_position, update_location_address, validate_map_position
+from .public import public_clusters
 
 router = APIRouter(tags=["Projects"])
 logger = logging.getLogger(__name__)
+
+
+def validate_project_fields(data, creating=False):
+    for key, limit in (("project_code", 50), ("name", 255), ("description", 1000)):
+        if key not in data and not (creating and key in ("project_code", "name")):
+            continue
+        value = data.get(key)
+        if key == 'description' and value is None:
+            continue
+        if not isinstance(value, str) or len(value) > limit or (key != 'description' and not value.strip()):
+            raise HTTPException(422, f"Trường {key} không hợp lệ (tối đa {limit} ký tự).")
+        data[key] = value.strip()
 
 @router.get("/api/admin/projects")
 async def get_projects(
@@ -42,8 +57,8 @@ async def get_projects(
         projects_with_counts = result.all()
 
         # Filter projects for operator role
-        assigned = getattr(current_user, 'assigned_projects', None) or []
-        if current_user.role == 'operator' and assigned:
+        assigned = user_project_filter_ids(current_user)
+        if assigned is not None:
             projects_with_counts = [(p, c) for p, c in projects_with_counts if p.id in assigned]
 
         rows = [
@@ -56,8 +71,8 @@ async def get_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
-                "gnss_clusters": getattr(p, "gnss_clusters", None),
-                "auto_adjustment_config": getattr(p, "auto_adjustment_config", None)
+                "gnss_clusters": p.gnss_clusters if current_user.role == 'admin' else public_clusters(p.gnss_clusters),
+                **({"auto_adjustment_config": p.auto_adjustment_config} if current_user.role == 'admin' else {}),
             }
             for p, count in projects_with_counts
         ]
@@ -80,7 +95,7 @@ async def get_projects(
         raise
     except Exception as e:
         logger.error(f"Error loading projects: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")
 
 
 @router.post("/api/admin/projects")
@@ -90,17 +105,21 @@ async def create_project(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
+        validate_project_fields(project_data, creating=True)
+        position = validate_map_position(project_data.get('map_position', {"mode": "auto"}))
         new_project = model_config.Project(
             project_code=project_data['project_code'],
             name=project_data['name'],
             description=project_data.get('description'),
-            location=project_data.get('location'),
+            location=update_location_address(None, project_data.get('location')),
             created_at=int(time.time()),
             updated_at=int(time.time()),
             is_active=True
         )
 
         db.add(new_project)
+        await db.flush()
+        await save_project_map_position(db, new_project, position)
         await db.commit()
         await db.refresh(new_project)
 
@@ -112,10 +131,13 @@ async def create_project(
             "location": new_project.location
         }
 
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Error creating project: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Không thể tạo dự án.")
 
 
 @router.put("/api/admin/projects/{project_id}")
@@ -127,12 +149,15 @@ async def update_project(
 ):
     try:
         result = await db.execute(
-            select(model_config.Project).where(model_config.Project.id == project_id)
+            select(model_config.Project).where(model_config.Project.id == project_id).with_for_update()
         )
         project = result.scalar_one_or_none()
 
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
+
+        validate_project_fields(project_data)
+        position = validate_map_position(project_data['map_position']) if 'map_position' in project_data else None
 
         if 'project_code' in project_data:
             project_code = str(project_data['project_code'] or '').strip()
@@ -156,7 +181,7 @@ async def update_project(
         if 'description' in project_data:
             project.description = project_data['description']
         if 'location' in project_data:
-            project.location = project_data['location']
+            project.location = update_location_address(project.location, project_data['location'])
         if 'is_active' in project_data:
             project.is_active = project_data['is_active']
         if 'gnss_clusters' in project_data:
@@ -165,6 +190,7 @@ async def update_project(
             project.auto_adjustment_config = project_data['auto_adjustment_config']
 
         project.updated_at = int(time.time())
+        await save_project_map_position(db, project, position)
 
         await db.commit()
         await db.refresh(project)
@@ -193,7 +219,7 @@ async def update_project(
     except Exception as e:
         await db.rollback()
         logger.error(f"Error updating project: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Không thể cập nhật dự án.")
 
 
 @router.get("/api/admin/projects/{project_id}")
@@ -222,7 +248,7 @@ async def get_project(
         raise
     except Exception as e:
         logger.error(f"Error getting project: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Không thể tải dự án.")
 
 
 @router.delete("/api/admin/projects/{project_id}")
@@ -250,4 +276,4 @@ async def delete_project(
     except Exception as e:
         await db.rollback()
         logger.error(f"Error deleting project: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Không thể xóa dự án.")

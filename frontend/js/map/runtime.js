@@ -113,11 +113,12 @@ let showStationMarkers = true;
 let stationClusterGroup = null;
 let clusterPolylines = [];
 let showRescueMarkers = true;
-let showCorsBaseMarkers = false;
+let showCorsBaseMarkers = true;
+let projectDetailsVisible = false;
 let currentMapMode = 'station';
 const mapUiState = window.mapUiState = {
     mode: currentMapMode,
-    layers: { stations: true, cors: false, rescue: true, heatmap: false },
+    layers: { stations: true, cors: true, rescue: true, heatmap: false },
     activePanel: null,
     selectedStation: null,
 };

@@ -20,6 +20,7 @@ from ...models.pi_device import PiDevice
 from ...runtime import mqtt_service
 from ...shared.access import get_optional_current_user_from_request, user_project_filter_ids
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
+from ...shared.project_location import refresh_project_map_position
 from ...shared.station_policy import check_operator_project_access, get_offline_threshold
 from .analysis_router import _calculate_station_risk_assessment
 from .common import (
@@ -223,6 +224,7 @@ async def create_station_in_project(
                         updated_at=int(time.time())
                     ))
 
+        await refresh_project_map_position(db, project_id)
         await db.commit()
         await db.refresh(new_station)
         return new_station
@@ -692,5 +694,4 @@ async def get_station_detail(
     except Exception as e:
         logger.error(f"Error loading station detail: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 

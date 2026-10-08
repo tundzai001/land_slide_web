@@ -12,6 +12,7 @@ from ...database import get_config_db, get_data_db
 from ...models import auth as model_auth
 from ...models import config as model_config
 from ...models import data as model_data
+from ...shared.project_location import refresh_project_map_position
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,12 +35,15 @@ async def admin_update_station(
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        # Update allowed fields
+        old_project_id = station.project_id
+        # Only mapped columns can be edited, never ORM internals/relationships.
         for key, value in update_data.items():
-            if key not in ['id', '_table'] and hasattr(station, key):
+            if key != 'id' and key in model_config.Station.__table__.columns:
                 setattr(station, key, value)
         
         station.updated_at = int(time.time())
+        for project_id in sorted({old_project_id, station.project_id}):
+            await refresh_project_map_position(db, project_id)
         
         await db.commit()
         return {"status": "success", "message": "Station updated"}
@@ -69,6 +73,7 @@ async def admin_delete_station(
             raise HTTPException(status_code=404, detail="Not found")
         
         await db.delete(station)
+        await refresh_project_map_position(db, station.project_id)
         await db.commit()
         
         return {"status": "success", "message": f"Deleted station {record_id}"}

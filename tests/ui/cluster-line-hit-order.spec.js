@@ -30,6 +30,11 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
       window.adjustmentRequests.push({ projectId, stationIds });
     };
     window.stationClusterGroup = null;
+    window.markers = {};
+    window.showStationMarkers = true;
+    window.projectDetailsVisible = false;
+    window.corsBaseMarkers = {};
+    window.showCorsBaseMarkers = true;
     window.currentTileLayer = null;
     window.tileUrls = [];
     window.TILE_URLS = { light: 'light', dark: 'dark' };

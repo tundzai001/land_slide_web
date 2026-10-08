@@ -1,3 +1,24 @@
+const projectMapPositionFields = prefix => `
+    <fieldset class="project-map-position mt-3" aria-describedby="${prefix}-map-hint">
+        <legend class="form-label fw-semibold">Điểm dự án trên bản đồ</legend>
+        <label class="form-label" for="${prefix}-map-mode">Cách đặt điểm</label>
+        <select class="form-select" id="${prefix}-map-mode">
+            <option value="auto">Trung bình tọa độ cảm biến</option>
+            <option value="manual">Nhập tọa độ</option>
+        </select>
+        <div class="row g-3 mt-1">
+            <div class="col-12 col-sm-6">
+                <label class="form-label" for="${prefix}-map-lat">Vĩ độ</label>
+                <input class="form-control" id="${prefix}-map-lat" type="number" inputmode="decimal" step="any" min="-90" max="90" placeholder="22.543210" aria-describedby="${prefix}-map-error">
+            </div>
+            <div class="col-12 col-sm-6">
+                <label class="form-label" for="${prefix}-map-lon">Kinh độ</label>
+                <input class="form-control" id="${prefix}-map-lon" type="number" inputmode="decimal" step="any" min="-180" max="180" placeholder="103.876543" aria-describedby="${prefix}-map-error">
+            </div>
+        </div>
+        <p class="form-text mb-0" id="${prefix}-map-hint" role="status">Tự cập nhật theo các trạm cảm biến có tọa độ hợp lệ.</p>
+        <p class="text-danger small mt-2 mb-0" id="${prefix}-map-error" role="alert" hidden></p>
+    </fieldset>`;
 window.LegacyTemplateParts ||= {};
 window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GNSS VISUAL CALCULATION BOARD -->
     <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
@@ -90,7 +111,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                             <div class="row g-3">
                                 <div class="col-md-4">
                                     <label class="form-label" for="project-config-code">Mã dự án <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="project-config-code" maxlength="100" autocomplete="off">
+                                    <input type="text" class="form-control" id="project-config-code" maxlength="50" autocomplete="off">
                                     <div class="form-text">Mã duy nhất dùng để nhận diện dự án.</div>
                                 </div>
                                 <div class="col-md-8">
@@ -104,6 +125,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                                 <div class="col-12">
                                     <label class="form-label" for="project-config-location">Địa điểm</label>
                                     <input type="text" class="form-control" id="project-config-location" maxlength="500" placeholder="Tỉnh, huyện hoặc khu vực triển khai">
+                                    ${projectMapPositionFields('project-config')}
                                 </div>
                             </div>
                         </div>
@@ -189,7 +211,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                    <button type="button" class="btn btn-primary" onclick="window.adminManager.saveProjectConfig()">
+                    <button type="button" id="project-config-save-btn" class="btn btn-primary" onclick="window.adminManager.saveProjectConfig()">
                         <i class="bi bi-check2-circle me-1"></i> Lưu thay đổi
                     </button>
                 </div>
@@ -281,26 +303,27 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                     <form id="createProjectForm">
                         <div class="mb-3">
                             <label class="form-label">Mã dự án <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="project-code" required>
+                            <input type="text" class="form-control" id="project-code" maxlength="50" required>
                             <small class="text-muted">VD: DA_QUANGNINH_2024</small>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Tên dự án <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="project-name" required>
+                            <input type="text" class="form-control" id="project-name" maxlength="255" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Mô tả</label>
-                            <textarea class="form-control" id="project-desc" rows="3"></textarea>
+                            <textarea class="form-control" id="project-desc" rows="3" maxlength="1000"></textarea>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Vị trí</label>
-                            <input type="text" class="form-control" id="project-location" placeholder="VD: Quảng Ninh">
+                            <input type="text" class="form-control" id="project-location" maxlength="500" placeholder="VD: Quảng Ninh">
+                            ${projectMapPositionFields('project')}
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                    <button type="button" class="btn btn-gradient" onclick="window.adminManager.createProject()">
+                    <button type="button" id="project-save-btn" class="btn btn-gradient" onclick="window.adminManager.createProject()">
                         <i class="bi bi-save me-1"></i> Tạo Dự án
                     </button>
                 </div>

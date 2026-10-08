@@ -10,6 +10,7 @@ from ... import auth, schemas
 from ...database import get_config_db
 from ...models import auth as model_auth
 from ...models import config as model_config
+from ...shared.project_location import refresh_project_map_position
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
@@ -28,6 +29,7 @@ async def delete_station(
             raise HTTPException(status_code=404, detail="Station not found")
 
         await db.delete(station)
+        await refresh_project_map_position(db, station.project_id)
         await db.commit()
 
         logger.info(f"✅ Deleted station {station_id}: {station.name}")
@@ -88,6 +90,7 @@ async def create_station(
 
     try:
         db.add(new_station)
+        await refresh_project_map_position(db, new_station.project_id)
         await db.commit()
         await db.refresh(new_station)
         return new_station

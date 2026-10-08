@@ -15,6 +15,7 @@ function createStationClusterGroup() {
 }
 
 let projectMapGroups = [];
+let projectOverviewInitialized = false;
 
 function getProjectMapPadding() {
     const leafletMap = getLeafletMap();
@@ -43,7 +44,7 @@ function refreshProjectMapVisibility() {
             padding.paddingTopLeft[0] + padding.paddingBottomRight[0],
             padding.paddingTopLeft[1] + padding.paddingBottomRight[1],
         ]));
-        const detailed = zoom >= detailZoom;
+        const detailed = group.stationIds.length > 0 && zoom >= detailZoom;
         if (detailed) {
             detailedProjects.add(String(group.id));
             group.stationIds.forEach(id => visibleStations.add(String(id)));
@@ -66,30 +67,52 @@ function refreshProjectMapVisibility() {
             if (!leafletMap.hasLayer(line)) line.addTo(leafletMap);
         } else leafletMap.removeLayer(line);
     });
+    projectDetailsVisible = zoom >= 13 || detailedProjects.size > 0;
+    Object.values(corsBaseMarkers).forEach(marker => {
+        if (showCorsBaseMarkers && projectDetailsVisible && showStationMarkers) {
+            if (!leafletMap.hasLayer(marker)) marker.addTo(leafletMap);
+        } else leafletMap.removeLayer(marker);
+    });
 }
 
 function createProjectMapGroup(project) {
     const stations = allStations.filter(station => (
         String(station.project_id) === String(project.id) && hasValidLatLon(station.location)
     ));
-    if (!stations.length) return null;
     const points = stations.map(station => [Number(station.location.lat), Number(station.location.lon)]);
-    const center = points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
-        .map(value => value / points.length);
-    const bounds = L.latLngBounds(points);
+    if (!points.length && !hasValidLatLon(project.location)) return null;
+    // Older servers may not yet have the persisted point during a rolling deploy.
+    const center = hasValidLatLon(project.location)
+        ? [Number(project.location.lat), Number(project.location.lon)]
+        : points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
+            .map(value => value / points.length);
+    const bounds = L.latLngBounds(points.length ? points : [center]);
     const name = String(project.name || 'Dự án');
     const tooltip = document.createElement('span');
-    tooltip.textContent = name;
+    const title = document.createElement('strong');
+    title.textContent = name;
+    const hint = document.createElement('span');
+    hint.textContent = stations.length ? `${stations.length} trạm cảm biến · Bấm để xem` : 'Chưa có trạm cảm biến';
+    tooltip.append(title, hint);
     const marker = L.marker(center, {
         title: name,
         alt: `${name}: xem toàn bộ ${stations.length} trạm cảm biến`,
         icon: L.divIcon({
             className: 'project-map-marker',
-            html: `<span class="project-map-point" aria-hidden="true">${stations.length}</span>`,
-            iconSize: [44, 44],
-            iconAnchor: [22, 22],
+            html: `<span class="project-map-halo" aria-hidden="true"></span><span class="project-map-point" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V8l8-4 8 4v12H4Z"/><path d="M9 20v-5h6v5M8 10h.01M12 10h.01M16 10h.01"/></svg></span><span class="project-map-count" aria-hidden="true">${stations.length}</span>`,
+            iconSize: [52, 60],
+            iconAnchor: [26, 54],
         }),
-    }).bindTooltip(tooltip, { direction: 'top', offset: [0, -18], className: 'project-map-tooltip' });
+    }).bindTooltip(tooltip, { direction: 'top', offset: [0, -60], opacity: 1, className: 'project-map-tooltip' });
+    marker.on('tooltipopen', () => {
+        const leafletMap = getLeafletMap();
+        const popup = marker.getTooltip();
+        const x = leafletMap.latLngToContainerPoint(marker.getLatLng()).x;
+        const halfWidth = popup.getElement().offsetWidth / 2;
+        const shift = Math.max(12 + halfWidth - x, Math.min(0, leafletMap.getSize().x - 12 - halfWidth - x));
+        popup.options.offset = [shift, -60];
+        popup.update();
+    });
     marker.on('add', () => {
         marker.getElement()?.setAttribute('aria-label', `${name}: xem toàn bộ ${stations.length} trạm cảm biến`);
     });
@@ -105,19 +128,19 @@ function createProjectMapGroup(project) {
         setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
         setChartsPanelOpen(document.getElementById('charts-panel'), false);
         document.getElementById('longterm-overlay')?.classList.remove('active');
-        leafletMap.fitBounds(bounds, {
+        leafletMap.flyToBounds(bounds, {
             ...getProjectMapPadding(),
             maxZoom: 16,
             animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-            duration: 0.4,
+            duration: 1.2,
         });
-        refreshProjectMapVisibility();
     });
     return { id: project.id, marker, bounds, stationIds: stations.map(station => station.id) };
 }
 
 function initMap() {
     try {
+        projectOverviewInitialized = false;
         map = L.map('map', {
             zoomControl: false,
             attributionControl: false,
@@ -133,6 +156,7 @@ function initMap() {
         window.map = map;
 
         map.on('movestart zoomstart', beginMapInteraction);
+        map.on('movestart', () => { projectOverviewInitialized = true; });
         map.on('moveend zoomend', endMapInteraction);
         map.on('zoomend resize', refreshProjectMapVisibility);
 
@@ -175,6 +199,7 @@ function findStationByClusterToken(token) {
 
 function hasValidLatLon(location) {
     return location?.lat != null && location?.lon != null
+        && typeof location.lat !== 'boolean' && typeof location.lon !== 'boolean'
         && String(location.lat).trim() !== '' && String(location.lon).trim() !== ''
         && Number.isFinite(Number(location.lat)) && Number.isFinite(Number(location.lon))
         && Math.abs(Number(location.lat)) <= 90 && Math.abs(Number(location.lon)) <= 180
@@ -205,6 +230,7 @@ async function loadProjectsAndClusters() {
             projects: projects.map(project => ({
                 id: project.id,
                 name: project.name,
+                location: project.location,
                 gnss_clusters: project.gnss_clusters,
             })),
             stations: allStations.map(station => [
@@ -303,6 +329,12 @@ async function loadProjectsAndClusters() {
                 }
             });
         });
+        if (!projectOverviewInitialized && projectMapGroups.length && leafletMap) {
+            projectOverviewInitialized = true;
+            leafletMap.fitBounds(L.latLngBounds(projectMapGroups.map(group => group.marker.getLatLng())), {
+                ...getProjectMapPadding(), maxZoom: 8, animate: false,
+            });
+        }
         refreshProjectMapVisibility();
         clusterRenderSignature = nextRenderSignature;
     } catch (e) {

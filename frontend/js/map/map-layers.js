@@ -29,24 +29,19 @@ function setupMarkerLayerControls() {
     layerCors?.addEventListener('change', () => {
         showCorsBaseMarkers = layerCors.checked;
         setMapState({ layers: { cors: showCorsBaseMarkers } });
-        Object.values(corsBaseMarkers).forEach(marker => {
-            const leafletMap = getLeafletMap();
-            if (!leafletMap) return;
-            if (showCorsBaseMarkers) marker.addTo(leafletMap);
-            else leafletMap.removeLayer(marker);
-        });
+        toggleStationMarkersDisplay();
     });
     layerHeatmap?.addEventListener('change', () => {
         if (layerHeatmap.checked !== heatmapVisible) void toggleHeatmap();
     });
 
-    // Show projects and rescue requests; CORS bases are opt-in.
+    // Bases stay enabled, but appear only when viewing project details.
     showStationMarkers = true;
     showRescueMarkers = true;
-    showCorsBaseMarkers = false;
+    showCorsBaseMarkers = true;
     if (layerStation) layerStation.checked = true;
     if (layerRescue) layerRescue.checked = true;
-    if (layerCors) layerCors.checked = false;
+    if (layerCors) layerCors.checked = true;
 
     toggleStationMarkersDisplay();
     toggleRescueMarkersDisplay();
@@ -136,13 +131,6 @@ function toggleStationMarkersDisplay() {
 
     refreshProjectMapVisibility();
 
-    Object.values(corsBaseMarkers).forEach(marker => {
-        if (showCorsBaseMarkers) {
-            if (!leafletMap.hasLayer(marker)) marker.addTo(leafletMap);
-        } else if (leafletMap.hasLayer(marker)) {
-            leafletMap.removeLayer(marker);
-        }
-    });
 }
 
 function toggleRescueMarkersDisplay() {
@@ -370,7 +358,7 @@ function addOrUpdateCorsBaseMarker(station) {
         .bindPopup(popupContent, { maxWidth: 300 });
 
     const leafletMap = getLeafletMap();
-    if (showCorsBaseMarkers && leafletMap) {
+    if (showCorsBaseMarkers && projectDetailsVisible && showStationMarkers && leafletMap) {
         marker.addTo(leafletMap);
     }
 

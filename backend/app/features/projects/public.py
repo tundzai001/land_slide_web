@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
@@ -12,6 +13,16 @@ from ...shared.access import get_optional_current_user_from_request, user_projec
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 
 router = APIRouter(tags=["Projects"])
+logger = logging.getLogger(__name__)
+
+
+def public_clusters(clusters):
+    # The map only needs geometry. Base connection settings can contain credentials.
+    return [
+        {key: cluster[key] for key in ('name', 'cluster_type', 'stations') if key in cluster}
+        if isinstance(cluster, dict) else cluster
+        for cluster in (clusters or []) if isinstance(cluster, (dict, list))
+    ]
 
 @router.get("/api/projects")
 async def get_public_projects(
@@ -67,8 +78,7 @@ async def get_public_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
-                "gnss_clusters": getattr(p, "gnss_clusters", None),
-                "auto_adjustment_config": getattr(p, "auto_adjustment_config", None)
+                "gnss_clusters": public_clusters(p.gnss_clusters),
             }
             for p, count in result.all()
         ]
@@ -85,4 +95,4 @@ async def get_public_projects(
         raise
     except Exception as e:
         logger.error(f"Error loading public projects: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")

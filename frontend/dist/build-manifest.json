@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "build": "6c9298f54bb6",
-  "generated_at": "2026-10-08T05:26:41.703Z",
+  "build": "77d2be079590",
+  "generated_at": "2026-10-08T06:42:19.307Z",
   "assets": {
     "admin-app.min.js": {
-      "bytes": 493777,
-      "sha256": "f26eb6f969ea6bf2c91d7d2b9d128ad87d11cf4a9ae360290b730983505cac76"
+      "bytes": 500019,
+      "sha256": "22e7f5bf6ff7b7320ffcf80058b5ffea75f20c7323027423711bd000a2278e91"
     },
     "admin.min.css": {
-      "bytes": 122673,
-      "sha256": "e005ed6d8946bbccab1b7942b959a700ea1da4d9f5271ead9fed1ee0417148cc"
+      "bytes": 123188,
+      "sha256": "095694a31d8810629a0790f3391d0878107a8814c5539e34445c346c3dc3ddf2"
     },
     "aitogy.png": {
       "bytes": 202093,
@@ -21,11 +21,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 17221,
-      "sha256": "2eb175ad17fb9e8f892f3b91855ea2578e104b4a90118aea3ef54a70fff5806c"
+      "sha256": "14b8d555f8305e9ada2a29512d9808ed825fa4ddfac5a39d4e327d1d708ff9a5"
     },
     "app.html": {
       "bytes": 979,
-      "sha256": "0fe5987ffb2cbba76bed49db68c323e316ef8a4ae4d561b6a85c578ad8d5d39b"
+      "sha256": "cc94d4319ef6a32aa0b9ca67a849a3be3abac642259150d973bbb1b6ec6a06a3"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -33,7 +33,7 @@
     },
     "index.html": {
       "bytes": 4498,
-      "sha256": "1b3b40068bd72475c95f189347f7ad8dd4d25b9ea4dd9a171021e9363f85c0cb"
+      "sha256": "0a12901ef62f1f3765d1cb5c837472c5300f079b42d2343f9d490a1d218f0200"
     },
     "landing.min.css": {
       "bytes": 32220,
@@ -48,16 +48,16 @@
       "sha256": "2444438ce771eb06ebb8c6544c3a25af56d96a0b7cca58c3f398db96d608aaea"
     },
     "map-app.min.js": {
-      "bytes": 447567,
-      "sha256": "c9c67ca42e922e4ba28c40ae7933d62d3428bf66b65a3634de77fd6a85682fb3"
+      "bytes": 449057,
+      "sha256": "62b91a8ccc66d64fb884bbd50461f0a9b26a4d3383411c31bde5d5a2a36e6af1"
     },
     "map.html": {
       "bytes": 2840,
-      "sha256": "08e8d06e2a874b05a54ce2ef8829d6751ac9b5e3b2ff069a9d9e9a4032016d77"
+      "sha256": "db80ea96cb22f43f17fa5d91654e646beede550a8a632ac01bd935f4d6c1af9a"
     },
     "map.min.css": {
-      "bytes": 155233,
-      "sha256": "cfaeea351a0d81fd1d4be053660b4397585ab69d784202b8a1fa2da0d1dbb6df"
+      "bytes": 156177,
+      "sha256": "80c0f5d16e1420a74c96f3e082235f6f2ee53062ad77a00ab17e6e1580248d0e"
     },
     "shared.min.js": {
       "bytes": 29042,
