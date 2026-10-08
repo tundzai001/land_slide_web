@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     # These are not NTRIP/Caster usernames or mountpoint passwords.
     WEB_CORS_API_BASE_URL: str = ""
     CORS_BASE_STATIONS_URL: str = ""
+    CORS_BASE_STATIONS_TOKEN: str = ""
     CORS_BASE_STATIONS_CACHE_TTL_SECONDS: float = 20.0
     CORS_BASE_STATIONS_STALE_TTL_SECONDS: float = 300.0
     CORS_BASE_STATIONS_RETRY_SECONDS: float = 15.0

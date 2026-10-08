@@ -21,6 +21,7 @@ router = APIRouter(tags=["CORS Stations"])
 logger = logging.getLogger(__name__)
 
 CORS_BASE_STATIONS_URL = config.settings.CORS_BASE_STATIONS_URL
+CORS_BASE_STATIONS_TOKEN = config.settings.CORS_BASE_STATIONS_TOKEN
 CORS_BASE_STATIONS_CACHE_TTL_SECONDS = config.settings.CORS_BASE_STATIONS_CACHE_TTL_SECONDS
 CORS_BASE_STATIONS_STALE_TTL_SECONDS = config.settings.CORS_BASE_STATIONS_STALE_TTL_SECONDS
 CORS_BASE_STATIONS_RETRY_SECONDS = config.settings.CORS_BASE_STATIONS_RETRY_SECONDS
@@ -152,14 +153,16 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
     with _cors_base_stations_cache_lock:
         now = time.monotonic()
         cache_age = now - _cors_base_stations_cache_updated_monotonic
+        managed_key_url = "/api/integrations/stations" in CORS_BASE_STATIONS_URL
         if (
-            _cors_base_stations_cache_has_value
+            not managed_key_url
+            and _cors_base_stations_cache_has_value
             and cache_age <= CORS_BASE_STATIONS_CACHE_TTL_SECONDS
         ):
             return copy.deepcopy(_cors_base_stations_cache)
 
         since_last_attempt = now - _cors_base_stations_last_attempt_monotonic
-        if since_last_attempt < CORS_BASE_STATIONS_RETRY_SECONDS:
+        if not managed_key_url and since_last_attempt < CORS_BASE_STATIONS_RETRY_SECONDS:
             if (
                 _cors_base_stations_cache_has_value
                 and cache_age <= CORS_BASE_STATIONS_STALE_TTL_SECONDS
@@ -172,15 +175,25 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
 
         _cors_base_stations_last_attempt_monotonic = now
         try:
-            response = requests.get(CORS_BASE_STATIONS_URL, timeout=8)
+            headers = (
+                {"Authorization": f"Bearer {CORS_BASE_STATIONS_TOKEN}"}
+                if CORS_BASE_STATIONS_TOKEN else {}
+            )
+            response = requests.get(CORS_BASE_STATIONS_URL, headers=headers, timeout=8)
             response.raise_for_status()
             payload = response.json()
             raw_stations = payload.get("value") if isinstance(payload, dict) else payload
             stations = _normalize_cors_base_stations(raw_stations)
         except requests.RequestException as exc:
             _cors_base_stations_last_error = exc
+            if (isinstance(exc, requests.HTTPError) and exc.response is not None
+                    and exc.response.status_code in (401, 403)):
+                _cors_base_stations_cache = []
+                _cors_base_stations_cache_has_value = False
+                raise
             if (
-                _cors_base_stations_cache_has_value
+                not managed_key_url
+                and _cors_base_stations_cache_has_value
                 and cache_age <= CORS_BASE_STATIONS_STALE_TTL_SECONDS
             ):
                 logger.warning(
@@ -288,6 +301,8 @@ async def get_cors_base_stations(
                         f"{pair.get('primary_server_id')}"
                     )
 
+        for station in filtered_cors:
+            station.pop("service_config", None)
         return filtered_cors
     except requests.RequestException as e:
         logger.warning(f"CORS base station fetch failed: {e}")

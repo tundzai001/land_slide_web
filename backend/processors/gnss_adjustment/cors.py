@@ -23,7 +23,16 @@ class RoundRobinCorsMixin:
         payload: Optional[dict] = None,
         *,
         access_token: Optional[str] = None,
+        _auth_retried: bool = False,
     ) -> Any:
+        if path == "/api/public/map-stations":
+            access_token = access_token or self._cors_token_sync()
+            path = (
+                "/api/integrations/stations"
+                if access_token.startswith("cors_") else "/api/map/stations"
+            )
+        elif path.startswith("/api/devices/") and path.endswith("/configure-service") and access_token and access_token.startswith("cors_"):
+            path = path.replace("/api/devices/", "/api/integrations/stations/", 1)
         url = f"{self.web_cors_api_base_url}{path}"
         headers = {"Accept": "application/json"}
         data = None
@@ -44,6 +53,14 @@ class RoundRobinCorsMixin:
                 if response.status < 200 or response.status >= 300:
                     raise RuntimeError(f"CORS API HTTP {response.status} for {path}")
         except urllib.error.HTTPError as exc:
+            if (path == "/api/map/stations" and exc.code == 401
+                    and not _auth_retried and self.web_cors_api_username):
+                self._web_cors_access_token = ""
+                return self._cors_api_request_sync(
+                    method, path, payload,
+                    access_token=self._cors_token_sync(force_login=True),
+                    _auth_retried=True,
+                )
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             raise RuntimeError(
                 f"CORS API HTTP {exc.code} for {path}: {detail or exc.reason}"
