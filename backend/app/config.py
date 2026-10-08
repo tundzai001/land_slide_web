@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     PRIVATE_AUTHZ_GRACE_SECONDS: int = 300
     ENVIRONMENT: str = "production"
     PUBLIC_SITE_URL: str = "https://monitoring.aitogy.com"
+    RESCUE_REQUEST_ENABLED: bool = True
     CORS_ORIGINS: str = "https://monitoring.aitogy.com,http://127.0.0.1:8001,http://localhost:8001"
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 10

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ... import auth
+from ...config import settings
 from ...database import get_data_db
 from ...models import auth as model_auth
 from ...models import data as model_data
@@ -73,11 +74,19 @@ async def get_rescue_image(
     )
 
 
+@router.get("/api/public/rescue-config")
+async def get_rescue_config(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return {"enabled": settings.RESCUE_REQUEST_ENABLED}
+
+
 @router.post("/api/public/rescue-requests")
 async def create_rescue_request(
     request: Request,
     db: AsyncSession = Depends(get_data_db),
 ):
+    if not settings.RESCUE_REQUEST_ENABLED:
+        raise HTTPException(status_code=404, detail="Tiếp nhận yêu cầu cứu hộ đang tắt.")
     content_type = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in content_type:
         form = await request.form()

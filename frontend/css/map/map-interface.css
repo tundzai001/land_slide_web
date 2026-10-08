@@ -1158,6 +1158,12 @@ textarea:focus-visible {
 }
 
 /* ---------- Rescue action and form ---------- */
+#btn-guest-rescue[hidden],
+#guestRescueModal[hidden],
+[data-map-action="rescue"][hidden] {
+    display: none !important;
+}
+
 .rescue-fab {
     right: 22px !important;
     bottom: 26px !important;
@@ -1474,6 +1480,9 @@ body:has(#guestRescueModal.show) .modal-backdrop.show {
 
     .map-bottom-nav {
         display: grid !important;
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
         left: 8px !important;
         right: 8px !important;
         bottom: 8px !important;

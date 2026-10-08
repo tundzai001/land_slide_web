@@ -1,6 +1,6 @@
 window.LegacyTemplateParts ||= {};
 window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -->
-    <button id="btn-guest-rescue" class="rescue-fab" aria-label="Yêu cầu cứu hộ">
+    <button id="btn-guest-rescue" class="rescue-fab" aria-label="Yêu cầu cứu hộ" hidden>
         <span class="rescue-fab-icon">
             <i class="bi bi-exclamation-triangle-fill"></i>
         </span>
@@ -8,7 +8,7 @@ window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -
     </button>
 
     <div class="modal fade" id="guestRescueModal" tabindex="-1" aria-labelledby="guestRescueModalLabel"
-        aria-hidden="true">
+        aria-hidden="true" hidden>
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable rescue-request-dialog">
             <div class="modal-content glass-modal-content rescue-request-modal">
                 <div class="modal-header">

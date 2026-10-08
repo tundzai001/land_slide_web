@@ -1,7 +1,20 @@
-function setupGuestRescueUI() {
+let guestRescueEnabled = false;
+
+async function setupGuestRescueUI() {
     const openBtn = document.getElementById('btn-guest-rescue');
     const modalEl = document.getElementById('guestRescueModal');
     if (!openBtn || !modalEl || !window.bootstrap) return;
+
+    try {
+        const response = await fetch('/api/public/rescue-config', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+        guestRescueEnabled = response.ok && (await response.json()).enabled === true;
+    } catch (_) {
+        guestRescueEnabled = false;
+    }
+    if (!guestRescueEnabled) return;
+    openBtn.hidden = false;
+    modalEl.hidden = false;
+    document.querySelectorAll('[data-map-action="rescue"]').forEach(button => { button.hidden = false; });
 
     window.rescueFormModal = new bootstrap.Modal(modalEl);
     const locateBtn = document.getElementById('btn-guest-rescue-locate');
@@ -303,6 +316,7 @@ function fillGuestRescueLocation(showToast = false) {
 }
 
 async function submitGuestRescueRequest() {
+    if (!guestRescueEnabled) return;
     const nameEl = document.getElementById('guest-rescue-name');
     const phoneEl = document.getElementById('guest-rescue-phone');
     const noteEl = document.getElementById('guest-rescue-note');
