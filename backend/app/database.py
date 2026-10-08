@@ -2,6 +2,9 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from .config import settings
+from .infrastructure.asyncpg_compat import install_asyncpg_tls_fix
+
+install_asyncpg_tls_fix()
 
 # Hàm tạo engine chung cho Postgres
 def create_pg_engine(url):
