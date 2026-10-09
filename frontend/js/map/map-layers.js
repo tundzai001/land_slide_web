@@ -559,3 +559,43 @@ function updateRescueMarkerFromWebSocket(message) {
         }
     }
 }
+
+function setupBasemapControls() {
+    const toggle = document.getElementById('basemap-toggle');
+    const popover = document.getElementById('basemap-popover');
+    if (!toggle || !popover) return;
+    const close = (restoreFocus = false) => {
+        popover.hidden = true;
+        toggle.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) toggle.focus();
+    };
+    const sync = () => {
+        popover.querySelectorAll('input[name="basemap"]').forEach(input => { input.checked = input.value === activeBasemap; });
+        toggle.setAttribute('aria-label', `Đổi nền bản đồ: ${MAP_BASEMAPS[activeBasemap].label}`);
+    };
+    sync();
+    toggle.addEventListener('click', () => {
+        popover.hidden = !popover.hidden;
+        toggle.setAttribute('aria-expanded', String(!popover.hidden));
+        if (!popover.hidden) {
+            const layers = document.getElementById('layer-popover');
+            if (layers) layers.hidden = true;
+            document.getElementById('layer-popover-toggle')?.setAttribute('aria-expanded', 'false');
+            popover.querySelector('input:checked')?.focus();
+        }
+    });
+    popover.addEventListener('change', event => {
+        const value = event.target.value;
+        if (!Object.hasOwn(MAP_BASEMAPS, value) || value === activeBasemap) return;
+        activeBasemap = value;
+        try { localStorage.setItem('monitoring-basemap', value); } catch (_) { /* Keep session choice. */ }
+        switchMapTiles();
+        sync();
+    });
+    document.addEventListener('click', event => {
+        if (!event.target.closest('.basemap-control')) close();
+    });
+    popover.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
+    });
+}

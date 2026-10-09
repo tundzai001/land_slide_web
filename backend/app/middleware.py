@@ -39,7 +39,7 @@ class VersionedAssetCacheMiddleware(BaseHTTPMiddleware):
         path = request.url.path.lower()
         versioned_extensions = (".js", ".jsx", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".mp3")
         html_routes = {
-            "/", "/map", "/login", "/management", "/management.html",
+            "/", "/about", "/map", "/login", "/management", "/management.html",
             "/admin", "/admin.html",
         }
         if path.startswith(("/api/admin/", "/api/auth/")):

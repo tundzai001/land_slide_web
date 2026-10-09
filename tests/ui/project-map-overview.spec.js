@@ -34,6 +34,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
         setStationListSidebarOpen() {}, setDetailSidebarOpen() {}, setGnssAdvancedPanelOpen() {}, setChartsPanelOpen() {},
         toggleRescueMarkersDisplay() {}, normalizeRiskLevel: () => 'LOW',
         TILE_URLS: { light: '' }, TILE_OPTIONS: { light: {} },
+        MAP_BASEMAPS: {hybrid:{url:'',label:'Vệ tinh có nhãn'}}, activeBasemap:'hybrid',
         getLeafletMap: () => window.map,
       });
       window.projects = [{ id: 7, name: 'Mỏ <Sin Quyền>', location: { map_mode: 'manual', lat: 22.45, lon: 103.9 }, gnss_clusters: [{ stations: [1, 2, 3] }] }, { id: 8, name: 'Dự án một trạm' }];

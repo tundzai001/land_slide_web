@@ -4,7 +4,7 @@ const { join } = require('node:path');
 
 const projectRoot = join(__dirname, '..', '..');
 const sessionSource = readFileSync(join(projectRoot, 'frontend/js/session-state.js'), 'utf8');
-const landingSource = readFileSync(join(projectRoot, 'frontend/js/landing.js'), 'utf8');
+const landingSource = readFileSync(join(projectRoot, 'frontend/js/templates/landing-template.js'), 'utf8');
 const runtimeSource = readFileSync(join(projectRoot, 'frontend/js/app-runtime.js'), 'utf8');
 
 async function installAppRoutes(page, authStatus = 200) {
@@ -26,12 +26,20 @@ async function installAppRoutes(page, authStatus = 200) {
   });
 }
 
-test('landing progressive enhancement routes remembered operators to management', async () => {
-  expect(landingSource).toContain("window.authSession?.inspect?.()");
-  expect(landingSource).toContain("['admin', 'operator'].includes(session.user?.role)");
-  expect(landingSource).toContain("const href = canManage ? '/management' : '/map'");
-  expect(landingSource).toContain("const label = canManage ? 'Quản trị hệ thống' : 'Mở bản đồ'");
+test('landing login returns to map', async () => {
+  expect(landingSource).toContain('id="auth-link" href="/login?return_to=%2Fmap"');
 });
+
+for (const [path, destination] of [['/login', '/map'], ['/login?return_to=/map', '/map'], ['/login?return_to=/management', '/management']]) {
+  test(`remembered session opens ${destination} from ${path}`, async ({ page }) => {
+    await installAppRoutes(page, 200);
+    await page.addInitScript(() => localStorage.setItem('token', 'remembered-token'));
+    await page.goto(`https://app.test${path}`);
+    await page.addScriptTag({ content: sessionSource });
+    await page.addScriptTag({ content: runtimeSource });
+    await expect(page).toHaveURL(`https://app.test${destination}`);
+  });
+}
 
 test('login route forwards a valid remembered session without showing the form', async ({ page }) => {
   await installAppRoutes(page, 200);
@@ -62,3 +70,15 @@ test('login route clears an invalid remembered token and shows the form', async 
   }));
   expect(stored).toEqual({ local: null, session: null, remember: null });
 });
+
+ test('successful login opens map by default', async ({ page }) => {
+  await installAppRoutes(page);
+  await page.route('https://app.test/api/auth/login', route => route.fulfill({ json: { access_token: 'new-session-token' } }));
+  await page.goto('https://app.test/login');
+  await page.addScriptTag({ content: sessionSource });
+  await page.addScriptTag({ content: runtimeSource });
+  await page.locator('#login-username').fill('operator');
+  await page.locator('#login-password').fill('test-password');
+  await page.locator('#login-submit').click();
+  await expect(page).toHaveURL('https://app.test/map');
+ });

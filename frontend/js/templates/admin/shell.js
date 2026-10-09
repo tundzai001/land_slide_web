@@ -7,61 +7,61 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
     <!-- Sidebar -->
     <div class="admin-sidebar">
-        <div class="sidebar-brand" role="link" tabindex="0" onclick="window.location.href='/map'" onkeydown="if(event.key==='Enter') window.location.href='/map'"
-            title="Về trang bản đồ">
+        <a class="sidebar-brand" href="/map" aria-label="Aitogy Monitoring — Mở bản đồ">
             <span class="app-brand-plate"><img src="/assets/aitogy.png?v=__BUILD_VERSION__" width="759" height="329" alt="Aitogy"></span>
-            <span class="app-brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span>
-        </div>
+            <span class="app-brand-product"><strong>Monitoring</strong><small>Quản trị hệ thống</small></span>
+        </a>
 
-        <nav>
+        <nav aria-label="Điều hướng quản trị">
+            <span class="sidebar-section-label">Không gian làm việc</span>
             <div class="nav-item">
-                <a class="nav-link active" href="#" data-tab="tab-users"
+                <a class="nav-link active" href="#" data-tab="tab-users" aria-label="Người dùng" title="Người dùng"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-users', this)">
                     <i class="bi bi-people"></i>
                     <span>Người dùng</span>
                 </a>
             </div>
             <div class="nav-item">
-                <a class="nav-link" href="#" data-tab="tab-projects"
+                <a class="nav-link" href="#" data-tab="tab-projects" aria-label="Dự án" title="Dự án"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-projects', this)">
                     <i class="bi bi-folder"></i>
                     <span>Dự án</span>
                 </a>
             </div>
             <div class="nav-item">
-                <a class="nav-link" href="#" data-tab="tab-database"
+                <a class="nav-link" href="#" data-tab="tab-database" aria-label="Dữ liệu" title="Dữ liệu"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-database', this)">
                     <i class="bi bi-database"></i>
-                    <span>Database</span>
+                    <span>Dữ liệu</span>
                 </a>
             </div>
             <div class="nav-item">
-                <a class="nav-link" href="#" data-tab="tab-simulations"
+                <a class="nav-link" href="#" data-tab="tab-simulations" aria-label="Mô phỏng" title="Mô phỏng"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-simulations', this)">
                     <i class="bi bi-boxes"></i>
                     <span>Mô phỏng</span>
                 </a>
             </div>
             <div class="nav-item">
-                <a class="nav-link" href="#" data-tab="tab-pi"
+                <a class="nav-link" href="#" data-tab="tab-pi" aria-label="Thiết bị Pi" title="Thiết bị Pi"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-pi', this)">
-                    <i class="bi bi-cpu-fill" style="color:#0ea5e9"></i>
-                    <span>Pi Devices</span>
+                    <i class="bi bi-cpu-fill"></i>
+                    <span>Thiết bị Pi</span>
                 </a>
             </div>
             <div class="nav-item">
-                <a class="nav-link" href="#" data-tab="tab-rescue"
+                <a class="nav-link" href="#" data-tab="tab-rescue" aria-label="Cứu hộ" title="Cứu hộ"
                     onclick="event.preventDefault(); window.adminManager?.switchTab('tab-rescue', this)">
-                    <i class="bi bi-life-preserver" style="color:#ef4444"></i>
+                    <i class="bi bi-life-preserver"></i>
                     <span>Cứu hộ</span>
                 </a>
             </div>
             <div class="nav-item">
-                <a class="nav-link" href="#" data-tab="tab-operations" onclick="event.preventDefault(); window.adminManager?.switchTab('tab-operations', this)">
+                <a class="nav-link" href="#" data-tab="tab-operations" aria-label="Vận hành" title="Vận hành" onclick="event.preventDefault(); window.adminManager?.switchTab('tab-operations', this)">
                     <i class="bi bi-journal-check" aria-hidden="true"></i><span>Vận hành</span>
                 </a>
             </div>
-            <div class="nav-item mt-5">
+            <div class="nav-item sidebar-logout">
                 <a class="nav-link text-danger" href="#" id="logout-btn">
                     <i class="bi bi-box-arrow-left"></i>
                     <span>Đăng xuất</span>
@@ -85,6 +85,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 </h5>
             </div>
             <div class="navbar-right d-flex align-items-center gap-3">
+                <a href="/map" class="workspace-map-link"><i class="bi bi-map" aria-hidden="true"></i><span>Mở bản đồ</span></a>
                 <button type="button" id="theme-toggle-btn" class="theme-toggle-mini"
                     aria-label="Chuyển giao diện sáng tối" title="Giao diện sáng / tối">
                     <i class="bi bi-moon-stars-fill"></i>
@@ -105,7 +106,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
             <!-- TAB 1: USERS -->
             <div class="tab-pane fade show active" id="tab-users">
-                <header class="ops-page-header"><div><span class="ops-eyebrow">ACCESS CONTROL</span><h4><i class="bi bi-people me-2"></i>Quản lý người dùng</h4><p>Tài khoản, vai trò và phạm vi dự án được cấp quyền.</p></div><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-person-plus me-2"></i>Thêm người dùng</button></header>
+                <header class="ops-page-header"><div><span class="ops-eyebrow">Phân quyền</span><h4><i class="bi bi-people me-2"></i>Quản lý người dùng</h4><p>Tài khoản, vai trò và phạm vi dự án được cấp quyền.</p></div><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-person-plus me-2"></i>Thêm người dùng</button></header>
                 <div class="user-toolbar">
                     <label class="ops-search" for="user-search"><i class="bi bi-search"></i><input type="search" id="user-search" placeholder="Tìm tài khoản hoặc họ tên…" oninput="window.adminManager?.scheduleUserFilter()"></label>
                     <select class="form-select" id="user-role-filter" aria-label="Lọc theo vai trò" onchange="window.adminManager?.loadUsers()"><option value="">Tất cả vai trò</option><option value="admin">Admin</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select>
@@ -144,20 +145,20 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     </ol>
                 </nav>
 
-                <div class="d-flex justify-content-between align-items-center mb-4">
+                <header class="ops-page-header project-page-header">
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-outline-secondary" id="btn-back-nav" style="display: none;"
                             onclick="window.adminManager.navigateBack()">
                             <i class="bi bi-arrow-left me-1"></i> Quay lại
                         </button>
-                        <h4 id="current-view-title" class="mb-0">Danh sách Dự án</h4>
+                        <h4 id="current-view-title" class="mb-0">Danh mục dự án</h4>
                     </div>
                     <div id="action-buttons-container">
                         <button class="btn btn-gradient" onclick="window.adminManager.openCreateProjectModal()">
                             <i class="bi bi-plus-circle me-2"></i>Tạo Dự án
                         </button>
                     </div>
-                </div>
+                </header>
 
                 <div id="projects-content-area">
                     <div class="text-center py-5">
@@ -171,7 +172,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             ${window.LegacyTemplateParts.operations || ''}
             <div class="tab-pane fade" id="tab-database">
                 <header class="ops-page-header">
-                    <div><span class="ops-eyebrow">DATA OPERATIONS</span><h4><i class="bi bi-database me-2"></i>Data Explorer</h4><p>Kiểm tra cấu hình, dữ liệu cảm biến và cảnh báo trong cùng một workspace.</p></div>
+                    <div><span class="ops-eyebrow">Dữ liệu quan trắc</span><h4><i class="bi bi-database me-2"></i>Tra cứu dữ liệu</h4><p>Kiểm tra cấu hình, dữ liệu cảm biến và cảnh báo theo từng trạm và dự án.</p></div>
                     <div class="ops-header-actions">
                         <button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
                         <button class="btn btn-success" onclick="window.dbManager.exportToExcel()"><i class="bi bi-box-arrow-down me-1"></i>Xuất dữ liệu</button>
@@ -215,7 +216,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
 
                 <div class="ops-drawer-backdrop" id="db-inspector-backdrop" onclick="window.dbManager.closeInspector()"></div>
                 <aside class="ops-drawer" id="db-inspector" aria-hidden="true" aria-labelledby="db-inspector-title">
-                    <header><div><span class="ops-eyebrow">RECORD INSPECTOR</span><h5 id="db-inspector-title">Chi tiết bản ghi</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.dbManager.closeInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header>
+                    <header><div><span class="ops-eyebrow">Bản ghi</span><h5 id="db-inspector-title">Chi tiết bản ghi</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.dbManager.closeInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header>
                     <div id="db-inspector-content" class="ops-drawer-body"></div>
                     <footer id="db-inspector-actions" class="ops-drawer-footer"></footer>
                 </aside>
@@ -224,7 +225,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             <!-- TAB: SIMULATION AUDIT -->
             <div class="tab-pane fade" id="tab-simulations" data-private-permission="MANAGE_SIMULATIONS">
                 <header class="ops-page-header simulation-audit-header">
-                    <div><span class="ops-eyebrow">PHÂN TÍCH TÁI LẬP</span><h4><i class="bi bi-boxes me-2"></i>Mô phỏng</h4><p>Theo dõi trạng thái, tham số nguồn và kết quả mô phỏng Digital Twin mà không thay đổi mô hình vật lý hiện có.</p></div>
+                    <div><span class="ops-eyebrow">PHÂN TÍCH TÁI LẬP</span><h4><i class="bi bi-boxes me-2"></i>Mô phỏng</h4><p>Theo dõi trạng thái, tham số nguồn và kết quả mô phỏng Digital Twin.</p></div>
                     <button type="button" class="btn btn-outline-primary" onclick="window.adminManager?.loadSimulationRuns(true)"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
                 </header>
                 <section class="simulation-audit-workspace" aria-live="polite">
@@ -236,7 +237,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
             <!-- TAB: RESCUE -->
             <div class="tab-pane fade" id="tab-rescue">
                 <header class="ops-page-header rescue-header">
-                    <div><span class="ops-eyebrow">INCIDENT RESPONSE</span><h4><i class="bi bi-life-preserver me-2"></i>Điều phối cứu hộ</h4><p>Ưu tiên yêu cầu đang chờ và giữ đầy đủ ngữ cảnh khi xử lý.</p></div>
+                    <div><span class="ops-eyebrow">Ứng phó</span><h4><i class="bi bi-life-preserver me-2"></i>Điều phối cứu hộ</h4><p>Ưu tiên yêu cầu đang chờ và giữ đầy đủ ngữ cảnh khi xử lý.</p></div>
                     <button type="button" class="btn btn-primary" onclick="window.adminManager?.loadRescueRequests()"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới queue</button>
                 </header>
                 <section class="ops-kpi-grid" aria-label="Tổng quan yêu cầu cứu hộ">
@@ -255,7 +256,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     <footer class="ops-pagination"><span id="rescue-page-summary">0 yêu cầu</span><div><button class="btn btn-outline-secondary" id="rescue-page-prev" onclick="window.adminManager?.changeRescuePage(-1)" aria-label="Trang trước"><i class="bi bi-chevron-left"></i></button><span id="rescue-page-number">Trang 1</span><button class="btn btn-outline-secondary" id="rescue-page-next" onclick="window.adminManager?.changeRescuePage(1)" aria-label="Trang sau"><i class="bi bi-chevron-right"></i></button></div></footer>
                 </section>
                 <div class="ops-drawer-backdrop" id="rescue-inspector-backdrop" onclick="window.adminManager?.closeRescueInspector()"></div>
-                <aside class="ops-drawer rescue-drawer" id="rescue-inspector" aria-hidden="true" aria-labelledby="rescue-inspector-title"><header><div><span class="ops-eyebrow">CASE DETAIL</span><h5 id="rescue-inspector-title">Chi tiết cứu hộ</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.adminManager?.closeRescueInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header><div id="rescue-inspector-content" class="ops-drawer-body"></div><footer id="rescue-inspector-actions" class="ops-drawer-footer"></footer></aside>
+                <aside class="ops-drawer rescue-drawer" id="rescue-inspector" aria-hidden="true" aria-labelledby="rescue-inspector-title"><header><div><span class="ops-eyebrow">Yêu cầu hỗ trợ</span><h5 id="rescue-inspector-title">Chi tiết cứu hộ</h5></div><button class="management-icon-btn btn btn-outline-secondary" onclick="window.adminManager?.closeRescueInspector()" aria-label="Đóng chi tiết"><i class="bi bi-x-lg"></i></button></header><div id="rescue-inspector-content" class="ops-drawer-body"></div><footer id="rescue-inspector-actions" class="ops-drawer-footer"></footer></aside>
             </div>
 
 ${window.LegacyTemplateParts['pi-devices'] || ''}

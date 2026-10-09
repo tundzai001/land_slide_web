@@ -1,4 +1,6 @@
 function setupEventListeners() {
+    setupBasemapControls();
+    setupChartWorkspaceControls();
     console.log('🔧 [MAP] Setting up event listeners...');
 
     const hamburgerBtn = document.getElementById('navbar-hamburger-btn');
@@ -57,6 +59,9 @@ function setupEventListeners() {
     layerPopoverToggle?.addEventListener('click', event => {
         event.stopPropagation();
         layerPopover.hidden = !layerPopover.hidden;
+        const basemapPopover = document.getElementById('basemap-popover');
+        if (basemapPopover) basemapPopover.hidden = true;
+        document.getElementById('basemap-toggle')?.setAttribute('aria-expanded', 'false');
         layerPopoverToggle.setAttribute('aria-expanded', String(!layerPopover.hidden));
     });
     layerPopover?.addEventListener('click', event => event.stopPropagation());

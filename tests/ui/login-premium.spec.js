@@ -25,12 +25,12 @@ async function openLogin(page) {
       body: '<!doctype html><html lang="vi" data-theme="light"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app-root"></div></body></html>',
     });
   });
-  await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await page.goto('https://app.test/login?return_to=/map');
   await page.addStyleTag({ content: baseCss });
   await page.addScriptTag({ content: sessionSource });
   await page.addScriptTag({ content: runtimeSource });
   await expect(page.locator('.login-card')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
   await expect(page.locator('.login-brand .app-brand-product strong')).toHaveText('Monitoring');
 }
 
@@ -68,6 +68,7 @@ test('production login keeps controls proportioned and responsive', async ({ pag
   await page.setViewportSize({ width: 375, height: 844 });
   await page.evaluate(() => { document.documentElement.style.fontSize = '20px'; });
   await expect(page.locator('.login-card')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   await page.screenshot({ path: 'test-results/login-premium-mobile.png', fullPage: true });
 
@@ -76,5 +77,6 @@ test('production login keeps controls proportioned and responsive', async ({ pag
   await page.locator('#login-theme').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('.login-card')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
 });

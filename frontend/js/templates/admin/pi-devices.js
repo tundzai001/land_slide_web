@@ -4,7 +4,7 @@ window.LegacyTemplateParts['pi-devices'] = String.raw`
             <div class="tab-pane fade" id="tab-pi">
                 <header class="ops-page-header">
                     <div>
-                        <span class="ops-eyebrow">EDGE OPERATIONS</span>
+                        <span class="ops-eyebrow">Thiết bị hiện trường</span>
                         <h4><i class="bi bi-cpu me-2" aria-hidden="true"></i>Quản lý thiết bị Pi</h4>
                         <p>Theo dõi kết nối, phạm vi gán trạm và thao tác thiết bị tại một nơi.</p>
                     </div>

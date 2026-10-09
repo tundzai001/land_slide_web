@@ -38,6 +38,8 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
     window.currentTileLayer = null;
     window.tileUrls = [];
     window.TILE_URLS = { light: 'light', dark: 'dark' };
+    window.MAP_BASEMAPS = { hybrid:{url:'light',label:'Vệ tinh có nhãn'} };
+    window.activeBasemap = 'hybrid';
     window.TILE_OPTIONS = { light: {}, dark: {} };
     window.beginMapInteraction = () => {};
     window.endMapInteraction = () => {};
@@ -67,7 +69,7 @@ test('ordinary cluster paths stay above total-cluster hitboxes', async ({ page }
     window.L = {
       map() { return fakeMap; },
       layerGroup() { return {}; },
-      tileLayer(url) { window.tileUrls.push(url); return { addTo() { return this; } }; },
+      tileLayer(url) { window.tileUrls.push(url); return { on() { return this; }, bringToBack() { return this; }, addTo() { return this; } }; },
       polyline(_points, options) {
         const line = {
           options,
@@ -171,7 +173,7 @@ test('station list updates existing rows with localized connection state', async
       visible: document.querySelectorAll('.station-item:not([hidden])').length,
       summary: document.getElementById('station-filter-result').textContent,
       rowWidth: Math.round(row.getBoundingClientRect().width),
-      listWidth: Math.round(document.getElementById('station-list-container').getBoundingClientRect().width - 20),
+      listWidth: Math.round(document.getElementById('station-list-container').getBoundingClientRect().width - parseFloat(getComputedStyle(document.getElementById('station-list-container')).paddingLeft) - parseFloat(getComputedStyle(document.getElementById('station-list-container')).paddingRight)),
       searchPadding: parseFloat(getComputedStyle(document.getElementById('search-station')).paddingLeft),
       state: row.dataset.state,
       label: row.querySelector('.station-status').textContent,

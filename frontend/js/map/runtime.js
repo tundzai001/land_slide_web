@@ -1121,6 +1121,17 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
 const TILE_URLS = {
     light: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
 };
+const MAP_BASEMAPS = Object.freeze({
+    roadmap: { label: 'Đường phố', url: 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}' },
+    satellite: { label: 'Vệ tinh', url: 'https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}' },
+    hybrid: { label: 'Vệ tinh có nhãn', url: TILE_URLS.light },
+    terrain: { label: 'Địa hình', url: 'https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}' },
+});
+let activeBasemap = 'hybrid';
+try {
+    const savedBasemap = localStorage.getItem('monitoring-basemap');
+    if (Object.hasOwn(MAP_BASEMAPS, savedBasemap)) activeBasemap = savedBasemap;
+} catch (_) { /* Browser storage may be unavailable. */ }
 const TILE_OPTIONS = {
     light: {
         maxZoom: 20,

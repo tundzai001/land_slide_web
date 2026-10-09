@@ -194,7 +194,7 @@ function focusMapOnStation(stationId, skipZoom = false) {
     });
 }
 
-async function loadStationHistoryAndRenderCharts({ hours = activeChartHours } = {}) {
+async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, force = false } = {}) {
     const stationId = Number(currentStationData?.id || 0);
     if (!stationId) return;
     const range = getChartRange(hours);
@@ -208,7 +208,7 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours } = 
     const chartsButton = document.getElementById('btn-show-charts');
     const cacheKey = `${stationId}:${range.hours}`;
     const cached = stationHistoryCache.get(cacheKey);
-    if (cached && Date.now() - cached.loadedAt < STATION_HISTORY_CACHE_MS) {
+    if (!force && cached && Date.now() - cached.loadedAt < STATION_HISTORY_CACHE_MS) {
         renderCharts(cached.data);
         return;
     }
@@ -216,6 +216,7 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours } = 
     stationHistoryController?.abort();
     stationHistoryController = new AbortController();
     chartsPanel?.classList.add('station-history-loading');
+    setChartWorkspaceStatus('Đang tải lịch sử cảm biến…', 'loading');
     if (chartsButton) chartsButton.disabled = true;
     document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = true; });
     try {
@@ -227,7 +228,7 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours } = 
         if (Number(currentStationData?.id || 0) !== stationId) return;
         const data = {
             ...currentStationData,
-            sensors: { ...currentStationData.sensors },
+            sensors: Object.fromEntries(Object.entries(currentStationData.sensors).map(([type,sensor]) => [type, sensorTypes.includes(type) ? {...sensor, history:[]} : sensor])),
         };
         Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
             if (!sensorTypes.includes(sensorType)) return;
@@ -242,7 +243,8 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours } = 
     } catch (error) {
         if (error?.name !== 'AbortError') {
             console.error('[MAP] Error loading station history:', error);
-            window.toast?.error('Failed to load chart history');
+            setChartWorkspaceStatus('Không tải được dữ liệu. Bấm tải lại để thử tiếp.', 'error');
+            window.toast?.error('Không tải được lịch sử biểu đồ');
         }
     } finally {
         chartsPanel?.classList.remove('station-history-loading');
@@ -1015,21 +1017,21 @@ function renderCharts(data) {
                 _chart_velocity: getGnssVelocity(h.data)
             }
         })).filter(h => h.data._chart_velocity !== null);
-        renderChart('chart-gnss', gnssHistory, '_chart_velocity', '#fa5252', 'Velocity (mm/s)');
+        renderChart('chart-gnss', gnssHistory, '_chart_velocity', '#0f766e', 'Vận tốc (mm/s)');
     }
 
     // Rain
     if (data.sensors.rain) {
         activeChartBoxIds.push('chart-box-rain');
         const history = data.sensors.rain.history || [];
-        renderChart('chart-rain', history, 'intensity_mm_h', '#06b6d4', 'Intensity (mm/h)');
+        renderChart('chart-rain', history, 'intensity_mm_h', '#06b6d4', 'Cường độ mưa (mm/h)');
     }
 
     // Water
     if (data.sensors.water) {
         activeChartBoxIds.push('chart-box-water');
         const history = data.sensors.water.history || [];
-        renderChart('chart-water', history, 'water_level', '#10b981', 'Level (m)');
+        renderChart('chart-water', history, 'water_level', '#10b981', 'Mực nước (m)');
     }
 
     // IMU (3-axis)
@@ -1096,6 +1098,7 @@ function renderCharts(data) {
         emptyState.style.display = activeChartBoxIds.length === 0 ? 'block' : 'none';
     }
 
+    enhanceChartWorkspace(data);
     console.log(`✅ [CHARTS] Rendered ${activeChartBoxIds.length} charts`);
 }
 
@@ -1226,6 +1229,7 @@ function renderChart(id, history, key, color, label) {
                     padding: 10,
                     boxPadding: 4,
                     usePointStyle: true,
+                    callbacks: { title: items => formatChartTimestamp(normalizeEpochMs(history[items[0]?.dataIndex]?.timestamp)) },
                 }
             },
             scales: {
@@ -1248,11 +1252,12 @@ function renderChart(id, history, key, color, label) {
                         color: tickColor,
                         padding: 8
                     },
-                    beginAtZero: true
+                    beginAtZero: id === 'chart-gnss' || id === 'chart-rain'
                 }
             }
         }
     });
+    charts[id]._monitoringTimestamps = history.map(row => normalizeEpochMs(row.timestamp));
 }
 
 function renderImuChart(history) {
@@ -1263,7 +1268,7 @@ function renderImuChart(history) {
 
     const metricOrNull = value => {
         const number = Number(value);
-        return Number.isFinite(number) ? number : null;
+        return value == null || value === '' ? null : (Number.isFinite(number) ? number : null);
     };
     const rollData = (history || []).map(h => metricOrNull(h.data?.roll));
     const pitchData = (history || []).map(h => metricOrNull(h.data?.pitch));
@@ -1330,6 +1335,7 @@ function renderImuChart(history) {
                     labels: {
                         color: legendColor,
                         usePointStyle: true,
+                    callbacks: { title: items => formatChartTimestamp(normalizeEpochMs(history[items[0]?.dataIndex]?.timestamp)) },
                         pointStyle: 'circle',
                         font: { size: 11 }
                     }
@@ -1347,4 +1353,5 @@ function renderImuChart(history) {
             }
         }
     });
+    charts['chart-imu']._monitoringTimestamps = history.map(row => normalizeEpochMs(row.timestamp));
 }

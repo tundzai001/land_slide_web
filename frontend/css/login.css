@@ -566,3 +566,30 @@
 .login-brand .app-brand-product { display: grid; line-height: 1; }
 .login-brand .app-brand-product strong { font-size: 1rem; }
 .login-brand .app-brand-product small { margin-top: 5px; font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; }
+
+/* Sign-in belongs to the same operations product, without decorative scenes. */
+.login-page { font-family:var(--font-base); --login-accent:var(--accent-primary); --login-accent-strong:var(--accent-primary-hover); }
+.login-visual, [data-theme="dark"] .login-visual { background:var(--workspace-chrome); }
+.login-visual::before, .login-visual::after { display:none; }
+.login-capabilities { position:relative; inset:auto; transform:none; width:100%; max-width:460px; margin:48px 0; }
+.login-capabilities-title { display:block; margin-bottom:24px; font-size:12px; font-weight:600; letter-spacing:1px; color:#a7c1be; }
+.login-capabilities>div { display:flex; gap:20px; align-items:center; padding:22px 0; border-top:1px solid #29494c; }
+.login-capabilities>div>i { display:grid; place-items:center; width:44px; height:44px; flex-shrink:0; color:#a7c1be; font-size:22px; }
+.login-capabilities strong, .login-capabilities small { display:block; }
+.login-capabilities strong { font-size:17px; font-weight:500; color:#f0fdfa; }
+.login-capabilities small { margin-top:5px; font-size:13px; color:#a7c1be; }
+.login-visual-copy h1 { font-size:clamp(30px,3.3vw,44px); font-weight:500; line-height:1.25; letter-spacing:-1px; }
+.login-visual-copy p { font-size:14px; line-height:1.7; color:#a7c1be; max-width:420px; }
+.login-panel, [data-theme="dark"] .login-panel { background:var(--surface-canvas); }
+.login-card, [data-theme="dark"] .login-card { border:1px solid var(--border-color); border-radius:12px; background:var(--surface-default); box-shadow:var(--panel-shadow); }
+.login-card h2 { font-size:25px; font-weight:600; letter-spacing:-.6px; }
+.login-heading-copy>span { font-size:12px; letter-spacing:0; font-weight:500; }
+.login-icon { border-radius:8px; background:var(--surface-selected); color:var(--accent-primary); box-shadow:none; }
+.login-field input, .login-input-shell, .login-password-row, .login-page .login-submit { border-radius:var(--control-radius); }
+.login-page .login-submit, .login-page .login-submit:hover { background:var(--accent-primary); box-shadow:none; }
+.login-page .login-submit:hover { background:var(--accent-primary-hover); }
+[data-theme="dark"] .login-page .login-submit { color:var(--bg-primary); }
+.login-theme { border-radius:var(--control-radius); box-shadow:none; }
+@media(max-width:900px) { .login-capabilities { display:none; }.login-visual-copy h1 { font-size:28px; } }
+@media(max-width:560px) { .login-card, [data-theme="dark"] .login-card { border-radius:10px; }.login-card h2 { font-size:22px; }.login-visual-copy h1 { font-size:25px; } }
+.login-capabilities { padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; }

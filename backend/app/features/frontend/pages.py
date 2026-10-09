@@ -49,6 +49,11 @@ async def read_root(request: Request):
     return _frontend_document("index.html")
 
 
+@router.get("/about")
+async def read_about():
+    return _frontend_document("about.html")
+
+
 @router.get("/management")
 @router.get("/management.html")
 @router.get("/admin")
@@ -87,6 +92,7 @@ async def sitemap_xml():
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
         f'<url><loc>{site_url}/</loc></url>'
         f'<url><loc>{site_url}/map</loc></url>'
+        f'<url><loc>{site_url}/about</loc></url>'
         '</urlset>'
     )
     return Response(content=xml, media_type="application/xml")

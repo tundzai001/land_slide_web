@@ -122,3 +122,10 @@
 @media(max-width:1100px) { .operations-log-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:767px) { .operations-log-filters { grid-template-columns:1fr; } @keyframes operations-drawer-enter { from { opacity:.5; transform:translateY(48px); } to { opacity:1; transform:translateY(0); } } }
 @media(prefers-reduced-motion:reduce) { .operations-nav-item,.operations-card .btn,.operations-table-wrap { transition:none; } .operations-card[data-ops-view]:not([hidden]),.operations-inspector[open],.operations-inspector[open]::backdrop,.operations-table-wrap::before,.operations-card .btn[aria-busy="true"]::before { animation:none; } .operations-nav-item:hover,.operations-nav-item:active,.operations-card .btn:active { transform:none; } }
+/* Align operation tools with the rest of the workspace. */
+.operations-card,.operations-nav-item,.operations-schedule { border-radius:var(--panel-radius); box-shadow:none; }
+.operations-nav-item>i { border-radius:var(--control-radius); }
+.operations-nav-item:hover { transform:none; box-shadow:none; background:var(--surface-hover); border-color:var(--border-strong); }
+.operations-nav-item strong { font-weight:600; }
+.operations-nav-item small { font-size:12px; }
+.operations-empty { border-radius:var(--panel-radius); }

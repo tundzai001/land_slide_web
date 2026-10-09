@@ -380,15 +380,6 @@
 }
 
 /* ========================================
-   MOBILE BOTTOM NAV — ẩn trên desktop,
-   chỉ hiển thị ở trang bản đồ (< 768px)
-   Trên trang admin/management luôn ẩn.
-======================================== */
-.mobile-bottom-nav {
-    display: none !important;
-}
-
-/* ========================================
    STATION CONFIG WIZARD — POLISHED SHELL
 ======================================== */
 #stationConfigModal {

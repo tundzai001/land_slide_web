@@ -26,7 +26,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
         <div class="sidebar-content">
             <!-- Status Badge -->
             <div class="status-bar">
-                <span class="status-label">Status:</span>
+                <span class="status-label">Trạng thái:</span>
                 <span id="st-risk" class="status-badge">...</span>
             </div>
             <div id="st-stale-info" class="stale-info" style="display: none;"></div>
@@ -53,10 +53,10 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                         </div>
                     </button>
 
-                    <!-- Rain Intensity -->
+                    <!-- Lượng mưa -->
                     <div class="sensor-item" id="sensor-card-rain">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-cloud-rain-fill me-1"></i>Rain Intensity</span>
+                            <span><i class="bi bi-cloud-rain-fill me-1"></i>Lượng mưa</span>
                             <span id="rain-offline-badge" class="sensor-offline-badge"
                                 style="display:none;">OFFLINE</span>
                         </div>
@@ -143,7 +143,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                 <!--ACTION BUTTONS -->
                 <div class="action-buttons">
                     <button class="btn-action" id="btn-show-charts" aria-controls="charts-panel" aria-expanded="false">
-                        <i class="bi bi-graph-up me-2"></i>View Chart
+                        <i class="bi bi-graph-up me-2"></i>Biểu đồ
                     </button>
                     <button class="btn-action w-100 secondary d-none" id="btn-long-term">
                         <i class="bi bi-calendar-range me-2"></i>Analysis
@@ -202,7 +202,14 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                     <button type="button" class="chart-range-btn" data-chart-hours="8760" aria-pressed="false">1 năm</button>
                 </div>
                 <span class="charts-point-meta" id="charts-point-meta">Mặc định 24 giờ</span>
-            </div>
+                </div>
+                <div class="chart-workspace-tools">
+                    <label for="chart-sensor-filter" class="visually-hidden">Chọn biểu đồ cảm biến</label>
+                    <select id="chart-sensor-filter" class="form-select"><option value="all">Tất cả cảm biến</option></select>
+                    <button type="button" id="charts-refresh" class="chart-tool-button" title="Tải lại dữ liệu" aria-label="Tải lại dữ liệu biểu đồ"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button type="button" id="charts-expand" class="chart-tool-button" aria-pressed="false" title="Mở rộng biểu đồ" aria-label="Mở rộng biểu đồ"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
+                <p id="chart-workspace-status" class="chart-workspace-status" role="status" aria-live="polite">Chọn khoảng thời gian để xem dữ liệu.</p>
 
             ${(window.SensorCatalog || []).filter(sensor => !sensor.legacy && sensor.key !== 'extensometer').map(sensor => sensor.fields.map(field => `
                 <div class="chart-box" id="chart-box-${sensor.key}-${field}">
@@ -216,15 +223,15 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                 <div class="chart-title"><i class="bi bi-speedometer2"></i><span>Vận tốc GNSS</span></div>
                 <div class="chart-stat-grid">
                     <div class="flex-fill">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">Mới nhất</div>
                         <div class="fw-bold text-primary" id="stat-chart-gnss-latest">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Max</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">Cao nhất</div>
                         <div class="fw-bold text-danger" id="stat-chart-gnss-max">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Min</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">Thấp nhất</div>
                         <div class="fw-bold text-success" id="stat-chart-gnss-min">--</div>
                     </div>
                     <div class="flex-fill border-start">
@@ -250,15 +257,15 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                 <div class="chart-title"><i class="bi bi-water"></i><span>Mực nước ngầm / Áp lực nước lỗ rỗng</span></div>
                 <div class="chart-stat-grid">
                     <div class="flex-fill">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">Mới nhất</div>
                         <div class="fw-bold text-primary" id="stat-chart-water-latest">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Max</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">Cao nhất</div>
                         <div class="fw-bold text-danger" id="stat-chart-water-max">--</div>
                     </div>
                     <div class="flex-fill border-start">
-                        <div class="small text-muted" style="font-size: 0.7rem;">Min</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">Thấp nhất</div>
                         <div class="fw-bold text-success" id="stat-chart-water-min">--</div>
                     </div>
                     <div class="flex-fill border-start">

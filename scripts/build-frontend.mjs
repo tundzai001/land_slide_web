@@ -41,6 +41,7 @@ const groups = {
     'css/shell.css', 'css/performance.css'
   ],
   'landing.min.css': ['css/landing.css'],
+  'about.min.css': ['css/about.css'],
   'login.min.css': ['css/login.css'],
   'map.min.css': [
     'css/map/base.css', 'css/map/station-panels.css', 'css/map/analysis.css',
@@ -60,7 +61,7 @@ const groups = {
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
     'js/map/runtime.js', 'js/map/realtime.js', 'js/map/incidents.js', 'js/map/marker-alerts.js',
     'js/map/guest-rescue.js', 'js/map/map-layers.js', 'js/map/map-interactions.js',
-    'js/map/stations.js', 'js/map/station-detail.js', 'js/map/long-term.js',
+    'js/map/stations.js', 'js/map/station-detail.js', 'js/map/chart-workspace.js', 'js/map/long-term.js',
     'js/map/analysis.js', 'js/map/ui-alerts.js', 'js/map/tools.js'
   ],
   'admin-app.min.js': [
@@ -114,10 +115,10 @@ async function minify(outputName, files) {
   await writeFile(path.join(outputRoot, outputName), transformed.code, 'utf8');
 }
 
-async function buildLanding() {
+async function buildLanding(page = 'landing') {
   await esbuild.build({
-    entryPoints: [path.join(frontendRoot, 'js/landing.js')],
-    outfile: path.join(outputRoot, 'landing.min.js'),
+    entryPoints: [path.join(frontendRoot, `js/${page}.js`)],
+    outfile: path.join(outputRoot, `${page}.min.js`),
     bundle: true,
     format: 'iife',
     target: 'es2019',
@@ -134,6 +135,7 @@ await mkdir(outputRoot, { recursive: true });
 await Promise.all(Object.entries(groups).map(([name, files]) => minify(name, files)));
 await Promise.all([
   buildLanding(),
+  buildLanding('about'),
   minify('app-runtime.min.js', ['js/session-state.js', 'js/app-runtime.js'])
 ]);
 
@@ -154,7 +156,7 @@ for (const assetName of ['aitogy.png', 'social-card.png']) {
   await copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName));
 }
 
-for (const shellName of ['index.html', 'map.html', 'app.html']) {
+for (const shellName of ['index.html', 'about.html', 'map.html', 'app.html']) {
   const shell = (await readFile(path.join(frontendRoot, shellName), 'utf8'))
     .replaceAll('__BUILD_VERSION__', buildVersion)
     .replaceAll('__PUBLIC_SITE_URL__', publicSiteUrl)
@@ -163,7 +165,7 @@ for (const shellName of ['index.html', 'map.html', 'app.html']) {
 }
 
 const artifactNames = [
-  ...Object.keys(groups), 'landing.min.js', 'app-runtime.min.js',
+  ...Object.keys(groups), 'landing.min.js', 'about.min.js', 'about.html', 'app-runtime.min.js',
   'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
 ].sort();
 const manifest = { version: 1, build: buildVersion, generated_at: new Date().toISOString(), assets: {} };
@@ -186,7 +188,7 @@ for (const name of artifactNames.filter(name => name.endsWith('.js'))) {
   if (forbidden.test(output)) throw new Error(`${name} still references a source-only path or runtime compiler`);
 }
 
-for (const shellName of ['index.html', 'map.html', 'app.html']) {
+for (const shellName of ['index.html', 'about.html', 'map.html', 'app.html']) {
   const shell = await readFile(path.join(outputRoot, shellName), 'utf8');
   if (shell.includes('__BUILD_VERSION__') || /["']\/(?:js|css)\//i.test(shell)) {
     throw new Error(`${shellName} still references a source-only path or unresolved build version`);

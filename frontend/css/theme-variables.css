@@ -4,8 +4,8 @@
 
 :root {
     /* === DEFAULT: LIGHT MODE === */
-    --bg-primary: #f4f8f7;
-    --bg-primary-rgb: 244, 248, 247;
+    --bg-primary: #f5f7f8;
+    --bg-primary-rgb: 245, 247, 248;
     --bg-secondary: #ffffff;
     --bg-secondary-rgb: 255, 255, 255;
     --bg-tertiary: #eef5f4;
@@ -48,6 +48,11 @@
     --accent-danger: #b91c1c;
     --accent-info: #2563eb;
     --brand-orange: #ff6b00;
+    --workspace-chrome: #182b34;
+    --workspace-chrome-text: #f3f7f8;
+    --workspace-chrome-muted: #b6c6cc;
+    --workspace-chrome-line: #354851;
+    --workspace-chrome-selected: #28434c;
     --accent-primary-hover: #0b5f59;
 
     --state-success-bg: #e9f8ef;
@@ -62,9 +67,9 @@
     --state-neutral-text: #596579;
 
     /* Gradients */
-    --gradient-hero: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
-    --gradient-card: linear-gradient(145deg, #ffffff 0%, #f5faf9 100%);
-    --gradient-button: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+    --gradient-hero: var(--accent-primary);
+    --gradient-card: var(--surface-default);
+    --gradient-button: var(--accent-primary);
 
     /* Shadows - Light Mode */
     --shadow-sm: 0 2px 8px rgba(15, 42, 46, 0.06);
@@ -90,10 +95,10 @@
     --spacing-xl: 32px;
 
     /* Border radius - Consistent */
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 22px;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
 
     /* Z-index layers */
     --z-map: 0;
@@ -194,7 +199,7 @@
     --shadow-xl: 0 26px 72px rgba(0, 0, 0, 0.38);
 
     --gradient-card: linear-gradient(145deg, #0b2427 0%, #071a1c 100%);
-    --gradient-button: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+    --gradient-button: var(--accent-primary);
 }
 
 /* Smooth font rendering for light mode */
@@ -284,4 +289,19 @@ html[data-theme="light"] {
 ::-moz-selection {
     background: var(--accent-primary);
     color: white;
+}
+
+/* Shared component contract: restrained surfaces and deliberate interaction. */
+:root {
+    --control-radius: 6px;
+    --panel-radius: 10px;
+    --control-height: 44px;
+    --control-focus: color-mix(in srgb, var(--accent-primary) 32%, transparent);
+    --panel-shadow: 0 2px 8px rgb(15 42 46 / 5%);
+    --overlay-shadow: 0 12px 36px rgb(15 42 46 / 14%);
+    --motion-control: 160ms;
+}
+[data-theme="dark"] {
+    --panel-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+    --overlay-shadow: 0 12px 36px rgb(0 0 0 / 28%);
 }

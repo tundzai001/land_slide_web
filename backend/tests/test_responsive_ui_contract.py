@@ -73,7 +73,7 @@ class ResponsiveUiContractTests(unittest.TestCase):
     def test_landing_uses_summary_endpoint_without_runtime_jsx_compiler(self):
         frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
         landing = (frontend_dir / "index.html").read_text(encoding="utf-8")
-        script = (frontend_dir / "js" / "landing.js").read_text(encoding="utf-8")
+        script = (frontend_dir / "js" / "landing-common.js").read_text(encoding="utf-8")
         app_shell = (frontend_dir / "app.html").read_text(encoding="utf-8")
         self.assertIn("/api/public/dashboard-summary", script)
         self.assertNotIn("tailwindcss", landing)
@@ -89,11 +89,11 @@ class ResponsiveUiContractTests(unittest.TestCase):
         expected = {
             "admin-app.min.js", "admin.min.css", "app-base.min.css", "app-runtime.min.js",
             "aitogy.png", "app.html", "build-manifest.json", "digital-twin.min.js", "index.html",
-            "landing.min.css", "landing.min.js", "login.min.css", "map-app.min.js",
+            "about.html", "about.min.css", "about.min.js", "landing.min.css", "landing.min.js", "login.min.css", "map-app.min.js",
             "map.html", "map.min.css", "shared.min.js", "social-card.png",
         }
         self.assertEqual({item.name for item in dist_dir.iterdir()}, expected)
-        for name in ("index.html", "map.html", "app.html"):
+        for name in ("index.html", "about.html", "map.html", "app.html"):
             document = (dist_dir / name).read_text(encoding="utf-8")
             self.assertNotIn("__BUILD_VERSION__", document)
             self.assertNotIn('src="/js/', document)

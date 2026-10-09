@@ -23,7 +23,7 @@ const mapCss = cssBundle([
   'frontend/css/map/analysis.css', 'frontend/css/map/effects-theme.css',
   'frontend/css/map/tools.css', 'frontend/css/map/gnss.css',
   'frontend/css/digital-twin.css', 'frontend/css/rescue-markers.css',
-  'frontend/css/map-responsive.css', 'frontend/css/map/premium-light.css',
+  'frontend/css/map-responsive.css', 'frontend/css/map/map-interface.css',
   'frontend/css/map/digital-twin-workspace.css', 'frontend/css/map/digital-twin-results.css',
   'frontend/css/map/incidents.css', 'frontend/css/map/operations-polish.css',
 ]);

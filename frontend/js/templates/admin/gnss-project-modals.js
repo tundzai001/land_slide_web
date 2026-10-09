@@ -273,7 +273,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <div><span class="ops-eyebrow">USER CONFIGURATION</span><h5 class="modal-title mt-1" id="editUserModalLabel">Sửa cấu hình người dùng</h5></div>
+                    <div><span class="ops-eyebrow">Phân quyền truy cập</span><h5 class="modal-title mt-1" id="editUserModalLabel">Sửa cấu hình người dùng</h5></div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
                 </div>
                 <div class="modal-body">

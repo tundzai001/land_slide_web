@@ -22,13 +22,16 @@ test('index is semantic and progressively enhanced without React', async () => {
   expect(indexSource).not.toContain('ReactDOM');
   expect(landingTemplateSource).toContain('<main id="main">');
   expect(landingTemplateSource).toContain('<section class="hero"');
-  expect(landingTemplateSource).toContain('Toàn cảnh quan trắc');
+  expect(landingTemplateSource).toContain('Hệ thống quan trắc');
   expect(landingTemplateSource).toContain('<address class="footer-contact"');
   expect(landingTemplateSource).toContain('aitogyaitogy@gmail.com');
-  expect(landingCss.toString()).toContain('.story-enhanced .story-stage');
-  expect(landingJs.toString()).toContain('story-enhanced');
-  expect(landingJs.toString()).toContain('--stage-scale');
+  expect(landingJs.toString()).not.toContain('WebGLRenderer');
+  expect(landingTemplateSource).toContain('href="/about"');
 });
+
+const aboutSource = readFileSync(join(__dirname, '../..', 'frontend/about.html'), 'utf8');
+const aboutCss = readFileSync(join(__dirname, '../..', 'frontend/dist/about.min.css'));
+const aboutJs = readFileSync(join(__dirname, '../..', 'frontend/dist/about.min.js'));
 
 const sizes = [
   { name: 'mobile-small', width: 375, height: 667 },
@@ -57,12 +60,12 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
       contentType: 'application/json; charset=utf-8',
       body: JSON.stringify({
         stations: { total: 59, online: 52, stale: 4, offline: 3 },
-        updated_at: '2026-08-14T12:00:00+07:00',
+        updated_at: new Date().toISOString(),
       }),
     }));
     await page.goto('/');
     await expect(page.locator('#main')).not.toBeEmpty();
-    await expect(page.locator('h1')).toContainText('Toàn cảnh quan trắc');
+    await expect(page.locator('h1')).toContainText('Hệ thống quan trắc');
     await expect(page.locator('#stations-total')).toHaveText('59');
 
     const contract = await page.evaluate(() => ({
@@ -83,19 +86,27 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     expect(contract.h1).toBe(1);
     expect(contract.emptyLinks).toBe(0);
     expect(contract.undersizedTargets).toEqual([]);
-    if (size.width >= 1800) expect(contract.mainWidth).toBeGreaterThanOrEqual(size.width * .98);
+    await expect(page.locator('.access-card').first()).toHaveAttribute('href', '/map');
+    await expect(page.locator('.access-card').last()).toHaveAttribute('href', '/management');
+    await expect(page.locator('#auth-link')).toHaveAttribute('href', '/login?return_to=%2Fmap');
+    await expect(page.locator('canvas')).toHaveCount(0);
 
     const themeButton = page.locator('.icon-button');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await themeButton.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    if (size.name === 'desktop') {
+      await page.waitForTimeout(250);
+      await page.screenshot({ path: 'test-results/landing-portal-dark.png', fullPage: true });
+    }
     await themeButton.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     if (size.width < 768) {
       await page.locator('.menu-button').click();
       await expect(page.locator('#mobile-menu')).toBeVisible();
-      await page.locator('.menu-button').click();
+      await page.keyboard.press('Escape');
       await expect(page.locator('#mobile-menu')).toBeHidden();
+      await expect(page.locator('.menu-button')).toBeFocused();
     }
 
     const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
@@ -103,7 +114,7 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
       await page.evaluate(value => scrollTo(0, value), top);
       await page.waitForTimeout(30);
     }
-    await expect(page.locator('.final-cta')).toHaveClass(/is-visible/);
+    await expect(page.locator('.about-link')).toBeVisible();
     await page.evaluate(() => scrollTo(0, 0));
 
     await page.screenshot({
@@ -116,17 +127,17 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
 test('desktop story advances without shifting the fixed navigation', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.route('http://127.0.0.1:8000/', route => route.fulfill({
+  await page.route('http://127.0.0.1:8000/about', route => route.fulfill({
     contentType: 'text/html; charset=utf-8',
-    body: indexSource.replaceAll('__BUILD_VERSION__', 'test'),
+    body: aboutSource.replaceAll('__BUILD_VERSION__', 'test'),
   }));
-  await page.route('**/assets/landing.min.css*', route => route.fulfill({ contentType: 'text/css', body: landingCss }));
-  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: landingJs }));
+  await page.route('**/assets/about.min.css*', route => route.fulfill({ contentType: 'text/css', body: aboutCss }));
+  await page.route('**/assets/about.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: aboutJs }));
   await page.route('**/api/public/dashboard-summary', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ stations: { total: 59, online: 52, stale: 4, offline: 3 }, updated_at: '2026-08-14T12:00:00+07:00' }),
+    body: JSON.stringify({ stations: { total: 59, online: 52, stale: 4, offline: 3 }, updated_at: new Date().toISOString() }),
   }));
-  await page.goto('/');
+  await page.goto('/about');
 
   const before = await page.locator('.header-inner').boundingBox();
   const storyVisibility = async progress => {
@@ -156,13 +167,13 @@ test('desktop story advances without shifting the fixed navigation', async ({ pa
 test('story fallback stays compact when progressive enhancement is unavailable', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.route('http://127.0.0.1:8000/', route => route.fulfill({
+  await page.route('http://127.0.0.1:8000/about', route => route.fulfill({
     contentType: 'text/html; charset=utf-8',
-    body: indexSource.replaceAll('__BUILD_VERSION__', 'test'),
+    body: aboutSource.replaceAll('__BUILD_VERSION__', 'test'),
   }));
-  await page.route('**/assets/landing.min.css*', route => route.fulfill({ contentType: 'text/css', body: landingCss }));
-  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: landingJs }));
-  await page.goto('/');
+  await page.route('**/assets/about.min.css*', route => route.fulfill({ contentType: 'text/css', body: aboutCss }));
+  await page.route('**/assets/about.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: aboutJs }));
+  await page.goto('/about');
 
   const geometry = await page.locator('.story').evaluate(element => ({
     height: element.getBoundingClientRect().height,
@@ -171,3 +182,20 @@ test('story fallback stays compact when progressive enhancement is unavailable',
   expect(geometry.enhanced).toBe(false);
   expect(geometry.height).toBeLessThan(2250);
 });
+
+ test('network error can be retried and empty data stays explicit', async ({ page }) => {
+  await page.route('http://127.0.0.1:8000/', route => route.fulfill({ contentType: 'text/html', body: indexSource }));
+  await page.route('**/assets/landing.min.css*', route => route.fulfill({ contentType: 'text/css', body: landingCss }));
+  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType: 'application/javascript', body: landingJs }));
+  let requests = 0;
+  await page.route('**/api/public/dashboard-summary', route => {
+    requests++;
+    return requests === 1 ? route.fulfill({ status: 503 }) : route.fulfill({ json: { stations: { total: 0, online: 0, stale: 0, offline: 0 } } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#metrics-status')).toHaveAttribute('data-state', 'error');
+  await page.locator('#metrics-retry').click();
+  await expect(page.locator('#metrics-status')).toHaveAttribute('data-state', 'empty');
+  await expect(page.locator('#stations-total')).toHaveText('0');
+  await expect(page.locator('#metric-grid')).toHaveAttribute('aria-busy', 'false');
+ });

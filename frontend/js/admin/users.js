@@ -54,11 +54,9 @@ class AdminUsersFeature extends window.AdminManager {
         }
 
         const roleBadge = (role) => {
-            const colors = { admin: 'danger', operator: 'info', viewer: 'secondary' };
             const labels = { admin: 'Admin', operator: 'Operator', viewer: 'Viewer' };
-            const c = colors[role] || 'secondary';
             const l = labels[role] || role;
-            return `<span class="badge bg-${c} bg-opacity-10 border border-${c} text-${c}">${l}</span>`;
+            return `<span class="badge user-role-badge">${this.escapeUserValue(l)}</span>`;
         };
 
         tbody.innerHTML = users.map(u => {

@@ -1,7 +1,7 @@
 window.LegacyTemplateParts ||= {};
 window.LegacyTemplateParts.operations = String.raw`
 <div class="tab-pane fade" id="tab-operations">
-  <header class="ops-page-header"><div><span class="ops-eyebrow">SYSTEM OPERATIONS</span><h4>Vận hành hệ thống</h4><p>Theo dõi hệ thống, kiểm soát thay đổi và bảo vệ dữ liệu quan trắc.</p></div><button class="btn btn-outline-primary" onclick="window.adminManager.loadOperations()"><i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Làm mới</button></header>
+  <header class="ops-page-header"><div><span class="ops-eyebrow">Quản trị hệ thống</span><h4>Vận hành hệ thống</h4><p>Theo dõi hệ thống, kiểm soát thay đổi và bảo vệ dữ liệu quan trắc.</p></div><button class="btn btn-outline-primary" onclick="window.adminManager.loadOperations()"><i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Làm mới</button></header>
   <div id="operations-feedback" role="status" aria-live="polite" tabindex="-1" hidden></div>
   <nav class="operations-nav" aria-label="Chức năng vận hành">
     <button class="operations-nav-item is-active" data-ops-tab="backup" aria-pressed="true" onclick="window.adminManager.selectOperationView('backup')"><i class="bi bi-database-check" aria-hidden="true"></i><span><strong>Sao lưu & phục hồi</strong><small>Bảo vệ dữ liệu quan trắc</small></span></button>

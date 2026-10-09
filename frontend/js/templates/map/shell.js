@@ -14,6 +14,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <span class="app-brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span>
             </a>
 
+            <span class="map-workspace-label">Bản đồ quan trắc</span>
+
             <button type="button" id="btn-digital-twin" class="btn btn-sm map-simulation-nav"
                 aria-label="Mở mô phỏng sạt lở 3D" style="display:none">
                 <i class="bi bi-boxes me-1"></i> Mô phỏng 3D
@@ -32,6 +34,17 @@ window.LegacyTemplateParts['shell'] = String.raw`
                 <span class="layer-mode-option station-mode" id="icon-layer-station"><i class="bi bi-broadcast-pin"></i><span>Trạm</span></span>
                 <span class="layer-mode-option rescue-mode" id="icon-layer-rescue"><i class="bi bi-life-preserver"></i><span>Cứu hộ</span></span>
             </label>
+
+            <div class="map-layer-control basemap-control">
+                <button type="button" id="basemap-toggle" class="map-icon-button" aria-label="Đổi nền bản đồ" aria-expanded="false" aria-controls="basemap-popover" title="Đổi nền bản đồ"><i class="bi bi-map"></i><span>Nền</span></button>
+                <fieldset id="basemap-popover" class="map-layer-popover" hidden><legend>Nền bản đồ</legend>
+                    <label><input type="radio" name="basemap" value="roadmap"><span><i class="bi bi-signpost-split"></i> Đường phố</span></label>
+                    <label><input type="radio" name="basemap" value="satellite"><span><i class="bi bi-globe"></i> Vệ tinh</span></label>
+                    <label><input type="radio" name="basemap" value="hybrid" checked><span><i class="bi bi-geo-alt"></i> Vệ tinh có nhãn</span></label>
+                    <label><input type="radio" name="basemap" value="terrain"><span><i class="bi bi-map"></i> Địa hình</span></label>
+                    <p id="basemap-status" role="status" aria-live="polite">Vệ tinh có nhãn</p>
+                </fieldset>
+            </div>
 
             <div class="map-layer-control">
                 <button type="button" id="layer-popover-toggle" class="map-icon-button" aria-label="Chọn lớp bản đồ" aria-expanded="false" aria-controls="layer-popover"><i class="bi bi-layers"></i></button>

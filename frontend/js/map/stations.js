@@ -7,7 +7,20 @@ function switchMapTiles() {
     if (currentTileLayer) {
         map.removeLayer(currentTileLayer);
     }
-    currentTileLayer = L.tileLayer(TILE_URLS.light, TILE_OPTIONS.light).addTo(map);
+    currentTileLayer = L.tileLayer(MAP_BASEMAPS[activeBasemap].url, { ...TILE_OPTIONS.light, attribution: '© Google Maps' });
+    const layer = currentTileLayer;
+    const status = document.getElementById('basemap-status');
+    if (status) status.textContent = `Đang tải ${MAP_BASEMAPS[activeBasemap].label.toLowerCase()}…`;
+    let failed = false;
+    layer.on('tileerror', () => {
+        failed = true;
+        if (layer === currentTileLayer && status) status.textContent = 'Một số ô nền chưa tải được. Thử đổi nền hoặc tải lại.';
+    });
+    layer.on('load', () => {
+        if (layer === currentTileLayer && status && !failed) status.textContent = MAP_BASEMAPS[activeBasemap].label;
+    });
+    layer.addTo(map);
+    layer.bringToBack();
 }
 
 function createStationClusterGroup() {
@@ -173,7 +186,7 @@ function initMap() {
 
 
 
-        // Keep the same Google imagery in both UI themes. Theme only changes controls.
+        // Keep the selected basemap when UI theme changes.
         switchMapTiles();
 
         console.log('✅ [MAP] Leaflet map initialized');

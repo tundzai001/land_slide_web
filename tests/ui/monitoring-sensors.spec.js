@@ -105,6 +105,7 @@ test('new sensor cards show zero, all axes, stale state and clear when changing 
   await page.setContent('<div id="monitoring-sensor-values"></div>');
   await page.evaluate(value => { window.SensorCatalog = value; }, catalog);
   await page.addScriptTag({content:source('frontend/js/map/station-detail.js')});
+  await page.addScriptTag({content:source('frontend/js/map/chart-workspace.js')});
   await page.evaluate(() => renderMonitoringSensors({sensors:{temperature:{latest:{temperature:0},is_online:true},accelerometer:{latest:{x:1,y:-2,z:3},is_online:false}}}));
   await expect(page.locator('#monitoring-sensor-values')).toContainText('0 °C');
   await expect(page.locator('#monitoring-sensor-values')).toContainText('Y: -2 m/s²');
@@ -117,6 +118,7 @@ test('station-specific custom sensor appears on map without exposing markup', as
   await page.setContent('<div id="monitoring-sensor-values"></div>');
   await page.evaluate(value => { window.SensorCatalog = value; }, catalog);
   await page.addScriptTag({content:source('frontend/js/map/station-detail.js')});
+  await page.addScriptTag({content:source('frontend/js/map/chart-workspace.js')});
   await page.evaluate(() => renderMonitoringSensors({
     config:{custom_sensors:{custom_0123456789ab:{key:'custom_0123456789ab',label:'Độ dẫn <điện>',note:'Đo độ dẫn',unit:'µS/cm',fields:['value'],metrics:[{field:'value',label:'Độ dẫn',unit:'µS/cm',decimals:3}]}}},
     sensors:{custom_0123456789ab:{latest:{value:0,quality:'valid'},is_online:true}}
@@ -141,6 +143,7 @@ test('history charts retain every tilt axis and extensometer point, then release
     };
   });
   await page.addScriptTag({content:source('frontend/js/map/station-detail.js')});
+  await page.addScriptTag({content:source('frontend/js/map/chart-workspace.js')});
   const result = await page.evaluate(() => {
     renderCharts({config:{custom_sensors:{custom_0123456789ab:{key:'custom_0123456789ab',label:'Độ dẫn',unit:'µS/cm',fields:['value'],metrics:[{field:'value',label:'Độ dẫn',unit:'µS/cm'}]}}},sensors:{
       tiltmeter: {history:[{timestamp:1700000000,data:{x:1,y:2,z:3}}]},
@@ -167,6 +170,7 @@ test('quality, measurement time and waveform are distinct from connection and sn
     constructor(canvas, config) {this.data = config.data;} destroy() {}
   };}, catalog);
   await page.addScriptTag({content:source('frontend/js/map/station-detail.js')});
+  await page.addScriptTag({content:source('frontend/js/map/chart-workspace.js')});
   await page.evaluate(() => {
     const sensor = {is_online:true,latest_timestamp:1700000010,latest:{x:0,y:-2,z:3,quality:'suspect',
       measured_at:1700000000,reference_id:'ZERO-1',event_id:'EVENT-1',
