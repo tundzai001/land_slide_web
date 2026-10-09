@@ -211,6 +211,27 @@
     ]
   },
   {
+    "key": "flow_velocity",
+    "label": "Lưu tốc",
+    "group": "Khí tượng & thủy văn",
+    "field": "velocity",
+    "fields": [
+      "velocity"
+    ],
+    "unit": "m/s",
+    "legacy": false,
+    "metrics": [
+      {
+        "field": "velocity",
+        "label": "Lưu tốc dòng chảy",
+        "unit": "m/s",
+        "decimals": 3
+      }
+    ],
+    "note": "Vận tốc dòng chảy tại vị trí đo",
+    "optional_metrics": []
+  },
+  {
     "key": "accelerometer",
     "label": "Gia tốc / rung chấn",
     "group": "Thân đập",

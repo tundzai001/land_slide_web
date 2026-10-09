@@ -977,6 +977,211 @@
     text-transform: uppercase;
 }
 
+/* Keep sensor selection compact so connection settings appear within the wizard. */
+#stationConfigModal .wizard-content[data-step="2"] .station-step-intro {
+    margin-bottom: 16px;
+}
+
+#stationConfigModal .monitoring-picker {
+    margin: 0;
+    padding: 18px;
+    border: 1px solid var(--station-border);
+    border-radius: 16px;
+    background: var(--station-surface);
+}
+
+#stationConfigModal .monitoring-picker legend {
+    float: left;
+    width: 100%;
+    margin: 0 0 3px;
+    color: var(--station-text);
+    font-size: 0.95rem;
+    font-weight: 750;
+}
+
+#stationConfigModal .monitoring-picker p {
+    margin: 0 0 14px;
+    color: var(--station-muted);
+    font-size: 0.78rem;
+}
+
+#stationConfigModal .monitoring-picker-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+#stationConfigModal .monitoring-picker-search {
+    position: relative;
+    flex: 1 1 260px;
+    min-width: 0;
+}
+
+#stationConfigModal .monitoring-picker-search > i {
+    position: absolute;
+    top: 50%;
+    left: 13px;
+    color: var(--station-muted);
+    pointer-events: none;
+    transform: translateY(-50%);
+}
+
+#stationConfigModal .monitoring-picker-search .form-control {
+    min-height: 44px;
+    padding-left: 39px;
+    border-color: var(--station-border);
+    border-radius: 10px;
+    color: var(--station-text);
+    background: var(--station-subtle);
+}
+
+#stationConfigModal .monitoring-picker-search .form-control:focus {
+    border-color: var(--station-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-primary) 15%, transparent);
+}
+
+#stationConfigModal .monitoring-picker-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 7px;
+    margin: 0;
+}
+
+#stationConfigModal .monitoring-picker-actions .btn {
+    min-height: 44px;
+    padding: 8px 12px;
+    border-color: var(--station-border);
+    border-radius: 10px;
+    color: var(--station-primary);
+    background: var(--station-surface);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+#stationConfigModal .monitoring-picker-actions .btn:hover {
+    border-color: var(--station-primary);
+    background: color-mix(in srgb, var(--station-primary) 7%, var(--station-surface));
+}
+
+#stationConfigModal .monitoring-picker-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+#stationConfigModal .monitoring-choice {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 64px;
+    padding: 10px 11px;
+    border: 1px solid var(--station-border);
+    border-radius: 10px;
+    color: var(--station-text);
+    background: var(--station-subtle);
+    box-shadow: none;
+    transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+#stationConfigModal .monitoring-choice[hidden] {
+    display: none;
+}
+
+#stationConfigModal .monitoring-choice:hover {
+    border-color: color-mix(in srgb, var(--station-primary) 55%, var(--station-border));
+    background: var(--station-surface);
+}
+
+#stationConfigModal .monitoring-choice:has(input:checked) {
+    border-color: var(--station-primary);
+    background: color-mix(in srgb, var(--station-primary) 7%, var(--station-surface));
+    box-shadow: inset 3px 0 0 var(--station-primary);
+}
+
+#stationConfigModal .monitoring-choice:focus-within {
+    outline: 3px solid color-mix(in srgb, var(--station-primary) 35%, transparent);
+    outline-offset: 2px;
+}
+
+#stationConfigModal .monitoring-choice input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+}
+
+#stationConfigModal .monitoring-choice-copy {
+    min-width: 0;
+}
+
+#stationConfigModal .monitoring-choice strong {
+    color: var(--station-text);
+    font-size: 0.79rem;
+    line-height: 1.25;
+}
+
+#stationConfigModal .monitoring-choice small {
+    margin-top: 3px;
+    color: var(--station-muted);
+    font-size: 0.7rem;
+    line-height: 1.25;
+}
+
+#stationConfigModal .monitoring-choice-check {
+    display: grid;
+    place-items: center;
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid color-mix(in srgb, var(--station-muted) 58%, var(--station-border));
+    border-radius: 6px;
+    color: transparent;
+    background: var(--station-surface);
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+#stationConfigModal .monitoring-choice input:checked ~ .monitoring-choice-check {
+    border-color: var(--station-primary);
+    color: #fff;
+    background: var(--station-primary);
+}
+
+#stationConfigModal .station-connection-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 21px 2px 10px;
+}
+
+#stationConfigModal .station-connection-heading h6 {
+    margin: 0;
+    color: var(--station-text);
+    font-size: 0.88rem;
+    font-weight: 750;
+}
+
+#stationConfigModal .station-connection-heading span {
+    color: var(--station-muted);
+    font-size: 0.73rem;
+}
+
+@media (max-width: 767.98px) {
+    #stationConfigModal .monitoring-picker-toolbar { flex-wrap: wrap; }
+    #stationConfigModal .monitoring-picker-search { flex-basis: 100%; }
+    #stationConfigModal .monitoring-picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 420px) {
+    #stationConfigModal .monitoring-picker { padding: 14px; }
+    #stationConfigModal .monitoring-picker-actions { width: 100%; }
+    #stationConfigModal .monitoring-picker-actions .btn { flex: 1; }
+    #stationConfigModal .station-connection-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
+}
+
 #stationConfigModal .station-sensor-picker {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -7,7 +7,7 @@ from app.features.data_export.sensors import export_sensor_record
 
 class MonitoringSensorTests(unittest.TestCase):
     def test_catalog_payload_and_export_round_trip(self):
-        self.assertEqual(len(MONITORING_TYPES), 10)
+        self.assertEqual(len(MONITORING_TYPES), 11)
         for sensor_type in MONITORING_TYPES:
             with self.subTest(sensor_type=sensor_type):
                 spec = SENSOR_CATALOG[sensor_type]
@@ -25,6 +25,8 @@ class MonitoringSensorTests(unittest.TestCase):
                     self.assertEqual(exported, value)
 
     def test_invalid_measurements_never_become_zero(self):
+        self.assertEqual(process_monitoring_payload('flow_velocity', {'velocity': 1.25}), {'velocity': 1.25, 'unit': 'm/s'})
+        self.assertIsNone(process_monitoring_payload('flow_velocity', {'velocity': 1.25, 'unit': 'L/s'}))
         for value in [None, '', '12', True, float('nan'), float('inf')]:
             self.assertIsNone(process_monitoring_payload('piezometer', {'pressure': value}))
         self.assertIsNone(process_monitoring_payload('piezometer', {'pressure': 12, 'unit': 'bar'}))

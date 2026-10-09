@@ -25,17 +25,20 @@ async function mount(page) {
 
 test('catalog supports multiple types, filtering and the existing save flow', async ({ page }) => {
   await mount(page);
-  await expect(page.locator('[data-sensor-choice]')).toHaveCount(14);
+  await expect(page.locator('[data-sensor-choice]')).toHaveCount(15);
   await page.locator('#edit-piezometer').check();
   await page.locator('#edit-temperature').check();
+  await page.locator('#edit-flow_velocity').check();
   await expect(page.locator('#mqtt-piezometer-section')).toBeVisible();
   await expect(page.locator('#mqtt-temperature-section')).toBeVisible();
+  await expect(page.locator('#mqtt-flow_velocity-section')).toBeVisible();
   await page.locator('#sensor-catalog-search').fill('thấm');
   await expect(page.locator('[data-sensor-choice]:visible')).toHaveCount(2);
   await expect(page.locator('#edit-temperature')).toBeChecked();
   await page.locator('#sensor-catalog-search').fill('');
   await page.locator('#topic-piezometer').fill('dam/T1/pressure');
   await page.locator('#topic-temperature').fill('dam/T1/temperature');
+  await page.locator('#topic-flow_velocity').fill('dam/T1/flow_velocity');
   await page.locator('#origin-piezometer-lat').fill('15.1');
   await page.locator('#origin-piezometer-lon').fill('107.2');
   const payload = await page.evaluate(async () => {
@@ -50,7 +53,7 @@ test('catalog supports multiple types, filtering and the existing save flow', as
     await window.adminManager.saveStation();
     return window.saved;
   });
-  expect(Object.keys(payload.sensors).sort()).toEqual(['piezometer', 'temperature']);
+  expect(Object.keys(payload.sensors).sort()).toEqual(['flow_velocity', 'piezometer', 'temperature']);
   expect(payload.sensors.piezometer.lat).toBe(15.1);
   expect(payload.config.piezometer_origin.lon).toBe(107.2);
 });
