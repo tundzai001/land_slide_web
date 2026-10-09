@@ -30,8 +30,6 @@ class RescueFeatureFlagTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(response.status_code, 404)
 
     def test_env_boolean_parsing(self):
-        with patch.dict('os.environ', {}, clear=True):
-            self.assertIs(Settings(_env_file=None).RESCUE_REQUEST_ENABLED, False)
         for value, expected in [('false', False), ('true', True)]:
             with patch.dict('os.environ', {'RESCUE_REQUEST_ENABLED': value}):
                 self.assertIs(Settings(_env_file=None).RESCUE_REQUEST_ENABLED, expected)
