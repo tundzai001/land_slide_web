@@ -1,4 +1,5 @@
 (() => {
+const escapeConfigHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 class AdminProjectConfigFeature extends window.AdminManager {
     // =========================================================================
     // PROJECT CONFIG (CORS Base & GNSS Clusters)
@@ -90,9 +91,9 @@ class AdminProjectConfigFeature extends window.AdminManager {
             return `
                 <div class="px-2 py-1">
                     <div class="form-check">
-                        <input class="form-check-input station-checkbox" type="checkbox" value="${s.station_code}" id="${inputId}" ${isChecked ? 'checked' : ''} onchange="window.adminManager.updateSelectedStationsLabel(this)">
-                        <label class="form-check-label text-slate-300 small" style="cursor: pointer;" for="${inputId}">
-                            ${s.station_name || s.name || s.station_code} (${s.station_code})
+                        <input class="form-check-input station-checkbox" type="checkbox" value="${escapeConfigHtml(s.station_code)}" id="${escapeConfigHtml(inputId)}" ${isChecked ? 'checked' : ''} onchange="window.adminManager.updateSelectedStationsLabel(this)">
+                        <label class="form-check-label text-slate-300 small" style="cursor: pointer;" for="${escapeConfigHtml(inputId)}">
+                            ${escapeConfigHtml(s.station_name || s.name || s.station_code)} (${escapeConfigHtml(s.station_code)})
                         </label>
                     </div>
                 </div>
@@ -105,7 +106,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
             this.projectStationsData.forEach(st => {
                 const isSelected = (st.station_code === base_station_code) ? 'selected' : '';
                 const devData = encodeURIComponent(JSON.stringify(st.devices || []));
-                baseOptionsHtml += `<option value="${st.station_code}" data-devices="${devData}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${isSelected}>${st.name || st.station_code}</option>`;
+                baseOptionsHtml += `<option value="${escapeConfigHtml(st.station_code)}" data-devices="${devData}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${isSelected}>${escapeConfigHtml(st.name || st.station_code)}</option>`;
             });
         }
         baseOptionsHtml += '</optgroup>';
@@ -115,7 +116,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
                 const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
-                baseOptionsHtml += `<option value="${st.name || st.code}" data-online="${online}" data-serial="${st.serial || ''}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${online ? '🟢' : '🔴'} ${st.name || st.code} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
+                baseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
             });
         }
         baseOptionsHtml += '</optgroup>';
@@ -127,13 +128,13 @@ class AdminProjectConfigFeature extends window.AdminManager {
         (this.projectStationsData || []).forEach(st => {
             const selected = st.station_code === backupBaseCode ? 'selected' : '';
             const devices = encodeURIComponent(JSON.stringify(st.devices || []));
-            backupBaseOptionsHtml += `<option value="${st.station_code}" data-devices="${devices}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${selected}>${st.name || st.station_code}</option>`;
+            backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.station_code)}" data-devices="${devices}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${selected}>${escapeConfigHtml(st.name || st.station_code)}</option>`;
         });
         backupBaseOptionsHtml += '</optgroup><optgroup label="CORS stations">';
         (this.corsStationsData || []).forEach(st => {
             const selected = (st.name === backupBaseCode || st.code === backupBaseCode) ? 'selected' : '';
             const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
-            backupBaseOptionsHtml += `<option value="${st.name || st.code}" data-online="${online}" data-serial="${st.serial || ''}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${st.name || st.code} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
+            backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
         });
         backupBaseOptionsHtml += '</optgroup>';
 
@@ -142,7 +143,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         if (this.corsStationsData) {
             this.corsStationsData.forEach(st => {
                 const isSelected = conflictBases.some(cb => cb.serial === st.serial) ? 'selected' : '';
-                conflictBaseOptionsHtml += `<option value="${st.serial}" data-name="${st.name || st.code}" ${isSelected}>${st.name || st.code}</option>`;
+                conflictBaseOptionsHtml += `<option value="${escapeConfigHtml(st.serial)}" data-name="${escapeConfigHtml(st.name || st.code)}" ${isSelected}>${escapeConfigHtml(st.name || st.code)}</option>`;
             });
         }
 
@@ -150,7 +151,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         row.innerHTML = `
             <!-- COMPACT ROW -->
             <div class="col-md-2">
-                <input type="text" class="form-control form-control-sm cluster-name fw-bold" placeholder="Tên cụm (vd: Cụm 1)" value="${name}">
+                <input type="text" class="form-control form-control-sm cluster-name fw-bold" placeholder="Tên cụm (vd: Cụm 1)" value="${escapeConfigHtml(name)}">
             </div>
             <div class="col-md-2">
                 <select class="form-select form-select-sm cluster-type text-primary fw-medium" style="background-color: #f8fafc; border-color: #cbd5e1;">
@@ -169,7 +170,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
                 </div>
             </div>
             <div class="col-md-2">
-                <input type="text" class="form-control form-control-sm cluster-desc" placeholder="Mô tả..." value="${desc}">
+                <input type="text" class="form-control form-control-sm cluster-desc" placeholder="Mô tả..." value="${escapeConfigHtml(desc)}">
             </div>
             <div class="col-md-3 text-end d-flex gap-1 justify-content-end">
                 <button type="button" class="btn btn-sm btn-primary" onclick="const bsCollapse = new bootstrap.Collapse(this.closest('.cluster-row').querySelector('.config-collapse'), {toggle: true});">
@@ -190,7 +191,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
                             <select class="form-select cluster-base-select mb-2" style="font-size:0.85rem;" onchange="window.adminManager.onBaseStationSelected(this)">
                                 ${baseOptionsHtml}
                             </select>
-                            <select class="form-select cluster-stream-select" style="font-size:0.85rem; display: ${base_stream ? 'block' : 'none'};" data-selected-stream="${base_stream}">
+                            <select class="form-select cluster-stream-select" style="font-size:0.85rem; display: ${base_stream ? 'block' : 'none'};" data-selected-stream="${escapeConfigHtml(base_stream)}">
                                 <option value="">-- Chọn Luồng (S1/S2) --</option>
                             </select>
                             <div class="base-station-info mt-2" style="display: none; font-size: 0.75rem; background: rgba(14,165,233,0.08); border: 1px solid rgba(14,165,233,0.25); border-radius: 6px; padding: 8px;">
@@ -218,7 +219,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
                             <select class="form-select cluster-backup-base-select mb-2" style="font-size:0.85rem;" onchange="window.adminManager.onBaseStationSelected(this)">
                                 ${backupBaseOptionsHtml}
                             </select>
-                            <select class="form-select cluster-backup-stream-select" style="font-size:0.85rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${backupBaseStream}">
+                            <select class="form-select cluster-backup-stream-select" style="font-size:0.85rem; display:${backupBaseStream ? 'block' : 'none'};" data-selected-stream="${escapeConfigHtml(backupBaseStream)}">
                                 <option value="">-- Chọn Luồng Base Phụ --</option>
                             </select>
                             <div class="backup-base-station-info mt-2" style="display:none; font-size:0.75rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:8px;">
@@ -293,7 +294,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
                     streams.forEach(s => {
                         const isSelected = (s.stream_id === selectedStreamVal || s.mountpoint === selectedStreamVal) ? 'selected' : '';
                         const hostLabel = s.host ? ` [${s.host}:${s.port}]` : '';
-                        streamSelect.innerHTML += `<option value="${s.stream_id}" data-server-id="${s.server_id || String(s.stream_id || '').replace(/\D/g, '')}" data-host="${s.host || ''}" data-port="${s.port || ''}" data-mp="${s.mountpoint || ''}" ${isSelected}>Luồng: ${s.stream_id.toUpperCase()} - ${s.mountpoint}${hostLabel}</option>`;
+                        streamSelect.innerHTML += `<option value="${escapeConfigHtml(s.stream_id)}" data-server-id="${escapeConfigHtml(s.server_id || String(s.stream_id || '').replace(/\D/g, ''))}" data-host="${escapeConfigHtml(s.host || '')}" data-port="${escapeConfigHtml(s.port || '')}" data-mp="${escapeConfigHtml(s.mountpoint || '')}" ${isSelected}>Luồng: ${escapeConfigHtml(String(s.stream_id || '').toUpperCase())} - ${escapeConfigHtml(s.mountpoint)}${escapeConfigHtml(hostLabel)}</option>`;
                     });
                     streamSelect.style.display = 'block';
                 } else {

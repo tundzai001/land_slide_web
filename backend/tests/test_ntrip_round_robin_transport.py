@@ -344,14 +344,14 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         }
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
-            web_cors_api_token="cors-admin-token",
+            web_cors_api_token="cors_testtoken",
             web_cors_api_base_url="https://cors.example",
         )
         requests = []
 
         def urlopen(request, timeout):
             requests.append((request, timeout))
-            if request.full_url.endswith("/api/public/map-stations"):
+            if request.full_url.endswith("/api/integrations/stations"):
                 return FakeResponse(json.dumps([{
                     "serial": "S1-SERIAL",
                     "name": "SinQuyen1",
@@ -374,13 +374,13 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 selected_host="caster-two.example",
             )
 
-        self.assertTrue(requests[0][0].full_url.endswith("/api/public/map-stations"))
+        self.assertTrue(requests[0][0].full_url.endswith("/api/integrations/stations"))
         self.assertTrue(
             requests[1][0].full_url.endswith(
-                "/api/devices/S1-SERIAL/configure-service"
+                "/api/integrations/stations/S1-SERIAL/configure-service"
             )
         )
-        self.assertEqual(requests[1][0].headers["Authorization"], "Bearer cors-admin-token")
+        self.assertEqual(requests[1][0].headers["Authorization"], "Bearer cors_testtoken")
         sleep_payload = json.loads(requests[1][0].data.decode())
         self.assertTrue(sleep_payload["server1_enabled"])
         self.assertFalse(sleep_payload["server2_enabled"])
@@ -423,14 +423,14 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
         }
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
-            web_cors_api_token="cors-admin-token",
+            web_cors_api_token="cors_testtoken",
             web_cors_api_base_url="https://cors.example",
         )
         requests = []
 
         def urlopen(request, timeout):
             requests.append((request, timeout))
-            if request.full_url.endswith("/api/public/map-stations"):
+            if request.full_url.endswith("/api/integrations/stations"):
                 return FakeResponse(json.dumps([
                     {
                         "serial": "SINQUYEN1-SERIAL",
@@ -466,7 +466,7 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(
             requests[1][0].full_url.endswith(
-                "/api/devices/SINQUYEN2-SERIAL/configure-service"
+                "/api/integrations/stations/SINQUYEN2-SERIAL/configure-service"
             )
         )
         sleep_payload = json.loads(requests[1][0].data.decode())

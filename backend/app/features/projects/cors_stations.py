@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import logging
+import math
 import threading
 import time
 from typing import Any, Dict, List
@@ -31,6 +32,12 @@ _cors_base_stations_cache_has_value = False
 _cors_base_stations_cache_updated_monotonic = 0.0
 _cors_base_stations_last_attempt_monotonic = 0.0
 _cors_base_stations_last_error = None
+_SERVICE_DISPLAY_FIELDS = {
+    "server1_enabled", "server2_enabled", "serverhost1", "serverhost2",
+    "port1", "port2", "mountpoint1", "mountpoint2", "active_mountpoint",
+    "stream_active", "stream_on_demand", "server1_stream_active",
+    "server2_stream_active", "server1_stream_on_demand", "server2_stream_on_demand",
+}
 
 def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw_stations, list):
@@ -48,7 +55,8 @@ def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
             alt = float(item.get("alt")) if item.get("alt") is not None else 0.0
         except (TypeError, ValueError):
             continue
-        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        if not (math.isfinite(lat) and math.isfinite(lon) and math.isfinite(alt)
+                and -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
             continue
 
         service_config = (
@@ -73,7 +81,9 @@ def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
         ):
             if not isinstance(raw_stream, dict):
                 continue
-            stream = dict(raw_stream)
+            stream = {key: raw_stream[key] for key in (
+                "server_id", "stream_id", "host", "port", "mountpoint", "enabled"
+            ) if key in raw_stream}
             raw_server_id = stream.get("server_id")
             if raw_server_id in (None, ""):
                 stream_token = str(stream.get("stream_id") or "")
@@ -127,7 +137,8 @@ def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
                 or name
             ),
             "streams": streams,
-            "service_config": item.get("service_config") or {},
+            "service_config": {key: value for key, value in service_config.items()
+                               if key in _SERVICE_DISPLAY_FIELDS},
             "is_provisioned": bool(item.get("is_provisioned")),
             "server_host": service_config.get("serverhost1"),
             "stream_active": bool(service_config.get("stream_active")),
@@ -241,13 +252,14 @@ async def get_cors_base_stations(
             if isinstance(clusters, list):
                 for c in clusters:
                     if isinstance(c, dict):
-                        base_station = c.get("base_station")
-                        if base_station:
-                            used_bases.add(base_station)
+                        used_bases.update(str(c[key]) for key in (
+                            "base_station", "backup_base_station", "base_serial", "backup_base_serial"
+                        ) if c.get(key))
 
         filtered_cors = [
             st for st in all_cors
-            if st["name"] in used_bases or st.get("mountpoint") in used_bases or st.get("code") in used_bases
+            if st["name"] in used_bases or st.get("mountpoint") in used_bases
+            or st.get("code") in used_bases or str(st.get("serial") or "") in used_bases
         ]
 
         # Physical receiver state and mountpoint availability are different.
