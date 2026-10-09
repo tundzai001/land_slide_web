@@ -18,6 +18,7 @@ from ...models import config as model_config
 from .topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_mqtt_topic
 from .defaults import get_default_station_config
 from app.shared.sensor_catalog import SENSOR_CATALOG
+from app.shared.custom_sensors import validate_custom_sensor_selection
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 logger = logging.getLogger(__name__)
@@ -69,7 +70,9 @@ async def update_station_config(
             logger.info(f"📋 [CONFIG] Incoming config keys: {list(new_config.keys())}")
 
             for key, value in new_config.items():
-                if isinstance(value, dict) and key in current_config and isinstance(current_config[key], dict):
+                if key == 'custom_sensors':
+                    current_config[key] = value
+                elif isinstance(value, dict) and key in current_config and isinstance(current_config[key], dict):
                     current_config[key].update(value)
                 else:
                     current_config[key] = value
@@ -88,8 +91,9 @@ async def update_station_config(
         # ✅ SYNC DEVICES từ sensors payload
         if 'sensors' in config_data and isinstance(config_data['sensors'], dict):
             sensors = config_data['sensors']
-            if set(sensors) - set(SENSOR_CATALOG) or any(not isinstance(info, dict) for info in sensors.values()):
+            if any(not isinstance(info, dict) for info in sensors.values()):
                 raise HTTPException(status_code=422, detail='Loại cảm biến hoặc cấu hình cảm biến không hợp lệ')
+            await validate_custom_sensor_selection(db, sensors, station.config or {})
             requested_topics = [
                 normalize_mqtt_topic(info.get('topic'))
                 for info in sensors.values()
@@ -184,9 +188,17 @@ async def update_station_config(
 
             logger.info(f"📋 [UPDATE] Active types: {active_types}")
 
+        elif 'custom_sensors' in (config_data.get('config') or {}):
+            active = (await db.execute(select(model_config.Device.device_type).where(
+                model_config.Device.station_id == station_id,
+                model_config.Device.is_active.is_(True),
+            ))).scalars().all()
+            await validate_custom_sensor_selection(db, {sensor_type: {} for sensor_type in active}, station.config or {})
+
         # ✅ AUTO-COMPUTE station location from average of sensor coordinate origins
         final_config = station.config or {}
         origin_keys = [f'{sensor_type}_origin' for sensor_type in SENSOR_CATALOG]
+        origin_keys.extend(f'{sensor_type}_origin' for sensor_type in (station.config or {}).get('custom_sensors', {}))
         lats, lons = [], []
         for key in origin_keys:
             origin = final_config.get(key, {})

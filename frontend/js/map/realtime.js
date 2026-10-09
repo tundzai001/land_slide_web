@@ -785,7 +785,7 @@ function updateRealtimeSensorValues(message) {
         currentStationData.sensors ||= {};
         currentStationData.sensors[sensor_type] ||= {};
         currentStationData.sensors[sensor_type].latest = data;
-        if ((window.SensorCatalog || []).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
+        if (stationSensorCatalog(currentStationData).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
             currentStationData.sensors[sensor_type].is_online = true;
         }
         currentStationData.sensors[sensor_type].latest_timestamp = Number(timestamp || Date.now() / 1000);
@@ -806,9 +806,9 @@ function updateRealtimeSensorValues(message) {
         return;
     }
 
-    if ((window.SensorCatalog || []).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
+    if (stationSensorCatalog(currentStationData).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
         renderMonitoringSensors(currentStationData);
-        const spec = window.SensorCatalog.find(sensor => sensor.key === sensor_type);
+        const spec = stationSensorCatalog(currentStationData).find(sensor => sensor.key === sensor_type);
         const fields = sensor_type === 'extensometer' ? [...document.querySelectorAll('#extensometer-charts canvas')].map(canvas => canvas.dataset.point) : spec.fields;
         if (chartsVisible && sensor_type === 'accelerometer') renderAccelerometerWaveform(currentStationData.sensors.accelerometer);
         if (chartsVisible) fields.forEach((field, index) => {

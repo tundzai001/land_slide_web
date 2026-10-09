@@ -25,7 +25,8 @@ async function mount(page) {
 
 test('catalog supports multiple types, filtering and the existing save flow', async ({ page }) => {
   await mount(page);
-  await expect(page.locator('[data-sensor-choice]')).toHaveCount(15);
+  await expect(page.locator('[data-sensor-choice]')).toHaveCount(catalog.length);
+  await expect(page.locator('#edit-surface_water')).toBeAttached();
   await page.locator('#edit-piezometer').check();
   await page.locator('#edit-temperature').check();
   await page.locator('#edit-flow_velocity').check();
@@ -71,6 +72,35 @@ test('catalog fits mobile and supports keyboard selection', async ({ page }) => 
   await page.screenshot({ path: 'tmp/monitoring/catalog-desktop.png', fullPage: true });
 });
 
+test('Khác creates one reusable sensor with required description and safe label', async ({page}) => {
+  await mount(page);
+  await page.evaluate(() => {
+    window.adminManager.token = 'test';
+    window.adminManager.currentUserRole = 'admin';
+    window.fetch = async (url, options) => {
+      const saved = {key:'custom_0123456789ab', label:'Độ dẫn <điện>', group:'Khác', field:'value', fields:['value'], unit:'µS/cm', legacy:false,
+        metrics:[{field:'value',label:'Độ dẫn <điện>',unit:'µS/cm',decimals:3}], note:'Đo độ dẫn điện', optional_metrics:[]};
+      if (options?.method === 'POST') { window.createdPreset = JSON.parse(options.body); return {ok:true,json:async () => saved}; }
+      return {ok:true,json:async () => [saved]};
+    };
+  });
+  await page.evaluate(() => window.loadCustomSensorPresets('test'));
+  await expect(page.locator('#edit-custom_0123456789ab')).toBeAttached();
+  await expect(page.locator('[data-sensor-choice] script')).toHaveCount(0);
+  await page.locator('#btn-add-custom-sensor').click();
+  await page.locator('#btn-save-custom-sensor').click();
+  await expect(page.locator('#custom-sensor-feedback')).toContainText('Nhập tên và mô tả');
+  await page.locator('#custom-sensor-name').fill('Độ dẫn điện');
+  await page.locator('#custom-sensor-description').fill('Đo độ dẫn điện');
+  await page.locator('#custom-sensor-unit').fill('µS/cm');
+  await page.locator('#btn-save-custom-sensor').click();
+  await expect(page.locator('#edit-custom_0123456789ab')).toBeChecked();
+  await expect(page.locator('#mqtt-custom_0123456789ab-section')).toBeVisible();
+  expect(await page.evaluate(() => window.createdPreset)).toEqual({name:'Độ dẫn điện',description:'Đo độ dẫn điện',unit:'µS/cm'});
+  await page.locator('#edit-custom_0123456789ab').uncheck();
+  await expect(page.locator('#mqtt-custom_0123456789ab-section')).toBeHidden();
+});
+
 test('new sensor cards show zero, all axes, stale state and clear when changing stations', async ({ page }) => {
   await page.setContent('<div id="monitoring-sensor-values"></div>');
   await page.evaluate(value => { window.SensorCatalog = value; }, catalog);
@@ -81,6 +111,19 @@ test('new sensor cards show zero, all axes, stale state and clear when changing 
   await expect(page.locator('#monitoring-sensor-values')).toContainText('Dữ liệu cuối');
   await page.evaluate(() => renderMonitoringSensors({sensors:{}}));
   await expect(page.locator('#monitoring-sensor-values')).toBeEmpty();
+});
+
+test('station-specific custom sensor appears on map without exposing markup', async ({page}) => {
+  await page.setContent('<div id="monitoring-sensor-values"></div>');
+  await page.evaluate(value => { window.SensorCatalog = value; }, catalog);
+  await page.addScriptTag({content:source('frontend/js/map/station-detail.js')});
+  await page.evaluate(() => renderMonitoringSensors({
+    config:{custom_sensors:{custom_0123456789ab:{key:'custom_0123456789ab',label:'Độ dẫn <điện>',note:'Đo độ dẫn',unit:'µS/cm',fields:['value'],metrics:[{field:'value',label:'Độ dẫn',unit:'µS/cm',decimals:3}]}}},
+    sensors:{custom_0123456789ab:{latest:{value:0,quality:'valid'},is_online:true}}
+  }));
+  await expect(page.locator('#monitoring-sensor-values')).toContainText('Độ dẫn <điện>');
+  await expect(page.locator('#monitoring-sensor-values')).toContainText('0 µS/cm');
+  await expect(page.locator('#monitoring-sensor-values script')).toHaveCount(0);
 });
 
 test('history charts retain every tilt axis and extensometer point, then release charts', async ({ page }) => {
@@ -99,9 +142,10 @@ test('history charts retain every tilt axis and extensometer point, then release
   });
   await page.addScriptTag({content:source('frontend/js/map/station-detail.js')});
   const result = await page.evaluate(() => {
-    renderCharts({sensors:{
+    renderCharts({config:{custom_sensors:{custom_0123456789ab:{key:'custom_0123456789ab',label:'Độ dẫn',unit:'µS/cm',fields:['value'],metrics:[{field:'value',label:'Độ dẫn',unit:'µS/cm'}]}}},sensors:{
       tiltmeter: {history:[{timestamp:1700000000,data:{x:1,y:2,z:3}}]},
-      extensometer: {history:[{timestamp:1700000000,data:{points:{A1:0,A2:-2}}}]}
+      extensometer: {history:[{timestamp:1700000000,data:{points:{A1:0,A2:-2}}}]},
+      custom_0123456789ab: {history:[{timestamp:1700000000,data:{value:0}}]}
     }});
     const values = Object.fromEntries(Object.entries(charts).map(([key, chart]) => [key,chart.data.datasets[0].data]));
     const instances = Object.values(charts);
@@ -111,6 +155,7 @@ test('history charts retain every tilt axis and extensometer point, then release
   expect(result.values['chart-tiltmeter-z']).toEqual([3]);
   expect(result.values['chart-extensometer-0']).toEqual([0]);
   expect(result.values['chart-extensometer-1']).toEqual([-2]);
+  expect(result.values['chart-custom_0123456789ab-value']).toEqual([0]);
   expect(result.released).toBe(true);
   expect(result.remaining).toEqual([]);
 });

@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Any
 
-from app.shared.sensor_catalog import MONITORING_TYPES, SENSOR_CATALOG
+from app.shared.sensor_catalog import SENSOR_CATALOG, is_custom_sensor, is_monitoring_type
 from app.config import settings
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import data as model_data
@@ -63,7 +63,7 @@ class SensorIngestPersistenceMixin:
         """
         identity_timestamp = int(timestamp or 0)
         stable_measurement = None
-        if sensor_type in MONITORING_TYPES and isinstance(processed_data, dict):
+        if is_monitoring_type(sensor_type) and isinstance(processed_data, dict):
             stable_measurement = processed_data.get('measured_at') or (processed_data.get('waveform') or {}).get('start_at')
         normalized = source_payload
         if stable_measurement is not None:
@@ -353,9 +353,9 @@ class SensorIngestPersistenceMixin:
             val_4 = processed_data.get('total_accel', 0.0) or 0.0
             val_5 = processed_data.get('battery', 0.0) or 0.0
 
-        if sensor_type in MONITORING_TYPES:
+        if is_monitoring_type(sensor_type):
             values = (list(processed_data['points'].values()) if sensor_type == 'extensometer' else
-                      [processed_data.get(field) for field in SENSOR_CATALOG[sensor_type]['fields']])
+                      [processed_data.get(field) for field in (['value'] if is_custom_sensor(sensor_type) else SENSOR_CATALOG[sensor_type]['fields'])])
             if processed_data.get('quality') == 'invalid':
                 values = []  # Keep evidence in JSON, exclude invalid values from numeric summaries.
             val_1, val_2, val_3, val_4, val_5 = (values + [None] * 5)[:5]

@@ -507,6 +507,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
         };
 
 
+        config.custom_sensors = Object.fromEntries((window.SensorCatalog || [])
+            .filter(sensor => sensor.key.startsWith('custom_') && document.getElementById(`edit-${sensor.key}`)?.checked)
+            .map(sensor => [sensor.key, sensor]));
         for (const sensor of (window.SensorCatalog || []).filter(sensor => !sensor.legacy)) {
             config[`${sensor.key}_origin`] = Object.fromEntries(['lat', 'lon', 'h'].map(axis => {
                 const value = document.getElementById(`origin-${sensor.key}-${axis}`)?.value;

@@ -1149,6 +1149,44 @@
     background: var(--station-primary);
 }
 
+#stationConfigModal .monitoring-add-button {
+    margin-top: 12px;
+    padding: 9px 13px;
+    border: 1px dashed var(--station-primary);
+    border-radius: 9px;
+    color: var(--station-primary);
+    background: var(--station-surface);
+    font-weight: 650;
+}
+#stationConfigModal .monitoring-add-button:hover,
+#stationConfigModal .monitoring-add-button:focus-visible {
+    background: color-mix(in srgb, var(--station-primary) 8%, var(--station-surface));
+    outline-color: var(--station-primary);
+}
+#stationConfigModal .monitoring-add-button[hidden],
+#stationConfigModal .monitoring-custom-form[hidden] { display: none; }
+#stationConfigModal .monitoring-custom-form {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 15px;
+    border: 1px solid var(--station-border);
+    border-radius: 10px;
+    background: var(--station-surface);
+}
+#stationConfigModal .monitoring-custom-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 10px;
+}
+#stationConfigModal .monitoring-custom-form label { display: block; color: var(--station-text); font-weight: 600; }
+#stationConfigModal .monitoring-custom-form .form-control { display: block; width: 100%; margin-top: 6px; }
+#stationConfigModal .monitoring-custom-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#stationConfigModal #custom-sensor-feedback { color: var(--station-muted); font-size: 0.82rem; }
+@media (max-width: 420px) {
+    #stationConfigModal .monitoring-custom-fields { grid-template-columns: 1fr; }
+}
+
 #stationConfigModal .station-connection-heading {
     display: flex;
     align-items: baseline;

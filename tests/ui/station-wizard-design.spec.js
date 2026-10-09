@@ -35,6 +35,10 @@ for (const { width, height } of [{ width: 1366, height: 900 }, { width: 390, hei
     await expect(page.locator('.station-connection-heading')).toBeVisible();
     await page.waitForTimeout(400);
     await page.screenshot({ path: `test-results/station-wizard-${width}.png` });
+    await page.getByRole('button', { name: 'Khác · thêm cảm biến' }).click();
+    await expect(page.locator('#custom-sensor-name')).toBeVisible();
+    await expect(page.locator('#custom-sensor-description')).toBeVisible();
+    await page.screenshot({ path: `test-results/station-wizard-custom-${width}.png` });
     await page.locator('[data-sensor-choice]').filter({ hasText: 'Biến dạng' }).first().click();
     await expect(page.locator('#edit-strain')).toBeChecked();
     await page.locator('#sensor-catalog-search').fill('giãn kế');

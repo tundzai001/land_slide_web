@@ -168,7 +168,7 @@ window.LegacyTemplateParts['station-alerts'] = String.raw`                <!-- S
                     <div class="config-section mb-4">
                         <div class="section-header">
                             <i class="bi bi-water"></i>
-                            <h5>Water Level Thresholds</h5>
+                            <h5>Ngưỡng mực nước ngầm / áp lực nước lỗ rỗng</h5>
                         </div>
                         <div class="row g-3">
                             <div class="col-md-4">

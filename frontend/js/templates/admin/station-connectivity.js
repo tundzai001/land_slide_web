@@ -1,4 +1,27 @@
 window.LegacyTemplateParts ||= {};
+window.monitoringEscapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+window.monitoringSensorSection = sensor => {
+    const key = sensor.key;
+    const title = window.monitoringEscapeHtml(sensor.label);
+    const unit = window.monitoringEscapeHtml(sensor.unit);
+    return `<section id="mqtt-${key}-section" class="sensor-config-section" style="display:none">
+        <div class="sensor-config-header">${title}${unit ? ` · ${unit}` : ''}</div>
+        <div class="sensor-config-body">
+            <label class="form-label" for="topic-${key}">MQTT Topic</label>
+            <input class="form-control" id="topic-${key}" placeholder="station/ST01/${key}">
+            <div class="row g-2 mt-2">
+                <div class="col-md-8"><label for="cfg-${key}-mqtt-host">MQTT Broker</label><input class="form-control" id="cfg-${key}-mqtt-host" placeholder="Dùng broker mặc định"></div>
+                <div class="col-md-4"><label for="cfg-${key}-mqtt-port">Port</label><input type="number" min="1" max="65535" class="form-control" id="cfg-${key}-mqtt-port" placeholder="1883"></div>
+                <div class="col-md-6"><label for="cfg-${key}-mqtt-user">Tài khoản</label><input class="form-control" id="cfg-${key}-mqtt-user" autocomplete="off"></div>
+                <div class="col-md-6"><label for="cfg-${key}-mqtt-pass">Mật khẩu</label><input type="password" class="form-control" id="cfg-${key}-mqtt-pass" autocomplete="new-password"></div>
+            </div>
+            <label class="monitoring-choice"><input type="checkbox" id="cfg-${key}-mqtt-tls"> Mã hóa TLS</label>
+            <div class="row g-2 mt-2">
+                ${[['lat','Vĩ độ',-90,90],['lon','Kinh độ',-180,180],['h','Cao độ (m)',-1000,10000]].map(([axis,label,min,max]) => `<div class="col-md-4"><label for="origin-${key}-${axis}">${label}</label><input class="form-control" type="number" step="any" min="${min}" max="${max}" id="origin-${key}-${axis}"></div>`).join('')}
+            </div>
+        </div>
+    </section>`;
+};
 window.LegacyTemplateParts['station-connectivity'] = String.raw`                        <!-- STEP 2: MQTT & TỌA ĐỘ -->
                         <div class="wizard-content" data-step="2" aria-labelledby="station-connectivity-heading">
                             <div class="station-step-intro">
@@ -23,12 +46,21 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                     </div>
                                 </div>
                                 <div class="monitoring-picker-grid">
-                                ${(window.SensorCatalog || [{key:'gnss',label:'GNSS'}, {key:'rain',label:'Lượng mưa'}, {key:'water',label:'Mực nước'}, {key:'imu',label:'IMU'}]).map(sensor => `
+                                ${(window.SensorCatalog || [{key:'gnss',label:'GNSS'}, {key:'rain',label:'Lượng mưa'}, {key:'water',label:'Mực nước ngầm / Áp lực nước lỗ rỗng'}, {key:'imu',label:'IMU'}]).map(sensor => `
                                     <label class="monitoring-choice" data-sensor-choice>
                                         <input type="checkbox" id="edit-${sensor.key}">
                                         <span class="monitoring-choice-copy"><strong>${sensor.label}</strong><small>${sensor.group || ''}</small></span>
                                         <span class="monitoring-choice-check" aria-hidden="true"><i class="bi bi-check2"></i></span>
                                     </label>`).join('')}
+                                </div>
+                                <button type="button" class="monitoring-add-button" id="btn-add-custom-sensor" onclick="window.toggleCustomSensorForm()"><i class="bi bi-plus-lg" aria-hidden="true"></i> Khác · thêm cảm biến</button>
+                                <div id="custom-sensor-form" class="monitoring-custom-form" hidden>
+                                    <div class="monitoring-custom-fields">
+                                        <label for="custom-sensor-name">Tên cảm biến <span aria-hidden="true">*</span><input id="custom-sensor-name" class="form-control" maxlength="80" placeholder="Ví dụ: Độ dẫn điện"></label>
+                                        <label for="custom-sensor-unit">Đơn vị đo<input id="custom-sensor-unit" class="form-control" maxlength="16" placeholder="Ví dụ: µS/cm"></label>
+                                    </div>
+                                    <label for="custom-sensor-description">Mô tả <span aria-hidden="true">*</span><textarea id="custom-sensor-description" class="form-control" maxlength="240" rows="2" placeholder="Cảm biến đo đại lượng gì, ở vị trí nào?"></textarea></label>
+                                    <div class="monitoring-custom-footer"><span id="custom-sensor-feedback" role="status" aria-live="polite"></span><button type="button" class="btn btn-primary" id="btn-save-custom-sensor" onclick="window.createCustomSensorPreset()">Lưu cảm biến</button></div>
                                 </div>
                             </fieldset>
 
@@ -37,24 +69,7 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                 <span>MQTT &amp; tọa độ lắp đặt</span>
                             </div>
 
-                            ${(window.SensorCatalog || []).filter(sensor => !sensor.legacy).map(sensor => `
-                            <section id="mqtt-${sensor.key}-section" class="sensor-config-section" style="display:none">
-                                <div class="sensor-config-header">${sensor.label} · ${sensor.unit}</div>
-                                <div class="sensor-config-body">
-                                    <label class="form-label" for="topic-${sensor.key}">MQTT Topic</label>
-                                    <input class="form-control" id="topic-${sensor.key}" placeholder="station/ST01/${sensor.key}">
-                                    <div class="row g-2 mt-2">
-                                        <div class="col-md-8"><label for="cfg-${sensor.key}-mqtt-host">MQTT Broker</label><input class="form-control" id="cfg-${sensor.key}-mqtt-host" placeholder="Dùng broker mặc định"></div>
-                                        <div class="col-md-4"><label for="cfg-${sensor.key}-mqtt-port">Port</label><input type="number" min="1" max="65535" class="form-control" id="cfg-${sensor.key}-mqtt-port" placeholder="1883"></div>
-                                        <div class="col-md-6"><label for="cfg-${sensor.key}-mqtt-user">Tài khoản</label><input class="form-control" id="cfg-${sensor.key}-mqtt-user" autocomplete="off"></div>
-                                        <div class="col-md-6"><label for="cfg-${sensor.key}-mqtt-pass">Mật khẩu</label><input type="password" class="form-control" id="cfg-${sensor.key}-mqtt-pass" autocomplete="new-password"></div>
-                                    </div>
-                                    <label class="monitoring-choice"><input type="checkbox" id="cfg-${sensor.key}-mqtt-tls"> Mã hóa TLS</label>
-                                    <div class="row g-2 mt-2">
-                                        ${[['lat','Vĩ độ',-90,90],['lon','Kinh độ',-180,180],['h','Cao độ (m)',-1000,10000]].map(([axis,label,min,max]) => `<div class="col-md-4"><label for="origin-${sensor.key}-${axis}">${label}</label><input class="form-control" type="number" step="any" min="${min}" max="${max}" id="origin-${sensor.key}-${axis}"></div>`).join('')}
-                                    </div>
-                                </div>
-                            </section>`).join('')}
+                            ${(window.SensorCatalog || []).filter(sensor => !sensor.legacy).map(window.monitoringSensorSection).join('')}
 
                             <div id="mqtt-gnss-section" class="sensor-config-section" style="display: none;">
                                 <div class="sensor-config-header">

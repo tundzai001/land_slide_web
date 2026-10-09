@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.shared.sensor_catalog import SENSOR_CATALOG
+from app.shared.sensor_catalog import is_custom_sensor
+from app.shared.custom_sensors import validate_custom_sensor_selection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,8 +174,9 @@ async def create_station_in_project(
         if exist.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Mã trạm đã tồn tại")
 
-        if set(station_data.sensors or {}) - set(SENSOR_CATALOG) or any(not isinstance(info, dict) for info in (station_data.sensors or {}).values()):
+        if any(not isinstance(info, dict) for info in (station_data.sensors or {}).values()):
             raise HTTPException(status_code=422, detail='Loại cảm biến hoặc cấu hình cảm biến không hợp lệ')
+        await validate_custom_sensor_selection(db, station_data.sensors or {}, station_data.config or {})
         requested_topics = [
             normalize_mqtt_topic(info.get("topic"))
             for info in (station_data.sensors or {}).values()
@@ -433,7 +436,7 @@ async def get_station_history(
     requested_types = {
         value.strip().lower()
         for value in sensor_types.split(",")
-        if value.strip().lower() in allowed_types
+        if value.strip().lower() in allowed_types or is_custom_sensor(value.strip().lower())
     }
     if not requested_types:
         raise HTTPException(status_code=400, detail="No valid sensor types requested")

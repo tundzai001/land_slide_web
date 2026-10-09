@@ -59,7 +59,7 @@ window.LegacyTemplateParts['station-storage'] = String.raw`                <!-- 
                                     <small>Ví dụ: 3.600 giây = 1 giờ</small>
                                 </label>
                                 <label class="station-storage-card" for="cfg-station-save-water">
-                                    <span class="station-storage-card-title"><i class="bi bi-water text-primary" aria-hidden="true"></i> Mực nước</span>
+                                    <span class="station-storage-card-title"><i class="bi bi-water text-primary" aria-hidden="true"></i> Mực nước ngầm / Áp lực nước lỗ rỗng</span>
                                     <span class="input-group">
                                         <input type="number" class="form-control" id="cfg-station-save-water" placeholder="Mặc định hệ thống" min="10" inputmode="numeric">
                                         <span class="input-group-text">giây</span>

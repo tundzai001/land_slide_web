@@ -211,6 +211,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         this.bindMqttTopicValidation();
         this.updateWizardStep();
         if (this.stationModal) this.stationModal.show();
+        window.loadCustomSensorPresets?.(this.token);
     }
 
     async editStation(stationId) {
@@ -240,6 +241,9 @@ class AdminStationWizardFeature extends window.AdminManager {
 
             const stationData = await resConfig.json();
             const devices = await resDevices.json();
+            if (await window.loadCustomSensorPresets?.(this.token) === false) {
+                throw new Error('Không tải được danh sách cảm biến đã lưu.');
+            }
 
             // STEP 1: Basic info
             document.getElementById('edit-station-id').value = stationId;

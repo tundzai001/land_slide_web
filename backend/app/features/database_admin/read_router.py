@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 PUBLIC_SENSOR_TYPES = tuple(SENSOR_CATALOG)
+PUBLIC_SENSOR_FILTER = or_(model_data.SensorData.sensor_type.in_(PUBLIC_SENSOR_TYPES),
+                           model_data.SensorData.sensor_type.like("custom\\_%", escape="\\"))
 INTERNAL_SENSOR_TYPES = (
     "gnss_audit",
     "gnss_adjusted",
@@ -84,7 +86,7 @@ async def get_database_stats(
         # are counted separately below.
         count_sensor_data = await data_db.execute(
             select(func.count()).select_from(model_data.SensorData).where(
-                model_data.SensorData.sensor_type.in_(PUBLIC_SENSOR_TYPES)
+                PUBLIC_SENSOR_FILTER
             )
         )
         num_data = int(count_sensor_data.scalar() or 0)
@@ -306,7 +308,7 @@ async def admin_get_sensor_data(
         if requested_sensor_type:
             sensor_filters.append(model_data.SensorData.sensor_type == requested_sensor_type)
         elif not include_internal:
-            sensor_filters.append(model_data.SensorData.sensor_type.in_(PUBLIC_SENSOR_TYPES))
+            sensor_filters.append(PUBLIC_SENSOR_FILTER)
         if grouped_adjustments:
             sensor_filters.append(model_data.SensorData.adjustment_key.is_not(None))
             if cluster_project_id is not None:

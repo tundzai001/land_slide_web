@@ -9,6 +9,7 @@ from .analysis_router import (
     get_long_term_analysis,
     router as analysis_router,
 )
+from .custom_router import router as custom_router
 from .common import (
     _load_station_runtime_maps,
     _station_detail_adjustment_latest,
@@ -30,3 +31,4 @@ from .query_router import (
 router = APIRouter()
 router.include_router(query_router)
 router.include_router(analysis_router)
+router.include_router(custom_router)

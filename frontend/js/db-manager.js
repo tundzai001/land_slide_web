@@ -281,7 +281,7 @@ class DatabaseManager {
                     { value: 'gnss', label: 'GNSS' },
                     { value: 'imu', label: 'IMU' },
                     { value: 'rain', label: 'Mưa' },
-                    { value: 'water', label: 'Mực nước' },
+                    { value: 'water', label: 'Mực nước ngầm / Áp lực nước lỗ rỗng' },
                     ...(window.SensorCatalog || []).filter(sensor => !sensor.legacy).map(sensor => ({value: sensor.key, label: sensor.label})),
                 ]),
             ],

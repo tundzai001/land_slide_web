@@ -23,7 +23,7 @@
   },
   {
     "key": "water",
-    "label": "Mực nước",
+    "label": "Mực nước ngầm / Áp lực nước lỗ rỗng",
     "group": "Khí tượng & thủy văn",
     "field": "water_level",
     "fields": [
@@ -31,6 +31,18 @@
     ],
     "unit": "m",
     "legacy": true
+  },
+  {
+    "key": "surface_water",
+    "label": "Mực nước",
+    "group": "Khí tượng & thủy văn",
+    "field": "water_level",
+    "fields": ["water_level"],
+    "unit": "m",
+    "legacy": false,
+    "metrics": [{"field": "water_level", "label": "Mực nước", "unit": "m", "decimals": 3}],
+    "note": "Mực nước mặt tại vị trí đo",
+    "optional_metrics": []
   },
   {
     "key": "imu",

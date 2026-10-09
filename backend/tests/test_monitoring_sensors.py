@@ -1,13 +1,19 @@
 """Run: PYTHONPATH=backend python3 -m unittest backend.tests.test_monitoring_sensors."""
 import unittest
 from types import SimpleNamespace
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from app.models.config import GlobalConfig
+from app.shared.custom_sensors import create_custom_sensor, get_custom_sensors, validate_custom_sensor_selection
 from app.shared.sensor_catalog import MONITORING_TYPES, SENSOR_CATALOG, process_monitoring_payload
 from app.features.data_export.sensors import export_sensor_record
 
 
 class MonitoringSensorTests(unittest.TestCase):
     def test_catalog_payload_and_export_round_trip(self):
-        self.assertEqual(len(MONITORING_TYPES), 11)
+        self.assertEqual(len(MONITORING_TYPES), 12)
+        self.assertEqual(SENSOR_CATALOG['water']['label'], 'Mực nước ngầm / Áp lực nước lỗ rỗng')
+        self.assertEqual(process_monitoring_payload('surface_water', {'water_level': 1.25}), {'water_level': 1.25, 'unit': 'm'})
         for sensor_type in MONITORING_TYPES:
             with self.subTest(sensor_type=sensor_type):
                 spec = SENSOR_CATALOG[sensor_type]
@@ -63,6 +69,34 @@ class MonitoringSensorTests(unittest.TestCase):
                           {**wave,'x':[0]*1025}, {**wave,'start_at':True}]:
             self.assertIsNone(process_monitoring_payload('accelerometer',{**payload,'waveform':malformed}))
         self.assertIsNone(process_monitoring_payload('temperature',{'temperature':10,'waveform':wave}))
+
+
+class CustomSensorTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+        async with self.engine.begin() as conn:
+            await conn.run_sync(GlobalConfig.__table__.create)
+        self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
+
+    async def asyncTearDown(self):
+        await self.session.close()
+        await self.engine.dispose()
+
+    async def test_global_preset_is_reusable_and_station_selection_is_verified(self):
+        preset = await create_custom_sensor(self.session, 'Độ dẫn điện', 'Đo độ dẫn điện của nước', 'µS/cm')
+        self.assertEqual(await get_custom_sensors(self.session), [preset])
+        self.assertEqual(await create_custom_sensor(self.session, 'Độ dẫn điện', 'Đo độ dẫn điện của nước', 'µS/cm'), preset)
+        await validate_custom_sensor_selection(self.session, {preset['key']: {'topic':'station/a'}},
+                                               {'custom_sensors': {preset['key']: preset}})
+        self.assertEqual(process_monitoring_payload(preset['key'], {'value': 0}, 'µS/cm')['value'], 0)
+        self.assertIsNone(process_monitoring_payload(preset['key'], {'value': 1, 'unit':'m'}, 'µS/cm'))
+        for selection, definitions in [({preset['key']: {}}, {}),
+                                       ({preset['key']: {}}, {preset['key']: {**preset, 'unit':'m'}}),
+                                       ({'custom_000000000000': {}}, {'custom_000000000000': preset})]:
+            with self.assertRaises(HTTPException):
+                await validate_custom_sensor_selection(self.session, selection, {'custom_sensors': definitions})
+        with self.assertRaises(HTTPException):
+            await create_custom_sensor(self.session, 'Độ dẫn điện', 'Mô tả khác', 'µS/cm')
 
 
 if __name__ == '__main__':

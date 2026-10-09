@@ -8,7 +8,7 @@ from typing import Optional
 
 import paho.mqtt.client as mqtt
 
-from app.shared.sensor_catalog import MONITORING_TYPES
+from app.shared.sensor_catalog import is_monitoring_type
 from app.database import ConfigSessionLocal
 from processors.gnss_processor import GNSSVelocityProcessor
 from processors.imu_processor import IMUEngine
@@ -164,7 +164,7 @@ class MQTTTopicMixin:
                                 )
                                 logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
                             self.processors_cache[proc_key] = imu_engine
-                        elif sensor_type in MONITORING_TYPES:
+                        elif is_monitoring_type(sensor_type):
                             self.processors_cache[proc_key] = None
                         else:
                             logger.warning('Unsupported sensor type %s for device %s', sensor_type, device.id)

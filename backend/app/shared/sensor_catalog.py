@@ -4,6 +4,7 @@ New channels accept calibrated engineering values, never raw vibrating-wire coun
 """
 import json
 import math
+import re
 from pathlib import Path
 
 SENSOR_CATALOG = {row['key']: row for row in json.loads(
@@ -12,15 +13,26 @@ SENSOR_CATALOG = {row['key']: row for row in json.loads(
 MONITORING_TYPES = {key for key, row in SENSOR_CATALOG.items() if not row['legacy']}
 METADATA_FIELDS = ('measured_at', 'quality', 'serial_number', 'model', 'calibration_id',
                    'reference_id', 'location_label', 'axis_convention', 'event_id', 'sequence')
+CUSTOM_KEY = re.compile(r'^custom_[0-9a-f]{12}$')
+
+
+def is_custom_sensor(sensor_type):
+    return isinstance(sensor_type, str) and CUSTOM_KEY.fullmatch(sensor_type) is not None
+
+
+def is_monitoring_type(sensor_type):
+    return sensor_type in MONITORING_TYPES or is_custom_sensor(sensor_type)
 
 
 def _number(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 
 
-def process_monitoring_payload(sensor_type, payload):
+def process_monitoring_payload(sensor_type, payload, custom_unit=None):
     """Reject missing/non-finite channels and mismatched engineering units."""
-    spec = SENSOR_CATALOG[sensor_type]
+    spec = SENSOR_CATALOG.get(sensor_type) if not is_custom_sensor(sensor_type) else {'unit': custom_unit, 'fields': ['value']}
+    if spec is None or spec['unit'] is None:
+        return None
     if not isinstance(payload, dict):
         return None
     if payload.get('unit', spec['unit']) != spec['unit']:

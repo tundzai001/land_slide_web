@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from ..cells import excel_chunks
-from app.shared.sensor_catalog import MONITORING_TYPES, SENSOR_CATALOG, METADATA_FIELDS
+from app.shared.sensor_catalog import SENSOR_CATALOG, METADATA_FIELDS, is_custom_sensor, is_monitoring_type
 
 COMMON_HEADERS = (
     "id",
@@ -96,9 +96,10 @@ def export_sensor_record(
         from .water import export_record
 
         return export_record(record, mapping)
-    if sensor_type in MONITORING_TYPES:
+    if is_monitoring_type(sensor_type):
+        spec = {'fields': ['value'], 'optional_metrics': []} if is_custom_sensor(sensor_type) else SENSOR_CATALOG[sensor_type]
         return build_sensor_export(record, mapping, sensor_type,
-                                   payload_fields=(*SENSOR_CATALOG[sensor_type]['fields'], 'unit',
-                                                   *(metric['field'] for metric in SENSOR_CATALOG[sensor_type].get('optional_metrics', [])),
+                                   payload_fields=(*spec['fields'], 'unit',
+                                                   *(metric['field'] for metric in spec.get('optional_metrics', [])),
                                                    *METADATA_FIELDS, 'received_at'))
     return None

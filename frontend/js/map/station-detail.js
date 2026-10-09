@@ -21,9 +21,17 @@ function getChartHistoryLimit(hours) {
 
 function getChartableSensorTypes(data) {
     const sensors = data?.sensors || {};
-    return CHART_SENSOR_TYPES.filter(sensorType => (
+    return [...CHART_SENSOR_TYPES, ...Object.keys(data?.config?.custom_sensors || {})].filter(sensorType => (
         sensors[sensorType] && typeof sensors[sensorType] === 'object'
     ));
+}
+
+function stationSensorCatalog(data) {
+    const catalog = window.SensorCatalog || [];
+    const custom = Object.values(data?.config?.custom_sensors || {}).filter(spec =>
+        spec && /^custom_[0-9a-f]{12}$/.test(spec.key) && Array.isArray(spec.fields)
+    );
+    return [...catalog, ...custom.filter(spec => !catalog.some(item => item.key === spec.key))];
 }
 
 function updateChartRangeControls(hours = activeChartHours) {
@@ -613,7 +621,7 @@ function renderMonitoringSensors(data) {
     const container = document.getElementById('monitoring-sensor-values');
     if (!container) return;
     container.replaceChildren();
-    for (const spec of (window.SensorCatalog || []).filter(sensor => !sensor.legacy)) {
+    for (const spec of stationSensorCatalog(data).filter(sensor => !sensor.legacy)) {
         const sensor = data.sensors?.[spec.key];
         if (!sensor) continue;
         const card = document.createElement('section');
@@ -918,7 +926,7 @@ function updateSidebarUI(data) {
 }
 
 function destroyStationCharts() {
-    [...Object.keys(charts).filter(id => id.startsWith('chart-extensometer-') || id.startsWith('chart-waveform-')), 'chart-gnss', 'chart-rain', 'chart-water', 'chart-imu', ...(window.SensorCatalog || []).filter(sensor => !sensor.legacy).flatMap(sensor => sensor.fields.map(field => `chart-${sensor.key}-${field}`))].forEach(id => {
+    [...Object.keys(charts)].forEach(id => {
         if (!charts[id]) return;
         charts[id].destroy();
         delete charts[id];
@@ -962,6 +970,28 @@ function renderAccelerometerWaveform(sensor) {
 
 function renderCharts(data) {
     if (!data.sensors) return;
+
+    const customChartAnchor = document.getElementById('extensometer-charts');
+    Object.keys(charts).filter(id => id.startsWith('chart-custom_')).forEach(id => { charts[id].destroy(); delete charts[id]; });
+    document.querySelectorAll('[data-custom-sensor-chart]').forEach(box => box.remove());
+    for (const spec of stationSensorCatalog(data).filter(sensor => sensor.key.startsWith('custom_'))) {
+        for (const field of spec.fields) {
+            if (!/^[a-z_]+$/.test(field)) continue;
+            const box = document.createElement('div');
+            box.className = 'chart-box';
+            box.id = `chart-box-${spec.key}-${field}`;
+            box.dataset.customSensorChart = '';
+            const title = document.createElement('div');
+            title.className = 'chart-title';
+            title.textContent = `${spec.label}${spec.unit ? ` (${spec.unit})` : ''}`;
+            const wrap = document.createElement('div');
+            wrap.className = 'chart-canvas-wrap';
+            const canvas = document.createElement('canvas');
+            canvas.id = `chart-${spec.key}-${field}`;
+            wrap.append(canvas); box.append(title, wrap);
+            customChartAnchor?.before(box);
+        }
+    }
 
     updateChartsAvailability(data);
     updateChartRangeControls();
@@ -1008,7 +1038,7 @@ function renderCharts(data) {
         renderImuChart(data.sensors.imu.history || []);
     }
 
-    for (const spec of (window.SensorCatalog || []).filter(sensor => !sensor.legacy && sensor.key !== 'extensometer')) {
+    for (const spec of stationSensorCatalog(data).filter(sensor => !sensor.legacy && sensor.key !== 'extensometer')) {
         for (const field of spec.fields) {
             const boxId = `chart-box-${spec.key}-${field}`;
             allChartIds.push(boxId);
@@ -1045,7 +1075,7 @@ function renderCharts(data) {
     }
     const pointMeta = document.getElementById('charts-point-meta');
     if (pointMeta) {
-        const totalPoints = CHART_SENSOR_TYPES.reduce(
+        const totalPoints = getChartableSensorTypes(data).reduce(
             (total, sensorType) => total + Number(data.sensors?.[sensorType]?.history?.length || 0),
             0,
         );

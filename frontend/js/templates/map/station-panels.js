@@ -66,7 +66,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
                     <!-- Water Level -->
                     <div class="sensor-item sensor-full-width" id="sensor-card-water">
                         <div class="sensor-label d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-water me-1"></i>Water Level</span>
+                            <span><i class="bi bi-water me-1"></i>Mực nước ngầm / Áp lực nước lỗ rỗng</span>
                             <span id="water-offline-badge" class="sensor-offline-badge"
                                 style="display:none;">OFFLINE</span>
                         </div>
@@ -247,7 +247,7 @@ window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL 
 
             <!-- Water Chart -->
             <div class="chart-box" id="chart-box-water">
-                <div class="chart-title"><i class="bi bi-water"></i><span>Mực nước</span></div>
+                <div class="chart-title"><i class="bi bi-water"></i><span>Mực nước ngầm / Áp lực nước lỗ rỗng</span></div>
                 <div class="chart-stat-grid">
                     <div class="flex-fill">
                         <div class="small text-muted" style="font-size: 0.7rem;">Hiện tại</div>
