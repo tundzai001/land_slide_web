@@ -90,10 +90,10 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     aria-label="Chuyển giao diện sáng tối" title="Giao diện sáng / tối">
                     <i class="bi bi-moon-stars-fill"></i>
                 </button>
-                <div class="user-profile d-flex align-items-center gap-2">
+                <button type="button" id="session-manager-btn" class="user-profile d-flex align-items-center gap-2" aria-label="Quản lý phiên đăng nhập">
                     <div class="avatar-circle">A</div>
                     <span class="d-none d-sm-block">Administrator</span>
-                </div>
+                </button>
             </div>
         </div>
     </nav>

@@ -373,3 +373,30 @@ button,
         font-size: 16px !important;
     }
 }
+
+.session-manager-dialog {
+    width: min(92vw, 540px);
+    max-height: min(85vh, 720px);
+    border: 1px solid var(--border-color, #d6e2df);
+    border-radius: 18px;
+    padding: 24px;
+    background: var(--surface-default, #fff);
+    color: var(--text-primary, #17322e);
+    box-shadow: 0 24px 72px rgba(9, 34, 31, .24);
+}
+.session-manager-dialog::backdrop { background: rgba(6, 25, 23, .56); }
+.session-manager-head, .session-manager-actions, .session-manager-dialog li { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.session-manager-head h2 { margin: 2px 0 0; font-size: 1.45rem; }
+.session-manager-kicker { color: var(--accent-primary, #26776f); font-size: .82rem; font-weight: 700; }
+.session-manager-dialog p { margin: 14px 0; line-height: 1.5; }
+.session-manager-dialog ul { list-style: none; margin: 12px 0 20px; padding: 0; overflow-y: auto; max-height: 42vh; }
+.session-manager-dialog li { padding: 12px 0; border-bottom: 1px solid var(--border-color, #d6e2df); }
+.session-manager-dialog li div { min-width: 0; }
+.session-manager-dialog li strong, .session-manager-dialog li small { display: block; overflow-wrap: anywhere; }
+.session-manager-dialog li small { color: var(--text-muted, #637873); margin-top: 3px; }
+.session-manager-dialog button { border: 1px solid var(--border-color, #b7d0c9); background: var(--surface-default, #fff); color: inherit; border-radius: 9px; padding: 8px 12px; cursor: pointer; }
+.session-manager-dialog button:hover { border-color: var(--accent-primary, #26776f); }
+.session-manager-dialog button:focus-visible { outline: 3px solid var(--accent-primary, #26776f); outline-offset: 2px; }
+.session-manager-dialog button:disabled { opacity: .5; cursor: wait; }
+.session-manager-actions { flex-wrap: wrap; justify-content: flex-end; }
+@media (prefers-reduced-motion: reduce) { .session-manager-dialog { transition: none; } }

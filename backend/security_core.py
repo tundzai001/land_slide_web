@@ -1,6 +1,5 @@
 import time
 import re
-import json
 import logging
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -64,36 +63,11 @@ class SecurityState:
 
 security_state = SecurityState()
 
-# --- GeoIP Core ---
-import urllib.request
-import threading
-
-def fetch_geoip_sync(ip: str, threat_type: str):
-    if ip not in security_state.geoip_cache:
-        try:
-            # Handle localhost resolving roughly to Hanoi for demo
-            if ip in ["127.0.0.1", "::1"] or ip.startswith("192.168.") or ip.startswith("10."):
-                security_state.geoip_cache[ip] = (21.0285, 105.8542)
-            else:
-                url = f"http://ip-api.com/json/{ip}?fields=lat,lon"
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=3) as response:
-                    data = json.loads(response.read().decode())
-                    security_state.geoip_cache[ip] = (data.get("lat", 0.0), data.get("lon", 0.0))
-        except Exception as e:
-            security_state.geoip_cache[ip] = (0.0, 0.0) # Ocean / Unknown
-            
-    lat, lon = security_state.geoip_cache[ip]
-    security_state.map_events.append({
-        "ip": ip,
-        "lat": lat,
-        "lon": lon,
-        "type": threat_type,
-        "time": time.time()
-    })
-
 def async_add_threat_map(ip: str, threat_type: str):
-    threading.Thread(target=fetch_geoip_sync, args=(ip, threat_type), daemon=True).start()
+    # IP geolocation requires a separately approved provider and privacy policy.
+    security_state.map_events.append({
+        "ip": ip, "lat": None, "lon": None, "type": threat_type, "time": time.time(),
+    })
 
 # --- WAF Rules ---
 # Granular signatures

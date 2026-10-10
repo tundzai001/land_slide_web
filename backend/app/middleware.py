@@ -9,7 +9,7 @@ from starlette.requests import Request
 class CharsetMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         started_at = time.perf_counter()
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        request_id = uuid.uuid4().hex
         response = await call_next(request)
         content_type = response.headers.get("content-type", "")
         textual = (
@@ -28,6 +28,9 @@ class CharsetMiddleware(BaseHTTPMiddleware):
             "Permissions-Policy",
             "camera=(), microphone=(), payment=(), usb=()",
         )
+        response.headers.setdefault("Content-Security-Policy", "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'")
+        if request.url.scheme == "https":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         return response
 
 
@@ -42,7 +45,7 @@ class VersionedAssetCacheMiddleware(BaseHTTPMiddleware):
             "/", "/about", "/map", "/login", "/management", "/management.html",
             "/admin", "/admin.html",
         }
-        if path.startswith(("/api/admin/", "/api/auth/")):
+        if path.startswith("/api/") or request.headers.get("authorization"):
             response.headers["Cache-Control"] = "private, no-store, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"

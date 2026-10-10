@@ -11,6 +11,7 @@ async function mount(page,width=1440) {
   await page.addStyleTag(process.env.WORKSPACE_BOOTSTRAP_CSS ? {path:process.env.WORKSPACE_BOOTSTRAP_CSS} : {url:'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css'});
   await page.addStyleTag({url:'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css'});
   for(const file of ['app-base','map']) await page.addStyleTag({content:source(`frontend/dist/${file}.min.css`)});
+  await page.addStyleTag({content:source('frontend/css/map/operations-polish.css')});
   await page.addStyleTag(process.env.LEAFLET_TEST_CSS ? {path:process.env.LEAFLET_TEST_CSS} : {url:'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'});
   await page.addScriptTag(process.env.LEAFLET_TEST_JS ? {path:process.env.LEAFLET_TEST_JS} : {url:'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'});
   await page.addScriptTag(process.env.CHART_TEST_JS ? {path:process.env.CHART_TEST_JS} : {url:'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js'});
@@ -61,6 +62,11 @@ for(const width of [1440,390,320]) test(`chart inspection, filtering, export and
   await page.locator('#chart-sensor-filter').selectOption('chart-water');
   await expect(page.locator('#chart-box-water')).toBeVisible(); await expect(page.locator('#chart-box-rain')).toBeHidden();
   await expect(page.locator('#chart-box-water .chart-series-summary')).toContainText('2 điểm');
+  await expect(page.locator('#chart-box-water .chart-series-summary')).toContainText('Thiếu 1 mẫu');
+  await page.locator('#chart-box-water summary').click();
+  await expect(page.locator('#chart-box-water table tbody tr')).toHaveCount(3);
+  await expect(page.locator('#chart-box-water table tbody tr').nth(1)).toContainText('—');
+  await expect(page.locator('#chart-workspace-status')).toContainText('Mẫu mới nhất:');
   await page.locator('#charts-expand').click(); await expect(page.locator('#charts-expand')).toHaveAttribute('aria-pressed','true');
   await page.keyboard.press('Escape'); await expect(page.locator('#charts-expand')).toHaveAttribute('aria-pressed','false');
   await page.locator('#charts-expand').click();
@@ -71,6 +77,7 @@ for(const width of [1440,390,320]) test(`chart inspection, filtering, export and
   const bytes=readFileSync(await (await png).path()); expect(bytes.subarray(1,4).toString()).toBe('PNG');
   await page.route('**/api/stations/1/history?**',route=>route.fulfill({status:503,json:{}}));
   await page.locator('#charts-refresh').click(); await expect(page.locator('#chart-workspace-status')).toContainText('Không tải được');
+  await expect(page.locator('#chart-workspace-status')).toContainText('Đang giữ dữ liệu đã tải');
   await expect(page.locator('#charts-refresh')).toBeEnabled();
   await page.route('**/api/stations/1/history?**',route=>route.fulfill({json:{sensors:{water:{history:[]},rain:{history:[]},imu:{history:[]}}}}));
   await page.locator('#charts-refresh').click(); await expect(page.locator('#chart-workspace-status')).toContainText('Chưa có dữ liệu');
@@ -82,4 +89,26 @@ for(const width of [1440,390,320]) test(`chart inspection, filtering, export and
   await page.evaluate(()=>{document.documentElement.dataset.theme='dark';window.dispatchEvent(new CustomEvent('themeChanged',{detail:{theme:'dark'}}));});
   expect(await page.evaluate(()=>charts['chart-water'].options.scales.y.ticks.color)).toBe(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim()));
   await page.screenshot({path:`test-results/chart-workspace-dark-${width}.png`,animations:'disabled'});
+});
+
+
+test('an aborted history request cannot clear the newer request loading state', async ({page}) => {
+  await mount(page);
+  let requests = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/stations/1/history?**', async route => {
+    requests++;
+    await gate;
+    await route.fulfill({json:{sensors:{water:{history:[]}}}}).catch(() => {});
+  });
+  await page.evaluate(() => { void loadStationHistoryAndRenderCharts({force:true}); });
+  await expect.poll(() => requests).toBe(1);
+  await page.evaluate(() => { void loadStationHistoryAndRenderCharts({force:true}); });
+  await expect.poll(() => requests).toBe(2);
+  await expect(page.locator('#charts-refresh')).toBeDisabled();
+  await expect(page.locator('#chart-workspace-status')).toHaveAttribute('data-state','loading');
+  await expect(page.locator('#charts-panel')).toHaveClass(/station-history-loading/);
+  release();
+  await expect(page.locator('#charts-refresh')).toBeEnabled();
 });

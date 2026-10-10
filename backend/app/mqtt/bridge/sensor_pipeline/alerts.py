@@ -25,6 +25,7 @@ class SensorAlertMixin:
         station_config: dict,
         processed_data: dict,
         current_timestamp: int,
+        *, project_id: int | None = None,
     ) -> tuple[dict | None, bool, bool]:
         alerting_enabled = self._is_station_alerting_enabled(station_config)
 
@@ -34,7 +35,7 @@ class SensorAlertMixin:
 
         if not alerting_enabled:
             self._reset_station_alert_state(station_id)
-            await self._suppress_station_alerts(station_id)
+            await self._suppress_station_alerts(station_id, project_id=project_id)
             alert = {"level": "PENDING", "category": "alerting_disabled"}
         else:
             try:
@@ -72,6 +73,7 @@ class SensorAlertMixin:
                 # 1. Update UI Status
                 await manager.broadcast({
                     "type": "station_status",
+                    "project_id": project_id,
                     "station_id": station_id,
                     "risk_level": alert['level']
                 })
@@ -79,6 +81,7 @@ class SensorAlertMixin:
                 # 2. Send Alert to Pi Audio Player (and UI) via WebSocket
                 await manager.broadcast({
                     "type": "alert",
+                    "project_id": project_id,
                     "station_id": station_id,
                     "sensor_type": sensor_type,
                     "level": alert['level'],
@@ -203,6 +206,7 @@ class SensorAlertMixin:
                 summary = await self._get_station_active_alert_summary(station_id, station_config)
                 await manager.broadcast({
                     "type": "station_status",
+                    "project_id": project_id,
                     "station_id": station_id,
                     "risk_level": summary['risk_level']
                 })

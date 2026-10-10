@@ -10,10 +10,14 @@ let rescueAdminSocket = null;
 let rescueAdminReconnectId = null;
 let rescueAdminReconnectAttempt = 0;
 let rescueAdminTicketPromise = null;
+let wsTicketPending = null;
+let wsSetupGeneration = 0;
+let incidentSetupGeneration = 0;
+let rescueSetupGeneration = 0;
 
 function incidentSocketAllowed() {
     const user = window.authManager?.getUserInfo?.();
-    return isMapViewActive() && window.authManager?.isAuthenticated?.() && ['admin', 'operator', 'viewer'].includes(user?.role);
+    return document.visibilityState !== 'hidden' && isMapViewActive() && window.authManager?.isAuthenticated?.() && ['admin', 'operator', 'viewer'].includes(user?.role);
 }
 
 async function requestIncidentSocketTicket() {
@@ -44,9 +48,11 @@ function scheduleIncidentSocketReconnect() {
 async function setupIncidentSocket() {
     if (!incidentSocketAllowed()) return;
     if (incidentSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(incidentSocket.readyState)) return;
+    const generation = incidentSetupGeneration;
     try {
         const ticket = await requestIncidentSocketTicket();
-        if (!incidentSocketAllowed() || !ticket) return;
+        if (generation !== incidentSetupGeneration || !incidentSocketAllowed() || !ticket) return;
+        if (incidentSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(incidentSocket.readyState)) return;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const socket = new WebSocket(`${protocol}//${window.location.host}/ws/operations?ticket=${encodeURIComponent(ticket)}`);
         incidentSocket = socket;
@@ -70,19 +76,23 @@ async function setupIncidentSocket() {
             }
         };
         socket.onerror = () => { if (incidentSocket === socket) document.documentElement.dataset.incidentsRealtime = 'degraded'; };
-        socket.onclose = () => {
+        socket.onclose = async event => {
             if (incidentSocket !== socket) return;
             incidentSocket = null;
             document.documentElement.dataset.incidentsRealtime = 'disconnected';
+            if (event.code === 1008) await window.authManager?.verifyToken?.();
             scheduleIncidentSocketReconnect();
         };
     } catch (error) {
-        document.documentElement.dataset.incidentsRealtime = 'degraded';
-        scheduleIncidentSocketReconnect();
+        if (generation === incidentSetupGeneration) {
+            document.documentElement.dataset.incidentsRealtime = 'degraded';
+            scheduleIncidentSocketReconnect();
+        }
     }
 }
 
 function stopIncidentSocket() {
+    incidentSetupGeneration += 1;
     if (incidentSocketReconnectId) clearTimeout(incidentSocketReconnectId);
     incidentSocketReconnectId = null;
     incidentSocketReconnectAttempt = 0;
@@ -93,7 +103,7 @@ function stopIncidentSocket() {
 }
 
 function rescueAdminSocketAllowed() {
-    return isMapViewActive() && window.authManager?.isAuthenticated?.() && window.authManager.getUserInfo?.()?.role === 'admin';
+    return document.visibilityState !== 'hidden' && isMapViewActive() && window.authManager?.isAuthenticated?.() && window.authManager.getUserInfo?.()?.role === 'admin';
 }
 async function requestRescueAdminTicket() {
     if (rescueAdminTicketPromise) return rescueAdminTicketPromise;
@@ -114,9 +124,10 @@ function scheduleRescueAdminReconnect() {
 }
 async function setupRescueAdminSocket() {
     if (!rescueAdminSocketAllowed() || rescueAdminSocket) return;
+    const generation = rescueSetupGeneration;
     try {
         const ticket = await requestRescueAdminTicket();
-        if (!rescueAdminSocketAllowed() || !ticket) return;
+        if (generation !== rescueSetupGeneration || !rescueAdminSocketAllowed() || !ticket || rescueAdminSocket) return;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const socket = new WebSocket(`${protocol}//${window.location.host}/ws/admin?ticket=${encodeURIComponent(ticket)}`);
         rescueAdminSocket = socket;
@@ -126,10 +137,22 @@ async function setupRescueAdminSocket() {
             try { const message = JSON.parse(event.data); if (message.type === 'rescue_request') updateRescueMarkerFromWebSocket(message); } catch (_) { /* keep the private channel fail-soft */ }
         };
         socket.onerror = () => { if (rescueAdminSocket === socket) document.documentElement.dataset.rescueRealtime = 'degraded'; };
-        socket.onclose = () => { if (rescueAdminSocket !== socket) return; rescueAdminSocket = null; document.documentElement.dataset.rescueRealtime = 'disconnected'; scheduleRescueAdminReconnect(); };
-    } catch (_) { document.documentElement.dataset.rescueRealtime = 'degraded'; scheduleRescueAdminReconnect(); }
+        socket.onclose = async event => {
+            if (rescueAdminSocket !== socket) return;
+            rescueAdminSocket = null;
+            document.documentElement.dataset.rescueRealtime = 'disconnected';
+            if (event.code === 1008) await window.authManager?.verifyToken?.();
+            scheduleRescueAdminReconnect();
+        };
+    } catch (_) {
+        if (generation === rescueSetupGeneration) {
+            document.documentElement.dataset.rescueRealtime = 'degraded';
+            scheduleRescueAdminReconnect();
+        }
+    }
 }
 function stopRescueAdminSocket() {
+    rescueSetupGeneration += 1;
     if (rescueAdminReconnectId) clearTimeout(rescueAdminReconnectId);
     rescueAdminReconnectId = null; rescueAdminReconnectAttempt = 0;
     const socket = rescueAdminSocket; rescueAdminSocket = null;
@@ -142,7 +165,7 @@ function finiteMetric(value) {
     return Number.isFinite(number) ? number : null;
 }
 
-function setupWebSocket() {
+async function setupWebSocket() {
     if (!isMapViewActive()) return;
     setupIncidentSocket();
     setupRescueAdminSocket();
@@ -153,13 +176,22 @@ function setupWebSocket() {
         clearTimeout(wsReconnectId);
         wsReconnectId = null;
     }
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/updates`;
-
-    console.log('🔌 [WS] Connecting to:', wsUrl);
-
-    const socket = new WebSocket(wsUrl);
-    wsConnection = socket;
+    if (!window.authManager?.isAuthenticated?.() || wsTicketPending) return;
+    const attempt = { generation: wsSetupGeneration };
+    wsTicketPending = attempt;
+    try {
+        const response = await window.authManager.apiFetch('/api/auth/ws-ticket', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: 'updates' }), cache: 'no-store',
+        });
+        if (!response?.ok) throw new Error('Realtime ticket unavailable');
+        const ticket = (await response.json()).ticket;
+        if (attempt.generation !== wsSetupGeneration || !isMapViewActive() || !window.authManager?.isAuthenticated?.()) return;
+        if (!ticket) throw new Error('Realtime ticket unavailable');
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/updates?ticket=${encodeURIComponent(ticket)}`;
+        const socket = new WebSocket(wsUrl);
+        wsConnection = socket;
 
     socket.onopen = () => {
         if (wsConnection !== socket) return;
@@ -205,7 +237,7 @@ function setupWebSocket() {
         refreshGnssAdjustmentDebugUi();
     };
 
-    socket.onclose = () => {
+    socket.onclose = async event => {
         if (wsConnection !== socket) return;
         console.warn('⚠️ [WS] Disconnected; scheduling reconnect...');
         document.documentElement.dataset.realtime = 'disconnected';
@@ -218,6 +250,8 @@ function setupWebSocket() {
             syncGnssAdjustmentStatus();
         }
         else refreshGnssAdjustmentDebugUi();
+        if (event.code === 1008) await window.authManager?.verifyToken?.();
+        if (attempt.generation !== wsSetupGeneration || !isMapViewActive() || !window.authManager?.isAuthenticated?.()) return;
         const baseDelay = Math.min(30000, 1000 * (2 ** Math.min(wsReconnectAttempt, 5)));
         const reconnectDelay = Math.round(baseDelay * (0.75 + Math.random() * 0.5));
         wsReconnectAttempt += 1;
@@ -226,6 +260,15 @@ function setupWebSocket() {
             setupWebSocket();
         }, reconnectDelay);
     };
+    } catch (error) {
+        if (attempt.generation === wsSetupGeneration && isMapViewActive() && window.authManager?.isAuthenticated?.()) {
+            wsConnection = null;
+            const delay = Math.min(30000, 1000 * (2 ** Math.min(wsReconnectAttempt++, 5)));
+            wsReconnectId = setTimeout(() => { wsReconnectId = null; setupWebSocket(); }, delay);
+        }
+    } finally {
+        if (wsTicketPending === attempt) wsTicketPending = null;
+    }
 }
 
 function syncWebSocketSubscription(stationId = currentStationData?.id) {
@@ -268,14 +311,28 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('auth:ready', () => {
     if (isMapViewActive()) {
+        setupWebSocket();
         setupIncidentSocket();
         setupRescueAdminSocket();
         void window.loadIncidentInbox?.();
     }
 });
-window.addEventListener('authzExpired', () => { stopIncidentSocket(); stopRescueAdminSocket(); });
+window.addEventListener('authzExpired', () => {
+    wsSetupGeneration += 1;
+    wsTicketPending = null;
+    stopIncidentSocket(); stopRescueAdminSocket();
+    if (wsReconnectId) clearTimeout(wsReconnectId);
+    wsReconnectId = null;
+    if (wsHeartbeatId) clearInterval(wsHeartbeatId);
+    wsHeartbeatId = null;
+    if (wsConnection) { const socket = wsConnection; wsConnection = null; socket.onclose = null; socket.close(); }
+});
 window.addEventListener('spa:navigate', (event) => {
-    if (event.detail?.view !== 'map') stopMapBackgroundWork();
+    if (event.detail?.view !== 'map') {
+        wsSetupGeneration += 1;
+        wsTicketPending = null;
+        stopMapBackgroundWork();
+    }
 });
 
 function handleRealtimeUpdate(message) {

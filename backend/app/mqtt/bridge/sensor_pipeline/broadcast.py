@@ -11,12 +11,14 @@ logger = logging.getLogger(__name__)
 
 class SensorBroadcastMixin:
     async def _broadcast_sensor_data(
-        self, station_id: int, sensor_type: str, timestamp: int, processed_data: dict
+        self, station_id: int, sensor_type: str, timestamp: int, processed_data: dict,
+        *, project_id: int | None = None,
     ) -> None:
         try:
             await manager.broadcast({
                 "type": "sensor_data",
                 "station_id": station_id,
+                "project_id": project_id,
                 "sensor_type": sensor_type,
                 "timestamp": timestamp,
                 "data": processed_data,

@@ -70,7 +70,7 @@ class AuthManager {
 
             if (isValid === false) {
                 console.warn('⚠️ [AUTH] Token expired or invalid');
-                this.logout(false); // Don't redirect immediately
+                await this.logout(false); // Don't redirect immediately
                 return false;
             }
 
@@ -217,7 +217,8 @@ class AuthManager {
             const response = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Session-Mode': 'cookie'
                 },
                 body: formData
             });
@@ -229,12 +230,7 @@ class AuthManager {
                 throw new Error('Lỗi đăng nhập. Vui lòng thử lại.');
             }
 
-            const data = await response.json();
-
-            this.token = data.access_token;
-
-            // Remember Me: localStorage = permanent, sessionStorage = session only
-            window.authSession.storeToken(data.access_token, rememberMe);
+            this.token = window.authSession.getToken();
 
             // Fetch user info immediately
             await this.verifyToken();
@@ -250,26 +246,24 @@ class AuthManager {
         }
     }
 
-    logout(redirect = true) {
+    async logout(redirect = true) {
         if (this.token) {
-            void fetch('/api/auth/logout', {
-                method: 'POST', headers: { Authorization: `Bearer ${this.token}` }, keepalive: true,
-            }).catch(() => {});
+            try {
+                const response = await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' });
+                if (!response.ok && response.status !== 401) throw new Error(`HTTP ${response.status}`);
+            } catch (error) {
+                console.warn('[AUTH] Logout could not revoke server session:', error);
+                alert('Chưa thể đăng xuất. Vui lòng thử lại khi kết nối ổn định.');
+                return false;
+            }
         }
-        // Clear interval
-        if (this.tokenCheckInterval) {
-            clearInterval(this.tokenCheckInterval);
-            this.tokenCheckInterval = null;
-        }
-        if (this.authzDeadlineTimer) {
-            clearTimeout(this.authzDeadlineTimer);
-            this.authzDeadlineTimer = null;
-        }
+        if (this.tokenCheckInterval) clearInterval(this.tokenCheckInterval);
+        if (this.authzDeadlineTimer) clearTimeout(this.authzDeadlineTimer);
+        this.tokenCheckInterval = null;
+        this.authzDeadlineTimer = null;
         this.authzDeadlineAt = 0;
         this.authzLocked = false;
         document.documentElement.removeAttribute('data-authz-lock');
-
-        // Clear data from both storages
         this.token = null;
         this.user = null;
         window.authSession.clearToken();
@@ -277,11 +271,83 @@ class AuthManager {
         sessionStorage.removeItem('loginReturnView');
         sessionStorage.removeItem('kicked_alert_shown');
         window.revokeAuthenticatedBlobUrls?.();
+        window.dispatchEvent(new CustomEvent('authzExpired'));
+        if (redirect) window.location.href = '/';
+        return true;
+    }
 
-        // Redirect
-        if (redirect) {
-            window.location.href = '/';
+    async openSessions() {
+        let dialog = document.getElementById('session-manager-dialog');
+        if (!dialog) {
+            dialog = document.createElement('dialog');
+            dialog.id = 'session-manager-dialog';
+            dialog.className = 'session-manager-dialog';
+            dialog.setAttribute('aria-labelledby', 'session-manager-title');
+            dialog.innerHTML = `<div class="session-manager-head"><div><span class="session-manager-kicker">Bảo mật tài khoản</span><h2 id="session-manager-title">Phiên đăng nhập</h2></div><button type="button" data-close aria-label="Đóng">×</button></div><p>Kiểm tra các thiết bị đang đăng nhập và kết thúc phiên không còn sử dụng.</p><div id="session-manager-status" role="status" aria-live="polite"></div><ul id="session-manager-list" aria-label="Các phiên đăng nhập"></ul><div class="session-manager-actions"><button type="button" data-revoke-others>Đăng xuất thiết bị khác</button><button type="button" data-logout>Đăng xuất thiết bị này</button></div>`;
+            document.body.appendChild(dialog);
+            dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
+            dialog.querySelector('[data-logout]').addEventListener('click', () => void this.logout());
+            dialog.querySelector('[data-revoke-others]').addEventListener('click', async () => {
+                const button = dialog.querySelector('[data-revoke-others]');
+                button.disabled = true;
+                try {
+                    const response = await fetch('/api/auth/sessions/revoke-others', { method: 'POST' });
+                    if (!response.ok) throw new Error('Không thể kết thúc phiên khác.');
+                    await this.loadSessions(dialog);
+                } catch (error) { dialog.querySelector('#session-manager-status').textContent = error.message; }
+                finally { button.disabled = false; }
+            });
+            dialog.addEventListener('close', () => this._sessionDialogOpener?.focus({ preventScroll: true }));
         }
+        this._sessionDialogOpener = document.activeElement;
+        if (!dialog.open) dialog.showModal();
+        await this.loadSessions(dialog);
+    }
+
+    async loadSessions(dialog) {
+        const list = dialog.querySelector('#session-manager-list');
+        const status = dialog.querySelector('#session-manager-status');
+        list.replaceChildren();
+        list.setAttribute('aria-busy', 'true');
+        status.textContent = 'Đang tải phiên đăng nhập…';
+        try {
+            const response = await fetch('/api/auth/sessions', { cache: 'no-store' });
+            if (!response.ok) throw new Error('Không thể tải danh sách phiên. Vui lòng thử lại.');
+            const sessions = await response.json();
+            status.textContent = `${sessions.length} phiên đang hoạt động`;
+            for (const session of sessions) {
+                const row = document.createElement('li');
+                const info = document.createElement('div');
+                const title = document.createElement('strong');
+                title.textContent = session.current ? 'Thiết bị này' : 'Thiết bị khác';
+                const meta = document.createElement('small');
+                const date = session.last_seen ? new Date(session.last_seen * 1000).toLocaleString('vi-VN') : 'Chưa rõ';
+                meta.textContent = `${session.client || 'Trình duyệt'} · Hoạt động ${date}`;
+                info.append(title, meta);
+                row.append(info);
+                if (!session.current) {
+                    const end = document.createElement('button');
+                    end.type = 'button'; end.textContent = 'Kết thúc';
+                    end.setAttribute('aria-label', `Kết thúc phiên ${session.client || 'thiết bị khác'}`);
+                    end.addEventListener('click', async () => {
+                        end.disabled = true;
+                        try {
+                            const result = await fetch(`/api/auth/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+                            if (!result.ok) throw new Error('Không thể kết thúc phiên.');
+                            await this.loadSessions(dialog);
+                        } catch (error) { status.textContent = error.message; end.disabled = false; }
+                    });
+                    row.append(end);
+                }
+                list.append(row);
+            }
+        } catch (error) {
+            status.textContent = error.message;
+            const retry = document.createElement('button');
+            retry.type = 'button'; retry.textContent = 'Thử lại';
+            retry.addEventListener('click', () => void this.loadSessions(dialog));
+            list.append(retry);
+        } finally { list.removeAttribute('aria-busy'); }
     }
 
     // ✅ UNIVERSAL: Works for both Landing & Map pages
@@ -300,14 +366,15 @@ class AuthManager {
             // ============================================
             // UPDATE AUTH BUTTON (All Pages)
             // ============================================
-            authBtn.innerHTML = `<i class="bi bi-person-check me-1"></i> ${this.user.username}`;
+            const icon = document.createElement('i');
+            icon.className = 'bi bi-person-check me-1';
+            icon.setAttribute('aria-hidden', 'true');
+            authBtn.replaceChildren(icon, document.createTextNode(this.user.username));
             authBtn.classList.remove('btn-primary');
             authBtn.classList.add('btn-outline-danger');
             authBtn.onclick = (e) => {
                 e.preventDefault();
-                if (confirm('Bạn muốn đăng xuất?')) {
-                    this.logout();
-                }
+                void this.openSessions();
             };
 
             // ============================================

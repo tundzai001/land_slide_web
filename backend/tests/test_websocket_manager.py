@@ -54,6 +54,55 @@ class _OverlapDetectingSocket:
 
 
 class WebSocketIsolationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_client_subscription_cannot_expand_server_project_scope(self):
+        manager = ConnectionManager()
+        socket = _RoleSocket("/ws/updates", "viewer")
+        socket.state.user_project_ids = [7]
+        manager.active_connections = [socket]
+        await manager.handle_client_message(socket, '{"type":"subscribe","project_ids":[99],"channels":["alerts"]}')
+        self.assertEqual(socket.messages[-1]["type"], "subscription_error")
+        socket.messages.clear()
+
+        await manager.broadcast({"type": "alert", "project_id": 99})
+        await manager.broadcast({"type": "alert"})
+        await manager.broadcast({"type": "alert", "project_id": 7})
+
+        self.assertEqual(socket.messages, [{"type": "alert", "project_id": 7}])
+
+    async def test_operations_channel_cannot_subscribe_to_other_data_types(self):
+        manager = ConnectionManager()
+        socket = _RoleSocket("/ws/operations", "admin")
+        manager.active_connections = [socket]
+        await manager.handle_client_message(socket, '{"type":"subscribe","channels":["sensor"],"station_ids":[1]}')
+        socket.messages.clear()
+        await manager.broadcast({"type": "sensor_data", "station_id": 1, "project_id": 7})
+        self.assertEqual(socket.messages, [])
+
+    async def test_malformed_subscription_keeps_existing_filter(self):
+        manager = ConnectionManager()
+        socket = _RecordingSocket()
+        manager.active_connections = [socket]
+        await manager.handle_client_message(socket, '{"type":"subscribe","station_ids":[1],"channels":["sensor"]}')
+        for invalid_ids in ('42', '"2"', '[true]', '[1.5]'):
+            await manager.handle_client_message(socket, '{"type":"subscribe","station_ids":' + invalid_ids + '}')
+            self.assertEqual(socket.messages[-1]["type"], "subscription_error")
+        self.assertEqual(manager._subscriptions[id(socket)]["station_ids"], {1})
+
+    async def test_revoked_session_closes_and_removes_all_local_sockets(self):
+        manager = ConnectionManager()
+        from unittest.mock import AsyncMock
+        sockets = [_RoleSocket("/ws/updates", "admin"), _RoleSocket("/ws/admin", "admin")]
+        other = _RoleSocket("/ws/updates", "admin")
+        for socket in sockets:
+            socket.state.session_id = "revoked-session"
+            socket.close = AsyncMock()
+        other.state.session_id = "other-session"
+        manager.active_connections = [*sockets, other]
+        await manager.close_session("revoked-session")
+        self.assertEqual(manager.active_connections, [other])
+        for socket in sockets:
+            socket.close.assert_awaited_once_with(code=1008, reason="Session revoked")
+
     async def test_sensitive_admin_broadcast_never_reaches_public_or_viewer_socket(self):
         manager = ConnectionManager()
         public = _RoleSocket("/ws/updates")

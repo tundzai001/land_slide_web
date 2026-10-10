@@ -237,7 +237,7 @@ async def create_station_in_project(
     except Exception as e:
         await db.rollback()
         logger.error(f"Error creating station: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Unable to complete station request")
 
 
 @router.get("/api/public/dashboard-summary")
@@ -406,7 +406,7 @@ async def get_stations(
         raise
     except Exception as e:
         logger.error(f"Error loading stations: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Unable to complete station request")
 
 
 @router.get("/api/stations/{station_id}/history")
@@ -696,5 +696,5 @@ async def get_station_detail(
         raise
     except Exception as e:
         logger.error(f"Error loading station detail: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Unable to complete station request")
 

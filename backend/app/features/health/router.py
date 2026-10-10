@@ -41,8 +41,8 @@ async def health_live() -> dict[str, Any]:
 
 @router.get("/api/health")
 async def health_check() -> dict[str, Any]:
-    """Legacy health endpoint kept with the operational health feature."""
-    return {"status": "ok", "time": time.time(), "db_status": "3-DB-Active"}
+    """Legacy liveness endpoint; avoid claiming healthy dependencies without probing."""
+    return {"status": "live", "ts": int(time.time())}
 
 
 @router.get("/api/health/ready")
@@ -52,13 +52,10 @@ async def health_ready(response: Response) -> dict[str, Any]:
         _probe_engine(config_engine),
         _probe_engine(data_engine),
     )
-    names = ("auth_db", "config_db", "data_db")
-    checks = dict(zip(names, probes))
     try:
         ingest = await mqtt_service.ingest_diagnostics()
     except Exception as exc:
         ingest = {"error": type(exc).__name__}
-    checks["ingest"] = ingest
     ready = all(item.get("ok") for item in probes)
     # A non-empty spool is healthy during a transient outage, but a rejected
     # append means the bounded handoff has reached its hard safety limit.
@@ -68,8 +65,6 @@ async def health_ready(response: Response) -> dict[str, Any]:
     return {
         "status": "ready" if ready else "degraded",
         "ts": int(time.time()),
-        "checks": checks,
-        "draining": bool(getattr(mqtt_service, "_stopping", False)),
     }
 
 

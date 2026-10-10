@@ -5,6 +5,7 @@ class AdminUsersFeature extends window.AdminManager {
     // =========================================================================
 
     async loadUsers() {
+        const requestId = this.userListRequestId = (this.userListRequestId || 0) + 1;
         const tbody = document.getElementById('user-table-body');
         if (tbody) tbody.innerHTML = '<tr><td colspan="6"><div class="ops-loading"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Đang tải người dùng…</span></div></td></tr>';
         try {
@@ -27,9 +28,11 @@ class AdminUsersFeature extends window.AdminManager {
             if (!res.ok) throw new Error('Failed to load users');
 
             const users = await res.json();
+            if (requestId !== this.userListRequestId) return;
             this.usersData = users;
             this.renderUsers(users);
         } catch (e) {
+            if (requestId !== this.userListRequestId) return;
             console.error('Error loading users:', e);
             if (tbody) tbody.innerHTML = '<tr><td colspan="6"><div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được người dùng</strong><button class="btn btn-outline-primary" onclick="window.adminManager.loadUsers()">Thử lại</button></div></td></tr>';
         }
@@ -108,23 +111,78 @@ class AdminUsersFeature extends window.AdminManager {
         document.getElementById('edit-user-username').value = user.username || '';
         document.getElementById('edit-user-fullname').value = user.full_name || '';
         document.getElementById('edit-user-password').value = '';
+        this.clearUserFormError('edit');
         const roleSelect = document.getElementById('edit-user-role');
         roleSelect.value = user.role || 'viewer';
         roleSelect.disabled = user.username === 'admin';
 
-        const container = document.getElementById('edit-user-projects');
-        container.innerHTML = '<span class="text-muted small">Đang tải dự án…</span>';
         bootstrap.Modal.getOrCreateInstance(document.getElementById('editUserModal')).show();
+        this.syncEditUserProjectVisibility();
+        await this.loadEditUserProjects(userId);
+    }
+
+    async loadEditUserProjects(userId = Number(document.getElementById('edit-user-id').value)) {
+        const user = (this.usersData || []).find(item => Number(item.id) === Number(userId));
+        if (!user) return;
+        const container = document.getElementById('edit-user-projects');
+        const button = document.getElementById('save-user-config-btn');
+        this.editUserProjectsReady = false;
+        button.disabled = true;
+        container.setAttribute('aria-busy', 'true');
+        container.innerHTML = '<span class="text-muted small">Đang tải dự án…</span>';
         try {
             const res = await fetch('/api/admin/projects', { headers: { 'Authorization': `Bearer ${this.token}` } });
-            if (!res.ok) throw new Error('Không tải được dự án');
+            if (!res.ok) throw new Error('Không tải được dự án. Hãy thử lại trước khi lưu.');
             const projects = await res.json();
-            const assigned = new Set(user.assigned_projects || []);
-            container.innerHTML = projects.length ? projects.map(project => `<label class="user-project-option"><input type="checkbox" value="${project.id}" ${assigned.has(project.id) ? 'checked' : ''}><span><strong>${this.escapeUserValue(project.name || project.project_code)}</strong><small>${this.escapeUserValue(project.project_code || `#${project.id}`)}</small></span></label>`).join('') : '<span class="text-muted small">Chưa có dự án</span>';
+            if (Number(document.getElementById('edit-user-id').value) !== Number(userId)) return;
+            const assigned = new Set((user.assigned_projects || []).map(Number));
+            container.innerHTML = projects.length ? projects.map(project => `<label class="user-project-option"><input type="checkbox" value="${Number(project.id)}" ${assigned.has(Number(project.id)) ? 'checked' : ''}><span><strong>${this.escapeUserValue(project.name || project.project_code)}</strong><small>${this.escapeUserValue(project.project_code || `#${project.id}`)}</small></span></label>`).join('') : '<span class="text-muted small">Chưa có dự án</span>';
+            this.editUserProjectsReady = true;
+            button.disabled = false;
         } catch (error) {
-            container.innerHTML = `<span class="text-danger small">${this.escapeUserValue(error.message)}</span>`;
+            if (Number(document.getElementById('edit-user-id').value) !== Number(userId)) return;
+            container.innerHTML = `<span class="text-danger small" role="alert">${this.escapeUserValue(error.message)}</span><button type="button" class="btn btn-outline-primary btn-sm" onclick="window.adminManager.loadEditUserProjects()">Thử lại</button>`;
+        } finally {
+            if (Number(document.getElementById('edit-user-id').value) === Number(userId)) container.removeAttribute('aria-busy');
         }
-        this.syncEditUserProjectVisibility();
+    }
+
+    clearUserFormError(mode) {
+        const summary = document.getElementById(`${mode}-user-error`);
+        if (summary) { summary.hidden = true; summary.textContent = ''; }
+        const field = document.getElementById(mode === 'new' ? 'new-password' : 'edit-user-password');
+        field?.removeAttribute('aria-invalid');
+        if (mode === 'new') document.getElementById('new-username')?.removeAttribute('aria-invalid');
+        const error = document.getElementById(`${mode}-password-error`);
+        if (error) error.textContent = '';
+    }
+
+    showUserFormError(mode, message, fieldId) {
+        const summary = document.getElementById(`${mode}-user-error`);
+        if (summary) { summary.textContent = message; summary.hidden = false; }
+        const field = fieldId && document.getElementById(fieldId);
+        if (field) {
+            field.setAttribute('aria-invalid', 'true');
+            const error = document.getElementById(`${mode}-password-error`);
+            if (error && field.type === 'password') error.textContent = message;
+            field.focus();
+        } else summary?.focus();
+    }
+
+    validateUserPassword(mode, required = false) {
+        const fieldId = mode === 'new' ? 'new-password' : 'edit-user-password';
+        const password = document.getElementById(fieldId).value;
+        if (!password && !required) return true;
+        const message = [...password].length < 12 ? 'Mật khẩu cần ít nhất 12 ký tự.'
+            : new TextEncoder().encode(password).length > 72 ? 'Mật khẩu quá dài. Giới hạn 72 byte UTF-8; ký tự có dấu có thể chiếm nhiều byte.' : '';
+        if (message) this.showUserFormError(mode, message, fieldId);
+        return !message;
+    }
+
+    async userResponseError(response) {
+        const payload = await response.json().catch(() => ({}));
+        if (Array.isArray(payload.detail)) return payload.detail.map(item => item.msg).join('. ');
+        return typeof payload.detail === 'string' ? payload.detail : `Không thể lưu thay đổi (HTTP ${response.status}).`;
     }
 
     syncEditUserProjectVisibility() {
@@ -137,13 +195,15 @@ class AdminUsersFeature extends window.AdminManager {
         const userId = Number(document.getElementById('edit-user-id').value);
         const role = document.getElementById('edit-user-role').value;
         const password = document.getElementById('edit-user-password').value;
-        if (password && password.length < 6) {
-            window.toast?.warning('Mật khẩu mới phải có ít nhất 6 ký tự');
-            document.getElementById('edit-user-password').focus();
+        this.clearUserFormError('edit');
+        if (!this.validateUserPassword('edit')) return;
+        if (!this.editUserProjectsReady) {
+            this.showUserFormError('edit', 'Danh sách dự án chưa sẵn sàng. Hãy tải lại trước khi lưu.');
             return;
         }
         const assignedProjects = [...document.querySelectorAll('#edit-user-projects input:checked')].map(input => Number(input.value));
         const button = document.getElementById('save-user-config-btn');
+        if (button.disabled) return;
         const originalButtonHtml = button.innerHTML;
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang lưu…';
@@ -158,12 +218,12 @@ class AdminUsersFeature extends window.AdminManager {
                     assigned_projects: ['operator', 'viewer'].includes(role) ? assignedProjects : [],
                 }),
             });
-            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+            if (!res.ok) throw new Error(await this.userResponseError(res));
             bootstrap.Modal.getInstance(document.getElementById('editUserModal'))?.hide();
             window.toast?.success('Đã cập nhật cấu hình người dùng');
             await this.loadUsers();
         } catch (error) {
-            window.toast?.error(error.message);
+            this.showUserFormError('edit', error.message);
         } finally {
             button.disabled = false;
             button.innerHTML = originalButtonHtml;
@@ -182,11 +242,22 @@ class AdminUsersFeature extends window.AdminManager {
             assignedProjects.push(parseInt(cb.value));
         });
 
-        if (!username || !password) {
-            window.toast?.warning('Thiếu tài khoản hoặc mật khẩu');
+        this.clearUserFormError('new');
+        if (!username || /\s/.test(username)) {
+            this.showUserFormError('new', 'Nhập tài khoản không chứa khoảng trắng.', 'new-username');
             return;
         }
-
+        if (!this.validateUserPassword('new', true)) return;
+        if (role !== 'admin' && !this.newUserProjectsReady) {
+            this.showUserFormError('new', 'Danh sách dự án chưa sẵn sàng. Hãy tải lại trước khi tạo tài khoản.');
+            return;
+        }
+        const button = document.getElementById('create-user-btn');
+        if (button.disabled) return;
+        const originalButtonHtml = button.innerHTML;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'Đang tạo…';
         try {
             const res = await fetch('/api/admin/users', {
                 method: 'POST',
@@ -201,16 +272,20 @@ class AdminUsersFeature extends window.AdminManager {
             });
 
             if (res.ok) {
-                window.toast?.success('✅ Tạo tài khoản thành công');
+                window.toast?.success('Tạo tài khoản thành công');
                 bootstrap.Modal.getInstance(document.getElementById('addUserModal'))?.hide();
                 document.getElementById('addUserForm').reset();
                 document.getElementById('project-assign-group').style.display = 'block';
                 this.loadUsers();
             } else {
-                throw new Error((await res.json()).detail || 'Lỗi tạo user');
+                throw new Error(await this.userResponseError(res));
             }
         } catch (e) {
-            window.toast?.error('❌ ' + e.message);
+            this.showUserFormError('new', e.message);
+        } finally {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.innerHTML = originalButtonHtml;
         }
     }
 
@@ -262,15 +337,17 @@ class AdminUsersFeature extends window.AdminManager {
 
     /** Load project list into the Add User modal checkboxes */
     async loadProjectsForModal() {
+        this.newUserProjectsReady = false;
+        const container = document.getElementById('project-checkbox-list');
+        if (!container) return;
+        container.innerHTML = '<small class="text-muted">Đang tải dự án…</small>';
         try {
             const res = await fetch('/api/admin/projects', {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
-            if (!res.ok) return;
+            if (!res.ok) throw new Error('Không tải được dự án');
             const projects = await res.json();
-
-            const container = document.getElementById('project-checkbox-list');
-            if (!container) return;
+            this.newUserProjectsReady = true;
 
             if (projects.length === 0) {
                 container.innerHTML = '<small class="text-muted">Chưa có dự án nào</small>';
@@ -280,11 +357,11 @@ class AdminUsersFeature extends window.AdminManager {
             container.innerHTML = projects.map(p => `
                 <div class="form-check mb-1">
                     <input class="form-check-input" type="checkbox" value="${p.id}" id="assign-proj-${p.id}">
-                    <label class="form-check-label small" for="assign-proj-${p.id}">${p.name} <span class="text-muted">(#${p.id})</span></label>
+                    <label class="form-check-label small" for="assign-proj-${p.id}">${this.escapeUserValue(p.name)} <span class="text-muted">(#${p.id})</span></label>
                 </div>
             `).join('');
         } catch (e) {
-            console.error('Error loading projects for modal:', e);
+            container.innerHTML = '<span class="text-danger small" role="alert">Không tải được dự án.</span><button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="window.adminManager.loadProjectsForModal()">Thử lại</button>';
         }
     }
 

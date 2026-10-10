@@ -1,66 +1,64 @@
 (() => {
     'use strict';
-
     if (window.authSession) return;
 
-    const TOKEN_KEY = 'token';
-    const REMEMBER_KEY = 'rememberMe';
-    const USER_KEY = 'auth_user';
-
-    function getToken() {
-        // A tab-scoped login is always the most recent explicit choice.
-        return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
+    // This marker is only a compatibility signal for legacy UI controllers.
+    // The signed credential is in an HttpOnly cookie and never enters JavaScript.
+    const marker = 'browser-session';
+    const csrfNames = ['__Host-monitoring_csrf', 'monitoring_csrf'];
+    const legacyKeys = ['token', 'rememberMe', 'auth_user'];
+    for (const key of legacyKeys) {
+        localStorage.removeItem(key);
+        if (key !== 'auth_user') sessionStorage.removeItem(key);
     }
 
-    function storeToken(token, remember = false) {
-        if (!token) return;
-        if (remember) {
-            localStorage.setItem(TOKEN_KEY, token);
-            localStorage.setItem(REMEMBER_KEY, 'true');
-            sessionStorage.removeItem(TOKEN_KEY);
-        } else {
-            sessionStorage.setItem(TOKEN_KEY, token);
-            localStorage.removeItem(TOKEN_KEY);
-            localStorage.removeItem(REMEMBER_KEY);
+    function csrf() {
+        for (const name of csrfNames) {
+            const value = document.cookie.split('; ').find(part => part.startsWith(`${name}=`));
+            if (value) return decodeURIComponent(value.slice(name.length + 1));
         }
-        sessionStorage.removeItem(USER_KEY);
+        return null;
     }
-
-    function clearToken(expectedToken = null) {
-        if (!expectedToken || sessionStorage.getItem(TOKEN_KEY) === expectedToken) {
-            sessionStorage.removeItem(TOKEN_KEY);
+    function getToken() { return csrf() ? marker : null; }
+    function storeToken() { /* Server sets HttpOnly session and readable CSRF cookies. */ }
+    function clearToken() {
+        for (const key of legacyKeys) {
+            localStorage.removeItem(key);
+            sessionStorage.removeItem(key);
         }
-        if (!expectedToken || localStorage.getItem(TOKEN_KEY) === expectedToken) {
-            localStorage.removeItem(TOKEN_KEY);
-            localStorage.removeItem(REMEMBER_KEY);
-        }
-        sessionStorage.removeItem(USER_KEY);
+        for (const name of csrfNames) document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`;
     }
-
     async function inspect({ timeout = 10000 } = {}) {
-        const token = getToken();
-        if (!token) return { status: 'anonymous', token: null, user: null };
-
         try {
             const response = await fetch('/api/auth/me', {
-                headers: { Authorization: `Bearer ${token}` },
-                signal: AbortSignal.timeout(timeout),
-                cache: 'no-store',
+                signal: AbortSignal.timeout(timeout), cache: 'no-store', credentials: 'same-origin',
             });
             if (response.ok) {
                 const user = await response.json();
-                sessionStorage.setItem(USER_KEY, JSON.stringify(user));
-                return { status: 'authenticated', token, user };
+                sessionStorage.setItem('auth_user', JSON.stringify(user));
+                return { status: 'authenticated', token: marker, user };
             }
             if (response.status === 401 || response.status === 403) {
-                clearToken(token);
+                clearToken();
                 return { status: 'anonymous', token: null, user: null };
             }
-            return { status: 'unavailable', token, user: null };
+            return { status: 'unavailable', token: getToken(), user: null };
         } catch (_) {
-            return { status: 'unavailable', token, user: null };
+            return { status: 'unavailable', token: getToken(), user: null };
         }
     }
 
+    const rawFetch = window.fetch.bind(window);
+    window.fetch = function (input, options = {}) {
+        const url = new URL(input instanceof URL ? input.href : typeof input === 'string' ? input : input.url, location.href);
+        const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+        if (headers.get('Authorization') === `Bearer ${marker}`) headers.delete('Authorization');
+        const method = String(options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        if (url.origin === location.origin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            const value = csrf();
+            if (value) headers.set('X-CSRF-Token', value);
+        }
+        return rawFetch(input, { ...options, headers, credentials: url.origin === location.origin ? 'same-origin' : options.credentials });
+    };
     window.authSession = Object.freeze({ getToken, storeToken, clearToken, inspect });
 })();

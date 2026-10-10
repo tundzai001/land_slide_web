@@ -220,29 +220,32 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
     </div>
 
     <!-- 1. Add User Modal -->
-    <div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserModalLabel">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Thêm người dùng mới</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h5 class="modal-title" id="addUserModalLabel">Thêm người dùng mới</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="addUserForm">
+                    <form id="addUserForm" novalidate onsubmit="event.preventDefault(); window.adminManager.createUser()">
+                        <p id="new-user-error" class="alert alert-danger" role="alert" tabindex="-1" hidden></p>
                         <div class="mb-3">
-                            <label class="form-label">Tài khoản</label>
-                            <input type="text" class="form-control" id="new-username" required>
+                            <label class="form-label" for="new-username">Tài khoản</label>
+                            <input type="text" class="form-control" id="new-username" maxlength="150" autocomplete="username" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Mật khẩu</label>
-                            <input type="password" class="form-control" id="new-password" required>
+                            <label class="form-label" for="new-password">Mật khẩu</label>
+                            <input type="password" class="form-control" id="new-password" minlength="12" autocomplete="new-password" aria-describedby="new-password-help new-password-error" oninput="window.adminManager.clearUserFormError('new')" required>
+                            <small class="form-text" id="new-password-help">Ít nhất 12 ký tự, tối đa 72 byte UTF-8. Có thể dán từ trình quản lý mật khẩu.</small>
+                            <small class="text-danger d-block" id="new-password-error"></small>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Họ tên</label>
-                            <input type="text" class="form-control" id="new-fullname">
+                            <label class="form-label" for="new-fullname">Họ tên</label>
+                            <input type="text" class="form-control" id="new-fullname" maxlength="255" autocomplete="name">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Vai trò</label>
+                            <label class="form-label" for="new-role">Vai trò</label>
                             <select class="form-select" id="new-role"
                                 onchange="document.getElementById('project-assign-group').style.display = (this.value === 'operator' || this.value === 'viewer') ? 'block' : 'none'">
                                 <option value="viewer">Viewer</option>
@@ -261,7 +264,7 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                    <button type="button" class="btn btn-gradient" onclick="window.adminManager.createUser()">Tạo tài
+                    <button type="submit" form="addUserForm" id="create-user-btn" class="btn btn-primary">Tạo tài
                         khoản</button>
                 </div>
             </div>
@@ -277,12 +280,13 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
                 </div>
                 <div class="modal-body">
+                    <p id="edit-user-error" class="alert alert-danger" role="alert" tabindex="-1" hidden></p>
                     <input type="hidden" id="edit-user-id">
                     <div class="row g-3">
                         <div class="col-md-6"><label class="form-label" for="edit-user-username">Tài khoản</label><input class="form-control" id="edit-user-username" readonly></div>
-                        <div class="col-md-6"><label class="form-label" for="edit-user-fullname">Họ tên</label><input class="form-control" id="edit-user-fullname"></div>
+                        <div class="col-md-6"><label class="form-label" for="edit-user-fullname">Họ tên</label><input class="form-control" id="edit-user-fullname" maxlength="255"></div>
                         <div class="col-md-6"><label class="form-label" for="edit-user-role">Vai trò</label><select class="form-select" id="edit-user-role" onchange="window.adminManager?.syncEditUserProjectVisibility()"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option></select></div>
-                        <div class="col-md-6"><label class="form-label" for="edit-user-password">Mật khẩu mới</label><input type="password" class="form-control" id="edit-user-password" minlength="6" autocomplete="new-password" placeholder="Để trống nếu không đổi"><small class="form-text">Tối thiểu 6 ký tự khi thay đổi.</small></div>
+                        <div class="col-md-6"><label class="form-label" for="edit-user-password">Mật khẩu mới</label><input type="password" class="form-control" id="edit-user-password" minlength="12" autocomplete="new-password" aria-describedby="edit-password-help edit-password-error" oninput="window.adminManager.clearUserFormError('edit')" placeholder="Để trống nếu không đổi"><small class="form-text" id="edit-password-help">Ít nhất 12 ký tự, tối đa 72 byte UTF-8. Đổi mật khẩu sẽ kết thúc các phiên đăng nhập.</small><small class="text-danger d-block" id="edit-password-error"></small></div>
                     </div>
                     <section class="user-project-scope mt-4" id="edit-user-project-group"><div><strong>Phạm vi dự án</strong><small>Chọn các dự án mà người dùng được phép truy cập.</small></div><div id="edit-user-projects" class="project-checkbox-list"><span class="text-muted small">Đang tải dự án…</span></div></section>
                 </div>

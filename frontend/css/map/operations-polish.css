@@ -793,3 +793,14 @@ html[data-theme="dark"] .station-filter-bar { background:var(--map-surface) !imp
     .top-navbar>.d-flex:first-child>* { flex-shrink:0; }
     .top-navbar>.d-flex:last-child { flex-shrink:0; }
 }
+
+.chart-data-details { margin-top:12px; border-top:1px solid var(--map-line); color:var(--map-text); font-size:12px; }
+.chart-data-details summary { padding:12px 4px; min-height:44px; cursor:pointer; }
+.chart-data-details summary:hover { color:var(--map-teal); }
+.chart-data-details summary:focus-visible, .chart-data-scroll:focus-visible { outline:3px solid var(--map-teal); outline-offset:2px; }
+.chart-data-scroll { max-height:300px; overflow:auto; border:1px solid var(--map-line); border-radius:6px; }
+.chart-data-scroll table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.chart-data-scroll caption { caption-side:top; text-align:left; padding:10px; color:var(--map-text-soft); line-height:1.6; }
+.chart-data-scroll th { position:sticky; top:0; background:var(--map-surface-subtle); font-weight:600; }
+.chart-data-scroll td, .chart-data-scroll th { padding:9px 12px; border-bottom:1px solid var(--map-line); white-space:nowrap; text-align:right; }
+.chart-data-scroll td:first-child, .chart-data-scroll th:first-child { text-align:left; }

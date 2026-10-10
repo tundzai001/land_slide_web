@@ -5,14 +5,15 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ... import auth, schemas
 from ...database import get_auth_db
 from ...models import auth as model_auth
-from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
+from ...shared.pagination import normalize_page, set_pagination_headers
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 @router.put("/users/{user_id}/status")
 async def toggle_user_status(
     user_id: int,
-    payload: dict,
+    payload: schemas.UserStatusUpdate,
     db: AsyncSession = Depends(get_auth_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
@@ -36,8 +37,9 @@ async def toggle_user_status(
     if user.username == 'admin':
         raise HTTPException(status_code=400, detail="Cannot change status of the admin user")
 
-    is_active = payload.get("is_active", True)
-    user.is_active = is_active
+    if user.id == current_user.id and not payload.is_active:
+        raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+    user.is_active = payload.is_active
     await db.commit()
     auth.invalidate_user_cache(user.username)
     return {"status": "success", "is_active": user.is_active}
@@ -46,8 +48,8 @@ async def toggle_user_status(
 @router.get("/users", response_model=List[schemas.UserResponse])
 async def get_users(
     response: Response,
-    q: Optional[str] = None,
-    role: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=150),
+    role: Optional[schemas.UserRole] = None,
     is_active: Optional[bool] = None,
     offset: Optional[int] = None,
     limit: Optional[int] = None,
@@ -55,23 +57,32 @@ async def get_users(
     db: AsyncSession = Depends(get_auth_db), # ✅ Dùng Auth DB
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
-    users = list((await db.execute(select(model_auth.User))).scalars().all())
+    page_offset, page_limit = normalize_page(offset, limit)
+    query = select(model_auth.User)
     normalized_q = (q or "").strip().lower()
     if normalized_q:
-        users = [user for user in users if normalized_q in (user.username or "").lower() or normalized_q in (user.full_name or "").lower()]
+        query = query.where(or_(
+            model_auth.User.username.icontains(normalized_q, autoescape=True),
+            model_auth.User.full_name.icontains(normalized_q, autoescape=True),
+        ))
     if role:
-        users = [user for user in users if user.role == role]
+        query = query.where(model_auth.User.role == role)
     if is_active is not None:
-        users = [user for user in users if user.is_active is is_active]
+        query = query.where(model_auth.User.is_active == is_active)
     allowed_sort = {"id", "username", "full_name", "role", "is_active"}
     if sort:
         field = sort.lstrip("-")
         if field not in allowed_sort:
             raise HTTPException(status_code=422, detail="Unsupported sort field")
-        users.sort(key=lambda user: getattr(user, field, None) or "", reverse=sort.startswith("-"))
-    page_offset, page_limit = normalize_page(offset, limit)
-    set_pagination_headers(response, total=len(users), offset=page_offset, limit=page_limit)
-    return slice_rows(users, page_offset, page_limit)
+        column = getattr(model_auth.User, field)
+        query = query.order_by(column.desc() if sort.startswith("-") else column.asc())
+    total = (await db.execute(select(func.count()).select_from(query.order_by(None).subquery()))).scalar_one()
+    query = query.order_by(model_auth.User.id.asc()).offset(page_offset)
+    if page_limit is not None:
+        query = query.limit(page_limit)
+    users = list((await db.execute(query)).scalars().all())
+    set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
+    return users
 
 
 @router.put("/users/{user_id}", response_model=schemas.UserResponse)
@@ -98,14 +109,11 @@ async def update_user(
     if payload.full_name is not None:
         user.full_name = payload.full_name.strip() or None
     user.role = role
-    user.assigned_projects = (
-        list(dict.fromkeys(payload.assigned_projects or []))
-        if role in {"operator", "viewer"}
-        else []
-    )
+    if role == "admin":
+        user.assigned_projects = []
+    elif payload.assigned_projects is not None:
+        user.assigned_projects = payload.assigned_projects
     if payload.password:
-        if len(payload.password) < 6:
-            raise HTTPException(status_code=400, detail="Password must contain at least 6 characters")
         user.hashed_password = await auth.get_password_hash(payload.password)
 
     await db.commit()
@@ -141,7 +149,7 @@ async def delete_user(
 @router.put("/users/{user_id}/projects")
 async def update_user_projects(
     user_id: int,
-    payload: dict,
+    payload: schemas.UserProjectsUpdate,
     db: AsyncSession = Depends(get_auth_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
@@ -151,7 +159,7 @@ async def update_user_projects(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user.assigned_projects = payload.get("assigned_projects", [])
+    user.assigned_projects = payload.assigned_projects if user.role != "admin" else []
     await db.commit()
     auth.invalidate_user_cache(user.username)
     return {"status": "success", "assigned_projects": user.assigned_projects}
@@ -174,9 +182,13 @@ async def create_user(
         full_name=user_in.full_name,
         role=user_in.role,
         is_active=True,
-        assigned_projects=user_in.assigned_projects or []
+        assigned_projects=user_in.assigned_projects if user_in.role != "admin" else []
     )
     db.add(new_user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Username already exists") from None
     await db.refresh(new_user)
     return new_user

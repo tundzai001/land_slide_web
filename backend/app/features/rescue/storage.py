@@ -36,7 +36,7 @@ def _validate_image(mime_type: str, image_bytes: bytes) -> str:
     if not extension:
         raise HTTPException(status_code=400, detail="Unsupported image type")
     if len(image_bytes) > MAX_RESCUE_IMAGE_BYTES:
-        raise HTTPException(status_code=400, detail="Image too large")
+        raise HTTPException(status_code=413, detail="Image too large")
     signatures_valid = {
         ".jpg": image_bytes.startswith(b"\xff\xd8\xff"),
         ".png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
@@ -61,6 +61,8 @@ def persist_data_url(image_data_url: Optional[str]) -> Optional[str]:
     header, separator, encoded = raw.partition(",")
     if not separator:
         raise HTTPException(status_code=400, detail="Invalid image payload")
+    if len(encoded) > 4 * ((MAX_RESCUE_IMAGE_BYTES + 2) // 3):
+        raise HTTPException(status_code=413, detail="Image too large")
     mime_type = header.split(";", 1)[0].removeprefix("data:").lower()
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
@@ -79,7 +81,7 @@ def persist_data_url(image_data_url: Optional[str]) -> Optional[str]:
 async def persist_upload(image_file: Optional[UploadFile]) -> Optional[str]:
     if image_file is None:
         return None
-    image_bytes = await image_file.read()
+    image_bytes = await image_file.read(MAX_RESCUE_IMAGE_BYTES + 1)
     if not image_bytes:
         return None
 
@@ -177,7 +179,8 @@ def validated_image_media_type(image_path: Path) -> Optional[str]:
     if mime_type is None or not image_path.is_file():
         return None
     try:
-        image_bytes = image_path.read_bytes()
+        with image_path.open("rb") as image_file:
+            image_bytes = image_file.read(MAX_RESCUE_IMAGE_BYTES + 1)
         _validate_image(mime_type, image_bytes)
     except (HTTPException, OSError):
         return None

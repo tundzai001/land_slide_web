@@ -15,22 +15,38 @@ from ...websocket import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 
-_ws_ticket_lock = asyncio.Lock()
-_consumed_ws_tickets: dict[str, float] = {}
-
 router = APIRouter()
+AUTHORIZATION_REFRESH_SECONDS = 30
+AUTHORIZATION_TIMEOUT_SECONDS = 5
+MAX_CLIENT_MESSAGE_BYTES = 16 * 1024
 
-async def _consume_ws_ticket(jti: str, *, ttl_seconds: int = 60) -> bool:
-    """Consume a ticket once and keep the registry bounded for one worker."""
-    now = time.time()
-    async with _ws_ticket_lock:
-        for key, expires_at in list(_consumed_ws_tickets.items()):
-            if expires_at <= now:
-                _consumed_ws_tickets.pop(key, None)
-        if not jti or jti in _consumed_ws_tickets:
-            return False
-        _consumed_ws_tickets[jti] = now + ttl_seconds
-        return True
+
+def _user_scope(user):
+    assigned = sorted({
+        int(project_id) for project_id in (getattr(user, "assigned_projects", []) or [])
+        if str(project_id).strip().lstrip("-").isdigit()
+    })
+    material = ":".join([
+        str(user.id), str(bool(user.is_active)).lower(), str(user.role or ""),
+        ",".join(map(str, assigned)),
+    ])
+    return assigned, hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+async def _session_user(username, session_id):
+    from ..authentication import sessions
+
+    async with AuthSessionLocal() as db:
+        user = await auth.get_user_by_username_cached(username, db)
+    if user is None or not user.is_active or not await asyncio.to_thread(
+        sessions.valid, session_id, user, touch=False
+    ):
+        raise ValueError("Session expired")
+    return user
+
+async def _consume_ws_ticket(jti: str) -> bool:
+    from ..authentication import sessions
+    return bool(jti and await asyncio.to_thread(sessions.consume_ws_ticket, jti))
 
 
 async def _authorize_websocket(websocket: WebSocket) -> bool:
@@ -39,8 +55,9 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
         await websocket.close(code=1008, reason="Origin not allowed")
         return False
 
-    if websocket.url.path not in {"/ws/admin", "/ws/operations"}:
-        return True
+    if websocket.url.path not in {"/ws/admin", "/ws/operations", "/ws/updates"}:
+        await websocket.close(code=1008, reason="Unknown channel")
+        return False
 
     token = websocket.query_params.get("ticket")
     if not token:
@@ -52,46 +69,47 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "jti", "purpose", "channel", "session_id", "authz_scope_hash"]},
         )
         username = payload.get("sub")
         channel = str(payload.get("channel") or "legacy_admin").lower()
-        required_channel = "operations" if websocket.url.path == "/ws/operations" else None
+        required_channel = {"/ws/operations": "operations", "/ws/updates": "updates"}.get(websocket.url.path)
         if required_channel and channel != required_channel:
             raise ValueError("Wrong WebSocket channel")
         if websocket.url.path == "/ws/admin" and channel not in {"legacy_admin", "admin"}:
             raise ValueError("Wrong WebSocket channel")
-        jti = str(payload.get("jti") or "")
+        jti = payload.get("jti")
         if (
             not username
             or payload.get("purpose") != "websocket"
-            or payload.get("boot_epoch") != auth.WS_BOOT_EPOCH
-            or not await _consume_ws_ticket(jti)
+            or not isinstance(jti, str)
+            or not jti
         ):
             raise ValueError("Token has no subject")
 
-        async with AuthSessionLocal() as db:
-            user = await auth.get_user_by_username_cached(username, db)
-        if user is None or not user.is_active:
-            raise ValueError("Inactive user")
-        if channel == "admin" and str(user.role or "") != auth.Role.ADMIN:
+        parent_session = str(payload.get("session_id") or "")
+        user = await asyncio.wait_for(
+            _session_user(username, parent_session), timeout=AUTHORIZATION_TIMEOUT_SECONDS
+        )
+        if websocket.url.path == "/ws/admin" and str(user.role or "") != auth.Role.ADMIN:
             raise ValueError("Admin channel requires admin role")
-        assigned_projects = sorted({
-            int(project_id)
-            for project_id in (getattr(user, "assigned_projects", []) or [])
-            if str(project_id).strip().lstrip("-").isdigit()
-        })
-        scope_material = ":".join([
-            str(user.id), str(bool(user.is_active)).lower(), str(user.role or ""),
-            ",".join(map(str, assigned_projects)),
-        ])
-        scope_hash = hashlib.sha256(scope_material.encode("utf-8")).hexdigest()
-        if payload.get("authz_scope_hash") and payload.get("authz_scope_hash") != scope_hash:
+        assigned_projects, scope_hash = _user_scope(user)
+        if payload.get("authz_scope_hash") != scope_hash:
             raise ValueError("Authorization scope changed")
+        if not await _consume_ws_ticket(jti):
+            raise ValueError("WebSocket ticket expired or already used")
         websocket.state.user_role = str(user.role or "")
         websocket.state.user_id = int(user.id)
         websocket.state.user_project_ids = assigned_projects
         websocket.state.authz_scope_hash = scope_hash
         websocket.state.ws_channel = channel
+        websocket.state.session_id = parent_session
+        websocket.state.username = username
+        websocket.state.authorization_deadline = time.monotonic() + AUTHORIZATION_REFRESH_SECONDS
+        websocket.state.authorization_lock = asyncio.Lock()
+        websocket.state.authorization_failed = False
+        # Both outbound delivery and the independent monitor use this gate.
+        websocket.state.ensure_authorized = lambda: _refresh_authorization(websocket)
     except (jwt.InvalidTokenError, ValueError):
         await websocket.close(code=1008, reason="Invalid authentication")
         return False
@@ -103,20 +121,70 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
     return True
 
 
+async def _refresh_authorization(websocket: WebSocket) -> bool:
+    async with websocket.state.authorization_lock:
+        if websocket.state.authorization_failed:
+            return False
+        if time.monotonic() < websocket.state.authorization_deadline:
+            return True
+        try:
+            user = await asyncio.wait_for(
+                _session_user(websocket.state.username, websocket.state.session_id),
+                timeout=AUTHORIZATION_TIMEOUT_SECONDS,
+            )
+            if _user_scope(user)[1] != websocket.state.authz_scope_hash:
+                raise ValueError("Authorization changed")
+        except ValueError:
+            code, reason = 1008, "Session or authorization expired"
+        except Exception:
+            logger.exception("WebSocket authorization refresh failed")
+            code, reason = 1013, "Authentication unavailable"
+        else:
+            websocket.state.authorization_deadline = time.monotonic() + AUTHORIZATION_REFRESH_SECONDS
+            return True
+        websocket.state.authorization_failed = True
+        ws_manager.disconnect(websocket)
+        await websocket.close(code=code, reason=reason)
+        return False
+
+
+async def _monitor_authorization(websocket: WebSocket):
+    while websocket in ws_manager.active_connections:
+        await asyncio.sleep(max(0, websocket.state.authorization_deadline - time.monotonic()))
+        if not await _refresh_authorization(websocket):
+            return
+
+
+async def _receive_messages(websocket: WebSocket):
+    while True:
+        data = await websocket.receive_text()
+        if len(data.encode("utf-8")) > MAX_CLIENT_MESSAGE_BYTES:
+            await websocket.close(code=1009, reason="Message too large")
+            return
+        if not await _refresh_authorization(websocket):
+            return
+        if data == "ping":
+            await ws_manager.send_personal(websocket, {"type": "pong"})
+        else:
+            await ws_manager.handle_client_message(websocket, data)
+
+
 @router.websocket("/ws/updates")
 @router.websocket("/ws/admin")
 @router.websocket("/ws/operations")
 async def websocket_endpoint(websocket: WebSocket):
     if not await _authorize_websocket(websocket):
         return
-    await ws_manager.connect(websocket)
+    tasks = []
     try:
-        while True:
-            data = await websocket.receive_text()
-            if data == "ping":
-                await ws_manager.send_personal(websocket, {"type": "pong"})
-            else:
-                await ws_manager.handle_client_message(websocket, data)
+        await ws_manager.connect(websocket)
+        tasks = [
+            asyncio.create_task(_receive_messages(websocket)),
+            asyncio.create_task(_monitor_authorization(websocket)),
+        ]
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -124,3 +192,6 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("WebSocket receive loop ended: %s", detail)
     finally:
         ws_manager.disconnect(websocket)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

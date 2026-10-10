@@ -116,12 +116,15 @@ class ConnectionManager:
 
     @staticmethod
     def _normalize_ids(raw_ids) -> set[int]:
+        if raw_ids is None:
+            return set()
+        if not isinstance(raw_ids, list) or len(raw_ids) > ConnectionManager.MAX_SUBSCRIPTION_IDS:
+            raise ValueError("Station and project IDs must be bounded lists")
         normalized = set()
-        for raw_id in raw_ids or ():
-            try:
-                normalized.add(int(raw_id))
-            except (TypeError, ValueError):
-                continue
+        for raw_id in raw_ids:
+            if isinstance(raw_id, bool) or not isinstance(raw_id, int) or raw_id < 1:
+                raise ValueError("Station and project IDs must be positive integers")
+            normalized.add(raw_id)
         return normalized
 
     async def handle_client_message(self, websocket: WebSocket, raw_message: str) -> bool:
@@ -137,8 +140,21 @@ class ConnectionManager:
         if action not in {"subscribe", "unsubscribe"}:
             return False
 
-        station_ids = self._normalize_ids(payload.get("station_ids"))
-        project_ids = self._normalize_ids(payload.get("project_ids"))
+        try:
+            station_ids = self._normalize_ids(payload.get("station_ids"))
+            project_ids = self._normalize_ids(payload.get("project_ids"))
+            raw_channels = payload.get("channels") or []
+            if not isinstance(raw_channels, list) or len(raw_channels) > 32:
+                raise ValueError("Channels must be a bounded list")
+        except ValueError as exc:
+            await self.send_personal(websocket, {"type": "subscription_error", "detail": str(exc)})
+            return True
+        state = getattr(websocket, "state", None)
+        if getattr(state, "user_role", None) not in {None, "admin"} and not project_ids.issubset(
+            set(getattr(state, "user_project_ids", []) or [])
+        ):
+            await self.send_personal(websocket, {"type": "subscription_error", "detail": "Project access denied"})
+            return True
         if len(station_ids) + len(project_ids) > self.MAX_SUBSCRIPTION_IDS:
             await self.send_personal(
                 websocket,
@@ -155,7 +171,7 @@ class ConnectionManager:
         allowed_channels = set(self.CHANNEL_BY_MESSAGE_TYPE.values())
         channels = {
             str(channel).strip().lower()
-            for channel in (payload.get("channels") or ())
+            for channel in raw_channels
             if str(channel).strip().lower() in allowed_channels
         }
         subscription = self._subscriptions.setdefault(
@@ -189,11 +205,29 @@ class ConnectionManager:
         return True
 
     def _should_send(self, connection: WebSocket, message: dict) -> bool:
+        state = getattr(connection, "state", None)
+        if getattr(state, "authorization_failed", False):
+            return False
+        path = getattr(getattr(connection, "url", None), "path", None)
+        message_type = str(message.get("type") or "")
+        if path == "/ws/operations" and message_type != "incident_changed":
+            return False
+        if path == "/ws/updates" and (
+            message_type == "incident_changed" or message_type.startswith("rescue_request")
+        ):
+            return False
+        role = getattr(state, "user_role", None)
+        if role is not None and role != "admin":
+            allowed = set(getattr(state, "user_project_ids", []) or [])
+            try:
+                if int(message.get("project_id")) not in allowed:
+                    return False
+            except (TypeError, ValueError):
+                return False
         subscription: Optional[dict] = self._subscriptions.get(id(connection))
         if not subscription or subscription.get("legacy", True):
             return True
 
-        message_type = str(message.get("type") or "")
         channel = self.CHANNEL_BY_MESSAGE_TYPE.get(message_type, message_type)
         channels = subscription.get("channels") or set()
         if channels and channel not in channels:
@@ -282,19 +316,19 @@ class ConnectionManager:
     async def broadcast_operations(self, message: dict):
         """Send non-PII Incident envelopes to scoped operations sockets.
 
-        The public ``/ws/updates`` stream deliberately never receives Incident
+        The telemetry ``/ws/updates`` stream deliberately never receives Incident
         cases or Rescue metadata.  Project filtering is delegated to the same
         subscription gate used by sensor streams.
         """
         def in_operations_scope(connection: WebSocket) -> bool:
-            role = getattr(connection.state, "user_role", None)
+            state = getattr(connection, "state", None)
+            role = getattr(state, "user_role", None)
             if role == "admin":
                 return True
             project_id = message.get("project_id")
             if project_id is None:
                 return False
-            subscription = self._subscriptions.get(id(connection)) or {}
-            project_ids = subscription.get("project_ids") or set(getattr(connection.state, "user_project_ids", []) or [])
+            project_ids = set(getattr(state, "user_project_ids", []) or [])
             try:
                 return int(project_id) in {int(value) for value in project_ids}
             except (TypeError, ValueError):
@@ -317,6 +351,24 @@ class ConnectionManager:
 
     async def send_personal(self, websocket: WebSocket, message: dict):
         await self._send_one(websocket, message)
+
+    async def close_session(self, session_id: str):
+        """Immediately close a revoked session on this worker; other workers revalidate."""
+        for connection in tuple(self.active_connections):
+            if getattr(connection.state, "session_id", None) == session_id:
+                connection.state.authorization_failed = True
+                self.disconnect(connection)
+                try:
+                    await connection.close(code=1008, reason="Session revoked")
+                except Exception:
+                    pass
+
+    async def _delivery_authorized(self, connection: WebSocket, message: dict) -> bool:
+        validator = getattr(getattr(connection, "state", None), "ensure_authorized", None)
+        if validator and not await validator():
+            return False
+        # Recheck queued envelopes after authorization and subscription changes.
+        return message.get("type") in {"hello", "pong", "subscription_ack", "subscription_error"} or self._should_send(connection, message)
 
     async def _send_one(self, connection: WebSocket, message: dict):
         if connection not in self.active_connections:
@@ -358,6 +410,8 @@ class ConnectionManager:
             if connection not in self.active_connections:
                 return
             try:
+                if not await self._delivery_authorized(connection, message):
+                    return
                 await asyncio.wait_for(
                     connection.send_json(message), timeout=self.SEND_TIMEOUT_SECONDS
                 )
@@ -377,6 +431,8 @@ class ConnectionManager:
             while connection in self.active_connections:
                 message = await outbox.get()
                 try:
+                    if not await self._delivery_authorized(connection, message):
+                        continue
                     await asyncio.wait_for(
                         connection.send_json(message), timeout=self.SEND_TIMEOUT_SECONDS
                     )

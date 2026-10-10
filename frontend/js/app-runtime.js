@@ -64,7 +64,7 @@
 
     function safeReturnTo() {
         const value = new URLSearchParams(location.search).get('return_to');
-        return value && value.startsWith('/') && !value.startsWith('//') ? value : '/map';
+        return value === '/management' || value === '/map' ? value : '/map';
     }
 
     function renderLogin() {
@@ -149,10 +149,8 @@
             try {
                 const body = new URLSearchParams({username: username.value.trim(), password: password.value});
                 if (document.getElementById('login-remember').checked) body.set('scope', 'remember_me');
-                const response = await fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(15000)});
+                const response = await fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Session-Mode': 'cookie'}, body, signal: AbortSignal.timeout(15000)});
                 if (!response.ok) throw new Error(response.status === 401 ? 'Tài khoản hoặc mật khẩu không đúng.' : 'Không thể đăng nhập. Vui lòng thử lại.');
-                const data = await response.json();
-                window.authSession.storeToken(data.access_token, document.getElementById('login-remember').checked);
                 location.replace(safeReturnTo());
             } catch (reason) {
                 error.querySelector('span').textContent = reason.name === 'TimeoutError' ? 'Máy chủ phản hồi quá chậm. Vui lòng thử lại.' : reason.message;
@@ -263,6 +261,7 @@
         } else {
             await loadScript('/assets/admin-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.admin;
+            root.querySelector('#session-manager-btn')?.addEventListener('click', () => void window.authManager?.openSessions());
             setupAdminMobileNavigation();
             setupAdminResponsiveTables();
             setupAdminDrawerAccessibility();
@@ -276,7 +275,7 @@
         const path = location.pathname.replace(/\/+$/, '') || '/';
         if (path === '/login') {
             const session = await window.authSession.inspect();
-            if (session.status === 'authenticated' || session.status === 'unavailable') {
+            if (session.status === 'authenticated') {
                 location.replace(safeReturnTo());
                 return;
             }
@@ -285,12 +284,24 @@
             renderLogin();
             return;
         }
+        const session = await window.authSession.inspect();
+        if (session.status === 'anonymous') {
+            location.replace(`/login?return_to=${encodeURIComponent(path === '/management' || path === '/admin' ? '/management' : '/map')}`);
+            return;
+        }
+        if (session.status === 'unavailable') {
+            root.innerHTML = '<main class="route-error"><h1>Không thể kiểm tra phiên đăng nhập</h1><p>Máy chủ chưa phản hồi. Thử lại sau ít phút.</p><button type="button" id="retry-session">Thử lại</button></main>';
+            root.querySelector('#retry-session')?.addEventListener('click', () => location.reload());
+            return;
+        }
         const view = path === '/management' || path === '/admin' ? 'admin' : 'map';
         await bootLegacy(view);
     }
 
     start().catch((error) => {
         console.error(error);
-        root.innerHTML = `<main class="route-error"><h1>Không thể tải giao diện</h1><p>${String(error.message || error)}</p><button type="button" onclick="location.reload()">Thử lại</button></main>`;
+        root.innerHTML = '<main class="route-error"><h1>Không thể tải giao diện</h1><p id="route-error-detail"></p><button type="button" id="retry-route">Thử lại</button></main>';
+        root.querySelector('#route-error-detail').textContent = String(error.message || error);
+        root.querySelector('#retry-route').addEventListener('click', () => location.reload());
     });
 })();

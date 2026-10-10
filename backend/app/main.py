@@ -40,6 +40,7 @@ from .logging_config import (
     install_heartbeat_filter,
 )
 from .middleware import CharsetMiddleware, VersionedAssetCacheMiddleware
+from .errors import install_error_handlers
 
 configure_system_logging()
 disable_windows_quick_edit_mode()
@@ -157,6 +158,7 @@ async def run_cors_fixed_base_failover_daemon():
 # ============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    config.settings.validate_security()
     logger.info("🚀 Landslide Monitoring System starting...")
     if not config.settings.BACKUP_SIGNING_KEY:
         logger.warning("BACKUP_SIGNING_KEY is unset; backup manifests use SECRET_KEY")
@@ -307,6 +309,7 @@ async def lifespan(app: FastAPI):
 # FASTAPI APPLICATION SETUP
 # ============================================================================
 app = FastAPI(title="Landslide System API", lifespan=lifespan)
+install_error_handlers(app)
 
 
 @app.exception_handler(TimeoutError)

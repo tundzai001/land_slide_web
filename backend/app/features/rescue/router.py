@@ -3,10 +3,11 @@ import logging
 import time
 import uuid
 from typing import Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -26,16 +27,33 @@ logger = logging.getLogger(__name__)
 
 
 class RescueRequestCreate(BaseModel):
-    requester_name: Optional[str] = None
-    phone: Optional[str] = None
-    message: Optional[str] = None
-    latitude: float
-    longitude: float
-    accuracy_m: Optional[float] = None
-    rescue_type: Optional[str] = None
-    province_city: Optional[str] = None
-    source_link: Optional[str] = None
-    image_data_url: Optional[str] = None
+    requester_name: Optional[str] = Field(default=None, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=32)
+    message: Optional[str] = Field(default=None, max_length=5000)
+    latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    accuracy_m: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+    rescue_type: Optional[str] = Field(default=None, max_length=80)
+    province_city: Optional[str] = Field(default=None, max_length=120)
+    source_link: Optional[str] = Field(default=None, max_length=2048)
+    image_data_url: Optional[str] = Field(
+        default=None, max_length=4 * ((rescue_storage.MAX_RESCUE_IMAGE_BYTES + 2) // 3) + 64
+    )
+
+    @field_validator("accuracy_m", mode="before")
+    @classmethod
+    def empty_accuracy(cls, value):
+        return None if value in (None, "", "null") else value
+
+    @field_validator("source_link")
+    @classmethod
+    def validate_source_link(cls, value):
+        if not value or not value.strip():
+            return None
+        parsed = urlsplit(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Source link must be an HTTP or HTTPS URL")
+        return value.strip()
 
 
 class RescueRequestUpdate(BaseModel):
@@ -88,35 +106,21 @@ async def create_rescue_request(
     if not settings.RESCUE_REQUEST_ENABLED:
         raise HTTPException(status_code=404, detail="Tiếp nhận yêu cầu cứu hộ đang tắt.")
     content_type = (request.headers.get("content-type") or "").lower()
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        payload = RescueRequestCreate(
-            requester_name=str(form.get("requester_name") or "").strip() or None,
-            phone=str(form.get("phone") or "").strip() or None,
-            message=str(form.get("message") or "").strip() or None,
-            latitude=float(form.get("latitude") or 0),
-            longitude=float(form.get("longitude") or 0),
-            accuracy_m=(
-                float(form.get("accuracy_m"))
-                if form.get("accuracy_m") not in (None, "", "null")
-                else None
-            ),
-            rescue_type=str(form.get("rescue_type") or "").strip() or None,
-            province_city=str(form.get("province_city") or "").strip() or None,
-            source_link=str(form.get("source_link") or "").strip() or None,
-        )
-        raw_file = form.get("image_file")
-        image_url = await rescue_storage.persist_upload(
-            raw_file if isinstance(raw_file, StarletteUploadFile) else None
-        )
-    else:
-        payload = RescueRequestCreate(**(await request.json()))
-        image_url = rescue_storage.persist_data_url(payload.image_data_url)
-
-    if not -90.0 <= float(payload.latitude) <= 90.0:
-        raise HTTPException(status_code=400, detail="Invalid latitude")
-    if not -180.0 <= float(payload.longitude) <= 180.0:
-        raise HTTPException(status_code=400, detail="Invalid longitude")
+    try:
+        if "multipart/form-data" in content_type:
+            async with request.form(max_files=1, max_fields=12, max_part_size=rescue_storage.MAX_RESCUE_IMAGE_BYTES) as form:
+                payload = RescueRequestCreate.model_validate(dict(form))
+                raw_file = form.get("image_file")
+                image_url = await rescue_storage.persist_upload(
+                    raw_file if isinstance(raw_file, StarletteUploadFile) else None
+                )
+        elif content_type.split(";", 1)[0].strip() == "application/json":
+            payload = RescueRequestCreate.model_validate(await request.json())
+            image_url = rescue_storage.persist_data_url(payload.image_data_url)
+        else:
+            raise HTTPException(status_code=415, detail="Use JSON or multipart form data")
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Dữ liệu cứu hộ không hợp lệ. Kiểm tra tọa độ, liên kết và độ dài nội dung.") from exc
 
     now_ts = int(time.time())
     row = model_data.RescueRequest(

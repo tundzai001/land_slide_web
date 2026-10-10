@@ -208,13 +208,17 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
     const chartsButton = document.getElementById('btn-show-charts');
     const cacheKey = `${stationId}:${range.hours}`;
     const cached = stationHistoryCache.get(cacheKey);
+    stationHistoryController?.abort();
+    const controller = new AbortController();
+    stationHistoryController = controller;
     if (!force && cached && Date.now() - cached.loadedAt < STATION_HISTORY_CACHE_MS) {
         renderCharts(cached.data);
+        chartsPanel?.classList.remove('station-history-loading');
+        if (chartsButton) chartsButton.disabled = false;
+        document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = false; });
         return;
     }
 
-    stationHistoryController?.abort();
-    stationHistoryController = new AbortController();
     chartsPanel?.classList.add('station-history-loading');
     setChartWorkspaceStatus('Đang tải lịch sử cảm biến…', 'loading');
     if (chartsButton) chartsButton.disabled = true;
@@ -223,11 +227,12 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
         const historyPayload = await fetchStationHistory(stationId, {
             hours: range.hours,
             sensorTypes,
-            signal: stationHistoryController.signal,
+            signal: controller.signal,
         });
-        if (Number(currentStationData?.id || 0) !== stationId) return;
+        if (controller.signal.aborted || stationHistoryController !== controller || Number(currentStationData?.id || 0) !== stationId) return;
         const data = {
             ...currentStationData,
+            _chartRangeLabel: range.label,
             sensors: Object.fromEntries(Object.entries(currentStationData.sensors).map(([type,sensor]) => [type, sensorTypes.includes(type) ? {...sensor, history:[]} : sensor])),
         };
         Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
@@ -241,15 +246,18 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
         currentStationData = data;
         renderCharts(data);
     } catch (error) {
-        if (error?.name !== 'AbortError') {
+        if (stationHistoryController === controller && !controller.signal.aborted && error?.name !== 'AbortError') {
             console.error('[MAP] Error loading station history:', error);
-            setChartWorkspaceStatus('Không tải được dữ liệu. Bấm tải lại để thử tiếp.', 'error');
+            const retained = Object.values(charts).some(chart => chart.data.datasets.some(dataset => dataset.data.length));
+            setChartWorkspaceStatus(`Không tải được dữ liệu ${range.label}.${retained ? ` Đang giữ dữ liệu đã tải${chartsPanel?.dataset.rangeLabel ? ` (${chartsPanel.dataset.rangeLabel})` : ''}; chưa cập nhật.` : ''} Bấm tải lại để thử tiếp.`, 'error');
             window.toast?.error('Không tải được lịch sử biểu đồ');
         }
     } finally {
-        chartsPanel?.classList.remove('station-history-loading');
-        if (chartsButton) chartsButton.disabled = false;
-        document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = false; });
+        if (stationHistoryController === controller) {
+            chartsPanel?.classList.remove('station-history-loading');
+            if (chartsButton) chartsButton.disabled = false;
+            document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = false; });
+        }
     }
 }
 

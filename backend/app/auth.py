@@ -3,11 +3,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import asyncio
 import secrets
-import time
 import jwt
 from jwt import InvalidTokenError as JWTError
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,45 +16,22 @@ from .database import get_auth_db
 from .models import auth as model_auth # Import từ thư mục models/auth.py
 from .config import settings
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+_bearer_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
-_AUTH_USER_CACHE_TTL_SECONDS = 15.0
-_auth_user_cache = {}
-_auth_user_locks = {}
-# Short-lived WebSocket tickets are single-process credentials.  A fresh
-# random epoch invalidates every outstanding ticket after a process restart,
-# even when the JWT signing secret remains stable.
-WS_BOOT_EPOCH = secrets.token_urlsafe(16)
 
+async def oauth2_scheme(request: Request, bearer_token: Optional[str] = Depends(_bearer_scheme)):
+    from .browser_session import request_token
+    return request_token(request)
 
 def invalidate_user_cache(username: Optional[str] = None) -> None:
-    """Drop cached auth records immediately after an admin RBAC mutation."""
-    if username:
-        _auth_user_cache.pop(str(username), None)
-        return
-    _auth_user_cache.clear()
+    """Compatibility hook; user authorization now reads directly from the database."""
+    return None
 
 
 async def get_user_by_username_cached(username: str, db: AsyncSession):
-    now = time.monotonic()
-    cached = _auth_user_cache.get(username)
-    if cached and cached[0] > now:
-        return cached[1]
+    result = await db.execute(select(model_auth.User).where(model_auth.User.username == username))
+    return result.scalar_one_or_none()
 
-    lock = _auth_user_locks.setdefault(username, asyncio.Lock())
-    async with lock:
-        now = time.monotonic()
-        cached = _auth_user_cache.get(username)
-        if cached and cached[0] > now:
-            return cached[1]
-
-        result = await db.execute(select(model_auth.User).where(model_auth.User.username == username))
-        user = result.scalar_one_or_none()
-        if user is not None and user.is_active:
-            _auth_user_cache[username] = (time.monotonic() + _AUTH_USER_CACHE_TTL_SECONDS, user)
-        else:
-            _auth_user_cache.pop(username, None)
-        return user
 
 class Role:
     ADMIN = "admin"
@@ -85,22 +61,34 @@ async def get_password_hash(password: str) -> str:
     return hashed.decode('utf-8')
 
 async def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return await asyncio.to_thread(
-        bcrypt.checkpw,
-        plain_password.encode('utf-8'),
-        hashed_password.encode('utf-8'),
-    )
+    try:
+        return await asyncio.to_thread(bcrypt.checkpw, plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except (ValueError, TypeError):
+        return False
 
 # --- JWT Token ---
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
+    to_encode.setdefault("purpose", "access")
+    to_encode.setdefault("jti", secrets.token_urlsafe(24))
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+def decode_access_token(token):
+    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+                         options={"require": ["exp", "iat", "sub", "jti", "purpose"]})
+    if payload["purpose"] != "access" or not isinstance(payload["sub"], str) or not payload["sub"]:
+        raise JWTError("Invalid access token purpose or subject")
+    if not isinstance(payload["jti"], str) or not 16 <= len(payload["jti"]) <= 128:
+        raise JWTError("Invalid session identifier")
+    return payload
+
 
 # --- Dependency lấy User hiện tại ---
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), 
+    request: Request,
+    token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_auth_db) # Sử dụng Auth DB
 ):
     credentials_exception = HTTPException(
@@ -109,17 +97,25 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = decode_access_token(token)
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-        
+
     # Query từ bảng User trong Auth DB
     user = await get_user_by_username_cached(username, db)
-    
+
     if user is None or not user.is_active:
+        raise credentials_exception
+    from .features.authentication import sessions
+    try:
+        session_valid = await asyncio.to_thread(sessions.valid, payload["jti"], user,
+                                                touch=request.url.path != "/api/auth/me")
+    except Exception:
+        raise HTTPException(503, "Authentication unavailable") from None
+    if not session_valid:
         raise credentials_exception
     from .features.operations.store import actor
     actor(user)

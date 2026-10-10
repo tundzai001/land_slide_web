@@ -350,6 +350,7 @@ class GnssPayloadMixin:
                         )
                         await manager.broadcast({
                             "type": "sensor_status",
+                            "project_id": public_project_id,
                             "station_id": station_id,
                             "sensor_type": "gnss",
                             "timestamp": current_timestamp,
@@ -427,6 +428,7 @@ class GnssPayloadMixin:
                     try:
                         await manager.broadcast({
                             "type": "sensor_status",
+                            "project_id": public_project_id,
                             "station_id": station_id,
                             "sensor_type": "gnss",
                             "timestamp": current_timestamp,
@@ -454,6 +456,7 @@ class GnssPayloadMixin:
                     try:
                         await manager.broadcast({
                             "type": "sensor_status",
+                            "project_id": public_project_id,
                             "station_id": station_id,
                             "sensor_type": "gnss",
                             "timestamp": current_timestamp,

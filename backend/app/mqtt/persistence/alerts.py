@@ -157,7 +157,7 @@ class AlertPersistenceMixin:
                 exc,
             )
             return 0
-    async def _suppress_station_alerts(self, station_id: int):
+    async def _suppress_station_alerts(self, station_id: int, *, project_id: int | None = None):
         """Resolve active alerts and keep station status LOW when alerting is disabled."""
         now = time.monotonic()
         if (
@@ -219,6 +219,7 @@ class AlertPersistenceMixin:
 
             await manager.broadcast({
                 "type": "station_status",
+                "project_id": project_id,
                 "station_id": station_id,
                 "risk_level": "LOW"
             })

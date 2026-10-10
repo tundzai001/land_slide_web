@@ -94,7 +94,7 @@ class SensorPipelineMixin(
             return
 
         await self._broadcast_sensor_data(
-            station_id, sensor_type, current_timestamp, processed_data
+            station_id, sensor_type, current_timestamp, processed_data, project_id=public_project_id
         )
         await self._forward_gnss(info, station_id, sensor_type, processed_data)
         await self._update_latest_sensor_cache(
@@ -107,6 +107,7 @@ class SensorPipelineMixin(
             station_config,
             processed_data,
             current_timestamp,
+            project_id=public_project_id,
         )
         await self._save_processed_data(
             info,

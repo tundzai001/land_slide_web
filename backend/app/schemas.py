@@ -1,6 +1,6 @@
 #backend/app/schemas.py
-from pydantic import BaseModel
-from typing import Optional, Dict, List, Any
+from pydantic import AfterValidator, BaseModel, Field, StrictBool, field_validator
+from typing import Annotated, Optional, Dict, List, Any, Literal
 from .config import settings
 
 class StationBase(BaseModel):
@@ -80,15 +80,49 @@ class UserBase(BaseModel):
     full_name: Optional[str] = None
     role: str = "user"
 
+def _valid_password(value: str) -> str:
+    if len(value) < 12 or len(value.encode("utf-8")) > 72:
+        raise ValueError("Password must contain at least 12 characters and at most 72 UTF-8 bytes")
+    return value
+
+
+NewPassword = Annotated[str, AfterValidator(_valid_password)]
+ProjectIds = Annotated[
+    List[Annotated[int, Field(strict=True, gt=0)]],
+    Field(max_length=500),
+    AfterValidator(lambda values: list(dict.fromkeys(values))),
+]
+UserRole = Literal["admin", "operator", "viewer"]
+
+
 class UserCreate(UserBase):
-    password: str
-    assigned_projects: List[int] = []
+    username: str = Field(min_length=1, max_length=150)
+    full_name: Optional[str] = Field(default=None, max_length=255)
+    role: UserRole = "viewer"
+    password: NewPassword
+    assigned_projects: ProjectIds = Field(default_factory=list)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(char.isspace() or not char.isprintable() for char in value):
+            raise ValueError("Username cannot contain whitespace or control characters")
+        return value
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    role: Optional[str] = None
-    password: Optional[str] = None
-    assigned_projects: Optional[List[int]] = None
+    full_name: Optional[str] = Field(default=None, max_length=255)
+    role: Optional[UserRole] = None
+    password: Optional[NewPassword] = None
+    assigned_projects: Optional[ProjectIds] = None
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: StrictBool
+
+
+class UserProjectsUpdate(BaseModel):
+    assigned_projects: ProjectIds
 
 class UserResponse(UserBase):
     id: int

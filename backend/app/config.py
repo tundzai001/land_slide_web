@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # --- 1. DATABASE URLs ---
     # Pydantic sẽ tự động đọc giá trị từ file .env khớp với tên biến
     # Nếu không đọc được .env, nó sẽ dùng giá trị mặc định bên phải (dự phòng)
-    
+
     AUTH_DB_URL: str = ""
     CONFIG_DB_URL: str = ""
     DATA_DB_URL: str = ""
@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     PRIVATE_AUTHZ_GRACE_SECONDS: int = 300
+    AUTH_IDLE_TIMEOUT_SECONDS: int = Field(default=1800, ge=60, le=43200)
+    PUBLIC_MONITORING_ENABLED: bool = False
     ENVIRONMENT: str = "production"
     PUBLIC_SITE_URL: str = "https://monitoring.aitogy.com"
     RESCUE_REQUEST_ENABLED: bool = True
@@ -53,7 +55,7 @@ class Settings(BaseSettings):
     FILE_CLEANUP_INTERVAL_SECONDS: float = 10.0
     FILE_CLEANUP_LEASE_SECONDS: int = 60
     FILE_CLEANUP_MAX_ATTEMPTS: int = 12
-    
+
     MQTT_BROKER: str = ""
     MQTT_PORT: int = 1883
     MQTT_USER: str = "mqttUser"
@@ -88,6 +90,24 @@ class Settings(BaseSettings):
     # GNSS rollup/purge workflow: thu thập dày theo giây, chốt ngày/tuần rồi dọn raw.
     GNSS_ROLLUP_INTERVAL_SECONDS: int = 300
     GNSS_PURGE_RAW_AFTER_DAILY_ROLLUP: bool = False
+
+    def validate_security(self):
+        if self.ALGORITHM != "HS256":
+            raise RuntimeError("Only HS256 is supported for application tokens")
+        if self.ENVIRONMENT.lower() == "production":
+            if len(self.SECRET_KEY.encode()) < 32 or self.SECRET_KEY == "super_secret_key_change_me_in_production":
+                raise RuntimeError("Configure a random SECRET_KEY of at least 32 bytes")
+            if "*" in self.cors_origins:
+                raise RuntimeError("Production CORS requires explicit origins")
+            if self.MQTT_PASSWORD == "":
+                raise RuntimeError("Configure MQTT_PASSWORD before production startup")
+        if not 1 <= self.ACCESS_TOKEN_EXPIRE_MINUTES <= 720:
+            raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 720")
+        if self.BOOTSTRAP_ADMIN_PASSWORD and (
+            len(self.BOOTSTRAP_ADMIN_PASSWORD) < 12
+            or len(self.BOOTSTRAP_ADMIN_PASSWORD.encode("utf-8")) > 72
+        ):
+            raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD must be 12+ characters and at most 72 UTF-8 bytes")
 
     @property
     def cors_origins(self) -> list[str]:
