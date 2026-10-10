@@ -80,3 +80,35 @@ test('production login keeps controls proportioned and responsive', async ({ pag
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
 });
+
+test('login introduction stays readable through light and dark switches', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await openLogin(page);
+  for (const theme of ['light', 'dark', 'light']) {
+    if (await page.locator('html').getAttribute('data-theme') !== theme) {
+      await page.locator('#login-theme').click();
+    }
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const contrast = await page.evaluate(() => {
+      const luminance = color => {
+        const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {
+          value /= 255;
+          return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+        });
+        return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+      };
+      const background = luminance(getComputedStyle(document.querySelector('.login-visual')).backgroundColor);
+      return ['.login-brand strong', '.login-brand small', '.login-capabilities-title',
+        '.login-capabilities strong', '.login-capabilities small', '.login-kicker',
+        '.login-visual-copy h1', '.login-visual-copy p'].map(selector => {
+        const foreground = luminance(getComputedStyle(document.querySelector(selector)).color);
+        return { selector, ratio: (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05) };
+      });
+    });
+    for (const item of contrast) expect(item.ratio, `${theme}: ${item.selector}`).toBeGreaterThanOrEqual(4.5);
+    await page.evaluate(() => Promise.all(document.getAnimations()
+      .filter(animation => animation.effect.getTiming().iterations !== Infinity)
+      .map(animation => animation.finished.catch(() => {}))));
+    await page.screenshot({ path: `test-results/login-contrast-${theme}.png`, fullPage: true });
+  }
+});

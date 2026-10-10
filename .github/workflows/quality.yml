@@ -57,6 +57,7 @@ jobs:
           tests/ui/project-map-overview.spec.js
           tests/ui/rescue-navigation.spec.js
           tests/ui/provisioning-safety.spec.js
+          tests/ui/login-premium.spec.js
           --project=chromium --reporter=line
 
   release-package:
