@@ -99,8 +99,6 @@ class Settings(BaseSettings):
                 raise RuntimeError("Configure a random SECRET_KEY of at least 32 bytes")
             if "*" in self.cors_origins:
                 raise RuntimeError("Production CORS requires explicit origins")
-            if self.MQTT_PASSWORD == "":
-                raise RuntimeError("Configure MQTT_PASSWORD before production startup")
         if not 1 <= self.ACCESS_TOKEN_EXPIRE_MINUTES <= 720:
             raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 720")
         if self.BOOTSTRAP_ADMIN_PASSWORD and (
