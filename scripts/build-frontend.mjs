@@ -40,8 +40,8 @@ const groups = {
     'css/theme-variables.css', 'css/theme-transition.css', 'css/components.css',
     'css/shell.css', 'css/performance.css'
   ],
-  'landing.min.css': ['css/landing.css'],
-  'about.min.css': ['css/about.css'],
+  'landing.min.css': ['css/landing.css', 'css/public-header.css'],
+  'about.min.css': ['css/about.css', 'css/public-header.css'],
   'login.min.css': ['css/login.css'],
   'map.min.css': [
     'css/map/base.css', 'css/map/station-panels.css', 'css/map/analysis.css',

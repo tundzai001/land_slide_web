@@ -1,0 +1,41 @@
+/* Shared navigation for the public landing and introduction pages. */
+:root { --header:80px; --nav-bg:#f6f7f8; --nav-surface:#fff; --nav-line:#dce3e5; }
+[data-theme="dark"] { --nav-bg:#0d2028; --nav-surface:#152b34; --nav-line:#354851; }
+.site-header { background:var(--nav-bg); border-bottom:1px solid var(--nav-line); transition:background-color .24s ease,border-color .24s ease,box-shadow .24s ease; }
+.site-header.scrolled { box-shadow:0 8px 24px rgba(17,40,37,.07); }
+.header-inner { height:var(--header); min-height:var(--header); max-width:1360px; padding:0 40px; gap:24px; }
+.brand { display:inline-flex; align-items:center; gap:12px; flex-shrink:0; }
+.brand-plate { display:block; width:82px; flex:0 0 auto; }
+.brand-plate img { display:block; width:100%; height:auto; }
+.brand-rule { width:1px; height:30px; background:var(--nav-line); }
+.brand-product { display:grid; padding:0; border:0; line-height:1.05; }
+.brand-product strong { font-size:16px; letter-spacing:-.02em; }
+.brand-product small { display:block; font:500 10px/1.2 "DM Mono",monospace; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
+.desktop-nav { display:flex; align-items:center; gap:24px; margin-left:auto; }
+.desktop-nav a { position:relative; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; color:var(--muted); font-size:13px; font-weight:600; }
+.desktop-nav a[aria-current="page"],.desktop-nav a:hover { color:var(--teal); }
+.desktop-nav a[aria-current="page"]::after { content:""; position:absolute; left:0; right:0; bottom:-10px; height:2px; background:var(--teal); }
+.header-actions { display:flex; align-items:center; gap:9px; }
+.header-actions .button,.header-actions .icon-button,.header-actions .menu-button { min-height:44px; border-radius:999px; font-size:13px; font-weight:700; }
+.header-actions .button { display:inline-flex; align-items:center; justify-content:center; gap:9px; padding:9px 17px; border:1px solid var(--nav-line); }
+.header-actions .button svg { width:17px; height:17px; }
+.header-actions .button-ghost { background:var(--nav-surface); color:var(--ink); }
+.header-actions .button-primary { background:var(--teal); border-color:var(--teal); color:#fff; }
+[data-theme="dark"] .header-actions .button-primary { color:#052c2a; }
+.header-actions .button:hover { transform:translateY(-2px); box-shadow:0 8px 20px rgba(15,118,110,.13); }
+.header-actions .login-link { max-width:155px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.header-actions .theme-switch { position:relative; display:grid; place-items:center; width:44px; height:44px; padding:0; overflow:hidden; border:1px solid var(--nav-line); background:var(--nav-surface); color:var(--teal); }
+.theme-switch svg { position:absolute; width:20px; height:20px; transition:transform .32s cubic-bezier(.2,.8,.2,1),opacity .22s ease; }
+.theme-switch .theme-moon { opacity:1; transform:rotate(0) scale(1); }
+.theme-switch .theme-sun { opacity:0; transform:rotate(-70deg) scale(.45); }
+[data-theme="dark"] .theme-switch .theme-moon { opacity:0; transform:rotate(70deg) scale(.45); }
+[data-theme="dark"] .theme-switch .theme-sun { opacity:1; transform:rotate(0) scale(1); }
+.header-actions .theme-switch:hover { background:var(--teal-soft); border-color:var(--teal); transform:translateY(-2px); }
+.header-actions .theme-switch:active { transform:scale(.94); }
+.mobile-menu { background:var(--nav-surface); border:1px solid var(--nav-line); }
+.mobile-menu a[aria-current="page"] { color:var(--teal); background:var(--teal-soft); }
+@media(max-width:1100px) { .header-inner { padding:0 28px; } .desktop-nav { gap:16px; } }
+@media(max-width:900px) { :root { --header:70px; } .desktop-nav,.header-actions .login-link,.header-actions .header-cta { display:none; } .header-inner { padding:0 20px; } .header-actions { margin-left:auto; } .header-actions .menu-button { display:flex; } }
+@media(max-width:560px) { .header-inner { padding:0 16px; } .brand-plate { width:68px; } .brand-product { display:grid; } .brand-product strong { font-size:14px; } .brand-product small { font-size:9px; } .brand-rule { display:block; height:26px; } }
+@media(max-width:360px) { .brand-plate { width:58px; } .header-inner { padding:0 12px; } }
+@media(prefers-reduced-motion:reduce) { .theme-switch svg,.site-header,.header-actions .button { transition:none!important; } }

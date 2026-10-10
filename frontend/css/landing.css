@@ -100,3 +100,17 @@ h1 { font-size:clamp(36px,4.2vw,60px); font-weight:550; line-height:1.12; letter
 @media(max-width:900px) { .hero { grid-template-columns:1fr; gap:30px; padding:48px 0 38px; } .hero-visual { height:330px; } .hero h1 { font-size:clamp(36px,5.4vw,50px); } }
 @media(max-width:600px) { .hero { padding:36px 0 32px; gap:27px; } .eyebrow { font-size:9px; gap:7px; letter-spacing:1.2px; } .eyebrow-rule { width:14px; } .hero h1 { font-size:clamp(31px,8.3vw,40px); line-height:1.16; letter-spacing:-1.4px; } .hero-lead { margin-top:19px; font-size:15px; line-height:1.65; } .hero-capabilities { margin-top:21px; } .hero-capabilities span { font-size:11px; } .hero-visual { height:252px; } .visual-topline { top:16px; left:16px; right:16px; font-size:8px; } .visual-footer { padding:10px 16px; min-height:56px; } .visual-label { font-size:9px; padding:4px 6px; } .label-water { top:41%; left:5%; } .label-rain { right:4%; } }
 @media(max-width:360px) { .hero h1 { font-size:29px; } .visual-topline>span:last-child { display:none; } .hero-capabilities { gap:6px; } .hero-capabilities span { padding:4px 7px; } }
+
+.access-map { background:#e5f1ef; color:var(--ink); border-color:#adcfc8; }
+.access-map .access-icon,.access-map .card-bottom strong { color:var(--teal); }
+.access-map .access-icon { border-color:#8bbdb2; }
+.access-map p,.access-map .destination,.access-map .card-bottom>span { color:var(--muted); }
+.access-map .card-bottom { border-color:#bed8d3; }
+.access-map:hover { background:#d9ebe7; border-color:var(--teal); }
+[data-theme="dark"] .access-map { background:#223e47; color:#f3f7f8; border-color:#42606a; }
+[data-theme="dark"] .access-map .access-icon,[data-theme="dark"] .access-map .card-bottom strong { color:#b9e8dc; }
+[data-theme="dark"] .access-map .access-icon { border-color:#729f9d; }
+[data-theme="dark"] .access-map p,[data-theme="dark"] .access-map .destination,[data-theme="dark"] .access-map .card-bottom>span { color:#b6c6cc; }
+[data-theme="dark"] .access-map .card-bottom { border-color:#354851; }
+[data-theme="dark"] .access-map:hover { background:#294952; border-color:#6d9990; }
+body,.access-card { transition:background-color .24s ease,color .24s ease,border-color .24s ease; }

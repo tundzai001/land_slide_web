@@ -6,14 +6,14 @@ export function renderAboutTemplate(logoUrl = '/assets/aitogy.png') {
     <header class="site-header">
         <div class="header-inner">
             <a class="brand" href="/" aria-label="Aitogy Monitoring — Trang chủ"><span class="brand-plate"><img src="${logoUrl}" width="759" height="329" alt="Aitogy"></span><span class="brand-rule" aria-hidden="true"></span><span class="brand-product"><strong>Monitoring</strong><small>Quan trắc</small></span></a>
-            <nav class="desktop-nav" aria-label="Điều hướng chính"><a href="/">Trang chủ</a><a href="/management">Dashboard</a><a href="/map">Bản đồ</a></nav>
+            <nav class="desktop-nav" aria-label="Điều hướng chính"><a href="/">Trang chủ</a><a href="/about" aria-current="page">Giới thiệu</a><a href="/management">Dashboard</a><a href="/map">Bản đồ</a></nav>
             <div class="header-actions">
-                <button class="icon-button" id="theme-toggle" type="button" aria-label="Chuyển giao diện tối"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36-1.42 1.42M7.06 16.94l-1.42 1.42m12.72 0-1.42-1.42M7.06 7.06 5.64 5.64"/><circle cx="12" cy="12" r="4"/></svg></button>
-                <a class="button button-ghost login-link" id="auth-link" href="/login?return_to=%2Fmap">Đăng nhập</a><a class="button button-primary header-cta" href="/map">Mở bản đồ</a>
+                <button class="icon-button theme-switch" id="theme-toggle" type="button" aria-label="Chuyển giao diện tối" aria-pressed="false"><svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.6A8.6 8.6 0 0 1 8.4 3.8 8.6 8.6 0 1 0 20.2 15.6Z"/></svg><svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.6"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+                <a class="button button-ghost login-link" id="auth-link" href="/login?return_to=%2Fmap">Tài khoản</a><a class="button button-primary header-cta" href="/map">Mở bản đồ <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a>
                 <button class="menu-button" id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Mở trình đơn"><span></span><span></span><span></span></button>
             </div>
         </div>
-        <nav class="mobile-menu" id="mobile-menu" aria-label="Điều hướng di động" hidden><a href="#story">Hành trình tín hiệu</a><a href="#network">Trạng thái mạng</a><a href="#response">Hành động</a><a href="/map">Mở bản đồ realtime</a><a href="/login?return_to=%2Fmap">Đăng nhập</a></nav>
+        <nav class="mobile-menu" id="mobile-menu" aria-label="Điều hướng di động" hidden><a href="/">Trang chủ</a><a href="/about" aria-current="page">Giới thiệu</a><a href="/management">Dashboard</a><a href="/map">Bản đồ</a><a id="mobile-auth-link" href="/login?return_to=%2Fmap">Tài khoản</a></nav>
     </header>
 
     <main id="main">

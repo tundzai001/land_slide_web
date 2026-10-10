@@ -95,12 +95,14 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await themeButton.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('.access-management h3')).toHaveCSS('color', 'rgb(240, 253, 250)');
     if (size.name === 'desktop') {
       await page.waitForTimeout(250);
       await page.screenshot({ path: 'test-results/landing-portal-dark.png', fullPage: true });
     }
     await themeButton.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(246, 247, 248)');
     if (size.width < 768) {
       await page.locator('.menu-button').click();
       await expect(page.locator('#mobile-menu')).toBeVisible();
@@ -123,6 +125,45 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     });
   });
 }
+
+test('public navigation reflects the session and keeps theme controls consistent', async ({ page }) => {
+  let authenticated = true;
+  await page.route('http://127.0.0.1:8000/', route => route.fulfill({ contentType:'text/html', body:indexSource.replaceAll('__BUILD_VERSION__', 'test') }));
+  await page.route('http://127.0.0.1:8000/about', route => route.fulfill({ contentType:'text/html', body:aboutSource.replaceAll('__BUILD_VERSION__', 'test') }));
+  await page.route('**/assets/landing.min.css*', route => route.fulfill({ contentType:'text/css', body:landingCss }));
+  await page.route('**/assets/landing.min.js*', route => route.fulfill({ contentType:'application/javascript', body:landingJs }));
+  await page.route('**/assets/about.min.css*', route => route.fulfill({ contentType:'text/css', body:aboutCss }));
+  await page.route('**/assets/about.min.js*', route => route.fulfill({ contentType:'application/javascript', body:aboutJs }));
+  await page.route('**/api/auth/me', route => route.fulfill(authenticated ? { json:{ username:'admin', full_name:'Administrator' } } : { status:401, json:{} }));
+  await page.route('**/api/public/dashboard-summary', route => route.fulfill({ json:{ stations:{ total:0, online:0, stale:0, offline:0 } } }));
+
+  let landingHeader;
+  for (const path of ['/', '/about']) {
+    await page.goto(path);
+    await expect(page.locator('#auth-link')).toHaveText('Administrator');
+    await expect(page.locator('#auth-link')).toHaveAttribute('href', '/management');
+    await expect(page.locator('#mobile-auth-link')).toHaveText('Administrator');
+    await expect(page.locator('.desktop-nav a')).toHaveText(['Trang chủ', 'Giới thiệu', 'Dashboard', 'Bản đồ']);
+    const header = await page.locator('.site-header').evaluate(element => ({ background:getComputedStyle(element).backgroundColor, height:element.getBoundingClientRect().height }));
+    if (landingHeader) expect(header).toEqual(landingHeader);
+    else landingHeader = header;
+    await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-pressed', 'false');
+    await page.locator('#theme-toggle').click();
+    await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.theme-sun')).toHaveCSS('opacity', '1');
+    await page.locator('#theme-toggle').click();
+  }
+
+  await page.goto('/');
+  await expect(page.locator('.access-map')).toHaveCSS('background-color', 'rgb(229, 241, 239)');
+  await page.locator('#theme-toggle').click();
+  await expect(page.locator('.access-map')).toHaveCSS('background-color', 'rgb(34, 62, 71)');
+  authenticated = false;
+  await page.reload();
+  await expect(page.locator('#auth-link')).toHaveText('Đăng nhập');
+  await expect(page.locator('#auth-link')).toHaveAttribute('href', '/login?return_to=%2Fmap');
+  await expect(page.locator('#mobile-auth-link')).toHaveText('Đăng nhập');
+});
 
 test('desktop story advances without shifting the fixed navigation', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });

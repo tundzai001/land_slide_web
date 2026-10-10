@@ -3,13 +3,45 @@ const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selec
 function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('theme', theme);
-    $('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#071a1c' : '#f4f8f7');
+    $('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
     $('#theme-toggle')?.setAttribute('aria-label', theme === 'dark' ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối');
+    $('#theme-toggle')?.setAttribute('aria-pressed', String(theme === 'dark'));
     dispatchEvent(new CustomEvent('themeChanged', { detail: { theme } }));
+}
+
+function setupAuthLinks() {
+    const links = [$('#auth-link'), $('#mobile-auth-link')].filter(Boolean);
+    let checking = false;
+    const refresh = async () => {
+        if (checking) return;
+        checking = true;
+        try {
+            const response = await fetch('/api/auth/me', { credentials:'same-origin', cache:'no-store', signal:AbortSignal.timeout(8000) });
+            let label, href;
+            if (response.ok) {
+                const user = await response.json();
+                label = user.full_name || user.username || 'Tài khoản';
+                href = '/management';
+            } else if (response.status === 401 || response.status === 403) {
+                label = 'Đăng nhập';
+                href = '/login?return_to=%2Fmap';
+            } else return;
+            for (const link of links) {
+                link.textContent = label;
+                link.href = href;
+            }
+        } catch (_) {
+            // Keep the neutral account link while session status is unavailable.
+        } finally { checking = false; }
+    };
+    refresh();
+    addEventListener('pageshow', event => { if (event.persisted) refresh(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 }
 
 function setupHeader() {
     setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+    setupAuthLinks();
     const header = $('.site-header');
     const menu = $('#mobile-menu');
     const toggle = $('#menu-toggle');
