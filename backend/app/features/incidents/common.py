@@ -71,8 +71,14 @@ def _sign_cursor(payload: dict[str, Any]) -> str:
 def _decode_cursor(value: str, *, scope_hash: str, filter_hash: str, sort: str) -> dict[str, Any]:
     try:
         padded = value + "=" * (-len(value) % 4)
-        packed = base64.urlsafe_b64decode(padded.encode("ascii"))
-        raw, signature = packed.rsplit(b".", 1)
+        packed = base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
+        if base64.urlsafe_b64encode(packed).decode("ascii").rstrip("=") != value:
+            raise ValueError
+        # A SHA-256 signature is binary and can itself contain a period. Read
+        # its fixed-size suffix instead of splitting on a byte inside the MAC.
+        if len(packed) <= 33 or packed[-33:-32] != b".":
+            raise ValueError
+        raw, signature = packed[:-33], packed[-32:]
         expected = hmac.new(settings.SECRET_KEY.encode("utf-8"), raw, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             raise ValueError

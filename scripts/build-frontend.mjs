@@ -14,7 +14,7 @@ async function sourceFilesIn(directory = frontendRoot, relativeRoot = '') {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    if (entry.name === 'dist') continue;
+    if (entry.name === 'dist' || entry.name.startsWith('.')) continue;
     const relativePath = path.join(relativeRoot, entry.name);
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await sourceFilesIn(absolutePath, relativePath));
@@ -168,7 +168,9 @@ const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'about.min.js', 'about.html', 'app-runtime.min.js',
   'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
 ].sort();
-const manifest = { version: 1, build: buildVersion, generated_at: new Date().toISOString(), assets: {} };
+// The manifest is committed and checked in CI. Identical inputs must produce
+// identical bytes; release timestamps belong to the workflow run metadata.
+const manifest = { version: 1, build: buildVersion, assets: {} };
 for (const name of artifactNames) {
   const filePath = path.join(outputRoot, name);
   const bytes = await readFile(filePath);

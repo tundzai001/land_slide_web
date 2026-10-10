@@ -1,5 +1,9 @@
 import unittest
+import base64
 from types import SimpleNamespace
+from unittest.mock import patch
+
+from app.features.incidents.common import settings
 
 from app.features.incidents.router import _canonical_filter_hash, _decode_cursor, _sign_cursor
 from app.features.incidents.cases import (
@@ -45,6 +49,16 @@ class IncidentDomainContractTests(unittest.TestCase):
         self.assertEqual(_decode_cursor(cursor, scope_hash="scope", filter_hash=filter_hash, sort="-updated_at")["id"], 2)
         with self.assertRaises(Exception):
             _decode_cursor(cursor[:-1] + ("A" if cursor[-1] != "A" else "B"), scope_hash="scope", filter_hash=filter_hash, sort="-updated_at")
+
+    def test_binary_cursor_signature_can_contain_the_separator(self):
+        payload = {"v": 1, "scope_hash": "scope", "filter_hash": _canonical_filter_hash({"status": "new"}),
+                   "sort": "-updated_at", "value": 10, "id": 2}
+        with patch.object(settings, "SECRET_KEY", "ci-only-signing-key-never-use-in-production"):
+            cursor = _sign_cursor(payload)
+            packed = base64.urlsafe_b64decode(cursor + '=' * (-len(cursor) % 4))
+            self.assertIn(b'.', packed[-32:])
+            self.assertEqual(_decode_cursor(cursor, scope_hash='scope', filter_hash=payload['filter_hash'],
+                                            sort='-updated_at'), payload)
 
 
 if __name__ == "__main__":

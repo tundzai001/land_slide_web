@@ -25,6 +25,11 @@ jobs:
       - name: Test backend and industrial gateway
         env:
           PYTHONPATH: backend
+          ENVIRONMENT: production
+          SECRET_KEY: ci-only-signing-key-never-use-in-production
+          AUTH_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_auth
+          CONFIG_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_config
+          DATA_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_data
         run: python -m pytest backend/tests -q --disable-warnings --tb=short --show-capture=no
 
   frontend:

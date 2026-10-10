@@ -1,11 +1,10 @@
 {
   "version": 1,
-  "build": "31091d568e54",
-  "generated_at": "2026-10-10T11:34:17.852Z",
+  "build": "2513f80c0300",
   "assets": {
     "about.html": {
       "bytes": 4476,
-      "sha256": "4c8e0679874d11f9fa255f5021d2433046fa157bc6dbb0d1245b3d0bfdfabdef"
+      "sha256": "cfde7540c2464e41544fab83de364b5b26c360b96041cb304336f10ad26e99c4"
     },
     "about.min.css": {
       "bytes": 35980,
@@ -17,7 +16,7 @@
     },
     "admin-app.min.js": {
       "bytes": 503108,
-      "sha256": "fefabf141a114d894fbb7913ee37944332ee7da4142a6c3e5e864cbe3f8cc5b4"
+      "sha256": "9b95ba051029072934ffe64367dba4ee1bc0baab5af97a61131d45bbc3341092"
     },
     "admin.min.css": {
       "bytes": 140728,
@@ -33,11 +32,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 19186,
-      "sha256": "86eab3d457ff5689e3ae1c1dd70d8ae1f330311c17b9feaf385efc815959dadc"
+      "sha256": "2afaeec797f060663864661ee58cf1a0a816c3890c5e48ef25dc5d9d947652d4"
     },
     "app.html": {
       "bytes": 979,
-      "sha256": "a63de91b7262dd19ec201c04150a85f2869a540010770c040a0a4e1580a9a295"
+      "sha256": "3e37e6d048f64664c11cac6bf340bc82cdaf8b54c589178465097752d7dee560"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -45,7 +44,7 @@
     },
     "index.html": {
       "bytes": 4410,
-      "sha256": "2ddb6f300a118b3ac1209a5a5dd1dd8526274692b729dbf14c5b12b9e54c5397"
+      "sha256": "e7475db57c8644380e63a9a1a10be80d22c9f94bbaf91f5730361172f6233323"
     },
     "landing.min.css": {
       "bytes": 21724,
@@ -61,11 +60,11 @@
     },
     "map-app.min.js": {
       "bytes": 461004,
-      "sha256": "2d25a16298800296c972f58354f8c732ec6ab682908c506a7362c28fd3e86a51"
+      "sha256": "c28933cd433aac75e32ec586dd4b7ca1c3c7e8490f2a9ba72c0c7cfdc90b4583"
     },
     "map.html": {
       "bytes": 2840,
-      "sha256": "bfbbb7fb92e4689e808c85e304bc8cae91a2acf4d71ed025272748db3071e0aa"
+      "sha256": "7a73084e33bd40964f0e18db6f84303ccb8a6cf61a289e8c73d8ad6d359ce1e7"
     },
     "map.min.css": {
       "bytes": 171663,
