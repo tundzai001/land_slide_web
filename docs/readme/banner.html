@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="vi">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aitogy Monitoring — README banner</title>
+<style>
+  * { box-sizing: border-box }
+  html, body { margin: 0; width: 1200px; height: 380px; overflow: hidden }
+  body { font-family: Arial, sans-serif; color: #f0fdfa; background: #071a1c }
+  .banner { position: relative; width: 1200px; height: 380px; padding: 48px 58px; overflow: hidden; border: 1px solid #29494c; border-radius: 18px }
+  .eyebrow { display: flex; align-items: center; gap: 14px; font-size: 14px; font-weight: 700; letter-spacing: 2.6px }
+  .brand { color: #ff7a1a }
+  .divider { width: 24px; height: 1px; background: #526b70 }
+  .eyebrow span:last-child { color: #a7c1be }
+  h1 { position: relative; margin: 35px 0 15px; font-size: 76px; line-height: 1; letter-spacing: -3.5px; font-weight: 700 }
+  .lead { position: relative; margin: 0; color: #a7c1be; font-size: 21px; line-height: 1.55; max-width: 550px }
+  .footer { position: absolute; left: 58px; bottom: 39px; display: flex; gap: 22px; color: #a7c1be; font-size: 12px; letter-spacing: 1.4px; font-family: monospace }
+  .footer b { font-weight: 400; color: #5eead4 }
+  svg { position: absolute; right: 26px; top: 20px; width: 500px; height: 340px }
+  .contour { fill: none; stroke: #29494c; stroke-width: 1; opacity: .65 }
+  .route { fill: none; stroke: #3e6468; stroke-width: 1.5 }
+  .node { fill: #123034; stroke: #5eead4; stroke-width: 1.5 }
+  .node-core { fill: #5eead4 }
+  .packet { fill: #b4f5e8 }
+  .label { fill: #a7c1be; font: 12px monospace; letter-spacing: 1px }
+  .hub-label { fill: #f0fdfa; font: bold 15px Arial, sans-serif }
+  .pulse { fill: none; stroke: #5eead4; stroke-width: 1 }
+</style>
+<main class="banner" aria-label="Aitogy Monitoring, quan trắc công trình và môi trường. Sơ đồ minh họa dữ liệu từ cảm biến tới MQTT và bản đồ.">
+  <div class="eyebrow"><span class="brand">AITOGY</span><span class="divider"></span><span>ENGINEERED FOR OBSERVATION</span></div>
+  <h1>Monitoring<span style="color:#5eead4">.</span></h1>
+  <p class="lead">Quan trắc công trình &amp; môi trường.<br>Dữ liệu hiện trường. Góc nhìn toàn cảnh.</p>
+  <div class="footer"><span><b>01</b> COLLECT</span><span><b>02</b> ANALYZE</span><span><b>03</b> OBSERVE</span></div>
+  <svg viewBox="0 0 500 340" aria-hidden="true">
+    <g class="contour">
+      <path d="M0 90 Q70 25 140 74 T290 58 T500 110 M0 113 Q70 48 140 97 T290 81 T500 133 M0 136 Q70 71 140 120 T290 104 T500 156"/>
+      <path d="M0 230 Q100 310 170 255 T330 267 T500 225 M0 253 Q100 333 170 278 T330 290 T500 248 M0 276 Q100 356 170 301 T330 313 T500 271"/>
+      <path d="M60 0 Q20 70 65 138 T56 300 M88 0 Q48 70 93 138 T84 330 M390 0 Q445 80 398 145 T438 340 M418 0 Q473 80 426 145 T466 340"/>
+    </g>
+    <path id="signal-a" class="route" d="M90 97 C165 97 144 171 245 171"/>
+    <path id="signal-b" class="route" d="M90 245 C163 245 150 171 245 171"/>
+    <path id="signal-c" class="route" d="M245 171 C335 171 331 112 405 112"/>
+    <circle class="node" cx="90" cy="97" r="19"/><circle class="node-core" cx="90" cy="97" r="4"/>
+    <circle class="node" cx="90" cy="245" r="19"/><circle class="node-core" cx="90" cy="245" r="4"/>
+    <rect class="node" x="207" y="133" width="76" height="76" rx="18"/>
+    <path d="M234 184v-9m11 9v-25m11 25v-17" stroke="#5eead4" stroke-width="4" stroke-linecap="round"/>
+    <circle class="pulse" cx="245" cy="171" r="47"/>
+    <rect class="node" x="375" y="82" width="60" height="60" rx="14"/>
+    <path d="M390 97l10-4 10 4 10-4v27l-10 4-10-4-10 4zm10-4v27m10-23v27" fill="none" stroke="#5eead4" stroke-width="1.5"/>
+    <text class="label" x="90" y="62" text-anchor="middle">GNSS / IMU</text>
+    <text class="label" x="90" y="284" text-anchor="middle">RAIN / WATER</text>
+    <text class="hub-label" x="245" y="234" text-anchor="middle">MQTT</text>
+    <text class="label" x="405" y="166" text-anchor="middle">MAP / DATA</text>
+    <circle class="packet" data-path="signal-a" r="3.5"/><circle class="packet" data-path="signal-b" r="3.5"/><circle class="packet" data-path="signal-c" r="3.5"/>
+    <text class="label" x="265" y="322" text-anchor="middle" style="font-size:10px;fill:#83a09d">SENSOR NETWORK · ILLUSTRATION</text>
+  </svg>
+</main>
+<script>
+  window.renderFrame = seconds => {
+    document.querySelectorAll('.packet').forEach((dot, i) => {
+      const path = document.getElementById(dot.dataset.path);
+      const progress = ((seconds / 4 + i / 3) % 1);
+      const point = path.getPointAtLength(progress * path.getTotalLength());
+      dot.setAttribute('cx', point.x); dot.setAttribute('cy', point.y);
+    });
+    const phase = (seconds / 4) % 1;
+    document.querySelector('.pulse').setAttribute('r', 45 + phase * 15);
+    document.querySelector('.pulse').setAttribute('opacity', .5 * (1 - phase));
+  };
+  window.renderFrame(0);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const animate = time => { window.renderFrame(time / 1000); requestAnimationFrame(animate); };
+    requestAnimationFrame(animate);
+  }
+</script>
+</html>
