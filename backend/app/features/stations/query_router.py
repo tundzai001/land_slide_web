@@ -1,6 +1,7 @@
 """Station listing, detail, history, and project query routes."""
 
 import logging
+import math
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -271,6 +272,18 @@ async def get_public_dashboard_summary(
     }
 
 
+def parse_station_bbox(value: str) -> tuple[float, float, float, float]:
+    try:
+        west, south, east, north = (float(part.strip()) for part in value.split(","))
+        if (not all(map(math.isfinite, (west, south, east, north)))
+                or not (-180 <= west <= east <= 180)
+                or not (-90 <= south <= north <= 90)):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="bbox must be finite west,south,east,north") from None
+    return west, south, east, north
+
+
 @router.get("/api/stations")
 async def get_stations(
     request: Request,
@@ -291,6 +304,7 @@ async def get_stations(
     ✅ Trả về danh sách tất cả các trạm với offline threshold tùy chỉnh
     """
     try:
+        bbox_bounds = parse_station_bbox(bbox) if bbox else None
         current_user = await get_optional_current_user_from_request(request, db_auth)
         project_filter_ids = user_project_filter_ids(current_user)
 
@@ -382,13 +396,8 @@ async def get_stations(
             if normalized_risk not in {"LOW", "MEDIUM", "WARNING", "HIGH", "CRITICAL", "EXTREME"}:
                 raise HTTPException(status_code=422, detail="Unsupported risk filter")
             stations_with_status = [row for row in stations_with_status if row["risk_level"] == normalized_risk]
-        if bbox:
-            try:
-                west, south, east, north = (float(value.strip()) for value in bbox.split(","))
-                if west > east or south > north:
-                    raise ValueError
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=422, detail="bbox must be west,south,east,north")
+        if bbox_bounds:
+            west, south, east, north = bbox_bounds
             def in_bbox(row):
                 location = row.get("location") or {}
                 try:

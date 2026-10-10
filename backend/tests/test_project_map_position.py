@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 from fastapi import FastAPI
@@ -9,6 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import auth
+from app.features.authentication import sessions as auth_sessions
+from app.shared import access
 from app.database import BaseAuth, BaseConfig, get_auth_db, get_config_db
 from app.models.auth import User
 from app.models.config import Project, Station
@@ -52,12 +55,19 @@ class ProjectMapPositionTests(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[get_auth_db] = session
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test')
         auth.invalidate_user_cache()
+        # These tests exercise project RBAC; durable session behavior has its own suite.
+        self.session_check = patch.object(auth_sessions, 'valid', return_value=True)
+        self.session_check.start()
+        self.public_monitoring = patch.object(access.config.settings, 'PUBLIC_MONITORING_ENABLED', True)
+        self.public_monitoring.start()
 
     async def asyncTearDown(self):
         await self.client.aclose()
         await self.engine.dispose()
         self.directory.cleanup()
         auth.invalidate_user_cache()
+        self.session_check.stop()
+        self.public_monitoring.stop()
 
     def headers(self, username='admin'):
         return {'Authorization': f'Bearer {auth.create_access_token({"sub": username})}'}

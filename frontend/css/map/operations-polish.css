@@ -745,6 +745,38 @@ html[data-theme="dark"] .station-list-sidebar { background:var(--map-surface) !i
 html[data-theme="dark"] .station-list-sidebar .sidebar-header,
 html[data-theme="dark"] .station-list-sidebar .sidebar-search,
 html[data-theme="dark"] .station-filter-bar { background:var(--map-surface) !important; border-radius:0 !important; }
+.map-heatmap-legend {
+    position: fixed;
+    z-index: var(--z-map-control);
+    left: 20px;
+    bottom: 78px;
+    display: grid;
+    gap: 5px;
+    width: min(252px, calc(100vw - 96px));
+    padding: 12px 14px;
+    border: 1px solid var(--map-line);
+    border-radius: var(--control-radius);
+    background: var(--map-surface);
+    color: var(--map-text);
+    box-shadow: var(--panel-shadow);
+    font-size: 12px;
+}
+.map-heatmap-legend[hidden] { display: none !important; }
+.map-heatmap-legend strong { font-size: 13px; }
+.map-heatmap-legend #heatmap-count { color: var(--map-text-soft); }
+.heatmap-gradient { height: 7px; border-radius: 999px; background: linear-gradient(90deg,#2a86c7,#7dbb72,#e7ce59,#e98536,#d63840); }
+.heatmap-scale { display: flex; justify-content: space-between; gap: 8px; color: var(--map-text-soft); font-size: 11px; }
+.heatmap-toggle-btn.is-loading i { opacity: .2; }
+.heatmap-toggle-btn.is-loading::after { content:""; position:absolute; width:18px; height:18px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:heatmap-spin .8s linear infinite; }
+@keyframes heatmap-spin { to { transform:rotate(360deg); } }
+@media(min-width:901px) { html:has(#station-list-sidebar.active) .map-heatmap-legend { left:356px; } }
+@media(max-width:900px) {
+    .map-heatmap-legend { left:12px; bottom:calc(var(--map-bottom-nav-height, 66px) + 82px); }
+    html:has(#station-list-sidebar.active) .map-heatmap-legend,
+    html:has(#detail-sidebar.active) .map-heatmap-legend { display:none; }
+}
+@media(max-height:520px) and (orientation:landscape) { .map-heatmap-legend { bottom:12px; } }
+@media(prefers-reduced-motion:reduce) { .heatmap-toggle-btn.is-loading::after { animation:none; } }
 .detail-sidebar-header>div { display:grid !important; grid-template-columns:minmax(0,1fr) auto; gap:12px; }
 .detail-station-identity { display:contents !important; }
 .detail-station-identity #st-name { grid-column:1/-1; white-space:normal !important; overflow:visible !important; text-overflow:clip !important; line-height:1.4 !important; }

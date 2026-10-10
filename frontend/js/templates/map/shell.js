@@ -52,7 +52,7 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     <label><input type="checkbox" id="layer-station" checked><span><i class="bi bi-broadcast-pin"></i> Trạm quan trắc</span></label>
                     <label><input type="checkbox" id="layer-cors" checked><span><i class="bi bi-crosshair"></i> Trạm CORS base</span></label>
                     <label><input type="checkbox" id="layer-rescue" checked><span><i class="bi bi-life-preserver"></i> Yêu cầu cứu hộ</span></label>
-                    <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Heatmap trạng thái trạm</span></label>
+                    <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Mật độ cảnh báo</span></label>
                 </fieldset>
             </div>
 
@@ -141,6 +141,13 @@ window.LegacyTemplateParts['shell'] = String.raw`
         <span><i class="status-dot is-offline"></i>Ngoại tuyến</span>
     </aside>
 
+    <aside class="map-heatmap-legend" id="heatmap-legend" aria-label="Chú giải mật độ cảnh báo" hidden>
+        <strong>Mật độ cảnh báo</strong>
+        <span id="heatmap-count" role="status" aria-live="polite"></span>
+        <span class="heatmap-gradient" aria-hidden="true"></span>
+        <span class="heatmap-scale"><span>Ít / cảnh báo</span><span>Nhiều / nguy cấp</span></span>
+    </aside>
+
     <nav class="map-bottom-nav" id="map-bottom-nav" aria-label="Điều hướng bản đồ">
         <button type="button" data-map-action="stations"><i class="bi bi-hdd-network"></i><span>Trạm</span></button>
         <button type="button" data-map-action="layers"><i class="bi bi-layers"></i><span>Lớp bản đồ</span></button>
@@ -151,8 +158,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <!-- CUSTOM GLASS ZOOM CONTROLS (Bottom-Right) -->
     <div class="custom-map-controls">
         <div class="heatmap-toggle-wrap">
-            <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt heatmap trạng thái trạm"
-                aria-label="Bật hoặc tắt heatmap trạng thái trạm" aria-pressed="false">
+            <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt mật độ cảnh báo"
+                aria-label="Bật hoặc tắt mật độ cảnh báo" aria-pressed="false" aria-controls="heatmap-legend">
                 <i class="bi bi-fire"></i>
             </button>
         </div>

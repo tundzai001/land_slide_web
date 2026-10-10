@@ -6,7 +6,10 @@ body {
 
 body :where(
     .card, .btn, .modal-content, .dropdown-menu, .top-navbar, .admin-navbar,
-    .station-list-sidebar, .detail-sidebar, .sensor-item,
+    .admin-sidebar, .admin-content, .admin-section,
+    .station-list-sidebar, .detail-sidebar, .sidebar-header, .sensor-item,
+    .map-layer-popover, .custom-map-controls, .map-status-legend, .map-heatmap-legend,
+    .chart-container,
     input, select, textarea, button, a
 ) {
     transition: background-color 0.3s ease,
@@ -40,7 +43,7 @@ body :where(
 @media (prefers-reduced-motion: reduce) {
     #theme-toggle-btn svg,
     body,
-    body :where(.card, .btn, .modal-content, .dropdown-menu, .top-navbar, .admin-navbar, .station-list-sidebar, .detail-sidebar, input, select, textarea, button, a) {
+    body :where(.card, .btn, .modal-content, .dropdown-menu, .top-navbar, .admin-navbar, .admin-sidebar, .admin-content, .admin-section, .station-list-sidebar, .detail-sidebar, .sidebar-header, .map-layer-popover, .custom-map-controls, .map-status-legend, .map-heatmap-legend, .chart-container, input, select, textarea, button, a) {
         transition: none !important;
     }
 }

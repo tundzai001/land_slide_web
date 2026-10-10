@@ -9,7 +9,7 @@ const gnssPanelCss = [
   'frontend/css/map/base.css',
   'frontend/css/map/gnss.css',
   'frontend/css/map-responsive.css',
-  'frontend/css/map/premium-light.css',
+  'frontend/css/map/map-interface.css',
   'frontend/css/map/operations-polish.css',
   'frontend/css/map/digital-twin-workspace.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
@@ -31,7 +31,7 @@ const mapControlsCss = [
   'frontend/css/map/tools.css',
   'frontend/css/rescue-markers.css',
   'frontend/css/map-responsive.css',
-  'frontend/css/map/premium-light.css',
+  'frontend/css/map/map-interface.css',
   'frontend/css/map/operations-polish.css',
   'frontend/css/map/digital-twin-workspace.css',
 ].map(file => readFileSync(join(__dirname, '..', '..', file), 'utf8')).join('\n');
@@ -402,8 +402,16 @@ test('desktop map controls remain stable, separated and readable', async ({ page
   expect(geometry.heatInsideRail).toBe(true);
   expect(geometry.heatZoomGap).toBeGreaterThanOrEqual(4);
   expect(geometry.railRescueGap).toBeGreaterThanOrEqual(12);
-  expect(geometry.authColor).toBe('rgb(255, 255, 255)');
-  expect(geometry.authBackground).toBe('rgb(37, 99, 235)');
+  const luminance = value => {
+    const channels = value.match(/[\d.]+/g).slice(0, 3).map(Number).map(channel => {
+      const fraction = channel / 255;
+      return fraction <= 0.04045 ? fraction / 12.92 : ((fraction + 0.055) / 1.055) ** 2.4;
+    });
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  const foreground = luminance(geometry.authColor);
+  const background = luminance(geometry.authBackground);
+  expect((Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)).toBeGreaterThanOrEqual(4.5);
 });
 
 test('map GNSS badge stays inside its pill and brand logos have no white plate', async ({ page }) => {
