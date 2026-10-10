@@ -12,7 +12,7 @@ const adminCss = cssBundle([
   'frontend/css/admin/base.css', 'frontend/css/admin/effects-theme.css',
   'frontend/css/admin/configuration.css', 'frontend/css/admin/pi-wizard.css',
   'frontend/css/admin-responsive.css', 'frontend/css/admin/pi-devices.css',
-  'frontend/css/admin/incidents.css', 'frontend/css/admin/simulations.css',
+  'frontend/css/admin/simulations.css',
   'frontend/css/admin/premium-light.css',
 ]);
 
@@ -25,7 +25,7 @@ const mapCss = cssBundle([
   'frontend/css/digital-twin.css', 'frontend/css/rescue-markers.css',
   'frontend/css/map-responsive.css', 'frontend/css/map/map-interface.css',
   'frontend/css/map/digital-twin-workspace.css', 'frontend/css/map/digital-twin-results.css',
-  'frontend/css/map/incidents.css', 'frontend/css/map/operations-polish.css',
+  'frontend/css/map/operations-polish.css',
 ]);
 
 async function computedTheme(page, selectors, tokens) {
@@ -136,7 +136,6 @@ test('light is the default and complex map boxes follow the same theme switch', 
   await page.setContent(`<!doctype html><html data-theme="light" data-app-view="map"><head><style>${mapCss}</style></head><body>
     <section class="dt-overlay-container" style="display:block"><header id="dt-header"></header><main id="dt-main"><aside id="dt-panel"><div class="dt-panel-section"></div></aside></main></section>
     <aside class="dt-results" style="visibility:visible;transform:none"></aside>
-    <section class="incident-inbox"><article class="incident-item"></article></section>
   </body></html>`);
 
   const snapshot = () => page.evaluate(() => ({
@@ -144,8 +143,6 @@ test('light is the default and complex map boxes follow the same theme switch', 
     canvas: getComputedStyle(document.querySelector('.dt-overlay-container')).backgroundColor,
     panelBox: getComputedStyle(document.querySelector('.dt-panel-section')).backgroundColor,
     results: getComputedStyle(document.querySelector('.dt-results')).backgroundColor,
-    incidents: getComputedStyle(document.querySelector('.incident-inbox')).backgroundColor,
-    incidentItem: getComputedStyle(document.querySelector('.incident-item')).backgroundColor,
   }));
   const tokens = async () => computedTheme(page, {}, ['--surface-canvas', '--surface-default', '--surface-subtle']);
 
@@ -154,17 +151,13 @@ test('light is the default and complex map boxes follow the same theme switch', 
   expect(light.theme).toBe('light');
   expect(light.canvas).toBe(lightTokens['--surface-canvas']);
   expect(light.results).toBe(lightTokens['--surface-default']);
-  expect(light.incidents).toBe(lightTokens['--surface-default']);
   expect(light.panelBox).toBe(lightTokens['--surface-subtle']);
-  expect(light.incidentItem).toBe(lightTokens['--surface-subtle']);
 
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
   const dark = await snapshot();
   const darkTokens = (await tokens()).tokens;
   expect(dark.canvas).toBe(darkTokens['--surface-canvas']);
   expect(dark.results).toBe(darkTokens['--surface-default']);
-  expect(dark.incidents).toBe(darkTokens['--surface-default']);
   expect(dark.panelBox).toBe(darkTokens['--surface-subtle']);
-  expect(dark.incidentItem).toBe(darkTokens['--surface-subtle']);
   expect(dark.results).not.toBe(light.results);
 });

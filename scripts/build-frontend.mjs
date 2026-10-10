@@ -48,18 +48,18 @@ const groups = {
     'css/map/effects-theme.css', 'css/map/tools.css', 'css/map/gnss.css',
     'css/digital-twin.css', 'css/rescue-markers.css', 'css/map-responsive.css',
     'css/map/map-interface.css', 'css/map/digital-twin-workspace.css',
-    'css/map/digital-twin-results.css', 'css/map/incidents.css', 'css/map/operations-polish.css'
+    'css/map/digital-twin-results.css', 'css/map/operations-polish.css'
   ],
   'admin.min.css': [
     'css/admin/base.css', 'css/admin/effects-theme.css', 'css/admin/configuration.css',
     'css/admin/pi-wizard.css', 'css/admin-responsive.css', 'css/admin/pi-devices.css',
-    'css/admin/incidents.css', 'css/admin/simulations.css', 'css/admin/premium-light.css', 'css/admin/operations.css'
+    'css/admin/simulations.css', 'css/admin/premium-light.css', 'css/admin/operations.css'
   ],
-  'shared.min.js': ['js/sensor-catalog.js', 'js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js', 'js/incident-store.js'],
+  'shared.min.js': ['js/sensor-catalog.js', 'js/session-state.js', 'js/theme-manager.js', 'js/api-client.js', 'js/auth.js'],
   'map-app.min.js': [
     'js/templates/map/shell.js', 'js/templates/map/station-panels.js',
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
-    'js/map/runtime.js', 'js/map/realtime.js', 'js/map/incidents.js', 'js/map/marker-alerts.js',
+    'js/map/runtime.js', 'js/map/realtime.js', 'js/map/marker-alerts.js',
     'js/map/guest-rescue.js', 'js/map/map-layers.js', 'js/map/map-interactions.js',
     'js/map/stations.js', 'js/map/station-detail.js', 'js/map/chart-workspace.js', 'js/map/long-term.js',
     'js/map/analysis.js', 'js/map/ui-alerts.js', 'js/map/tools.js'
@@ -77,7 +77,7 @@ const groups = {
     'js/admin/velocity.js', 'js/admin/origin.js', 'js/admin/provisioning.js',
     'js/admin/users.js', 'js/admin/pi-devices.js', 'js/admin/pi-device-actions.js', 'js/admin/pi-center.js',
     'js/admin/auto-adjustment.js',
-    'js/admin/lifecycle.js', 'js/admin/bootstrap.js', 'js/admin/incidents.js', 'js/admin/simulations.js', 'js/db-manager.js'
+    'js/admin/lifecycle.js', 'js/admin/bootstrap.js', 'js/admin/simulations.js', 'js/db-manager.js'
   ]
 };
 

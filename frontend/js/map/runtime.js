@@ -73,7 +73,6 @@ function stopMapBackgroundWork() {
         socket.onclose = null;
         socket.close();
     }
-    if (typeof stopIncidentSocket === 'function') stopIncidentSocket();
     if (typeof stopRescueAdminSocket === 'function') stopRescueAdminSocket();
     if (gnssAdjustmentDebugState.statusPollId) clearInterval(gnssAdjustmentDebugState.statusPollId);
     if (gnssAdjustmentDebugState.watchdogId) clearInterval(gnssAdjustmentDebugState.watchdogId);

@@ -9,14 +9,10 @@ class AdminManager {
         this._refreshIntervals = [];
         this._wsReconnectTimer = null;
         this._wsConnecting = false;
-        this.operationsWs = null;
-        this._operationsWsReconnectTimer = null;
-        this._operationsWsConnecting = false;
         this._authzChangeHandler = (event) => this.applyAuthzSession(event.detail?.user || null);
         this._authzExpiredHandler = () => {
             this._tabRequestControllers?.forEach?.(controller => controller.abort());
             this._tabRequestControllers?.clear?.();
-            this.operationsWs?.close?.(1000, 'authorization grace expired');
             this.ws?.close?.(1000, 'authorization grace expired');
         };
         this._popstateHandler = () => {
@@ -138,12 +134,6 @@ class AdminManager {
             this.ws.onmessage = (event) => {
                 let message;
                 try { message = JSON.parse(event.data); } catch (_) { return; }
-                if (message.type === 'incident_changed') {
-                    window.incidentStore?.applyEnvelope(message);
-                    window.dispatchEvent(new CustomEvent('incidentChanged', { detail: message }));
-                    window.loadAdminIncidents?.(true);
-                    return;
-                }
                 if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
                     console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
                     const relocked = !!message.data?.relocked;
@@ -299,37 +289,6 @@ class AdminManager {
         }
     }
 
-    async setupOperationsWebSocket() {
-        if (this._disposed || document.documentElement.dataset.appView !== 'admin' || this._operationsWsConnecting || this.operationsWs) return;
-        this._operationsWsConnecting = true;
-        try {
-            const response = await fetch('/api/auth/ws-ticket', { method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'operations' }), cache: 'no-store' });
-            if (!response.ok) throw new Error(`Operations ticket HTTP ${response.status}`);
-            const { ticket } = await response.json();
-            if (this._disposed || document.documentElement.dataset.appView !== 'admin') { this._operationsWsConnecting = false; return; }
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const socket = new WebSocket(`${protocol}//${window.location.host}/ws/operations?ticket=${encodeURIComponent(ticket)}`);
-            this.operationsWs = socket; this._operationsWsConnecting = false;
-            socket.onopen = () => {
-                const projects = (this.currentUserAssignedProjects || window.authManager?.getUserInfo?.()?.assigned_projects || []).map(Number).filter(Number.isFinite);
-                socket.send(JSON.stringify({ type: 'subscribe', project_ids: projects, station_ids: [], channels: ['incident'] }));
-                document.documentElement.dataset.incidentsRealtime = 'connected';
-            };
-            socket.onmessage = event => {
-                try { const message = JSON.parse(event.data); if (message.type === 'incident_changed') { window.incidentStore?.applyEnvelope(message); window.dispatchEvent(new CustomEvent('incidentChanged', { detail: message })); } } catch (_) { /* malformed private event is ignored */ }
-            };
-            socket.onerror = () => { document.documentElement.dataset.incidentsRealtime = 'degraded'; };
-            socket.onclose = () => {
-                if (this.operationsWs !== socket) return;
-                this.operationsWs = null; document.documentElement.dataset.incidentsRealtime = 'disconnected';
-                if (!this._disposed && document.documentElement.dataset.appView === 'admin') this._operationsWsReconnectTimer = setTimeout(() => { this._operationsWsReconnectTimer = null; this.setupOperationsWebSocket(); }, 5000);
-            };
-        } catch (_) {
-            this._operationsWsConnecting = false; document.documentElement.dataset.incidentsRealtime = 'degraded';
-            if (!this._disposed && document.documentElement.dataset.appView === 'admin') this._operationsWsReconnectTimer = setTimeout(() => { this._operationsWsReconnectTimer = null; this.setupOperationsWebSocket(); }, 5000);
-        }
-    }
-
     /** Switch visible tab pane (called from sidebar icons) */
     switchTab(tabId, linkEl, loadData = true, options = {}) {
         if (!this.canAccessTab(tabId)) {
@@ -443,12 +402,6 @@ class AdminManager {
             window.dbManager?.datasetRequestController?.abort?.();
             this.switchTab(this._safeFallbackTab(), null, true, { replace: true, restore: true });
         }
-        if (this.hasPermission('VIEW_INCIDENTS')) {
-            this.setupOperationsWebSocket();
-        } else if (this.operationsWs) {
-            this.operationsWs.close(1000, 'authorization changed');
-            this.operationsWs = null;
-        }
         if (this.currentUserRole === 'admin' && !this.ws) this.setupWebSocketListener();
         if (this.currentUserRole !== 'admin' && this.ws) {
             this.ws.close(1000, 'authorization changed');
@@ -467,9 +420,6 @@ class AdminManager {
         if (initialTab === 'tab-operations') this.loadOperations?.();
         if (this.canAccessTab('tab-projects')) this.loadProjects?.();
         if (this.canAccessTab('tab-users')) this.loadUsers?.();
-        if (this.hasPermission('VIEW_INCIDENTS')) {
-            this.setupOperationsWebSocket();
-        }
         if (this.currentUserRole === 'admin') this.setupWebSocketListener();
     }
 

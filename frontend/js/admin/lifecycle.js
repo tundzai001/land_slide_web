@@ -22,17 +22,9 @@ class AdminLifecycleFeature extends window.AdminManager {
         this._refreshIntervals = [];
         if (this._wsReconnectTimer) clearTimeout(this._wsReconnectTimer);
         this._wsReconnectTimer = null;
-        if (this._operationsWsReconnectTimer) clearTimeout(this._operationsWsReconnectTimer);
-        this._operationsWsReconnectTimer = null;
         if (this.ws) {
             const socket = this.ws;
             this.ws = null;
-            socket.onclose = null;
-            socket.close();
-        }
-        if (this.operationsWs) {
-            const socket = this.operationsWs;
-            this.operationsWs = null;
             socket.onclose = null;
             socket.close();
         }
