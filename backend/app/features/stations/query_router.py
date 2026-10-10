@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 async def get_stations_by_project(
     project_id: int,
     response: Response,
-    q: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=100),
     status: Optional[str] = None,
     offset: Optional[int] = None,
     limit: Optional[int] = None,
@@ -57,8 +57,9 @@ async def get_stations_by_project(
     check_operator_project_access(current_user, project_id)
     stmt = select(model_config.Station).where(model_config.Station.project_id == project_id)
     if q and q.strip():
-        pattern = f"%{q.strip()}%"
-        stmt = stmt.where(model_config.Station.name.ilike(pattern) | model_config.Station.station_code.ilike(pattern))
+        term = q.strip()
+        stmt = stmt.where(model_config.Station.name.icontains(term, autoescape=True)
+                          | model_config.Station.station_code.icontains(term, autoescape=True))
     sort_fields = {"name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
     if sort:
         field_name = sort.lstrip("-")
@@ -292,7 +293,7 @@ async def get_stations(
     status: Optional[str] = None,
     risk: Optional[str] = None,
     bbox: Optional[str] = None,
-    q: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=100),
     offset: Optional[int] = None,
     limit: Optional[int] = None,
     sort: Optional[str] = None,
@@ -317,12 +318,11 @@ async def get_stations(
             stmt = stmt.where(model_config.Station.project_id.in_(project_filter_ids))
         if project_id is not None:
             stmt = stmt.where(model_config.Station.project_id == project_id)
-        normalized_q = (q or "").strip().lower()
-        if normalized_q:
-            pattern = f"%{normalized_q}%"
+        term = (q or "").strip()
+        if term:
             stmt = stmt.where(
-                model_config.Station.name.ilike(pattern)
-                | model_config.Station.station_code.ilike(pattern)
+                model_config.Station.name.icontains(term, autoescape=True)
+                | model_config.Station.station_code.icontains(term, autoescape=True)
             )
 
         sort_fields = {

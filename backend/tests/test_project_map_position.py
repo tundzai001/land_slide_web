@@ -144,6 +144,31 @@ class ProjectMapPositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(project['gnss_clusters'], [{'name': 'Cụm 1', 'stations': [1, 2]}])
         self.assertEqual(project['location'], await self.location())
 
+    async def test_project_search_treats_wildcards_as_literal_text(self):
+        async with self.sessions() as db:
+            db.add(Project(project_code='P_%', name='Đập 100%', created_at=2, updated_at=2))
+            await db.commit()
+        for query in ('%', '_'):
+            response = await self.client.get('/api/projects', params={'q': query})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual([row['project_code'] for row in response.json()], ['P_%'])
+        too_long = await self.client.get('/api/projects', params={'q': 'x' * 101})
+        self.assertEqual(too_long.status_code, 422)
+
+    async def test_public_cluster_projection_drops_unexpected_nested_lists(self):
+        async with self.sessions() as db:
+            project = await db.get(Project, 1)
+            project.gnss_clusters = [
+                {'name': 'Safe', 'stations': [1], 'base_service_config': {'password': 'DO_NOT_EXPOSE'}},
+                [{'base_service_config': {'password': 'DO_NOT_EXPOSE'}}],
+            ]
+            await db.commit()
+        response = await self.client.get('/api/projects')
+        self.assertEqual(response.status_code, 200, response.text)
+        project = next(row for row in response.json() if row['id'] == 1)
+        self.assertEqual(project['gnss_clusters'], [{'name': 'Safe', 'stations': [1]}])
+        self.assertNotIn('DO_NOT_EXPOSE', response.text)
+
     async def test_station_config_cannot_change_another_projects_position(self):
         response = await self.client.put('/api/admin/stations/1/config', headers=self.headers('empty'),
             json={'config': {'gnss_origin': {'lat': 10, 'lon': 106}}})

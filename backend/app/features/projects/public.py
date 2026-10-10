@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_auth_db, get_config_db
@@ -20,15 +20,14 @@ def public_clusters(clusters):
     # The map only needs geometry. Base connection settings can contain credentials.
     return [
         {key: cluster[key] for key in ('name', 'cluster_type', 'stations') if key in cluster}
-        if isinstance(cluster, dict) else cluster
-        for cluster in (clusters or []) if isinstance(cluster, (dict, list))
+        for cluster in (clusters or []) if isinstance(cluster, dict)
     ]
 
 @router.get("/api/projects")
 async def get_public_projects(
     request: Request,
     response: Response,
-    q: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=100),
     is_active: Optional[bool] = None,
     offset: Optional[int] = None,
     limit: Optional[int] = None,
@@ -58,10 +57,10 @@ async def get_public_projects(
             stmt = stmt.where(model_config.Project.id.in_(project_filter_ids))
 
         if q and q.strip():
-            pattern = f"%{q.strip()}%"
+            term = q.strip()
             stmt = stmt.where(
-                model_config.Project.name.ilike(pattern)
-                | model_config.Project.project_code.ilike(pattern)
+                model_config.Project.name.icontains(term, autoescape=True)
+                | model_config.Project.project_code.icontains(term, autoescape=True)
             )
         if is_active is not None:
             stmt = stmt.where(model_config.Project.is_active.is_(is_active))

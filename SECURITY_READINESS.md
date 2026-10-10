@@ -12,6 +12,7 @@ Status date: 2026-10-10. Scope: application changes in this repository. This is 
 - Project and station queries default to authenticated access. Public aggregate dashboard data remains a separate route. User and rescue inputs are bounded and validated; user edits preserve assignments if project loading fails. Validation failures omit submitted values, and 5xx API responses omit internal exception details.
 - Production startup rejects a default/short signing key, wildcard CORS, unsupported JWT algorithm and invalid token lifetime. An MQTT credential present in source history produces a startup warning during a coordinated broker migration. API responses are not cached; browser security headers and request IDs are emitted. HTTPS responses include HSTS.
 - The map now provides chart inspection, filtering, export, refresh feedback and accessible tabular values. Management user forms report errors without wiping edits or submitting duplicates.
+- Public project responses allowlist GNSS cluster fields even when stored data contains unexpected nested values. Project/station search treats SQL wildcard characters as literal input and bounds search text. Pi provisioning and assignment render device metadata as text and keep actions bound to the selected device without inline JavaScript.
 
 ## Verification
 

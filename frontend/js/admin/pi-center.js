@@ -1,4 +1,7 @@
 (() => {
+const escapePiText = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+})[char]);
 class AdminPiCenterFeature extends window.AdminManager {
     // =========================================================================
     // FIELD STATION GẮN LIỀN VỚI PI CENTER
@@ -54,12 +57,12 @@ class AdminPiCenterFeature extends window.AdminManager {
                                 <div class="list-group list-group-flush" id="center-pick-list">
                                     ${centers.map(c => `
                                         <button type="button" class="list-group-item list-group-item-action d-flex gap-3 align-items-center center-pick-item"
-                                               data-center-id="${c.id}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                                               data-center-id="${Number(c.id)}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
                                             <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
                                             <div class="text-start">
-                                                <strong>${c.name}</strong>
-                                                <small class="d-block text-muted font-monospace">${c.serial}</small>
-                                                ${c.station_name ? `<small class="text-info">📍 ${c.station_name}</small>` : ''}
+                                                <strong>${escapePiText(c.name)}</strong>
+                                                <small class="d-block text-muted font-monospace">${escapePiText(c.serial)}</small>
+                                                ${c.station_name ? `<small class="text-info">📍 ${escapePiText(c.station_name)}</small>` : ''}
                                             </div>
                                             <span class="badge ${c.status === 'assigned' ? 'bg-primary' : 'bg-success'} ms-auto">${c.status === 'assigned' ? '📍 Assigned' : '✅ Activated'}</span>
                                         </button>
@@ -166,11 +169,11 @@ class AdminPiCenterFeature extends window.AdminManager {
             } else {
                 if (optionsBox) {
                     optionsBox.innerHTML = pointsToAssign.map(p => `
-                        <button type="button" class="device-pick-option" data-point-id="${p.id}">
+                        <button type="button" class="device-pick-option" data-point-id="${Number(p.id)}">
                             <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
                             <div class="text-start">
-                                <strong>${p.name}</strong>
-                                <small class="d-block text-muted font-monospace">${p.serial}</small>
+                                <strong>${escapePiText(p.name)}</strong>
+                                <small class="d-block text-muted font-monospace">${escapePiText(p.serial)}</small>
                             </div>
                             <span class="badge bg-success ms-auto">✅ Activated</span>
                         </button>
@@ -277,11 +280,11 @@ class AdminPiCenterFeature extends window.AdminManager {
                 <div class="list-group list-group-flush">
                     ${available.map(d => `
                     <button type="button" class="list-group-item list-group-item-action d-flex gap-3 align-items-center wizard-pi-option"
-                           data-pi-id="${d.id}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
+                           data-pi-id="${Number(d.id)}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
                         <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
                         <div class="text-start">
-                            <strong class="font-monospace">${d.name}</strong>
-                            <small class="d-block text-muted font-monospace">${d.serial}</small>
+                            <strong class="font-monospace">${escapePiText(d.name)}</strong>
+                            <small class="d-block text-muted font-monospace">${escapePiText(d.serial)}</small>
                         </div>
                         <span class="badge bg-success ms-auto">✅ Sẵn sàng</span>
                     </button>
