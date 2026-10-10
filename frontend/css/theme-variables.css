@@ -48,11 +48,11 @@
     --accent-danger: #b91c1c;
     --accent-info: #2563eb;
     --brand-orange: #ff6b00;
-    --workspace-chrome: #182b34;
-    --workspace-chrome-text: #f3f7f8;
-    --workspace-chrome-muted: #b6c6cc;
-    --workspace-chrome-line: #354851;
-    --workspace-chrome-selected: #28434c;
+    --workspace-chrome: #ffffff;
+    --workspace-chrome-text: #0f2a2e;
+    --workspace-chrome-muted: #526b70;
+    --workspace-chrome-line: #d5e3e1;
+    --workspace-chrome-selected: #e7f1ef;
     --accent-primary-hover: #0b5f59;
 
     --state-success-bg: #e9f8ef;
@@ -149,6 +149,11 @@
 
 /* === DARK MODE OVERRIDE === */
 [data-theme="dark"] {
+    --workspace-chrome: #0b2427;
+    --workspace-chrome-text: #f0fdfa;
+    --workspace-chrome-muted: #a7c1be;
+    --workspace-chrome-line: #29494c;
+    --workspace-chrome-selected: #19433f;
     --bg-primary: #071a1c;
     --bg-primary-rgb: 7, 26, 28;
     --bg-secondary: #0b2427;

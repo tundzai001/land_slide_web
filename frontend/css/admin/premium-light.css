@@ -990,12 +990,12 @@ html[data-app-view="admin"] :is(.sidebar-brand,.workspace-map-link,.mobile-botto
 .admin-sidebar .sidebar-brand .app-brand-plate { background:#fff; padding:4px 6px; border-radius:4px; }
 .admin-sidebar .nav-link { color:var(--workspace-chrome-muted) !important; }
 .admin-sidebar .nav-link:hover { background:var(--workspace-chrome-selected) !important; color:var(--workspace-chrome-text) !important; }
-.admin-sidebar .nav-link.active { background:var(--workspace-chrome-selected) !important; color:#fff !important; box-shadow:inset 3px 0 0 #9ed4c7 !important; }
+.admin-sidebar .nav-link.active { background:var(--workspace-chrome-selected) !important; color:var(--workspace-chrome-text) !important; box-shadow:inset 3px 0 0 var(--admin-primary) !important; }
 .admin-sidebar .sidebar-logout { border-color:var(--workspace-chrome-line); }
 .admin-sidebar .sidebar-logout .nav-link { color:var(--workspace-chrome-muted) !important; }
 .sidebar-guides { background:transparent; border-color:var(--workspace-chrome-line); }
 .sidebar-guides button,.sidebar-guide-status { color:var(--workspace-chrome-muted); }
-.sidebar-guides button:hover { background:var(--workspace-chrome-selected); color:#fff; }
+.sidebar-guides button:hover { background:var(--workspace-chrome-selected); color:var(--workspace-chrome-text); }
 .ops-page-header { padding-bottom:24px; margin-bottom:24px; border-bottom:1px solid var(--admin-border); }
 .ops-page-header h4 { font-size:32px; font-weight:550 !important; letter-spacing:-1px; }
 .ops-eyebrow { font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin-bottom:10px; }
@@ -1007,34 +1007,7 @@ html[data-app-view="admin"] :is(.sidebar-brand,.workspace-map-link,.mobile-botto
 .project-directory-summary { display:flex; gap:28px; align-items:center; margin-bottom:20px; font-size:13px; color:var(--admin-muted); }
 .project-directory-summary strong { font-size:22px; color:var(--admin-text); font-weight:550; margin-right:6px; font-variant-numeric:tabular-nums; }
 .management-project-grid { row-gap:12px !important; }
-.management-project-grid>div { width:100%; }
-.management-project-card { display:grid; grid-template-columns:minmax(0,1fr) auto; box-shadow:none !important; border-radius:10px !important; }
-.management-project-card .card-body { padding:24px; }
-.management-project-card .card-body>.d-flex { margin-bottom:0 !important; }
-.management-project-card .project-icon { width:48px; height:48px; flex-basis:48px; background:var(--admin-surface-muted); }
-.management-project-card .card-title { font-size:19px; letter-spacing:-.4px; }
-.management-project-card .project-count { margin-left:20px; background:transparent; color:var(--admin-muted); font-size:12px; padding:0; text-align:right; }
-.management-project-card .project-count strong { display:block; color:var(--admin-text); font-size:26px; font-weight:500; line-height:1.2; }
-.management-project-card .project-description { min-height:0; margin:12px 0 8px 64px; font-size:13px; }
-.management-project-card .project-location { margin-left:64px; font-size:12px; }
-.management-project-card .card-footer { display:flex; align-items:center; padding:24px; border-top:0 !important; border-left:1px solid var(--admin-border); }
-.management-project-card .card-footer>.d-flex { flex-wrap:wrap; width:180px; }
-.management-project-card .card-footer .btn-primary { flex-basis:100%; }
-.management-project-card .project-edit-btn { flex:1; }
-@media(max-width:1100px) and (min-width:768px) {
-    .management-project-card .card-footer { padding:20px; }
-    .management-project-card .card-footer>.d-flex { width:148px; }
-    .management-project-card .card-body { padding:20px; }
-}
 @media(max-width:767.98px) {
-    .ops-page-header { padding-bottom:20px; }
-    .ops-page-header h4 { font-size:27px; }
-    .management-project-card { display:flex; }
-    .management-project-card .card-body { padding:20px; }
-    .management-project-card .card-footer { border-left:0; border-top:1px solid var(--admin-border) !important; padding:16px 20px; }
-    .management-project-card .card-footer>.d-flex { width:100%; flex-wrap:nowrap; }
-    .management-project-card .card-footer .btn-primary { flex-basis:auto; }
-    .management-project-card .project-edit-btn { flex:0 0 44px; }
     .project-directory-summary { gap:20px; }
     .project-directory-summary strong { font-size:20px; }
 }

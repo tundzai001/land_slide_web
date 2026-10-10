@@ -184,6 +184,7 @@
                 <button type="button" data-tab="tab-operations"><i class="bi bi-journal-check"></i> Vận hành</button>
                 <button type="button" data-logout-action><i class="bi bi-box-arrow-right"></i> Đăng xuất</button>
             </div>`;
+        if (window.rescueFeatureEnabled === false) navigation.querySelector('[data-tab="tab-rescue"]')?.remove();
         const more = navigation.querySelector('.admin-more-sheet');
         navigation.addEventListener('click', (event) => {
             const button = event.target.closest('button');
@@ -246,7 +247,12 @@
         if (view === 'admin') root.setAttribute('data-private-content', '');
         else root.removeAttribute('data-private-content');
         document.title = view === 'map' ? 'Bản đồ realtime · Monitoring' : 'Quản trị · Monitoring';
+        const rescueAvailability = fetch('/api/public/rescue-config', {
+            cache: 'no-store', signal: AbortSignal.timeout(3000),
+        }).then(response => response.ok ? response.json() : null)
+          .then(config => config?.enabled === true).catch(() => false);
         await Promise.all((view === 'map' ? mapStyles : adminStyles).concat(sharedStyles).map(loadStyle));
+        window.rescueFeatureEnabled = await rescueAvailability;
         await loadScript('/assets/shared.min.js?v=__BUILD_VERSION__');
         await loadScript(CDN.bootstrapJs);
         await loadScript(CDN.sweetalert);
@@ -256,11 +262,20 @@
             window.__MAP_BUNDLE_LOADING__ = true;
             await loadScript('/assets/map-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.map;
+            if (!window.rescueFeatureEnabled) {
+                root.querySelector('.layer-toggle-switch')?.remove();
+                root.querySelectorAll('#layer-rescue, #layer-heatmap').forEach(input => input.closest('label')?.remove());
+                root.querySelectorAll('[data-map-action="rescue"], #btn-guest-rescue, #guestRescueModal').forEach(element => element.remove());
+            }
             window.__MAP_BUNDLE_LOADING__ = false;
             window.flushMapReadyQueue?.();
         } else {
             await loadScript('/assets/admin-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.admin;
+            if (!window.rescueFeatureEnabled) {
+                root.querySelector('[data-tab="tab-rescue"]')?.closest('.nav-item')?.remove();
+                root.querySelector('#tab-rescue')?.remove();
+            }
             root.querySelector('#session-manager-btn')?.addEventListener('click', () => void window.authManager?.openSessions());
             setupAdminMobileNavigation();
             setupAdminResponsiveTables();

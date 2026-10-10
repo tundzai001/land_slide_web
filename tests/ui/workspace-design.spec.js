@@ -62,6 +62,12 @@ for (const width of [1440, 1024, 768, 390, 320]) {
     await page.locator(width < 768 ? '#mobile-bottom-nav [data-tab="tab-projects"]' : '.admin-sidebar [data-tab="tab-projects"]').click();
     await expect(page.locator('#tab-projects')).toHaveClass(/active/);
     await expect(page.locator('.management-project-card')).toHaveCount(3);
+    const projectPositions = await page.locator('.management-project-card').evaluateAll(cards => cards.map(card => ({
+      top: card.getBoundingClientRect().top,
+      width: card.getBoundingClientRect().width,
+    })));
+    if (width >= 768) expect(projectPositions[0].top).toBe(projectPositions[1].top);
+    else expect(projectPositions[0].top).toBeLessThan(projectPositions[1].top);
     await expect(page.locator('.project-directory-summary')).toContainText('3 dự án');
     await expect(page.locator('.project-directory-summary')).toContainText('26 trạm quan trắc');
     await page.locator('.management-project-card').first().focus();
@@ -70,8 +76,13 @@ for (const width of [1440, 1024, 768, 390, 320]) {
     await expect(page.locator('.workspace-map-link')).toHaveAttribute('href','/map');
     await assertLayout(page);
     await page.screenshot({ path:`test-results/workspace-projects-${width}.png`, fullPage:true, animations:'disabled' });
+    const lightChrome = await page.evaluate(() => [getComputedStyle(document.querySelector('.admin-sidebar')).backgroundColor, getComputedStyle(document.querySelector('.admin-navbar')).backgroundColor]);
+    expect(lightChrome[0]).toBe(lightChrome[1]);
     await page.evaluate(() => document.documentElement.dataset.theme='dark');
     await page.waitForTimeout(200);
+    const darkChrome = await page.evaluate(() => [getComputedStyle(document.querySelector('.admin-sidebar')).backgroundColor, getComputedStyle(document.querySelector('.admin-navbar')).backgroundColor]);
+    expect(darkChrome[0]).toBe(darkChrome[1]);
+    expect(darkChrome[0]).not.toBe(lightChrome[0]);
     await page.screenshot({ path:`test-results/workspace-projects-dark-${width}.png`, fullPage:true, animations:'disabled' });
     if (width < 768) await page.locator('#mobile-bottom-nav [data-more]').click();
     await page.locator(width < 768 ? '#mobile-bottom-nav [data-tab="tab-users"]' : '.admin-sidebar [data-tab="tab-users"]').focus();
@@ -117,8 +128,11 @@ for (const width of [1440, 1024, 768, 390, 320]) {
     await assertLayout(page);
     await page.waitForTimeout(1000);
     await page.screenshot({ path:`test-results/workspace-map-${width}.png`, fullPage:true, animations:'disabled' });
+    const lightNav = await page.locator('.top-navbar').evaluate(el => getComputedStyle(el).backgroundColor);
     await page.evaluate(() => document.documentElement.dataset.theme='dark');
     await page.waitForTimeout(200);
+    const darkNav = await page.locator('.top-navbar').evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(darkNav).not.toBe(lightNav);
     await page.screenshot({ path:`test-results/workspace-map-dark-${width}.png`, fullPage:true, animations:'disabled' });
     await page.locator('#sidebar-close-tab').click();
     await expect(page.locator('#station-list-sidebar')).toHaveAttribute('aria-hidden','true');

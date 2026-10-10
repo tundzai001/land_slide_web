@@ -37,7 +37,7 @@ function setupMarkerLayerControls() {
 
     // Bases stay enabled, but appear only when viewing project details.
     showStationMarkers = true;
-    showRescueMarkers = true;
+    showRescueMarkers = window.rescueFeatureEnabled !== false;
     showCorsBaseMarkers = true;
     if (layerStation) layerStation.checked = true;
     if (layerRescue) layerRescue.checked = true;
@@ -366,6 +366,7 @@ function addOrUpdateCorsBaseMarker(station) {
 }
 
 async function loadRescueMarkers() {
+    if (window.rescueFeatureEnabled === false) return;
     if (document.hidden) return;
     if (mapInteractionActive) {
         pendingRescueMarkersReload = true;

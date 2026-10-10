@@ -124,7 +124,7 @@ class AdminProjectsFeature extends window.AdminManager {
                 <span><strong>${this.projectsData.length}</strong> dự án</span>
                 <span><strong>${this.projectsData.reduce((total, project) => total + (Number(project.station_count) || 0), 0)}</strong> trạm quan trắc</span>
             </div>
-            <div class="row g-0 management-project-grid">
+            <div class="row g-3 management-project-grid">
                 ${this.projectsData.map(p => `
                     <div class="col-md-6 col-xl-4">
                         <article class="card project-card management-project-card h-100" onclick="window.adminManager.loadStations(${Number(p.id)})" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();window.adminManager.loadStations(${Number(p.id)})}" tabindex="0" aria-label="Mở dự án ${this.escapeHtml(p.name)}">

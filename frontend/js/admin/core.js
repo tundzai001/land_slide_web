@@ -390,6 +390,7 @@ class AdminManager {
     }
 
     canAccessTab(tabId) {
+        if (tabId === 'tab-rescue' && window.rescueFeatureEnabled === false) return false;
         const required = {
             'tab-users': 'MANAGE_USERS',
             'tab-projects': 'VIEW_STATIONS',
