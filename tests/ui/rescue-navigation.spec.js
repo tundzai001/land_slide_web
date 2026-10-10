@@ -5,7 +5,7 @@ const { join } = require('node:path');
 const runtime = readFileSync(join(__dirname, '../../frontend/js/app-runtime.js'), 'utf8');
 const adminCore = readFileSync(join(__dirname, '../../frontend/js/admin/core.js'), 'utf8');
 const mapHtml = `<label class="layer-toggle-switch"><input id="layer-mode-toggle"><span>Cứu hộ</span></label>
-  <fieldset><label><input id="layer-rescue">Cứu hộ</label><label><input id="layer-heatmap">Heatmap cứu hộ</label></fieldset>
+  <fieldset><label><input id="layer-rescue">Cứu hộ</label><label><input id="layer-heatmap">Heatmap trạng thái trạm</label></fieldset>
   <button data-map-action="rescue">Cứu hộ</button><button id="btn-guest-rescue">Yêu cầu cứu hộ</button><div id="guestRescueModal"></div>`;
 const adminHtml = `<nav><div class="nav-item"><a data-tab="tab-rescue">Cứu hộ</a></div></nav>
   <div id="admin-tab-content"><div id="tab-rescue">Yêu cầu cứu hộ</div></div><div id="mobile-bottom-nav"></div>`;
@@ -32,7 +32,7 @@ for (const enabled of [false, true]) {
     await mount(page, 'map', enabled);
     await expect(page.locator('.layer-toggle-switch')).toHaveCount(enabled ? 1 : 0);
     await expect(page.locator('#layer-rescue')).toHaveCount(enabled ? 1 : 0);
-    await expect(page.locator('#layer-heatmap')).toHaveCount(enabled ? 1 : 0);
+    await expect(page.locator('#layer-heatmap')).toHaveCount(1);
     await expect(page.locator('[data-map-action="rescue"]')).toHaveCount(enabled ? 1 : 0);
     await expect(page.locator('#guestRescueModal')).toHaveCount(enabled ? 1 : 0);
   });

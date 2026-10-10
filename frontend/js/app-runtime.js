@@ -262,9 +262,10 @@
             window.__MAP_BUNDLE_LOADING__ = true;
             await loadScript('/assets/map-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.map;
+            window.themeManager?.updateToggleIcon();
             if (!window.rescueFeatureEnabled) {
                 root.querySelector('.layer-toggle-switch')?.remove();
-                root.querySelectorAll('#layer-rescue, #layer-heatmap').forEach(input => input.closest('label')?.remove());
+                root.querySelector('#layer-rescue')?.closest('label')?.remove();
                 root.querySelectorAll('[data-map-action="rescue"], #btn-guest-rescue, #guestRescueModal').forEach(element => element.remove());
             }
             window.__MAP_BUNDLE_LOADING__ = false;
@@ -272,6 +273,7 @@
         } else {
             await loadScript('/assets/admin-app.min.js?v=__BUILD_VERSION__');
             root.innerHTML = window.LegacyTemplates.admin;
+            window.themeManager?.updateToggleIcon();
             if (!window.rescueFeatureEnabled) {
                 root.querySelector('[data-tab="tab-rescue"]')?.closest('.nav-item')?.remove();
                 root.querySelector('#tab-rescue')?.remove();

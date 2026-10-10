@@ -52,12 +52,12 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     <label><input type="checkbox" id="layer-station" checked><span><i class="bi bi-broadcast-pin"></i> Trạm quan trắc</span></label>
                     <label><input type="checkbox" id="layer-cors" checked><span><i class="bi bi-crosshair"></i> Trạm CORS base</span></label>
                     <label><input type="checkbox" id="layer-rescue" checked><span><i class="bi bi-life-preserver"></i> Yêu cầu cứu hộ</span></label>
-                    <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Heatmap cứu hộ</span></label>
+                    <label><input type="checkbox" id="layer-heatmap"><span><i class="bi bi-fire"></i> Heatmap trạng thái trạm</span></label>
                 </fieldset>
             </div>
 
-            <button id="theme-toggle-btn" class="map-icon-button" aria-label="Chuyển giao diện sáng tối">
-                <i class="bi bi-moon-stars-fill"></i>
+            <button type="button" id="theme-toggle-btn" class="map-icon-button" aria-label="Chuyển giao diện tối" aria-pressed="false">
+                <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.6A8.6 8.6 0 0 1 8.4 3.8 8.6 8.6 0 1 0 20.2 15.6Z"/></svg><svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.6"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
             </button>
 
             <!-- Auth Button -->
@@ -151,8 +151,8 @@ window.LegacyTemplateParts['shell'] = String.raw`
     <!-- CUSTOM GLASS ZOOM CONTROLS (Bottom-Right) -->
     <div class="custom-map-controls">
         <div class="heatmap-toggle-wrap">
-            <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt Heatmap cứu hộ"
-                aria-label="Bật hoặc tắt heatmap cứu hộ">
+            <button class="heatmap-toggle-btn" id="heatmap-toggle" title="Bật/Tắt heatmap trạng thái trạm"
+                aria-label="Bật hoặc tắt heatmap trạng thái trạm" aria-pressed="false">
                 <i class="bi bi-fire"></i>
             </button>
         </div>

@@ -1,17 +1,11 @@
 /* Smooth theme switching */
-body.theme-switching,
-body.theme-switching * {
-    transition: none !important;
-}
-
-/* Re-enable transitions after switch */
-body:not(.theme-switching) {
+body {
     transition: background-color 0.3s ease,
                 color 0.3s ease;
 }
 
-body:not(.theme-switching) :where(
-    .card, .btn, .modal-content, .dropdown-menu, .top-navbar,
+body :where(
+    .card, .btn, .modal-content, .dropdown-menu, .top-navbar, .admin-navbar,
     .station-list-sidebar, .detail-sidebar, .sensor-item,
     input, select, textarea, button, a
 ) {
@@ -19,6 +13,36 @@ body:not(.theme-switching) :where(
                 color 0.3s ease,
                 border-color 0.3s ease,
                 box-shadow 0.3s ease;
+}
+
+/* Match the public header's moon-to-sun interaction on the map and dashboard. */
+#theme-toggle-btn {
+    position: relative;
+    overflow: hidden;
+}
+#theme-toggle-btn svg {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .22s ease;
+}
+#theme-toggle-btn .theme-moon { opacity: 1; transform: rotate(0) scale(1); }
+#theme-toggle-btn .theme-sun { opacity: 0; transform: rotate(-70deg) scale(.45); }
+[data-theme="dark"] #theme-toggle-btn .theme-moon { opacity: 0; transform: rotate(70deg) scale(.45); }
+[data-theme="dark"] #theme-toggle-btn .theme-sun { opacity: 1; transform: rotate(0) scale(1); }
+#theme-toggle-btn:active { transform: scale(.94); }
+
+@media (prefers-reduced-motion: reduce) {
+    #theme-toggle-btn svg,
+    body,
+    body :where(.card, .btn, .modal-content, .dropdown-menu, .top-navbar, .admin-navbar, .station-list-sidebar, .detail-sidebar, input, select, textarea, button, a) {
+        transition: none !important;
+    }
 }
 
 /* Prevent layout shift during transition */

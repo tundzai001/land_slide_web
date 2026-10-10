@@ -30,12 +30,6 @@ class ThemeManager {
     applyTheme(theme) {
         console.log('🎨 Switching to:', theme);
 
-        // Add transition class BEFORE changing theme
-        document.body.classList.add('theme-switching');
-
-        // Force layout calculation to ensure transition is applied
-        void document.body.offsetHeight;
-
         // Apply theme
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
@@ -44,12 +38,6 @@ class ThemeManager {
         // Update icons and favicon
         this.updateToggleIcon();
         this.updateFavicon();
-
-        // Remove transition class after completion (slightly longer for smoothness)
-        setTimeout(() => {
-            document.body.classList.remove('theme-switching');
-            console.log('✅ Theme applied:', theme);
-        }, 100);
 
         // Dispatch event
         window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme } }));
@@ -72,13 +60,6 @@ class ThemeManager {
         const newTheme = this.theme === 'dark' ? 'light' : 'dark';
         this.applyTheme(newTheme);
 
-        // Animate the button
-        if (this.toggleButton) {
-            this.toggleButton.style.transform = 'scale(0.9) rotate(180deg)';
-            setTimeout(() => {
-                this.toggleButton.style.transform = '';
-            }, 300);
-        }
     }
 
     createToggleButton() {
@@ -141,17 +122,21 @@ class ThemeManager {
         }
 
         // Update navbar toggle (#theme-toggle-btn)
-        const navToggle = this.navToggleButton || document.getElementById('theme-toggle-btn');
+        const navToggle = document.getElementById('theme-toggle-btn');
         if (navToggle) {
             const icon = navToggle.querySelector('i');
             if (icon) icon.className = iconClass;
+            navToggle.setAttribute('aria-label', this.theme === 'dark' ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối');
+            navToggle.setAttribute('aria-pressed', String(this.theme === 'dark'));
         }
 
         // Update admin mini toggle (.theme-toggle-mini)
-        const miniToggle = this.miniToggleButton || document.querySelector('.theme-toggle-mini');
+        const miniToggle = document.querySelector('.theme-toggle-mini');
         if (miniToggle) {
             const icon = miniToggle.querySelector('i');
             if (icon) icon.className = iconClass;
+            miniToggle.setAttribute('aria-label', this.theme === 'dark' ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối');
+            miniToggle.setAttribute('aria-pressed', String(this.theme === 'dark'));
         }
     }
 

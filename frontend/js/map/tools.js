@@ -223,24 +223,49 @@ window.exportStationPDF = async function () {
         window.toast?.error('Lỗi khi xuất PDF từ server. Thử phương án client-side...');
     });
 };
-// --- FEATURE 5: RESCUE HEATMAP LAYER ---
-let rescueHeatLayer = null;
+// --- FEATURE 5: STATION RISK HEATMAP LAYER ---
+let stationHeatLayer = null;
 let heatmapVisible = false;
+let heatmapLoading = false;
 
 function buildHeatmapData() {
-    return (rescueRequestsData || [])
-        .filter(request => Number.isFinite(Number(request.latitude)) && Number.isFinite(Number(request.longitude)))
-        .map(request => [Number(request.latitude), Number(request.longitude), 0.8]);
+    return allStations
+        .filter(station => hasValidLatLon(station.location))
+        .filter(station => !['OFFLINE', 'STALE'].includes(normalizeRiskLevel(station.risk_level, station.status)))
+        .map(station => {
+            const risk = normalizeRiskLevel(station.risk_level, station.status);
+            return [Number(station.location.lat), Number(station.location.lon), risk === 'CRITICAL' ? 1 : risk === 'MEDIUM' ? 0.65 : 0.2];
+        });
+}
+
+function refreshHeatmapData() {
+    if (heatmapVisible && stationHeatLayer) stationHeatLayer.setLatLngs(buildHeatmapData());
 }
 
 async function toggleHeatmap() {
     const btn = document.getElementById('heatmap-toggle');
-    if (!map) return;
+    const checkbox = document.getElementById('layer-heatmap');
+    if (!map || heatmapLoading) return;
+    if (!heatmapVisible && !buildHeatmapData().length) {
+        if (checkbox) checkbox.checked = false;
+        window.toast?.info('Chưa có trạm quan trắc có vị trí và dữ liệu trạng thái để hiển thị heatmap.');
+        return;
+    }
     if (!heatmapVisible && typeof L.heatLayer === 'undefined') {
+        heatmapLoading = true;
+        if (btn) btn.disabled = true;
         try { await window.loadFeatureLibrary?.('heat'); }
-        catch (_) { window.toast?.error('Không thể tải lớp heatmap.'); return; }
+        catch (_) {
+            if (checkbox) checkbox.checked = false;
+            window.toast?.error('Không thể tải lớp heatmap.');
+            return;
+        } finally {
+            heatmapLoading = false;
+            if (btn) btn.disabled = false;
+        }
     }
     if (typeof L.heatLayer === 'undefined') {
+        if (checkbox) checkbox.checked = heatmapVisible;
         window.toast?.error('Plugin heatmap chưa sẵn sàng.');
         return;
     }
@@ -251,28 +276,27 @@ async function toggleHeatmap() {
         const data = buildHeatmapData();
         if (!data.length) {
             heatmapVisible = false;
-            const checkbox = document.getElementById('layer-heatmap');
             if (checkbox) checkbox.checked = false;
             setMapState({ layers: { heatmap: false } });
-            window.toast?.info('Chưa có yêu cầu cứu hộ có tọa độ để hiển thị heatmap.');
+            window.toast?.info('Chưa có trạm quan trắc có vị trí và dữ liệu trạng thái để hiển thị heatmap.');
             return;
         }
-        rescueHeatLayer = L.heatLayer(data, {
-            radius: 30, blur: 20, maxZoom: 14,
+        stationHeatLayer = L.heatLayer(data, {
+            radius: 35, blur: 18, maxZoom: 7, minOpacity: 0.25,
             gradient: { 0.2: '#2196f3', 0.4: '#4caf50', 0.6: '#ffeb3b', 0.8: '#ff9800', 1: '#f44336' }
-        }).addTo(window.map);
+        }).addTo(map);
         btn?.classList.add('active');
-        const checkbox = document.getElementById('layer-heatmap');
+        btn?.setAttribute('aria-pressed', 'true');
         if (checkbox) checkbox.checked = true;
         setMapState({ layers: { heatmap: true } });
         window.toast?.info('Heatmap đã bật');
     } else {
-        if (rescueHeatLayer && window.map) {
-            window.map.removeLayer(rescueHeatLayer);
-            rescueHeatLayer = null;
+        if (stationHeatLayer) {
+            map.removeLayer(stationHeatLayer);
+            stationHeatLayer = null;
         }
         btn?.classList.remove('active');
-        const checkbox = document.getElementById('layer-heatmap');
+        btn?.setAttribute('aria-pressed', 'false');
         if (checkbox) checkbox.checked = false;
         setMapState({ layers: { heatmap: false } });
         window.toast?.info('Heatmap đã tắt');

@@ -425,6 +425,7 @@ async function loadStations() {
             return;
         }
         allStations = stations;
+        refreshHeatmapData();
 
         const validStationIds = new Set(stations.filter(station => hasValidLatLon(station.location)).map(station => String(station.id)));
         Object.entries(markers).forEach(([id, marker]) => {
