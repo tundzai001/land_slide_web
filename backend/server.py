@@ -7,6 +7,13 @@ import uvicorn
 from app.config import settings
 
 if __name__ == "__main__":
+    try:
+        settings.validate_security()
+    except RuntimeError as exc:
+        raise SystemExit(
+            f"Startup configuration error: {exc}\n"
+            "Set production secrets in backend/.env, then restart the server."
+        ) from None
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

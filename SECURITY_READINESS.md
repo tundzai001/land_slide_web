@@ -29,6 +29,8 @@ Store CI results, dependency scan output, review approvals, deployment configura
 
 Provision a random `SECRET_KEY` of at least 32 bytes, unique `MQTT_PASSWORD`, exact `CORS_ORIGINS` and `PUBLIC_SITE_URL`, TLS at the edge, protected backups, least-privilege database accounts and monitoring. Serve the public site and API from the configured origins. Set `PUBLIC_MONITORING_ENABLED=true` only after classifying the underlying project/station data for public release. Rotate credentials previously exposed in source history. Validate proxy, HTTPS, HSTS, cookie delivery, logout, WebSocket revocation and CSRF behavior in the deployed environment.
 
+For the Windows `python server.py` deployment, run `python -c "import secrets; print(secrets.token_urlsafe(48))"` once and copy the output into `C:\inetpub\wwwroot\land_slide_web\backend\.env` as `SECRET_KEY=<generated value>`. Keep this value private and stable across restarts and application instances; replacing it ends existing sessions. Set `MQTT_PASSWORD` to the actual non-sample broker credential as well. The `.env` file is ignored by Git. Do not use `ENVIRONMENT=development` to bypass production checks.
+
 The browser migration requires a coordinated frontend/backend rollout. Deploy the backend first, then the frontend assets; cached older browser code may require a reload and users will sign in again. Existing explicit bearer API clients continue to work. Keep the previous deployment and database backup available for rollback; no schema migration is required by these controls.
 
 ## ISO 27001 / ISO 9001 evidence still required
