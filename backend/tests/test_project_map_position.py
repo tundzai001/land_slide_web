@@ -183,7 +183,7 @@ class ProjectMapPositionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(added_slope.status_code, 200, added_slope.text)
                 self.assertNotEqual(added_slope.json()["dem_id"], dem_id)
                 async with self.sessions() as db:
-                    catalog = await db.get(GlobalConfig, "project_dem:1")
+                    catalog = await db.scalar(select(GlobalConfig).where(GlobalConfig.key == "project_dem:1"))
                     self.assertEqual([item["name"] for item in catalog.value["models"]], ["Thân đập", "Bờ mỏ"])
 
                 models = await self.client.get("/api/projects/1/dems", headers=self.headers("operator"))

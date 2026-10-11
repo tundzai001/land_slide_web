@@ -14,7 +14,7 @@ def _key(project_id: int) -> str:
 
 
 async def get_project_dem_models(db: AsyncSession, project_id: int) -> list[dict]:
-    row = await db.get(GlobalConfig, _key(project_id))
+    row = await db.scalar(select(GlobalConfig).where(GlobalConfig.key == _key(project_id)))
     if row is None:
         return list_project_dems(project_id)  # One-time compatibility for existing file manifests.
     value = row.value if isinstance(row.value, dict) else {}
@@ -41,7 +41,7 @@ async def get_project_dem_summaries(db: AsyncSession, project_ids: list[int]) ->
 
 async def save_project_dem_catalog(db: AsyncSession, project_id: int, models: list[dict], updated_by: str | None = None) -> None:
     key = _key(project_id)
-    row = await db.get(GlobalConfig, key)
+    row = await db.scalar(select(GlobalConfig).where(GlobalConfig.key == key))
     if row is None:
         row = GlobalConfig(key=key, value={"models": models}, updated_at=int(time.time()), updated_by=updated_by)
         db.add(row)
@@ -52,6 +52,6 @@ async def save_project_dem_catalog(db: AsyncSession, project_id: int, models: li
 
 
 async def delete_project_dem_catalog(db: AsyncSession, project_id: int) -> None:
-    row = await db.get(GlobalConfig, _key(project_id))
+    row = await db.scalar(select(GlobalConfig).where(GlobalConfig.key == _key(project_id)))
     if row is not None:
         await db.delete(row)
