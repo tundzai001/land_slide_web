@@ -557,14 +557,21 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
     const response = await window.authManager.apiFetch(safeUrl, { cache: 'no-store' });
     if (!response?.ok) {
         let detail = '';
+        let data = null;
         try {
-            const data = await response.json();
-            detail = data?.detail || data?.message || '';
+            data = await response.json();
+            const value = data?.detail || data?.message || '';
+            detail = typeof value === 'string' ? value : JSON.stringify(value);
         } catch (_) {
             try {
                 detail = await response.text();
             } catch (_) {}
         }
+        const phase = data?.phase_label || response.headers?.get('X-Operation-Phase');
+        const phaseCode = data?.phase && data.phase !== phase ? ` (${data.phase})` : '';
+        const requestId = data?.request_id || response.headers?.get('X-Request-ID');
+        if (phase) detail += `${detail ? ' · ' : ''}Giai đoạn: ${phase}${phaseCode}`;
+        if (requestId) detail += `${detail ? ' · ' : ''}Mã yêu cầu: ${requestId}`;
         const errorMsg = detail ? `HTTP ${response?.status || 0}: ${detail}` : `Download HTTP ${response?.status || 0}`;
         console.error(`[Download] Thất bại khi tải file từ ${safeUrl}:`, errorMsg, response);
         throw new Error(errorMsg);

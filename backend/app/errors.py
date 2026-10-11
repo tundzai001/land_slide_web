@@ -7,6 +7,22 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
+OPERATION_PHASE_LABELS = {
+    "dependencies": "Kết nối hoặc xác thực dịch vụ",
+    "validate_report": "Kiểm tra yêu cầu tải báo cáo",
+    "resolve_project": "Tra cứu dự án",
+    "list_projects": "Tra cứu danh sách dự án",
+    "authorize_project": "Kiểm tra quyền truy cập dự án",
+    "lookup_indexed_adjustment": "Tìm bản ghi bình sai",
+    "lookup_legacy_adjustment": "Tìm bản ghi bình sai cũ",
+    "load_adjustment_evidence": "Tải trị đo thô",
+    "render_xlsx": "Dựng file Excel",
+    "serialize_json": "Chuẩn bị file JSON",
+}
+
+
+def operation_phase_label(phase: str) -> str:
+    return OPERATION_PHASE_LABELS.get(phase, "Xử lý yêu cầu")
 
 
 def install_error_handlers(app: FastAPI):
@@ -25,7 +41,25 @@ def install_error_handlers(app: FastAPI):
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception):
-        logger.error("Unhandled API failure at %s: %s", request.url.path,
-                     exc.__class__.__name__)
-        return JSONResponse({"detail": "The request could not be completed."},
-                            status_code=500, headers={"Cache-Control": "no-store"})
+        phase = getattr(request.state, "operation_phase", "dependencies")
+        request_id = getattr(request.state, "request_id", "unknown")
+        logger.error(
+            "Unhandled API failure request_id=%s method=%s path=%s phase=%s (%s) error=%s",
+            request_id,
+            request.method,
+            request.url.path,
+            phase,
+            operation_phase_label(phase),
+            exc.__class__.__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return JSONResponse(
+            {
+                "detail": "The request could not be completed.",
+                "phase": phase,
+                "phase_label": operation_phase_label(phase),
+                "request_id": request_id,
+            },
+            status_code=500,
+            headers={"Cache-Control": "no-store"},
+        )

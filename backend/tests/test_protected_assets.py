@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from starlette.responses import Response
+from starlette.requests import Request
 from unittest.mock import patch
 
 from app.features.data_export.reports.adjustment import router as gnss_adjustment_reports
@@ -47,6 +48,10 @@ class _DataSession:
         return _DataResult(self.records)
 
 
+def _request():
+    return Request({"type": "http", "method": "GET", "path": "/test", "headers": []})
+
+
 class ProtectedAssetTests(unittest.TestCase):
     def test_report_download_is_project_scoped_and_rejects_unsafe_names(self):
         user = SimpleNamespace(role="admin")
@@ -61,7 +66,7 @@ class ProtectedAssetTests(unittest.TestCase):
         }
         response = asyncio.run(
             gnss_adjustment_reports.download_gnss_adjustment_report(
-                17, report_name, db, user, _DataSession([SimpleNamespace(
+                _request(), 17, report_name, db, user, _DataSession([SimpleNamespace(
                     data=payload,
                     adjustment_project_id=17,
                     adjustment_key="run:17:0:1",
@@ -84,7 +89,7 @@ class ProtectedAssetTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(
                     gnss_adjustment_reports.download_gnss_adjustment_report(
-                        17, invalid_name, db, user
+                        _request(), 17, invalid_name, db, user
                     )
                 )
             self.assertEqual(raised.exception.status_code, 404)
@@ -95,7 +100,7 @@ class ProtectedAssetTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             asyncio.run(
                 gnss_adjustment_reports.download_gnss_adjustment_report(
-                    17, "gnss_adjustment_17_1700000000.json", db, user
+                    _request(), 17, "gnss_adjustment_17_1700000000.json", db, user
                 )
             )
         self.assertEqual(raised.exception.status_code, 403)
@@ -121,6 +126,7 @@ class ProtectedAssetTests(unittest.TestCase):
         )
         response = asyncio.run(
             gnss_adjustment_reports.download_gnss_adjustment_report(
+                _request(),
                 17,
                 report_name,
                 _ProjectSession(SimpleNamespace(id=17)),

@@ -2,8 +2,12 @@
 
 from pathlib import Path
 import re
+import logging
+import time
+from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +20,7 @@ from .artifacts import artifact_slug
 from .render import find_adjustment, json_response, missing_export, xlsx_response
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 ADJUSTMENT_REPORT_NAME = re.compile(
     r"^gnss_(?:binh_sai|adjustment)_(?P<project_id>[1-9][0-9]*)_"
     r"(?P<timestamp>[1-9][0-9]*)\.(?P<extension>xlsx|json)$"
@@ -25,7 +30,6 @@ ADJUSTMENT_REPORT_NAME = re.compile(
 async def _project_or_404(
     db: AsyncSession,
     project_id: int,
-    current_user: model_auth.User,
 ):
     project = (
         await db.execute(
@@ -34,8 +38,44 @@ async def _project_or_404(
     ).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=404, detail="Adjustment report not found")
-    check_operator_project_access(current_user, project_id)
     return project
+
+
+async def _observe_phase(
+    request: Request,
+    phase: str,
+    operation: Callable[[], Awaitable[object]],
+    **context,
+):
+    request.state.operation_phase = phase
+    request_id = getattr(request.state, "request_id", "unknown")
+    started = time.perf_counter()
+    logger.info(
+        "GNSS export phase started request_id=%s phase=%s context=%s",
+        request_id,
+        phase,
+        context,
+    )
+    try:
+        result = await operation()
+    except Exception:
+        logger.exception(
+            "GNSS export phase failed request_id=%s phase=%s context=%s elapsed_ms=%.1f",
+            request_id,
+            phase,
+            context,
+            (time.perf_counter() - started) * 1000,
+        )
+        raise
+    logger.info(
+        "GNSS export phase completed request_id=%s phase=%s context=%s bytes=%s elapsed_ms=%.1f",
+        request_id,
+        phase,
+        context,
+        len(result.body) if isinstance(getattr(result, "body", None), bytes) else "n/a",
+        (time.perf_counter() - started) * 1000,
+    )
+    return result
 
 
 async def _download(
@@ -44,6 +84,7 @@ async def _download(
     filename: str,
     requested_url: str,
     data_db: AsyncSession,
+    request: Request,
 ):
     match = re.search(r"\.(xlsx|json)$", filename, re.IGNORECASE)
     if not match:
@@ -52,22 +93,39 @@ async def _download(
         data_db,
         project_id=project_id,
         requested_url=requested_url,
+        request_id=getattr(request.state, "request_id", "unknown"),
+        mark_phase=lambda phase: setattr(request.state, "operation_phase", phase),
     )
     if found is None:
         raise missing_export(f".{match.group(1).lower()}")
     _record, payload, evidence = found
     if match.group(1).lower() == "json":
+        request.state.operation_phase = "serialize_json"
         return json_response(payload, filename)
-    return xlsx_response(
-        payload,
-        evidence,
+    baseline_observations = payload.get("baseline_observations") or []
+    points = payload.get("points") or {}
+    return await _observe_phase(
+        request,
+        "render_xlsx",
+        lambda: run_in_threadpool(
+            xlsx_response,
+            payload,
+            evidence,
+            project_id=project_id,
+            filename=filename,
+        ),
         project_id=project_id,
         filename=filename,
+        status=payload.get("status", "unknown"),
+        evidence_count=len(evidence),
+        baseline_observation_count=len(baseline_observations),
+        point_count=len(points),
     )
 
 
 @router.get("/api/admin/gnss/adjustment/reports/{project_id}/{filename}")
 async def download_gnss_adjustment_report(
+    request: Request,
     project_id: int,
     filename: str,
     db: AsyncSession = Depends(get_config_db),
@@ -80,17 +138,27 @@ async def download_gnss_adjustment_report(
     match = ADJUSTMENT_REPORT_NAME.fullmatch(filename)
     if not match or int(match.group("project_id")) != project_id:
         raise HTTPException(status_code=404, detail="Adjustment report not found")
-    await _project_or_404(db, project_id, current_user)
+    request.state.operation_phase = "validate_report"
+    await _observe_phase(
+        request,
+        "resolve_project",
+        lambda: _project_or_404(db, project_id),
+        project_id=project_id,
+    )
+    request.state.operation_phase = "authorize_project"
+    check_operator_project_access(current_user, project_id)
     return await _download(
         project_id=project_id,
         filename=filename,
         requested_url=f"/api/admin/gnss/adjustment/reports/{project_id}/{filename}",
         data_db=data_db,
+        request=request,
     )
 
 
 @router.get("/api/admin/gnss/adjustment/reports/{project_code}/{cluster_name}/{path:path}")
 async def download_scoped_gnss_adjustment_report(
+    request: Request,
     project_code: str,
     cluster_name: str,
     path: str,
@@ -113,7 +181,12 @@ async def download_scoped_gnss_adjustment_report(
     ):
         raise HTTPException(status_code=404, detail="Adjustment report not found")
 
-    projects = (await db.execute(select(model_config.Project))).scalars().all()
+    projects = await _observe_phase(
+        request,
+        "list_projects",
+        lambda: _list_projects(db),
+        project_code=project_code,
+    )
     project = next(
         (
             item
@@ -124,6 +197,7 @@ async def download_scoped_gnss_adjustment_report(
     )
     if project is None:
         raise HTTPException(status_code=404, detail="Adjustment report not found")
+    request.state.operation_phase = "authorize_project"
     check_operator_project_access(current_user, int(project.id))
     return await _download(
         project_id=int(project.id),
@@ -133,4 +207,9 @@ async def download_scoped_gnss_adjustment_report(
             f"{project_code}/{cluster_name}/{path}"
         ),
         data_db=data_db,
+        request=request,
     )
+
+
+async def _list_projects(db: AsyncSession):
+    return (await db.execute(select(model_config.Project))).scalars().all()

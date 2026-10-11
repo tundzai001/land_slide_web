@@ -243,6 +243,80 @@ test('sensor pages load lightweight rows and GNSS details open as a downloadable
   await expect.poll(() => page.evaluate(() => window.downloadedAdjustmentUrl)).toBe('/api/admin/gnss/adjustment/reports/2/result.json');
 });
 
+test('adjustment XLSX download shows progress then exposes the failed server phase', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.addScriptTag({ content: source('frontend/js/toast-notifications.js') });
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+  await page.evaluate(() => {
+    window.dbManager = Object.create(DatabaseManager.prototype);
+    window.dbManager.selectedRecord = {
+      id: 77,
+      data: { excel_report_url: '/api/admin/gnss/adjustment/reports/2/result.xlsx' },
+    };
+    let rejectDownload;
+    window.pendingAdjustmentDownload = new Promise((_, reject) => { rejectDownload = reject; });
+    window.failAdjustmentDownload = () => rejectDownload(new Error(
+      'HTTP 503: timeout · Giai đoạn: Dựng file Excel (render_xlsx) · Mã yêu cầu: request-123'
+    ));
+    window.downloadAuthenticatedFile = () => window.pendingAdjustmentDownload;
+    void window.dbManager.downloadAdjustmentArtifact('xlsx');
+  });
+
+  const progress = page.locator('#toast-notification-container [role="status"]');
+  await expect(progress).toContainText('Đang dựng file Excel');
+  await page.evaluate(() => window.failAdjustmentDownload());
+  const error = page.locator('#toast-notification-container [role="alert"]');
+  await expect(error).toContainText('Dựng file Excel');
+  await expect(error).toContainText('request-123');
+});
+
+test('protected download errors include the backend phase and request ID', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.evaluate(() => {
+    window.authSession = { getToken: () => null };
+    Object.defineProperty(window, 'sessionStorage', {
+      value: { getItem: () => null, setItem() {}, removeItem() {} },
+    });
+  });
+  await page.addScriptTag({ content: source('frontend/js/auth.js') });
+  await page.evaluate(() => {
+    window.authManager.apiFetch = async () => new Response(JSON.stringify({
+      detail: 'A required backend service timed out; retry shortly.',
+      phase: 'lookup_indexed_adjustment',
+      phase_label: 'Tìm bản ghi bình sai',
+      request_id: 'request-456',
+    }), { status: 503, headers: { 'X-Request-ID': 'request-456', 'X-Operation-Phase': 'lookup_indexed_adjustment' } });
+    return window.downloadAuthenticatedFile('/api/admin/gnss/adjustment/reports/2/result.xlsx')
+      .catch(error => { window.downloadFailureMessage = error.message; });
+  });
+
+  await expect.poll(() => page.evaluate(() => window.downloadFailureMessage)).toContain('Tìm bản ghi bình sai');
+  await expect.poll(() => page.evaluate(() => window.downloadFailureMessage)).toContain('request-456');
+});
+
+test('adjustment XLSX progress popup clears after download completes', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.addScriptTag({ content: source('frontend/js/toast-notifications.js') });
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+  await page.evaluate(() => {
+    window.dbManager = Object.create(DatabaseManager.prototype);
+    window.dbManager.selectedRecord = {
+      id: 77,
+      data: { excel_report_url: '/api/admin/gnss/adjustment/reports/2/result.xlsx' },
+    };
+    let resolveDownload;
+    window.pendingAdjustmentDownload = new Promise(resolve => { resolveDownload = resolve; });
+    window.completeAdjustmentDownload = () => resolveDownload();
+    window.downloadAuthenticatedFile = () => window.pendingAdjustmentDownload;
+    void window.dbManager.downloadAdjustmentArtifact('xlsx');
+  });
+
+  await expect(page.locator('#toast-notification-container [role="status"]')).toContainText('Đang dựng file Excel');
+  await page.evaluate(() => window.completeAdjustmentDownload());
+  await expect(page.locator('#toast-notification-container')).toContainText('Đã tạo file XLSX');
+  await expect(page.locator('#toast-notification-container')).not.toContainText('Đang dựng file Excel');
+});
+
 test('dark theme applies one semantic surface across the data workspace', async ({ page }) => {
   await mountManagement(page);
   await page.evaluate(() => {

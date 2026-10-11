@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from io import BytesIO
-from typing import Iterable
+from typing import Callable, Iterable
 from fastapi import HTTPException
 from fastapi.responses import Response
 from sqlalchemy import or_, select
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .....models import data as model_data
@@ -103,29 +105,64 @@ async def find_adjustment(
     *,
     project_id: int,
     requested_url: str,
+    request_id: str = "unknown",
+    mark_phase: Callable[[str], None] | None = None,
 ) -> tuple[object, dict, list[object]] | None:
+    def mark(phase: str) -> None:
+        if mark_phase:
+            mark_phase(phase)
+
+    async def execute(phase: str, statement):
+        mark(phase)
+        started = time.perf_counter()
+        logger.info(
+            "GNSS export phase started request_id=%s phase=%s project_id=%s",
+            request_id,
+            phase,
+            project_id,
+        )
+        try:
+            result = await data_db.execute(statement)
+            rows = result.scalars().all()
+        except Exception:
+            logger.exception(
+                "GNSS export phase failed request_id=%s phase=%s project_id=%s elapsed_ms=%.1f",
+                request_id,
+                phase,
+                project_id,
+                (time.perf_counter() - started) * 1000,
+            )
+            raise
+        logger.info(
+            "GNSS export phase completed request_id=%s phase=%s project_id=%s rows=%d elapsed_ms=%.1f",
+            request_id,
+            phase,
+            project_id,
+            len(rows),
+            (time.perf_counter() - started) * 1000,
+        )
+        return rows
+
     query = select(model_data.SensorData).where(
         model_data.SensorData.sensor_type.in_(ADJUSTMENT_SENSOR_TYPES),
         _report_url_filter(requested_url),
     )
-    records = (
-        await data_db.execute(
-            query.where(
-                model_data.SensorData.adjustment_project_id == project_id,
-                model_data.SensorData.adjustment_key.is_not(None),
-            ).limit(1)
-        )
-    ).scalars().all()
+    records = await execute(
+        "lookup_indexed_adjustment",
+        query.where(
+            model_data.SensorData.adjustment_project_id == project_id,
+            model_data.SensorData.adjustment_key.is_not(None),
+        ).limit(1),
+    )
     if not records:
         # Keep compatibility with pre-indexed rows whose project id lives only
         # in the JSON payload. This is a fallback; current rows use the index.
-        records = (
-            await data_db.execute(
-                query.where(model_data.SensorData.adjustment_project_id.is_(None))
-                .order_by(model_data.SensorData.timestamp.desc())
-                .limit(1)
-            )
-        ).scalars().all()
+        records = await execute(
+            "lookup_legacy_adjustment",
+            query.where(model_data.SensorData.adjustment_project_id.is_(None))
+            .order_by(model_data.SensorData.timestamp.desc())
+            .limit(1),
+        )
     for record in records:
         payload = record.data if isinstance(record.data, dict) else None
         if not payload or not matches_payload(payload, record, requested_url, project_id):
@@ -134,18 +171,32 @@ async def find_adjustment(
         key = str(getattr(record, "adjustment_key", None) or payload.get("adjustment_key") or "")
         if key:
             try:
-                evidence = (
-                    await data_db.execute(
-                        select(model_data.GnssAdjustmentEvidence)
-                        .where(model_data.GnssAdjustmentEvidence.adjustment_key == key)
-                        .order_by(model_data.GnssAdjustmentEvidence.source_index.asc())
-                    )
-                ).scalars().all()
+                evidence = await execute(
+                    "load_adjustment_evidence",
+                    select(model_data.GnssAdjustmentEvidence)
+                    .where(model_data.GnssAdjustmentEvidence.adjustment_key == key)
+                    .order_by(model_data.GnssAdjustmentEvidence.source_index.asc()),
+                )
+            except (TimeoutError, SQLAlchemyTimeoutError):
+                raise
             except Exception:
                 # Old deployments have no evidence table yet; old rows still
                 # contain baseline_observations and remain downloadable.
-                logger.info("GNSS evidence table unavailable during export", exc_info=True)
+                mark("load_adjustment_evidence")
+                logger.warning(
+                    "GNSS export evidence unavailable; using stored payload request_id=%s project_id=%s adjustment_key=%s",
+                    request_id,
+                    project_id,
+                    key,
+                    exc_info=True,
+                )
         return record, payload, evidence
+    logger.info(
+        "GNSS export record not found request_id=%s project_id=%s requested_url=%s",
+        request_id,
+        project_id,
+        _url_path(requested_url),
+    )
     return None
 
 

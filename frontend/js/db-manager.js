@@ -565,16 +565,24 @@ class DatabaseManager {
                 console.info(`[DB Manager] Chuyển URL cũ → ${downloadUrl}`);
             }
         }
+        let progressToast = null;
         try {
+            const progressMessage = format === 'xlsx'
+                ? '<span class="spinner-border spinner-border-sm" style="margin-right:.5rem" aria-hidden="true"></span><strong>Đang dựng file Excel…</strong><br><small>Đang tra cứu dữ liệu và tạo báo cáo. Quá trình có thể mất một chút thời gian.</small>'
+                : '<span class="spinner-border spinner-border-sm" style="margin-right:.5rem" aria-hidden="true"></span><strong>Đang chuẩn bị file JSON…</strong>';
+            progressToast = window.toast?.info?.(progressMessage, 0);
             if (button instanceof HTMLButtonElement) {
                 button.disabled = true;
-                button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải…';
+                button.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${format === 'xlsx' ? 'Đang dựng…' : 'Đang tải…'}`;
             }
             await window.downloadAuthenticatedFile(downloadUrl, downloadUrl.split('/').pop());
+            if (progressToast) window.toast?.dismiss?.(progressToast);
+            window.toast?.success?.(`Đã tạo file ${format.toUpperCase()}, trình duyệt đang tải xuống.`, 4000);
         } catch (error) {
             console.error(`[DB Manager] Lỗi khi tải file ${format.toUpperCase()} (${url}):`, error);
-            const reason = error?.message ? `: ${error.message}` : '';
-            window.toast?.error?.(`Không tải được file ${format.toUpperCase()}${reason}`);
+            if (progressToast) window.toast?.dismiss?.(progressToast);
+            const reason = error?.message ? `: ${this.escapeHtml(error.message)}` : '';
+            window.toast?.error?.(`Không tải được file ${format.toUpperCase()}${reason}`, 10000);
         } finally {
             if (button instanceof HTMLButtonElement) {
                 button.disabled = false;

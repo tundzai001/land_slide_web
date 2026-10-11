@@ -10,6 +10,8 @@ class CharsetMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         started_at = time.perf_counter()
         request_id = uuid.uuid4().hex
+        request.state.request_id = request_id
+        request.state.operation_phase = "dependencies"
         response = await call_next(request)
         content_type = response.headers.get("content-type", "")
         textual = (

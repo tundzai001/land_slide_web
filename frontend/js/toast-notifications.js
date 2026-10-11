@@ -79,6 +79,10 @@ class ToastNotification {
         const textColor = config.text || '#ffffff';
 
         toast.className = 'toast-notification';
+        const isError = type === 'error' || type === 'danger';
+        toast.setAttribute('role', isError ? 'alert' : 'status');
+        toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
+        toast.setAttribute('aria-atomic', 'true');
         toast.style.cssText = `
             background: ${config.bg};
             color: ${textColor};
@@ -105,7 +109,7 @@ class ToastNotification {
         toast.innerHTML = `
             <i class="bi ${icons[type]}" style="font-size: 1.25rem; color: ${config.iconColor}; margin-top: 2px;"></i>
             <div style="flex: 1;">${message}</div>
-            <button style="background:none; border:none; color:white; opacity:0.7; cursor:pointer; padding:0;">
+            <button type="button" aria-label="Đóng thông báo" style="background:none; border:none; color:white; opacity:0.7; cursor:pointer; padding:0;">
                 <i class="bi bi-x-lg"></i>
             </button>
         `;

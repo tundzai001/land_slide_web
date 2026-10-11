@@ -82,6 +82,38 @@ class GnssAdjustmentReportLookupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ORDER BY sensor_data.timestamp DESC", fallback)
         self.assertIn("LIMIT", fallback)
 
+    async def test_evidence_query_timeout_is_not_swallowed_and_keeps_its_phase(self):
+        url = "/api/admin/gnss/adjustment/reports/project/dap/gnss_adjustment.xlsx"
+        self.db.add(model_data.SensorData(
+            id=1,
+            station_id=5,
+            timestamp=100,
+            sensor_type="gnss_adjusted",
+            adjustment_key="run:17:4:1",
+            adjustment_project_id=17,
+            data={"project_id": 17, "excel_report_url": url},
+        ))
+        self.db.commit()
+
+        class TimeoutOnEvidence(_AsyncSessionAdapter):
+            async def execute(inner_self, statement):
+                if len(inner_self.statements) == 1:
+                    inner_self.statements.append(statement)
+                    raise TimeoutError("evidence query timed out")
+                return await super(TimeoutOnEvidence, inner_self).execute(statement)
+
+        phases = []
+        with self.assertRaisesRegex(TimeoutError, "evidence query timed out"):
+            await find_adjustment(
+                TimeoutOnEvidence(self.db),
+                project_id=17,
+                requested_url=url,
+                request_id="request-test",
+                mark_phase=phases.append,
+            )
+
+        self.assertEqual(phases, ["lookup_indexed_adjustment", "load_adjustment_evidence"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,7 +40,7 @@ from .logging_config import (
     install_heartbeat_filter,
 )
 from .middleware import CharsetMiddleware, VersionedAssetCacheMiddleware
-from .errors import install_error_handlers
+from .errors import install_error_handlers, operation_phase_label
 
 configure_system_logging()
 disable_windows_quick_edit_mode()
@@ -316,17 +316,32 @@ install_error_handlers(app)
 
 @app.exception_handler(TimeoutError)
 @app.exception_handler(SQLAlchemyTimeoutError)
-async def timeout_exception_handler(_request: Request, exc: Exception):
+async def timeout_exception_handler(request: Request, exc: Exception):
     """Return a bounded outage response instead of an ASGI traceback storm."""
 
-    logger.warning("Request dependency timed out: %s", exc.__class__.__name__)
+    phase = getattr(request.state, "operation_phase", "dependencies")
+    request_id = getattr(request.state, "request_id", "unknown")
+    phase_label = operation_phase_label(phase)
+    logger.warning(
+        "Request timed out request_id=%s method=%s path=%s phase=%s (%s) error=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        phase,
+        phase_label,
+        exc.__class__.__name__,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
     return JSONResponse(
         status_code=503,
         content={
             "detail": "A required backend service timed out; retry shortly.",
             "retryable": True,
+            "phase": phase,
+            "phase_label": phase_label,
+            "request_id": request_id,
         },
-        headers={"Retry-After": "5"},
+        headers={"Retry-After": "5", "X-Operation-Phase": phase},
     )
 
 # Add Security Middleware FIRST (Before CORS or Routing)
@@ -339,7 +354,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[
-        "ETag", "Server-Timing", "X-Request-ID",
+        "ETag", "Server-Timing", "X-Request-ID", "X-Operation-Phase",
         "X-Total-Count", "X-Offset", "X-Limit", "X-Has-More",
     ],
 )

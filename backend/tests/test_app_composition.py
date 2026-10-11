@@ -3,8 +3,9 @@ from collections import Counter
 
 from starlette.requests import Request
 from starlette.responses import Response
+import json
 
-from app.main import app
+from app.main import app, timeout_exception_handler
 from app.middleware import CharsetMiddleware, VersionedAssetCacheMiddleware
 from app.features.rescue import storage as rescue_storage
 
@@ -126,6 +127,21 @@ def test_charset_is_added_only_once():
 
     response = asyncio.run(middleware.dispatch(_request("/api/health"), call_next))
     assert response.headers["content-type"].lower().count("charset=") == 1
+
+
+def test_timeout_response_identifies_the_operation_phase_and_request():
+    request = _request("/api/admin/gnss/adjustment/reports/project/cluster/result.xlsx")
+    request.state.operation_phase = "render_xlsx"
+    request.state.request_id = "request-test"
+
+    response = asyncio.run(timeout_exception_handler(request, TimeoutError("timed out")))
+
+    payload = json.loads(response.body)
+    assert response.status_code == 503
+    assert payload["phase"] == "render_xlsx"
+    assert payload["phase_label"] == "Dựng file Excel"
+    assert payload["request_id"] == "request-test"
+    assert response.headers["x-operation-phase"] == "render_xlsx"
 
 
 def test_rescue_metadata_round_trip_and_path_guard():
