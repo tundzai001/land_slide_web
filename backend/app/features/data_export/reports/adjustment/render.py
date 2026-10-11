@@ -83,6 +83,21 @@ def matches_payload(
     return int(project_id) in project_ids
 
 
+def _report_url_filter(requested_url: str):
+    requested = _url_path(requested_url)
+    url_filters = []
+    for key in ("audit_json_url", "excel_report_url", "report_file_url"):
+        value = model_data.SensorData.data[key].as_string()
+        url_filters.append(
+            or_(
+                value == requested,
+                value.startswith(f"{requested}?", autoescape=True),
+                value.startswith(f"{requested}/", autoescape=True),
+            )
+        )
+    return or_(*url_filters)
+
+
 async def find_adjustment(
     data_db: AsyncSession,
     *,
@@ -91,14 +106,26 @@ async def find_adjustment(
 ) -> tuple[object, dict, list[object]] | None:
     query = select(model_data.SensorData).where(
         model_data.SensorData.sensor_type.in_(ADJUSTMENT_SENSOR_TYPES),
-        or_(
-            model_data.SensorData.adjustment_project_id == project_id,
-            model_data.SensorData.adjustment_project_id.is_(None),
-        ),
+        _report_url_filter(requested_url),
     )
     records = (
-        await data_db.execute(query.order_by(model_data.SensorData.timestamp.desc()))
+        await data_db.execute(
+            query.where(
+                model_data.SensorData.adjustment_project_id == project_id,
+                model_data.SensorData.adjustment_key.is_not(None),
+            ).limit(1)
+        )
     ).scalars().all()
+    if not records:
+        # Keep compatibility with pre-indexed rows whose project id lives only
+        # in the JSON payload. This is a fallback; current rows use the index.
+        records = (
+            await data_db.execute(
+                query.where(model_data.SensorData.adjustment_project_id.is_(None))
+                .order_by(model_data.SensorData.timestamp.desc())
+                .limit(1)
+            )
+        ).scalars().all()
     for record in records:
         payload = record.data if isinstance(record.data, dict) else None
         if not payload or not matches_payload(payload, record, requested_url, project_id):
