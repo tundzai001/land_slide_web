@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "build": "1813496abf87",
+  "build": "3e7968651a0a",
   "assets": {
     "about.html": {
       "bytes": 4476,
-      "sha256": "fd0680b71cfc53540fcddf4b4d4674e6871477e6784a2018fbee3bf2036ea174"
+      "sha256": "9ed1e556448b4fe26483cfd1defba6b81fd7f6c27ebc86c4a470f10e18185432"
     },
     "about.min.css": {
       "bytes": 35980,
@@ -15,8 +15,8 @@
       "sha256": "4886bd8351a5424833f5ce35c40167c9cb588fe242e9aa88560edaee6da1d4ca"
     },
     "admin-app.min.js": {
-      "bytes": 532464,
-      "sha256": "20d962aa035f227cd6205333e46449634a558cc9eff2e182bbcd7d77c3930ff2"
+      "bytes": 532785,
+      "sha256": "aa62e7041efc4d8cfb6527e1cf5370a5dc20578fc57b124d52bec0fb66d0cb2e"
     },
     "admin.min.css": {
       "bytes": 143410,
@@ -32,11 +32,11 @@
     },
     "app-runtime.min.js": {
       "bytes": 19581,
-      "sha256": "dc72ff4c3860c2720a5e6c09392905c5f86410de3d237e591f57cda11066bd4a"
+      "sha256": "e2d7ad7f32baa5862f9930e76f15e544760a1b0dd0b20fe732e615a4eafa5f99"
     },
     "app.html": {
       "bytes": 979,
-      "sha256": "2181f41c95bb102537e6890fc4e7ad398e31465e1f198c5bb577e00c228484ea"
+      "sha256": "fde1c49f8ea4979d71e2ff2ebcd5e9bd0abbd74900cf5dccd1e65a6bcf2f3f13"
     },
     "digital-twin.min.js": {
       "bytes": 66008,
@@ -44,7 +44,7 @@
     },
     "index.html": {
       "bytes": 4410,
-      "sha256": "a5f764517a76bce44a89545837aaf2fa684ae45a1cdb423b8fd75775946f9855"
+      "sha256": "6803733e7213be13fa56fb75f25b810b4321d97d03354c9c0ac0eccf5e2b0151"
     },
     "landing.min.css": {
       "bytes": 21724,
@@ -60,11 +60,11 @@
     },
     "map-app.min.js": {
       "bytes": 480262,
-      "sha256": "99b1af9010764d547db29b56f3f38cdf0309ecd8b51aaed318129b3ac6965075"
+      "sha256": "06486e0b90d2fa11219c40bd42395470e5ad3f1f45220182dcef472f132307e3"
     },
     "map.html": {
       "bytes": 2840,
-      "sha256": "5c6900dcf9ab75ad25c552053026985a23578cbbf4fac219915e483d24c77eaa"
+      "sha256": "eac02190e4ab7f742533328229f187755dcb286a96229f8b7da400aff7e21ffc"
     },
     "map.min.css": {
       "bytes": 175988,

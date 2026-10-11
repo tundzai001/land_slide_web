@@ -14,7 +14,8 @@ async function sourceFilesIn(directory = frontendRoot, relativeRoot = '') {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    if (entry.name === 'dist' || entry.name.startsWith('.')) continue;
+    // DEM files here are local test fixtures, not production frontend assets.
+    if (entry.name === 'dist' || entry.name.startsWith('.') || (relativeRoot === 'assets' && entry.name === 'dem')) continue;
     const relativePath = path.join(relativeRoot, entry.name);
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await sourceFilesIn(absolutePath, relativePath));

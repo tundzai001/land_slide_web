@@ -196,8 +196,15 @@ class AdminStationsFeature extends window.AdminManager {
                 headers: { Authorization: `Bearer ${this.token}` },
                 body: form,
             });
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(result.detail || `Không tải được DEM (HTTP ${response.status}).`);
+            const responseText = await response.text();
+            let result = {};
+            try { result = JSON.parse(responseText); } catch { /* Proxy errors may be HTML. */ }
+            if (!response.ok) {
+                const detail = result.detail || (response.status === 413
+                    ? `Máy chủ từ chối file (HTTP 413): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB). Giới hạn ứng dụng là 20 MiB; nếu file nhỏ hơn giới hạn, hãy kiểm tra cấu hình upload của IIS hoặc proxy.`
+                    : `Không tải được DEM (HTTP ${response.status}).`);
+                throw new Error(detail);
+            }
             const project = (this.projectsData || []).find(item => String(item.id) === String(this.currentProjectId));
             if (project) { project.dems = result.models || []; project.has_dem = true; }
             this._selectedDemId = result.dem_id;

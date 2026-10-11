@@ -89,3 +89,30 @@ test('project without DEM keeps the old map zoom behavior and opens no empty pan
   await expect.poll(() => page.evaluate(() => window.zoomCall?.bounds.points.length)).toBe(2);
   await expect(page.locator('#project-dashboard')).toHaveCount(0);
 });
+
+test('DEM upload explains an upstream 413 with the file details', async ({ page }) => {
+  const source = file => readFileSync(join(__dirname, '../..', file), 'utf8');
+  await page.setContent('<input id="project-dem-name" value="Thân đập"><p id="management-dem-selection" role="status"></p><div id="action-buttons-container"><button onclick=""></button></div>');
+  await page.evaluate(() => {
+    window.AdminManager = class {};
+    window.applyAdminFeature = Feature => { window.AdminStationsFeature = Feature; };
+    window.toast = { error: message => { window.lastToast = message; } };
+    window.fetch = async () => new Response('<html>Content Too Large</html>', {
+      status: 413,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  });
+  await page.addScriptTag({ content: source('frontend/js/admin/stations.js') });
+  await page.evaluate(async () => {
+    const manager = Object.assign(Object.create(window.AdminStationsFeature.prototype), {
+      currentProjectId: 6,
+      token: 'test-token',
+      projectsData: [],
+      renderStations() {},
+    });
+    await manager.uploadProjectDem(new File(['dem'], 'site.asc', { type: 'text/plain' }));
+  });
+  await expect(page.locator('#management-dem-selection')).toContainText('site.asc (0.0 MiB)');
+  await expect(page.locator('#management-dem-selection')).toContainText('IIS hoặc proxy');
+  await expect.poll(() => page.evaluate(() => window.lastToast)).toContain('HTTP 413');
+});

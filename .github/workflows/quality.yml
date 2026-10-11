@@ -55,6 +55,7 @@ jobs:
           tests/ui/theme-contract.spec.js
           tests/ui/map-workspace-tools.spec.js
           tests/ui/project-map-overview.spec.js
+          tests/ui/project-dem-dashboard.spec.js
           tests/ui/rescue-navigation.spec.js
           tests/ui/provisioning-safety.spec.js
           tests/ui/login-premium.spec.js
@@ -71,7 +72,7 @@ jobs:
           git archive --format=tar.gz --output=monitoring-release.tar.gz HEAD
           frontend/dist backend/app backend/alembic backend/alembic.ini
           backend/processors backend/static backend/requirements.txt
-          backend/server.py backend/security_core.py field_unit
+          backend/server.py backend/security_core.py field_unit web.config
       - uses: actions/upload-artifact@v4
         with:
           name: monitoring-release-${{ github.sha }}
