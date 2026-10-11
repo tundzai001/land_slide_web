@@ -61,7 +61,7 @@ function ensureProjectDashboard() {
                         <div class="project-dashboard-message" id="project-dashboard-message" role="status" aria-live="polite"><i class="bi bi-mountains" aria-hidden="true"></i><span></span></div>
                         <div class="dem-grid-viewport project-dashboard-dem-viewport" id="project-dashboard-viewport" hidden><canvas id="project-dashboard-canvas" aria-label="Mô hình địa hình số của dự án"></canvas></div>
                         <div class="project-dashboard-controls">
-                            <p>Cuộn để zoom · Kéo để di chuyển</p>
+                            <p>Kéo để xoay · cuộn để zoom mô hình 3D</p>
                             <div class="dem-grid-toolbar" aria-label="Điều khiển mô hình DEM">
                                 <button type="button" data-dem-action="out" aria-label="Thu nhỏ mô hình">−</button>
                                 <button type="button" data-dem-action="fit" aria-label="Vừa khung mô hình"><i class="bi bi-arrows-angle-contract" aria-hidden="true"></i></button>
@@ -169,7 +169,7 @@ async function loadProjectDashboardDem(project, demId, parentRequest) {
     const viewport = document.getElementById('project-dashboard-viewport');
     const status = document.getElementById('project-dashboard-status');
     const model = (project.dems || []).find(item => item.id === demId);
-    document.getElementById('project-dashboard-terrain-description').textContent = `${model?.name || 'DEM'} · EPSG:32648 · ô lưới theo file`;
+    document.getElementById('project-dashboard-terrain-description').textContent = `${model?.name || 'DEM'} · EPSG:32648 · mô hình địa hình 3D`;
     projectDashboardViewer?.destroy();
     projectDashboardViewer = null;
     viewport.hidden = true;
@@ -184,7 +184,12 @@ async function loadProjectDashboardDem(project, demId, parentRequest) {
         if (!response.ok) throw new Error(response.status === 404 ? 'Không tìm thấy file DEM của khu địa hình.' : `Không tải được mô hình (HTTP ${response.status}).`);
         const grid = window.DemGrid.parse(await response.text());
         if (parentRequest !== projectDashboardRequest || requestId !== projectDashboardDemRequest || !panel.classList.contains('is-open')) return;
-        projectDashboardViewer = window.DemGrid.mount(document.getElementById('project-dashboard-canvas'), grid);
+        const viewer = await window.DemGrid.mount(document.getElementById('project-dashboard-canvas'), grid);
+        if (parentRequest !== projectDashboardRequest || requestId !== projectDashboardDemRequest || !panel.classList.contains('is-open')) {
+            viewer.destroy();
+            return;
+        }
+        projectDashboardViewer = viewer;
         viewport.hidden = false;
         message.hidden = true;
         status.textContent = `${grid.ncols} × ${grid.nrows} ô · độ cao ${grid.min.toFixed(1)}–${grid.max.toFixed(1)} m · ô ${grid.cellsize} m`;

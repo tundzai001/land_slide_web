@@ -152,7 +152,7 @@ class AdminStationsFeature extends window.AdminManager {
                         ${dems.length > 1 ? `<label class="management-dem-select-label" for="management-dem-select">Khu địa hình
                             <select class="form-select form-select-sm" id="management-dem-select">${dems.map(model => `<option value="${this.escapeHtml(model.id)}" ${model.id === this._selectedDemId ? 'selected' : ''}>${this.escapeHtml(model.name)}</option>`).join('')}</select>
                         </label>` : `<span class="management-dem-current-name">${this.escapeHtml(dems[0]?.name || 'Địa hình')}</span>`}
-                        <span class="small text-muted">Cuộn để zoom · kéo để di chuyển · mỗi ô theo lưới DEM</span>
+                        <span class="small text-muted">Kéo để xoay · cuộn để zoom · chọn vị trí trên địa hình 3D</span>
                         <div class="dem-grid-toolbar" aria-label="Điều khiển mô hình DEM">
                             <button type="button" class="btn btn-sm btn-outline-secondary" data-dem-admin-action="out" aria-label="Thu nhỏ mô hình">−</button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" data-dem-admin-action="fit" aria-label="Vừa khung mô hình"><i class="bi bi-arrows-angle-contract" aria-hidden="true"></i></button>
@@ -234,10 +234,12 @@ class AdminStationsFeature extends window.AdminManager {
             this._managementDemPlacement = false;
             this._managementDemGrid = grid;
             this._managementDemModel = (this.projectsData || []).find(item => String(item.id) === String(projectId))?.dems?.find(model => model.id === demId) || null;
-            this._managementDemViewer = window.DemGrid.mount(canvas, grid, {
+            const viewer = await window.DemGrid.mount(canvas, grid, {
                 selectable: true,
                 onSelect: (point, interaction) => this.handleProjectDemCell(point, interaction),
             });
+            if (!canvas.isConnected || requestId !== this._managementDemRequest) { viewer.destroy(); return; }
+            this._managementDemViewer = viewer;
             document.querySelectorAll('[data-dem-admin-action]').forEach(button => button.onclick = () => {
                 const action = button.dataset.demAdminAction;
                 if (action === 'in') this._managementDemViewer?.zoomIn();

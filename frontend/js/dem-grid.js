@@ -90,175 +90,191 @@
         return { lat: latitude * 180 / Math.PI, lon: longitude * 180 / Math.PI };
     }
 
-    function mixColor(t) {
-        const index = colorStops.findIndex(stop => stop[0] >= t);
-        if (index <= 0) return colorStops[0][1];
-        const [leftT, left] = colorStops[index - 1];
-        const [rightT, right] = colorStops[index];
-        const f = (t - leftT) / (rightT - leftT);
-        return left.map((value, i) => Math.round(value + (right[i] - value) * f));
-    }
-
-    function rasterize(grid) {
-        const canvas = document.createElement('canvas');
-        canvas.width = grid.ncols;
-        canvas.height = grid.nrows;
-        const context = canvas.getContext('2d', { alpha: false });
-        const image = context.createImageData(grid.ncols, grid.nrows);
-        const range = Math.max(0.001, grid.max - grid.min);
-        for (let row = 0; row < grid.nrows; row += 1) {
-            for (let column = 0; column < grid.ncols; column += 1) {
-                const index = row * grid.ncols + column;
-                const value = grid.values[index];
-                const pixel = index * 4;
-                if (value === grid.nodata) {
-                    image.data[pixel + 3] = 0;
-                    continue;
-                }
-                const color = mixColor((value - grid.min) / range);
-                const left = grid.values[row * grid.ncols + Math.max(0, column - 1)];
-                const right = grid.values[row * grid.ncols + Math.min(grid.ncols - 1, column + 1)];
-                const up = grid.values[Math.max(0, row - 1) * grid.ncols + column];
-                const down = grid.values[Math.min(grid.nrows - 1, row + 1) * grid.ncols + column];
-                const slope = (left === grid.nodata || right === grid.nodata || up === grid.nodata || down === grid.nodata)
-                    ? 0 : ((left - right) + (up - down)) / Math.max(grid.cellsize * 10, 1);
-                const shade = Math.max(0.68, Math.min(1.25, 0.92 + slope * 0.07));
-                image.data[pixel] = Math.min(255, color[0] * shade);
-                image.data[pixel + 1] = Math.min(255, color[1] * shade);
-                image.data[pixel + 2] = Math.min(255, color[2] * shade);
-                image.data[pixel + 3] = 255;
-            }
-        }
-        context.putImageData(image, 0, 0);
-        return canvas;
-    }
-
-    function mount(canvas, grid, { onSelect = null, selectable = false } = {}) {
-        const context = canvas.getContext('2d');
-        const raster = rasterize(grid);
+    async function mount(canvas, grid, { onSelect = null, selectable = false } = {}) {
+        const [THREE, { OrbitControls }] = await Promise.all([
+            import('three'),
+            import('three/addons/controls/OrbitControls.js'),
+        ]);
         const listeners = new AbortController();
-        const state = { zoom: 1, panX: 0, panY: 0, pointer: null, down: null, selected: null, destroyed: false };
-        let width = 0;
-        let height = 0;
-        let dpr = 1;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f252c);
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
 
-        function geometry() {
-            const fit = Math.min(width / grid.ncols, height / grid.nrows) * 0.92;
-            const drawWidth = grid.ncols * fit * state.zoom;
-            const drawHeight = grid.nrows * fit * state.zoom;
-            return { drawWidth, drawHeight, x: (width - drawWidth) / 2 + state.panX, y: (height - drawHeight) / 2 + state.panY };
-        }
+        const target = new THREE.Vector3(0, 0, 0);
+        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100000);
+        const controls = new OrbitControls(camera, canvas);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.copy(target);
+        scene.add(new THREE.HemisphereLight(0xd9f4ff, 0x253c35, 2.0));
+        const sun = new THREE.DirectionalLight(0xffedc5, 2.7);
+        sun.position.set(-1, 2, 1.4);
+        scene.add(sun);
+        const fill = new THREE.DirectionalLight(0x74c8c6, 1.0);
+        fill.position.set(1, 0.5, -1);
+        scene.add(fill);
 
-        function render() {
-            if (state.destroyed) return;
-            const box = canvas.getBoundingClientRect();
-            if (!box.width || !box.height) return;
-            dpr = Math.min(window.devicePixelRatio || 1, 2);
-            width = box.width;
-            height = box.height;
-            canvas.width = Math.round(width * dpr);
-            canvas.height = Math.round(height * dpr);
-            context.setTransform(dpr, 0, 0, dpr, 0, 0);
-            context.clearRect(0, 0, width, height);
-            const { x, y, drawWidth, drawHeight } = geometry();
-            context.imageSmoothingEnabled = state.zoom < 8;
-            context.drawImage(raster, x, y, drawWidth, drawHeight);
-            if (state.zoom >= 8) {
-                context.beginPath();
-                context.strokeStyle = 'rgba(233, 247, 240, .14)';
-                context.lineWidth = 1;
-                const cell = drawWidth / grid.ncols;
-                for (let column = 0; column <= grid.ncols; column += 1) {
-                    const lineX = x + column * cell;
-                    context.moveTo(lineX, y);
-                    context.lineTo(lineX, y + drawHeight);
+        // Cap GPU mesh density while preserving full-resolution cell picking.
+        const step = Math.max(1, Math.ceil(Math.max(grid.ncols, grid.nrows) / 512));
+        const columns = Math.ceil((grid.ncols - 1) / step) + 1;
+        const rows = Math.ceil((grid.nrows - 1) / step) + 1;
+        const width = (grid.ncols - 1) * grid.cellsize;
+        const depth = (grid.nrows - 1) * grid.cellsize;
+        const relief = Math.max(grid.max - grid.min, grid.cellsize);
+        const verticalScale = Math.max(1, Math.min(5, Math.max(width, depth) / relief * 0.16));
+        const positions = new Float32Array(columns * rows * 3);
+        const colors = new Float32Array(columns * rows * 3);
+        const valid = new Uint8Array(columns * rows);
+        const color = new THREE.Color();
+        const stops = colorStops.map(([t, rgb]) => [t, new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace)]);
+        const sampleRows = new Uint32Array(rows);
+        const sampleColumns = new Uint32Array(columns);
+        for (let r = 0; r < rows; r += 1) sampleRows[r] = Math.min(grid.nrows - 1, r * step);
+        for (let c = 0; c < columns; c += 1) sampleColumns[c] = Math.min(grid.ncols - 1, c * step);
+        for (let r = 0; r < rows; r += 1) {
+            for (let c = 0; c < columns; c += 1) {
+                const vertex = r * columns + c;
+                const sourceRow = sampleRows[r];
+                const sourceColumn = sampleColumns[c];
+                const elevation = grid.values[sourceRow * grid.ncols + sourceColumn];
+                const validVertex = elevation !== grid.nodata;
+                valid[vertex] = validVertex ? 1 : 0;
+                positions[vertex * 3] = (sourceColumn - (grid.ncols - 1) / 2) * grid.cellsize;
+                positions[vertex * 3 + 1] = validVertex ? (elevation - grid.min) * verticalScale : 0;
+                positions[vertex * 3 + 2] = (sourceRow - (grid.nrows - 1) / 2) * grid.cellsize;
+                const t = Math.max(0, Math.min(1, (elevation - grid.min) / Math.max(grid.max - grid.min, 0.001)));
+                let stop = stops.findIndex(([limit]) => limit >= t);
+                if (stop <= 0) color.copy(stops[0][1]);
+                else {
+                    const [lo, lowColor] = stops[stop - 1];
+                    const [hi, highColor] = stops[stop];
+                    color.copy(lowColor).lerp(highColor, (t - lo) / (hi - lo));
                 }
-                for (let row = 0; row <= grid.nrows; row += 1) {
-                    const lineY = y + row * cell;
-                    context.moveTo(x, lineY);
-                    context.lineTo(x + drawWidth, lineY);
-                }
-                context.stroke();
-            }
-            if (state.selected) {
-                const cellWidth = drawWidth / grid.ncols;
-                const cellHeight = drawHeight / grid.nrows;
-                context.fillStyle = 'rgba(246, 191, 83, .23)';
-                context.strokeStyle = '#fff1b0';
-                context.lineWidth = 2;
-                context.fillRect(x + state.selected.column * cellWidth, y + state.selected.row * cellHeight, cellWidth, cellHeight);
-                context.strokeRect(x + state.selected.column * cellWidth, y + state.selected.row * cellHeight, cellWidth, cellHeight);
+                color.toArray(colors, vertex * 3);
             }
         }
+        const indices = [];
+        for (let r = 0; r < rows - 1; r += 1) {
+            for (let c = 0; c < columns - 1; c += 1) {
+                const a = r * columns + c;
+                const b = a + 1;
+                const d = a + columns;
+                const e = d + 1;
+                if (valid[a] && valid[b] && valid[d]) indices.push(a, d, b);
+                if (valid[b] && valid[d] && valid[e]) indices.push(b, d, e);
+            }
+        }
+        const terrainGeometry = new THREE.BufferGeometry();
+        terrainGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        terrainGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        terrainGeometry.setIndex(indices);
+        terrainGeometry.computeVertexNormals();
+        const terrain = new THREE.Mesh(terrainGeometry, new THREE.MeshStandardMaterial({
+            vertexColors: true, roughness: 0.88, metalness: 0, side: THREE.DoubleSide,
+        }));
+        scene.add(terrain);
 
-        function selectAt(clientX, clientY) {
-            if (!selectable || !onSelect) return;
-            const box = canvas.getBoundingClientRect();
-            const { x, y, drawWidth, drawHeight } = geometry();
-            const localX = clientX - box.left;
-            const localY = clientY - box.top;
-            if (localX < x || localY < y || localX >= x + drawWidth || localY >= y + drawHeight) return;
-            const column = Math.min(grid.ncols - 1, Math.floor((localX - x) / drawWidth * grid.ncols));
-            const row = Math.min(grid.nrows - 1, Math.floor((localY - y) / drawHeight * grid.nrows));
-            const elevation = grid.values[row * grid.ncols + column];
-            if (elevation === grid.nodata) return;
-            const easting = grid.xllcorner + (column + 0.5) * grid.cellsize;
-            const northing = grid.yllcorner + (grid.nrows - row - 0.5) * grid.cellsize;
-            const point = { row, column, easting, northing, elevation, ...utm48ToWgs84(easting, northing) };
-            state.selected = point;
-            render();
-            onSelect(point, { commit: true, source: 'pointer' });
+        const baseY = -Math.max(relief * verticalScale * 0.12, grid.cellsize);
+        const skirtPositions = [];
+        const perimeter = [];
+        for (let c = 0; c < columns; c += 1) perimeter.push(c);
+        for (let r = 1; r < rows; r += 1) perimeter.push(r * columns + columns - 1);
+        for (let c = columns - 2; c >= 0; c -= 1) perimeter.push((rows - 1) * columns + c);
+        for (let r = rows - 2; r > 0; r -= 1) perimeter.push(r * columns);
+        for (let i = 0; i < perimeter.length; i += 1) {
+            const a = perimeter[i];
+            const b = perimeter[(i + 1) % perimeter.length];
+            if (!valid[a] || !valid[b]) continue;
+            skirtPositions.push(...positions.slice(a * 3, a * 3 + 3), positions[a * 3], baseY, positions[a * 3 + 2]);
+            skirtPositions.push(...positions.slice(b * 3, b * 3 + 3), positions[a * 3], baseY, positions[a * 3 + 2]);
+            skirtPositions.push(...positions.slice(b * 3, b * 3 + 3), positions[b * 3], baseY, positions[b * 3 + 2]);
+            skirtPositions.push(...positions.slice(a * 3, a * 3 + 3), positions[b * 3], baseY, positions[b * 3 + 2]);
         }
+        const skirtGeometry = new THREE.BufferGeometry();
+        skirtGeometry.setAttribute('position', new THREE.Float32BufferAttribute(skirtPositions, 3));
+        skirtGeometry.computeVertexNormals();
+        const skirt = new THREE.Mesh(skirtGeometry, new THREE.MeshStandardMaterial({ color: 0x29474a, roughness: 1, side: THREE.DoubleSide }));
+        scene.add(skirt);
+
+        const marker = new THREE.Group();
+        const cellMarker = new THREE.Mesh(
+            new THREE.PlaneGeometry(grid.cellsize * 0.92, grid.cellsize * 0.92),
+            new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }),
+        );
+        cellMarker.rotation.x = -Math.PI / 2;
+        const markerOutline = new THREE.LineSegments(
+            new THREE.EdgesGeometry(new THREE.PlaneGeometry(grid.cellsize * 0.92, grid.cellsize * 0.92)),
+            new THREE.LineBasicMaterial({ color: 0xffefb0, depthTest: false }),
+        );
+        markerOutline.rotation.x = -Math.PI / 2;
+        marker.add(cellMarker, markerOutline);
+        marker.visible = false;
+        scene.add(marker);
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const state = { selected: null, destroyed: false };
+        const requestRender = () => { if (!state.destroyed) renderer.render(scene, camera); };
 
         function pointAt(row, column) {
             const boundedRow = Math.max(0, Math.min(grid.nrows - 1, row));
             const boundedColumn = Math.max(0, Math.min(grid.ncols - 1, column));
             const elevation = grid.values[boundedRow * grid.ncols + boundedColumn];
             if (elevation === grid.nodata) return null;
-            const easting = grid.xllcorner + (boundedColumn + 0.5) * grid.cellsize;
-            const northing = grid.yllcorner + (grid.nrows - boundedRow - 0.5) * grid.cellsize;
-            return { row: boundedRow, column: boundedColumn, easting, northing, elevation, ...utm48ToWgs84(easting, northing) };
+            return {
+                row: boundedRow, column: boundedColumn,
+                easting: grid.xllcorner + (boundedColumn + 0.5) * grid.cellsize,
+                northing: grid.yllcorner + (grid.nrows - boundedRow - 0.5) * grid.cellsize,
+                elevation,
+                x: (boundedColumn - (grid.ncols - 1) / 2) * grid.cellsize,
+                y: (elevation - grid.min) * verticalScale,
+                z: (boundedRow - (grid.nrows - 1) / 2) * grid.cellsize,
+                ...utm48ToWgs84(
+                    grid.xllcorner + (boundedColumn + 0.5) * grid.cellsize,
+                    grid.yllcorner + (grid.nrows - boundedRow - 0.5) * grid.cellsize,
+                ),
+            };
         }
 
-        canvas.addEventListener('pointerdown', event => {
-            state.pointer = event.pointerId;
-            state.down = { x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY, moved: false };
-            canvas.setPointerCapture?.(event.pointerId);
-        }, { signal: listeners.signal });
-        canvas.addEventListener('pointermove', event => {
-            if (state.pointer !== event.pointerId || !state.down) return;
-            const dx = event.clientX - state.down.x;
-            const dy = event.clientY - state.down.y;
-            if (Math.abs(dx) + Math.abs(dy) > 5) state.down.moved = true;
-            if (state.down.moved) {
-                state.panX = state.down.panX + dx;
-                state.panY = state.down.panY + dy;
-                render();
-            }
-        }, { signal: listeners.signal });
-        const endPointer = event => {
-            if (state.pointer !== event.pointerId) return;
-            if (!state.down?.moved) selectAt(event.clientX, event.clientY);
-            state.pointer = null;
-            state.down = null;
+        function setSelected(point) {
+            state.selected = point;
+            if (point) {
+                marker.position.set(point.x, point.y + Math.max(grid.cellsize * 0.04, relief * verticalScale * 0.001), point.z);
+                marker.visible = true;
+            } else marker.visible = false;
+            requestRender();
+        }
+
+        const fit = () => {
+            const span = Math.max(width, depth, relief * verticalScale, 1);
+            const distance = span / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.45;
+            target.set(0, Math.max(0, relief * verticalScale * 0.24), 0);
+            controls.target.copy(target);
+            camera.position.copy(target).add(new THREE.Vector3(distance * 0.95, distance * 0.9, distance * 1.15));
+            camera.near = Math.max(0.01, distance / 1000);
+            camera.far = distance * 20;
+            camera.updateProjectionMatrix();
+            controls.update();
+            requestRender();
         };
-        canvas.addEventListener('pointerup', endPointer, { signal: listeners.signal });
-        canvas.addEventListener('pointercancel', endPointer, { signal: listeners.signal });
-        canvas.addEventListener('wheel', event => {
-            event.preventDefault();
-            const before = geometry();
+
+        canvas.addEventListener('pointerup', event => {
+            if (!selectable || !onSelect || !event.isPrimary || event.button !== 0) return;
             const box = canvas.getBoundingClientRect();
-            const localX = event.clientX - box.left;
-            const localY = event.clientY - box.top;
-            const factor = event.deltaY < 0 ? 1.25 : 0.8;
-            const nextZoom = Math.max(1, Math.min(40, state.zoom * factor));
-            const ratio = nextZoom / state.zoom;
-            state.panX = localX - (localX - before.x) * ratio - (width - before.drawWidth * ratio) / 2;
-            state.panY = localY - (localY - before.y) * ratio - (height - before.drawHeight * ratio) / 2;
-            state.zoom = nextZoom;
-            if (state.zoom === 1) { state.panX = 0; state.panY = 0; }
-            render();
-        }, { passive: false, signal: listeners.signal });
+            pointer.set((event.clientX - box.left) / box.width * 2 - 1, -((event.clientY - box.top) / box.height) * 2 + 1);
+            raycaster.setFromCamera(pointer, camera);
+            const hit = raycaster.intersectObject(terrain, false)[0];
+            if (!hit) return;
+            const column = Math.round(hit.point.x / grid.cellsize + (grid.ncols - 1) / 2);
+            const row = Math.round(hit.point.z / grid.cellsize + (grid.nrows - 1) / 2);
+            const point = pointAt(row, column);
+            if (!point) return;
+            setSelected(point);
+            onSelect(point, { commit: true, source: 'pointer' });
+        }, { signal: listeners.signal });
         canvas.addEventListener('keydown', event => {
             if (!selectable || !onSelect) return;
             const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
@@ -266,26 +282,50 @@
                 event.preventDefault();
                 const current = state.selected || pointAt(Math.floor(grid.nrows / 2), Math.floor(grid.ncols / 2));
                 if (!current) return;
-                if (state.zoom < 8) state.zoom = 8;
-                state.selected = pointAt(current.row + moves[event.key][0], current.column + moves[event.key][1]);
-                if (state.selected) {
-                    render();
-                    onSelect(state.selected, { commit: false, source: 'keyboard' });
-                }
+                const point = pointAt(current.row + moves[event.key][0], current.column + moves[event.key][1]);
+                if (point) { setSelected(point); onSelect(point, { commit: false, source: 'keyboard' }); }
             } else if (event.key === 'Enter' && state.selected) {
                 event.preventDefault();
                 onSelect(state.selected, { commit: true, source: 'keyboard' });
             }
         }, { signal: listeners.signal });
 
-        const resizeObserver = new ResizeObserver(render);
+        controls.addEventListener('change', requestRender);
+        const resizeObserver = new ResizeObserver(() => {
+            const box = canvas.getBoundingClientRect();
+            if (!box.width || !box.height) return;
+            renderer.setSize(box.width, box.height, false);
+            camera.aspect = box.width / box.height;
+            camera.updateProjectionMatrix();
+            requestRender();
+        });
         resizeObserver.observe(canvas);
-        render();
+        fit();
+        renderer.setAnimationLoop(() => {
+            controls.update();
+            renderer.render(scene, camera);
+        });
+
         return {
-            zoomIn() { state.zoom = Math.min(40, state.zoom * 1.5); render(); },
-            zoomOut() { state.zoom = Math.max(1, state.zoom / 1.5); if (state.zoom === 1) { state.panX = 0; state.panY = 0; } render(); },
-            fit() { state.zoom = 1; state.panX = 0; state.panY = 0; render(); },
-            destroy() { state.destroyed = true; resizeObserver.disconnect(); listeners.abort(); },
+            zoomIn() { camera.position.sub(controls.target).multiplyScalar(0.8).add(controls.target); controls.update(); },
+            zoomOut() { camera.position.sub(controls.target).multiplyScalar(1.25).add(controls.target); controls.update(); },
+            fit,
+            destroy() {
+                state.destroyed = true;
+                renderer.setAnimationLoop(null);
+                resizeObserver.disconnect();
+                listeners.abort();
+                controls.dispose();
+                terrainGeometry.dispose();
+                terrain.material.dispose();
+                skirtGeometry.dispose();
+                skirt.material.dispose();
+                cellMarker.geometry.dispose();
+                cellMarker.material.dispose();
+                markerOutline.geometry.dispose();
+                markerOutline.material.dispose();
+                renderer.dispose();
+            },
         };
     }
 
