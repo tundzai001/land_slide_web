@@ -10,6 +10,7 @@ test('project dashboard zooms to the project and switches between terrain models
   await page.addScriptTag({ content: source('frontend/js/dem-grid.js') });
   await page.addScriptTag({ content: source('frontend/js/map/stations.js') });
   await page.evaluate(() => {
+    window.DemGrid.mount = async () => ({ destroy() {}, fit() {} });
     const center = { lat: 22.6, lng: 103.8 };
     const map = {
       getCenter: () => center,
