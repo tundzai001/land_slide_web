@@ -522,7 +522,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
             sensors: sensors,
             config: config,
             owner_authorization: document.getElementById('gnss-forwarding-approval')?.value?.trim() || '',
-            location: null
+            location: !this.isEditMode && this.pendingStationLocation ? { ...this.pendingStationLocation } : null
         };
 
         console.log('💾 [SAVE] isEditMode:', this.isEditMode, 'stationId:', this.currentStationId);
@@ -551,6 +551,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
             window.toast?.success('✅ Lưu thành công!');
             this._projectConfigCache?.delete(Number(projectId));
             this.stationModal.hide();
+            this.pendingStationLocation = null;
             this.loadStations(projectId);
         } catch (e) {
             window.toast?.error('❌ ' + e.message);

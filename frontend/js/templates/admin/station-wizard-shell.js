@@ -36,7 +36,7 @@ window.LegacyTemplateParts['station-wizard-shell'] = String.raw`    <!-- 3. Stat
                 </div>
 
                 <div class="modal-body">
-
+                    <div class="alert alert-info py-2" id="station-dem-location" role="status" hidden></div>
                     <form id="stationConfigForm">
                         <input type="hidden" id="edit-station-id">
                         <input type="hidden" id="edit-project-id">

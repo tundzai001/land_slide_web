@@ -3,22 +3,137 @@ class AdminProjectsFeature extends window.AdminManager {
     setupProjectMapPosition(prefix, location = null) {
         const mode = document.getElementById(`${prefix}-map-mode`);
         if (!mode) return;
-        mode.value = location?.map_mode || (location?.lat != null && location?.lon != null ? 'manual' : 'auto');
+        mode.value = prefix === 'project' ? 'manual' : (location?.map_mode || (location?.lat != null && location?.lon != null ? 'manual' : 'auto'));
+        const pickerContainer = document.getElementById(`${prefix}-map-picker`);
+        const pickerToggle = document.getElementById(`${prefix}-map-picker-toggle`);
+        if (pickerContainer) pickerContainer.hidden = true;
+        if (pickerToggle) {
+            pickerToggle.setAttribute('aria-expanded', 'false');
+            pickerToggle.innerHTML = '<i class="bi bi-map me-1" aria-hidden="true"></i>Chọn điểm dự án trên bản đồ';
+        }
         for (const key of ['lat', 'lon']) {
             const input = document.getElementById(`${prefix}-map-${key}`);
             input.value = location?.[key] ?? '';
-            input.onblur = () => this.collectProjectMapPosition(prefix, false);
+            input.onblur = () => {
+                this.collectProjectMapPosition(prefix, false);
+                this.updateProjectPickerMarker(prefix);
+            };
             input.oninput = () => {
                 input.removeAttribute('aria-invalid');
                 document.getElementById(`${prefix}-map-error`).hidden = true;
             };
         }
         mode.onchange = () => this.syncProjectMapPosition(prefix, true);
+        if (pickerToggle) pickerToggle.onclick = () => this.toggleProjectMapPicker(prefix);
         this.syncProjectMapPosition(prefix);
+        this.updateProjectPickerMarker(prefix);
+    }
+
+    async ensureProjectMapLibrary() {
+        if (window.L) return;
+        const cssUrl = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        const jsUrl = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        if (!document.querySelector(`link[href="${cssUrl}"]`)) {
+            const style = document.createElement('link');
+            style.rel = 'stylesheet';
+            style.href = cssUrl;
+            document.head.appendChild(style);
+        }
+        if (!this._projectLeafletPromise) {
+            this._projectLeafletPromise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = jsUrl;
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Không tải được bản đồ. Bạn vẫn có thể nhập tọa độ trực tiếp.'));
+                document.head.appendChild(script);
+            });
+        }
+        await this._projectLeafletPromise;
+    }
+
+    async toggleProjectMapPicker(prefix) {
+        const container = document.getElementById(`${prefix}-map-picker`);
+        const button = document.getElementById(`${prefix}-map-picker-toggle`);
+        if (!container || !button) return;
+        const opening = container.hidden;
+        container.hidden = !opening;
+        button.setAttribute('aria-expanded', String(opening));
+        button.innerHTML = opening
+            ? '<i class="bi bi-map me-1" aria-hidden="true"></i>Ẩn bản đồ chọn điểm'
+            : '<i class="bi bi-map me-1" aria-hidden="true"></i>Chọn điểm dự án trên bản đồ';
+        if (!opening) return;
+        try {
+            await this.ensureProjectMapLibrary();
+            const element = document.getElementById(`${prefix}-map-picker-canvas`);
+            let picker = this._projectMapPickers?.get(prefix);
+            if (!picker) {
+                this._projectMapPickers ||= new Map();
+                const lat = Number(document.getElementById(`${prefix}-map-lat`).value);
+                const lon = Number(document.getElementById(`${prefix}-map-lon`).value);
+                const hasPoint = Number.isFinite(lat) && Number.isFinite(lon) && (lat !== 0 || lon !== 0);
+                const map = window.L.map(element, { scrollWheelZoom: false }).setView(hasPoint ? [lat, lon] : [21.5, 104.5], hasPoint ? 12 : 6);
+                window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap',
+                }).addTo(map);
+                picker = { map, marker: null };
+                map.on('click', event => this.setProjectMapPoint(prefix, event.latlng.lat, event.latlng.lng));
+                this._projectMapPickers.set(prefix, picker);
+                this.updateProjectPickerMarker(prefix);
+            }
+            requestAnimationFrame(() => picker.map.invalidateSize());
+        } catch (error) {
+            container.hidden = false;
+            const hint = document.getElementById(`${prefix}-map-hint`);
+            hint.textContent = error.message;
+            hint.setAttribute('role', 'alert');
+        }
+    }
+
+    setProjectMapPoint(prefix, lat, lon) {
+        if (document.getElementById(`${prefix}-map-mode`).value !== 'manual') return;
+        document.getElementById(`${prefix}-map-lat`).value = Number(lat).toFixed(7);
+        document.getElementById(`${prefix}-map-lon`).value = Number(lon).toFixed(7);
+        this.syncProjectMapPosition(prefix);
+        this.updateProjectPickerMarker(prefix);
+    }
+
+    updateProjectPickerMarker(prefix) {
+        const picker = this._projectMapPickers?.get(prefix);
+        if (!picker) return;
+        const latValue = document.getElementById(`${prefix}-map-lat`).value.trim();
+        const lonValue = document.getElementById(`${prefix}-map-lon`).value.trim();
+        if (!latValue && !lonValue) {
+            if (picker.marker) picker.map.removeLayer(picker.marker);
+            picker.marker = null;
+            picker.map.setView([21.5, 104.5], 6);
+            return;
+        }
+        const lat = Number(latValue);
+        const lon = Number(lonValue);
+        if (!latValue || !lonValue || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || (lat === 0 && lon === 0)) return;
+        if (!picker.marker) picker.marker = window.L.marker([lat, lon], { draggable: true }).addTo(picker.map);
+        else picker.marker.setLatLng([lat, lon]);
+        picker.marker.off('dragend');
+        picker.marker.on('dragend', event => {
+            const point = event.target.getLatLng();
+            this.setProjectMapPoint(prefix, point.lat, point.lng);
+        });
+        if (picker.map.getZoom() < 10) picker.map.setView([lat, lon], 12);
     }
 
     syncProjectMapPosition(prefix, recalculate = false) {
         const manual = document.getElementById(`${prefix}-map-mode`).value === 'manual';
+        const pickerToggle = document.getElementById(`${prefix}-map-picker-toggle`);
+        if (pickerToggle) {
+            pickerToggle.disabled = !manual;
+            if (!manual) {
+                pickerToggle.setAttribute('aria-expanded', 'false');
+                pickerToggle.innerHTML = '<i class="bi bi-map me-1" aria-hidden="true"></i>Chọn điểm dự án trên bản đồ';
+            }
+        }
+        const pickerContainer = document.getElementById(`${prefix}-map-picker`);
+        if (!manual && pickerContainer) pickerContainer.hidden = true;
         const fields = ['lat', 'lon'].map(key => document.getElementById(`${prefix}-map-${key}`));
         fields.forEach(input => { input.readOnly = !manual; input.required = manual; input.removeAttribute('aria-invalid'); });
         document.getElementById(`${prefix}-map-error`).hidden = true;
@@ -36,8 +151,11 @@ class AdminProjectsFeature extends window.AdminManager {
             });
         }
         document.getElementById(`${prefix}-map-hint`).textContent = manual
-            ? 'Tọa độ WGS84 (độ thập phân). Điểm nhập tay giữ nguyên khi cảm biến thay đổi.'
+            ? (prefix === 'project'
+                ? 'Điểm này đại diện cho công trình trên bản đồ; nhập tọa độ hoặc chọn vị trí trên bản đồ.'
+                : 'Tọa độ WGS84 (độ thập phân). Điểm nhập tay giữ nguyên khi cảm biến thay đổi.')
             : (fields[0].value ? 'Tự cập nhật theo các trạm cảm biến có tọa độ hợp lệ.' : 'Điểm sẽ xuất hiện khi dự án có cảm biến với tọa độ hợp lệ.');
+        this.updateProjectPickerMarker(prefix);
     }
 
     collectProjectMapPosition(prefix, focusError = true) {
@@ -141,6 +259,7 @@ class AdminProjectsFeature extends window.AdminManager {
                                 </div>
                                 <p class="project-description">${this.escapeHtml(p.description || 'Chưa có mô tả cho dự án này.')}</p>
                                 ${p.location ? `<p class="project-location mb-0"><i class="bi bi-geo-alt" aria-hidden="true"></i><span>${this.escapeHtml(typeof p.location === 'string' ? p.location : (p.location.address || p.location.source || `${p.location.lat ?? ''}, ${p.location.lon ?? ''}`))}</span></p>` : ''}
+                                <p class="project-dem-summary mb-0"><i class="bi bi-layers" aria-hidden="true"></i>${Number(p.dems?.length) || 0} khu địa hình DEM</p>
 
                             </div>
                             <div class="card-footer">

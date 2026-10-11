@@ -111,9 +111,10 @@ class AdminStationWizardFeature extends window.AdminManager {
         return invalidIndex < 0;
     }
 
-    openAddStationModal() {
+    openAddStationModal(options = {}) {
         this.isEditMode = false;
         this.currentStationId = null;
+        this.pendingStationLocation = options.location || null;
         this.currentStationConfig = {};
         this.stationPresetConfirm = null;
         this.currentStep = 1;
@@ -124,6 +125,13 @@ class AdminStationWizardFeature extends window.AdminManager {
         }
 
         document.getElementById('stationConfigForm').reset();
+        const demLocation = document.getElementById('station-dem-location');
+        if (demLocation) {
+            demLocation.hidden = !this.pendingStationLocation;
+            demLocation.textContent = this.pendingStationLocation
+                ? `Vị trí đã chọn · ${this.pendingStationLocation.dem_name || 'DEM'}: ${Number(this.pendingStationLocation.lat).toFixed(7)}, ${Number(this.pendingStationLocation.lon).toFixed(7)} · cao độ ${Number(this.pendingStationLocation.h).toFixed(1)} m`
+                : '';
+        }
         document.getElementById('edit-station-id').value = '';
 
         // Reset custom MQTT Broker inputs
@@ -218,6 +226,9 @@ class AdminStationWizardFeature extends window.AdminManager {
         try {
             this.isEditMode = true;
             this.currentStationId = stationId;
+            this.pendingStationLocation = null;
+            const demLocation = document.getElementById('station-dem-location');
+            if (demLocation) demLocation.hidden = true;
             this.currentStep = 1;
             this.resetGnssOriginRelockProgress?.();
             this.resetGnssCalibrationResult?.();

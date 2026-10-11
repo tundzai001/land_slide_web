@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -19,6 +20,7 @@ from app.features.projects import admin, public
 from app.features.database_admin.write_router import router as database_router
 from app.features.stations.configuration import router as station_config_router
 from app.shared.project_location import backfill_project_map_positions
+from app.shared import project_dem
 
 
 class ProjectMapPositionTests(unittest.IsolatedAsyncioTestCase):
@@ -154,6 +156,67 @@ class ProjectMapPositionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([row['project_code'] for row in response.json()], ['P_%'])
         too_long = await self.client.get('/api/projects', params={'q': 'x' * 101})
         self.assertEqual(too_long.status_code, 422)
+
+    async def test_project_dem_upload_readback_and_project_scope(self):
+        grid = (
+            b"ncols 2\nnrows 2\nxllcorner 454959.202\nyllcorner 2326094.284\n"
+            b"cellsize 1\nNODATA_value -9999\n100 101\n98 99\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="project-dem-test-") as directory:
+            with patch.object(project_dem, "PROJECT_DEM_DIR", Path(directory)):
+                uploaded = await self.client.post(
+                    "/api/admin/projects/1/dems",
+                    headers=self.headers(),
+                    data={"dem_name": "Thân đập"},
+                    files={"dem_file": ("dam.asc", grid, "text/plain")},
+                )
+                self.assertEqual(uploaded.status_code, 200, uploaded.text)
+                self.assertEqual(uploaded.json()["dem"]["crs"], "EPSG:32648")
+                self.assertEqual(uploaded.json()["dem"]["name"], "Thân đập")
+                dem_id = uploaded.json()["dem_id"]
+                added_slope = await self.client.post(
+                    "/api/admin/projects/1/dems",
+                    headers=self.headers(),
+                    data={"dem_name": "Bờ mỏ"},
+                    files={"dem_file": ("slope.asc", grid, "text/plain")},
+                )
+                self.assertEqual(added_slope.status_code, 200, added_slope.text)
+                self.assertNotEqual(added_slope.json()["dem_id"], dem_id)
+
+                models = await self.client.get("/api/projects/1/dems", headers=self.headers("operator"))
+                self.assertEqual(models.json()["models"][0]["id"], dem_id)
+                self.assertEqual([model["name"] for model in models.json()["models"]], ["Thân đập", "Bờ mỏ"])
+                readback = await self.client.get(f"/api/projects/1/dems/{dem_id}", headers=self.headers("operator"))
+                self.assertEqual(readback.status_code, 200, readback.text)
+                self.assertEqual(readback.content, grid)
+
+                hidden = await self.client.get("/api/projects/1/dems", headers=self.headers("empty"))
+                self.assertEqual(hidden.status_code, 404)
+                project_list = await self.client.get("/api/projects")
+                project = next(row for row in project_list.json() if row["id"] == 1)
+                self.assertTrue(project["has_dem"])
+
+    async def test_dem_placed_station_location_survives_sensor_config_updates(self):
+        selected = {
+            "lat": 22.6, "lon": 103.8, "h": 101.5,
+            "source": "project-dem-grid", "dem_name": "Thân đập",
+        }
+        async with self.sessions() as db:
+            station = await db.get(Station, 1)
+            station.location = selected
+            await db.commit()
+
+        response = await self.client.put(
+            "/api/admin/stations/1/config",
+            headers=self.headers(),
+            json={
+                "config": {"gnss_origin": {"lat": 22.7, "lon": 103.9, "h": 90}},
+                "sensors": {},
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Station, 1)).location, selected)
 
     async def test_public_cluster_projection_drops_unexpected_nested_lists(self):
         async with self.sessions() as db:

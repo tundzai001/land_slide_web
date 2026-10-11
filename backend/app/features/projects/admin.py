@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import time
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ... import auth
@@ -15,6 +16,7 @@ from ...models import config as model_config
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 from ...shared.access import user_project_filter_ids
 from ...shared.project_location import save_project_map_position, update_location_address, validate_map_position
+from ...shared.project_dem import MAX_DEM_BYTES, delete_project_dems, project_dem_summary, save_project_dem
 from .public import public_clusters
 
 router = APIRouter(tags=["Projects"])
@@ -71,6 +73,7 @@ async def get_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
+                **project_dem_summary(p.id),
                 "gnss_clusters": p.gnss_clusters if current_user.role == 'admin' else public_clusters(p.gnss_clusters),
                 **({"auto_adjustment_config": p.auto_adjustment_config} if current_user.role == 'admin' else {}),
             }
@@ -96,6 +99,26 @@ async def get_projects(
     except Exception as e:
         logger.error(f"Error loading projects: {e}")
         raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")
+
+
+@router.post("/api/admin/projects/{project_id}/dems")
+async def upload_project_dem(
+    project_id: int,
+    dem_name: str = Form(..., max_length=100),
+    dem_file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+):
+    project = await db.get(model_config.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án.")
+    if not (dem_file.filename or "").lower().endswith(".asc"):
+        raise HTTPException(status_code=415, detail="Chỉ hỗ trợ file DEM ESRI ASCII Grid (.asc).")
+    content = await dem_file.read(MAX_DEM_BYTES + 1)
+    if len(content) > MAX_DEM_BYTES:
+        raise HTTPException(status_code=413, detail="File DEM vượt quá 20 MB.")
+    result = await run_in_threadpool(save_project_dem, project_id, dem_name, content)
+    return {"project_id": project_id, **result}
 
 
 @router.post("/api/admin/projects")
@@ -268,6 +291,10 @@ async def delete_project(
 
         await db.delete(project)
         await db.commit()
+        try:
+            delete_project_dems(project_id)
+        except OSError:
+            logger.warning("Could not remove DEM for deleted project id=%s", project_id)
 
         return {"status": "success", "message": f"Deleted project {project_id}"}
 

@@ -211,7 +211,10 @@ async def update_station_config(
             except (ValueError, TypeError, AttributeError):
                 continue
 
-        if lats and lons:
+        if lats and lons and not (
+            isinstance(station.location, dict)
+            and station.location.get("source") == "project-dem-grid"
+        ):
             avg_lat = sum(lats) / len(lats)
             avg_lon = sum(lons) / len(lons)
             station.location = {"lat": round(avg_lat, 8), "lon": round(avg_lon, 8)}

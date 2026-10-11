@@ -77,6 +77,38 @@ for (const width of [1280, 390]) {
   });
 }
 
+test('new projects require an explicit map point and the map picker fills its coordinates', async ({ page }) => {
+  await mount(page, 1280);
+  await page.evaluate(() => window.adminManager.openCreateProjectModal());
+  await expect(page.locator('#project-map-mode')).toHaveValue('manual');
+  await expect(page.locator('#project-map-mode option')).toHaveCount(1);
+  await page.locator('#project-code').fill('DAM-01');
+  await page.locator('#project-name').fill('Đập thử nghiệm');
+  await page.locator('#project-save-btn').click();
+  await expect(page.locator('#project-map-error')).toBeVisible();
+  expect(await page.evaluate(() => window.savedRequests)).toEqual([]);
+
+  await page.evaluate(() => {
+    const map = { setView() { return this; }, on(event, callback) { this.clickHandler = callback; }, getZoom() { return 6; }, invalidateSize() {}, removeLayer(marker) { this.removedMarker = marker; } };
+    window.L = {
+      map() { return map; },
+      tileLayer() { return { addTo() {} }; },
+      marker() { return { addTo() { return this; }, setLatLng() {}, off() { return this; }, on() { return this; } }; },
+    };
+    window.fakeProjectMap = map;
+  });
+  await page.locator('#project-map-picker-toggle').click();
+  await page.evaluate(() => window.fakeProjectMap.clickHandler({ latlng: { lat: 22.654321, lng: 103.876543 } }));
+  await expect(page.locator('#project-map-lat')).toHaveValue('22.6543210');
+  await expect(page.locator('#project-map-lon')).toHaveValue('103.8765430');
+  await page.locator('#project-save-btn').click();
+  expect((await page.evaluate(() => window.savedRequests))[0].map_position).toEqual({ mode: 'manual', lat: 22.654321, lon: 103.876543 });
+  await page.evaluate(() => window.adminManager.openCreateProjectModal());
+  await expect(page.locator('#project-map-lat')).toHaveValue('');
+  await expect(page.locator('#project-map-picker')).toBeHidden();
+  expect(await page.evaluate(() => Boolean(window.fakeProjectMap.removedMarker))).toBe(true);
+});
+
 test('project cards escape stored HTML and hide write controls from operators', async ({ page }) => {
   await mount(page, 1280);
   await page.evaluate(() => {

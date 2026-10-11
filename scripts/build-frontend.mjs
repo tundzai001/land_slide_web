@@ -61,7 +61,7 @@ const groups = {
     'js/templates/map/analysis.js', 'js/templates/map/rescue.js', 'js/templates/map-template.js',
     'js/map/runtime.js', 'js/map/realtime.js', 'js/map/marker-alerts.js',
     'js/map/guest-rescue.js', 'js/map/map-layers.js', 'js/map/map-interactions.js',
-    'js/map/stations.js', 'js/map/station-detail.js', 'js/map/chart-workspace.js', 'js/map/long-term.js',
+    'js/dem-grid.js', 'js/map/stations.js', 'js/map/station-detail.js', 'js/map/chart-workspace.js', 'js/map/long-term.js',
     'js/map/analysis.js', 'js/map/ui-alerts.js', 'js/map/tools.js'
   ],
   'admin-app.min.js': [
@@ -71,7 +71,7 @@ const groups = {
     'js/templates/admin/station-connectivity.js', 'js/templates/admin/station-alerts.js',
     'js/templates/admin/station-storage.js', 'js/templates/admin/data-modals-nav.js',
     'js/templates/admin-template.js', 'js/toast-notifications.js',
-    'js/admin/core.js', 'js/admin/operations.js', 'js/admin/navigation.js', 'js/admin/projects.js',
+    'js/admin/core.js', 'js/admin/operations.js', 'js/admin/navigation.js', 'js/admin/projects.js', 'js/dem-grid.js',
     'js/admin/project-config.js', 'js/admin/stations.js', 'js/admin/station-wizard.js',
     'js/admin/station-presets.js', 'js/admin/forwarding-controls.js',
     'js/admin/velocity.js', 'js/admin/origin.js', 'js/admin/provisioning.js',

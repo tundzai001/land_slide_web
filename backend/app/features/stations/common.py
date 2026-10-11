@@ -30,6 +30,10 @@ def is_offline_display_enabled(station_config: Optional[Dict[str, Any]]) -> bool
 
 
 def calculate_station_location(sensors: dict, manual_location: dict = None):
+    # A DEM grid pick is the station's chosen map position; sensor reference
+    # coordinates are separate origins and must not override it.
+    if isinstance(manual_location, dict) and manual_location.get("source") == "project-dem-grid":
+        return manual_location
     coords = []
     if sensors:
         for s_type, info in sensors.items():

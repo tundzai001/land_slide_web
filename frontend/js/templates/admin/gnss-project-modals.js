@@ -3,9 +3,16 @@ const projectMapPositionFields = prefix => `
         <legend class="form-label fw-semibold">Điểm dự án trên bản đồ</legend>
         <label class="form-label" for="${prefix}-map-mode">Cách đặt điểm</label>
         <select class="form-select" id="${prefix}-map-mode">
-            <option value="auto">Trung bình tọa độ cảm biến</option>
+            ${prefix === 'project' ? '' : '<option value="auto">Trung bình tọa độ cảm biến</option>'}
             <option value="manual">Nhập tọa độ</option>
         </select>
+        <button type="button" class="btn btn-outline-primary btn-sm mt-2" id="${prefix}-map-picker-toggle" aria-expanded="false" aria-controls="${prefix}-map-picker">
+            <i class="bi bi-map me-1" aria-hidden="true"></i>Chọn điểm đập trên bản đồ
+        </button>
+        <div class="project-map-picker mt-2" id="${prefix}-map-picker" hidden>
+            <div class="project-map-picker-canvas" id="${prefix}-map-picker-canvas" role="application" aria-label="Bản đồ chọn tọa độ dự án"></div>
+            <p class="form-text mb-0">Bấm vào vị trí công trình để đặt điểm dự án. Bạn vẫn có thể nhập tọa độ bên dưới.</p>
+        </div>
         <div class="row g-3 mt-1">
             <div class="col-12 col-sm-6">
                 <label class="form-label" for="${prefix}-map-lat">Vĩ độ</label>
@@ -16,7 +23,7 @@ const projectMapPositionFields = prefix => `
                 <input class="form-control" id="${prefix}-map-lon" type="number" inputmode="decimal" step="any" min="-180" max="180" placeholder="103.876543" aria-describedby="${prefix}-map-error">
             </div>
         </div>
-        <p class="form-text mb-0" id="${prefix}-map-hint" role="status">Tự cập nhật theo các trạm cảm biến có tọa độ hợp lệ.</p>
+        <p class="form-text mb-0" id="${prefix}-map-hint" role="status">Nhập hoặc chọn tọa độ đại diện cho công trình.</p>
         <p class="text-danger small mt-2 mb-0" id="${prefix}-map-error" role="alert" hidden></p>
     </fieldset>`;
 window.LegacyTemplateParts ||= {};

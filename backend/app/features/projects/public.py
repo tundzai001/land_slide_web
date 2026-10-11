@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_auth_db, get_config_db
 from ...models import config as model_config
 from ...shared.access import get_optional_current_user_from_request, user_project_filter_ids
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
+from ...shared.project_dem import list_project_dems, project_dem_path, project_dem_summary
 
 router = APIRouter(tags=["Projects"])
 logger = logging.getLogger(__name__)
@@ -77,6 +79,7 @@ async def get_public_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
+                **project_dem_summary(p.id),
                 "gnss_clusters": public_clusters(p.gnss_clusters),
             }
             for p, count in result.all()
@@ -95,3 +98,47 @@ async def get_public_projects(
     except Exception as e:
         logger.error(f"Error loading public projects: {e}")
         raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")
+
+
+async def _project_dem_access(project_id: int, request: Request, db: AsyncSession, db_auth: AsyncSession):
+    current_user = await get_optional_current_user_from_request(request, db_auth)
+    allowed_project_ids = user_project_filter_ids(current_user)
+    if allowed_project_ids is not None and project_id not in allowed_project_ids:
+        raise HTTPException(status_code=404, detail="Không tìm thấy mô hình địa hình.")
+    project = await db.get(model_config.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Không tìm thấy mô hình địa hình.")
+    return project
+
+
+@router.get("/api/projects/{project_id}/dems")
+async def get_project_dems(
+    project_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_config_db),
+    db_auth: AsyncSession = Depends(get_auth_db),
+):
+    await _project_dem_access(project_id, request, db, db_auth)
+    return {"project_id": project_id, "models": list_project_dems(project_id)}
+
+
+@router.get("/api/projects/{project_id}/dems/{dem_id}")
+async def get_project_dem_file(
+    project_id: int,
+    dem_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_config_db),
+    db_auth: AsyncSession = Depends(get_auth_db),
+):
+    await _project_dem_access(project_id, request, db, db_auth)
+    models = list_project_dems(project_id)
+    model = next((item for item in models if item.get("id") == dem_id), None)
+    if not model:
+        raise HTTPException(status_code=404, detail="Dự án chưa có mô hình địa hình.")
+    dem_path = project_dem_path(project_id, dem_id)
+    return FileResponse(
+        dem_path,
+        media_type="text/plain; charset=utf-8",
+        filename=f"model-{dem_id}.asc",
+        headers={"Cache-Control": "private, no-store"},
+    )

@@ -29,6 +29,172 @@ function createStationClusterGroup() {
 
 let projectMapGroups = [];
 let projectOverviewInitialized = false;
+let projectDashboardViewer = null;
+let projectDashboardTrigger = null;
+let projectDashboardRequest = 0;
+let projectDashboardDemRequest = 0;
+
+function ensureProjectDashboard() {
+    let panel = document.getElementById('project-dashboard');
+    if (panel) return panel;
+    document.body.insertAdjacentHTML('beforeend', `
+        <aside class="project-dashboard-panel" id="project-dashboard" role="dialog" aria-modal="false" aria-label="Bảng điều khiển dự án" aria-hidden="true" inert>
+            <header class="project-dashboard-header">
+                <div>
+                    <p class="project-dashboard-eyebrow">Tổng quan dự án</p>
+                    <h2 id="project-dashboard-name"></h2>
+                    <p class="project-dashboard-location" id="project-dashboard-location"></p>
+                </div>
+                <button type="button" class="project-dashboard-close" id="project-dashboard-close" aria-label="Đóng bảng dự án"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+            </header>
+            <div class="project-dashboard-content">
+                <div class="project-dashboard-summary">
+                    <span><strong id="project-dashboard-stations">0</strong> trạm</span>
+                    <span id="project-dashboard-dem-badge">Chưa có mô hình DEM</span>
+                </div>
+                <section class="project-dashboard-terrain" aria-labelledby="project-dashboard-terrain-title">
+                    <div class="project-dashboard-terrain-head">
+                        <div><h3 id="project-dashboard-terrain-title">Địa hình số của công trình</h3><p id="project-dashboard-terrain-description">DEM · EPSG:32648 · ô lưới theo file</p></div>
+                        <select class="project-dashboard-dem-select" id="project-dashboard-dem-select" aria-label="Chọn khu địa hình" hidden></select>
+                    </div>
+                    <div class="project-dashboard-terrain-body">
+                        <div class="project-dashboard-message" id="project-dashboard-message" role="status" aria-live="polite"><i class="bi bi-mountains" aria-hidden="true"></i><span></span></div>
+                        <div class="dem-grid-viewport project-dashboard-dem-viewport" id="project-dashboard-viewport" hidden><canvas id="project-dashboard-canvas" aria-label="Mô hình địa hình số của dự án"></canvas></div>
+                        <div class="project-dashboard-controls">
+                            <p>Cuộn để zoom · Kéo để di chuyển</p>
+                            <div class="dem-grid-toolbar" aria-label="Điều khiển mô hình DEM">
+                                <button type="button" data-dem-action="out" aria-label="Thu nhỏ mô hình">−</button>
+                                <button type="button" data-dem-action="fit" aria-label="Vừa khung mô hình"><i class="bi bi-arrows-angle-contract" aria-hidden="true"></i></button>
+                                <button type="button" data-dem-action="in" aria-label="Phóng to mô hình">+</button>
+                            </div>
+                        </div>
+                        <p class="project-dashboard-status" id="project-dashboard-status" aria-live="polite"></p>
+                    </div>
+                </section>
+            </div>
+        </aside>`);
+    panel = document.getElementById('project-dashboard');
+    panel.querySelector('#project-dashboard-close').addEventListener('click', closeProjectDashboard);
+    panel.querySelectorAll('[data-dem-action]').forEach(button => button.addEventListener('click', () => {
+        const action = button.dataset.demAction;
+        if (action === 'in') projectDashboardViewer?.zoomIn();
+        else if (action === 'out') projectDashboardViewer?.zoomOut();
+        else projectDashboardViewer?.fit();
+    }));
+    panel.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeProjectDashboard();
+    });
+    return panel;
+}
+
+function closeProjectDashboard() {
+    projectDashboardRequest += 1;
+    const panel = document.getElementById('project-dashboard');
+    if (!panel) return;
+    panel.classList.remove('is-open');
+    panel.setAttribute('aria-hidden', 'true');
+    panel.inert = true;
+    projectDashboardViewer?.destroy();
+    projectDashboardViewer = null;
+    projectDashboardTrigger?.focus?.({ preventScroll: true });
+    projectDashboardTrigger = null;
+}
+
+async function openProjectDashboard(project, center, trigger) {
+    const requestId = ++projectDashboardRequest;
+    const leafletMap = getLeafletMap();
+    const panel = ensureProjectDashboard();
+    projectDashboardTrigger = trigger;
+    projectDashboardViewer?.destroy();
+    projectDashboardViewer = null;
+    const location = project.location;
+    const dems = Array.isArray(project.dems) ? project.dems : [];
+    document.getElementById('project-dashboard-name').textContent = project.name || 'Dự án';
+    document.getElementById('project-dashboard-location').textContent = location?.address
+        ? `${location.address} · ${Number(center[0]).toFixed(6)}, ${Number(center[1]).toFixed(6)}`
+        : `Vị trí dự án · ${Number(center[0]).toFixed(6)}, ${Number(center[1]).toFixed(6)}`;
+    const stationCount = allStations.filter(station => String(station.project_id) === String(project.id)).length;
+    document.getElementById('project-dashboard-stations').textContent = String(stationCount);
+    document.getElementById('project-dashboard-dem-badge').textContent = dems.length
+        ? `${dems.length} khu địa hình` : 'Chưa có mô hình DEM';
+    const message = document.getElementById('project-dashboard-message');
+    const messageText = message.querySelector('span');
+    const viewport = document.getElementById('project-dashboard-viewport');
+    const status = document.getElementById('project-dashboard-status');
+    viewport.hidden = true;
+    message.hidden = false;
+    status.textContent = '';
+    messageText.textContent = dems.length ? 'Đang tải mô hình địa hình…' : 'Dự án này chưa có DEM. Tải mô hình lên trong trang Quản lý dự án để xem địa hình tại đây.';
+    const demSelect = document.getElementById('project-dashboard-dem-select');
+    demSelect.replaceChildren(...dems.map(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name;
+        return option;
+    }));
+    demSelect.hidden = dems.length < 2;
+    demSelect.onchange = () => loadProjectDashboardDem(project, demSelect.value, requestId);
+
+    const currentZoom = leafletMap.getZoom();
+    const targetZoom = Math.max(currentZoom, 14);
+    const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const moved = Math.abs(leafletMap.getCenter().lat - center[0]) > 0.00001
+        || Math.abs(leafletMap.getCenter().lng - center[1]) > 0.00001
+        || Math.abs(currentZoom - targetZoom) > 0.01;
+    if (moved && animate) {
+        await new Promise(resolve => {
+            const finish = () => resolve();
+            leafletMap.once('moveend', finish);
+            leafletMap.flyTo(center, targetZoom, { animate: true, duration: 1.05 });
+            window.setTimeout(finish, 1300);
+        });
+    } else if (moved) leafletMap.setView(center, targetZoom, { animate: false });
+    if (requestId !== projectDashboardRequest) return;
+
+    panel.inert = false;
+    panel.setAttribute('aria-hidden', 'false');
+    panel.classList.add('is-open');
+    panel.querySelector('#project-dashboard-close').focus({ preventScroll: true });
+    if (window.innerWidth > 700) {
+        leafletMap.panBy([Math.min(panel.getBoundingClientRect().width * 0.22, 160), 0], { animate, duration: 0.3 });
+    }
+    if (dems.length) await loadProjectDashboardDem(project, dems[0].id, requestId);
+}
+
+async function loadProjectDashboardDem(project, demId, parentRequest) {
+    const requestId = ++projectDashboardDemRequest;
+    const panel = document.getElementById('project-dashboard');
+    const message = document.getElementById('project-dashboard-message');
+    const messageText = message.querySelector('span');
+    const viewport = document.getElementById('project-dashboard-viewport');
+    const status = document.getElementById('project-dashboard-status');
+    const model = (project.dems || []).find(item => item.id === demId);
+    document.getElementById('project-dashboard-terrain-description').textContent = `${model?.name || 'DEM'} · EPSG:32648 · ô lưới theo file`;
+    projectDashboardViewer?.destroy();
+    projectDashboardViewer = null;
+    viewport.hidden = true;
+    message.hidden = false;
+    message.querySelector('i').className = 'bi bi-mountains';
+    messageText.textContent = 'Đang tải mô hình địa hình…';
+    status.textContent = '';
+    try {
+        const response = window.authManager?.isAuthenticated?.()
+            ? await window.authManager.apiFetch(`/api/projects/${project.id}/dems/${encodeURIComponent(demId)}`)
+            : await fetch(`/api/projects/${project.id}/dems/${encodeURIComponent(demId)}`);
+        if (!response.ok) throw new Error(response.status === 404 ? 'Không tìm thấy file DEM của khu địa hình.' : `Không tải được mô hình (HTTP ${response.status}).`);
+        const grid = window.DemGrid.parse(await response.text());
+        if (parentRequest !== projectDashboardRequest || requestId !== projectDashboardDemRequest || !panel.classList.contains('is-open')) return;
+        projectDashboardViewer = window.DemGrid.mount(document.getElementById('project-dashboard-canvas'), grid);
+        viewport.hidden = false;
+        message.hidden = true;
+        status.textContent = `${grid.ncols} × ${grid.nrows} ô · độ cao ${grid.min.toFixed(1)}–${grid.max.toFixed(1)} m · ô ${grid.cellsize} m`;
+    } catch (error) {
+        if (parentRequest !== projectDashboardRequest || requestId !== projectDashboardDemRequest) return;
+        message.querySelector('i').className = 'bi bi-exclamation-circle';
+        messageText.textContent = error.message || 'Không thể đọc mô hình DEM.';
+        status.textContent = 'Kiểm tra file ESRI ASCII Grid (.asc) và thử tải lại.';
+    }
+}
 
 function getProjectMapPadding() {
     const leafletMap = getLeafletMap();
@@ -105,7 +271,7 @@ function createProjectMapGroup(project) {
     const title = document.createElement('strong');
     title.textContent = name;
     const hint = document.createElement('span');
-    hint.textContent = stations.length ? `${stations.length} trạm cảm biến · Bấm để xem` : 'Chưa có trạm cảm biến';
+    hint.textContent = `${stations.length} trạm · Bấm để mở dashboard`;
     tooltip.append(title, hint);
     const marker = L.marker(center, {
         title: name,
@@ -135,18 +301,12 @@ function createProjectMapGroup(project) {
         marker.fire('click');
     });
     marker.on('click', () => {
-        const leafletMap = getLeafletMap();
         setStationListSidebarOpen(document.getElementById('station-list-sidebar'), false);
         setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
         setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
         setChartsPanelOpen(document.getElementById('charts-panel'), false);
         document.getElementById('longterm-overlay')?.classList.remove('active');
-        leafletMap.flyToBounds(bounds, {
-            ...getProjectMapPadding(),
-            maxZoom: 16,
-            animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-            duration: 1.2,
-        });
+        openProjectDashboard(project, center, marker.getElement());
     });
     return { id: project.id, marker, bounds, stationIds: stations.map(station => station.id) };
 }
@@ -244,6 +404,8 @@ async function loadProjectsAndClusters() {
                 id: project.id,
                 name: project.name,
                 location: project.location,
+                has_dem: project.has_dem,
+                dems: project.dems,
                 gnss_clusters: project.gnss_clusters,
             })),
             stations: allStations.map(station => [
