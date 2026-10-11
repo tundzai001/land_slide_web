@@ -16,7 +16,8 @@ from ...models import config as model_config
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 from ...shared.access import user_project_filter_ids
 from ...shared.project_location import save_project_map_position, update_location_address, validate_map_position
-from ...shared.project_dem import delete_project_dems, project_dem_summary, save_project_dem
+from ...shared.project_dem import delete_project_dems, save_project_dem
+from ...shared.project_dem_db import delete_project_dem_catalog, get_project_dem_models, get_project_dem_summaries, save_project_dem_catalog
 from .public import public_clusters
 
 router = APIRouter(tags=["Projects"])
@@ -57,6 +58,7 @@ async def get_projects(
         )
 
         projects_with_counts = result.all()
+        dem_summaries = await get_project_dem_summaries(db, [project.id for project, _ in projects_with_counts])
 
         # Filter projects for operator role
         assigned = user_project_filter_ids(current_user)
@@ -73,7 +75,7 @@ async def get_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
-                **project_dem_summary(p.id),
+                **dem_summaries[p.id],
                 "gnss_clusters": p.gnss_clusters if current_user.role == 'admin' else public_clusters(p.gnss_clusters),
                 **({"auto_adjustment_config": p.auto_adjustment_config} if current_user.role == 'admin' else {}),
             }
@@ -109,12 +111,17 @@ async def upload_project_dem(
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
 ):
+    logger.info("Project DEM upload received project_id=%s filename=%s bytes=%s", project_id, dem_file.filename, getattr(dem_file, "size", None))
     project = await db.get(model_config.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Không tìm thấy dự án.")
     if not (dem_file.filename or "").lower().endswith(".asc"):
         raise HTTPException(status_code=415, detail="Chỉ hỗ trợ file DEM ESRI ASCII Grid (.asc).")
-    result = await run_in_threadpool(save_project_dem, project_id, dem_name, dem_file.file)
+    existing_models = await get_project_dem_models(db, project_id)
+    result = await run_in_threadpool(save_project_dem, project_id, dem_name, dem_file.file, existing_models)
+    await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
+    await db.commit()
+    logger.info("Saved project DEM project_id=%s dem_id=%s filename=%s bytes=%s", project_id, result["dem_id"], dem_file.filename, dem_file.size)
     return {"project_id": project_id, **result}
 
 
@@ -287,6 +294,7 @@ async def delete_project(
             raise HTTPException(status_code=404, detail="Project not found")
 
         await db.delete(project)
+        await delete_project_dem_catalog(db, project_id)
         await db.commit()
         try:
             delete_project_dems(project_id)

@@ -197,7 +197,7 @@ class AdminStationsFeature extends window.AdminManager {
             try { result = JSON.parse(responseText); } catch { /* Proxy errors may be HTML. */ }
             if (!response.ok) {
                 const detail = result.detail || (response.status === 413
-                    ? `Máy chủ từ chối file (HTTP 413): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB). Kiểm tra giới hạn request trên IIS hoặc proxy và dung lượng ổ đĩa.`
+                    ? `Máy chủ từ chối file (HTTP 413): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB). Đối chiếu log backend “Project DEM upload received”; nếu không có dòng này, IIS hoặc proxy đã chặn trước ứng dụng.`
                     : `Không tải được DEM (HTTP ${response.status}).`);
                 throw new Error(detail);
             }

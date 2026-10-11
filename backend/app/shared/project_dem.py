@@ -13,8 +13,16 @@ import uuid
 from pathlib import Path
 
 from fastapi import HTTPException
+from ..config import settings
 
-PROJECT_DEM_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "dems"
+PROJECT_DEM_DIR = (
+    Path(settings.PROJECT_DEM_DIR)
+    if settings.PROJECT_DEM_DIR
+    else Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Aitogy" / "Landslide" / "project_dems"
+    if os.name == "nt"
+    else Path(__file__).resolve().parents[3] / "runtime" / "project_dems"
+)
+LEGACY_PROJECT_DEM_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "dems"
 MAX_DEM_CELLS = 10_000_000
 DEM_ID_PATTERN = re.compile(r"^[a-f0-9]{16}$")
 _manifest_lock = threading.RLock()
@@ -27,11 +35,22 @@ def project_dem_manifest_path(project_id: int) -> Path:
 def project_dem_path(project_id: int, dem_id: str) -> Path:
     if not DEM_ID_PATTERN.fullmatch(str(dem_id)):
         raise HTTPException(status_code=404, detail="Không tìm thấy mô hình địa hình.")
-    return PROJECT_DEM_DIR / f"project-{int(project_id)}-{dem_id}.asc"
+    filename = f"project-{int(project_id)}-{dem_id}.asc"
+    primary = PROJECT_DEM_DIR / filename
+    return primary if primary.is_file() else LEGACY_PROJECT_DEM_DIR / filename
 
 
-def list_project_dems(project_id: int) -> list[dict]:
+def list_project_dems(project_id: int, models=None) -> list[dict]:
+    if models is not None:
+        return [
+            model for model in models
+            if isinstance(model, dict)
+            and DEM_ID_PATTERN.fullmatch(str(model.get("id", "")))
+            and project_dem_path(project_id, model["id"]).is_file()
+        ]
     manifest_path = project_dem_manifest_path(project_id)
+    if not manifest_path.is_file():
+        manifest_path = LEGACY_PROJECT_DEM_DIR / manifest_path.name
     if not manifest_path.is_file():
         return []
     try:
@@ -47,8 +66,8 @@ def list_project_dems(project_id: int) -> list[dict]:
         return []
 
 
-def project_dem_summary(project_id: int) -> dict:
-    models = list_project_dems(project_id)
+def project_dem_summary(project_id: int, models=None) -> dict:
+    models = list_project_dems(project_id, models)
     return {"dems": models, "has_dem": bool(models)}
 
 
@@ -150,17 +169,17 @@ def inspect_ascii_grid(content) -> dict:
     }
 
 
-def save_project_dem(project_id: int, name: str, content) -> dict:
+def save_project_dem(project_id: int, name: str, content, existing_models=None) -> dict:
     metadata = inspect_ascii_grid(content)
     clean_name = (name or "").strip()
     if not clean_name or len(clean_name) > 100:
         raise HTTPException(status_code=422, detail="Tên khu địa hình phải có từ 1 đến 100 ký tự.")
     PROJECT_DEM_DIR.mkdir(parents=True, exist_ok=True)
     with _manifest_lock:
-        models = list_project_dems(project_id)
+        models = list_project_dems(project_id, existing_models)
         existing = next((model for model in models if model.get("name", "").casefold() == clean_name.casefold()), None)
         dem_id = existing["id"] if existing else uuid.uuid4().hex[:16]
-        destination = project_dem_path(project_id, dem_id)
+        destination = PROJECT_DEM_DIR / f"project-{int(project_id)}-{dem_id}.asc"
         descriptor, temporary_path = tempfile.mkstemp(prefix=f"project-{project_id}-", suffix=".tmp", dir=PROJECT_DEM_DIR)
         try:
             with os.fdopen(descriptor, "wb") as file:
@@ -180,7 +199,6 @@ def save_project_dem(project_id: int, name: str, content) -> dict:
             models = [model if item["id"] == dem_id else item for item in models]
         else:
             models.append(model)
-        _write_manifest(project_id, models)
         return {"dem_id": dem_id, "dem": model, "models": models}
 
 
@@ -201,5 +219,7 @@ def _write_manifest(project_id: int, models: list[dict]) -> None:
 def delete_project_dems(project_id: int) -> None:
     with _manifest_lock:
         project_dem_manifest_path(project_id).unlink(missing_ok=True)
-        for path in PROJECT_DEM_DIR.glob(f"project-{int(project_id)}-*.asc"):
-            path.unlink(missing_ok=True)
+        (LEGACY_PROJECT_DEM_DIR / f"project-{int(project_id)}.json").unlink(missing_ok=True)
+        for directory in {PROJECT_DEM_DIR, LEGACY_PROJECT_DEM_DIR}:
+            for path in directory.glob(f"project-{int(project_id)}-*.asc"):
+                path.unlink(missing_ok=True)

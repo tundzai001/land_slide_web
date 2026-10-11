@@ -12,7 +12,8 @@ from ...database import get_auth_db, get_config_db
 from ...models import config as model_config
 from ...shared.access import get_optional_current_user_from_request, user_project_filter_ids
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
-from ...shared.project_dem import list_project_dems, project_dem_path, project_dem_summary
+from ...shared.project_dem import project_dem_path
+from ...shared.project_dem_db import get_project_dem_models, get_project_dem_summaries
 
 router = APIRouter(tags=["Projects"])
 logger = logging.getLogger(__name__)
@@ -68,6 +69,8 @@ async def get_public_projects(
             stmt = stmt.where(model_config.Project.is_active.is_(is_active))
         page_offset, page_limit = normalize_page(offset, limit)
         result = await db.execute(stmt)
+        project_rows = result.all()
+        dem_summaries = await get_project_dem_summaries(db, [project.id for project, _ in project_rows])
 
         rows = [
             {
@@ -79,10 +82,10 @@ async def get_public_projects(
                 "is_active": p.is_active,
                 "created_at": p.created_at,
                 "station_count": count,
-                **project_dem_summary(p.id),
+                **dem_summaries[p.id],
                 "gnss_clusters": public_clusters(p.gnss_clusters),
             }
-            for p, count in result.all()
+            for p, count in project_rows
         ]
         allowed_sort = {"name", "project_code", "created_at", "station_count"}
         if sort:
@@ -119,7 +122,7 @@ async def get_project_dems(
     db_auth: AsyncSession = Depends(get_auth_db),
 ):
     await _project_dem_access(project_id, request, db, db_auth)
-    return {"project_id": project_id, "models": list_project_dems(project_id)}
+    return {"project_id": project_id, "models": await get_project_dem_models(db, project_id)}
 
 
 @router.get("/api/projects/{project_id}/dems/{dem_id}")
@@ -131,7 +134,7 @@ async def get_project_dem_file(
     db_auth: AsyncSession = Depends(get_auth_db),
 ):
     await _project_dem_access(project_id, request, db, db_auth)
-    models = list_project_dems(project_id)
+    models = await get_project_dem_models(db, project_id)
     model = next((item for item in models if item.get("id") == dem_id), None)
     if not model:
         raise HTTPException(status_code=404, detail="Dự án chưa có mô hình địa hình.")

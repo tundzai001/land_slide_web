@@ -10,6 +10,12 @@ Mở **Quản trị → Vận hành** bằng tài khoản Admin. API tương ứ
 
 Cuối cột trái, chọn **Hướng dẫn tích hợp** để tải PDF này hoặc **Hướng dẫn sử dụng** để tải cẩm nang thao tác web. Thiết bị gửi MQTT tiếp tục dùng cấu hình trạm hiện có.
 
+## Lưu mô hình DEM dự án
+
+Danh mục DEM (tên khu, mã mô hình và thông số lưới) được lưu trong bảng `global_configs` của CONFIG PostgreSQL; nội dung `.asc` lưu ngoài thư mục mã nguồn để tránh làm phình CSDL và không mất khi cập nhật code. Windows mặc định dùng `%PROGRAMDATA%\Aitogy\Landslide\project_dems`; đặt `PROJECT_DEM_DIR` để chuyển sang ổ dữ liệu khác và cấp quyền ghi cho tài khoản chạy backend. Sao lưu thư mục này cùng bản backup PostgreSQL.
+
+`web.config` nâng trần IIS request filtering lên mức tối đa của IIS. Nếu upload trả HTTP 413, tìm dòng `Project DEM upload received` trong log backend cùng thời điểm: có dòng này thì request đã tới ứng dụng; không có thì IIS hoặc proxy chặn trước FastAPI. Khi đó kiểm tra IIS Failed Request Tracing (HTTP 413.1) và cấu hình proxy tại máy chủ, rồi recycle tiến trình sau khi sửa cấu hình.
+
 ## Sao lưu nóng
 
 Chạy ứng dụng một worker như cấu hình hiện tại: vòng đời MQTT và các daemon được khởi tạo theo process. Dùng nhiều worker sẽ nhân đôi các daemon này; cần thiết kế leader/lease trước khi scale.

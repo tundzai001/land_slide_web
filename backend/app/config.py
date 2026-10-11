@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     RUN_SCHEMA_BOOTSTRAP: bool = False
     # Backup archives live outside the web root by default on Windows servers.
     BACKUP_DIR: str = ""
+    PROJECT_DEM_DIR: str = ""
     OPERATIONS_LOG_RETENTION_DAYS: int = 365
     NTP_SERVER: str = Field(default="pool.ntp.org", min_length=1, max_length=253, pattern=r'^[A-Za-z0-9.-]+$')
     BOOTSTRAP_ADMIN_PASSWORD: str = ""

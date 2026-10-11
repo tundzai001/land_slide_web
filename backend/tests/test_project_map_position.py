@@ -15,7 +15,7 @@ from app.features.authentication import sessions as auth_sessions
 from app.shared import access
 from app.database import BaseAuth, BaseConfig, get_auth_db, get_config_db
 from app.models.auth import User
-from app.models.config import Project, Station
+from app.models.config import GlobalConfig, Project, Station
 from app.features.projects import admin, public
 from app.features.database_admin.write_router import router as database_router
 from app.features.stations.configuration import router as station_config_router
@@ -182,6 +182,9 @@ class ProjectMapPositionTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(added_slope.status_code, 200, added_slope.text)
                 self.assertNotEqual(added_slope.json()["dem_id"], dem_id)
+                async with self.sessions() as db:
+                    catalog = await db.get(GlobalConfig, "project_dem:1")
+                    self.assertEqual([item["name"] for item in catalog.value["models"]], ["Thân đập", "Bờ mỏ"])
 
                 models = await self.client.get("/api/projects/1/dems", headers=self.headers("operator"))
                 self.assertEqual(models.json()["models"][0]["id"], dem_id)
