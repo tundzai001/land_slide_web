@@ -143,25 +143,33 @@ async def find_adjustment(
         )
         return rows
 
+    # Keep the hot path on the project/adjustment indexes. Filtering the JSON
+    # report URLs in SQL makes PostgreSQL scan the large sensor_data table;
+    # the indexed adjustment rows are small enough to match in Python.
     query = select(model_data.SensorData).where(
         model_data.SensorData.sensor_type.in_(ADJUSTMENT_SENSOR_TYPES),
-        _report_url_filter(requested_url),
     )
     records = await execute(
         "lookup_indexed_adjustment",
         query.where(
             model_data.SensorData.adjustment_project_id == project_id,
             model_data.SensorData.adjustment_key.is_not(None),
-        ).limit(1),
+        ),
     )
     if not records:
         # Keep compatibility with pre-indexed rows whose project id lives only
-        # in the JSON payload. This is a fallback; current rows use the index.
+        # in the JSON payload. Keep the expensive JSON predicate off the hot path.
+        legacy_query = (
+            query.where(
+                model_data.SensorData.adjustment_project_id.is_(None),
+                _report_url_filter(requested_url),
+            )
+            .order_by(model_data.SensorData.timestamp.desc())
+            .limit(1)
+        )
         records = await execute(
             "lookup_legacy_adjustment",
-            query.where(model_data.SensorData.adjustment_project_id.is_(None))
-            .order_by(model_data.SensorData.timestamp.desc())
-            .limit(1),
+            legacy_query,
         )
     for record in records:
         payload = record.data if isinstance(record.data, dict) else None

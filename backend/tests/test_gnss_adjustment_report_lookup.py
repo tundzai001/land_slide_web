@@ -32,15 +32,26 @@ class GnssAdjustmentReportLookupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_indexed_report_lookup_matches_json_url(self):
         url = "/api/admin/gnss/adjustment/reports/sin-quyen/dap-4/gnss_adjustment.xlsx"
-        self.db.add(model_data.SensorData(
-            id=1,
-            station_id=5,
-            timestamp=100,
-            sensor_type="gnss_adjusted",
-            adjustment_key="run:17:4:1",
-            adjustment_project_id=17,
-            data={"project_id": 17, "excel_report_url": url},
-        ))
+        self.db.add_all([
+            model_data.SensorData(
+                id=1,
+                station_id=5,
+                timestamp=99,
+                sensor_type="gnss_adjusted",
+                adjustment_key="run:17:4:0",
+                adjustment_project_id=17,
+                data={"project_id": 17, "excel_report_url": "/another-report.xlsx"},
+            ),
+            model_data.SensorData(
+                id=2,
+                station_id=5,
+                timestamp=100,
+                sensor_type="gnss_adjusted",
+                adjustment_key="run:17:4:1",
+                adjustment_project_id=17,
+                data={"project_id": 17, "excel_report_url": url},
+            ),
+        ])
         self.db.commit()
 
         found = await find_adjustment(
@@ -50,12 +61,11 @@ class GnssAdjustmentReportLookupTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNotNone(found)
-        self.assertEqual(found[0].id, 1)
+        self.assertEqual(found[0].id, 2)
         query = str(self.session.statements[0].compile(dialect=sqlite_dialect()))
         self.assertIn("adjustment_project_id = ?", query)
         self.assertIn("adjustment_key IS NOT NULL", query)
-        self.assertIn("json_extract", query.lower())
-        self.assertIn("LIMIT", query)
+        self.assertNotIn("json_extract", query.lower())
 
     async def test_legacy_project_id_in_json_uses_fallback(self):
         url = "/api/admin/gnss/adjustment/reports/legacy/dap-4/gnss_adjustment.xlsx"
@@ -79,6 +89,7 @@ class GnssAdjustmentReportLookupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.session.statements), 2)
         fallback = str(self.session.statements[1].compile(dialect=sqlite_dialect()))
         self.assertIn("adjustment_project_id IS NULL", fallback)
+        self.assertIn("json_extract", fallback.lower())
         self.assertIn("ORDER BY sensor_data.timestamp DESC", fallback)
         self.assertIn("LIMIT", fallback)
 
