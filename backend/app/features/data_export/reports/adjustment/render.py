@@ -82,7 +82,7 @@ def matches_payload(
         )
         if str(value or "").strip().lstrip("-").isdigit()
     }
-    return int(project_id) in project_ids
+    return project_ids == {int(project_id)}
 
 
 def _report_url_filter(requested_url: str):
@@ -105,6 +105,7 @@ async def find_adjustment(
     *,
     project_id: int,
     requested_url: str,
+    sensor_data_id: int | None = None,
     request_id: str = "unknown",
     mark_phase: Callable[[str], None] | None = None,
 ) -> tuple[object, dict, list[object]] | None:
@@ -112,32 +113,35 @@ async def find_adjustment(
         if mark_phase:
             mark_phase(phase)
 
-    async def execute(phase: str, statement):
+    async def execute(phase: str, statement, **context):
         mark(phase)
         started = time.perf_counter()
         logger.info(
-            "GNSS export phase started request_id=%s phase=%s project_id=%s",
+            "GNSS export phase started request_id=%s phase=%s project_id=%s context=%s",
             request_id,
             phase,
             project_id,
+            context,
         )
         try:
             result = await data_db.execute(statement)
             rows = result.scalars().all()
         except Exception:
             logger.exception(
-                "GNSS export phase failed request_id=%s phase=%s project_id=%s elapsed_ms=%.1f",
+                "GNSS export phase failed request_id=%s phase=%s project_id=%s context=%s elapsed_ms=%.1f",
                 request_id,
                 phase,
                 project_id,
+                context,
                 (time.perf_counter() - started) * 1000,
             )
             raise
         logger.info(
-            "GNSS export phase completed request_id=%s phase=%s project_id=%s rows=%d elapsed_ms=%.1f",
+            "GNSS export phase completed request_id=%s phase=%s project_id=%s context=%s rows=%d elapsed_ms=%.1f",
             request_id,
             phase,
             project_id,
+            context,
             len(rows),
             (time.perf_counter() - started) * 1000,
         )
@@ -149,14 +153,33 @@ async def find_adjustment(
     query = select(model_data.SensorData).where(
         model_data.SensorData.sensor_type.in_(ADJUSTMENT_SENSOR_TYPES),
     )
-    records = await execute(
-        "lookup_indexed_adjustment",
-        query.where(
-            model_data.SensorData.adjustment_project_id == project_id,
-            model_data.SensorData.adjustment_key.is_not(None),
-        ),
-    )
-    if not records:
+    if sensor_data_id is not None:
+        records = await execute(
+            "lookup_adjustment_record",
+            query.where(model_data.SensorData.id == sensor_data_id).limit(1),
+            sensor_data_id=sensor_data_id,
+        )
+        if not records:
+            return None
+        payload = records[0].data if isinstance(records[0].data, dict) else None
+        if not payload or not matches_payload(payload, records[0], requested_url, project_id):
+            logger.warning(
+                "GNSS export selected record did not match request request_id=%s project_id=%s sensor_data_id=%s requested_url=%s",
+                request_id,
+                project_id,
+                sensor_data_id,
+                _url_path(requested_url),
+            )
+            return None
+    else:
+        records = await execute(
+            "lookup_indexed_adjustment",
+            query.where(
+                model_data.SensorData.adjustment_project_id == project_id,
+                model_data.SensorData.adjustment_key.is_not(None),
+            ),
+        )
+    if sensor_data_id is None and not records:
         # Keep compatibility with pre-indexed rows whose project id lives only
         # in the JSON payload. Keep the expensive JSON predicate off the hot path.
         legacy_query = (

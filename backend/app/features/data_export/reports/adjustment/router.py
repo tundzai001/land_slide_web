@@ -83,6 +83,7 @@ async def _download(
     project_id: int,
     filename: str,
     requested_url: str,
+    sensor_data_id: int | None,
     data_db: AsyncSession,
     request: Request,
 ):
@@ -93,6 +94,7 @@ async def _download(
         data_db,
         project_id=project_id,
         requested_url=requested_url,
+        sensor_data_id=sensor_data_id,
         request_id=getattr(request.state, "request_id", "unknown"),
         mark_phase=lambda phase: setattr(request.state, "operation_phase", phase),
     )
@@ -133,6 +135,7 @@ async def download_gnss_adjustment_report(
         auth.require_permission(auth.Permission.EDIT_STATIONS)
     ),
     data_db: AsyncSession = Depends(get_data_db),
+    sensor_data_id: int | None = None,
 ):
     """Download a project-scoped result rendered from the data database."""
     match = ADJUSTMENT_REPORT_NAME.fullmatch(filename)
@@ -151,6 +154,7 @@ async def download_gnss_adjustment_report(
         project_id=project_id,
         filename=filename,
         requested_url=f"/api/admin/gnss/adjustment/reports/{project_id}/{filename}",
+        sensor_data_id=sensor_data_id,
         data_db=data_db,
         request=request,
     )
@@ -167,6 +171,7 @@ async def download_scoped_gnss_adjustment_report(
         auth.require_permission(auth.Permission.EDIT_STATIONS)
     ),
     data_db: AsyncSession = Depends(get_data_db),
+    sensor_data_id: int | None = None,
 ):
     """Download a project/cluster result rendered from the data database."""
     path_object = Path(path)
@@ -206,6 +211,7 @@ async def download_scoped_gnss_adjustment_report(
             f"/api/admin/gnss/adjustment/reports/"
             f"{project_code}/{cluster_name}/{path}"
         ),
+        sensor_data_id=sensor_data_id,
         data_db=data_db,
         request=request,
     )

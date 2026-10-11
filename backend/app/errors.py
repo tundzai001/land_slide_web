@@ -14,6 +14,7 @@ OPERATION_PHASE_LABELS = {
     "list_projects": "Tra cứu danh sách dự án",
     "authorize_project": "Kiểm tra quyền truy cập dự án",
     "lookup_indexed_adjustment": "Tìm bản ghi bình sai",
+    "lookup_adjustment_record": "Đọc bản ghi đã chọn",
     "lookup_legacy_adjustment": "Tìm bản ghi bình sai cũ",
     "load_adjustment_evidence": "Tải trị đo thô",
     "render_xlsx": "Dựng file Excel",

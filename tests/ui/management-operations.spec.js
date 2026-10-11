@@ -240,7 +240,7 @@ test('sensor pages load lightweight rows and GNSS details open as a downloadable
   await expect(page.locator('#db-inspector-actions')).toContainText('Tải XLSX');
 
   await page.getByRole('button', { name: 'Tải JSON' }).click();
-  await expect.poll(() => page.evaluate(() => window.downloadedAdjustmentUrl)).toBe('/api/admin/gnss/adjustment/reports/2/result.json');
+  await expect.poll(() => page.evaluate(() => window.downloadedAdjustmentUrl)).toBe('/api/admin/gnss/adjustment/reports/2/result.json?sensor_data_id=77');
 });
 
 test('adjustment XLSX download shows progress then exposes the failed server phase', async ({ page }) => {

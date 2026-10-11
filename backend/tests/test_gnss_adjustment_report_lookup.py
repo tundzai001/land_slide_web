@@ -67,6 +67,57 @@ class GnssAdjustmentReportLookupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("adjustment_key IS NOT NULL", query)
         self.assertNotIn("json_extract", query.lower())
 
+    async def test_selected_record_id_uses_primary_key_and_validates_report(self):
+        url = "/api/admin/gnss/adjustment/reports/sin-quyen/dap-4/gnss_adjustment.xlsx"
+        self.db.add(model_data.SensorData(
+            id=2,
+            station_id=5,
+            timestamp=100,
+            sensor_type="gnss_adjusted",
+            adjustment_key="run:17:4:1",
+            adjustment_project_id=17,
+            data={"project_id": 17, "excel_report_url": url},
+        ))
+        self.db.add(model_data.SensorData(
+            id=3,
+            station_id=5,
+            timestamp=101,
+            sensor_type="gnss_adjusted",
+            adjustment_key="run:18:4:1",
+            adjustment_project_id=18,
+            data={"project_id": 17, "excel_report_url": url},
+        ))
+        self.db.commit()
+
+        found = await find_adjustment(
+            self.session,
+            project_id=17,
+            requested_url=url,
+            sensor_data_id=2,
+        )
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found[0].id, 2)
+        query = str(self.session.statements[0].compile(dialect=sqlite_dialect()))
+        self.assertIn("sensor_data.id = ?", query)
+        self.assertNotIn("json_extract", query.lower())
+
+        wrong_report = await find_adjustment(
+            self.session,
+            project_id=17,
+            requested_url="/another-report.xlsx",
+            sensor_data_id=2,
+        )
+        self.assertIsNone(wrong_report)
+        wrong_project = await find_adjustment(
+            self.session,
+            project_id=17,
+            requested_url=url,
+            sensor_data_id=3,
+        )
+        self.assertIsNone(wrong_project)
+        self.assertEqual(len(self.session.statements), 4)
+
     async def test_legacy_project_id_in_json_uses_fallback(self):
         url = "/api/admin/gnss/adjustment/reports/legacy/dap-4/gnss_adjustment.xlsx"
         self.db.add(model_data.SensorData(

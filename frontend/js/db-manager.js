@@ -565,17 +565,22 @@ class DatabaseManager {
                 console.info(`[DB Manager] Chuyển URL cũ → ${downloadUrl}`);
             }
         }
+        const recordId = Number(this.selectedRecord?.id);
+        if (downloadUrl.startsWith('/api/admin/gnss/adjustment/reports/') && Number.isSafeInteger(recordId) && recordId > 0) {
+            const separator = downloadUrl.includes('?') ? '&' : '?';
+            downloadUrl += `${separator}sensor_data_id=${recordId}`;
+        }
         let progressToast = null;
         try {
             const progressMessage = format === 'xlsx'
-                ? '<span class="spinner-border spinner-border-sm" style="margin-right:.5rem" aria-hidden="true"></span><strong>Đang dựng file Excel…</strong><br><small>Đang tra cứu dữ liệu và tạo báo cáo. Quá trình có thể mất một chút thời gian.</small>'
+                ? '<span class="spinner-border spinner-border-sm" style="margin-right:.5rem" aria-hidden="true"></span><strong>Đang dựng file Excel…</strong><br><small>Đang đọc bản ghi đã chọn và tạo báo cáo. Quá trình có thể mất một chút thời gian.</small>'
                 : '<span class="spinner-border spinner-border-sm" style="margin-right:.5rem" aria-hidden="true"></span><strong>Đang chuẩn bị file JSON…</strong>';
             progressToast = window.toast?.info?.(progressMessage, 0);
             if (button instanceof HTMLButtonElement) {
                 button.disabled = true;
                 button.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${format === 'xlsx' ? 'Đang dựng…' : 'Đang tải…'}`;
             }
-            await window.downloadAuthenticatedFile(downloadUrl, downloadUrl.split('/').pop());
+            await window.downloadAuthenticatedFile(downloadUrl, downloadUrl.split(/[?#]/, 1)[0].split('/').pop());
             if (progressToast) window.toast?.dismiss?.(progressToast);
             window.toast?.success?.(`Đã tạo file ${format.toUpperCase()}, trình duyệt đang tải xuống.`, 4000);
         } catch (error) {
