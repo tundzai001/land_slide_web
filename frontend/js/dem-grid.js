@@ -118,8 +118,8 @@
         fill.position.set(1, 0.5, -1);
         scene.add(fill);
 
-        // Cap GPU mesh density while preserving full-resolution cell picking.
-        const step = Math.max(1, Math.ceil(Math.max(grid.ncols, grid.nrows) / 512));
+        // Keep enough mesh detail for close inspection without overloading the GPU.
+        const step = Math.max(1, Math.ceil(Math.max(grid.ncols, grid.nrows) / 1024));
         const columns = Math.ceil((grid.ncols - 1) / step) + 1;
         const rows = Math.ceil((grid.nrows - 1) / step) + 1;
         const width = (grid.ncols - 1) * grid.cellsize;
@@ -250,7 +250,7 @@
 
         const fit = () => {
             const span = Math.max(width, depth, relief * verticalScale, 1);
-            const distance = span / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.45;
+            const distance = span / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.12;
             target.set(0, Math.max(0, relief * verticalScale * 0.24), 0);
             controls.target.copy(target);
             camera.position.copy(target).add(new THREE.Vector3(distance * 0.95, distance * 0.9, distance * 1.15));
