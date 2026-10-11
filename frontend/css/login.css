@@ -593,3 +593,59 @@
 @media(max-width:900px) { .login-capabilities { display:none; }.login-visual-copy h1 { font-size:28px; } }
 @media(max-width:560px) { .login-card, [data-theme="dark"] .login-card { border-radius:10px; }.login-card h2 { font-size:22px; }.login-visual-copy h1 { font-size:25px; } }
 .login-capabilities { padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; }
+
+/* Match the public page's smooth theme and moon-to-sun transition. */
+.login-page,
+.login-visual,
+.login-brand,
+.login-brand small,
+.login-capabilities-title,
+.login-capabilities > div,
+.login-capabilities > div > i,
+.login-capabilities strong,
+.login-capabilities small,
+.login-kicker,
+.login-visual-copy h1,
+.login-visual-copy p,
+.login-panel,
+.login-card,
+.login-icon,
+.login-heading-copy > span,
+.login-card h2,
+.login-subtitle,
+.login-field > span,
+.login-input-shell,
+.login-input-shell > i,
+.login-password-row,
+.login-password-row > i,
+.login-check,
+.login-check input,
+.login-security-note,
+.login-error {
+    transition: color .3s cubic-bezier(.4, 0, .2, 1),
+                background-color .3s cubic-bezier(.4, 0, .2, 1),
+                border-color .3s cubic-bezier(.4, 0, .2, 1),
+                box-shadow .3s cubic-bezier(.4, 0, .2, 1);
+}
+.login-page .login-input-shell input,
+.login-page .login-password-row input,
+.login-page input::placeholder {
+    transition: color .3s cubic-bezier(.4, 0, .2, 1);
+}
+.login-page .login-theme { position:relative; overflow:hidden; }
+.login-page .login-theme svg {
+    position:absolute;
+    width:20px;
+    height:20px;
+    fill:none;
+    stroke:currentColor;
+    stroke-width:1.8;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+    transition:transform .32s cubic-bezier(.2,.8,.2,1), opacity .22s ease;
+}
+.login-page .login-theme .theme-moon { opacity:1; transform:rotate(0) scale(1); }
+.login-page .login-theme .theme-sun { opacity:0; transform:rotate(-70deg) scale(.45); }
+[data-theme="dark"] .login-page .login-theme .theme-moon { opacity:0; transform:rotate(70deg) scale(.45); }
+[data-theme="dark"] .login-page .login-theme .theme-sun { opacity:1; transform:rotate(0) scale(1); }
+.login-page .login-theme:active { transform:scale(.94); }

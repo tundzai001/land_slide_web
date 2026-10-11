@@ -89,6 +89,8 @@ test('login introduction stays readable through light and dark switches', async 
       await page.locator('#login-theme').click();
     }
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await expect.poll(() => page.locator('.login-brand strong').evaluate(element => getComputedStyle(element).color))
+      .toBe(theme === 'dark' ? 'rgb(240, 253, 250)' : 'rgb(15, 42, 46)');
     const contrast = await page.evaluate(() => {
       const luminance = color => {
         const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {
@@ -106,9 +108,6 @@ test('login introduction stays readable through light and dark switches', async 
       });
     });
     for (const item of contrast) expect(item.ratio, `${theme}: ${item.selector}`).toBeGreaterThanOrEqual(4.5);
-    await page.evaluate(() => Promise.all(document.getAnimations()
-      .filter(animation => animation.effect.getTiming().iterations !== Infinity)
-      .map(animation => animation.finished.catch(() => {}))));
     await page.screenshot({ path: `test-results/login-contrast-${theme}.png`, fullPage: true });
   }
 });
