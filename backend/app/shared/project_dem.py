@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import io
 import os
 import json
 import re
@@ -14,7 +15,6 @@ from pathlib import Path
 from fastapi import HTTPException
 
 PROJECT_DEM_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "dems"
-MAX_DEM_BYTES = 20 * 1024 * 1024
 MAX_DEM_CELLS = 10_000_000
 DEM_ID_PATTERN = re.compile(r"^[a-f0-9]{16}$")
 _manifest_lock = threading.RLock()
@@ -52,16 +52,19 @@ def project_dem_summary(project_id: int) -> dict:
     return {"dems": models, "has_dem": bool(models)}
 
 
-def inspect_ascii_grid(content: bytes) -> dict:
-    if not content or len(content) > MAX_DEM_BYTES:
-        raise HTTPException(status_code=413 if content else 400, detail="File DEM trống hoặc vượt quá 20 MB.")
+def inspect_ascii_grid(content) -> dict:
+    stream = io.BytesIO(content) if isinstance(content, bytes) else content
+    if not hasattr(stream, "read"):
+        raise HTTPException(status_code=400, detail="DEM không phải file ESRI ASCII Grid hợp lệ.")
     try:
-        lines = content.decode("utf-8-sig").splitlines()
+        stream.seek(0)
+        header_lines = [stream.readline(257) for _ in range(6)]
+        if any(not line or len(line) > 256 for line in header_lines):
+            raise HTTPException(status_code=400, detail="File DEM thiếu phần tiêu đề hoặc dữ liệu độ cao.")
+        header_lines[0] = header_lines[0].removeprefix(b"\xef\xbb\xbf")
+        lines = [line.decode("ascii").strip() for line in header_lines]
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="DEM phải là file ESRI ASCII Grid dạng văn bản.") from exc
-
-    if len(lines) < 7:
-        raise HTTPException(status_code=400, detail="File DEM thiếu phần tiêu đề hoặc dữ liệu độ cao.")
     header = {}
     for line in lines[:6]:
         fields = line.split()
@@ -96,20 +99,39 @@ def inspect_ascii_grid(content: bytes) -> dict:
     value_count = 0
     elevation_min = math.inf
     elevation_max = -math.inf
-    try:
-        for line in lines[6:]:
-            for raw_value in line.split():
-                value_count += 1
-                if value_count > expected_values:
-                    raise HTTPException(status_code=400, detail="Số ô dữ liệu không khớp kích thước lưới DEM.")
-                value = float(raw_value)
-                if not math.isfinite(value):
-                    raise ValueError
-                if value != nodata:
-                    elevation_min = min(elevation_min, value)
-                    elevation_max = max(elevation_max, value)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.") from exc
+    token = b""
+
+    def consume_value(raw_value: bytes) -> None:
+        nonlocal value_count, elevation_min, elevation_max
+        value_count += 1
+        if value_count > expected_values:
+            raise HTTPException(status_code=400, detail="Số ô dữ liệu không khớp kích thước lưới DEM.")
+        try:
+            value = float(raw_value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.") from exc
+        if not math.isfinite(value):
+            raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.")
+        if value != nodata:
+            elevation_min = min(elevation_min, value)
+            elevation_max = max(elevation_max, value)
+
+    for chunk in iter(lambda: stream.read(64 * 1024), b""):
+        parts = re.split(rb"[ \t\r\n\v\f]+", chunk)
+        if chunk[:1] not in (b" ", b"\t", b"\r", b"\n", b"\v", b"\f") and token:
+            parts[0] = token + parts[0]
+        elif token:
+            consume_value(token)
+        token = b""
+        if chunk[-1:] not in (b" ", b"\t", b"\r", b"\n", b"\v", b"\f"):
+            token = parts.pop()
+        for raw_value in parts:
+            if raw_value:
+                consume_value(raw_value)
+        if len(token) > 64:
+            raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.")
+    if token:
+        consume_value(bytes(token))
     if value_count != expected_values:
         raise HTTPException(status_code=400, detail="Số ô dữ liệu không khớp kích thước lưới DEM.")
     if math.isinf(elevation_min):
@@ -128,7 +150,7 @@ def inspect_ascii_grid(content: bytes) -> dict:
     }
 
 
-def save_project_dem(project_id: int, name: str, content: bytes) -> dict:
+def save_project_dem(project_id: int, name: str, content) -> dict:
     metadata = inspect_ascii_grid(content)
     clean_name = (name or "").strip()
     if not clean_name or len(clean_name) > 100:
@@ -142,7 +164,10 @@ def save_project_dem(project_id: int, name: str, content: bytes) -> dict:
         descriptor, temporary_path = tempfile.mkstemp(prefix=f"project-{project_id}-", suffix=".tmp", dir=PROJECT_DEM_DIR)
         try:
             with os.fdopen(descriptor, "wb") as file:
-                file.write(content)
+                source = io.BytesIO(content) if isinstance(content, bytes) else content
+                source.seek(0)
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    file.write(chunk)
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary_path, destination)

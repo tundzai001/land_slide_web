@@ -16,7 +16,7 @@ from ...models import config as model_config
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 from ...shared.access import user_project_filter_ids
 from ...shared.project_location import save_project_map_position, update_location_address, validate_map_position
-from ...shared.project_dem import MAX_DEM_BYTES, delete_project_dems, project_dem_summary, save_project_dem
+from ...shared.project_dem import delete_project_dems, project_dem_summary, save_project_dem
 from .public import public_clusters
 
 router = APIRouter(tags=["Projects"])
@@ -114,10 +114,7 @@ async def upload_project_dem(
         raise HTTPException(status_code=404, detail="Không tìm thấy dự án.")
     if not (dem_file.filename or "").lower().endswith(".asc"):
         raise HTTPException(status_code=415, detail="Chỉ hỗ trợ file DEM ESRI ASCII Grid (.asc).")
-    content = await dem_file.read(MAX_DEM_BYTES + 1)
-    if len(content) > MAX_DEM_BYTES:
-        raise HTTPException(status_code=413, detail="File DEM vượt quá 20 MB.")
-    result = await run_in_threadpool(save_project_dem, project_id, dem_name, content)
+    result = await run_in_threadpool(save_project_dem, project_id, dem_name, dem_file.file)
     return {"project_id": project_id, **result}
 
 

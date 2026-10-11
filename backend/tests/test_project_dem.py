@@ -1,6 +1,7 @@
 """Validation for UTM 48N project DEM grids and station placement."""
 
 import unittest
+import io
 
 from fastapi import HTTPException
 
@@ -27,6 +28,11 @@ class ProjectDemTests(unittest.TestCase):
         self.assertEqual((metadata["ncols"], metadata["nrows"]), (2, 2))
         self.assertEqual(metadata["elevation_min"], 98)
         self.assertEqual(metadata["elevation_max"], 101.5)
+
+    def test_accepts_valid_grid_larger_than_previous_20_mib_cap(self):
+        padding = b" " * (20 * 1024 * 1024 + 1)
+        metadata = inspect_ascii_grid(io.BytesIO(self.valid_grid + padding))
+        self.assertEqual((metadata["ncols"], metadata["nrows"]), (2, 2))
 
     def test_rejects_invalid_grid_dimensions_and_cell_counts(self):
         for content in (

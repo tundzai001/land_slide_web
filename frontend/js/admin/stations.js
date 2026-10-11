@@ -181,10 +181,6 @@ class AdminStationsFeature extends window.AdminManager {
             document.getElementById('project-dem-name')?.focus();
             return;
         }
-        if (file.size > 20 * 1024 * 1024) {
-            window.toast?.error('File DEM vượt quá 20 MB');
-            return;
-        }
         if (status) status.textContent = 'Đang tải và kiểm tra lưới DEM…';
         if (uploadButton) { uploadButton.disabled = true; uploadButton.setAttribute('aria-busy', 'true'); }
         try {
@@ -201,7 +197,7 @@ class AdminStationsFeature extends window.AdminManager {
             try { result = JSON.parse(responseText); } catch { /* Proxy errors may be HTML. */ }
             if (!response.ok) {
                 const detail = result.detail || (response.status === 413
-                    ? `Máy chủ từ chối file (HTTP 413): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB). Giới hạn ứng dụng là 20 MiB; nếu file nhỏ hơn giới hạn, hãy kiểm tra cấu hình upload của IIS hoặc proxy.`
+                    ? `Máy chủ từ chối file (HTTP 413): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB). Kiểm tra giới hạn request trên IIS hoặc proxy và dung lượng ổ đĩa.`
                     : `Không tải được DEM (HTTP ${response.status}).`);
                 throw new Error(detail);
             }

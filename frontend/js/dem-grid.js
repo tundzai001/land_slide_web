@@ -11,8 +11,15 @@
     ];
 
     function parse(text) {
-        const lines = String(text || '').replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-        if (lines.length < 7) throw new Error('File DEM thiếu dữ liệu.');
+        const source = String(text || '').replace(/^\uFEFF/, '');
+        const lines = [];
+        let cursor = 0;
+        for (let i = 0; i < 6; i += 1) {
+            const end = source.indexOf('\n', cursor);
+            if (end < 0) throw new Error('File DEM thiếu dữ liệu.');
+            lines.push(source.slice(cursor, end).trim());
+            cursor = end + 1;
+        }
         const header = {};
         for (const line of lines.slice(0, 6)) {
             const [key, value] = line.trim().split(/\s+/);
@@ -32,17 +39,23 @@
         }
         const xllcorner = header[xKey] - (xKey === 'xllcenter' ? cellsize / 2 : 0);
         const yllcorner = header[yKey] - (yKey === 'yllcenter' ? cellsize / 2 : 0);
-        const tokens = lines.slice(6).join(' ').trim().split(/\s+/);
-        if (tokens.length !== ncols * nrows) throw new Error('Số ô dữ liệu không khớp kích thước DEM.');
-        const values = new Float32Array(tokens.length);
+        const expected = ncols * nrows;
+        const values = new Float32Array(expected);
         let min = Infinity;
         let max = -Infinity;
-        for (let i = 0; i < tokens.length; i += 1) {
-            const value = Number(tokens[i]);
+        const tokens = /\S+/g;
+        tokens.lastIndex = cursor;
+        let i = 0;
+        let match;
+        while ((match = tokens.exec(source))) {
+            if (i >= expected) throw new Error('Số ô dữ liệu không khớp kích thước DEM.');
+            const value = Number(match[0]);
             if (!Number.isFinite(value)) throw new Error('DEM chứa giá trị không hợp lệ.');
             values[i] = value;
             if (value !== nodata) { min = Math.min(min, value); max = Math.max(max, value); }
+            i += 1;
         }
+        if (i !== expected) throw new Error('Số ô dữ liệu không khớp kích thước DEM.');
         if (!Number.isFinite(min)) throw new Error('DEM không có độ cao hợp lệ.');
         return { ncols, nrows, cellsize, nodata, xllcorner, yllcorner, values, min, max, crs: 'EPSG:32648' };
     }
