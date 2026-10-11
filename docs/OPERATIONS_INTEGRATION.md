@@ -14,7 +14,7 @@ Cuối cột trái, chọn **Hướng dẫn tích hợp** để tải PDF này h
 
 Danh mục DEM (tên khu, mã mô hình và thông số lưới) được lưu trong bảng `global_configs` của CONFIG PostgreSQL; nội dung `.asc` lưu ngoài thư mục mã nguồn để tránh làm phình CSDL và không mất khi cập nhật code. Windows mặc định dùng `%PROGRAMDATA%\Aitogy\Landslide\project_dems`; đặt `PROJECT_DEM_DIR` để chuyển sang ổ dữ liệu khác và cấp quyền ghi cho tài khoản chạy backend. Sao lưu thư mục này cùng bản backup PostgreSQL.
 
-`web.config` nâng trần IIS request filtering lên mức tối đa của IIS. Nếu upload trả HTTP 413, tìm dòng `Project DEM upload received` trong log backend cùng thời điểm: có dòng này thì request đã tới ứng dụng; không có thì IIS hoặc proxy chặn trước FastAPI. Khi đó kiểm tra IIS Failed Request Tracing (HTTP 413.1) và cấu hình proxy tại máy chủ, rồi recycle tiến trình sau khi sửa cấu hình.
+`web.config` nâng trần IIS request filtering lên mức tối đa và tăng IIS HTTPS read-ahead buffer từ mặc định 49.152 byte lên 16 MiB; buffer này không đặt trần tổng kích thước request. Nếu upload trả HTTP 413, tìm dòng `Project DEM upload received` trong log backend cùng thời điểm: có dòng này thì request đã tới ứng dụng; không có thì IIS hoặc proxy chặn trước FastAPI. Khi đó kiểm tra IIS Failed Request Tracing và trường `sc-substatus` trong IIS log (413.1 là request filtering), kiểm tra cấu hình proxy tại máy chủ, rồi recycle tiến trình sau khi sửa cấu hình.
 
 ## Sao lưu nóng
 
