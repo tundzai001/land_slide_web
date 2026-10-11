@@ -52,3 +52,40 @@ test('project dashboard zooms to the project and switches between terrain models
   await page.keyboard.press('Escape');
   await expect(page.locator('#project-dashboard')).toHaveAttribute('aria-hidden', 'true');
 });
+
+test('project without DEM keeps the old map zoom behavior and opens no empty panel', async ({ page }) => {
+  const source = file => readFileSync(join(__dirname, '../..', file), 'utf8');
+  await page.setContent('<main id="map"></main>');
+  await page.addScriptTag({ content: source('frontend/js/map/stations.js') });
+  await page.evaluate(() => {
+    const handlers = {};
+    const marker = {
+      bindTooltip() { return this; },
+      on(name, callback) { handlers[name] = callback; return this; },
+      getElement() { return document.createElement('button'); },
+    };
+    const map = {
+      getSize: () => ({ x: 1000, y: 700 }),
+      getContainer: () => ({ getBoundingClientRect: () => ({ top: 0, bottom: 700 }) }),
+      flyToBounds(bounds, options) { window.zoomCall = { bounds, options }; },
+    };
+    window.L = {
+      marker: () => marker,
+      divIcon: () => ({}),
+      latLngBounds: points => ({ points }),
+    };
+    window.getLeafletMap = () => map;
+    window.allStations = [
+      { id: 1, project_id: 12, name: 'CP02', location: { lat: 21.1, lon: 107.2 } },
+      { id: 2, project_id: 12, name: 'CP06', location: { lat: 21.2, lon: 107.3 } },
+    ];
+    window.matchMedia = () => ({ matches: true });
+    window.projectMarkerHandlers = handlers;
+  });
+  await page.evaluate(() => {
+    window.createProjectMapGroup({ id: 12, name: 'Mông Dương', location: { lat: 21.15, lon: 107.25 } });
+    window.projectMarkerHandlers.click();
+  });
+  await expect.poll(() => page.evaluate(() => window.zoomCall?.bounds.points.length)).toBe(2);
+  await expect(page.locator('#project-dashboard')).toHaveCount(0);
+});

@@ -301,6 +301,16 @@ function createProjectMapGroup(project) {
         marker.fire('click');
     });
     marker.on('click', () => {
+        if (!Array.isArray(project.dems) || project.dems.length === 0) {
+            const leafletMap = getLeafletMap();
+            leafletMap.flyToBounds(bounds, {
+                ...getProjectMapPadding(),
+                maxZoom: 16,
+                animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+                duration: 1.2,
+            });
+            return;
+        }
         setStationListSidebarOpen(document.getElementById('station-list-sidebar'), false);
         setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
         setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
