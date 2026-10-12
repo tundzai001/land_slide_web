@@ -6,8 +6,6 @@ import asyncio
 import logging
 from typing import Optional
 
-import paho.mqtt.client as mqtt
-
 logger = logging.getLogger(__name__)
 
 class GNSSLiveFetcher:
@@ -23,25 +21,45 @@ class GNSSLiveFetcher:
     def _parse_gngga(self, gngga_string: str) -> Optional[dict]:
         try:
             parts = gngga_string.strip().split(',')
-            if len(parts) < 10 or not parts[2] or not parts[4]: return None
+            if len(parts) < 12:
+                return None
 
-            lat_str, lat_dir = parts[2], parts[3]
-            lat = float(lat_str[:2]) + float(lat_str[2:]) / 60.0
-            if lat_dir == 'S': lat = -lat
+            lat_str, lon_str = parts[2], parts[4]
+            lat_dir = parts[3].upper() if parts[3] else ''
+            lon_dir = parts[5].upper() if parts[5] else ''
+            if not lat_str or not lon_str:
+                return None
+            if lat_dir not in ('N', 'S') or lon_dir not in ('E', 'W'):
+                return None
 
-            lon_str, lon_dir = parts[4], parts[5]
-            lon = float(lon_str[:3]) + float(lon_str[3:]) / 60.0
-            if lon_dir == 'W': lon = -lon
-
-            # GGA altitude is MSL; convert to ellipsoidal for consistency with GNSS pipeline.
-            altitude_msl = float(parts[9]) if parts[9] else 0.0
-            geoid_sep = float(parts[11]) if len(parts) > 11 and parts[11] else 0.0
+            # Persisted origins use ellipsoidal height. Missing geoid would
+            # silently store MSL and shift the origin by tens of metres.
+            if not parts[9] or not parts[11]:
+                return None
+            altitude_msl = float(parts[9])
+            geoid_sep = float(parts[11])
             h = altitude_msl + geoid_sep
+
+            lat_deg = int(lat_str[:2])
+            lat_min = float(lat_str[2:])
+            lon_deg = int(lon_str[:3])
+            lon_min = float(lon_str[3:])
+            if not (0.0 <= lat_min < 60.0 and 0.0 <= lon_min < 60.0):
+                return None
+
+            lat = float(lat_deg) + lat_min / 60.0
+            if lat_dir == 'S':
+                lat = -lat
+            lon = float(lon_deg) + lon_min / 60.0
+            if lon_dir == 'W':
+                lon = -lon
+            if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                return None
+
             fix_quality = int(parts[6]) if parts[6] else 0
             num_sats = int(parts[7]) if parts[7] else 0
-
             return {'lat': lat, 'lon': lon, 'h': h, 'fix_quality': fix_quality, 'num_sats': num_sats}
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, TypeError):
             return None
 
     def _extract_gngga(self, payload_bytes: bytes) -> Optional[str]:
@@ -92,6 +110,8 @@ class GNSSLiveFetcher:
 
     async def fetch_origin(self, topic: str, timeout: int = 30) -> Optional[dict]:
         try:
+            import paho.mqtt.client as mqtt
+
             self.received_data = None
             client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata={'topic': topic})
             client.on_connect = self._on_connect
