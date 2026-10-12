@@ -129,7 +129,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (demLocation) {
             demLocation.hidden = !this.pendingStationLocation;
             demLocation.textContent = this.pendingStationLocation
-                ? `Vị trí đã chọn · ${this.pendingStationLocation.dem_name || 'DEM'}: ${Number(this.pendingStationLocation.lat).toFixed(7)}, ${Number(this.pendingStationLocation.lon).toFixed(7)} · cao độ ${Number(this.pendingStationLocation.h).toFixed(1)} m`
+                ? `Vị trí đã chọn · ${this.pendingStationLocation.dem_name || 'DEM'} · ô ${Number(this.pendingStationLocation.grid?.column) + 1}, ${Number(this.pendingStationLocation.grid?.row) + 1} · cao độ ${Number(this.pendingStationLocation.h).toFixed(1)} m`
                 : '';
         }
         document.getElementById('edit-station-id').value = '';

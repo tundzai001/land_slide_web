@@ -178,28 +178,6 @@
         }));
         scene.add(terrain);
 
-        const baseY = -Math.max(relief * verticalScale * 0.12, grid.cellsize);
-        const skirtPositions = [];
-        const perimeter = [];
-        for (let c = 0; c < columns; c += 1) perimeter.push(c);
-        for (let r = 1; r < rows; r += 1) perimeter.push(r * columns + columns - 1);
-        for (let c = columns - 2; c >= 0; c -= 1) perimeter.push((rows - 1) * columns + c);
-        for (let r = rows - 2; r > 0; r -= 1) perimeter.push(r * columns);
-        for (let i = 0; i < perimeter.length; i += 1) {
-            const a = perimeter[i];
-            const b = perimeter[(i + 1) % perimeter.length];
-            if (!valid[a] || !valid[b]) continue;
-            skirtPositions.push(...positions.slice(a * 3, a * 3 + 3), positions[a * 3], baseY, positions[a * 3 + 2]);
-            skirtPositions.push(...positions.slice(b * 3, b * 3 + 3), positions[a * 3], baseY, positions[a * 3 + 2]);
-            skirtPositions.push(...positions.slice(b * 3, b * 3 + 3), positions[b * 3], baseY, positions[b * 3 + 2]);
-            skirtPositions.push(...positions.slice(a * 3, a * 3 + 3), positions[b * 3], baseY, positions[b * 3 + 2]);
-        }
-        const skirtGeometry = new THREE.BufferGeometry();
-        skirtGeometry.setAttribute('position', new THREE.Float32BufferAttribute(skirtPositions, 3));
-        skirtGeometry.computeVertexNormals();
-        const skirt = new THREE.Mesh(skirtGeometry, new THREE.MeshStandardMaterial({ color: 0x29474a, roughness: 1, side: THREE.DoubleSide }));
-        scene.add(skirt);
-
         const marker = new THREE.Group();
         const cellMarker = new THREE.Mesh(
             new THREE.PlaneGeometry(grid.cellsize * 0.92, grid.cellsize * 0.92),
@@ -261,8 +239,13 @@
             requestRender();
         };
 
+        let pointerStart = null;
+        canvas.addEventListener('pointerdown', event => {
+            pointerStart = event.isPrimary && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+        }, { signal: listeners.signal });
         canvas.addEventListener('pointerup', event => {
             if (!selectable || !onSelect || !event.isPrimary || event.button !== 0) return;
+            if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
             const box = canvas.getBoundingClientRect();
             pointer.set((event.clientX - box.left) / box.width * 2 - 1, -((event.clientY - box.top) / box.height) * 2 + 1);
             raycaster.setFromCamera(pointer, camera);
@@ -274,7 +257,9 @@
             if (!point) return;
             setSelected(point);
             onSelect(point, { commit: true, source: 'pointer' });
+            pointerStart = null;
         }, { signal: listeners.signal });
+        canvas.addEventListener('pointercancel', () => { pointerStart = null; }, { signal: listeners.signal });
         canvas.addEventListener('keydown', event => {
             if (!selectable || !onSelect) return;
             const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
@@ -318,8 +303,6 @@
                 controls.dispose();
                 terrainGeometry.dispose();
                 terrain.material.dispose();
-                skirtGeometry.dispose();
-                skirt.material.dispose();
                 cellMarker.geometry.dispose();
                 cellMarker.material.dispose();
                 markerOutline.geometry.dispose();

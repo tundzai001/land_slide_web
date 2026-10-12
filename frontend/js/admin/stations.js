@@ -274,11 +274,11 @@ class AdminStationsFeature extends window.AdminManager {
     handleProjectDemCell(point, interaction = { commit: true }) {
         const status = document.getElementById('management-dem-selection');
         if (!interaction.commit) {
-            if (status) status.textContent = `${this._managementDemPlacement ? 'Đang chọn' : 'Ô'} ${point.column + 1}, ${point.row + 1} · ${point.elevation.toFixed(1)} m · ${point.lat.toFixed(7)}, ${point.lon.toFixed(7)}${this._managementDemPlacement ? ' · nhấn Enter để đặt trạm' : ''}`;
+            if (status) status.textContent = `${this._managementDemPlacement ? 'Đang chọn' : 'Ô'} ${point.column + 1}, ${point.row + 1} · cao độ ${point.elevation.toFixed(1)} m${this._managementDemPlacement ? ' · nhấn Enter để đặt trạm' : ''}`;
             return;
         }
         if (!this._managementDemPlacement) {
-            if (status) status.textContent = `Ô ${point.column + 1}, ${point.row + 1} · ${point.elevation.toFixed(1)} m · ${point.lat.toFixed(7)}, ${point.lon.toFixed(7)}`;
+            if (status) status.textContent = `Ô ${point.column + 1}, ${point.row + 1} · cao độ ${point.elevation.toFixed(1)} m`;
             return;
         }
         this._managementDemPlacement = false;
