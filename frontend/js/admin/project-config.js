@@ -101,42 +101,30 @@ class AdminProjectConfigFeature extends window.AdminManager {
         }).join('') || '<div class="px-3 py-2 text-muted small">Không tìm thấy trạm nào</div>';
 
         let baseOptionsHtml = '<option value="">-- Chọn Trạm Base --</option>';
-        baseOptionsHtml += '<optgroup label="Trạm Dự Án">';
-        if (this.projectStationsData) {
-            this.projectStationsData.forEach(st => {
-                const isSelected = (st.station_code === base_station_code) ? 'selected' : '';
-                const devData = encodeURIComponent(JSON.stringify(st.devices || []));
-                baseOptionsHtml += `<option value="${escapeConfigHtml(st.station_code)}" data-devices="${devData}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${isSelected}>${escapeConfigHtml(st.name || st.station_code)}</option>`;
-            });
-        }
-        baseOptionsHtml += '</optgroup>';
-        
-        baseOptionsHtml += '<optgroup label="CORS Quốc Gia">';
-        if (this.corsStationsData) {
+        if (this.corsStationsData && this.corsStationsData.length > 0) {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
                 const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
                 baseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
             });
         }
-        baseOptionsHtml += '</optgroup>';
+        if (base_station_code && !this.corsStationsData?.some(st => (st.name === base_station_code || st.code === base_station_code))) {
+            baseOptionsHtml += `<option value="${escapeConfigHtml(base_station_code)}" selected>${escapeConfigHtml(base_station_code)}</option>`;
+        }
 
         const backupBaseCode = clusterConfig.backup_base_station || '';
         const backupBaseStream = clusterConfig.backup_base_stream || '';
         let backupBaseOptionsHtml = '<option value="">-- Backup fixed base (optional) --</option>';
-        backupBaseOptionsHtml += '<optgroup label="Project stations">';
-        (this.projectStationsData || []).forEach(st => {
-            const selected = st.station_code === backupBaseCode ? 'selected' : '';
-            const devices = encodeURIComponent(JSON.stringify(st.devices || []));
-            backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.station_code)}" data-devices="${devices}" data-lat="${st.location?.lat || ''}" data-lon="${st.location?.lon || ''}" data-alt="${st.location?.h || 0}" ${selected}>${escapeConfigHtml(st.name || st.station_code)}</option>`;
-        });
-        backupBaseOptionsHtml += '</optgroup><optgroup label="CORS stations">';
-        (this.corsStationsData || []).forEach(st => {
-            const selected = (st.name === backupBaseCode || st.code === backupBaseCode) ? 'selected' : '';
-            const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
-            backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
-        });
-        backupBaseOptionsHtml += '</optgroup>';
+        if (this.corsStationsData && this.corsStationsData.length > 0) {
+            this.corsStationsData.forEach(st => {
+                const selected = (st.name === backupBaseCode || st.code === backupBaseCode) ? 'selected' : '';
+                const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
+                backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
+            });
+        }
+        if (backupBaseCode && !this.corsStationsData?.some(st => (st.name === backupBaseCode || st.code === backupBaseCode))) {
+            backupBaseOptionsHtml += `<option value="${escapeConfigHtml(backupBaseCode)}" selected>${escapeConfigHtml(backupBaseCode)}</option>`;
+        }
 
         const conflictBases = clusterConfig.conflict_bases || [];
         let conflictBaseOptionsHtml = '';

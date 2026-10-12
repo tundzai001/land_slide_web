@@ -19,5 +19,5 @@ from .public import get_public_projects, router as public_router
 
 router = APIRouter()
 router.include_router(public_router)
-router.include_router(admin_router)
 router.include_router(cors_router)
+router.include_router(admin_router)
