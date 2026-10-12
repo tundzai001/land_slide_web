@@ -9,7 +9,7 @@ class OriginFetcherParseTests(unittest.TestCase):
         self.fetcher = GNSSLiveFetcher("127.0.0.1", 1883)
 
     def test_ellipsoidal_height_adds_geoid_separation(self):
-        sentence = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,145.277,M,37.485,M,1.0,0"
+        sentence = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,145.277,M,37.485,M,1.0,0*63"
         point = self.fetcher._parse_gngga(sentence)
         self.assertAlmostEqual(point["lat"], 21.05)
         self.assertAlmostEqual(point["lon"], 107.3166667, places=6)
@@ -24,6 +24,16 @@ class OriginFetcherParseTests(unittest.TestCase):
     def test_invalid_nmea_minutes_are_rejected(self):
         sentence = "$GNGGA,010203.00,2165.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0"
         self.assertIsNone(self.fetcher._parse_gngga(sentence))
+
+    def test_invalid_checksum_is_rejected(self):
+        sentence = "$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0*00"
+        self.assertIsNone(self.fetcher._parse_gngga(sentence))
+
+    def test_malformed_checksum_is_not_stripped_during_extraction(self):
+        sentence = b"$GNGGA,010203.00,2103.000000,N,10719.000000,E,4,20,0.8,10.0,M,0.0,M,1.0,0*ZZ"
+        extracted = self.fetcher._extract_gngga(sentence)
+        self.assertTrue(extracted.endswith("*ZZ"))
+        self.assertIsNone(self.fetcher._parse_gngga(extracted))
 
 
 if __name__ == "__main__":

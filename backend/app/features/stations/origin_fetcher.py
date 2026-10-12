@@ -20,6 +20,8 @@ class GNSSLiveFetcher:
 
     def _parse_gngga(self, gngga_string: str) -> Optional[dict]:
         try:
+            if not self._verify_nmea_checksum(gngga_string):
+                return None
             parts = gngga_string.strip().split(',')
             if len(parts) < 12:
                 return None
@@ -62,12 +64,30 @@ class GNSSLiveFetcher:
         except (ValueError, IndexError, TypeError):
             return None
 
+    @staticmethod
+    def _verify_nmea_checksum(sentence: str) -> bool:
+        if not sentence or '*' not in sentence:
+            return True
+        try:
+            body, checksum = sentence.rsplit('*', 1)
+            body = body[body.find('$') + 1:] if '$' in body else body
+            checksum = checksum.strip()[:2]
+            if len(checksum) != 2 or any(char not in '0123456789ABCDEFabcdef' for char in checksum):
+                return False
+            expected = int(checksum, 16)
+            actual = 0
+            for char in body:
+                actual ^= ord(char)
+            return actual == expected
+        except (ValueError, IndexError):
+            return False
+
     def _extract_gngga(self, payload_bytes: bytes) -> Optional[str]:
         if not payload_bytes:
             return None
 
         import re
-        gga_regex = re.compile(rb'\$G[NP]GGA,[^\r\n*]*(?:\*[0-9A-Fa-f]{2})?')
+        gga_regex = re.compile(rb'\$G[NP]GGA,[^\r\n]*')
 
         match = gga_regex.search(payload_bytes)
         if not match and b'\x00' in payload_bytes:
