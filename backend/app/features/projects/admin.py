@@ -16,7 +16,7 @@ from ...models import config as model_config
 from pydantic import BaseModel
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 from ...shared.access import user_project_filter_ids
-from ...shared.project_location import save_project_map_position, update_location_address, validate_map_position
+from ...shared.project_location import refresh_project_map_position, save_project_map_position, update_location_address, validate_map_position
 from ...shared.project_dem import delete_project_dems, save_project_dem, update_project_dem_metadata
 from ...shared.project_dem_db import delete_project_dem_catalog, get_project_dem_models, get_project_dem_summaries, save_project_dem_catalog
 from .public import public_clusters
@@ -121,6 +121,7 @@ async def upload_project_dem(
     existing_models = await get_project_dem_models(db, project_id)
     result = await run_in_threadpool(save_project_dem, project_id, dem_name, dem_file.file, existing_models)
     await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
+    await refresh_project_map_position(db, project_id)
     await db.commit()
     logger.info("Saved project DEM project_id=%s dem_id=%s filename=%s bytes=%s", project_id, result["dem_id"], dem_file.filename, dem_file.size)
     return {"project_id": project_id, **result}
@@ -154,6 +155,7 @@ async def update_project_dem(
         existing_models,
     )
     await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
+    await refresh_project_map_position(db, project_id)
     await db.commit()
     logger.info("Updated project DEM project_id=%s dem_id=%s xllcorner=%s yllcorner=%s", project_id, dem_id, payload.xllcorner, payload.yllcorner)
     return {"project_id": project_id, **result}

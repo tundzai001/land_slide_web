@@ -264,26 +264,41 @@ function createProjectMapGroup(project) {
         String(station.project_id) === String(project.id) && hasValidLatLon(station.location)
     ));
     const points = stations.map(station => [Number(station.location.lat), Number(station.location.lon)]);
-    if (!points.length && !hasValidLatLon(project.location)) return null;
+
+    let demCenter = null;
+    const dems = Array.isArray(project.dems) ? project.dems : [];
+    if (!points.length && !hasValidLatLon(project.location) && dems.length > 0) {
+        const dem = dems[0];
+        if (dem && dem.xllcorner != null && dem.yllcorner != null && dem.ncols && dem.nrows && dem.cellsize && window.DemGrid?.utm48ToWgs84) {
+            const easting = Number(dem.xllcorner) + (Number(dem.ncols) * Number(dem.cellsize)) / 2;
+            const northing = Number(dem.yllcorner) + (Number(dem.nrows) * Number(dem.cellsize)) / 2;
+            const wgs = window.DemGrid.utm48ToWgs84(easting, northing);
+            if (Number.isFinite(wgs.lat) && Number.isFinite(wgs.lon)) {
+                demCenter = [wgs.lat, wgs.lon];
+            }
+        }
+    }
+
+    if (!points.length && !hasValidLatLon(project.location) && !demCenter) return null;
     // Older servers may not yet have the persisted point during a rolling deploy.
     const center = hasValidLatLon(project.location)
         ? [Number(project.location.lat), Number(project.location.lon)]
-        : points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
-            .map(value => value / points.length);
+        : (demCenter || points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
+            .map(value => value / points.length));
     const bounds = L.latLngBounds(points.length ? points : [center]);
     const name = String(project.name || 'Dự án');
     const tooltip = document.createElement('span');
     const title = document.createElement('strong');
     title.textContent = name;
     const hint = document.createElement('span');
-    hint.textContent = `${stations.length} trạm · Bấm để mở dashboard`;
+    hint.textContent = stations.length ? `${stations.length} trạm · Bấm để mở dashboard` : 'Mô hình DEM 3D · Bấm để xem địa hình';
     tooltip.append(title, hint);
     const marker = L.marker(center, {
         title: name,
         alt: `${name}: xem toàn bộ ${stations.length} trạm cảm biến`,
         icon: L.divIcon({
             className: 'project-map-marker',
-            html: `<span class="project-map-halo" aria-hidden="true"></span><span class="project-map-point" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V8l8-4 8 4v12H4Z"/><path d="M9 20v-5h6v5M8 10h.01M12 10h.01M16 10h.01"/></svg></span><span class="project-map-count" aria-hidden="true">${stations.length}</span>`,
+            html: `<span class="project-map-halo" aria-hidden="true"></span><span class="project-map-point" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V8l8-4 8 4v12H4Z"/><path d="M9 20v-5h6v5M8 10h.01M12 10h.01M16 10h.01"/></svg></span><span class="project-map-count" aria-hidden="true">${stations.length || (dems.length ? '3D' : 0)}</span>`,
             iconSize: [52, 60],
             iconAnchor: [26, 54],
         }),

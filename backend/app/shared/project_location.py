@@ -56,6 +56,36 @@ def update_location_address(current, incoming):
     return location
 
 
+def utm48_to_wgs84(easting: float, northing: float) -> tuple[float, float]:
+    a = 6378137.0
+    eccentricity = 0.00669437999014
+    second_ecc = eccentricity / (1.0 - eccentricity)
+    k0 = 0.9996
+    x = easting - 500000.0
+    meridian = northing / k0
+    mu = meridian / (a * (1.0 - eccentricity / 4.0 - 3.0 * eccentricity**2 / 64.0 - 5.0 * eccentricity**3 / 256.0))
+    e1 = (1.0 - math.sqrt(1.0 - eccentricity)) / (1.0 + math.sqrt(1.0 - eccentricity))
+    phi1 = (mu
+        + (3.0 * e1 / 2.0 - 27.0 * e1**3 / 32.0) * math.sin(2.0 * mu)
+        + (21.0 * e1**2 / 16.0 - 55.0 * e1**4 / 32.0) * math.sin(4.0 * mu)
+        + (151.0 * e1**3 / 96.0) * math.sin(6.0 * mu)
+        + (1097.0 * e1**4 / 512.0) * math.sin(8.0 * mu))
+    sin_p = math.sin(phi1)
+    cos_p = math.sin(phi1)
+    tan_p = math.tan(phi1)
+    n1 = a / math.sqrt(1.0 - eccentricity * sin_p**2)
+    t1 = tan_p**2
+    c1 = second_ecc * cos_p**2
+    r1 = a * (1.0 - eccentricity) / (1.0 - eccentricity * sin_p**2)**1.5
+    d = x / (n1 * k0)
+    lat = phi1 - (n1 * tan_p / r1) * (d**2 / 2.0
+        - (5.0 + 3.0 * t1 + 10.0 * c1 - 4.0 * c1**2 - 9.0 * second_ecc) * d**4 / 24.0
+        + (61.0 + 90.0 * t1 + 298.0 * c1 + 45.0 * t1**2 - 252.0 * second_ecc - 3.0 * c1**2) * d**6 / 720.0)
+    lon = 105.0 * math.pi / 180.0 + (d - (1.0 + 2.0 * t1 + c1) * d**3 / 6.0
+        + (5.0 - 2.0 * c1 + 28.0 * t1 - 3.0 * c1**2 + 8.0 * second_ecc + 24.0 * t1**2) * d**5 / 120.0) / cos_p
+    return (round(math.degrees(lat), 7), round(math.degrees(lon), 7))
+
+
 async def save_project_map_position(db, project, position=None):
     if position is not None:
         validate_map_position(position)
@@ -68,6 +98,18 @@ async def save_project_map_position(db, project, position=None):
         rows = (await db.execute(select(Station.location).where(Station.project_id == project.id))).scalars().all()
         points = [point for row in rows if (point := coordinates(row)) is not None]
         point = tuple(round(sum(values) / len(points), 8) for values in zip(*points)) if points else None
+        if point is None:
+            try:
+                from .project_dem_db import get_project_dem_models
+                models = await get_project_dem_models(db, project.id)
+                if models:
+                    first = models[0]
+                    if all(first.get(k) is not None for k in ("xllcorner", "yllcorner", "ncols", "nrows", "cellsize")):
+                        ec = float(first["xllcorner"]) + (float(first["ncols"]) * float(first["cellsize"])) / 2.0
+                        nc = float(first["yllcorner"]) + (float(first["nrows"]) * float(first["cellsize"])) / 2.0
+                        point = utm48_to_wgs84(ec, nc)
+            except Exception:
+                pass
     location.update(map_mode=mode, lat=point[0] if point else None, lon=point[1] if point else None)
     project.location = location
 
