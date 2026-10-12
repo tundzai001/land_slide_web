@@ -202,6 +202,62 @@ def save_project_dem(project_id: int, name: str, content, existing_models=None) 
         return {"dem_id": dem_id, "dem": model, "models": models}
 
 
+def update_project_dem_metadata(
+    project_id: int,
+    dem_id: str,
+    xllcorner: float,
+    yllcorner: float,
+    name: str | None = None,
+    existing_models: list[dict] | None = None,
+) -> dict:
+    if not (math.isfinite(xllcorner) and math.isfinite(yllcorner)):
+        raise HTTPException(status_code=400, detail="Tọa độ không hợp lệ.")
+    if not (0 <= xllcorner <= 1_000_000 and 0 <= yllcorner <= 10_000_000):
+        raise HTTPException(status_code=400, detail="DEM không có tọa độ UTM hợp lệ cho vùng 48N.")
+    path = project_dem_path(project_id, dem_id)
+    with _manifest_lock:
+        models = list_project_dems(project_id, existing_models)
+        target = next((m for m in models if m.get("id") == dem_id), None)
+        if not target:
+            raise HTTPException(status_code=404, detail="Không tìm thấy mô hình địa hình.")
+
+        clean_name = (name or "").strip()
+        if clean_name:
+            if len(clean_name) > 100:
+                raise HTTPException(status_code=422, detail="Tên khu địa hình phải từ 1 đến 100 ký tự.")
+            target["name"] = clean_name
+
+        target["xllcorner"] = float(xllcorner)
+        target["yllcorner"] = float(yllcorner)
+
+        # Update the header lines in the .asc file
+        descriptor, temp_path = tempfile.mkstemp(prefix=f"project-{project_id}-", suffix=".tmp", dir=PROJECT_DEM_DIR)
+        try:
+            with open(path, "rb") as src, os.fdopen(descriptor, "wb") as dst:
+                header_count = 0
+                for line in src:
+                    if header_count < 6:
+                        header_count += 1
+                        parts = line.strip().split()
+                        if parts and parts[0].lower() in (b"xllcorner", b"xllcenter"):
+                            dst.write(f"xllcorner     {float(xllcorner):.4f}\n".encode("ascii"))
+                            continue
+                        elif parts and parts[0].lower() in (b"yllcorner", b"yllcenter"):
+                            dst.write(f"yllcorner     {float(yllcorner):.4f}\n".encode("ascii"))
+                            continue
+                    dst.write(line)
+                dst.flush()
+                os.fsync(dst.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+        updated_models = [target if m.get("id") == dem_id else m for m in models]
+        _write_manifest(project_id, updated_models)
+        return {"dem_id": dem_id, "dem": target, "models": updated_models}
+
+
 def _write_manifest(project_id: int, models: list[dict]) -> None:
     manifest_path = project_dem_manifest_path(project_id)
     descriptor, temporary_path = tempfile.mkstemp(prefix=f"project-{project_id}-", suffix=".json.tmp", dir=PROJECT_DEM_DIR)

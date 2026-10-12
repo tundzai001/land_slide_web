@@ -90,6 +90,35 @@
         return { lat: latitude * 180 / Math.PI, lon: longitude * 180 / Math.PI };
     }
 
+    function wgs84ToUtm48(lat, lon) {
+        const a = 6378137;
+        const f = 1 / 298.257223563;
+        const e2 = 2 * f - f * f;
+        const ePrime2 = e2 / (1 - e2);
+        const k0 = 0.9996;
+        const phi = lat * Math.PI / 180;
+        const lambda = lon * Math.PI / 180;
+        const lambda0 = 105 * Math.PI / 180;
+        const dLambda = lambda - lambda0;
+        const sinPhi = Math.sin(phi);
+        const cosPhi = Math.cos(phi);
+        const tanPhi = Math.tan(phi);
+        const N = a / Math.sqrt(1 - e2 * sinPhi * sinPhi);
+        const T = tanPhi * tanPhi;
+        const C = ePrime2 * cosPhi * cosPhi;
+        const A = cosPhi * dLambda;
+        const M = a * ((1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * phi
+            - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * Math.sin(2 * phi)
+            + (15 * e2 * e2 / 256 + 45 * e2 * e2 * e2 / 1024) * Math.sin(4 * phi)
+            - (35 * e2 * e2 * e2 / 3072) * Math.sin(6 * phi));
+        const easting = 500000 + k0 * N * (A + (1 - T + C) * Math.pow(A, 3) / 6
+            + (5 - 18 * T + T * T + 72 * C - 58 * ePrime2) * Math.pow(A, 5) / 120);
+        const northing = k0 * (M + N * tanPhi * (A * A / 2
+            + (5 - T + 9 * C + 4 * C * C) * Math.pow(A, 4) / 24
+            + (61 - 58 * T + T * T + 600 * C - 330 * ePrime2) * Math.pow(A, 6) / 720));
+        return { easting, northing };
+    }
+
     async function mount(canvas, grid, { onSelect = null, selectable = false } = {}) {
         const [THREE, { OrbitControls }] = await Promise.all([
             import('three'),
@@ -312,5 +341,5 @@
         };
     }
 
-    window.DemGrid = { parse, mount, utm48ToWgs84 };
+    window.DemGrid = { parse, mount, utm48ToWgs84, wgs84ToUtm48 };
 })();

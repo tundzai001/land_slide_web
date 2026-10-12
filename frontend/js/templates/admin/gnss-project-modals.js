@@ -342,4 +342,64 @@ window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GN
         </div>
     </div>
 
+    <!-- 3. Edit DEM Coordinates Modal -->
+    <div class="modal fade" id="editDemCoordinatesModal" tabindex="-1" aria-labelledby="editDemCoordinatesModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editDemCoordinatesModalTitle"><i class="bi bi-geo-alt me-2 text-primary"></i>Chỉnh sửa Tọa độ DEM</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editDemCoordinatesForm" onsubmit="event.preventDefault(); window.adminManager.saveDemCoordinates();">
+                        <input type="hidden" id="edit-dem-id">
+                        <div class="mb-3">
+                            <label class="form-label" for="edit-dem-name">Tên khu địa hình <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit-dem-name" maxlength="100" required>
+                        </div>
+                        <div class="p-3 mb-3 rounded border bg-body-tertiary">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0 fw-bold small text-uppercase"><i class="bi bi-compass me-1"></i>Tọa độ gốc Tây-Nam (UTM 48N)</h6>
+                                <span class="badge text-bg-primary">EPSG:32648</span>
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold" for="edit-dem-xll">X (Easting) mét</label>
+                                    <input type="number" step="any" class="form-control form-control-sm" id="edit-dem-xll" required oninput="window.adminManager.onDemUtmInput()">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold" for="edit-dem-yll">Y (Northing) mét</label>
+                                    <input type="number" step="any" class="form-control form-control-sm" id="edit-dem-yll" required oninput="window.adminManager.onDemUtmInput()">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block" style="font-size: 0.75rem;">xllcorner và yllcorner là tọa độ mốc gốc của file lưới DEM.</small>
+                        </div>
+                        <div class="p-3 rounded border bg-body-tertiary">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0 fw-bold small text-uppercase"><i class="bi bi-globe me-1"></i>Tọa độ tâm địa lý (WGS84)</h6>
+                                <small class="text-muted">Tự động đồng bộ</small>
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold" for="edit-dem-lat">Vĩ độ (Lat °)</label>
+                                    <input type="number" step="any" class="form-control form-control-sm" id="edit-dem-lat" oninput="window.adminManager.onDemWgsInput()">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold" for="edit-dem-lon">Kinh độ (Lon °)</label>
+                                    <input type="number" step="any" class="form-control form-control-sm" id="edit-dem-lon" oninput="window.adminManager.onDemWgsInput()">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block" style="font-size: 0.75rem;">Nhập UTM (X, Y) hoặc WGS84 (Lat, Lon) sẽ tự động quy đổi tương ứng.</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-primary" id="btn-save-dem-coords" onclick="window.adminManager.saveDemCoordinates()">
+                        <i class="bi bi-check2-circle me-1"></i>Lưu tọa độ DEM
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 `;

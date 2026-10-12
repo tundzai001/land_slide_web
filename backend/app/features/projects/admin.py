@@ -13,10 +13,11 @@ from ... import auth
 from ...database import get_config_db
 from ...models import auth as model_auth
 from ...models import config as model_config
+from pydantic import BaseModel
 from ...shared.pagination import normalize_page, set_pagination_headers, slice_rows
 from ...shared.access import user_project_filter_ids
 from ...shared.project_location import save_project_map_position, update_location_address, validate_map_position
-from ...shared.project_dem import delete_project_dems, save_project_dem
+from ...shared.project_dem import delete_project_dems, save_project_dem, update_project_dem_metadata
 from ...shared.project_dem_db import delete_project_dem_catalog, get_project_dem_models, get_project_dem_summaries, save_project_dem_catalog
 from .public import public_clusters
 
@@ -122,6 +123,39 @@ async def upload_project_dem(
     await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
     await db.commit()
     logger.info("Saved project DEM project_id=%s dem_id=%s filename=%s bytes=%s", project_id, result["dem_id"], dem_file.filename, dem_file.size)
+    return {"project_id": project_id, **result}
+
+
+class UpdateProjectDemRequest(BaseModel):
+    xllcorner: float
+    yllcorner: float
+    name: Optional[str] = None
+
+
+@router.put("/api/admin/projects/{project_id}/dems/{dem_id}")
+async def update_project_dem(
+    project_id: int,
+    dem_id: str,
+    payload: UpdateProjectDemRequest,
+    db: AsyncSession = Depends(get_config_db),
+    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+):
+    project = await db.get(model_config.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án.")
+    existing_models = await get_project_dem_models(db, project_id)
+    result = await run_in_threadpool(
+        update_project_dem_metadata,
+        project_id,
+        dem_id,
+        payload.xllcorner,
+        payload.yllcorner,
+        payload.name,
+        existing_models,
+    )
+    await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
+    await db.commit()
+    logger.info("Updated project DEM project_id=%s dem_id=%s xllcorner=%s yllcorner=%s", project_id, dem_id, payload.xllcorner, payload.yllcorner)
     return {"project_id": project_id, **result}
 
 

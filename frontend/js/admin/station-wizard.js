@@ -132,6 +132,13 @@ class AdminStationWizardFeature extends window.AdminManager {
                 ? `Vị trí đã chọn · ${this.pendingStationLocation.dem_name || 'DEM'} · ô ${Number(this.pendingStationLocation.grid?.column) + 1}, ${Number(this.pendingStationLocation.grid?.row) + 1} · cao độ ${Number(this.pendingStationLocation.h).toFixed(1)} m`
                 : '';
         }
+        const step2Notice = document.getElementById('step2-dem-location-notice');
+        if (step2Notice) {
+            step2Notice.hidden = !this.pendingStationLocation;
+            step2Notice.innerHTML = this.pendingStationLocation
+                ? `<i class="bi bi-geo-alt-fill text-primary me-2"></i><strong>Đã điền tọa độ từ điểm chọn trên mô hình DEM</strong>: ${this.pendingStationLocation.dem_name || 'DEM'} · ô ${Number(this.pendingStationLocation.grid?.column) + 1}, ${Number(this.pendingStationLocation.grid?.row) + 1} (Lat: ${Number(this.pendingStationLocation.lat).toFixed(6)}, Lon: ${Number(this.pendingStationLocation.lon).toFixed(6)}, Cao độ: ${Number(this.pendingStationLocation.h).toFixed(1)} m). Bạn có thể kiểm tra hoặc điều chỉnh.`
+                : '';
+        }
         document.getElementById('edit-station-id').value = '';
 
         // Reset custom MQTT Broker inputs
@@ -145,22 +152,68 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (mqttUserEl) mqttUserEl.value = '';
         const mqttPassEl = document.getElementById('station-mqtt-pass');
         if (mqttPassEl) mqttPassEl.value = '';
-        document.getElementById('origin-lat').value = '';
-        document.getElementById('origin-lon').value = '';
-        document.getElementById('origin-h').value = '';
-        document.getElementById('origin-status').textContent = 'Chưa có tọa độ gốc';
-        this.resetGnssCalibrationResult?.();
-        this.updateOriginActionButtons(false);
+        if (this.pendingStationLocation) {
+            const loc = this.pendingStationLocation;
+            const latStr = loc.lat != null ? Number(loc.lat).toFixed(7) : '';
+            const lonStr = loc.lon != null ? Number(loc.lon).toFixed(7) : '';
+            const hStr = loc.h != null ? Number(loc.h).toFixed(2) : '';
 
-        // Reset sub-sensor coordinates
-        (window.sensorTypes?.() || ['rain', 'water', 'imu']).filter(type => type !== 'gnss').forEach(s => {
-            const lat = document.getElementById(`origin-${s}-lat`);
-            const lon = document.getElementById(`origin-${s}-lon`);
-            const h = document.getElementById(`origin-${s}-h`);
-            if (lat) lat.value = '';
-            if (lon) lon.value = '';
-            if (h) h.value = '';
-        });
+            document.getElementById('origin-lat').value = latStr;
+            document.getElementById('origin-lon').value = lonStr;
+            document.getElementById('origin-h').value = hStr;
+            const originStatus = document.getElementById('origin-status');
+            if (originStatus) {
+                originStatus.textContent = `Tọa độ lấy từ mô hình DEM (${loc.dem_name || 'DEM'} · ô ${Number(loc.grid?.column) + 1}, ${Number(loc.grid?.row) + 1})`;
+                originStatus.className = 'text-success small';
+            }
+            this.resetGnssCalibrationResult?.();
+            this.updateOriginActionButtons(Boolean(latStr && lonStr));
+
+            (window.sensorTypes?.() || ['rain', 'water', 'imu']).filter(type => type !== 'gnss').forEach(s => {
+                const lat = document.getElementById(`origin-${s}-lat`);
+                const lon = document.getElementById(`origin-${s}-lon`);
+                const h = document.getElementById(`origin-${s}-h`);
+                if (lat) lat.value = latStr;
+                if (lon) lon.value = lonStr;
+                if (h) h.value = hStr;
+            });
+            (window.SensorCatalog || []).forEach(sensor => {
+                const lat = document.getElementById(`origin-${sensor.key}-lat`);
+                const lon = document.getElementById(`origin-${sensor.key}-lon`);
+                const h = document.getElementById(`origin-${sensor.key}-h`);
+                if (lat) lat.value = latStr;
+                if (lon) lon.value = lonStr;
+                if (h) h.value = hStr;
+            });
+        } else {
+            document.getElementById('origin-lat').value = '';
+            document.getElementById('origin-lon').value = '';
+            document.getElementById('origin-h').value = '';
+            const originStatus = document.getElementById('origin-status');
+            if (originStatus) {
+                originStatus.textContent = 'Chưa có tọa độ gốc';
+                originStatus.className = 'text-muted';
+            }
+            this.resetGnssCalibrationResult?.();
+            this.updateOriginActionButtons(false);
+
+            (window.sensorTypes?.() || ['rain', 'water', 'imu']).filter(type => type !== 'gnss').forEach(s => {
+                const lat = document.getElementById(`origin-${s}-lat`);
+                const lon = document.getElementById(`origin-${s}-lon`);
+                const h = document.getElementById(`origin-${s}-h`);
+                if (lat) lat.value = '';
+                if (lon) lon.value = '';
+                if (h) h.value = '';
+            });
+            (window.SensorCatalog || []).forEach(sensor => {
+                const lat = document.getElementById(`origin-${sensor.key}-lat`);
+                const lon = document.getElementById(`origin-${sensor.key}-lon`);
+                const h = document.getElementById(`origin-${sensor.key}-h`);
+                if (lat) lat.value = '';
+                if (lon) lon.value = '';
+                if (h) h.value = '';
+            });
+        }
         document.getElementById('edit-project-id').value = this.currentProjectId;
         const alertingDisabledEl = document.getElementById('station-alerting-disabled');
         if (alertingDisabledEl) alertingDisabledEl.checked = false;

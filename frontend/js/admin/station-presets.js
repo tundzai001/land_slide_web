@@ -516,13 +516,24 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 return [axis, value === '' || value == null ? null : Number(value)];
             }));
         }
+        let stationLocation = null;
+        if (!this.isEditMode && this.pendingStationLocation) {
+            stationLocation = { ...this.pendingStationLocation };
+            const editedLat = parseFloat(document.getElementById('origin-lat')?.value || document.getElementById('origin-rain-lat')?.value || document.getElementById('origin-water-lat')?.value);
+            const editedLon = parseFloat(document.getElementById('origin-lon')?.value || document.getElementById('origin-rain-lon')?.value || document.getElementById('origin-water-lon')?.value);
+            const editedH = parseFloat(document.getElementById('origin-h')?.value || document.getElementById('origin-rain-h')?.value || document.getElementById('origin-water-h')?.value);
+            if (Number.isFinite(editedLat)) stationLocation.lat = editedLat;
+            if (Number.isFinite(editedLon)) stationLocation.lon = editedLon;
+            if (Number.isFinite(editedH)) stationLocation.h = editedH;
+        }
+
         const payload = {
             station_code: code,
             name: name,
             sensors: sensors,
             config: config,
             owner_authorization: document.getElementById('gnss-forwarding-approval')?.value?.trim() || '',
-            location: !this.isEditMode && this.pendingStationLocation ? { ...this.pendingStationLocation } : null
+            location: stationLocation
         };
 
         console.log('💾 [SAVE] isEditMode:', this.isEditMode, 'stationId:', this.currentStationId);

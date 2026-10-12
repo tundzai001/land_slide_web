@@ -32,6 +32,7 @@ window.LegacyTemplateParts['station-connectivity'] = String.raw`                
                                 </div>
                                 <span class="station-step-status"><i class="bi bi-shield-check" aria-hidden="true"></i> Kiểm tra tại chỗ</span>
                             </div>
+                            <div id="step2-dem-location-notice" class="alert alert-info py-2 mb-3" style="font-size: 0.85rem;" hidden></div>
                             <fieldset class="monitoring-picker">
                                 <legend>Cảm biến của trạm</legend>
                                 <p>Chọn loại đang lắp đặt. Bạn có thể chọn nhiều cảm biến.</p>

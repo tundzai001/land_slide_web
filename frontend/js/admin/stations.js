@@ -161,6 +161,37 @@ class AdminStationsFeature extends window.AdminManager {
                     </div>
                     <div class="dem-grid-viewport management-dem-viewport"><canvas id="management-dem-canvas" tabindex="0" role="application" aria-label="Mô hình DEM. Dùng phím mũi tên để chọn ô và Enter để đặt trạm."></canvas></div>
                     <p class="management-dem-selection" id="management-dem-selection" role="status" aria-live="polite">${canUpload ? 'Chọn “Chọn ô đặt trạm”, sau đó bấm một ô trên mô hình.' : 'Mô hình địa hình của dự án.'}</p>
+                    <div class="card border mt-3 shadow-none bg-body-tertiary" id="management-dem-georef-card" style="border-radius: 8px;">
+                        <div class="card-body p-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                <span class="fw-bold small text-uppercase" style="letter-spacing: 0.5px;">
+                                    <i class="bi bi-geo-alt-fill text-primary me-1" aria-hidden="true"></i>Thông số tọa độ &amp; Địa lý DEM
+                                </span>
+                                ${canUpload ? `
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-edit-dem-coords" onclick="window.adminManager.openEditDemCoordinatesModal()">
+                                    <i class="bi bi-pencil-square me-1"></i>Chỉnh sửa tọa độ DEM
+                                </button>` : ''}
+                            </div>
+                            <div class="row g-2 small">
+                                <div class="col-6 col-md-3">
+                                    <span class="text-muted d-block" style="font-size: 0.78rem;">Hệ tọa độ (CRS)</span>
+                                    <strong id="dem-georef-crs">EPSG:32648 (UTM 48N)</strong>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <span class="text-muted d-block" style="font-size: 0.78rem;">Gốc Tây-Nam (X, Y)</span>
+                                    <strong id="dem-georef-origin">—</strong>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <span class="text-muted d-block" style="font-size: 0.78rem;">Tâm địa lý (WGS84)</span>
+                                    <strong id="dem-georef-center">—</strong>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <span class="text-muted d-block" style="font-size: 0.78rem;">Lưới &amp; Cao độ</span>
+                                    <strong id="dem-georef-elevation">—</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 ` : `
                     <div class="management-dem-empty" role="status">
                         <i class="bi bi-mountains" aria-hidden="true"></i>
@@ -249,6 +280,17 @@ class AdminStationsFeature extends window.AdminManager {
             const selector = document.getElementById('management-dem-select');
             if (selector) selector.onchange = () => this.loadProjectDem(selector.value);
             if (status) status.textContent = `${grid.ncols} × ${grid.nrows} ô · cao độ ${grid.min.toFixed(1)}–${grid.max.toFixed(1)} m · UTM 48N`;
+
+            const centerEasting = grid.xllcorner + (grid.ncols * grid.cellsize) / 2;
+            const centerNorthing = grid.yllcorner + (grid.nrows * grid.cellsize) / 2;
+            const centerWgs = window.DemGrid.utm48ToWgs84(centerEasting, centerNorthing);
+
+            const elOrigin = document.getElementById('dem-georef-origin');
+            const elCenter = document.getElementById('dem-georef-center');
+            const elElev = document.getElementById('dem-georef-elevation');
+            if (elOrigin) elOrigin.textContent = `X: ${grid.xllcorner.toFixed(1)}, Y: ${grid.yllcorner.toFixed(1)}`;
+            if (elCenter) elCenter.textContent = `${centerWgs.lat.toFixed(6)}°, ${centerWgs.lon.toFixed(6)}°`;
+            if (elElev) elElev.textContent = `${grid.ncols} × ${grid.nrows} ô (${grid.cellsize}m) · ${grid.min.toFixed(1)}m đến ${grid.max.toFixed(1)}m`;
         } catch (error) {
             if (requestId === this._managementDemRequest) {
                 if (status) status.textContent = error.message || 'Không thể đọc file DEM.';
@@ -294,6 +336,109 @@ class AdminStationsFeature extends window.AdminManager {
         document.getElementById('dem-placement-toggle')?.setAttribute('aria-pressed', 'false');
         if (status) status.textContent = `Đã chọn ô ${point.column + 1}, ${point.row + 1} · ${point.elevation.toFixed(1)} m. Đang mở biểu mẫu tạo trạm…`;
         this.openAddStationModal({ location: this.pendingStationLocation });
+    }
+
+    openEditDemCoordinatesModal() {
+        const modalEl = document.getElementById('editDemCoordinatesModal');
+        if (!modalEl || !this._selectedDemId) return;
+        const project = (this.projectsData || []).find(item => String(item.id) === String(this.currentProjectId));
+        const dem = project?.dems?.find(model => model.id === this._selectedDemId) || this._managementDemModel;
+        if (!dem) return;
+
+        document.getElementById('edit-dem-id').value = dem.id;
+        document.getElementById('edit-dem-name').value = dem.name || '';
+        document.getElementById('edit-dem-xll').value = dem.xllcorner != null ? Number(dem.xllcorner).toFixed(4) : '';
+        document.getElementById('edit-dem-yll').value = dem.yllcorner != null ? Number(dem.yllcorner).toFixed(4) : '';
+
+        if (this._managementDemGrid && dem.xllcorner != null && dem.yllcorner != null) {
+            const grid = this._managementDemGrid;
+            const centerE = Number(dem.xllcorner) + (grid.ncols * grid.cellsize) / 2;
+            const centerN = Number(dem.yllcorner) + (grid.nrows * grid.cellsize) / 2;
+            const centerWgs = window.DemGrid.utm48ToWgs84(centerE, centerN);
+            document.getElementById('edit-dem-lat').value = centerWgs.lat.toFixed(7);
+            document.getElementById('edit-dem-lon').value = centerWgs.lon.toFixed(7);
+        }
+
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+    }
+
+    onDemUtmInput() {
+        if (!this._managementDemGrid || !window.DemGrid) return;
+        const xll = parseFloat(document.getElementById('edit-dem-xll')?.value);
+        const yll = parseFloat(document.getElementById('edit-dem-yll')?.value);
+        if (!Number.isFinite(xll) || !Number.isFinite(yll)) return;
+        const grid = this._managementDemGrid;
+        const centerE = xll + (grid.ncols * grid.cellsize) / 2;
+        const centerN = yll + (grid.nrows * grid.cellsize) / 2;
+        const centerWgs = window.DemGrid.utm48ToWgs84(centerE, centerN);
+        const latInput = document.getElementById('edit-dem-lat');
+        const lonInput = document.getElementById('edit-dem-lon');
+        if (latInput) latInput.value = centerWgs.lat.toFixed(7);
+        if (lonInput) lonInput.value = centerWgs.lon.toFixed(7);
+    }
+
+    onDemWgsInput() {
+        if (!this._managementDemGrid || !window.DemGrid?.wgs84ToUtm48) return;
+        const lat = parseFloat(document.getElementById('edit-dem-lat')?.value);
+        const lon = parseFloat(document.getElementById('edit-dem-lon')?.value);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const utm = window.DemGrid.wgs84ToUtm48(lat, lon);
+        const grid = this._managementDemGrid;
+        const xll = utm.easting - (grid.ncols * grid.cellsize) / 2;
+        const yll = utm.northing - (grid.nrows * grid.cellsize) / 2;
+        const xllInput = document.getElementById('edit-dem-xll');
+        const yllInput = document.getElementById('edit-dem-yll');
+        if (xllInput) xllInput.value = xll.toFixed(4);
+        if (yllInput) yllInput.value = yll.toFixed(4);
+    }
+
+    async saveDemCoordinates() {
+        const demId = document.getElementById('edit-dem-id')?.value;
+        const name = document.getElementById('edit-dem-name')?.value?.trim();
+        const xll = parseFloat(document.getElementById('edit-dem-xll')?.value);
+        const yll = parseFloat(document.getElementById('edit-dem-yll')?.value);
+        const saveBtn = document.getElementById('btn-save-dem-coords');
+
+        if (!demId || !this.currentProjectId) return;
+        if (!name) {
+            window.toast?.warning('Vui lòng nhập tên khu địa hình');
+            return;
+        }
+        if (!Number.isFinite(xll) || !Number.isFinite(yll)) {
+            window.toast?.warning('Vui lòng nhập tọa độ X và Y hợp lệ');
+            return;
+        }
+
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang lưu…'; }
+        try {
+            const response = await fetch(`/api/admin/projects/${this.currentProjectId}/dems/${encodeURIComponent(demId)}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ xllcorner: xll, yllcorner: yll, name: name })
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.detail || 'Không thể lưu tọa độ DEM');
+            }
+
+            const result = await response.json();
+            const project = (this.projectsData || []).find(item => String(item.id) === String(this.currentProjectId));
+            if (project) {
+                project.dems = result.models || [];
+            }
+            bootstrap.Modal.getInstance(document.getElementById('editDemCoordinatesModal'))?.hide();
+            window.toast?.success('✅ Đã cập nhật tọa độ mô hình DEM thành công!');
+            this.loadProjectDem(demId);
+        } catch (error) {
+            window.toast?.error(error.message || 'Lỗi khi cập nhật tọa độ DEM');
+        } finally {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Lưu tọa độ DEM'; }
+        }
     }
 
 }

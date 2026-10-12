@@ -18,6 +18,7 @@ backend/temp_exports/
 backend/static/adjustments/
 backend/static/uploads/
 frontend/js/dist/
+frontend/assets/dem/
 /config.db
 /runtime/operations/
 *.log
