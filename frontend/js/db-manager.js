@@ -715,23 +715,21 @@ class DatabaseManager {
         }
 
         if (this.exportTaskId) {
-            modal.show();
             this.renderExportTaskState();
             this.startExportPolling(this.exportTaskId);
-            return;
+        } else {
+            const progressContainer = document.getElementById('export-progress-container');
+            if (progressContainer) progressContainer.style.display = 'none';
+            const startButton = document.getElementById('btn-export-start');
+            const closeButton = document.getElementById('btn-export-cancel');
+            if (startButton) startButton.disabled = false;
+            if (closeButton) closeButton.disabled = false;
         }
 
-        const progressContainer = document.getElementById('export-progress-container');
-        if (progressContainer) progressContainer.style.display = 'none';
-        const startButton = document.getElementById('btn-export-start');
-        const closeButton = document.getElementById('btn-export-cancel');
-        if (startButton) startButton.disabled = false;
-        if (closeButton) closeButton.disabled = false;
-        
-        // Nạp danh sách Project
+        // Nạp danh sách Project & Trạm
         this.setExportSelectLoading('export-project-select', 'Đang tải danh sách dự án...');
         this.setExportSelectLoading('export-station-select', 'Chọn dự án để tải trạm...');
-        
+
         modal.show();
 
         await this.populateExportProjects();
@@ -755,9 +753,10 @@ class DatabaseManager {
     }
 
     async fetchJson(url) {
-        const res = await fetch(url, {
-            headers: { 'Authorization': `Bearer ${this.token}` }
-        });
+        const token = window.authSession?.getToken() || this.token;
+        if (token) this.token = token;
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res = await fetch(url, { headers });
 
         if (!res.ok) {
             const message = await res.text().catch(() => '');
@@ -806,7 +805,7 @@ class DatabaseManager {
 
         try {
             const cachedProjects = window.adminManager?.projectsData;
-            const projects = Array.isArray(cachedProjects)
+            const projects = Array.isArray(cachedProjects) && cachedProjects.length > 0
                 ? cachedProjects
                 : await this.fetchJson('/api/admin/projects');
             this.exportProjects = Array.isArray(projects) ? projects : [];
@@ -1003,6 +1002,26 @@ class DatabaseManager {
         return pill;
     }
 
+    resetExportTask() {
+        this.exportTaskId = null;
+        this.exportTaskState = null;
+        this.exportDownloadStarted = false;
+        localStorage.removeItem('activeDatabaseExportTaskId');
+        if (this.exportPollTimer) {
+            clearInterval(this.exportPollTimer);
+            this.exportPollTimer = null;
+        }
+        const progressContainer = document.getElementById('export-progress-container');
+        if (progressContainer) progressContainer.style.display = 'none';
+        const startButton = document.getElementById('btn-export-start');
+        if (startButton) startButton.disabled = false;
+        const retryBtn = document.getElementById('btn-export-retry');
+        if (retryBtn) retryBtn.style.display = 'none';
+        const pill = document.getElementById('database-export-task-pill');
+        if (pill) pill.style.display = 'none';
+        void this.populateExportProjects();
+    }
+
     renderExportTaskState() {
         const state = this.exportTaskState;
         const active = Boolean(this.exportTaskId && state);
@@ -1019,6 +1038,7 @@ class DatabaseManager {
         const progressText = document.getElementById('export-status-text');
         const progressDetail = document.getElementById('export-progress-detail');
         const startButton = document.getElementById('btn-export-start');
+        const retryBtn = document.getElementById('btn-export-retry');
         const failed = state.status === 'error' || state.status === 'failed';
         const completed = state.status === 'completed';
         const downloading = state.status === 'downloading';
@@ -1032,6 +1052,7 @@ class DatabaseManager {
         if (progressText) progressText.textContent = failed ? 'Export thất bại' : downloading ? 'Đang chuẩn bị tải xuống' : completed ? 'Export hoàn tất' : 'Đang export dữ liệu';
         if (progressDetail) progressDetail.textContent = state.error || state.message || 'Đang xử lý...';
         if (startButton) startButton.disabled = !failed && !completed;
+        if (retryBtn) retryBtn.style.display = failed ? 'inline-flex' : 'none';
         const pillTitle = pill.querySelector('.export-pill-title');
         const pillDetail = pill.querySelector('.export-pill-detail');
         const spinner = pill.querySelector('.export-pill-spinner');
@@ -1045,9 +1066,14 @@ class DatabaseManager {
         if (this.exportPollTimer) clearInterval(this.exportPollTimer);
         const poll = async () => {
             try {
-                const response = await fetch(`/api/admin/db/export-excel/${taskId}/progress`, {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const token = window.authSession?.getToken() || this.token;
+                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+                const response = await fetch(`/api/admin/db/export-excel/${taskId}/progress`, { headers });
+                if (response.status === 404) {
+                    console.warn(`[DB MANAGER] Export task ${taskId} không còn tồn tại trên server (404), dọn dẹp tác vụ.`);
+                    this.resetExportTask();
+                    return;
+                }
                 if (!response.ok) throw new Error(`Không đọc được tiến trình (HTTP ${response.status})`);
                 this.exportTaskState = await response.json();
                 this.renderExportTaskState();
@@ -1064,6 +1090,8 @@ class DatabaseManager {
                 } else if (['error', 'failed'].includes(this.exportTaskState.status)) {
                     clearInterval(this.exportPollTimer);
                     this.exportPollTimer = null;
+                    this.exportTaskId = null;
+                    localStorage.removeItem('activeDatabaseExportTaskId');
                     window.toast?.error('Export thất bại: ' + (this.exportTaskState.error || 'Không rõ lỗi'));
                 }
             } catch (error) {
@@ -1072,6 +1100,8 @@ class DatabaseManager {
                 this.renderExportTaskState();
                 clearInterval(this.exportPollTimer);
                 this.exportPollTimer = null;
+                this.exportTaskId = null;
+                localStorage.removeItem('activeDatabaseExportTaskId');
             }
         };
         poll();

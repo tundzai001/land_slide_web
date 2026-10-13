@@ -31,7 +31,7 @@ def add_excel_files(path):
                     cells = []
                     for value in row:
                         if len(value) > 32767:
-                            raise ValueError('A CSV field exceeds the Excel cell limit; choose CSV to preserve the full value')
+                            value = value[:32700] + '... [TRUNCATED - xem file CSV để có đầy đủ]'
                         cell = WriteOnlyCell(sheet, value=value)
                         cell.data_type = 's'  # Sensor strings must never become executable formulas.
                         cells.append(cell)

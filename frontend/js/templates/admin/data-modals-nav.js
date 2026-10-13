@@ -159,7 +159,12 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
                         <div class="progress export-progress-track">
                             <div id="export-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;"></div>
                         </div>
-                        <small class="text-muted mt-2 d-block" id="export-progress-detail">Khởi tạo tác vụ chạy nền...</small>
+                        <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                            <small class="text-muted d-block" id="export-progress-detail">Khởi tạo tác vụ chạy nền...</small>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-export-retry" style="display:none;" onclick="window.dbManager.resetExportTask()">
+                                <i class="bi bi-arrow-repeat me-1"></i> Làm mới tác vụ
+                            </button>
+                        </div>
                     </div>
 
                 </div>
@@ -177,66 +182,134 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
     </div>
     
     <style>
-        #exportExcelModal { --export-ink:#102a24; --export-muted:#637a72; --export-green:#087f5b; --export-line:#dce8e3; --export-canvas:#f4f8f6; }
+        #exportExcelModal {
+            --export-ink: #102a24;
+            --export-muted: #637a72;
+            --export-green: #087f5b;
+            --export-line: #dce8e3;
+            --export-canvas: #f4f8f6;
+            --export-shell-bg: #ffffff;
+            --export-panel-bg: rgba(255, 255, 255, .94);
+            --export-field-bg: #ffffff;
+            --export-field-line: #cdded6;
+            --export-dataset-bg: #ffffff;
+            --export-dataset-line: #d9e6e0;
+            --export-dataset-active: #f7fcf9;
+            --export-icon-bg: #edf7f3;
+            --export-icon-color: #246c58;
+            --export-check-bg: #ffffff;
+            --export-check-line: #cbdcd4;
+            --export-sensor-bg: #f8fbfa;
+            --export-sensor-line: #dceae4;
+            --export-sensor-item-bg: #ffffff;
+            --export-sensor-item-line: #e0ebe6;
+            --export-sensor-text: #284c40;
+            --export-note-bg: #f2f9f5;
+            --export-note-line: #d7e9e0;
+            --export-note-text: #527067;
+            --export-progress-bg: #ffffff;
+            --export-progress-line: #b9ddcf;
+            --export-track-bg: #dfeae5;
+            --export-footer-bg: rgba(250, 253, 251, .96);
+            --export-footer-line: #dce7e1;
+            --export-btn-start-bg: #087f5b;
+            --export-btn-start-hover: #056b4c;
+            --export-btn-start-text: #ffffff;
+        }
+        [data-theme="dark"] #exportExcelModal {
+            --export-ink: var(--on-surface, #f0fdfa);
+            --export-muted: var(--on-surface-muted, #a7c1be);
+            --export-green: var(--accent-primary, #2dd4bf);
+            --export-line: var(--border-color, #29494c);
+            --export-canvas: var(--surface-canvas, #071a1c);
+            --export-shell-bg: var(--surface-default, #0b2427);
+            --export-panel-bg: rgba(11, 36, 39, .94);
+            --export-field-bg: #0c2b2e;
+            --export-field-line: var(--border-color, #29494c);
+            --export-dataset-bg: #0c2b2e;
+            --export-dataset-line: var(--border-color, #29494c);
+            --export-dataset-active: #143e3c;
+            --export-icon-bg: #133c3f;
+            --export-icon-color: var(--accent-secondary, #5eead4);
+            --export-check-bg: #0b2427;
+            --export-check-line: #3b6265;
+            --export-sensor-bg: #081e21;
+            --export-sensor-line: var(--border-color, #29494c);
+            --export-sensor-item-bg: #0c2b2e;
+            --export-sensor-item-line: var(--border-color, #29494c);
+            --export-sensor-text: var(--on-surface, #f0fdfa);
+            --export-note-bg: #0d2427;
+            --export-note-line: var(--border-color, #29494c);
+            --export-note-text: var(--on-surface-muted, #a7c1be);
+            --export-progress-bg: #0c2b2e;
+            --export-progress-line: var(--border-color, #29494c);
+            --export-track-bg: #17383b;
+            --export-footer-bg: rgba(11, 36, 39, .96);
+            --export-footer-line: var(--border-color, #29494c);
+            --export-btn-start-bg: var(--accent-primary, #2dd4bf);
+            --export-btn-start-hover: var(--accent-primary-hover, #5eead4);
+            --export-btn-start-text: #071a1c;
+        }
         #exportExcelModal .export-dialog { max-width:1120px; }
-        #exportExcelModal .export-shell { overflow:hidden; border:1px solid #d5e3dd; border-radius:22px; background:#fff; box-shadow:0 28px 90px rgba(15,45,35,.24); }
+        #exportExcelModal .export-shell { overflow:hidden; border:1px solid var(--export-line); border-radius:22px; background:var(--export-shell-bg); box-shadow:0 28px 90px rgba(0,0,0,.28); }
         #exportExcelModal .export-header { align-items:flex-start; gap:18px; padding:22px 26px; border:0; background:linear-gradient(125deg,#0b332b 0%,#0b6b52 68%,#11946e 100%); }
+        [data-theme="dark"] #exportExcelModal .export-header { background:linear-gradient(125deg,#06231f 0%,#09483a 68%,#0f6a54 100%); border-bottom:1px solid var(--export-line); }
         #exportExcelModal .export-title-wrap { display:flex; align-items:center; gap:14px; min-width:0; }
         #exportExcelModal .export-header-icon { display:grid; place-items:center; width:44px; height:44px; flex:0 0 44px; border:1px solid rgba(255,255,255,.22); border-radius:13px; color:#d5fff1; background:rgba(255,255,255,.12); font-size:1.2rem; }
         #exportExcelModal .export-header-copy { max-width:650px; color:rgba(232,255,247,.78); font-size:.84rem; line-height:1.45; }
         #exportExcelModal .export-eyebrow { margin-bottom:4px; color:#b8f5dc; font:700 .66rem/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.14em; }
-        #exportExcelModal .export-body { max-height:min(72vh,760px); overflow-y:auto; padding:20px; background:linear-gradient(145deg,#f7faf8 0%,var(--export-canvas) 100%); }
+        #exportExcelModal .export-body { max-height:min(72vh,760px); overflow-y:auto; padding:20px; background:linear-gradient(145deg,var(--export-shell-bg) 0%,var(--export-canvas) 100%); }
         #exportExcelModal .export-layout { display:grid; grid-template-columns:minmax(300px,.82fr) minmax(420px,1.18fr); gap:16px; align-items:stretch; }
-        #exportExcelModal .export-panel { min-width:0; padding:20px; border:1px solid var(--export-line); border-radius:16px; background:rgba(255,255,255,.94); box-shadow:0 8px 24px rgba(17,61,45,.05); }
+        #exportExcelModal .export-panel { min-width:0; padding:20px; border:1px solid var(--export-line); border-radius:16px; background:var(--export-panel-bg); box-shadow:0 8px 24px rgba(0,0,0,.06); }
         #exportExcelModal .export-section-title { display:flex; align-items:center; gap:10px; margin:0 0 18px; color:var(--export-ink); }
         #exportExcelModal .export-section-title-spaced { margin-top:28px; }
-        #exportExcelModal .export-step { display:grid; place-items:center; width:27px; height:27px; flex:0 0 27px; border-radius:8px; color:#fff; background:var(--export-green); font:700 .68rem ui-monospace,SFMono-Regular,Menlo,monospace; }
+        #exportExcelModal .export-step { display:grid; place-items:center; width:27px; height:27px; flex:0 0 27px; border-radius:8px; color:var(--export-btn-start-text); background:var(--export-green); font:700 .68rem ui-monospace,SFMono-Regular,Menlo,monospace; }
         #exportExcelModal .export-section-copy { display:flex; flex-direction:column; gap:2px; }
-        #exportExcelModal .export-section-copy strong { font-size:.91rem; font-weight:800; letter-spacing:.01em; }
+        #exportExcelModal .export-section-copy strong { font-size:.91rem; font-weight:800; letter-spacing:.01em; color:var(--export-ink); }
         #exportExcelModal .export-section-copy small { color:var(--export-muted); font-size:.74rem; font-weight:500; line-height:1.35; }
         #exportExcelModal .export-field { margin-bottom:14px; }
-        #exportExcelModal .form-label { display:block; margin:0 0 7px; color:#526b62!important; font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
-        #exportExcelModal .form-select, #exportExcelModal .form-control { min-height:44px; border:1px solid #cdded6; border-radius:11px; color:var(--export-ink); background:#fff; font-size:.88rem; }
-        #exportExcelModal .form-select:focus, #exportExcelModal .form-control:focus { border-color:#3ca47f; box-shadow:0 0 0 3px rgba(8,127,91,.13); }
+        #exportExcelModal .form-label { display:block; margin:0 0 7px; color:var(--export-muted)!important; font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+        #exportExcelModal .form-select, #exportExcelModal .form-control { min-height:44px; border:1px solid var(--export-field-line); border-radius:11px; color:var(--export-ink); background:var(--export-field-bg); font-size:.88rem; }
+        #exportExcelModal .form-select:focus, #exportExcelModal .form-control:focus { border-color:var(--export-green); box-shadow:0 0 0 3px rgba(45,212,191,.18); }
         #exportExcelModal .export-date-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-        #exportExcelModal .export-scope-note { margin-top:22px; padding:12px 13px; border:1px solid #d7e9e0; border-radius:11px; color:#527067; background:#f2f9f5; font-size:.78rem; line-height:1.45; }
+        #exportExcelModal .export-scope-note { margin-top:22px; padding:12px 13px; border:1px solid var(--export-note-line); border-radius:11px; color:var(--export-note-text); background:var(--export-note-bg); font-size:.78rem; line-height:1.45; }
         #exportExcelModal .export-options { display:grid; gap:10px; }
-        #exportExcelModal .export-dataset { position:relative; display:grid; grid-template-columns:40px minmax(0,1fr) 24px; align-items:center; gap:12px; min-height:72px; padding:12px 14px; border:1px solid #d9e6e0; border-radius:13px; color:var(--export-ink); background:#fff; cursor:pointer; transition:border-color .18s ease,background-color .18s ease,box-shadow .18s ease; }
-        #exportExcelModal .export-dataset:hover { border-color:#56ad8c; box-shadow:0 7px 18px rgba(17,95,71,.08); }
-        #exportExcelModal .export-dataset:focus-within { outline:3px solid rgba(8,127,91,.16); outline-offset:2px; }
+        #exportExcelModal .export-dataset { position:relative; display:grid; grid-template-columns:40px minmax(0,1fr) 24px; align-items:center; gap:12px; min-height:72px; padding:12px 14px; border:1px solid var(--export-dataset-line); border-radius:13px; color:var(--export-ink); background:var(--export-dataset-bg); cursor:pointer; }
+        #exportExcelModal .export-dataset:hover { border-color:var(--export-green); box-shadow:0 7px 18px rgba(0,0,0,.1); }
+        #exportExcelModal .export-dataset:focus-within { outline:3px solid rgba(45,212,191,.2); outline-offset:2px; }
         #exportExcelModal .export-dataset > input, #exportExcelModal .export-dataset-main > input, #exportExcelModal .export-sensor-types input { position:absolute!important; width:1px!important; height:1px!important; min-width:1px!important; min-height:1px!important; margin:0!important; padding:0!important; overflow:hidden; opacity:0; clip-path:inset(50%); pointer-events:none; }
-        #exportExcelModal .export-dataset-icon { display:grid; place-items:center; width:40px; height:40px; border-radius:11px; color:#246c58; background:#edf7f3; font-size:1.05rem; transition:color .18s ease,background-color .18s ease; }
+        #exportExcelModal .export-dataset-icon { display:grid; place-items:center; width:40px; height:40px; border-radius:11px; color:var(--export-icon-color); background:var(--export-icon-bg); font-size:1.05rem; }
         #exportExcelModal .export-dataset-copy { display:flex; min-width:0; flex-direction:column; gap:4px; line-height:1.2; }
-        #exportExcelModal .export-dataset-copy strong { font-size:.91rem; font-weight:800; }
+        #exportExcelModal .export-dataset-copy strong { font-size:.91rem; font-weight:800; color:var(--export-ink); }
         #exportExcelModal .export-dataset-copy small { overflow:hidden; color:var(--export-muted); font-size:.77rem; line-height:1.4; text-overflow:ellipsis; }
-        #exportExcelModal .export-check { box-sizing:border-box; display:grid; place-items:center; width:22px; height:22px; border:1px solid #cbdcd4; border-radius:7px; color:transparent; background:#fff; font-size:.9rem; transition:all .18s ease; }
-        #exportExcelModal .export-dataset:has(> input:checked), #exportExcelModal .export-dataset-main:has(> input:checked) { border-color:#52ad89; background:#f7fcf9; box-shadow:inset 3px 0 0 var(--export-green),0 0 0 2px rgba(8,127,91,.05); }
-        #exportExcelModal .export-dataset:has(> input:checked) > .export-check, #exportExcelModal .export-dataset-main:has(> input:checked) > .export-check { border-color:var(--export-green); color:#fff; background:var(--export-green); }
-        #exportExcelModal .export-dataset:has(> input:checked) > .export-dataset-icon, #exportExcelModal .export-dataset-main:has(> input:checked) > .export-dataset-icon { color:#067653; background:#dcf5e9; }
-        #exportExcelModal .export-dataset-featured { border-left:3px solid #75bca1; }
+        #exportExcelModal .export-check { box-sizing:border-box; display:grid; place-items:center; width:22px; height:22px; border:1px solid var(--export-check-line); border-radius:7px; color:transparent; background:var(--export-check-bg); font-size:.9rem; }
+        #exportExcelModal .export-dataset:has(> input:checked), #exportExcelModal .export-dataset-main:has(> input:checked) { border-color:var(--export-green); background:var(--export-dataset-active); box-shadow:inset 3px 0 0 var(--export-green),0 0 0 2px rgba(45,212,191,.06); }
+        #exportExcelModal .export-dataset:has(> input:checked) > .export-check, #exportExcelModal .export-dataset-main:has(> input:checked) > .export-check { border-color:var(--export-green); color:var(--export-btn-start-text); background:var(--export-green); }
+        #exportExcelModal .export-dataset:has(> input:checked) > .export-dataset-icon, #exportExcelModal .export-dataset-main:has(> input:checked) > .export-dataset-icon { color:var(--export-btn-start-text); background:var(--export-green); }
+        #exportExcelModal .export-dataset-featured { border-left:3px solid var(--export-green); }
         #exportExcelModal .export-dataset-with-children { display:block; padding:0; overflow:hidden; }
         #exportExcelModal .export-dataset-main { position:relative; display:grid; grid-template-columns:40px minmax(0,1fr) 24px; align-items:center; gap:12px; min-height:72px; padding:12px 14px; cursor:pointer; }
-        #exportExcelModal .export-sensor-types { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 14px 14px 54px; padding:12px; border:1px solid #dceae4; border-radius:11px; background:#f8fbfa; }
-        #exportExcelModal .export-sensor-types label { position:relative; display:grid; grid-template-columns:22px minmax(0,1fr); gap:9px; align-items:center; min-height:48px; padding:7px 9px; border:1px solid #e0ebe6; border-radius:9px; color:#284c40; background:#fff; cursor:pointer; transition:border-color .18s ease,background-color .18s ease; }
-        #exportExcelModal .export-sensor-types label:hover { border-color:#91cbb4; }
-        #exportExcelModal .export-sensor-types label:has(input:focus-visible) { outline:3px solid rgba(8,127,91,.16); outline-offset:1px; }
-        #exportExcelModal .export-sensor-check { box-sizing:border-box; display:grid; place-items:center; width:21px; height:21px; border:1px solid #bfd2c9; border-radius:6px; color:transparent; background:#fff; font-size:.82rem; transition:all .18s ease; }
+        #exportExcelModal .export-sensor-types { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 14px 14px 54px; padding:12px; border:1px solid var(--export-sensor-line); border-radius:11px; background:var(--export-sensor-bg); }
+        #exportExcelModal .export-sensor-types label { position:relative; display:grid; grid-template-columns:22px minmax(0,1fr); gap:9px; align-items:center; min-height:48px; padding:7px 9px; border:1px solid var(--export-sensor-item-line); border-radius:9px; color:var(--export-sensor-text); background:var(--export-sensor-item-bg); cursor:pointer; }
+        #exportExcelModal .export-sensor-types label:hover { border-color:var(--export-green); }
+        #exportExcelModal .export-sensor-types label:has(input:focus-visible) { outline:3px solid rgba(45,212,191,.2); outline-offset:1px; }
+        #exportExcelModal .export-sensor-check { box-sizing:border-box; display:grid; place-items:center; width:21px; height:21px; border:1px solid var(--export-check-line); border-radius:6px; color:transparent; background:var(--export-check-bg); font-size:.82rem; }
         #exportExcelModal .export-sensor-copy { display:flex; min-width:0; flex-direction:column; gap:2px; line-height:1.2; }
-        #exportExcelModal .export-sensor-copy strong { font-size:.78rem; font-weight:800; }
-        #exportExcelModal .export-sensor-copy small { color:#71877f; font-size:.69rem; }
-        #exportExcelModal .export-sensor-types label:has(input:checked) { border-color:#a7d8c4; background:#f4fbf7; }
-        #exportExcelModal .export-sensor-types label:has(input:checked) .export-sensor-check { border-color:var(--export-green); color:#fff; background:var(--export-green); }
-        #exportExcelModal .export-progress-card { margin-top:16px; padding:15px 17px; border:1px solid #b9ddcf; border-radius:14px; background:#fff; box-shadow:0 8px 22px rgba(18,99,73,.08); }
+        #exportExcelModal .export-sensor-copy strong { font-size:.78rem; font-weight:800; color:var(--export-ink); }
+        #exportExcelModal .export-sensor-copy small { color:var(--export-muted); font-size:.69rem; }
+        #exportExcelModal .export-sensor-types label:has(input:checked) { border-color:var(--export-green); background:var(--export-dataset-active); }
+        #exportExcelModal .export-sensor-types label:has(input:checked) .export-sensor-check { border-color:var(--export-green); color:var(--export-btn-start-text); background:var(--export-green); }
+        #exportExcelModal .export-progress-card { margin-top:16px; padding:15px 17px; border:1px solid var(--export-progress-line); border-radius:14px; background:var(--export-progress-bg); box-shadow:0 8px 22px rgba(0,0,0,.08); }
         #exportExcelModal .export-percent { color:var(--export-green); font:800 1.2rem ui-monospace,SFMono-Regular,Menlo,monospace; }
-        #exportExcelModal .export-progress-track { height:9px; border-radius:999px; background:#dfeae5; }
-        #exportExcelModal .export-progress-track .progress-bar { border-radius:999px; background:linear-gradient(90deg,#087f5b,#43c99a); }
-        #exportExcelModal .export-footer { position:sticky; bottom:0; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #dce7e1; background:rgba(250,253,251,.96); backdrop-filter:blur(10px); }
-        #exportExcelModal #btn-export-start { min-height:42px; padding-inline:18px; border:0; border-radius:10px; background:#087f5b; box-shadow:0 7px 16px rgba(8,127,91,.18); font-weight:750; }
-        #exportExcelModal #btn-export-start:hover { background:#056b4c; box-shadow:0 9px 20px rgba(8,127,91,.24); }
-        #exportExcelModal #btn-export-cancel { min-height:42px; border-radius:10px; }
+        #exportExcelModal .export-progress-track { height:9px; border-radius:999px; background:var(--export-track-bg); }
+        #exportExcelModal .export-progress-track .progress-bar { border-radius:999px; background:linear-gradient(90deg,#0d9488,var(--export-green)); }
+        #exportExcelModal .export-footer { position:sticky; bottom:0; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid var(--export-footer-line); background:var(--export-footer-bg); backdrop-filter:blur(10px); }
+        #exportExcelModal #btn-export-start { min-height:42px; padding-inline:18px; border:0; border-radius:10px; background:var(--export-btn-start-bg); color:var(--export-btn-start-text); box-shadow:0 7px 16px rgba(0,0,0,.15); font-weight:750; }
+        #exportExcelModal #btn-export-start:hover { background:var(--export-btn-start-hover); box-shadow:0 9px 20px rgba(0,0,0,.22); }
+        #exportExcelModal #btn-export-cancel { min-height:42px; border-radius:10px; border:1px solid var(--export-line); color:var(--export-muted); }
+        [data-theme="dark"] #exportExcelModal #btn-export-cancel:hover { background:var(--surface-hover, #17383b); color:var(--on-surface, #f0fdfa); }
         @media (max-width:900px) { #exportExcelModal .export-layout { grid-template-columns:1fr; } }
         @media (max-width:575px) { #exportExcelModal .export-header { padding:18px; } #exportExcelModal .export-body { padding:12px; } #exportExcelModal .export-panel { padding:15px; } #exportExcelModal .export-date-grid, #exportExcelModal .export-sensor-types { grid-template-columns:1fr; } #exportExcelModal .export-sensor-types { margin-left:13px; } #exportExcelModal .export-footer { padding:12px; } #exportExcelModal #btn-export-cancel, #exportExcelModal #btn-export-start { flex:1; } }
-        @media (prefers-reduced-motion: reduce) { #exportExcelModal .export-dataset, #exportExcelModal #btn-export-start { transition:none; } }
     </style>
     
     <!-- ============================================
@@ -325,7 +398,7 @@ window.LegacyTemplateParts['data-modals-nav'] = String.raw`    <!-- 4. Modal Vel
                         </div>
                     </form>
                 </div>
-                <div class="modal-footer bg-light">
+                <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
                     <button type="button" class="btn btn-success" onclick="window.adminManager.confirmAssignPiPoint()">
                         <i class="bi bi-link me-1"></i> Gắn Thiết Bị
