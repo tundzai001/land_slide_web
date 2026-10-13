@@ -27,9 +27,11 @@ def create(jti, user, expires_at, *, client=""):
 
 def valid(jti, user, *, touch=True):
     now = int(time.time())
+    query = select(OperationsSetting).where(OperationsSetting.key == "auth_session:" + jti)
+    if touch:
+        query = query.with_for_update()
     with store._sessions.begin() as db:
-        row = db.scalar(select(OperationsSetting).where(
-            OperationsSetting.key == "auth_session:" + jti).with_for_update())
+        row = db.scalar(query)
         record = row.value if row else None
         if not isinstance(record, dict) or record.get("expires_at", 0) <= now:
             return False

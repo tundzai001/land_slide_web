@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 AUTHORIZATION_REFRESH_SECONDS = 30
-AUTHORIZATION_TIMEOUT_SECONDS = 5
+AUTHORIZATION_TIMEOUT_SECONDS = max(10, int(getattr(settings, "DB_POOL_TIMEOUT_SECONDS", 10)))
 MAX_CLIENT_MESSAGE_BYTES = 16 * 1024
 
 
@@ -43,6 +43,20 @@ async def _session_user(username, session_id):
     ):
         raise ValueError("Session expired")
     return user
+
+
+async def _await_session_user(username: str, session_id: str):
+    try:
+        return await asyncio.wait_for(
+            _session_user(username, session_id),
+            timeout=AUTHORIZATION_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        await asyncio.sleep(0)
+        return await asyncio.wait_for(
+            _session_user(username, session_id),
+            timeout=AUTHORIZATION_TIMEOUT_SECONDS,
+        )
 
 async def _consume_ws_ticket(jti: str) -> bool:
     from ..authentication import sessions
@@ -88,9 +102,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
             raise ValueError("Token has no subject")
 
         parent_session = str(payload.get("session_id") or "")
-        user = await asyncio.wait_for(
-            _session_user(username, parent_session), timeout=AUTHORIZATION_TIMEOUT_SECONDS
-        )
+        user = await _await_session_user(username, parent_session)
         if websocket.url.path == "/ws/admin" and str(user.role or "") != auth.Role.ADMIN:
             raise ValueError("Admin channel requires admin role")
         assigned_projects, scope_hash = _user_scope(user)
@@ -128,9 +140,8 @@ async def _refresh_authorization(websocket: WebSocket) -> bool:
         if time.monotonic() < websocket.state.authorization_deadline:
             return True
         try:
-            user = await asyncio.wait_for(
-                _session_user(websocket.state.username, websocket.state.session_id),
-                timeout=AUTHORIZATION_TIMEOUT_SECONDS,
+            user = await _await_session_user(
+                websocket.state.username, websocket.state.session_id
             )
             if _user_scope(user)[1] != websocket.state.authz_scope_hash:
                 raise ValueError("Authorization changed")

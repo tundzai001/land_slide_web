@@ -154,6 +154,21 @@ class WebSocketAuthorizationTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await routes._refresh_authorization(socket))
         self.assertEqual(socket.close_code, 1013)
 
+    async def test_transient_authorization_timeout_recovers_on_retry_before_closing(self):
+        socket = Socket(self.ticket())
+        with patch.object(
+            routes,
+            "_session_user",
+            AsyncMock(side_effect=[self.user, TimeoutError(), self.user, TimeoutError(), TimeoutError()]),
+        ):
+            self.assertTrue(await routes._authorize_websocket(socket))
+            socket.state.authorization_deadline = 0
+            self.assertTrue(await routes._refresh_authorization(socket))
+            self.assertFalse(socket.closed.is_set())
+            socket.state.authorization_deadline = 0
+            self.assertFalse(await routes._refresh_authorization(socket))
+        self.assertEqual(socket.close_code, 1013)
+
 
 if __name__ == "__main__":
     unittest.main()
