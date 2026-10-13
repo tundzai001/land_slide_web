@@ -659,15 +659,28 @@ function setupEventListeners() {
             const maxX = Math.max(...values.map(plotX), 0);
             const minY = Math.min(...values.map(plotY), 0);
             const maxY = Math.max(...values.map(plotY), 0);
-            const padding = 90;
+            const rosterEl = document.getElementById('gnss-roster-summary');
+            const rosterBottom = rosterEl && rosterEl.offsetHeight
+                ? rosterEl.offsetTop + rosterEl.offsetHeight
+                : 86;
+            const topPadding = Math.min(
+                Math.max(116, rosterBottom + 32),
+                Math.max(116, Math.floor(this.viewHeight * 0.36)),
+            );
+            const bottomPadding = 52;
+            const sidePadding = 76;
             const rangeX = Math.max(maxX - minX, 1);
             const rangeY = Math.max(maxY - minY, 1);
+            const usableWidth = Math.max(120, this.viewWidth - sidePadding * 2);
+            const usableHeight = Math.max(120, this.viewHeight - topPadding - bottomPadding);
             const scale = Math.max(0.01, Math.min(
-                (this.viewWidth - padding * 2) / rangeX,
-                (this.viewHeight - padding * 2) / rangeY,
+                usableWidth / rangeX,
+                usableHeight / rangeY,
             ));
-            const centerX = this.viewWidth / 2 - ((minX + maxX) / 2) * scale;
-            const centerY = this.viewHeight / 2 + ((minY + maxY) / 2) * scale;
+            const boxCenterX = sidePadding + usableWidth / 2;
+            const boxCenterY = topPadding + usableHeight / 2;
+            const centerX = boxCenterX - ((minX + maxX) / 2) * scale;
+            const centerY = boxCenterY + ((minY + maxY) / 2) * scale;
             return { scale, centerX, centerY };
         },
         getScreenCoords(pt, projection = this.getProjection()) {
@@ -1005,17 +1018,17 @@ function setupEventListeners() {
             });
 
             ctx.save();
-            ctx.fillStyle = 'rgba(6, 20, 27, 0.75)';
+            ctx.fillStyle = 'rgba(6, 20, 27, 0.78)';
             ctx.beginPath();
-            ctx.roundRect(16, 16, 280, 68, 6);
+            ctx.roundRect(14, 12, 252, 52, 6);
             ctx.fill();
             ctx.fillStyle = '#7dd3c7';
-            ctx.font = "600 13px 'IBM Plex Mono', monospace";
-            ctx.fillText('GNSS NETWORK SOLVER', 32, 36);
-            ctx.fillStyle = 'rgba(203,255,248,.55)';
-            ctx.font = "11px 'IBM Plex Mono', monospace";
-            ctx.fillText(`${gnssAdjustmentDebugState.phase}  ·  ${this.baselines.length} cạnh  ·  ${gnssAdjustmentDebugState.baselineCount} trị đo`, 32, 55);
-            ctx.fillText(`${this.getRoverCount()} rover + 1 BASE`, 32, 72);
+            ctx.font = "600 11.5px 'IBM Plex Mono', monospace";
+            ctx.fillText('GNSS NETWORK SOLVER', 26, 28);
+            ctx.fillStyle = 'rgba(203,255,248,.58)';
+            ctx.font = "10px 'IBM Plex Mono', monospace";
+            ctx.fillText(`${gnssAdjustmentDebugState.phase}  ·  ${this.baselines.length} cạnh  ·  ${gnssAdjustmentDebugState.baselineCount} trị đo`, 26, 43);
+            ctx.fillText(`${this.getRoverCount()} rover + 1 BASE`, 26, 56);
             ctx.restore();
         }
     };
@@ -1088,7 +1101,7 @@ function setupEventListeners() {
                                 <div id="gnss-debug-resizer" title="Kéo để đổi chiều cao Live Debug" style="height: 7px; flex: 0 0 7px; cursor: row-resize; background: #2c3440; border-top: 1px solid #4a5568; border-bottom: 1px solid #1a202c; touch-action: none; transition: background 0.2s;"></div>
                                 <div id="gnss-debug-section" class="bg-darker d-flex flex-column live-debug-panel">
                                     <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-gradient-debug border-bottom border-secondary gnss-debug-header">
-                                        <h6 class="mb-0 text-warning font-monospace fw-bold" style="font-size: 0.8rem; letter-spacing: 0.5px;"><i class="bi bi-terminal-fill me-2"></i>Live Debug</h6>
+                                        <h6 class="mb-0 text-warning font-monospace fw-bold" style="font-size: 0.76rem; letter-spacing: 0.5px;"><i class="bi bi-terminal-fill me-2"></i>Live Debug</h6>
                                         <div class="d-flex gap-1 gnss-debug-actions">
                                             <button id="gnss-debug-copy" type="button" class="btn btn-sm btn-outline-info py-0 px-1" style="font-size: 0.65rem;" title="Sao chép toàn bộ log">Sao chép</button>
                                             <button id="gnss-debug-follow" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;" title="Xuống cuối và tiếp tục tự cuộn">↓ Cuối</button>
@@ -1096,8 +1109,8 @@ function setupEventListeners() {
                                             <button id="gnss-debug-clear" type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.65rem;">Xóa log</button>
                                         </div>
                                     </div>
-                                    <div id="gnss-debug-summary" class="px-3 py-1 text-muted font-monospace border-bottom border-secondary" style="font-size: 0.72rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto; background: rgba(0,0,0,0.3);">WS: CONNECTING</div>
-                                    <div id="gnss-debug-log" class="p-3 font-monospace flex-grow-1 text-light" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.8rem; line-height: 1.6;"></div>
+                                    <div id="gnss-debug-summary" class="px-3 py-1 text-muted font-monospace border-bottom border-secondary" style="font-size: 0.66rem; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 0 0 auto; background: rgba(0,0,0,0.3);">WS: CONNECTING</div>
+                                    <div id="gnss-debug-log" class="p-3 font-monospace flex-grow-1 text-light" tabindex="0" style="min-height: 0; overflow: auto; scrollbar-gutter: stable; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-size: 0.68rem; line-height: 1.42;"></div>
                                 </div>
                                 <div id="adj-results-section" class="p-3 border-top border-secondary bg-gradient-premium gnss-result-panel" style="display: none;">
                                     <h6 id="adj-process-status" class="mb-2"></h6>
@@ -1124,7 +1137,35 @@ function setupEventListeners() {
         `.trim();
         modal = wrapper.firstElementChild;
         document.body.appendChild(modal);
+        const dataColumn = modal.querySelector('#gnss-data-column');
+        const debugSection = modal.querySelector('#gnss-debug-section');
+        const debugToggle = modal.querySelector('#gnss-debug-toggle');
+        const clampGnssLayoutPanels = () => {
+            if (window.innerWidth <= 900) {
+                dataColumn.style.removeProperty('width');
+                dataColumn.style.removeProperty('flex-basis');
+                debugSection.style.removeProperty('height');
+                debugSection.style.removeProperty('flex-basis');
+                return;
+            }
+            const savedColumnWidth = Number(localStorage.getItem('gnssDataColumnWidth'));
+            const maxColumnWidth = Math.max(340, Math.min(540, Math.floor(window.innerWidth * 0.44)));
+            if (savedColumnWidth >= 320) {
+                const fittedWidth = Math.min(savedColumnWidth, maxColumnWidth);
+                dataColumn.style.width = `${fittedWidth}px`;
+                dataColumn.style.flexBasis = `${fittedWidth}px`;
+            }
+            const savedDebugHeight = Number(localStorage.getItem('gnssDebugHeight'));
+            const maxDebugHeight = Math.max(115, Math.min(220, Math.floor(window.innerHeight * 0.28)));
+            if (savedDebugHeight >= 105) {
+                const fittedHeight = Math.min(savedDebugHeight, maxDebugHeight);
+                debugSection.style.height = `${fittedHeight}px`;
+                debugSection.style.flexBasis = `${fittedHeight}px`;
+            }
+        };
+        clampGnssLayoutPanels();
         modal.addEventListener('shown.bs.modal', () => {
+            clampGnssLayoutPanels();
             window.gnssBoardState?.init?.({ preserve: gnssAdjustmentDebugState.active });
             if (pendingGnssAdjustmentResult) {
                 window.gnssBoardState?.loadAdjustmentResult?.(pendingGnssAdjustmentResult);
@@ -1137,26 +1178,10 @@ function setupEventListeners() {
             refreshGnssAdjustmentRunningPill();
         });
         window.addEventListener('resize', () => {
+            clampGnssLayoutPanels();
             window.gnssBoardState?.requestResize?.();
             window.gnssBoardState?.resize?.(true);
         }, { passive: true });
-        const dataColumn = modal.querySelector('#gnss-data-column');
-        const debugSection = modal.querySelector('#gnss-debug-section');
-        const debugToggle = modal.querySelector('#gnss-debug-toggle');
-        const savedColumnWidth = Number(localStorage.getItem('gnssDataColumnWidth'));
-        const savedDebugHeight = Number(localStorage.getItem('gnssDebugHeight'));
-        const maxInitialColumnWidth = Math.max(340, window.innerWidth * 0.68);
-        if (savedColumnWidth >= 340) {
-            const fittedWidth = Math.min(savedColumnWidth, maxInitialColumnWidth);
-            dataColumn.style.width = `${fittedWidth}px`;
-            dataColumn.style.flexBasis = `${fittedWidth}px`;
-        }
-        const maxInitialDebugHeight = Math.max(150, window.innerHeight * 0.48);
-        if (savedDebugHeight >= 140) {
-            const fittedHeight = Math.min(savedDebugHeight, maxInitialDebugHeight);
-            debugSection.style.height = `${fittedHeight}px`;
-            debugSection.style.flexBasis = `${fittedHeight}px`;
-        }
         const setDebugCollapsed = collapsed => {
             dataColumn.classList.toggle('gnss-debug-collapsed', collapsed);
             debugToggle?.setAttribute('aria-expanded', String(!collapsed));

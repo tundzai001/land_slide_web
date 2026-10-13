@@ -268,7 +268,7 @@
 .gnss-workflow-panel {
     --flow-accent: #53e0c1;
     --flow-blue: #67b8ff;
-    min-height: 190px;
+    min-height: 150px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -283,22 +283,22 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
-    padding: 18px 20px 12px;
+    gap: 10px;
+    padding: 10px 14px 7px;
     flex: 0 0 auto;
 }
 
 .gnss-workflow-kicker {
     display: block;
     color: #73dbc9;
-    font: 700 0.62rem/1.2 var(--bs-font-monospace, monospace);
-    letter-spacing: 0.18em;
-    margin-bottom: 6px;
+    font: 700 0.56rem/1.15 var(--bs-font-monospace, monospace);
+    letter-spacing: 0.16em;
+    margin-bottom: 2px;
 }
 
 .gnss-workflow-header h6 {
     margin: 0;
-    font-size: 1rem;
+    font-size: 0.88rem;
     font-weight: 750;
     letter-spacing: -0.01em;
     color: #f4fbff;
@@ -306,15 +306,15 @@
 
 .gnss-workflow-header h6 i {
     color: var(--flow-accent);
-    margin-right: 7px;
+    margin-right: 6px;
 }
 
 .gnss-workflow-header p {
-    max-width: 330px;
-    margin: 6px 0 0;
+    max-width: 340px;
+    margin: 3px 0 0;
     color: #91a9b6;
-    font-size: 0.72rem;
-    line-height: 1.35;
+    font-size: 0.66rem;
+    line-height: 1.3;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -323,20 +323,20 @@
 .gnss-workflow-live {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
     flex: 0 0 auto;
     border: 1px solid rgba(83, 224, 193, 0.28);
     border-radius: 999px;
-    padding: 6px 9px;
+    padding: 4px 8px;
     color: #9debdc;
     background: rgba(8, 27, 33, 0.74);
-    font: 700 0.58rem/1 var(--bs-font-monospace, monospace);
+    font: 700 0.54rem/1 var(--bs-font-monospace, monospace);
     letter-spacing: 0.1em;
 }
 
 .gnss-workflow-live i {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--flow-accent);
     box-shadow: 0 0 0 4px rgba(83, 224, 193, 0.1), 0 0 12px rgba(83, 224, 193, 0.85);
@@ -345,7 +345,7 @@
 
 .gnss-workflow-progress {
     height: 3px;
-    margin: 0 20px;
+    margin: 0 14px;
     overflow: hidden;
     border-radius: 999px;
     background: rgba(148, 163, 184, 0.14);
@@ -364,9 +364,9 @@
 .gnss-workflow-progress-meta {
     display: flex;
     justify-content: space-between;
-    padding: 7px 20px 9px;
+    padding: 4px 14px 6px;
     color: #6f8896;
-    font: 600 0.62rem/1.2 var(--bs-font-monospace, monospace);
+    font: 600 0.58rem/1.15 var(--bs-font-monospace, monospace);
     letter-spacing: 0.04em;
 }
 
@@ -405,7 +405,7 @@
     flex: 1 1 auto;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 3px 18px 24px 16px;
+    padding: 2px 12px 12px 10px;
     scrollbar-gutter: stable;
 }
 
@@ -417,14 +417,14 @@
 .gnss-flow-node {
     --node-color: #67b8ff;
     display: grid;
-    grid-template-columns: 42px minmax(0, 1fr);
-    gap: 8px;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 6px;
     position: relative;
     animation: gnss-flow-enter 0.35s cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .gnss-flow-node.is-branch {
-    margin-left: 18px;
+    margin-left: 12px;
 }
 
 .gnss-flow-node.status-success { --node-color: #53e0c1; }
@@ -441,8 +441,8 @@
     content: '';
     position: absolute;
     z-index: 0;
-    top: 31px;
-    bottom: -12px;
+    top: 25px;
+    bottom: -8px;
     width: 2px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--node-color) 64%, transparent), rgba(89, 118, 132, 0.22));
 }
@@ -452,35 +452,35 @@
     z-index: 1;
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
-    margin-top: 8px;
+    width: 24px;
+    height: 24px;
+    margin-top: 5px;
     border: 1px solid color-mix(in srgb, var(--node-color) 55%, transparent);
-    border-radius: 10px;
+    border-radius: 8px;
     color: var(--node-color);
     background: #0a171f;
-    box-shadow: 0 0 0 5px rgba(8, 20, 27, 0.88), 0 0 18px color-mix(in srgb, var(--node-color) 18%, transparent);
-    font-size: 0.78rem;
+    box-shadow: 0 0 0 4px rgba(8, 20, 27, 0.88), 0 0 14px color-mix(in srgb, var(--node-color) 18%, transparent);
+    font-size: 0.68rem;
 }
 
 .gnss-flow-node.status-running .gnss-flow-marker::after {
     content: '';
     position: absolute;
-    inset: -5px;
+    inset: -4px;
     border: 1px solid color-mix(in srgb, var(--node-color) 50%, transparent);
-    border-radius: 13px;
+    border-radius: 11px;
     animation: gnss-flow-ring 1.65s ease-out infinite;
 }
 
 .gnss-flow-card {
     position: relative;
     min-width: 0;
-    margin: 0 0 12px;
-    padding: 11px 13px 10px;
+    margin: 0 0 7px;
+    padding: 7px 10px 6px;
     border: 1px solid rgba(125, 157, 171, 0.14);
-    border-radius: 12px;
+    border-radius: 10px;
     background: linear-gradient(145deg, rgba(24, 45, 55, 0.82), rgba(11, 25, 34, 0.9));
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
     transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -503,13 +503,13 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 5px;
+    gap: 10px;
+    margin-bottom: 2px;
 }
 
 .gnss-flow-step,
 .gnss-flow-status {
-    font: 700 0.57rem/1.2 var(--bs-font-monospace, monospace);
+    font: 700 0.53rem/1.15 var(--bs-font-monospace, monospace);
     letter-spacing: 0.11em;
     text-transform: uppercase;
 }
@@ -520,25 +520,25 @@
 .gnss-flow-card h6 {
     margin: 0;
     color: #ecf7fa;
-    font-size: 0.82rem;
+    font-size: 0.75rem;
     font-weight: 720;
-    line-height: 1.3;
+    line-height: 1.25;
 }
 
 .gnss-flow-card p {
-    margin: 5px 44px 0 0;
+    margin: 2px 38px 0 0;
     color: #8fa8b4;
-    font-size: 0.68rem;
-    line-height: 1.45;
+    font-size: 0.63rem;
+    line-height: 1.35;
     overflow-wrap: anywhere;
 }
 
 .gnss-flow-card time {
     position: absolute;
-    right: 12px;
-    bottom: 10px;
+    right: 9px;
+    bottom: 7px;
     color: #59717e;
-    font: 600 0.57rem/1 var(--bs-font-monospace, monospace);
+    font: 600 0.53rem/1 var(--bs-font-monospace, monospace);
 }
 
 @keyframes gnss-flow-enter {
@@ -601,47 +601,67 @@
     background: rgba(255, 255, 255, 0.4);
 }
 
+#gnssTerminalModal {
+    --gnss-top-offset: 0px;
+    z-index: var(--z-modal, 2200);
+    padding: calc(var(--gnss-top-offset) + 8px) 16px 12px !important;
+    overflow: hidden;
+}
+
+html[data-app-view="map"] #gnssTerminalModal,
+body:has(.top-navbar) #gnssTerminalModal {
+    --gnss-top-offset: 72px;
+}
+
 #gnssTerminalModal .gnss-terminal-dialog {
-    width: min(96vw, 1780px);
-    max-width: min(96vw, 1780px);
-    margin-inline: auto;
+    width: min(94vw, 1520px);
+    max-width: min(94vw, 1520px);
+    height: calc(100dvh - var(--gnss-top-offset) - 20px);
+    max-height: calc(100dvh - var(--gnss-top-offset) - 20px);
+    min-height: 0;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
 }
 
 #gnssTerminalModal .gnss-terminal-content {
-    height: min(92dvh, 980px);
-    min-height: min(680px, 92dvh);
+    width: 100%;
+    height: min(100%, 840px);
+    max-height: 100%;
+    min-height: min(460px, 100%);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     border-color: rgba(44, 212, 255, 0.42) !important;
-    border-radius: 16px;
+    border-radius: 14px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(94, 234, 212, 0.08);
 }
 
 #gnssTerminalModal .modal-header {
-    min-height: 68px;
-    gap: 14px;
-    padding: 10px 14px;
+    min-height: 48px;
+    flex: 0 0 auto;
+    gap: 10px;
+    padding: 6px 14px;
     background: linear-gradient(110deg, rgba(6, 24, 34, 0.99), rgba(16, 29, 38, 0.99));
     border-bottom: 1px solid rgba(94, 234, 212, 0.16) !important;
 }
 
 #gnssTerminalModal .gnss-terminal-heading {
-    min-width: 220px;
+    min-width: 180px;
 }
 
 #gnssTerminalModal .gnss-terminal-eyebrow {
     display: block;
-    margin-bottom: 2px;
+    margin-bottom: 1px;
     color: #5eead4;
-    font: 700 0.62rem/1.2 'IBM Plex Mono', monospace;
+    font: 700 0.55rem/1.1 'IBM Plex Mono', monospace;
     letter-spacing: 0.15em;
 }
 
 #gnssTerminalModal .gnss-run-controls {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
     flex: 0 0 auto;
 }
 
@@ -649,10 +669,11 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 36px;
-    padding-inline: 12px;
-    border-radius: 9px;
+    gap: 5px;
+    min-height: 30px;
+    padding: 3px 10px;
+    border-radius: 8px;
+    font-size: 0.76rem;
     font-weight: 700;
     transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, opacity 180ms ease;
 }
@@ -663,6 +684,14 @@
     outline-offset: 2px;
 }
 
+#gnssTerminalModal .btn-close {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px;
+}
+
 #gnssTerminalModal .gnss-run-controls .btn:disabled {
     cursor: not-allowed;
     opacity: 0.45;
@@ -671,26 +700,26 @@
 #gnssTerminalModal .gnss-roster-summary {
     position: absolute;
     z-index: 4;
-    top: 78px;
-    left: 20px;
+    top: 60px;
+    left: 14px;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 7px;
-    max-width: calc(100% - 40px);
+    gap: 5px;
+    max-width: calc(100% - 28px);
     pointer-events: none;
 }
 
 #gnssTerminalModal .gnss-roster-summary span,
 #gnssTerminalModal .gnss-roster-summary small {
-    padding: 6px 9px;
+    padding: 4px 8px;
     border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 999px;
     color: #cbd5e1;
     background: rgba(5, 18, 25, 0.88);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(8px);
-    font: 600 0.68rem/1 'IBM Plex Mono', monospace;
+    font: 600 0.62rem/1 'IBM Plex Mono', monospace;
 }
 
 #gnssTerminalModal .gnss-roster-summary .is-active {
@@ -710,12 +739,15 @@
 
 #gnssTerminalModal .modal-title {
     flex: 0 1 auto;
-    min-width: 210px;
+    min-width: 175px;
+    font-size: 0.95rem;
 }
 
 #gnssTerminalModal #gnss-phase-indicator {
     min-width: 0;
     flex: 1 1 auto;
+    margin-left: 0.5rem !important;
+    font-size: 0.78rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -737,10 +769,10 @@
 }
 
 #gnssTerminalModal #gnss-data-column {
-    width: clamp(390px, 42vw, 680px);
-    min-width: min(390px, 100%);
-    max-width: 68vw;
-    flex: 0 0 clamp(390px, 42vw, 680px);
+    width: clamp(340px, 38vw, 520px);
+    min-width: min(340px, 100%);
+    max-width: 58vw;
+    flex: 0 0 clamp(340px, 38vw, 520px);
     overflow: hidden;
     min-height: 0;
     background: linear-gradient(180deg, #101820, #0c131a);
@@ -750,8 +782,8 @@
 #gnssTerminalModal .gnss-result-panel {
     position: relative;
     min-height: 0;
-    max-height: min(30dvh, 240px);
-    flex: 0 1 240px;
+    max-height: min(30dvh, 220px);
+    flex: 0 1 220px;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
@@ -767,7 +799,7 @@
 }
 
 #gnssTerminalModal.gnss-result-visible .gnss-workflow-panel {
-    min-height: 120px;
+    min-height: 110px;
 }
 
 #gnssTerminalModal.gnss-is-resizing #gnss-data-column,
@@ -786,18 +818,30 @@
 }
 
 #gnssTerminalModal #gnss-debug-section {
-    height: clamp(160px, 28vh, 280px);
-    min-height: 140px;
-    max-height: 48%;
-    flex: 0 0 clamp(160px, 28vh, 280px);
+    height: clamp(120px, 21dvh, 190px);
+    min-height: 105px;
+    max-height: 42%;
+    flex: 0 0 clamp(120px, 21dvh, 190px);
     overflow: hidden;
     position: relative;
     transition: height 0.2s ease, flex-basis 0.2s ease;
 }
 
 #gnssTerminalModal .gnss-debug-header {
+    padding: 5px 10px !important;
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: 4px 8px;
+}
+
+#gnssTerminalModal #gnss-debug-summary {
+    padding: 3px 10px !important;
+    font-size: 0.66rem !important;
+}
+
+#gnssTerminalModal #gnss-debug-log {
+    padding: 7px 10px !important;
+    font-size: 0.68rem !important;
+    line-height: 1.42 !important;
 }
 
 #gnssTerminalModal .gnss-debug-actions {
@@ -806,10 +850,19 @@
     justify-content: flex-end;
 }
 
+#gnssTerminalModal .gnss-debug-actions .btn {
+    min-height: 24px;
+    min-width: 26px;
+    padding: 2px 7px !important;
+    border-radius: 6px;
+    font-size: 0.64rem !important;
+    line-height: 1.1;
+}
+
 #gnssTerminalModal #gnss-data-column.gnss-debug-collapsed #gnss-debug-section {
-    height: 38px !important;
-    min-height: 38px !important;
-    flex-basis: 38px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    flex-basis: 34px !important;
 }
 
 #gnssTerminalModal #gnss-data-column.gnss-debug-collapsed #gnss-debug-summary,
@@ -828,9 +881,9 @@
 
 @media (max-width: 1180px) and (min-width: 901px) {
     #gnssTerminalModal #gnss-data-column {
-        width: clamp(360px, 48vw, 540px);
-        min-width: 360px;
-        flex-basis: clamp(360px, 48vw, 540px);
+        width: clamp(320px, 42vw, 460px);
+        min-width: 320px;
+        flex-basis: clamp(320px, 42vw, 460px);
     }
 
     #gnssTerminalModal #gnss-board-container {
@@ -839,13 +892,24 @@
 }
 
 @media (max-width: 900px) {
+    html[data-app-view="map"] #gnssTerminalModal,
+    body:has(.top-navbar) #gnssTerminalModal {
+        --gnss-top-offset: 64px;
+    }
+
+    #gnssTerminalModal {
+        padding: calc(var(--gnss-top-offset) + 6px) 6px 6px !important;
+    }
+
     #gnssTerminalModal .modal-dialog {
         max-width: calc(100vw - 12px) !important;
-        margin: 6px auto;
+        height: calc(100dvh - var(--gnss-top-offset) - 12px) !important;
+        max-height: calc(100dvh - var(--gnss-top-offset) - 12px) !important;
+        margin: 0 auto;
     }
 
     #gnssTerminalModal .modal-content {
-        height: calc(100dvh - 12px) !important;
+        height: 100% !important;
         min-height: 0;
         border-radius: 12px;
     }

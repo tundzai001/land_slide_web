@@ -343,7 +343,9 @@ class MQTTAdjustmentMixin:
         run_context = self._adjustment_run_context(run_id)
         public_project_id = int(run_context["project_id"])
         cluster_name = str(run_context.get("cluster_name") or "Cụm")
+        prefixed_message = f"{cluster_name}: {message}"
         self.adjustment_message[run_id] = message
+        self.adjustment_message[public_project_id] = prefixed_message
         phase = str(self.adjustment_phase.get(run_id) or "").upper()
         if phase not in {"COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}:
             # Receiver health preflight runs inside the start request, before the
@@ -356,5 +358,5 @@ class MQTTAdjustmentMixin:
             "run_id": run_id,
             "cluster_name": cluster_name,
             "phase": phase,
-            "message": f"{cluster_name}: {message}",
+            "message": prefixed_message,
         })

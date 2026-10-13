@@ -581,7 +581,8 @@ function renderGnssAdjustmentWorkflow() {
 }
 
 function gnssWorkflowRoverFromMessage(message) {
-    const match = String(message || '').match(/^([^:]{1,80}):\s*/);
+    const cleaned = String(message || '').replace(/^Cụm\s+[^:]{1,60}:\s*/i, '').trim();
+    const match = cleaned.match(/^([^:]{1,80}):\s*/);
     return match ? match[1].trim() : '';
 }
 
@@ -640,6 +641,8 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
     }
 
     if (normalizedPhase !== 'FREE_NETWORK') return;
+    finishGnssWorkflowNode('session', 'API và kênh thời gian thực đã sẵn sàng.');
+    finishGnssWorkflowNode('seed');
     if (/starting round-robin|all selected rovers|remaining rovers/i.test(message)) {
         if (/skipped offline|no-data station/i.test(message)) {
             upsertGnssWorkflowNode('seed', {
