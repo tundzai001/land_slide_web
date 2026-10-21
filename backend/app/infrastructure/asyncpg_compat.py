@@ -1,7 +1,11 @@
 """Work around asyncpg 0.31.0 TLS negotiation races without changing SSL policy."""
 
+import logging
+
 import asyncpg
 from asyncpg import connect_utils
+
+logger = logging.getLogger(__name__)
 
 
 def _retrieve_negotiation_exception(future):
@@ -30,3 +34,10 @@ def install_asyncpg_tls_fix():
     # Reassess/remove this compatibility patch when upgrading asyncpg.
     if asyncpg.__version__ == "0.31.0":
         connect_utils.TLSUpgradeProto = _SafeTLSUpgradeProto
+        logger.info("asyncpg %s: TLS negotiation compatibility fix enabled", asyncpg.__version__)
+    else:
+        logger.warning(
+            "asyncpg %s differs from pinned 0.31.0; TLS compatibility fix is not installed. "
+            "Install backend/requirements.txt using the server's Python interpreter.",
+            asyncpg.__version__,
+        )

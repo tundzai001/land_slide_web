@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.mqtt.persistence.alerts import AlertPersistenceMixin
@@ -19,6 +21,50 @@ class DummyAlertManager(AlertPersistenceMixin):
 
 
 class TestAlertPoolSafety(unittest.IsolatedAsyncioTestCase):
+    async def test_slow_alert_work_does_not_overlap_and_cancellation_allows_retry(self):
+        for operation, args in (
+            ("_touch_active_alert", (10, "gnss_velocity", 123)),
+            ("_suppress_station_alerts", (10,)),
+        ):
+            with self.subTest(operation=operation):
+                manager = DummyAlertManager()
+                started = asyncio.Event()
+                release = asyncio.Event()
+                clock = [100.0]
+                db = AsyncMock()
+                result = MagicMock()
+                result.scalars.return_value.all.return_value = []
+                result.rowcount = 1
+
+                async def execute(*args):
+                    started.set()
+                    await release.wait()
+                    return result
+
+                db.execute.side_effect = execute
+                context = AsyncMock()
+                context.__aenter__.return_value = db
+                with patch("app.mqtt.persistence.alerts.DataSessionLocal", return_value=context) as sessions, \
+                     patch("app.mqtt.persistence.alerts.time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time)):
+                    task = asyncio.create_task(getattr(manager, operation)(*args))
+                    try:
+                        await asyncio.wait_for(started.wait(), 1)
+                        # Even after the throttle expires, the first call owns
+                        # this station until its DB operation finishes.
+                        clock[0] = 200.0
+                        release.set()
+                        await getattr(manager, operation)(*args)
+                        self.assertEqual(sessions.call_count, 1)
+                    finally:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+                    clock[0] = 300.0
+                    await getattr(manager, operation)(*args)
+                    self.assertEqual(sessions.call_count, 2)
+                    clock[0] = 301.0
+                    await getattr(manager, operation)(*args)
+                    self.assertEqual(sessions.call_count, 2)
+
     async def test_get_station_active_alert_summary_reuses_passed_db_session(self):
         manager = DummyAlertManager()
         mock_db = AsyncMock()

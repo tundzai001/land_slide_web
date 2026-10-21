@@ -132,11 +132,17 @@ class AlertPersistenceMixin:
         refresh_attempts = getattr(self, "_active_alert_refresh_attempts", None)
         if refresh_attempts is None:
             refresh_attempts = self._active_alert_refresh_attempts = {}
+        in_flight = getattr(self, "_active_alert_refresh_in_flight", None)
+        if in_flight is None:
+            in_flight = self._active_alert_refresh_in_flight = set()
         now = time.monotonic()
         last_attempt = float(refresh_attempts.get(refresh_key, 0.0) or 0.0)
-        if now - last_attempt < 15.0:
+        if refresh_key in in_flight or now - last_attempt < 15.0:
             return 0
         refresh_attempts[refresh_key] = now
+        # A slow DB call can outlive the throttle interval. Do not queue
+        # another refresh for the same alert while it still owns a connection.
+        in_flight.add(refresh_key)
         try:
             async with DataSessionLocal() as db_data:
                 result = await db_data.execute(
@@ -152,22 +158,30 @@ class AlertPersistenceMixin:
                 return int(result.rowcount or 0)
         except Exception as exc:
             logger.error(
-                "❌ Failed to refresh active alert station=%s category=%s: %s",
+                "❌ Failed to refresh active alert station=%s category=%s: %s: %r",
                 station_id,
                 category,
+                exc.__class__.__name__,
                 exc,
             )
             return 0
+        finally:
+            in_flight.discard(refresh_key)
+            refresh_attempts[refresh_key] = time.monotonic()
     async def _suppress_station_alerts(self, station_id: int, *, project_id: int | None = None):
         """Resolve active alerts and keep station status LOW when alerting is disabled."""
         now = time.monotonic()
         attempts = getattr(self, "_alert_suppression_last_attempt", None)
         if attempts is None:
             attempts = self._alert_suppression_last_attempt = {}
+        in_flight = getattr(self, "_alert_suppression_in_flight", None)
+        if in_flight is None:
+            in_flight = self._alert_suppression_in_flight = set()
         last_attempt = float(attempts.get(station_id, 0.0) or 0.0)
-        if now - last_attempt < self._alert_suppression_interval_seconds:
+        if station_id in in_flight or now - last_attempt < self._alert_suppression_interval_seconds:
             return
         attempts[station_id] = now
+        in_flight.add(station_id)
         try:
             async with DataSessionLocal() as db_data:
                 alert_ids = [int(value) for value in (await db_data.execute(
@@ -178,7 +192,7 @@ class AlertPersistenceMixin:
                 )).scalars().all()]
                 if not alert_ids:
                     # No active alerts to suppress; avoid empty UPDATE and back off interval
-                    self._alert_suppression_last_attempt[station_id] = now + 25.0
+                    self._alert_suppression_last_attempt[station_id] = time.monotonic() + 25.0
                     return
                 res = await db_data.execute(
                     model_data.Alert.__table__.update()
@@ -237,6 +251,9 @@ class AlertPersistenceMixin:
                     e.__class__.__name__,
                     e,
                 )
+        finally:
+            in_flight.discard(station_id)
+            attempts[station_id] = max(attempts[station_id], time.monotonic())
     async def _get_station_active_alert_summary(
         self,
         station_id: int,

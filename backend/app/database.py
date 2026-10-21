@@ -3,8 +3,14 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from .config import settings
 from .infrastructure.asyncpg_compat import install_asyncpg_tls_fix
+import logging
 
 install_asyncpg_tls_fix()
+logging.getLogger(__name__).info(
+    "PostgreSQL pools per database: size=%s overflow=%s checkout_timeout=%ss command_timeout=%ss",
+    settings.DB_POOL_SIZE, settings.DB_MAX_OVERFLOW,
+    settings.DB_POOL_TIMEOUT_SECONDS, settings.DB_COMMAND_TIMEOUT_SECONDS,
+)
 
 # Hàm tạo engine chung cho Postgres
 def create_pg_engine(url):
