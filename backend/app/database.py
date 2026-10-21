@@ -24,7 +24,7 @@ def create_pg_engine(url):
         pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
         pool_use_lifo=True,
         connect_args={
-            "timeout": 10,
+            "timeout": 15,
             "command_timeout": settings.DB_COMMAND_TIMEOUT_SECONDS,
         },
     )

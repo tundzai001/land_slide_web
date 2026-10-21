@@ -121,7 +121,7 @@ class SensorAlertMixin:
                         # station into a resolved one.  Check the durable
                         # summary before mutating alert rows so a restart or
                         # transient pool outage cannot silence a real alarm.
-                        summary_before = await self._get_station_active_alert_summary(station_id, station_config)
+                        summary_before = await self._get_station_active_alert_summary(station_id, station_config, db=db_data)
                         if summary_before.get('degraded'):
                             logger.warning(
                                 f"⚠️ Alert summary unavailable for station {station_id}; "
@@ -155,7 +155,7 @@ class SensorAlertMixin:
                                         model_data.IncidentCase.source_kind == "SENSOR_ALERT",
                                         model_data.IncidentCase.source_id.in_(alert_ids),
                                     ).with_for_update()
-                                )).scalars().all()
+                                )) .scalars().all()
                                 for incident_case in incident_rows:
                                     if incident_case.status in {"resolved", "dismissed"}:
                                         continue
@@ -180,7 +180,7 @@ class SensorAlertMixin:
                                     "summary": serialize_case(incident_case),
                                 })
                             is_just_resolved = True
-                            summary = await self._get_station_active_alert_summary(station_id, station_config)
+                            summary = await self._get_station_active_alert_summary(station_id, station_config, db=db_data)
                             unresolved_count = summary.get('unresolved_count', 0)
                             if summary.get('degraded'):
                                 logger.warning(

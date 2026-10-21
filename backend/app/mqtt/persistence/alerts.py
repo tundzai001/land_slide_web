@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, Optional
 
 from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import ConfigSessionLocal, DataSessionLocal
 from app.models import data as model_data
@@ -160,12 +161,13 @@ class AlertPersistenceMixin:
     async def _suppress_station_alerts(self, station_id: int, *, project_id: int | None = None):
         """Resolve active alerts and keep station status LOW when alerting is disabled."""
         now = time.monotonic()
-        if (
-            now - self._alert_suppression_last_attempt[station_id]
-            < self._alert_suppression_interval_seconds
-        ):
+        attempts = getattr(self, "_alert_suppression_last_attempt", None)
+        if attempts is None:
+            attempts = self._alert_suppression_last_attempt = {}
+        last_attempt = float(attempts.get(station_id, 0.0) or 0.0)
+        if now - last_attempt < self._alert_suppression_interval_seconds:
             return
-        self._alert_suppression_last_attempt[station_id] = now
+        attempts[station_id] = now
         try:
             async with DataSessionLocal() as db_data:
                 alert_ids = [int(value) for value in (await db_data.execute(
@@ -174,6 +176,10 @@ class AlertPersistenceMixin:
                         model_data.Alert.is_resolved == False,
                     ))
                 )).scalars().all()]
+                if not alert_ids:
+                    # No active alerts to suppress; avoid empty UPDATE and back off interval
+                    self._alert_suppression_last_attempt[station_id] = now + 25.0
+                    return
                 res = await db_data.execute(
                     model_data.Alert.__table__.update()
                     .where(and_(
@@ -231,7 +237,12 @@ class AlertPersistenceMixin:
                     e.__class__.__name__,
                     e,
                 )
-    async def _get_station_active_alert_summary(self, station_id: int, station_config: Optional[dict] = None) -> Dict[str, Any]:
+    async def _get_station_active_alert_summary(
+        self,
+        station_id: int,
+        station_config: Optional[dict] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
         """Return highest active risk level and unresolved alert count for a station."""
         try:
             if not self._is_station_alerting_enabled(station_config):
@@ -264,17 +275,22 @@ class AlertPersistenceMixin:
                 'shock': int(ttl_cfg.get('shock', default_ttl['shock'])),
             }
 
-            async with DataSessionLocal() as db_data:
-                res = await db_data.execute(
-                    select(model_data.Alert.level, model_data.Alert.category, model_data.Alert.timestamp)
-                    .where(
-                        and_(
-                            model_data.Alert.station_id == station_id,
-                            model_data.Alert.is_resolved == False
-                        )
+            stmt = (
+                select(model_data.Alert.level, model_data.Alert.category, model_data.Alert.timestamp)
+                .where(
+                    and_(
+                        model_data.Alert.station_id == station_id,
+                        model_data.Alert.is_resolved == False
                     )
                 )
+            )
+            if db is not None:
+                res = await db.execute(stmt)
                 rows = res.all()
+            else:
+                async with DataSessionLocal() as db_data:
+                    res = await db_data.execute(stmt)
+                    rows = res.all()
 
             unresolved_levels = []
             stale_count = 0
