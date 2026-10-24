@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     NTRIP_HOSTS: str = ""
     NTRIP_PORT: int = 2101
     NTRIP_PASSWORD: str = ""
-    # Login/API credentials of the WEB CORS dashboard (cors.aitogy.com).
+    # Login/API credentials of the WEB CORS dashboard (base.aitogy.com).
     # These are not NTRIP/Caster usernames or mountpoint passwords.
     WEB_CORS_API_BASE_URL: str = ""
     CORS_BASE_STATIONS_URL: str = ""
