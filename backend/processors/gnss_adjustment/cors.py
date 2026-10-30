@@ -61,7 +61,12 @@ class RoundRobinCorsMixin:
                     access_token=self._cors_token_sync(force_login=True),
                     _auth_retried=True,
                 )
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            # Bound proxy responses before decoding; retain API validation details.
+            with exc:
+                detail = exc.read(2048).decode("utf-8", errors="replace").strip()
+            if not detail or detail.startswith("<"):
+                detail = str(exc.reason or "HTTP request failed")
+            detail = " ".join(detail.split())[:500]
             raise RuntimeError(
                 f"CORS API HTTP {exc.code} for {path}: {detail or exc.reason}"
             ) from exc

@@ -1,10 +1,13 @@
 """Process-wide logging and Windows console configuration."""
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import re
 import sys
 
 LOG_FILE_NAME = "landslide_system.log"
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
 _ORIGINAL_STDOUT = sys.__stdout__
 
 
@@ -21,10 +24,15 @@ def configure_system_logging() -> None:
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     root_logger = logging.getLogger()
-    root_logger.handlers.clear()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        handler.close()
     root_logger.setLevel(logging.INFO)
 
-    file_handler = logging.FileHandler(LOG_FILE_NAME, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        LOG_FILE_NAME, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8", delay=True,
+    )
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 

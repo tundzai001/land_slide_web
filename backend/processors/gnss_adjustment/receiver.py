@@ -1096,8 +1096,14 @@ class RoundRobinReceiverMixin:
                             else:
                                 logger.log(
                                     logging.ERROR if attempt == max_retries else logging.WARNING,
-                                    "Error reading command response for %s: %s",
+                                    "Error reading command response station=%s caster=%s:%s mountpoint=%s command=%s attempt=%s/%s: %s",
+                                    ack_station_code or "unknown",
+                                    target_host,
+                                    target_port,
+                                    mountpoint,
                                     command_str,
+                                    attempt,
+                                    max_retries,
                                     response_error,
                                 )
                             if attempt == max_retries:
