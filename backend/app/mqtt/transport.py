@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+import time
 from typing import Optional
 
 import paho.mqtt.client as mqtt
@@ -180,7 +181,13 @@ class MQTTTransportMixin:
                     decrypted_payload = payload_str.strip()
 
                 if sensor_type == 'gnss' and not decrypted_payload:
-                    # Silently return on empty/binary frames to avoid console flooding
+                    # Binary RTCM is still device activity, even without text
+                    # for the position-processing pipeline.
+                    if msg.payload:
+                        self._submit_threadsafe(
+                            self._touch_online_heartbeat(info["device_id"], info["station_id"], int(time.time())),
+                            "gnss-heartbeat",
+                        )
                     return
 
                 if sensor_type == 'gnss':
@@ -347,6 +354,7 @@ class MQTTTransportMixin:
         self._track_background_task(self.reload_topics_from_db())
         self._track_background_task(self._flush_loop())
         self._track_background_task(self._drain_ingest_spool_loop())
+        self._track_background_task(self._idle_rover_guard_loop())
         try:
             self.client.connect_async(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
             self.client.loop_start()

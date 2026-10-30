@@ -9,7 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models import config as model_config
 from ...models import data as model_data
+from ...runtime import mqtt_service
 from ...shared.station_policy import get_offline_threshold
+
+
+def _device_activity_timestamp(device) -> int:
+    """Include received packets that have not reached the periodic DB flush."""
+    pending = getattr(mqtt_service, "_device_update_buffer", {})
+    return max(int(device.last_data_time or 0), int(pending.get(int(device.id), 0)))
+
 
 def _station_detail_adjustment_latest(
     payload: Optional[Dict[str, Any]], include_observations: bool
@@ -75,7 +83,7 @@ async def _load_station_runtime_maps(
     db_config: AsyncSession,
     db_data: AsyncSession,
 ):
-    """Load station runtime state in bulk instead of querying per station/device."""
+    """Load activity timestamps and alerts in bulk for station online status."""
     station_ids = [int(station.id) for station in stations]
     if not station_ids:
         return defaultdict(list), {}, defaultdict(list)
@@ -141,6 +149,13 @@ async def _load_station_runtime_maps(
             key = (int(station_id), str(sensor_type))
             if key in missing_keys:
                 latest_by_key[key] = int(timestamp or 0)
+
+    # Online means the device is sending packets, including AGRICA/RTCM and
+    # rejected measurements. Do not require a new accepted position sample.
+    for station_devices in devices_by_station.values():
+        for device in station_devices:
+            key = (int(device.station_id), str(device.device_type))
+            latest_by_key[key] = max(latest_by_key.get(key, 0), _device_activity_timestamp(device))
 
     alerts_result = await db_data.execute(
         select(model_data.Alert).where(

@@ -27,9 +27,28 @@ class _Bridge(MQTTTransportMixin):
         self._stopping = False
         self._background_tasks = set()
         self._threadsafe_futures = set()
+        self._idle_rover_guard_loop = AsyncMock()
 
 
 class MQTTTransportLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_binary_gnss_payload_updates_heartbeat_without_position_data(self):
+        bridge = _Bridge()
+        broker = ("caster.example", 1883, None, None, False)
+        info = {"type": "gnss", "device_id": 16, "station_id": 13, "station_code": "CP06"}
+        bridge.topic_map = {(broker, "device/860549070084194/upload"): info}
+        bridge.round_robin_manager = Mock()
+        bridge._touch_online_heartbeat = AsyncMock()
+        bridge.process_pipeline = AsyncMock()
+        submitted = []
+        bridge._submit_threadsafe = lambda coroutine, _label: submitted.append(coroutine)
+        bridge.on_message(None, broker, SimpleNamespace(
+            topic="device/860549070084194/upload", payload=b"\xff\xfe",
+        ))
+        await asyncio.gather(*submitted)
+        bridge._touch_online_heartbeat.assert_awaited_once()
+        self.assertEqual(bridge._touch_online_heartbeat.await_args.args[:2], (16, 13))
+        bridge.process_pipeline.assert_not_awaited()
+
     async def test_round_robin_source_failure_does_not_switch_caster(self):
         bridge = _Bridge()
         bridge.topic_map = {}
@@ -81,6 +100,7 @@ class MQTTTransportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         bridge.reload_topics_from_db.assert_awaited_once()
         bridge._flush_loop.assert_awaited_once()
         bridge._drain_ingest_spool_loop.assert_awaited_once()
+        bridge._idle_rover_guard_loop.assert_awaited_once()
         await asyncio.gather(*bridge._background_tasks)
 
     async def test_refused_default_connection_retries_while_workers_run(self):

@@ -167,7 +167,11 @@ async def start_gnss_adjustment(
                     online_station_ids,
                 )
             )
-            mqtt_service.round_robin_manager.configure_project(session_id, active_clusters)
+            # Wait for an idle repair already in flight, then reserve the
+            # selected rovers before any startup/preflight await can race it.
+            async with mqtt_service.round_robin_manager._idle_rover_recovery_lock:
+                mqtt_service.round_robin_manager.configure_project(session_id, active_clusters)
+                mqtt_service.round_robin_manager._sessions[session_id]["idle_recovery_reserved"] = True
             try:
                 rover_preflight = (
                     await mqtt_service.round_robin_manager.ensure_rover_streams_ready(
@@ -206,6 +210,7 @@ async def start_gnss_adjustment(
                     mqtt_service.round_robin_manager.configure_project(
                         session_id, active_clusters
                     )
+                    mqtt_service.round_robin_manager._sessions[session_id]["idle_recovery_reserved"] = True
                 # Scope monitoring isolation before the seed handover starts,
                 # including scheduler runs whose session ID is not a project ID.
                 mqtt_service.round_robin_manager._sessions[session_id]["monitoring_project_id"] = int(project.id)
@@ -260,6 +265,7 @@ async def start_gnss_adjustment(
         # 1. Bật chế độ chờ thu thập Baseline (COLLECTING_BASELINE)
         mqtt_service.adjustment_phase[session_id] = "COLLECTING_BASELINE"
         mqtt_service.adjustment_phase[req.project_id] = "COLLECTING_BASELINE"
+        mqtt_service.round_robin_manager._sessions[session_id].pop("idle_recovery_reserved", None)
         mqtt_service.adjustment_message[session_id] = (
             "Common fixed-base route is ready; waiting for source-verified #AGRICA "
             "baselines from every selected rover."

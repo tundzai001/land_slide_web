@@ -203,8 +203,8 @@ class RoundRobinObservationMixin:
 
         This is deliberately fed before UTF-8 decoding because RTCM is binary and
         would otherwise disappear from the normal sensor pipeline.  The tracker is
-        passive; state-changing recovery is only performed by the adjustment
-        preflight, never by the general monitoring path.
+        passive; adjustment preflight and the session-aware idle watchdog own
+        any state-changing recovery, outside this MQTT callback.
         """
 
         station_code = str((info or {}).get("station_code") or "").strip()
@@ -230,6 +230,12 @@ class RoundRobinObservationMixin:
                 break
 
         with self._gnss_stream_health_lock:
+            from app.mqtt.ntrip_pusher import Rtcm3FrameFilter
+
+            frame_filter = self._gnss_rtcm_filters.get(key)
+            if frame_filter is None:
+                frame_filter = self._gnss_rtcm_filters[key] = Rtcm3FrameFilter()
+            verified_rtcm = frame_filter.feed(raw)
             state = dict(self._gnss_stream_health.get(key) or {})
             state.update({
                 "station_code": station_code,
@@ -242,6 +248,9 @@ class RoundRobinObservationMixin:
                 state["last_gga_monotonic"] = now
             if has_rtcm:
                 state["last_rtcm_monotonic"] = now
+            if verified_rtcm:
+                state["last_valid_rtcm_monotonic"] = now
+                state["valid_rtcm_frames"] = frame_filter.valid_frame_count
             self._gnss_stream_health[key] = state
 
 
@@ -268,6 +277,7 @@ class RoundRobinObservationMixin:
             "agrica_recent": recent("last_agrica_monotonic"),
             "gga_recent": recent("last_gga_monotonic"),
             "rtcm_recent": recent("last_rtcm_monotonic"),
+            "valid_rtcm_recent": recent("last_valid_rtcm_monotonic"),
         })
         state["ready_as_rover"] = bool(
             state["agrica_recent"]
@@ -424,34 +434,10 @@ class RoundRobinObservationMixin:
                     f"{rover_code}: cannot self-heal receiver because no active "
                     "AICaster control session/mountpoint was found"
                 )
-            repair_started = time.monotonic()
-            await self._restore_rover_output_sequence(
-                rover_code=rover_code,
-                mountpoint=str(client_info["Mountpoint"]).strip(),
-                client_info=client_info,
-                commands=self._build_unicore_rover_config(
-                    restore_undulation=(self.rover_llh_cache.get(rover_code) or {}).get("undulation")
-                ),
-                project_id=project_id,
+            await self.restore_rover_stream(
+                rover_code, client_info=client_info,
+                project_id=project_id, verify_seconds=verify_seconds,
             )
-
-            verify_deadline = asyncio.get_running_loop().time() + max(1.0, verify_seconds)
-            verified = None
-            while asyncio.get_running_loop().time() < verify_deadline:
-                candidate = self.get_gnss_stream_health(rover_code, freshness_seconds=5.0)
-                agrica_fresh = float(candidate.get("last_agrica_monotonic") or 0) > repair_started
-                gga_fresh = float(candidate.get("last_gga_monotonic") or 0) > repair_started
-                last_rtcm = float(candidate.get("last_rtcm_monotonic") or 0)
-                rtcm_quiet = last_rtcm <= repair_started or time.monotonic() - last_rtcm >= 3.0
-                if agrica_fresh and gga_fresh and rtcm_quiet:
-                    verified = candidate
-                    break
-                await asyncio.sleep(0.25)
-            if verified is None:
-                raise RuntimeError(
-                    f"{rover_code}: ROVER commands were acknowledged but live output did "
-                    f"not prove fresh GGA + AGRICA with RTCM stopped within {verify_seconds:g}s"
-                )
             outcomes.append({
                 "station_code": rover_code,
                 "status": "recovered",
@@ -464,6 +450,36 @@ class RoundRobinObservationMixin:
                 f"{rover_code}: live stream verified as ROVER (fresh GGA + AGRICA, RTCM stopped).",
             )
         return outcomes
+
+    async def restore_rover_stream(
+        self, rover_code: str, *, client_info: dict,
+        project_id: Optional[int] = None, verify_seconds: float = 30.0,
+    ) -> None:
+        """Restore the ACK-verified profile and prove fresh live ROVER output."""
+        repair_started = time.monotonic()
+        await self._restore_rover_output_sequence(
+            rover_code=rover_code,
+            mountpoint=str(client_info["Mountpoint"]).strip(),
+            client_info=client_info,
+            commands=self._build_unicore_rover_config(
+                restore_undulation=(self.rover_llh_cache.get(rover_code) or {}).get("undulation")
+            ),
+            project_id=project_id,
+        )
+        verify_deadline = asyncio.get_running_loop().time() + max(1.0, verify_seconds)
+        while asyncio.get_running_loop().time() < verify_deadline:
+            candidate = self.get_gnss_stream_health(rover_code, freshness_seconds=5.0)
+            agrica_fresh = bool(candidate["agrica_recent"]) and float(candidate.get("last_agrica_monotonic") or 0) > repair_started
+            gga_fresh = bool(candidate["gga_recent"]) and float(candidate.get("last_gga_monotonic") or 0) > repair_started
+            last_rtcm = float(candidate.get("last_rtcm_monotonic") or 0)
+            rtcm_quiet = last_rtcm <= repair_started or time.monotonic() - last_rtcm >= 3.0
+            if agrica_fresh and gga_fresh and rtcm_quiet:
+                return
+            await asyncio.sleep(0.25)
+        raise RuntimeError(
+            f"{rover_code}: ROVER commands were acknowledged but live output did "
+            f"not prove fresh GGA + AGRICA with RTCM stopped within {verify_seconds:g}s"
+        )
 
 
     def update_rover_llh(self, station_code: str, lat: float, lon: float, alt: float) -> None:

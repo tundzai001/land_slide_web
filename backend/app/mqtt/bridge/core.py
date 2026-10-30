@@ -147,3 +147,5 @@ class MQTTBridgeCore:
         self._stopping = False
         self._background_tasks = set()
         self._threadsafe_futures = set()
+        self._idle_rover_rtcm_seen: dict[str, int] = {}
+        self._idle_rover_retry_at: dict[str, float] = {}

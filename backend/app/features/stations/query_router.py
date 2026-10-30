@@ -27,6 +27,7 @@ from ...shared.project_location import refresh_project_map_position
 from ...shared.station_policy import check_operator_project_access, get_offline_threshold
 from .analysis_router import _calculate_station_risk_assessment
 from .common import (
+    _device_activity_timestamp,
     _load_station_runtime_maps,
     _station_detail_adjustment_latest,
     _summarize_station_alerts,
@@ -557,9 +558,12 @@ async def get_station_detail(
             threshold = get_offline_threshold(station.config, sensor_type)
             current_time = int(time.time())
 
-            # Check xem sensor này có online không (dựa trên ts mới nhất thực sự)
+            received_ts = max(int(latest_ts or 0), _device_activity_timestamp(device))
+            sensor_is_online = bool(received_ts and current_time - received_ts < threshold)
+            station_online = station_online or sensor_is_online
+
+            # Measurement freshness is separate from device activity.
             if latest_ts and (current_time - latest_ts) < threshold:
-                station_online = True  # Chỉ cần 1 sensor online là trạm online
                 has_recent_data = True
                 if latest_ts > latest_data_timestamp:
                     latest_data_timestamp = latest_ts
@@ -591,9 +595,6 @@ async def get_station_detail(
                         )
                     ]
 
-            # ✅ Per-sensor online check (dựa trên cache timestamp)
-            sensor_is_online = bool(latest_ts and (current_time - latest_ts) < threshold)
-
             # ✅ Sửa lỗi "ảo": Tự động bù đắp dữ liệu Advanced cho trạm Offline/Dữ liệu cũ
             if sensor_type == 'gnss' and latest_data and 'adv_x' not in latest_data:
                 latest_data = dict(latest_data) # Clone to modify
@@ -611,6 +612,7 @@ async def get_station_detail(
                 "is_online": sensor_is_online,
                 "latest": latest_data,
                 "latest_timestamp": latest_ts,
+                "last_received_timestamp": received_ts or None,
                 "history": [
                     {
                         "timestamp": h.timestamp,

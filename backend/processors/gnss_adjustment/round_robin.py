@@ -202,6 +202,10 @@ class RoundRobinAdjustmentManager(
         self._command_ack_waiters: Dict[str, _CommandAckWaiter] = {}
         self._gnss_stream_health_lock = threading.Lock()
         self._gnss_stream_health: Dict[str, Dict[str, Any]] = {}
+        self._gnss_rtcm_filters: Dict[str, Any] = {}
+        # ponytail: serialize idle repairs with startup; use per-station locks
+        # if independent recoveries need to run concurrently.
+        self._idle_rover_recovery_lock = asyncio.Lock()
         self.running_tasks: Dict[int, asyncio.Task] = {}
         self.rover_llh_cache: Dict[str, Dict[str, float]] = {}
         self._sessions: Dict[int, dict] = {}
