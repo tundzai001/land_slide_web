@@ -976,13 +976,13 @@ function updateRealtimeSensorValues(message) {
                 const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
                 const zScore = Number(data.velocity_z_score);
                 const zHtml = Number.isFinite(zScore)
-                    ? `<span class="opacity-75 font-monospace">z=${zScore.toFixed(2)}σ / ngưỡng ${Number(data.velocity_min_sigma || 3).toFixed(1)}σ</span>`
+                    ? `<span class="font-monospace">z=${zScore.toFixed(2)}σ / ngưỡng ${Number(data.velocity_min_sigma || 3).toFixed(1)}σ</span>`
                     : '';
                 evalSummaryEl.innerHTML = `
                     <div class="d-flex flex-column gap-1">
                         <div>${trendHtml}</div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="opacity-75 font-monospace">(${ciStr})</span>` : ''} ${zHtml}
+                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="font-monospace">(${ciStr})</span>` : ''} ${zHtml}
                         </div>
                         <div class="text-muted fw-normal" style="font-size: 0.75rem;">
                             <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)

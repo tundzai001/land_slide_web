@@ -1,4 +1,22 @@
 /* GNSS ADVANCED SIDEPANEL */
+/* Bootstrap utilities load after the map styles; keep evaluation text themed. */
+#gnss-eval-summary .text-muted,
+#gnss-eval-summary .text-secondary {
+    color: var(--text-secondary) !important;
+}
+
+#gnss-eval-summary .text-success {
+    color: var(--state-success-text) !important;
+}
+
+#gnss-eval-summary .text-warning {
+    color: var(--state-warning-text) !important;
+}
+
+#gnss-eval-summary .text-info {
+    color: var(--state-info-text) !important;
+}
+
 .gnss-integrity-section {
     border-left: 3px solid var(--accent-info, #0ea5e9);
 }
