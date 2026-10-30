@@ -369,8 +369,8 @@ html[data-app-view="admin"] body { background: var(--admin-canvas) !important; c
 .db-row { cursor: pointer; }
 .db-row:focus-visible { outline: 3px solid rgba(30, 58, 95, .22); outline-offset: -3px; }
 .db-row td:nth-child(2) { min-width: 280px; }
-.db-primary { display: block; overflow: hidden; max-width: 560px; color: var(--admin-text); font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
-.db-row td:nth-child(2) small { display: block; overflow: hidden; max-width: 560px; margin-top: 4px; color: var(--admin-muted); font: 500 .71rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.db-primary { display: block; max-width: 560px; color: var(--admin-text); font-size: .82rem; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
+.db-row td:nth-child(2) small { display: block; max-width: 560px; margin-top: 4px; color: var(--admin-muted); font: 500 .71rem/1.5 var(--font-base); overflow-wrap: anywhere; white-space: normal; }
 .db-id, .db-time { color: var(--admin-muted); font: 650 .72rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 
 .ops-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; padding: 9px 16px; border-top: 1px solid var(--admin-border); color: var(--admin-muted); background: var(--admin-surface-muted); font-size: .78rem; }

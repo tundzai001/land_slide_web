@@ -179,6 +179,64 @@ test('database explorer prefetches the next 100-row page', async ({ page }) => {
   expect(await page.evaluate(() => window.datasetPageRequests)).toBe(2);
 });
 
+test('database rows resolve station and project names after lookup data arrives', async ({ page }) => {
+  await mountManagement(page);
+  await page.evaluate(() => {
+    window.authSession = { getToken: () => 'test-token' };
+    window.bootstrap = { Modal: class { show() {} hide() {} } };
+    Object.defineProperty(window, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} } });
+    window.fetch = async url => {
+      const target = String(url);
+      if (target.includes('/api/admin/projects')) return new Response(JSON.stringify([
+        { id: 3, name: 'Quan trắc sườn dốc Vũ Môn', project_code: 'VM-03', gnss_clusters: [{ name: 'Cụm sườn Bắc' }] },
+      ]));
+      if (target.includes('/api/admin/db/stations')) {
+        await new Promise(resolve => { window.releaseStationNames = resolve; });
+        return new Response(JSON.stringify([{ id: 10, name: 'Điểm quan trắc CP03', station_code: 'CP03', project_id: 3 }]));
+      }
+      if (target.includes('/stats')) return new Response('{}');
+      return new Response(JSON.stringify([{ id: 77, station_id: 10, project_id: 3, cluster_index: 0,
+        sensor_type: 'gnss', timestamp: 1787419040 }]), { headers: { 'X-Has-More': 'false' } });
+    };
+  });
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+  await page.evaluate(async () => {
+    window.bootstrapDatabaseManager();
+    window.dbManager.currentDataset = 'sensor_data';
+    await window.dbManager.loadAllData();
+  });
+  await expect(page.locator('#db-table-body .db-primary')).toContainText('Trạm #10');
+  await page.evaluate(() => window.releaseStationNames());
+  await expect(page.locator('#db-table-body .db-primary')).toHaveText('GNSS · Điểm quan trắc CP03 · CP03');
+  await expect(page.locator('#db-table-body small')).toContainText('Quan trắc sườn dốc Vũ Môn · VM-03');
+  await page.locator('.db-dataset[data-dataset="gnss_adjustments"]').click();
+  await expect(page.locator('#db-table-body .db-primary')).toHaveText('Quan trắc sườn dốc Vũ Môn · VM-03 · Cụm sườn Bắc');
+  await expect(page.locator('#db-table-body small')).toContainText('Trạm đại diện: Điểm quan trắc CP03 · CP03');
+  await page.addStyleTag({ content: source('frontend/dist/app-base.min.css') });
+  await page.addStyleTag({ content: source('frontend/dist/admin.min.css') });
+  await page.evaluate(() => {
+    document.querySelectorAll('.tab-pane').forEach(panel => panel.classList.remove('active', 'show'));
+    document.getElementById('tab-database').classList.add('active', 'show');
+  });
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await page.locator('.db-explorer').screenshot({ path: `tmp/database-names-${theme}.png`, animations: 'disabled' });
+    expect(await page.locator('#db-table-body .db-primary').evaluate(element => getComputedStyle(element).whiteSpace)).toBe('normal');
+  }
+  const matches = await page.evaluate(() => {
+    window.dbManager.filterPageRows('sườn Bắc');
+    return window.dbManager.filteredData.length;
+  });
+  expect(matches).toBe(1);
+  await page.evaluate(() => {
+    window.dbManager.filterOptions.stations[0].name = '<img src=x onerror=alert(1)>';
+    window.dbManager.renderTable();
+  });
+  await expect(page.locator('#db-table-body small')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#db-table-body img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.dbManager.stationLabel(999))).toBe('Trạm #999');
+});
+
 test('sensor pages load lightweight rows and GNSS details open as a downloadable table', async ({ page }) => {
   await mountManagement(page);
   await page.evaluate(() => {

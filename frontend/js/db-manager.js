@@ -91,6 +91,10 @@ class DatabaseManager {
             this.filterOptions.stations = stationsRes.ok ? await stationsRes.json() : [];
             this.filterOptionsLoaded = projectsRes.ok && stationsRes.ok;
             this.renderContextFilters();
+            if (this.allData.length && this.allData[0]._table === this.currentDataset) {
+                this.filterPageRows(document.getElementById('db-search')?.value.trim() || '');
+                this.renderTable();
+            }
         } catch (error) {
             console.warn('[DB MANAGER] filter options unavailable:', error);
         } finally {
@@ -174,10 +178,14 @@ class DatabaseManager {
         this.hasMore = page.hasMore;
         this.total = page.total;
         this.allData = page.rows.map(row => ({ ...row, _table: page.dataset }));
-        this.filteredData = page.search && !['stations', 'devices'].includes(page.dataset)
-            ? this.allData.filter(row => JSON.stringify(row).toLowerCase().includes(page.search.toLowerCase()))
-            : this.allData;
+        this.filterPageRows(page.search);
         this.renderTable();
+    }
+
+    filterPageRows(search) {
+        this.filteredData = search && !['stations', 'devices'].includes(this.currentDataset)
+            ? this.allData.filter(row => JSON.stringify([row, this.getPreviewData(row), this.getRecordSecondary(row)]).toLowerCase().includes(search.toLowerCase()))
+            : this.allData;
     }
 
     async fetchCurrentDataset(signal) {
@@ -252,11 +260,11 @@ class DatabaseManager {
         const container = document.getElementById('db-context-filters');
         if (!container) return;
         const projectOptions = [{ value: '', label: 'Tất cả dự án' }, ...this.filterOptions.projects.map(project => ({ value: project.id, label: project.name || project.project_code }))];
-        const stationOptions = [{ value: '', label: 'Tất cả trạm' }, ...this.filterOptions.stations.map(station => ({ value: station.id, label: station.station_code || station.name }))];
+        const stationOptions = [{ value: '', label: 'Tất cả trạm' }, ...this.filterOptions.stations.map(station => ({ value: station.id, label: this.stationLabel(station.id) }))];
         const clusterOptions = [
             { value: '', label: 'Tất cả cụm' },
             ...this.filterOptions.projects.flatMap(project => {
-                const projectLabel = project.project_code || project.name || `Dự án #${project.id}`;
+                const projectLabel = this.projectLabel(project.id);
                 const clusters = Array.isArray(project.gnss_clusters) ? project.gnss_clusters : [];
                 return clusters.map((cluster, index) => ({
                     value: `${project.id}:${index}`,
@@ -370,6 +378,20 @@ class DatabaseManager {
         return colors[table] || 'bg-secondary';
     }
 
+    stationLabel(id) {
+        const station = this.filterOptions?.stations?.find(station => String(station.id) === String(id));
+        return station
+            ? [station.name, station.station_code].filter((value, index, values) => value && values.indexOf(value) === index).join(' · ')
+            : `Trạm #${id ?? '--'}`;
+    }
+
+    projectLabel(id) {
+        const project = this.filterOptions?.projects?.find(project => String(project.id) === String(id));
+        return project
+            ? [project.name, project.project_code].filter((value, index, values) => value && values.indexOf(value) === index).join(' · ')
+            : `Dự án #${id ?? '--'}`;
+    }
+
     getPreviewData(item) {
         if (item._table === 'stations') {
             return `${item.station_code || '--'} · ${item.name || 'Trạm chưa đặt tên'}`;
@@ -378,14 +400,16 @@ class DatabaseManager {
             return `${item.device_code || '--'} · ${item.name || item.device_type || 'Thiết bị'}`;
         }
         if (item._table === 'gnss_adjustments') {
-            const project = item.data?.project_code || item.project_code || (item.data?.project_id || item.project_id ? `Dự án #${item.data?.project_id || item.project_id}` : 'GNSS');
+            const projectId = item.data?.project_id ?? item.project_id;
+            const projectInfo = this.filterOptions?.projects?.find(project => String(project.id) === String(projectId));
+            const project = projectInfo ? this.projectLabel(projectId) : item.data?.project_code || item.project_code || (projectId != null ? this.projectLabel(projectId) : 'GNSS');
             const index = item.data?.cluster_index ?? item.cluster_index;
-            const cluster = item.data?.cluster_name || item.cluster_name || (index != null ? `Cụm ${Number(index) + 1}` : 'Cụm GNSS');
+            const cluster = item.data?.cluster_name || item.cluster_name || projectInfo?.gnss_clusters?.[index]?.name || (index != null ? `Cụm ${Number(index) + 1}` : 'Cụm GNSS');
             return `${project} · ${cluster}`;
         }
         if (item._table === 'sensor_data') {
             const cluster = item.data?.cluster_name || item.data?.project_code;
-            return `${String(item.sensor_type || 'sensor').toUpperCase()} · ${cluster ? `${cluster} · ` : ''}Trạm #${item.station_id ?? '--'}`;
+            return `${String(item.sensor_type || 'sensor').toUpperCase()} · ${cluster ? `${cluster} · ` : ''}${this.stationLabel(item.station_id)}`;
         }
         if (item._table === 'alerts') {
             return `${item.category || 'Cảnh báo'} · ${item.message || '--'}`;
@@ -397,17 +421,18 @@ class DatabaseManager {
     getRecordSecondary(item) {
         if (item._table === 'devices') return item.mqtt_topic || item.device_type || 'Không có MQTT topic';
         if (item._table === 'gnss_adjustments') {
-            return item.data_preview || 'Mở để xem toàn bộ kết quả cụm';
+            return `Trạm đại diện: ${this.stationLabel(item.station_id)} · Mở để xem toàn bộ kết quả cụm`;
         }
         if (item._table === 'sensor_data') {
-            return item.data_preview || (item.data ? this.compactJsonPreview(item.data) : 'Mở để xem chi tiết');
+            const station = this.filterOptions?.stations?.find(station => String(station.id) === String(item.station_id));
+            return station?.project_id != null ? this.projectLabel(station.project_id) : 'Mở để xem chi tiết';
         }
-        if (item._table === 'alerts') return `Trạm #${item.station_id ?? '--'} · ${item.level || '--'}`;
+        if (item._table === 'alerts') return `${this.stationLabel(item.station_id)} · ${item.level || '--'}`;
         if (item._table === 'simulations') return `${item.station_code || item.project_code || 'Kịch bản thủ công'} · ${item.summary?.classification || item.mode}`;
         const location = item.location && typeof item.location === 'object'
             ? item.location.name || item.location.address || ([item.location.lat, item.location.lon].every(Number.isFinite) ? `${item.location.lat}, ${item.location.lon}` : 'Chưa có vị trí')
             : item.location || 'Chưa có vị trí';
-        return `Dự án #${item.project_id ?? '--'} · ${location}`;
+        return `${this.projectLabel(item.project_id)} · ${location}`;
     }
 
     getRecordStatus(item) {
