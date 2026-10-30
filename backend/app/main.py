@@ -254,7 +254,7 @@ async def lifespan(app: FastAPI):
             )
 
         mqtt_service.start()
-        logger.info("✓ Background MQTT Service started")
+        logger.info("MQTT background workers scheduled; broker status is reported by connection callbacks")
 
         from .infrastructure.scheduler import start_scheduler
         await start_scheduler()

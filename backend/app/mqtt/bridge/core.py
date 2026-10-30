@@ -63,6 +63,7 @@ class MQTTBridgeCore:
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         self.client.on_disconnect = self.on_disconnect
+        self.client.on_connect_fail = self.on_connect_fail
         
         # Topic management
         self.topic_map: Dict[tuple, Dict[str, Any]] = {}  # Key: (broker_key, topic)

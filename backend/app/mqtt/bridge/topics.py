@@ -212,6 +212,7 @@ class MQTTTopicMixin:
                         client.on_connect = self.on_connect
                         client.on_message = self.on_message
                         client.on_disconnect = self.on_disconnect
+                        client.on_connect_fail = self.on_connect_fail
                         
                         if broker_user:
                             client.username_pw_set(broker_user, broker_pass)
@@ -225,12 +226,12 @@ class MQTTTopicMixin:
                                 logger.error(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
                         
                         try:
-                            client.connect(broker_host, broker_port, 60)
+                            client.connect_async(broker_host, broker_port, 60)
                             client.loop_start()
                             self._sub_clients[b_key] = client
                         except Exception as conn_e:
                             logger.error(f"❌ Failed to connect dynamic client to {broker_host}:{broker_port}: {conn_e}")
-                            self._sub_clients[b_key] = client
+                            continue
                     
                     client = self._sub_clients[b_key]
                     current_topics = self._client_topics[b_key]

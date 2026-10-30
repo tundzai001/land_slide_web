@@ -94,39 +94,22 @@ class MQTTTransportMixin:
             logger.error(f"❌ MQTT Connection to {broker_key[0]}:{broker_key[1]} failed: rc={rc}")
 
     def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
-        if not isinstance(userdata, tuple) or len(userdata) < 5:
-            # Default client
-            if reason_code != 0:
-                logger.warning(f"⚠️ Default MQTT disconnect: rc={reason_code}. Reconnecting...")
-                try:
-                    client.reconnect()
-                    logger.info("✅ Default MQTT Reconnected successfully")
-                except Exception as e:
-                    logger.error(f"❌ Default Reconnect failed: {e}. Will retry in 5s...")
-                    if self.loop and self.loop.is_running():
-                        self.loop.call_later(5, self._retry_connect)
-            else:
-                logger.info("✅ Default MQTT Disconnected gracefully")
-            return
-
-        broker_key = userdata
-        if reason_code != 0:
-            logger.warning(f"⚠️ MQTT disconnect from {broker_key[0]}:{broker_key[1]}: rc={reason_code}. Reconnecting...")
-            try:
-                client.reconnect()
-                logger.info(f"✅ MQTT Reconnected to {broker_key[0]}:{broker_key[1]} successfully")
-            except Exception as e:
-                logger.error(f"❌ Reconnect to {broker_key[0]}:{broker_key[1]} failed: {e}.")
+        if isinstance(userdata, tuple) and len(userdata) >= 5:
+            host, port = userdata[:2]
         else:
-            logger.info(f"✅ MQTT Disconnected from {broker_key[0]}:{broker_key[1]} gracefully")
+            host, port = self.runtime_mqtt["broker"], self.runtime_mqtt["port"]
+        # Paho's network loop owns reconnection, including the first attempt.
+        if reason_code != 0 and not self._stopping:
+            logger.warning("MQTT disconnected from %s:%s: rc=%s; network loop will retry", host, port, reason_code)
+        else:
+            logger.info("MQTT disconnected from %s:%s", host, port)
 
-    def _retry_connect(self):
-        try:
-            self.client.reconnect()
-            logger.info("✅ MQTT Reconnected after retry")
-        except Exception as e:
-            logger.error(f"❌ Retry failed: {e}. Next retry in 10s...")
-            self.loop.call_later(10, self._retry_connect)
+    def on_connect_fail(self, client, userdata):
+        if isinstance(userdata, tuple) and len(userdata) >= 5:
+            host, port = userdata[:2]
+        else:
+            host, port = self.runtime_mqtt["broker"], self.runtime_mqtt["port"]
+        logger.warning("MQTT TCP connection failed to %s:%s; network loop will retry", host, port)
 
     def _extract_gga_from_payload(self, payload_bytes: bytes) -> Optional[str]:
         """Extract a single NMEA GGA sentence from mixed binary/text payload."""
@@ -383,13 +366,14 @@ class MQTTTransportMixin:
             logger.error("❌ No running event loop found!")
             return
 
+        # Device brokers and durable writes must run even if the default broker is down.
+        self._track_background_task(self.reload_topics_from_db())
+        self._track_background_task(self._flush_loop())
+        self._track_background_task(self._drain_ingest_spool_loop())
         try:
-            self.client.connect(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
+            self.client.connect_async(self.runtime_mqtt["broker"], self.runtime_mqtt["port"], 60)
             self.client.loop_start()
-            self._track_background_task(self.reload_topics_from_db())
-            self._track_background_task(self._flush_loop())  # ✅ Khởi động flush buffer
-            self._track_background_task(self._drain_ingest_spool_loop())
-            logger.info("✅ MQTT Bridge started successfully.")
+            logger.info("MQTT network loop started for %s:%s; awaiting broker connection", self.runtime_mqtt["broker"], self.runtime_mqtt["port"])
         except Exception as e:
             logger.error(f"❌ Failed to start MQTT Bridge: {e}")
 
