@@ -207,7 +207,7 @@ class RoundRobinReceiverMixin:
                     await self._emit_progress(
                         project_id,
                         (
-                            f"{rover_code}: fixed BASE accepted Sleep but AICaster still "
+                            f"{rover_code}: CORS accepted the fixed-BASE disable request but AICaster still "
                             f"holds {target_route_mountpoint}; waiting for mountpoint release "
                             f"({release_attempt}/{self.FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS})."
                         ),

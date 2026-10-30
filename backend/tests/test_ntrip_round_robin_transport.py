@@ -5,6 +5,8 @@ import json
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
+from backend.app.mqtt.transport import MQTTTransportMixin
+
 try:
     from backend.app.mqtt.ntrip_pusher import (
         NtripPusher,
@@ -262,6 +264,8 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_temporary_route_waits_for_fixed_mountpoint_release(self):
         route_attempts = 0
         events = []
+        bridge = MQTTTransportMixin()
+        bridge.topic_map = {}
 
         async def route_start(*_args):
             nonlocal route_attempts
@@ -276,9 +280,11 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
 
         manager = RoundRobinAdjustmentManager(
             _FakeMqttClient(),
-            route_start_callback=route_start,
+            route_start_callback=bridge._start_round_robin_ntrip_route,
             route_stop_callback=route_stop,
         )
+        bridge.round_robin_manager = manager
+        manager.caster_hosts = ["backup.example", "selected.example"]
         manager.FIXED_BASE_MOUNTPOINT_RELEASE_ATTEMPTS = 3
         manager.rover_llh_cache["Dap1_1"] = {"lat": 21.0, "lon": 105.0, "alt": 10.0}
         manager._find_client_info = AsyncMock(return_value={
@@ -286,7 +292,13 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
             "receiverID": "1.4.10",
             "Mountpoint": "SinQuyen1",
         })
-        manager._send_set_command = AsyncMock(return_value=True)
+
+        async def send_command(_mountpoint, _username, _receiver_id, commands, **_kwargs):
+            if any(command.strip().lower().startswith(b"mode base ") for command in commands):
+                self.assertEqual(route_attempts, 3, "SET BASE must wait for the selected SOURCE")
+            return True
+
+        manager._send_set_command = AsyncMock(side_effect=send_command)
 
         async def sleep_fixed():
             events.append("fixed-sleep")
@@ -299,12 +311,24 @@ class RoundRobinCommandTests(unittest.IsolatedAsyncioTestCase):
                 "Mountpoint": "SinQuyen1",
             }
 
-        with patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()):
+        with (
+            patch(f"{ROUND_ROBIN_MODULE}.asyncio.sleep", new=AsyncMock()),
+            patch("app.mqtt.ntrip_pusher.ntrip_manager") as pushers,
+        ):
+            pushers.start_pusher = AsyncMock(side_effect=route_start)
+            pushers.stop_pusher = AsyncMock()
+            pushers.get_diagnostics.return_value = {}
             await manager._set_rover_as_temporary_base(
                 "Dap1_1",
+                route_host="selected.example",
                 route_mountpoint="SinQuyen2,SinQuyen1",
                 before_route_start=sleep_fixed,
                 before_rover_restore=wake_fixed,
+            )
+            self.assertEqual(pushers.start_pusher.await_count, 3)
+            self.assertEqual(
+                {call.args[1] for call in pushers.start_pusher.await_args_list},
+                {"selected.example"},
             )
 
         self.assertEqual(route_attempts, 3)

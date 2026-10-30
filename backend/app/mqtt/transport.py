@@ -265,7 +265,7 @@ class MQTTTransportMixin:
         mountpoint: str,
         password: str,
     ) -> bool:
-        """Open every SOURCE target and wait for all caster handshakes."""
+        """Open all mountpoints on the caster selected for the rover clients."""
 
         from app.mqtt.ntrip_pusher import ntrip_manager
 
@@ -275,58 +275,35 @@ class MQTTTransportMixin:
             if str((info or {}).get("station_code") or "").casefold() == str(station_code).casefold()
             and (info or {}).get("type") == "gnss"
         })
-        configured_hosts = list(
-            dict.fromkeys(
-                [str(host).strip()]
-                + [
-                    str(item).strip()
-                    for item in getattr(
-                        self.round_robin_manager, "caster_hosts", []
-                    )
-                ]
-            )
+        # A SOURCE handshake on another caster does not move the rover clients.
+        # Propagate failure so the receiver flow waits for this mountpoint's
+        # release before sending SET BASE, or safely skips the rotation.
+        source_host = str(host).strip()
+        logger.info(
+            "[Round-Robin RTCM] station=%s source_target=%s:%s/%s mqtt_topics=%s",
+            station_code,
+            source_host,
+            port,
+            mountpoint,
+            mapped_topics,
         )
-        configured_hosts = [item for item in configured_hosts if item]
-        failures = []
-        for source_host in configured_hosts:
-            logger.info(
-                "[Round-Robin RTCM] station=%s source_target=%s:%s/%s mqtt_topics=%s",
+        try:
+            await ntrip_manager.start_pusher(
+                station_code, source_host, port, mountpoint, password
+            )
+        except Exception as exc:
+            diagnostics = ntrip_manager.get_diagnostics(station_code)
+            diagnostics["mapped_mqtt_topics"] = mapped_topics
+            logger.warning(
+                "[Round-Robin RTCM] station=%s source_target=%s failed: %s diagnostics=%s",
                 station_code,
                 source_host,
-                port,
-                mountpoint,
-                mapped_topics,
+                exc,
+                diagnostics,
             )
-            try:
-                await ntrip_manager.start_pusher(
-                    station_code, source_host, port, mountpoint, password
-                )
-                if source_host != host:
-                    logger.warning(
-                        "[Round-Robin RTCM] station=%s SOURCE failed over from %s to %s",
-                        station_code,
-                        host,
-                        source_host,
-                    )
-                return True
-            except Exception as exc:
-                failures.append(f"{source_host}:{port} ({exc})")
-                diagnostics = ntrip_manager.get_diagnostics(station_code)
-                diagnostics["mapped_mqtt_topics"] = mapped_topics
-                logger.warning(
-                    "[Round-Robin RTCM] station=%s source_target=%s failed: %s diagnostics=%s",
-                    station_code,
-                    source_host,
-                    exc,
-                    diagnostics,
-                )
-                await ntrip_manager.stop_pusher(station_code)
-
-        detail = "; ".join(failures) or "no NTRIP SOURCE host is configured"
-        raise RuntimeError(
-            f"All NTRIP SOURCE hosts failed for {station_code}: {detail}; "
-            f"mapped_mqtt_topics={mapped_topics}"
-        )
+            await ntrip_manager.stop_pusher(station_code)
+            raise
+        return True
 
     async def _wait_round_robin_ntrip_route(
         self,

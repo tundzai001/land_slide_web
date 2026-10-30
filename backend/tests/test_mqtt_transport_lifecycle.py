@@ -1,6 +1,7 @@
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import paho.mqtt.client as mqtt
 
@@ -29,6 +30,43 @@ class _Bridge(MQTTTransportMixin):
 
 
 class MQTTTransportLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_round_robin_source_failure_does_not_switch_caster(self):
+        bridge = _Bridge()
+        bridge.topic_map = {}
+        bridge.round_robin_manager = SimpleNamespace(
+            caster_hosts=["backup.example", "selected.example"]
+        )
+        for error in (
+            "Caster rejected SOURCE: ERROR - Mountpoint already in using",
+            "Connection refused",
+        ):
+            with self.subTest(error=error), patch("app.mqtt.ntrip_pusher.ntrip_manager") as pushers:
+                # The other caster accepts SOURCE, but has no rover clients.
+                pushers.start_pusher = AsyncMock(side_effect=[RuntimeError(error), True])
+                pushers.stop_pusher = AsyncMock()
+                pushers.get_diagnostics.return_value = {}
+                with self.assertRaisesRegex(RuntimeError, error):
+                    await bridge._start_round_robin_ntrip_route(
+                        "CP08", "selected.example", 2101, "QN.CP", "secret"
+                    )
+                pushers.start_pusher.assert_awaited_once_with(
+                    "CP08", "selected.example", 2101, "QN.CP", "secret"
+                )
+                pushers.stop_pusher.assert_awaited_once_with("CP08")
+
+    async def test_round_robin_source_opens_selected_caster_and_all_mountpoints(self):
+        bridge = _Bridge()
+        bridge.topic_map = {}
+        bridge.round_robin_manager = SimpleNamespace(caster_hosts=["backup.example"])
+        with patch("app.mqtt.ntrip_pusher.ntrip_manager") as pushers:
+            pushers.start_pusher = AsyncMock()
+            self.assertTrue(await bridge._start_round_robin_ntrip_route(
+                "CP08", "selected.example", 2101, "QN.CP,OTHER", "secret"
+            ))
+            pushers.start_pusher.assert_awaited_once_with(
+                "CP08", "selected.example", 2101, "QN.CP,OTHER", "secret"
+            )
+
     async def test_invalid_default_broker_does_not_block_device_workers(self):
         bridge = _Bridge()
         bridge.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)

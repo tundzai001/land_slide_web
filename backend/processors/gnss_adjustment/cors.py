@@ -315,9 +315,11 @@ class RoundRobinCorsMixin:
                 serial,
                 disabled_config,
             )
+            # The API confirms dispatch, not device application. SOURCE startup
+            # must still prove the selected caster has released the mountpoint.
             snapshot["confirmed_disabled"] = True
             logger.info(
-                "WEB CORS configure-service hard-disabled fixed base %s host=%s serial=%s S%s",
+                "WEB CORS configure-service sent fixed-base disable request %s host=%s serial=%s S%s; awaiting SOURCE mountpoint release",
                 mountpoint,
                 selected_host,
                 serial,
