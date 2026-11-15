@@ -111,8 +111,10 @@ jobs:
             -Dsonar.python.version=3.12
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.javascript.lcov.reportPaths=coverage-js/lcov.info
+            -Dsonar.sources=.
             -Dsonar.tests=backend/tests,tests
             -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
+            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/css/**,*.html,*.config,*.mjs,*.cjs
             -Dsonar.qualitygate.wait=true
 
   release-package:
