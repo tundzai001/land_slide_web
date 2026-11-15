@@ -34,9 +34,9 @@ function setupAuthLinks() {
             // Keep the neutral account link while session status is unavailable.
         } finally { checking = false; }
     };
-    refresh();
-    addEventListener('pageshow', event => { if (event.persisted) refresh(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    void refresh();
+    addEventListener('pageshow', event => { if (event.persisted) void refresh(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
 }
 
 function setupHeader() {
@@ -132,7 +132,7 @@ function setupMetrics() {
         } finally { clearTimeout(timeout); }
     };
     retry?.addEventListener('click', load);
-    load();
+    void load();
 }
 
 
