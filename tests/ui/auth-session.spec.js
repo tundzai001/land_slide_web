@@ -34,7 +34,7 @@ test('landing login returns to map', async () => {
   expect(landingSource).toContain('id="auth-link" href="/login?return_to=%2Fmap"');
 });
 
-for (const [path, destination] of [['/login', '/map'], ['/login?return_to=/map', '/map'], ['/login?return_to=/management', '/management']]) {
+for (const [path, destination] of [['/login', '/map'], ['/login?return_to=/map', '/map'], ['/login?return_to=/management', '/management'], ['/login////?return_to=/map', '/map']]) {
   test(`browser session opens ${destination} from ${path}`, async ({ page }) => {
     await installAppRoutes(page, 200);
     await page.addInitScript(() => { document.cookie = 'monitoring_csrf=test-csrf; Path=/; SameSite=Lax'; localStorage.setItem('token', 'obsolete-token'); });

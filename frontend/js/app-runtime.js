@@ -294,7 +294,9 @@
     }
 
     async function start() {
-        const path = location.pathname.replace(/\/+$/, '') || '/';
+        let end = location.pathname.length;
+        while (end > 0 && location.pathname[end - 1] === '/') end -= 1;
+        const path = location.pathname.slice(0, end) || '/';
         if (path === '/login') {
             const session = await window.authSession.inspect();
             if (session.status === 'authenticated') {
