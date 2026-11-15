@@ -155,10 +155,46 @@ class _SafeRoverRotationSkip(RuntimeError):
     """A rover rotation failed after the receiver was confirmed safe in ROVER mode."""
 
 
-_COMMAND_RESPONSE_RE = re.compile(
-    r"\$COMMAND\s*,\s*(?P<command>[^,\r\n]+),\s*RESPONSE\s*:\s*(?P<response>[^*\r\n]+)",
-    re.IGNORECASE,
-)
+class _CommandResponseMatch:
+    def __init__(self, command: str, response: str, start_pos: int = 0):
+        self._groups = {"command": command, "response": response}
+        self._start = start_pos
+
+    def start(self) -> int:
+        return self._start
+
+    def group(self, name_or_idx: Any) -> str:
+        if isinstance(name_or_idx, str):
+            return self._groups[name_or_idx]
+        if name_or_idx == 0:
+            return f"$COMMAND,{self._groups['command']},RESPONSE:{self._groups['response']}"
+        if name_or_idx == 1:
+            return self._groups["command"]
+        if name_or_idx == 2:
+            return self._groups["response"]
+        raise IndexError(name_or_idx)
+
+
+class _CommandResponseMatcher:
+    @staticmethod
+    def search(line: str) -> Optional[_CommandResponseMatch]:
+        if not line or "$command" not in line.casefold():
+            return None
+        idx = line.casefold().find("$command")
+        sub = line[idx:].strip()
+        parts = sub.split(",")
+        if len(parts) < 3 or parts[0].strip().casefold() != "$command":
+            return None
+        cmd = parts[1].strip()
+        rest = ",".join(parts[2:]).strip()
+        if not rest.casefold().startswith("response") or ":" not in rest:
+            return None
+        resp_part = rest.split(":", 1)[1].strip()
+        resp = resp_part.split("*")[0].strip()
+        return _CommandResponseMatch(cmd, resp, start_pos=idx)
+
+
+_COMMAND_RESPONSE_RE = _CommandResponseMatcher()
 
 
 def _normalized_receiver_command(value: Any) -> str:
