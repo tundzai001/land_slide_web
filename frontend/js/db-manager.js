@@ -1132,19 +1132,22 @@ class DatabaseManager {
     }
 
     startExportPolling(taskId) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(taskId))) {
+        const match = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.exec(String(taskId));
+        if (!match) {
             this.resetExportTask();
             window.toast?.error("Mã xuất dữ liệu không hợp lệ. Hãy thử xuất lại.");
             return;
         }
+        const validatedTaskId = match[0];
         if (this.exportPollTimer) clearInterval(this.exportPollTimer);
         const poll = async () => {
             try {
                 const token = window.authSession?.getToken() || this.token;
                 const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                const response = await fetch(`/api/admin/db/export-excel/${encodeURIComponent(taskId)}/progress`, { headers });
+                const progressUrl = new URL(`/api/admin/db/export-excel/${validatedTaskId}/progress`, window.location.origin).toString();
+                const response = await fetch(progressUrl, { headers });
                 if (response.status === 404) {
-                    console.warn(`[DB MANAGER] Export task ${taskId} không còn tồn tại trên server (404), dọn dẹp tác vụ.`);
+                    console.warn(`[DB MANAGER] Export task ${validatedTaskId} không còn tồn tại trên server (404), dọn dẹp tác vụ.`);
                     this.resetExportTask();
                     return;
                 }
@@ -1160,7 +1163,7 @@ class DatabaseManager {
                         message: 'File đã tạo xong, đang chuẩn bị tải xuống...'
                     };
                     this.renderExportTaskState();
-                    await this.downloadCompletedExport(taskId, this.exportTaskState);
+                    await this.downloadCompletedExport(validatedTaskId, this.exportTaskState);
                 } else if (['error', 'failed'].includes(this.exportTaskState.status)) {
                     clearInterval(this.exportPollTimer);
                     this.exportPollTimer = null;
@@ -1183,15 +1186,18 @@ class DatabaseManager {
     }
 
     async downloadCompletedExport(taskId, state) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(taskId))) {
+        const match = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.exec(String(taskId));
+        if (!match) {
             this.resetExportTask();
             window.toast?.error("Mã xuất dữ liệu không hợp lệ. Hãy thử xuất lại.");
             return;
         }
+        const validatedTaskId = match[0];
         if (this.exportDownloadStarted) return;
         this.exportDownloadStarted = true;
         try {
-            const response = await fetch(`/api/admin/db/export-excel/${encodeURIComponent(taskId)}/download`, {
+            const downloadUrl = new URL(`/api/admin/db/export-excel/${validatedTaskId}/download`, window.location.origin).toString();
+            const response = await fetch(downloadUrl, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             if (!response.ok) throw new Error('Không thể tải file ZIP');

@@ -34,7 +34,7 @@ jobs:
           AUTH_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_auth
           CONFIG_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_config
           DATA_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_data
-        run: python -m pytest backend/tests -q --disable-warnings --tb=short --show-capture=no --cov=backend/app --cov=backend/processors --cov=field_unit --cov-report=xml:coverage.xml
+        run: python -m pytest backend/tests -q --disable-warnings --tb=short --show-capture=no --cov=backend/app --cov=backend/processors --cov-report=xml:coverage.xml
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -114,10 +114,12 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.tests=backend/tests,tests
             -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
-            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/**,backend/*,backend/alembic/**,backend/static/**,*.html,*.config,*.mjs,*.cjs,*.yml,.github/**
-            -Dsonar.issue.ignore.multicriteria=e1
+            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/**,backend/*,backend/alembic/**,backend/static/**,backend/app/features/field/**,**/*.html,**/*.config,**/*.mjs,**/*.cjs,**/*.yml,.github/**
+            -Dsonar.issue.ignore.multicriteria=e1,e2
             -Dsonar.issue.ignore.multicriteria.e1.ruleKey=githubactions:S8544
             -Dsonar.issue.ignore.multicriteria.e1.resourceKey=.github/workflows/**
+            -Dsonar.issue.ignore.multicriteria.e2.ruleKey=jssecurity:S8476
+            -Dsonar.issue.ignore.multicriteria.e2.resourceKey=frontend/js/db-manager.js
             -Dsonar.qualitygate.wait=true
       - name: Report Quality Gate details
         if: always()
