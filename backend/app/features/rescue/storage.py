@@ -71,7 +71,7 @@ def persist_data_url(image_data_url: Optional[str]) -> Optional[str]:
 
     extension = _validate_image(mime_type, image_bytes)
     RESCUE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    file_name = f"{hashlib.sha1(image_bytes).hexdigest()}{extension}"  # nosec B324
+    file_name = f"{hashlib.sha256(image_bytes).hexdigest()}{extension}"
     file_path = RESCUE_IMAGE_DIR / file_name
     if not file_path.exists():
         file_path.write_bytes(image_bytes)

@@ -346,10 +346,11 @@ async def timeout_exception_handler(request: Request, exc: Exception):
 
 # Add Security Middleware FIRST (Before CORS or Routing)
 app.add_middleware(AdvancedSecurityMiddleware)
-
+app.add_middleware(CharsetMiddleware)
+app.add_middleware(AuditMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.settings.cors_origins,
+    allow_origins=config.settings.allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -358,8 +359,6 @@ app.add_middleware(
         "X-Total-Count", "X-Offset", "X-Limit", "X-Has-More",
     ],
 )
-app.add_middleware(CharsetMiddleware)
-app.add_middleware(AuditMiddleware)
 app.include_router(authentication_router.router)
 app.include_router(users_router.router)
 app.include_router(device_admin_router.router)

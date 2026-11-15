@@ -22,7 +22,8 @@
                 } catch (error) {
                     if (attempt === attempts - 1 || controller.signal.aborted) throw error;
                 }
-                await sleep(250 * (2 ** attempt) + Math.random() * 150);
+                const jitter = (window.crypto?.getRandomValues ? window.crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 : 0.5) * 150;
+                await sleep(250 * (2 ** attempt) + jitter);
             }
         } finally {
             clearTimeout(timeout);

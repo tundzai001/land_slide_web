@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     PUBLIC_SITE_URL: str = "https://monitoring.aitogy.com"
     RESCUE_REQUEST_ENABLED: bool = True
     CORS_ORIGINS: str = "https://monitoring.aitogy.com,http://127.0.0.1:8001,http://localhost:8001"
+    SERVER_HOST: str = "127.0.0.1"
+    SERVER_PORT: int = 8001
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_TIMEOUT_SECONDS: int = 10
@@ -109,7 +111,11 @@ class Settings(BaseSettings):
             raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD must be 12+ characters and at most 72 UTF-8 bytes")
 
     @property
-    def cors_origins(self) -> list[str]:
+    def allowed_cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return self.allowed_cors_origins
 
 settings = Settings()

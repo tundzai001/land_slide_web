@@ -16,8 +16,8 @@ if __name__ == "__main__":
         ) from None
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8001,
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
         reload=False,
         ws="websockets-sansio",
         proxy_headers=True,

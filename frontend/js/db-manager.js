@@ -775,7 +775,11 @@ class DatabaseManager {
         const select = document.getElementById(selectId);
         if (!select) return;
         select.disabled = true;
-        select.innerHTML = `<option value="all">${this.escapeHtml(message)}</option>`;
+        select.replaceChildren();
+        const opt = document.createElement('option');
+        opt.value = 'all';
+        opt.textContent = String(message || '');
+        select.appendChild(opt);
     }
 
     async fetchJson(url) {
@@ -799,11 +803,17 @@ class DatabaseManager {
         // Giả sử window.adminManager.projects đã có dữ liệu
         const projects = window.adminManager?.projects || [];
         
-        let html = '<option value="all">-- Tất cả Dự án --</option>';
+        select.replaceChildren();
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = 'all';
+        defaultOpt.textContent = '-- Tất cả Dự án --';
+        select.appendChild(defaultOpt);
         projects.forEach(p => {
-            html += `<option value="${p.id}">${p.project_code} - ${p.name || ''}</option>`;
+            const opt = document.createElement('option');
+            opt.value = String(p.id ?? '');
+            opt.textContent = `${p.project_code || ''} - ${p.name || ''}`;
+            select.appendChild(opt);
         });
-        select.innerHTML = html;
         
         this.onExportProjectChange();
     }
@@ -816,13 +826,19 @@ class DatabaseManager {
         const projectId = pSelect.value;
         const stations = window.adminManager?.stations || [];
         
-        let html = '<option value="all">-- Tất cả Trạm --</option>';
+        sSelect.replaceChildren();
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = 'all';
+        defaultOpt.textContent = '-- Tất cả Trạm --';
+        sSelect.appendChild(defaultOpt);
         stations.forEach(s => {
             if (projectId === 'all' || s.project_id == projectId) {
-                html += `<option value="${s.id}">${s.station_code} - ${s.name || ''}</option>`;
+                const opt = document.createElement('option');
+                opt.value = String(s.id ?? '');
+                opt.textContent = `${s.station_code || ''} - ${s.name || ''}`;
+                sSelect.appendChild(opt);
             }
         });
-        sSelect.innerHTML = html;
     }
 
     async populateExportProjects() {
@@ -836,17 +852,27 @@ class DatabaseManager {
                 : await this.fetchJson('/api/admin/projects');
             this.exportProjects = Array.isArray(projects) ? projects : [];
 
-            let html = '<option value="all">-- Tất cả Dự án --</option>';
+            select.replaceChildren();
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = 'all';
+            defaultOpt.textContent = '-- Tất cả Dự án --';
+            select.appendChild(defaultOpt);
             this.exportProjects.forEach(p => {
-                html += `<option value="${this.escapeHtml(p.id)}">${this.escapeHtml(p.project_code)} - ${this.escapeHtml(p.name || '')}</option>`;
+                const opt = document.createElement('option');
+                opt.value = String(p.id ?? '');
+                opt.textContent = `${p.project_code || ''} - ${p.name || ''}`;
+                select.appendChild(opt);
             });
-            select.innerHTML = html;
             select.disabled = false;
 
             await this.onExportProjectChange();
         } catch (e) {
             console.error('Error loading export projects:', e);
-            select.innerHTML = '<option value="all">Không tải được danh sách dự án</option>';
+            select.replaceChildren();
+            const errOpt = document.createElement('option');
+            errOpt.value = 'all';
+            errOpt.textContent = 'Không tải được danh sách dự án';
+            select.appendChild(errOpt);
             select.disabled = true;
             this.setExportSelectLoading('export-station-select', 'Không tải được danh sách trạm');
             this.setExportSelectLoading('export-cluster-select', 'Không tải được danh sách cụm');
@@ -865,9 +891,17 @@ class DatabaseManager {
         this.setExportSelectLoading('export-station-select', 'Đang tải danh sách trạm...');
         const project = this.exportProjects.find(p => String(p.id) === String(projectId));
         const clusters = Array.isArray(project?.gnss_clusters) ? project.gnss_clusters : [];
-        cSelect.innerHTML = '<option value="all">-- Tất cả Cụm --</option>' + clusters.map((cluster, index) =>
-            `<option value="${index}">${this.escapeHtml(cluster?.name || `Cụm ${index + 1}`)}</option>`
-        ).join('');
+        cSelect.replaceChildren();
+        const defaultCluster = document.createElement('option');
+        defaultCluster.value = 'all';
+        defaultCluster.textContent = '-- Tất cả Cụm --';
+        cSelect.appendChild(defaultCluster);
+        clusters.forEach((cluster, index) => {
+            const opt = document.createElement('option');
+            opt.value = String(index);
+            opt.textContent = cluster?.name || `Cụm ${index + 1}`;
+            cSelect.appendChild(opt);
+        });
         cSelect.disabled = !projectId || projectId === 'all' || clusters.length === 0;
 
         try {
@@ -878,16 +912,26 @@ class DatabaseManager {
             if (requestSeq !== this.exportStationRequestSeq) return;
 
             this.exportStations = Array.isArray(stations) ? stations : [];
-            let html = '<option value="all">-- Tất cả Trạm --</option>';
+            sSelect.replaceChildren();
+            const defaultStation = document.createElement('option');
+            defaultStation.value = 'all';
+            defaultStation.textContent = '-- Tất cả Trạm --';
+            sSelect.appendChild(defaultStation);
             this.exportStations.forEach(s => {
-                html += `<option value="${this.escapeHtml(s.id)}">${this.escapeHtml(s.station_code)} - ${this.escapeHtml(s.name || s.station_name || '')}</option>`;
+                const opt = document.createElement('option');
+                opt.value = String(s.id ?? '');
+                opt.textContent = `${s.station_code || ''} - ${s.name || s.station_name || ''}`;
+                sSelect.appendChild(opt);
             });
-            sSelect.innerHTML = html;
             sSelect.disabled = false;
         } catch (e) {
             console.error('Error loading export stations:', e);
             if (requestSeq !== this.exportStationRequestSeq) return;
-            sSelect.innerHTML = '<option value="all">Không tải được danh sách trạm</option>';
+            sSelect.replaceChildren();
+            const errStation = document.createElement('option');
+            errStation.value = 'all';
+            errStation.textContent = 'Không tải được danh sách trạm';
+            sSelect.appendChild(errStation);
             sSelect.disabled = true;
             window.toast?.error('Không thể tải danh sách trạm để xuất dữ liệu');
         }

@@ -272,7 +272,10 @@ def auto_register_device():
         status      = result.get('status', 'pending')
         station_id  = result.get('station_id') or existing_cfg.get('station_id', 0)
 
-        logger.info("✅ Registration OK: device_id=%r, status=%r, station_id=%r", device_id, status, station_id)
+        clean_device_id = str(device_id).replace("\r", "").replace("\n", "")
+        clean_status = str(status).replace("\r", "").replace("\n", "")
+        clean_station_id = str(station_id).replace("\r", "").replace("\n", "")
+        logger.info("✅ Registration OK: device_id=%s, status=%s, station_id=%s", clean_device_id, clean_status, clean_station_id)
 
         # Update local config with fresh data from backend
         cfg = {
@@ -291,7 +294,7 @@ def auto_register_device():
         if status == 'pending':
             logger.info("   ⏳ Waiting for admin to activate this device...")
         elif status in ('activated', 'assigned'):
-            logger.info(f"   ✅ Device is {status}, station_id={station_id}")
+            logger.info("   ✅ Device is %s, station_id=%s", clean_status, clean_station_id)
 
     except Exception as e:
         logger.warning(f"⚠️ Register/heartbeat failed: {e}")

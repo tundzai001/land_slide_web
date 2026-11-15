@@ -4,7 +4,22 @@ import threading
 import sys
 import subprocess
 import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+from ttkbootstrap.constants import (
+    BOTH,
+    BOTTOM,
+    DANGER,
+    END,
+    HORIZONTAL,
+    LEFT,
+    PRIMARY,
+    RIGHT,
+    SECONDARY,
+    SUCCESS,
+    TOP,
+    VERTICAL,
+    WARNING,
+    YES,
+)
 from tkinter import messagebox, scrolledtext
 import logging
 import os
@@ -84,10 +99,11 @@ class SIEMAdminGUI(ttk.Window):
         threading.Thread(target=_thread_target, daemon=True).start()
         logging.info("New thread started for async command.")
 
-    async def _send_ipc_command(self, cmd, args=[]):
+    async def _send_ipc_command(self, cmd, args=None):
+        cmd_args = list(args) if args is not None else []
         try:
             reader, writer = await asyncio.open_connection(IPC_HOST, IPC_PORT)
-            message = f"{cmd} {' '.join(args)}\n"
+            message = f"{cmd} {' '.join(cmd_args)}\n"
             logging.debug(f"Writing IPC command: {message.strip()}")
             writer.write(message.encode())
             await writer.drain()
@@ -159,9 +175,8 @@ class SIEMAdminGUI(ttk.Window):
             try:
                 self.map_widget.set_tile_server("https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", max_zoom=19)
                 logging.debug("Map tile server initialized.")
-            except:
+            except Exception:
                 logging.warning("Failed to set custom tile server, using default.")
-                pass
             self.map_widget.set_position(21.0285, 105.8542) # Hanoi center
             self.map_widget.set_zoom(2)
             self.map_markers = []

@@ -160,7 +160,8 @@ async function setupWebSocket() {
         if (event.code === 1008) await window.authManager?.verifyToken?.();
         if (attempt.generation !== wsSetupGeneration || !isMapViewActive() || !window.authManager?.isAuthenticated?.()) return;
         const baseDelay = Math.min(30000, 1000 * (2 ** Math.min(wsReconnectAttempt, 5)));
-        const reconnectDelay = Math.round(baseDelay * (0.75 + Math.random() * 0.5));
+        const randomFactor = (window.crypto?.getRandomValues ? window.crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 : 0.5) * 0.5;
+        const reconnectDelay = Math.round(baseDelay * (0.75 + randomFactor));
         wsReconnectAttempt += 1;
         wsReconnectId = setTimeout(() => {
             wsReconnectId = null;

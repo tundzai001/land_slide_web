@@ -147,14 +147,15 @@ async def register_pi_device(
             pi.device_type = payload.device_type
 
             # Auto-confirm: if status is stuck at 'activating' and license matches, promote to 'activated'
+            clean_serial = payload.serial.replace("\r", "").replace("\n", "")
             if pi.status == "activating" and pi.license_key:
                 expected_key = generate_activation_key(pi.serial)
                 if pi.license_key == expected_key:
                     pi.status = "activated"
-                    logger.info(f"✅ Auto-confirmed Pi '{pi.serial}' (license matched on reconnect)")
+                    logger.info("✅ Auto-confirmed Pi '%s' (license matched on reconnect)", clean_serial)
 
             await db.commit()
-            logger.info(f"🔄 Pi reconnect: {payload.serial} (status={pi.status})")
+            logger.info("🔄 Pi reconnect: %s (status=%s)", clean_serial, pi.status)
             return {
                 "device_id": pi.id,
                 "status":    pi.status,
@@ -162,7 +163,9 @@ async def register_pi_device(
             }
         else:
             # New Pi device
-            logger.info("✨ New Pi registration: %r (%r)", payload.serial, payload.device_type)
+            clean_serial = payload.serial.replace("\r", "").replace("\n", "")
+            clean_type = payload.device_type.replace("\r", "").replace("\n", "")
+            logger.info("✨ New Pi registration: %s (%s)", clean_serial, clean_type)
             new_pi = PiDevice(
                 serial        = payload.serial,
                 name          = payload.name,

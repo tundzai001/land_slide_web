@@ -65,7 +65,10 @@ async def stop_siren_command(
             import ssl
             tls_info = {} # Sử dụng mặc định TLS
             
-        logger.info("📡 Sending stop_siren command to %s (target: %r) via broker %r:%s", cmd_topic, target, broker, port)
+        safe_topic = str(cmd_topic).replace("\r", "").replace("\n", "")
+        safe_target = str(target).replace("\r", "").replace("\n", "")
+        safe_broker = str(broker).replace("\r", "").replace("\n", "")
+        logger.info("📡 Sending stop_siren command to %s (target: %s) via broker %s:%s", safe_topic, safe_target, safe_broker, port)
         publish.single(
             topic=cmd_topic,
             payload=payload_data,

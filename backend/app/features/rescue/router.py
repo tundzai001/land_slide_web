@@ -108,7 +108,7 @@ async def create_rescue_request(
     content_type = (request.headers.get("content-type") or "").lower()
     try:
         if "multipart/form-data" in content_type:
-            async with request.form(max_files=1, max_fields=12, max_part_size=rescue_storage.MAX_RESCUE_IMAGE_BYTES) as form:
+            async with request.form(max_files=1, max_fields=12) as form:
                 payload = RescueRequestCreate.model_validate(dict(form))
                 raw_file = form.get("image_file")
                 image_url = await rescue_storage.persist_upload(

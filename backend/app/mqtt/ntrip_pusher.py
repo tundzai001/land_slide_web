@@ -205,7 +205,7 @@ class NtripPusher:
                 writer.close()
                 try:
                     await writer.wait_closed()
-                except:
+                except Exception:
                     pass
             logger.info(f"[NTRIP Pusher] {self.station_code}: Connection closed.")
 

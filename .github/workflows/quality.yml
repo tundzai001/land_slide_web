@@ -108,6 +108,7 @@ jobs:
           args: >-
             -Dsonar.organization=tundzai001
             -Dsonar.projectKey=tundzai001_land_slide_web
+            -Dsonar.python.version=3.12
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.javascript.lcov.reportPaths=coverage-js/lcov.info
             -Dsonar.tests=backend/tests,tests
