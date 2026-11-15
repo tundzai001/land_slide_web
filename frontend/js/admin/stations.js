@@ -72,7 +72,7 @@ class AdminStationsFeature extends window.AdminManager {
                     <p class="text-muted mt-2">Chưa có trạm nào</p>
                 </div>
             `;
-            if (hasDem) this.loadProjectDem(this._selectedDemId);
+            if (hasDem) void this.loadProjectDem(this._selectedDemId).catch(error => console.error('DEM load failed:', error));
             return;
         }
 
@@ -127,7 +127,7 @@ class AdminStationsFeature extends window.AdminManager {
             }
             </div >
     `;
-        if (hasDem) this.loadProjectDem(this._selectedDemId);
+        if (hasDem) void this.loadProjectDem(this._selectedDemId).catch(error => console.error('DEM load failed:', error));
     }
 
     renderProjectDemWorkspace(project, canUpload) {
@@ -433,7 +433,7 @@ class AdminStationsFeature extends window.AdminManager {
             }
             bootstrap.Modal.getInstance(document.getElementById('editDemCoordinatesModal'))?.hide();
             window.toast?.success('✅ Đã cập nhật tọa độ mô hình DEM thành công!');
-            this.loadProjectDem(demId);
+            await this.loadProjectDem(demId);
         } catch (error) {
             window.toast?.error(error.message || 'Lỗi khi cập nhật tọa độ DEM');
         } finally {

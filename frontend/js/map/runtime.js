@@ -31,7 +31,7 @@ const pendingRealtimeSensorUi = new Map();
 let realtimeSensorUiFrameId = null;
 
 function normalizeEpochMs(value) {
-    if (value === null || value === undefined || value === '') return NaN;
+    if (value === null || value === undefined || value === '') return Number.NaN;
     const numeric = Number(value);
     if (Number.isFinite(numeric)) return Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric;
     return Date.parse(String(value));

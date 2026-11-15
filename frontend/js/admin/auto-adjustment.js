@@ -82,7 +82,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
 
         const interval = parseInt(intervalSelect.value) || 4;
         let startHour = parseInt(startHourInput.value);
-        if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
+        if (Number.isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
 
         const { hours, nextCycle } = this.calculateDailySchedule(interval, startHour);
 
@@ -142,7 +142,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
 
         const interval = parseInt(intervalSelect?.value) || 4;
         let startHour = parseInt(startHourInput?.value);
-        if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
+        if (Number.isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
 
         const { hours: scheduledHours } = this.calculateDailySchedule(interval, startHour);
 

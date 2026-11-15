@@ -406,7 +406,7 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     }
 
     const num = parseFloat(value);
-    if (isNaN(num)) {
+    if (Number.isNaN(num)) {
         return defaultValue;
     }
 
@@ -465,7 +465,7 @@ function formatWaterLevelDisplay(waterLatest) {
 
 function formatImuDelta(val, axis) {
     const num = parseFloat(val);
-    if (isNaN(num)) return '-- cm';
+    if (Number.isNaN(num)) return '-- cm';
     const dispMm = Math.sin(num * Math.PI / 180) * 0.09 * 1000; // mm
     const sign = dispMm > 0 ? '+' : '';
     // Ưu tiên cm; chỉ dùng mm khi |giá trị| < 1 cm

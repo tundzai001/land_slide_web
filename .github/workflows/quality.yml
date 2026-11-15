@@ -63,6 +63,7 @@ jobs:
           tests/ui/theme-toggle-motion.spec.js
           tests/ui/theme-contract.spec.js
           tests/ui/analysis-safety.spec.js
+          tests/ui/auto-adjustment.spec.js
           tests/ui/gnss-summary-theme.spec.js
           tests/ui/gnss-terminal.spec.js
           tests/ui/map-workspace-tools.spec.js
