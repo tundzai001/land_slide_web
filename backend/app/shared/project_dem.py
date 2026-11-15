@@ -26,6 +26,8 @@ LEGACY_PROJECT_DEM_DIR = Path(__file__).resolve().parents[2] / "static" / "uploa
 MAX_DEM_CELLS = 10_000_000
 DEM_ID_PATTERN = re.compile(r"^[a-f0-9]{16}$")
 _manifest_lock = threading.RLock()
+INVALID_ELEVATION_DETAIL = "DEM chứa giá trị độ cao không hợp lệ."
+GRID_SIZE_MISMATCH_DETAIL = "Số ô dữ liệu không khớp kích thước lưới DEM."
 
 
 def project_dem_manifest_path(project_id: int) -> Path:
@@ -124,13 +126,13 @@ def inspect_ascii_grid(content) -> dict:
         nonlocal value_count, elevation_min, elevation_max
         value_count += 1
         if value_count > expected_values:
-            raise HTTPException(status_code=400, detail="Số ô dữ liệu không khớp kích thước lưới DEM.")
+            raise HTTPException(status_code=400, detail=GRID_SIZE_MISMATCH_DETAIL)
         try:
             value = float(raw_value)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.") from exc
+            raise HTTPException(status_code=400, detail=INVALID_ELEVATION_DETAIL) from exc
         if not math.isfinite(value):
-            raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.")
+            raise HTTPException(status_code=400, detail=INVALID_ELEVATION_DETAIL)
         if value != nodata:
             elevation_min = min(elevation_min, value)
             elevation_max = max(elevation_max, value)
@@ -148,11 +150,11 @@ def inspect_ascii_grid(content) -> dict:
             if raw_value:
                 consume_value(raw_value)
         if len(token) > 64:
-            raise HTTPException(status_code=400, detail="DEM chứa giá trị độ cao không hợp lệ.")
+            raise HTTPException(status_code=400, detail=INVALID_ELEVATION_DETAIL)
     if token:
         consume_value(bytes(token))
     if value_count != expected_values:
-        raise HTTPException(status_code=400, detail="Số ô dữ liệu không khớp kích thước lưới DEM.")
+        raise HTTPException(status_code=400, detail=GRID_SIZE_MISMATCH_DETAIL)
     if math.isinf(elevation_min):
         raise HTTPException(status_code=400, detail="DEM không có ô độ cao hợp lệ.")
 

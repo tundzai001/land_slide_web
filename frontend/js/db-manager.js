@@ -606,17 +606,10 @@ class DatabaseManager {
         }, 0);
     }
 
-    async downloadAdjustmentArtifact(format) {
+    _resolveAdjustmentDownloadUrl(format) {
         const data = this.selectedRecord?.data || {};
         const url = String(format === 'json' ? data.audit_json_url : (data.excel_report_url || data.report_file_url) || '');
-        if (!url) {
-            console.warn(`[DB Manager] Bản ghi #${this.selectedRecord?.id} không có URL cho file ${format.toUpperCase()}:`, data);
-            window.toast?.warning?.(`Bản ghi này chưa có liên kết tải file ${format.toUpperCase()}.`);
-            return;
-        }
-        const button = document.activeElement;
-        const original = button?.innerHTML;
-        // Normalize legacy /static/adjustments/ URLs to the authenticated API path.
+        if (!url) return null;
         let downloadUrl = url;
         const legacyPrefix = '/static/adjustments/';
         if (downloadUrl.startsWith(legacyPrefix)) {
@@ -624,7 +617,6 @@ class DatabaseManager {
             const idMatch = filename.match(/^gnss_(?:binh_sai|adjustment)_(\d+)_/);
             if (idMatch) {
                 downloadUrl = `/api/admin/gnss/adjustment/reports/${idMatch[1]}/${filename}`;
-                console.info(`[DB Manager] Chuyển URL cũ → ${downloadUrl}`);
             }
         }
         const recordId = Number(this.selectedRecord?.id);
@@ -632,6 +624,17 @@ class DatabaseManager {
             const separator = downloadUrl.includes('?') ? '&' : '?';
             downloadUrl += `${separator}sensor_data_id=${recordId}`;
         }
+        return downloadUrl;
+    }
+
+    async downloadAdjustmentArtifact(format) {
+        const downloadUrl = this._resolveAdjustmentDownloadUrl(format);
+        if (!downloadUrl) {
+            window.toast?.warning?.(`Bản ghi này chưa có liên kết tải file ${format.toUpperCase()}.`);
+            return;
+        }
+        const button = document.activeElement;
+        const original = button instanceof HTMLButtonElement ? button.innerHTML : null;
         let progressToast = null;
         try {
             const progressMessage = format === 'xlsx'
@@ -646,12 +649,11 @@ class DatabaseManager {
             if (progressToast) window.toast?.dismiss?.(progressToast);
             window.toast?.success?.(`Đã tạo file ${format.toUpperCase()}, trình duyệt đang tải xuống.`, 4000);
         } catch (error) {
-            console.error(`[DB Manager] Lỗi khi tải file ${format.toUpperCase()} (${url}):`, error);
             if (progressToast) window.toast?.dismiss?.(progressToast);
             const reason = error?.message ? `: ${this.escapeHtml(error.message)}` : '';
             window.toast?.error?.(`Không tải được file ${format.toUpperCase()}${reason}`, 10000);
         } finally {
-            if (button instanceof HTMLButtonElement) {
+            if (button instanceof HTMLButtonElement && original !== null) {
                 button.disabled = false;
                 button.innerHTML = original;
             }
@@ -851,7 +853,7 @@ class DatabaseManager {
             select.appendChild(opt);
         });
         
-        this.onExportProjectChange();
+        void this.onExportProjectChange();
     }
     
     onExportProjectChangeLegacyUnused() {
@@ -973,82 +975,91 @@ class DatabaseManager {
         }
     }
 
+    _collectExportTables() {
+        const tables = [];
+        if (document.getElementById('export-projects')?.checked) tables.push('projects', 'stations');
+        if (document.getElementById('export-stations')?.checked) tables.push('stations');
+        if (document.getElementById('export-devices')?.checked) tables.push('devices');
+        if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
+        if (document.getElementById('export-gnss-adjustments')?.checked) tables.push('gnss_adjustments');
+        if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
+        if (document.getElementById('export-simulations')?.checked) tables.push('simulations');
+        return [...new Set(tables)];
+    }
+
+    _collectSensorTypes() {
+        if (!document.getElementById('export-sensor-data')?.checked) return null;
+        const sensorTypes = [];
+        if (document.getElementById('sensor-gnss')?.checked) sensorTypes.push('gnss');
+        if (document.getElementById('sensor-imu')?.checked) sensorTypes.push('imu');
+        if (document.getElementById('sensor-rain')?.checked) sensorTypes.push('rain');
+        if (document.getElementById('sensor-water')?.checked) sensorTypes.push('water');
+        (window.SensorCatalog || []).filter(sensor => !sensor.legacy).forEach(sensor => {
+            if (document.getElementById(`sensor-${sensor.key}`)?.checked) sensorTypes.push(sensor.key);
+        });
+        return sensorTypes;
+    }
+
+    _collectExportFilters() {
+        const projectId = document.getElementById('export-project-select')?.value;
+        const stationId = document.getElementById('export-station-select')?.value;
+        const clusterIndex = document.getElementById('export-cluster-select')?.value;
+        const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId, 10)] : null;
+        const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId, 10)] : null;
+        const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [parseInt(clusterIndex, 10)] : null;
+        const selectedStation = stationIds
+            ? this.exportStations.find(s => String(s.id) === String(stationIds[0]))
+            : null;
+        const effectiveProjectIds = projectIds
+            || (selectedStation?.project_id ? [parseInt(selectedStation.project_id, 10)] : null);
+        return {
+            effectiveProjectIds,
+            stationIds,
+            clusterIndices,
+            startDate: document.getElementById('export-start-date')?.value || null,
+            endDate: document.getElementById('export-end-date')?.value || null
+        };
+    }
+
+    _buildExportPayload() {
+        const uniqueTables = this._collectExportTables();
+        if (uniqueTables.length === 0) return null;
+        const filters = this._collectExportFilters();
+        return {
+            format: document.getElementById('export-format')?.value || 'csv',
+            tables: uniqueTables,
+            project_ids: filters.effectiveProjectIds,
+            station_ids: filters.stationIds,
+            cluster_indices: filters.clusterIndices,
+            sensor_types: this._collectSensorTypes(),
+            start_date: filters.startDate,
+            end_date: filters.endDate
+        };
+    }
+
+    _initExportProgressUI() {
+        document.getElementById('btn-export-start').disabled = true;
+        document.getElementById('btn-export-cancel').disabled = false;
+        const progressContainer = document.getElementById('export-progress-container');
+        const progressBar = document.getElementById('export-progress-bar');
+        const progressText = document.getElementById('export-status-text');
+        const progressDetail = document.getElementById('export-progress-detail');
+        if (progressContainer) progressContainer.style.display = 'block';
+        if (progressBar) progressBar.style.width = '5%';
+        if (progressText) progressText.innerText = 'Đang khởi tạo tác vụ...';
+        if (progressDetail) progressDetail.innerText = 'Có thể thu nhỏ cửa sổ; tác vụ vẫn chạy trên server.';
+    }
+
     async confirmExportExcel() {
         try {
-            // Lấy các bảng được chọn
-            const tables = [];
-            if (document.getElementById('export-projects')?.checked) {
-                tables.push('projects');
-                tables.push('stations');
-            }
-            if (document.getElementById('export-stations')?.checked) tables.push('stations');
-            if (document.getElementById('export-devices')?.checked) tables.push('devices');
-            if (document.getElementById('export-sensor-data')?.checked) tables.push('sensor_data');
-            if (document.getElementById('export-gnss-adjustments')?.checked) tables.push('gnss_adjustments');
-            if (document.getElementById('export-alerts')?.checked) tables.push('alerts');
-            if (document.getElementById('export-simulations')?.checked) tables.push('simulations');
-            const uniqueTables = [...new Set(tables)];
-
-            // Kiểm tra
-            if (uniqueTables.length === 0) {
+            const payload = this._buildExportPayload();
+            if (!payload) {
                 window.toast?.warning('⚠️ Vui lòng chọn ít nhất 1 bảng dữ liệu!');
                 return;
             }
 
-            // Lấy các filters
-            const projectId = document.getElementById('export-project-select')?.value;
-            const stationId = document.getElementById('export-station-select')?.value;
-            const clusterIndex = document.getElementById('export-cluster-select')?.value;
-            const startDate = document.getElementById('export-start-date')?.value;
-            const endDate = document.getElementById('export-end-date')?.value;
-            
-            const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId)] : null;
-            const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId)] : null;
-            const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [parseInt(clusterIndex)] : null;
-            const selectedStation = stationIds
-                ? this.exportStations.find(s => String(s.id) === String(stationIds[0]))
-                : null;
-            const effectiveProjectIds = projectIds
-                || (selectedStation?.project_id ? [parseInt(selectedStation.project_id)] : null);
-            
-            // Lấy Sensor types nếu có chọn sensor_data
-            let sensorTypes = null;
-            if (document.getElementById('export-sensor-data')?.checked) {
-                sensorTypes = [];
-                if (document.getElementById('sensor-gnss')?.checked) sensorTypes.push('gnss');
-                if (document.getElementById('sensor-imu')?.checked) sensorTypes.push('imu');
-                if (document.getElementById('sensor-rain')?.checked) sensorTypes.push('rain');
-                if (document.getElementById('sensor-water')?.checked) sensorTypes.push('water');
-                (window.SensorCatalog || []).filter(sensor => !sensor.legacy).forEach(sensor => {
-                    if (document.getElementById(`sensor-${sensor.key}`)?.checked) sensorTypes.push(sensor.key);
-                });
-            }
-            
-            const payload = {
-                format: document.getElementById('export-format')?.value || 'csv',
-                tables: uniqueTables,
-                project_ids: effectiveProjectIds,
-                station_ids: stationIds,
-                cluster_indices: clusterIndices,
-                sensor_types: sensorTypes,
-                start_date: startDate || null,
-                end_date: endDate || null
-            };
+            this._initExportProgressUI();
 
-            // Khóa UI
-            document.getElementById('btn-export-start').disabled = true;
-            document.getElementById('btn-export-cancel').disabled = false;
-            const progressContainer = document.getElementById('export-progress-container');
-            const progressBar = document.getElementById('export-progress-bar');
-            const progressText = document.getElementById('export-status-text');
-            const progressDetail = document.getElementById('export-progress-detail');
-            
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '5%';
-            progressText.innerText = 'Đang khởi tạo tác vụ...';
-            progressDetail.innerText = 'Có thể thu nhỏ cửa sổ; tác vụ vẫn chạy trên server.';
-
-            // Gọi API /start
             const res = await fetch('/api/admin/db/export-excel/start', {
                 method: 'POST',
                 headers: {
@@ -1128,6 +1139,35 @@ class DatabaseManager {
         void this.populateExportProjects();
     }
 
+    _getExportStatusText(state, percent) {
+        if (state.status === 'error' || state.status === 'failed') {
+            return {
+                modal: 'Export thất bại',
+                pill: 'Export gặp lỗi',
+                running: false
+            };
+        }
+        if (state.status === 'downloading') {
+            return {
+                modal: 'Đang chuẩn bị tải xuống',
+                pill: 'Đang chuẩn bị tải xuống',
+                running: true
+            };
+        }
+        if (state.status === 'completed') {
+            return {
+                modal: 'Export hoàn tất',
+                pill: 'Export hoàn tất',
+                running: false
+            };
+        }
+        return {
+            modal: 'Đang export dữ liệu',
+            pill: `Đang export · ${percent}%`,
+            running: true
+        };
+    }
+
     renderExportTaskState() {
         const state = this.exportTaskState;
         const active = Boolean(this.exportTaskId && state);
@@ -1138,6 +1178,10 @@ class DatabaseManager {
         if (!active) return;
 
         const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
+        const failed = state.status === 'error' || state.status === 'failed';
+        const completed = state.status === 'completed';
+        const statusMeta = this._getExportStatusText(state, percent);
+
         const progressContainer = document.getElementById('export-progress-container');
         const progressBar = document.getElementById('export-progress-bar');
         const progressPercent = document.getElementById('export-progress-percent');
@@ -1145,26 +1189,25 @@ class DatabaseManager {
         const progressDetail = document.getElementById('export-progress-detail');
         const startButton = document.getElementById('btn-export-start');
         const retryBtn = document.getElementById('btn-export-retry');
-        const failed = state.status === 'error' || state.status === 'failed';
-        const completed = state.status === 'completed';
-        const downloading = state.status === 'downloading';
+
         if (progressContainer) progressContainer.style.display = 'block';
         if (progressBar) {
             progressBar.style.width = `${percent}%`;
-            progressBar.classList.toggle('progress-bar-animated', !failed && !completed);
+            progressBar.classList.toggle('progress-bar-animated', statusMeta.running);
             progressBar.style.background = failed ? '#dc5a5a' : '';
         }
         if (progressPercent) progressPercent.textContent = `${percent}%`;
-        if (progressText) progressText.textContent = failed ? 'Export thất bại' : downloading ? 'Đang chuẩn bị tải xuống' : completed ? 'Export hoàn tất' : 'Đang export dữ liệu';
+        if (progressText) progressText.textContent = statusMeta.modal;
         if (progressDetail) progressDetail.textContent = state.error || state.message || 'Đang xử lý...';
         if (startButton) startButton.disabled = !failed && !completed;
         if (retryBtn) retryBtn.style.display = failed ? 'inline-flex' : 'none';
+
         const pillTitle = pill.querySelector('.export-pill-title');
         const pillDetail = pill.querySelector('.export-pill-detail');
         const spinner = pill.querySelector('.export-pill-spinner');
-        if (pillTitle) pillTitle.textContent = failed ? 'Export gặp lỗi' : downloading ? 'Đang chuẩn bị tải xuống' : completed ? 'Export hoàn tất' : `Đang export · ${percent}%`;
+        if (pillTitle) pillTitle.textContent = statusMeta.pill;
         if (pillDetail) pillDetail.textContent = state.error || state.message || 'Nhấn để mở chi tiết';
-        if (spinner) spinner.style.animationPlayState = failed || completed ? 'paused' : 'running';
+        if (spinner) spinner.style.animationPlayState = statusMeta.running ? 'running' : 'paused';
     }
 
     startExportPolling(taskId) {
@@ -1217,7 +1260,7 @@ class DatabaseManager {
                 localStorage.removeItem('activeDatabaseExportTaskId');
             }
         };
-        poll();
+        void poll();
         this.exportPollTimer = setInterval(poll, 1000);
     }
 
@@ -1293,7 +1336,7 @@ class DatabaseManager {
 
         // Fallback: simple confirm if no modal present
         if (confirm('⚠️ CẢNH BÁO: Bạn có chắc muốn xóa dữ liệu?')) {
-            this.performClear();
+            void this.performClear();
         }
     }
 

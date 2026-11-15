@@ -24,6 +24,5 @@ def test_cors_origins_and_server_host_properties():
         SERVER_PORT=8001
     )
     assert settings.allowed_cors_origins == ["https://site1.example", "https://site2.example"]
-    assert settings.cors_origins == ["https://site1.example", "https://site2.example"]
     assert settings.SERVER_HOST == "127.0.0.1"
     assert settings.SERVER_PORT == 8001

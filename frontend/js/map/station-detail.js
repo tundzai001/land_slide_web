@@ -708,7 +708,7 @@ function updateSidebarUI(data) {
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
     const stationId = data.id;
-    window.restoreGnssAdjustmentStatus?.(data.project_id);
+    void window.restoreGnssAdjustmentStatus?.(data.project_id);
     const imuApiTs = Number(data.sensors?.imu?.latest_timestamp || 0);
     const imuRealtimeTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
     const latestSensorTs = getLatestSensorTimestamp(data);

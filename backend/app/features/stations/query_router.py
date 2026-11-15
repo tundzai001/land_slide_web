@@ -40,6 +40,8 @@ from .topics import duplicate_mqtt_topics, find_mqtt_topic_conflicts, normalize_
 router = APIRouter(tags=["Stations"])
 logger = logging.getLogger(__name__)
 
+STATION_REQUEST_FAILED_DETAIL = "Unable to complete station request"
+
 @router.get("/api/admin/projects/{project_id}/stations")
 async def get_stations_by_project(
     project_id: int,
@@ -240,7 +242,7 @@ async def create_station_in_project(
     except Exception as e:
         await db.rollback()
         logger.error(f"Error creating station: {e}")
-        raise HTTPException(status_code=500, detail="Unable to complete station request")
+        raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 
 
 @router.get("/api/public/dashboard-summary")
@@ -416,7 +418,7 @@ async def get_stations(
         raise
     except Exception as e:
         logger.error(f"Error loading stations: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Unable to complete station request")
+        raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 
 
 @router.get("/api/stations/{station_id}/history")
@@ -707,5 +709,5 @@ async def get_station_detail(
         raise
     except Exception as e:
         logger.error(f"Error loading station detail: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Unable to complete station request")
+        raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 

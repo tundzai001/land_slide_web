@@ -19,7 +19,7 @@ def csrf_token(jti):
 
 def require_origin(request: Request):
     origin = request.headers.get("origin")
-    allowed = set(settings.cors_origins)
+    allowed = set(settings.allowed_cors_origins)
     site = urlsplit(settings.PUBLIC_SITE_URL)
     allowed.add(f"{site.scheme}://{site.netloc}")
     if origin not in allowed:

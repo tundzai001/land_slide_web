@@ -28,7 +28,7 @@ function scheduleRescueAdminReconnect() {
     if (rescueAdminReconnectId || !rescueAdminSocketAllowed()) return;
     const delay = Math.min(30000, 1000 * (2 ** Math.min(rescueAdminReconnectAttempt, 5)));
     rescueAdminReconnectAttempt += 1;
-    rescueAdminReconnectId = setTimeout(() => { rescueAdminReconnectId = null; setupRescueAdminSocket(); }, delay);
+    rescueAdminReconnectId = setTimeout(() => { rescueAdminReconnectId = null; void setupRescueAdminSocket(); }, delay);
 }
 async function setupRescueAdminSocket() {
     if (!rescueAdminSocketAllowed() || rescueAdminSocket) return;
@@ -75,7 +75,7 @@ function finiteMetric(value) {
 
 async function setupWebSocket() {
     if (!isMapViewActive()) return;
-    setupRescueAdminSocket();
+    void setupRescueAdminSocket();
     if (wsConnection && [WebSocket.OPEN, WebSocket.CONNECTING].includes(wsConnection.readyState)) {
         return;
     }
@@ -109,7 +109,7 @@ async function setupWebSocket() {
         gnssAdjustmentDebugState.wsStatus = 'CONNECTED';
         if (gnssAdjustmentDebugState.active) {
             addGnssAdjustmentDebug('WS', 'WebSocket đã kết nối.', 'success');
-            syncGnssAdjustmentStatus();
+            void syncGnssAdjustmentStatus();
         }
         else refreshGnssAdjustmentDebugUi();
         if (wsHeartbeatId) clearInterval(wsHeartbeatId);
@@ -154,7 +154,7 @@ async function setupWebSocket() {
         gnssAdjustmentDebugState.wsStatus = 'DISCONNECTED';
         if (gnssAdjustmentDebugState.active) {
             addGnssAdjustmentDebug('WS', 'WebSocket bị ngắt; đang tự kết nối lại và vẫn theo dõi tiến trình qua API.', 'warning');
-            syncGnssAdjustmentStatus();
+            void syncGnssAdjustmentStatus();
         }
         else refreshGnssAdjustmentDebugUi();
         if (event.code === 1008) await window.authManager?.verifyToken?.();
@@ -165,14 +165,14 @@ async function setupWebSocket() {
         wsReconnectAttempt += 1;
         wsReconnectId = setTimeout(() => {
             wsReconnectId = null;
-            setupWebSocket();
+            void setupWebSocket();
         }, reconnectDelay);
     };
     } catch (error) {
         if (attempt.generation === wsSetupGeneration && isMapViewActive() && window.authManager?.isAuthenticated?.()) {
             wsConnection = null;
             const delay = Math.min(30000, 1000 * (2 ** Math.min(wsReconnectAttempt++, 5)));
-            wsReconnectId = setTimeout(() => { wsReconnectId = null; setupWebSocket(); }, delay);
+            wsReconnectId = setTimeout(() => { wsReconnectId = null; void setupWebSocket(); }, delay);
         }
     } finally {
         if (wsTicketPending === attempt) wsTicketPending = null;
@@ -196,8 +196,8 @@ function syncWebSocketSubscription(stationId = currentStationData?.id) {
 
 window.addEventListener('online', () => {
     if (!isMapViewActive()) return;
-    if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) setupWebSocket();
-    if (!rescueAdminSocket || rescueAdminSocket.readyState === WebSocket.CLOSED) setupRescueAdminSocket();
+    if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) void setupWebSocket();
+    if (!rescueAdminSocket || rescueAdminSocket.readyState === WebSocket.CLOSED) void setupRescueAdminSocket();
 });
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') {
@@ -206,18 +206,18 @@ document.addEventListener('visibilitychange', () => {
     }
     if (document.visibilityState === 'visible' && isMapViewActive()) {
         if (!wsConnection || wsConnection.readyState === WebSocket.CLOSED) {
-            setupWebSocket();
+            void setupWebSocket();
         }
-        setupRescueAdminSocket();
-        loadStations();
-        loadCorsBaseStations();
-        loadRescueMarkers();
+        void setupRescueAdminSocket();
+        void loadStations();
+        void loadCorsBaseStations();
+        void loadRescueMarkers();
     }
 });
 window.addEventListener('auth:ready', () => {
     if (isMapViewActive()) {
-        setupWebSocket();
-        setupRescueAdminSocket();
+        void setupWebSocket();
+        void setupRescueAdminSocket();
     }
 });
 window.addEventListener('authzExpired', () => {

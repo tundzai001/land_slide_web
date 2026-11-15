@@ -15,6 +15,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
+PUBLIC_MAP_STATIONS_ENDPOINT = "/api/public/map-stations"
+
 class RoundRobinCorsMixin:
     def _cors_api_request_sync(
         self,
@@ -25,7 +27,7 @@ class RoundRobinCorsMixin:
         access_token: Optional[str] = None,
         _auth_retried: bool = False,
     ) -> Any:
-        if path == "/api/public/map-stations":
+        if path == PUBLIC_MAP_STATIONS_ENDPOINT:
             access_token = access_token or self._cors_token_sync()
             path = (
                 "/api/integrations/stations"
@@ -166,7 +168,7 @@ class RoundRobinCorsMixin:
         selected_serial: str = "",
         selected_server_id: Optional[int] = None,
     ) -> tuple[str, int, dict]:
-        stations = self._cors_api_request_sync("GET", "/api/public/map-stations")
+        stations = self._cors_api_request_sync("GET", PUBLIC_MAP_STATIONS_ENDPOINT)
         if isinstance(stations, dict):
             stations = stations.get("value") or stations.get("items") or []
         target = str(mountpoint or "").strip().casefold()
@@ -211,7 +213,7 @@ class RoundRobinCorsMixin:
 
 
     def _disable_conflict_base_sync(self, serial: str) -> Optional[dict]:
-        stations = self._cors_api_request_sync("GET", "/api/public/map-stations")
+        stations = self._cors_api_request_sync("GET", PUBLIC_MAP_STATIONS_ENDPOINT)
         if isinstance(stations, dict):
             stations = stations.get("value") or stations.get("items") or []
         for station in stations or []:
@@ -527,7 +529,7 @@ class RoundRobinCorsMixin:
             stations = await asyncio.to_thread(
                 self._cors_api_request_sync,
                 "GET",
-                "/api/public/map-stations",
+                PUBLIC_MAP_STATIONS_ENDPOINT,
             )
         if isinstance(stations, dict):
             stations = stations.get("value") or stations.get("items") or []

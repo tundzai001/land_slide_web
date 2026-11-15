@@ -253,82 +253,80 @@ class SIEMAdminGUI(ttk.Window):
         self.run_async(self._send_ipc_command("status"), self._update_ui_stats)
         logging.debug("Dashboard refreshed.")
 
+    def _update_stat_labels(self, data):
+        self.lbl_total_req.config(text=str(data.get("total_requests", 0)))
+        self.lbl_pi_req.config(text=str(data.get("pi_requests", 0)))
+        self.lbl_client_req.config(text=str(data.get("client_requests", 0)))
+        self.lbl_blocked_req.config(text=str(data.get("blocked_requests", 0)))
+        self.lbl_waf_sqli.config(text=str(data.get("sqli_blocks", 0)))
+        self.lbl_waf_xss.config(text=str(data.get("xss_blocks", 0)))
+        self.lbl_waf_lfi.config(text=str(data.get("lfi_blocks", 0)))
+        self.lbl_active_ips.config(text=str(data.get("active_ips_count", 0)))
+
+    def _sync_panic_mode(self, data):
+        server_panic = data.get("panic_mode", False)
+        if server_panic != self.panic_active:
+            self.panic_active = server_panic
+            if self.panic_active:
+                self.btn_panic.config(text="🟢 DISABLE PANIC MODE")
+                self.status_var.set("[CRITICAL ALARM] PANIC MODE ACTIVE. TRAFFIC BLOCKED.")
+            else:
+                self.btn_panic.config(text="🚨 ENABLE PANIC MODE")
+                self.status_var.set("[SYS] ONLINE - Real-time Threat Monitoring Active")
+        elif not self.panic_active:
+            self.status_var.set("[SYS] ONLINE - Real-time Threat Monitoring Active")
+
+    def _update_blocked_ips_tree(self, data):
+        for item in self.tree_blocked.get_children():
+            self.tree_blocked.delete(item)
+        for ip in data.get("blocked_ips", []):
+            self.tree_blocked.insert("", END, values=(ip,))
+
+    def _update_threat_feed(self, data):
+        events = data.get("events", [])
+        self.txt_feed.config(state="normal")
+        self.txt_feed.delete(1.0, END)
+        for ev in events:
+            self.txt_feed.insert(END, ev + "\n")
+        self.txt_feed.config(state="disabled")
+
+    def _update_map_markers(self, data):
+        map_events = data.get("map_events", [])
+        for event in map_events[-20:]:
+            event_id = f"{event['ip']}_{event['time']}"
+            if event_id in self.processed_events:
+                continue
+            self.processed_events.add(event_id)
+            lat = event.get("lat", 0.0)
+            lon = event.get("lon", 0.0)
+            threat_type = event.get("type", "NORMAL")
+            if lat is None or lon is None or (abs(float(lat)) < 1e-6 and abs(float(lon)) < 1e-6):
+                continue
+            if HAS_MAPVIEW and hasattr(self, 'map_widget'):
+                mrk = self.map_widget.set_marker(lat, lon, text=f"{event['ip']}\n({threat_type})")
+                self.map_markers.append(mrk)
+                if len(self.map_markers) > 30:
+                    old = self.map_markers.pop(0)
+                    old.delete()
+        if len(self.processed_events) > 1000:
+            self.processed_events.clear()
+
     def _update_ui_stats(self, response):
         if not response:
             self.status_var.set("[SYS] DISCONNECTED - IPC Socket Unreachable")
             logging.warning("Failed to update UI stats: IPC socket unreachable.")
             return
-            
-        if response.get("status") == "ok":
-            data = response.get("data", {})
-            self.lbl_total_req.config(text=str(data.get("total_requests", 0)))
-            self.lbl_pi_req.config(text=str(data.get("pi_requests", 0)))
-            self.lbl_client_req.config(text=str(data.get("client_requests", 0)))
-            self.lbl_blocked_req.config(text=str(data.get("blocked_requests", 0)))
-            self.lbl_waf_sqli.config(text=str(data.get("sqli_blocks", 0)))
-            self.lbl_waf_xss.config(text=str(data.get("xss_blocks", 0)))
-            self.lbl_waf_lfi.config(text=str(data.get("lfi_blocks", 0)))
-            self.lbl_active_ips.config(text=str(data.get("active_ips_count", 0)))
-            logging.info("UI stats updated successfully with latest data.")
-            
-            # Sync Panic Mode UI
-            server_panic = data.get("panic_mode", False)
-            if server_panic != self.panic_active:
-                self.panic_active = server_panic
-                if self.panic_active:
-                    self.btn_panic.config(text="🟢 DISABLE PANIC MODE")
-                    self.status_var.set("[CRITICAL ALARM] PANIC MODE ACTIVE. TRAFFIC BLOCKED.")
-                    logging.info("Panic mode activated.")
-                else:
-                    self.btn_panic.config(text="🚨 ENABLE PANIC MODE")
-                    self.status_var.set("[SYS] ONLINE - Real-time Threat Monitoring Active")
-                    logging.info("Panic mode is already activated before.")
-            elif not self.panic_active:
-                self.status_var.set("[SYS] ONLINE - Real-time Threat Monitoring Active")
-                logging.info("Panic mode is deactivated.")
-            
-            # Update Treeview
-            for item in self.tree_blocked.get_children():
-                self.tree_blocked.delete(item)
-                logging.debug("Cleared existing entries in blocked IPs treeview.")
-            for ip in data.get("blocked_ips", []):
-                self.tree_blocked.insert("", END, values=(ip,))
-                logging.debug(f"Added blocked IP to treeview: {ip}")
-                
-            # Update Threat Feed
-            events = data.get("events", [])
-            self.txt_feed.config(state="normal")
-            self.txt_feed.delete(1.0, END)
-            for ev in events:
-                self.txt_feed.insert(END, ev + "\n")
-            self.txt_feed.config(state="disabled")
-            
-            # Update Threat Map Radars
-            map_events = data.get("map_events", [])
-            for event in map_events[-20:]:
-                event_id = f"{event['ip']}_{event['time']}"
-                if event_id not in self.processed_events:
-                    self.processed_events.add(event_id)
-                    lat = event.get("lat", 0.0)
-                    lon = event.get("lon", 0.0)
-                    threat_type = event.get("type", "NORMAL")
-                    
-                    # Ocean / Unresolved
-                    if lat is None or lon is None or (abs(float(lat)) < 1e-6 and abs(float(lon)) < 1e-6): continue
-                    
-                    if HAS_MAPVIEW and hasattr(self, 'map_widget'):
-                        mrk = self.map_widget.set_marker(lat, lon, text=f"{event['ip']}\n({threat_type})")
-                        self.map_markers.append(mrk)
-                        if len(self.map_markers) > 30:
-                            old = self.map_markers.pop(0)
-                            old.delete()
-                        
-            # Prevent memory leak
-            if len(self.processed_events) > 1000:
-                self.processed_events.clear()
-                
-        else:
+
+        if response.get("status") != "ok":
             self.status_var.set(f"[SYS ERROR] {response.get('message', 'Unknown Error')}")
+            return
+
+        data = response.get("data", {})
+        self._update_stat_labels(data)
+        self._sync_panic_mode(data)
+        self._update_blocked_ips_tree(data)
+        self._update_threat_feed(data)
+        self._update_map_markers(data)
 
     def toggle_panic(self):
         cmd_arg = "off" if self.panic_active else "on"

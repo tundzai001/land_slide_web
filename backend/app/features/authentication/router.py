@@ -24,6 +24,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 from . import sessions
 
+AUTH_UNAVAILABLE_DETAIL = "Authentication unavailable"
 _DUMMY_PASSWORD_HASH = bcrypt.hashpw(secrets.token_urlsafe(24).encode(), bcrypt.gensalt()).decode()
 
 # ============================================================================
@@ -42,7 +43,7 @@ async def login(
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
     result = await db.execute(
         select(model_auth.User).where(model_auth.User.username == form_data.username)
     )
@@ -68,7 +69,7 @@ async def login(
         await asyncio.to_thread(sessions.create, claims["jti"], user, claims["exp"],
                                 client=request.headers.get("user-agent", ""))
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
     from ..operations.store import actor
     actor(user)
     
@@ -89,7 +90,7 @@ async def logout(response: Response,
     try:
         await asyncio.to_thread(sessions.revoke, jti)
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
     await websocket_manager.close_session(jti)
     browser_session.clear_cookies(response)
     return {"status": "success"}
@@ -139,7 +140,7 @@ async def list_sessions(current_user: model_auth.User = Depends(auth.get_current
         return await asyncio.to_thread(sessions.list_for, current_user,
                                        auth.decode_access_token(token)["jti"])
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
 
 
 @router.delete("/api/auth/sessions/{session_id}")
@@ -153,7 +154,7 @@ async def revoke_session(session_id: str,
         revoked = await asyncio.to_thread(sessions.revoke_for, current_user, session_id,
                                           current_jti=current_id)
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
     if not revoked:
         raise HTTPException(404, "Session not found")
     await websocket_manager.close_session(session_id)
@@ -172,7 +173,7 @@ async def revoke_other_sessions(current_user: model_auth.User = Depends(auth.get
                                         current_jti=current_id)
                 await websocket_manager.close_session(row["id"])
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
     return {"revoked": sum(not row["current"] for row in rows)}
 
 
@@ -213,5 +214,5 @@ async def create_websocket_ticket(
     try:
         await asyncio.to_thread(sessions.create_ws_ticket, claims["jti"], claims["exp"])
     except Exception:
-        raise HTTPException(503, "Authentication unavailable") from None
+        raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
     return {"ticket": ticket, "expires_in": 30}

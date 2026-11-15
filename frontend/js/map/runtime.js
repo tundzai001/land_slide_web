@@ -1058,7 +1058,7 @@ async function restoreGnssAdjustmentStatus(projectId) {
         setGnssAdjustmentPhase(status.phase, status.message || 'Đã khôi phục phiên bình sai đang chạy từ máy chủ.');
         addGnssAdjustmentDebug('SYNC', 'Đã nối lại phiên đang chạy sau khi tải lại trang.', 'success');
         startGnssAdjustmentStatusPolling();
-        syncGnssAdjustmentStatus();
+        void syncGnssAdjustmentStatus();
     } catch (error) {
         console.warn('[GNSS] Could not restore running adjustment:', error);
     } finally {
@@ -1341,11 +1341,11 @@ function initialize() {
     setupEventListeners();
     setupMobileMapNavigation();
     setupMarkerLayerControls();
-    setupGuestRescueUI();
-    loadStations();
-    loadCorsBaseStations();
-    loadRescueMarkers();
-    setupWebSocket();
+    void setupGuestRescueUI();
+    void loadStations();
+    void loadCorsBaseStations();
+    void loadRescueMarkers();
+    void setupWebSocket();
 
     const stationSidebar = document.getElementById('station-list-sidebar');
     if (stationSidebar) {

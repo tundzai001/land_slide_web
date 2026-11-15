@@ -19,6 +19,7 @@ router = APIRouter()
 AUTHORIZATION_REFRESH_SECONDS = 30
 AUTHORIZATION_TIMEOUT_SECONDS = max(10, int(getattr(settings, "DB_POOL_TIMEOUT_SECONDS", 10)))
 MAX_CLIENT_MESSAGE_BYTES = 16 * 1024
+WS_ADMIN_PATH = "/ws/admin"
 
 
 def _user_scope(user):
@@ -65,11 +66,11 @@ async def _consume_ws_ticket(jti: str) -> bool:
 
 async def _authorize_websocket(websocket: WebSocket) -> bool:
     origin = websocket.headers.get("origin")
-    if origin and origin not in settings.cors_origins:
+    if origin and origin not in settings.allowed_cors_origins:
         await websocket.close(code=1008, reason="Origin not allowed")
         return False
 
-    if websocket.url.path not in {"/ws/admin", "/ws/operations", "/ws/updates"}:
+    if websocket.url.path not in {WS_ADMIN_PATH, "/ws/operations", "/ws/updates"}:
         await websocket.close(code=1008, reason="Unknown channel")
         return False
 
@@ -90,7 +91,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
         required_channel = {"/ws/operations": "operations", "/ws/updates": "updates"}.get(websocket.url.path)
         if required_channel and channel != required_channel:
             raise ValueError("Wrong WebSocket channel")
-        if websocket.url.path == "/ws/admin" and channel not in {"legacy_admin", "admin"}:
+        if websocket.url.path == WS_ADMIN_PATH and channel not in {"legacy_admin", "admin"}:
             raise ValueError("Wrong WebSocket channel")
         jti = payload.get("jti")
         if (
@@ -103,7 +104,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
 
         parent_session = str(payload.get("session_id") or "")
         user = await _await_session_user(username, parent_session)
-        if websocket.url.path == "/ws/admin" and str(user.role or "") != auth.Role.ADMIN:
+        if websocket.url.path == WS_ADMIN_PATH and str(user.role or "") != auth.Role.ADMIN:
             raise ValueError("Admin channel requires admin role")
         assigned_projects, scope_hash = _user_scope(user)
         if payload.get("authz_scope_hash") != scope_hash:
@@ -181,7 +182,7 @@ async def _receive_messages(websocket: WebSocket):
 
 
 @router.websocket("/ws/updates")
-@router.websocket("/ws/admin")
+@router.websocket(WS_ADMIN_PATH)
 @router.websocket("/ws/operations")
 async def websocket_endpoint(websocket: WebSocket):
     if not await _authorize_websocket(websocket):

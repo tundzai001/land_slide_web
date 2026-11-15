@@ -10,6 +10,9 @@ from ...config import settings
 from ...models.operations import OperationsSetting
 from ..operations import store
 
+AUTH_SESSION_PREFIX = "auth_session:"
+AUTH_WS_TICKET_PREFIX = "auth_ws_ticket:"
+
 
 def credential_stamp(user):
     material = f"{user.id}:{user.username}:{user.hashed_password}"
@@ -18,7 +21,7 @@ def credential_stamp(user):
 
 def create(jti, user, expires_at, *, client=""):
     now = int(time.time())
-    store.set_setting("auth_session:" + jti, {
+    store.set_setting(AUTH_SESSION_PREFIX + jti, {
         "user_id": user.id, "credential_stamp": credential_stamp(user),
         "expires_at": int(expires_at), "created_at": now, "last_seen": now,
         "client": str(client)[:120],
@@ -27,7 +30,7 @@ def create(jti, user, expires_at, *, client=""):
 
 def valid(jti, user, *, touch=True):
     now = int(time.time())
-    query = select(OperationsSetting).where(OperationsSetting.key == "auth_session:" + jti)
+    query = select(OperationsSetting).where(OperationsSetting.key == AUTH_SESSION_PREFIX + jti)
     if touch:
         query = query.with_for_update()
     with store._sessions.begin() as db:
@@ -48,14 +51,14 @@ def valid(jti, user, *, touch=True):
 
 def revoke(jti):
     with store._sessions.begin() as db:
-        db.execute(delete(OperationsSetting).where(OperationsSetting.key == "auth_session:" + jti))
+        db.execute(delete(OperationsSetting).where(OperationsSetting.key == AUTH_SESSION_PREFIX + jti))
 
 
 def list_for(user, current_jti):
     now = int(time.time())
     with store._sessions() as db:
         rows = db.scalars(select(OperationsSetting).where(
-            OperationsSetting.key.startswith("auth_session:")
+            OperationsSetting.key.startswith(AUTH_SESSION_PREFIX)
         )).all()
     result = []
     for row in rows:
@@ -66,10 +69,10 @@ def list_for(user, current_jti):
             continue
         if not hmac.compare_digest(str(value.get("credential_stamp", "")), credential_stamp(user)):
             continue
-        result.append({"id": row.key.removeprefix("auth_session:"),
+        result.append({"id": row.key.removeprefix(AUTH_SESSION_PREFIX),
                        "created_at": value.get("created_at"), "last_seen": value.get("last_seen"),
                        "expires_at": value["expires_at"], "client": value.get("client", ""),
-                       "current": row.key == "auth_session:" + current_jti})
+                       "current": row.key == AUTH_SESSION_PREFIX + current_jti})
     return sorted(result, key=lambda item: item["created_at"] or 0, reverse=True)
 
 
@@ -77,7 +80,7 @@ def revoke_for(user, target_jti, *, current_jti=None):
     if target_jti == current_jti:
         return False
     with store._sessions.begin() as db:
-        row = db.get(OperationsSetting, "auth_session:" + target_jti)
+        row = db.get(OperationsSetting, AUTH_SESSION_PREFIX + target_jti)
         if not row or not isinstance(row.value, dict) or row.value.get("user_id") != user.id:
             return False
         db.delete(row)
@@ -85,13 +88,13 @@ def revoke_for(user, target_jti, *, current_jti=None):
 
 
 def create_ws_ticket(jti, expires_at):
-    store.set_setting("auth_ws_ticket:" + jti, {"expires_at": int(expires_at)})
+    store.set_setting(AUTH_WS_TICKET_PREFIX + jti, {"expires_at": int(expires_at)})
 
 
 def consume_ws_ticket(jti):
     with store._sessions.begin() as db:
         result = db.execute(delete(OperationsSetting).where(
-            OperationsSetting.key == "auth_ws_ticket:" + jti,
+            OperationsSetting.key == AUTH_WS_TICKET_PREFIX + jti,
             OperationsSetting.value["expires_at"].as_integer() > int(time.time()),
         ).returning(OperationsSetting.key))
         return result.scalar_one_or_none() is not None

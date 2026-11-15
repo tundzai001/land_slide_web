@@ -90,7 +90,7 @@ class SimulationController {
 
         this.clock = new THREE.Clock();
 
-        this.init();
+        void this.init();
     }
 
     async init() {
@@ -253,7 +253,7 @@ class SimulationController {
             if (this.isRunning || this._backendPending) {
                 this.stop();
             } else {
-                this.start();
+                void this.start();
             }
         });
 
@@ -300,7 +300,7 @@ class SimulationController {
                 if (!document.fullscreenElement) {
                     container.requestFullscreen().catch(err => console.log(err));
                 } else {
-                    document.exitFullscreen();
+                    void document.exitFullscreen();
                 }
             });
         }
@@ -990,7 +990,7 @@ window.closeDigitalTwin = function() {
     if (container) {
         container.classList.remove('dt-active');
         if (document.fullscreenElement) {
-            document.exitFullscreen();
+            void document.exitFullscreen();
         }
     }
     

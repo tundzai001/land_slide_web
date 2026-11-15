@@ -100,7 +100,7 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT.lower() == "production":
             if len(self.SECRET_KEY.encode()) < 32 or self.SECRET_KEY == "super_secret_key_change_me_in_production":
                 raise RuntimeError("Configure a random SECRET_KEY of at least 32 bytes")
-            if "*" in self.cors_origins:
+            if "*" in self.allowed_cors_origins:
                 raise RuntimeError("Production CORS requires explicit origins")
         if not 1 <= self.ACCESS_TOKEN_EXPIRE_MINUTES <= 720:
             raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 720")
@@ -113,9 +113,5 @@ class Settings(BaseSettings):
     @property
     def allowed_cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-
-    @property
-    def cors_origins(self) -> list[str]:
-        return self.allowed_cors_origins
 
 settings = Settings()

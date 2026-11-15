@@ -8,6 +8,8 @@ import sys
 LOG_FILE_NAME = "landslide_system.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
+LOGGER_UVICORN_ACCESS = "uvicorn.access"
+LOGGER_UVICORN_ERROR = "uvicorn.error"
 _ORIGINAL_STDOUT = sys.__stdout__
 
 
@@ -41,7 +43,7 @@ def configure_system_logging() -> None:
     root_logger.addHandler(stream_handler)
     logging.captureWarnings(True)
 
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
+    for logger_name in ("uvicorn", LOGGER_UVICORN_ERROR, LOGGER_UVICORN_ACCESS, "fastapi"):
         framework_logger = logging.getLogger(logger_name)
         framework_logger.handlers.clear()
         framework_logger.propagate = True
@@ -103,10 +105,10 @@ class SensitiveQueryFilter(logging.Filter):
 
 
 def install_heartbeat_filter() -> None:
-    access_logger = logging.getLogger("uvicorn.access")
+    access_logger = logging.getLogger(LOGGER_UVICORN_ACCESS)
     if not any(isinstance(item, HeartbeatFilter) for item in access_logger.filters):
         access_logger.addFilter(HeartbeatFilter())
-    for logger_name in ("uvicorn.access", "uvicorn.error"):
+    for logger_name in (LOGGER_UVICORN_ACCESS, LOGGER_UVICORN_ERROR):
         framework_logger = logging.getLogger(logger_name)
         if not any(isinstance(item, SensitiveQueryFilter) for item in framework_logger.filters):
             framework_logger.addFilter(SensitiveQueryFilter())

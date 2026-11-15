@@ -278,7 +278,7 @@ function setupEventListeners() {
                         setTimeout(() => {
                             const roll = Number(latest.roll);
                             const pitch = Number(latest.pitch);
-                            if (Number.isFinite(roll) && Number.isFinite(pitch)) initRealtimeIMU3D(roll, pitch);
+                            if (Number.isFinite(roll) && Number.isFinite(pitch)) void initRealtimeIMU3D(roll, pitch);
                         }, 50);
                     }
                 }
@@ -316,7 +316,7 @@ function setupEventListeners() {
 
             console.log('📊 [LONGTERM] Analysis overlay opened');
 
-            loadLongTermAnalysis();
+            void loadLongTermAnalysis();
         });
     }
 
@@ -1271,7 +1271,7 @@ function setupEventListeners() {
             followButton?.classList.toggle('btn-outline-secondary', gnssAdjustmentDebugState.autoScroll);
         }, { passive: true });
         modal.querySelector('#gnss-debug-copy')?.addEventListener('click', event => {
-            copyGnssAdjustmentDebugOutput(event.currentTarget);
+            void copyGnssAdjustmentDebugOutput(event.currentTarget);
         });
         modal.querySelector('#gnss-debug-follow')?.addEventListener('click', () => {
             scrollGnssAdjustmentDebugToBottom();
@@ -1289,10 +1289,10 @@ function setupEventListeners() {
             addGnssAdjustmentDebug('UI', 'Đã xóa nhật ký debug.', 'info');
         });
         modal.querySelector('#gnss-pause-adjustment-btn')?.addEventListener('click', event => {
-            runGnssControlAction('pause', event.currentTarget);
+            void runGnssControlAction('pause', event.currentTarget);
         });
         modal.querySelector('#gnss-resume-adjustment-btn')?.addEventListener('click', event => {
-            runGnssControlAction('resume', event.currentTarget);
+            void runGnssControlAction('resume', event.currentTarget);
         });
         modal.querySelector('#gnss-stop-adjustment-btn')?.addEventListener('click', async event => {
             const confirmation = await window.Swal.fire({
@@ -1304,7 +1304,7 @@ function setupEventListeners() {
                 cancelButtonText: 'Tiếp tục chạy',
                 confirmButtonColor: '#dc3545',
             });
-            if (confirmation?.isConfirmed) runGnssControlAction('stop', event.currentTarget);
+            if (confirmation?.isConfirmed) void runGnssControlAction('stop', event.currentTarget);
         });
         modal.querySelector('#gnss-retry-adjustment-btn')?.addEventListener('click', () => {
             const projectId = Number(gnssAdjustmentDebugState.projectId || 0);
@@ -1514,7 +1514,7 @@ function setupEventListeners() {
                 'success',
             );
             startGnssAdjustmentStatusPolling();
-            syncGnssAdjustmentStatus();
+            void syncGnssAdjustmentStatus();
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);
@@ -1545,7 +1545,7 @@ function setupEventListeners() {
             btn.addEventListener('click', () => {
                 rangeSelector.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                loadLongTermAnalysis({ includeCorrelation: isRainCorrelationAiEnabled });
+                void loadLongTermAnalysis({ includeCorrelation: isRainCorrelationAiEnabled });
             });
         });
     }

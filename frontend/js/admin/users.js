@@ -335,7 +335,7 @@ class AdminUsersFeature extends window.AdminManager {
 
             if (res.ok) {
                 window.toast?.success(`Đã ${action} người dùng ${username}`);
-                this.loadUsers();
+                void this.loadUsers();
             } else {
                 const err = await res.json();
                 throw new Error(err.detail || `Lỗi ${action} tài khoản`);

@@ -11,6 +11,8 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
+WS_OPERATIONS_PATH = "/ws/operations"
+
 
 class ConnectionManager:
     SEND_TIMEOUT_SECONDS = 2.0
@@ -82,7 +84,7 @@ class ConnectionManager:
         self._sender_tasks[id(websocket)] = asyncio.create_task(
             self._sender_loop(websocket), name=f"ws-sender-{id(websocket)}"
         )
-        operations_socket = websocket.url.path == "/ws/operations"
+        operations_socket = websocket.url.path == WS_OPERATIONS_PATH
         self._subscriptions[id(websocket)] = {
             "legacy": not operations_socket,
             "station_ids": set(),
@@ -210,7 +212,7 @@ class ConnectionManager:
             return False
         path = getattr(getattr(connection, "url", None), "path", None)
         message_type = str(message.get("type") or "")
-        if path == "/ws/operations" and message_type != "incident_changed":
+        if path == WS_OPERATIONS_PATH and message_type != "incident_changed":
             return False
         if path == "/ws/updates" and (
             message_type == "incident_changed" or message_type.startswith("rescue_request")
@@ -337,7 +339,7 @@ class ConnectionManager:
         connections = tuple(
             connection
             for connection in self.active_connections
-            if connection.url.path == "/ws/operations"
+            if connection.url.path == WS_OPERATIONS_PATH
             and getattr(connection.state, "user_role", None) in {"admin", "operator", "viewer"}
             and in_operations_scope(connection)
             and self._should_send(connection, message)

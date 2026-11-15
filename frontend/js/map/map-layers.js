@@ -100,19 +100,19 @@ function endMapInteraction() {
     requestAnimationFrame(() => {
         if (pendingStationsReload) {
             pendingStationsReload = false;
-            loadStations();
+            void loadStations();
         }
         if (pendingProjectsReload) {
             pendingProjectsReload = false;
-            loadProjectsAndClusters();
+            void loadProjectsAndClusters();
         }
         if (pendingRescueMarkersReload) {
             pendingRescueMarkersReload = false;
-            loadRescueMarkers();
+            void loadRescueMarkers();
         }
         if (pendingCorsBaseReload) {
             pendingCorsBaseReload = false;
-            loadCorsBaseStations();
+            void loadCorsBaseStations();
         }
     });
 }

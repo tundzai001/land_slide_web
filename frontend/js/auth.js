@@ -102,7 +102,7 @@ class AuthManager {
             const isValid = await this.verifyToken();
             if (isValid === false) {
                 console.warn('⚠️ [AUTH] Token expired during session');
-                this.logout();
+                void this.logout();
             } else if (isValid === true && !hadUser) {
                 this.updateAuthUI();
             }
@@ -187,7 +187,7 @@ class AuthManager {
                 sessionStorage.setItem('kicked_alert_shown', 'true');
                 alert('Tài khoản của bạn đã bị khóa hoặc phiên đăng nhập hết hạn.');
             }
-            this.logout(true);
+            void this.logout(true);
         })().finally(() => {
             if (this._unauthorizedCheckPromise === confirmation) {
                 this._unauthorizedCheckPromise = null;
@@ -635,9 +635,9 @@ const initAuthUI = async () => {
 
 // Run on DOM ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAuthUI);
+    document.addEventListener('DOMContentLoaded', () => { void initAuthUI(); });
 } else {
-    initAuthUI();
+    void initAuthUI();
 }
 
 console.log('✅ [AUTH] AuthManager loaded');

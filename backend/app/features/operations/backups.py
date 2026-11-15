@@ -22,6 +22,8 @@ from . import store
 DATABASES = {'auth': auth_engine, 'config': config_engine, 'data': data_engine}
 lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
+BACKUP_ID_PATTERN = r'[0-9a-f]{32}'
+MANIFEST_FILENAME = 'manifest.json'
 
 
 def directory():
@@ -38,7 +40,7 @@ def directory():
 
 
 def backup_path(identifier):
-    if not re.fullmatch(r'[0-9a-f]{32}', identifier):
+    if not re.fullmatch(BACKUP_ID_PATTERN, identifier):
         raise ValueError('Invalid backup identifier')
     return directory() / f'{identifier}.zip'
 
@@ -127,7 +129,7 @@ async def create(identifier, trigger='manual'):
                             'snapshots': 'one snapshot per database'}
                 def pack():
                     with zipfile.ZipFile(partial, 'w', zipfile.ZIP_STORED) as archive:
-                        archive.writestr('manifest.json', json.dumps({'manifest': manifest, 'signature': sign(manifest)}))
+                        archive.writestr(MANIFEST_FILENAME, json.dumps({'manifest': manifest, 'signature': sign(manifest)}))
                         for filename in files:
                             archive.write(Path(temp) / filename, filename)
                     secure_file(partial)
@@ -157,9 +159,9 @@ async def create(identifier, trigger='manual'):
 def validate_archive(path, destination=None):
     with zipfile.ZipFile(path) as archive:
         base_files = {'auth.dump', 'config.dump', 'data.dump'}
-        if archive.getinfo('manifest.json').file_size > 16384:
+        if archive.getinfo(MANIFEST_FILENAME).file_size > 16384:
             raise ValueError('Invalid manifest size')
-        envelope = json.loads(archive.read('manifest.json'))
+        envelope = json.loads(archive.read(MANIFEST_FILENAME))
         manifest = envelope['manifest']
         version = manifest.get('version')
         if version not in (1, 2) or not hmac.compare_digest(sign(manifest), str(envelope.get('signature', ''))):
@@ -169,7 +171,7 @@ def validate_archive(path, destination=None):
             raise ValueError('Invalid manifest files')
         if version == 2 and manifest.get('trigger') not in {'manual', 'scheduled'}:
             raise ValueError('Invalid backup metadata')
-        if sorted(archive.namelist()) != sorted(['manifest.json', *files]):
+        if sorted(archive.namelist()) != sorted([MANIFEST_FILENAME, *files]):
             raise ValueError('Backup must contain exactly the manifest and its declared files')
         for name in files:
             info = archive.getinfo(name)
@@ -232,7 +234,7 @@ async def restore(identifier, backup_id):
 
 def list_backups():
     return sorted([{'id': p.stem, 'bytes': p.stat().st_size, 'created_at': int(p.stat().st_mtime)}
-                   for p in directory().glob('*.zip') if re.fullmatch(r'[0-9a-f]{32}', p.stem)],
+                   for p in directory().glob('*.zip') if re.fullmatch(BACKUP_ID_PATTERN, p.stem)],
                   key=lambda item: item['created_at'], reverse=True)
 
 
@@ -241,13 +243,13 @@ def prune_scheduled_backups(retention_count):
     retention_count = max(1, min(int(retention_count), 365))
     candidates = []
     for path in directory().glob('*.zip'):
-        if not re.fullmatch(r'[0-9a-f]{32}', path.stem):
+        if not re.fullmatch(BACKUP_ID_PATTERN, path.stem):
             continue
         try:
             with zipfile.ZipFile(path) as archive:
-                if archive.getinfo('manifest.json').file_size > 16384:
+                if archive.getinfo(MANIFEST_FILENAME).file_size > 16384:
                     continue
-                envelope = json.loads(archive.read('manifest.json'))
+                envelope = json.loads(archive.read(MANIFEST_FILENAME))
                 manifest = envelope['manifest']
                 if (manifest.get('version') == 2 and manifest.get('trigger') == 'scheduled'
                         and hmac.compare_digest(sign(manifest), str(envelope.get('signature', '')))):

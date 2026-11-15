@@ -336,7 +336,7 @@ function createProjectMapGroup(project) {
         setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
         setChartsPanelOpen(document.getElementById('charts-panel'), false);
         document.getElementById('longterm-overlay')?.classList.remove('active');
-        openProjectDashboard(project, center, marker.getElement());
+        void openProjectDashboard(project, center, marker.getElement());
     });
     return { id: project.id, marker, bounds, stationIds: stations.map(station => station.id) };
 }
@@ -658,7 +658,7 @@ async function loadStations() {
         renderStationList(stations);
         ensureGlobalAlertBannerFromStations(stations);
         refreshProjectMapVisibility();
-        loadProjectsAndClusters();
+        void loadProjectsAndClusters();
 
     } catch (e) {
         console.error('❌ [MAP] Error loading stations:', e);
@@ -796,7 +796,7 @@ function renderStationList(stations) {
                 <i class="bi bi-chevron-right station-item-chevron" aria-hidden="true"></i>
             `;
             div.addEventListener('click', () => {
-                selectStation(st.id);
+                void selectStation(st.id);
                 if (window.innerWidth < 768) {
                     const sidebar = document.getElementById('station-list-sidebar');
                     setStationListSidebarOpen(sidebar, false);
