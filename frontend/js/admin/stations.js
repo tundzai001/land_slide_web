@@ -313,9 +313,10 @@ class AdminStationsFeature extends window.AdminManager {
         document.getElementById('management-dem-canvas')?.focus({ preventScroll: true });
     }
 
-    handleProjectDemCell(point, interaction = { commit: true }) {
+    handleProjectDemCell(point, interaction = null) {
+        const commit = interaction?.commit ?? true;
         const status = document.getElementById('management-dem-selection');
-        if (!interaction.commit) {
+        if (!commit) {
             if (status) status.textContent = `${this._managementDemPlacement ? 'Đang chọn' : 'Ô'} ${point.column + 1}, ${point.row + 1} · cao độ ${point.elevation.toFixed(1)} m${this._managementDemPlacement ? ' · nhấn Enter để đặt trạm' : ''}`;
             return;
         }

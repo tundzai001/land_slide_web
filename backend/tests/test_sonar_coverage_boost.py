@@ -135,3 +135,18 @@ class SonarCoverageBoostTests(unittest.TestCase):
             with pytest.raises(HTTPException) as exc:
                 require_origin(req)
             assert exc.value.status_code == 403
+
+    def test_security_core_waf_granular(self):
+        from security_core import check_waf_granular
+        self.assertEqual(check_waf_granular("union select * from users"), "SQLI")
+        self.assertEqual(check_waf_granular("select id from stations"), "SQLI")
+        self.assertEqual(check_waf_granular("<script>alert(1)</script>"), "XSS")
+        self.assertEqual(check_waf_granular("../../etc/passwd"), "LFI")
+        self.assertIsNone(check_waf_granular("normal clean input"))
+
+    def test_session_command_response_re(self):
+        from processors.gnss_adjustment.session import _COMMAND_RESPONSE_RE
+        m = _COMMAND_RESPONSE_RE.search("$COMMAND,mode rover survey,Response:OK*00")
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group("command"), "mode rover survey")
+        self.assertEqual(m.group("response"), "OK")

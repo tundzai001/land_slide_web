@@ -156,7 +156,7 @@ class _SafeRoverRotationSkip(RuntimeError):
 
 
 _COMMAND_RESPONSE_RE = re.compile(
-    r"\$COMMAND\s*,\s*(?P<command>.*?)\s*,\s*RESPONSE\s*:\s*(?P<response>[^*\r\n]+)",
+    r"\$COMMAND\s*,\s*(?P<command>[^,\r\n]+)\s*,\s*RESPONSE\s*:\s*(?P<response>[^*\r\n]+)",
     re.IGNORECASE,
 )
 

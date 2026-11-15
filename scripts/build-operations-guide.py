@@ -89,7 +89,7 @@ for line in source.read_text().splitlines():
     elif args.user and line == '---':
         story.append(PageBreak())
     elif args.user and line.startswith('!['):
-        caption, relative = re.fullmatch(r'!\[(.*?)\]\((.*?)\)', line).groups()
+        caption, relative = re.fullmatch(r'!\[([^\]]*)\]\(([^)]*)\)', line).groups()
         picture = Image(str(source.parent / relative))
         scale = min(507 / picture.imageWidth, 245 / picture.imageHeight)
         picture.drawWidth = picture.imageWidth * scale

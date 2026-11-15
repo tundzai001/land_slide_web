@@ -73,9 +73,9 @@ class AdminVelocityFeature extends window.AdminManager {
         const num = Number(value);
         if (!Number.isFinite(num)) return '--';
         if (Math.abs(num) >= 1000) return num.toFixed(0);
-        if (Math.abs(num) >= 10) return num.toFixed(2).replace(/\.00$/, '');
-        if (Math.abs(num) >= 1) return num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
-        return num.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+        if (Math.abs(num) >= 10) return String(Number(num.toFixed(2)));
+        if (Math.abs(num) >= 1) return String(Number(num.toFixed(3)));
+        return String(Number(num.toFixed(6)));
     }
 
     refreshVelocityDescriptions() {
