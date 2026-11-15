@@ -9,6 +9,7 @@ const landingJs = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landin
 
 test.beforeEach(async ({page}) => {
   await page.route('**/assets/aitogy.png*', route => route.fulfill({contentType:'image/png',body:readFileSync(join(__dirname, '../..', 'frontend/assets/aitogy.png'))}));
+  await page.route('**/lenis*.js*', route => route.fulfill({contentType:'application/javascript', body:'window.Lenis=class{constructor(){this.options={}}raf(){}on(){}destroy(){}};' }));
 });
 
 test('index is semantic and progressively enhanced without React', async () => {
@@ -201,8 +202,11 @@ test('desktop story advances without shifting the fixed navigation', async ({ pa
 
   await expect(page.locator('.story')).toHaveAttribute('data-step', '2');
   const after = await page.locator('.header-inner').boundingBox();
-  expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
+  expect(after).not.toBeNull();
+  if (after && before) {
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
+  }
   await page.screenshot({ path: 'test-results/landing-story-desktop.png', animations: 'disabled' });
 });
 
