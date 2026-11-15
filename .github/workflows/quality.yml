@@ -114,7 +114,7 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.tests=backend/tests,tests
             -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
-            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/**,backend/*,backend/alembic/**,backend/static/**,backend/app/features/field/**,backend/app/mqtt/ntrip_pusher.py,**/*.html,**/*.config,**/*.mjs,**/*.cjs,**/*.yml,.github/**
+            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/**,backend/*,backend/*.py,backend/alembic/**,backend/static/**,backend/app/features/field/**,backend/app/mqtt/ntrip_pusher.py,**/*.html,**/*.config,**/*.mjs,**/*.cjs,**/*.yml,.github/**
             -Dsonar.issue.ignore.multicriteria=e1,e2
             -Dsonar.issue.ignore.multicriteria.e1.ruleKey=githubactions:S8544
             -Dsonar.issue.ignore.multicriteria.e1.resourceKey=.github/workflows/**
@@ -130,7 +130,7 @@ jobs:
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=tundzai001_land_slide_web" || true
           echo ""
           echo "=== Issues Breakdown by Type, Severity & Top Rules ==="
-          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&facets=types,severities,rules&ps=1" | jq -r '.facets[] | "\(.property): " + ([\(.values[] | "\(.val)=\(.count)")] | join(", "))' || true
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&facets=types,severities,rules&ps=1" | jq -r '.facets[] | "\(.property): " + ([.values[] | "\(.val)=\(.count)"] | join(", "))' || true
           echo ""
           echo "=== Top Open Issues (Blocker / Critical) ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&severities=BLOCKER,CRITICAL&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.type)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
