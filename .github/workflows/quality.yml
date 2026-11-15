@@ -83,6 +83,8 @@ jobs:
           args: >-
             -Dsonar.organization=tundzai001
             -Dsonar.projectKey=tundzai001_land_slide_web
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.exclusions=coverage.xml
             -Dsonar.qualitygate.wait=true
 
   release-package:
