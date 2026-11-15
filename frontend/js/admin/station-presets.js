@@ -165,7 +165,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
     getConfirmStepWarnings() {
         const readInt = (id, fallback) => {
-            const val = Number.parseInt(document.getElementById(id)?.value, 10);
+            const val = parseInt(document.getElementById(id)?.value, 10);
             return Number.isFinite(val) ? val : fallback;
         };
 
@@ -273,7 +273,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 }
 
                 const mqttHost = document.getElementById(`cfg-${type}-mqtt-host`)?.value?.trim() || null;
-                const mqttPort = document.getElementById(`cfg-${type}-mqtt-port`)?.value ? Number.parseInt(document.getElementById(`cfg-${type}-mqtt-port`).value) : null;
+                const mqttPort = document.getElementById(`cfg-${type}-mqtt-port`)?.value ? parseInt(document.getElementById(`cfg-${type}-mqtt-port`).value) : null;
                 const mqttTls = !!document.getElementById(`cfg-${type}-mqtt-tls`)?.checked;
                 const mqttUser = document.getElementById(`cfg-${type}-mqtt-user`)?.value?.trim() || null;
                 const mqttPass = document.getElementById(`cfg-${type}-mqtt-pass`)?.value?.trim() || null;
@@ -295,9 +295,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
                     const h = document.getElementById('origin-h').value;
 
                     if (lat && lon) {
-                        sensors[type].lat = Number.parseFloat(lat);
-                        sensors[type].lon = Number.parseFloat(lon);
-                        sensors[type].h = Number.parseFloat(h) || 0;
+                        sensors[type].lat = parseFloat(lat);
+                        sensors[type].lon = parseFloat(lon);
+                        sensors[type].h = parseFloat(h) || 0;
                     }
                 } else {
                     const lat = document.getElementById(`origin-${type}-lat`)?.value;
@@ -305,9 +305,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
                     const h = document.getElementById(`origin-${type}-h`)?.value;
 
                     if (lat && lon) {
-                        sensors[type].lat = Number.parseFloat(lat);
-                        sensors[type].lon = Number.parseFloat(lon);
-                        sensors[type].h = Number.parseFloat(h) || 0;
+                        sensors[type].lat = parseFloat(lat);
+                        sensors[type].lon = parseFloat(lon);
+                        sensors[type].h = parseFloat(h) || 0;
                     }
                 }
             }
@@ -320,27 +320,27 @@ class AdminStationPresetsFeature extends window.AdminManager {
         }
         if (!this.confirmConfirmStepWarnings()) return;
 
-        const finalRainWarningConfirm = Number.parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
-        const finalRainCriticalConfirm = Number.parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1;
-        const finalWaterWarningConfirm = Number.parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3;
-        const finalWaterCriticalConfirm = Number.parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2;
-        const finalGnssWarningConfirm = Number.parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3;
-        const finalGnssCriticalConfirm = Number.parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
-        const finalImuCriticalConfirm = Number.parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
+        const finalRainWarningConfirm = parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
+        const finalRainCriticalConfirm = parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1;
+        const finalWaterWarningConfirm = parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3;
+        const finalWaterCriticalConfirm = parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2;
+        const finalGnssWarningConfirm = parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3;
+        const finalGnssCriticalConfirm = parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
+        const finalImuCriticalConfirm = parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
 
         // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
         const offlineThresholds = {
-            gnss: Number.parseInt(document.getElementById('offline-gnss')?.value) || this.defaultOfflineThresholds.gnss,
-            rain: Number.parseInt(document.getElementById('offline-rain')?.value) || this.defaultOfflineThresholds.rain,
-            water: Number.parseInt(document.getElementById('offline-water')?.value) || this.defaultOfflineThresholds.water,
-            imu: Number.parseInt(document.getElementById('offline-imu')?.value) || this.defaultOfflineThresholds.imu
+            gnss: parseInt(document.getElementById('offline-gnss')?.value) || this.defaultOfflineThresholds.gnss,
+            rain: parseInt(document.getElementById('offline-rain')?.value) || this.defaultOfflineThresholds.rain,
+            water: parseInt(document.getElementById('offline-water')?.value) || this.defaultOfflineThresholds.water,
+            imu: parseInt(document.getElementById('offline-imu')?.value) || this.defaultOfflineThresholds.imu
         };
 
         // ✅ ĐỌC GNSS RTK FORWARDING CONFIG
         const rtkForwarding = {
             enabled: !!document.getElementById('cfg-fwd-enabled')?.checked,
             host: document.getElementById('gnss-rtk-host')?.value?.trim() || '',
-            port: Number.parseInt(document.getElementById('gnss-rtk-port')?.value) || 1883,
+            port: parseInt(document.getElementById('gnss-rtk-port')?.value) || 1883,
             username: document.getElementById('gnss-rtk-user')?.value?.trim() || '',
             password: document.getElementById('gnss-rtk-pass')?.value?.trim() || '',
             rtk_topic: document.getElementById('gnss-rtk-topic')?.value?.trim() || '',
@@ -365,27 +365,27 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
         const vn2000 = {
             enabled: !!document.getElementById('vn2000-enabled')?.checked,
-            dx: Number.parseFloat(document.getElementById('vn-dx')?.value) || 191.90441429,
-            dy: Number.parseFloat(document.getElementById('vn-dy')?.value) || 39.30318279,
-            dz: Number.parseFloat(document.getElementById('vn-dz')?.value) || 111.45032835,
-            rx: Number.parseFloat(document.getElementById('vn-rx')?.value) || 0.00928836,
-            ry: Number.parseFloat(document.getElementById('vn-ry')?.value) || -0.01975479,
-            rz: Number.parseFloat(document.getElementById('vn-rz')?.value) || 0.00427372,
-            k: Number.parseFloat(document.getElementById('vn-k')?.value) || 0.999999747093722,
+            dx: parseFloat(document.getElementById('vn-dx')?.value) || 191.90441429,
+            dy: parseFloat(document.getElementById('vn-dy')?.value) || 39.30318279,
+            dz: parseFloat(document.getElementById('vn-dz')?.value) || 111.45032835,
+            rx: parseFloat(document.getElementById('vn-rx')?.value) || 0.00928836,
+            ry: parseFloat(document.getElementById('vn-ry')?.value) || -0.01975479,
+            rz: parseFloat(document.getElementById('vn-rz')?.value) || 0.00427372,
+            k: parseFloat(document.getElementById('vn-k')?.value) || 0.999999747093722,
             l0_deg: l0Parsed.value,
             l0_raw: String(l0Raw ?? '').trim(),
             l0_input_format: l0Parsed.format,
-            k0: Number.parseFloat(document.getElementById('vn-k0')?.value) || 0.9999,
-            res_b: Number.parseFloat(document.getElementById('vn-resb')?.value) || 0.0,
-            res_l: Number.parseFloat(document.getElementById('vn-resl')?.value) || 0.0,
-            res_h: Number.parseFloat(document.getElementById('vn-resh')?.value) || 0.0,
-            res_n: Number.parseFloat(document.getElementById('vn-resn')?.value) || 0.0,
-            res_e: Number.parseFloat(document.getElementById('vn-rese')?.value) || 0.0
+            k0: parseFloat(document.getElementById('vn-k0')?.value) || 0.9999,
+            res_b: parseFloat(document.getElementById('vn-resb')?.value) || 0.0,
+            res_l: parseFloat(document.getElementById('vn-resl')?.value) || 0.0,
+            res_h: parseFloat(document.getElementById('vn-resh')?.value) || 0.0,
+            res_n: parseFloat(document.getElementById('vn-resn')?.value) || 0.0,
+            res_e: parseFloat(document.getElementById('vn-rese')?.value) || 0.0
         };
 
         const stationMqtt = {
             host: document.getElementById('station-mqtt-host')?.value?.trim() || '',
-            port: document.getElementById('station-mqtt-port')?.value ? Number.parseInt(document.getElementById('station-mqtt-port').value) : null,
+            port: document.getElementById('station-mqtt-port')?.value ? parseInt(document.getElementById('station-mqtt-port').value) : null,
             use_tls: !!document.getElementById('station-mqtt-tls')?.checked,
             username: document.getElementById('station-mqtt-user')?.value?.trim() || '',
             password: document.getElementById('station-mqtt-pass')?.value?.trim() || ''
@@ -409,19 +409,19 @@ class AdminStationPresetsFeature extends window.AdminManager {
             active_preset: this.activePreset || '',
             simulation_profile: {
                 version: 1,
-                cohesion_kpa: Number.parseFloat(document.getElementById('sim-profile-cohesion')?.value || 15),
-                friction_angle_deg: Number.parseFloat(document.getElementById('sim-profile-friction')?.value || 30),
-                unit_weight_kn_m3: Number.parseFloat(document.getElementById('sim-profile-unit-weight')?.value || 18),
-                slip_depth_m: Number.parseFloat(document.getElementById('sim-profile-slip-depth')?.value || 5),
-                slope_angle_deg: Number.parseFloat(document.getElementById('sim-profile-slope')?.value || 25),
-                saturated_conductivity_m_s: Number.parseFloat(document.getElementById('sim-profile-ks')?.value || 0.000015),
-                porosity: Number.parseFloat(document.getElementById('sim-profile-porosity')?.value || 0.25),
-                base_pore_pressure_ratio: Number.parseFloat(document.getElementById('sim-profile-base-ru')?.value || 0),
-                water_level_dry_m: Number.parseFloat(document.getElementById('sim-profile-water-dry')?.value || 0),
-                water_level_saturated_m: Number.parseFloat(document.getElementById('sim-profile-water-saturated')?.value || 1),
+                cohesion_kpa: parseFloat(document.getElementById('sim-profile-cohesion')?.value || 15),
+                friction_angle_deg: parseFloat(document.getElementById('sim-profile-friction')?.value || 30),
+                unit_weight_kn_m3: parseFloat(document.getElementById('sim-profile-unit-weight')?.value || 18),
+                slip_depth_m: parseFloat(document.getElementById('sim-profile-slip-depth')?.value || 5),
+                slope_angle_deg: parseFloat(document.getElementById('sim-profile-slope')?.value || 25),
+                saturated_conductivity_m_s: parseFloat(document.getElementById('sim-profile-ks')?.value || 0.000015),
+                porosity: parseFloat(document.getElementById('sim-profile-porosity')?.value || 0.25),
+                base_pore_pressure_ratio: parseFloat(document.getElementById('sim-profile-base-ru')?.value || 0),
+                water_level_dry_m: parseFloat(document.getElementById('sim-profile-water-dry')?.value || 0),
+                water_level_saturated_m: parseFloat(document.getElementById('sim-profile-water-saturated')?.value || 1),
                 base_seismic_coeff: 0,
-                house_count: Number.parseInt(document.getElementById('sim-profile-houses')?.value || 40),
-                tree_count: Number.parseInt(document.getElementById('sim-profile-trees')?.value || 300),
+                house_count: parseInt(document.getElementById('sim-profile-houses')?.value || 40),
+                tree_count: parseInt(document.getElementById('sim-profile-trees')?.value || 300),
             },
             alerting: {
                 enabled: !document.getElementById('station-alerting-disabled')?.checked
@@ -433,43 +433,43 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 enabled: !!document.getElementById('cfg-station-processing-storage-enabled')?.checked
             },
             Water: {
-                warning_threshold: Number.parseFloat(document.getElementById('cfg-water-warning')?.value || 0),
-                critical_threshold: Number.parseFloat(document.getElementById('cfg-water-critical')?.value || 0),
+                warning_threshold: parseFloat(document.getElementById('cfg-water-warning')?.value || 0),
+                critical_threshold: parseFloat(document.getElementById('cfg-water-critical')?.value || 0),
                 water_warning_confirm_steps: finalWaterWarningConfirm,
                 water_critical_confirm_steps: finalWaterCriticalConfirm,
                 water_confirm_steps: finalWaterWarningConfirm,
-                water_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-water-safe-confirm')?.value) || 3
+                water_safe_confirm_steps: parseInt(document.getElementById('cfg-water-safe-confirm')?.value) || 3
             },
             RainAlerting: {
-                rain_intensity_watch_threshold: Number.parseFloat(document.getElementById('cfg-rain-watch')?.value || 0),
-                rain_intensity_warning_threshold: Number.parseFloat(document.getElementById('cfg-rain-warning')?.value || 0),
-                rain_intensity_critical_threshold: Number.parseFloat(document.getElementById('cfg-rain-critical')?.value || 0),
+                rain_intensity_watch_threshold: parseFloat(document.getElementById('cfg-rain-watch')?.value || 0),
+                rain_intensity_warning_threshold: parseFloat(document.getElementById('cfg-rain-warning')?.value || 0),
+                rain_intensity_critical_threshold: parseFloat(document.getElementById('cfg-rain-critical')?.value || 0),
                 rain_warning_confirm_steps: finalRainWarningConfirm,
                 rain_critical_confirm_steps: finalRainCriticalConfirm,
                 rain_confirm_steps: finalRainWarningConfirm,
-                rain_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-rain-safe-confirm')?.value) || 3
+                rain_safe_confirm_steps: parseInt(document.getElementById('cfg-rain-safe-confirm')?.value) || 3
             },
             GnssAlerting: {
-                gnss_max_hdop: Number.parseFloat(document.getElementById('cfg-gnss-hdop')?.value || 4.0),
+                gnss_max_hdop: parseFloat(document.getElementById('cfg-gnss-hdop')?.value || 4.0),
                 gnss_warning_confirm_steps: finalGnssWarningConfirm,
                 gnss_critical_confirm_steps: finalGnssCriticalConfirm,
                 gnss_confirm_steps: finalGnssWarningConfirm,
-                gnss_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
-                gnss_degraded_timeout: Number.parseInt(document.getElementById('cfg-gnss-timeout')?.value || 300)
+                gnss_safe_confirm_steps: parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
+                gnss_degraded_timeout: parseInt(document.getElementById('cfg-gnss-timeout')?.value || 300)
             },
             ImuAlerting: {
-                tilt_critical_deg: Number.parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
-                tilt_warning_deg: Number.parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
+                tilt_critical_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
+                tilt_warning_deg: parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
                 imu_warning_confirm_steps: finalImuCriticalConfirm,
                 imu_critical_confirm_steps: finalImuCriticalConfirm,
                 imu_confirm_steps: finalImuCriticalConfirm,
-                imu_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-imu-safe-confirm')?.value) || 3,
-                shock_threshold_ms2: Number.parseFloat(document.getElementById('cfg-imu-shock')?.value || 5.0)
+                imu_safe_confirm_steps: parseInt(document.getElementById('cfg-imu-safe-confirm')?.value) || 3,
+                shock_threshold_ms2: parseFloat(document.getElementById('cfg-imu-shock')?.value || 5.0)
             },
             ImuBaseline: {
-                baseline_roll: Number.parseFloat(document.getElementById('cfg-imu-base-roll')?.value) || 0.0,
-                baseline_pitch: Number.parseFloat(document.getElementById('cfg-imu-base-pitch')?.value) || 0.0,
-                baseline_yaw: Number.parseFloat(document.getElementById('cfg-imu-base-yaw')?.value) || 0.0
+                baseline_roll: parseFloat(document.getElementById('cfg-imu-base-roll')?.value) || 0.0,
+                baseline_pitch: parseFloat(document.getElementById('cfg-imu-base-pitch')?.value) || 0.0,
+                baseline_yaw: parseFloat(document.getElementById('cfg-imu-base-yaw')?.value) || 0.0
             },
             gnss_origin: {
                 lat: document.getElementById('origin-lat')?.value || null,
@@ -499,10 +499,10 @@ class AdminStationPresetsFeature extends window.AdminManager {
             vn2000_params: vn2000,
             mqtt: stationMqtt,
             save_intervals: {
-                gnss: (document.getElementById('edit-gnss')?.checked && document.getElementById('cfg-station-save-gnss')?.value) ? Number.parseInt(document.getElementById('cfg-station-save-gnss').value) : null,
-                rain: (document.getElementById('edit-rain')?.checked && document.getElementById('cfg-station-save-rain')?.value) ? Number.parseInt(document.getElementById('cfg-station-save-rain').value) : null,
-                water: (document.getElementById('edit-water')?.checked && document.getElementById('cfg-station-save-water')?.value) ? Number.parseInt(document.getElementById('cfg-station-save-water').value) : null,
-                imu: (document.getElementById('edit-imu')?.checked && document.getElementById('cfg-station-save-imu')?.value) ? Number.parseInt(document.getElementById('cfg-station-save-imu').value) : null
+                gnss: (document.getElementById('edit-gnss')?.checked && document.getElementById('cfg-station-save-gnss')?.value) ? parseInt(document.getElementById('cfg-station-save-gnss').value) : null,
+                rain: (document.getElementById('edit-rain')?.checked && document.getElementById('cfg-station-save-rain')?.value) ? parseInt(document.getElementById('cfg-station-save-rain').value) : null,
+                water: (document.getElementById('edit-water')?.checked && document.getElementById('cfg-station-save-water')?.value) ? parseInt(document.getElementById('cfg-station-save-water').value) : null,
+                imu: (document.getElementById('edit-imu')?.checked && document.getElementById('cfg-station-save-imu')?.value) ? parseInt(document.getElementById('cfg-station-save-imu').value) : null
             }
         };
 
@@ -519,9 +519,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
         let stationLocation = null;
         if (!this.isEditMode && this.pendingStationLocation) {
             stationLocation = { ...this.pendingStationLocation };
-            const editedLat = Number.parseFloat(document.getElementById('origin-lat')?.value || document.getElementById('origin-rain-lat')?.value || document.getElementById('origin-water-lat')?.value);
-            const editedLon = Number.parseFloat(document.getElementById('origin-lon')?.value || document.getElementById('origin-rain-lon')?.value || document.getElementById('origin-water-lon')?.value);
-            const editedH = Number.parseFloat(document.getElementById('origin-h')?.value || document.getElementById('origin-rain-h')?.value || document.getElementById('origin-water-h')?.value);
+            const editedLat = parseFloat(document.getElementById('origin-lat')?.value || document.getElementById('origin-rain-lat')?.value || document.getElementById('origin-water-lat')?.value);
+            const editedLon = parseFloat(document.getElementById('origin-lon')?.value || document.getElementById('origin-rain-lon')?.value || document.getElementById('origin-water-lon')?.value);
+            const editedH = parseFloat(document.getElementById('origin-h')?.value || document.getElementById('origin-rain-h')?.value || document.getElementById('origin-water-h')?.value);
             if (Number.isFinite(editedLat)) stationLocation.lat = editedLat;
             if (Number.isFinite(editedLon)) stationLocation.lon = editedLon;
             if (Number.isFinite(editedH)) stationLocation.h = editedH;

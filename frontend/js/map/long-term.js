@@ -17,7 +17,7 @@ async function loadLongTermAnalysis(options = {}) {
 
     // Get selected days from range selector
     const activeBtn = document.querySelector('#longterm-range-selector .btn.active');
-    const days = activeBtn ? Number.parseFloat(activeBtn.dataset.days) || 30 : 30;
+    const days = activeBtn ? parseFloat(activeBtn.dataset.days) || 30 : 30;
 
     document.getElementById('longterm-loading').style.display = 'block';
     document.getElementById('longterm-content').style.display = 'none';

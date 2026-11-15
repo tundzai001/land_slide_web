@@ -55,7 +55,7 @@ class AdminVelocityFeature extends window.AdminManager {
     }
 
     updateVelocityThreshold(index, newValue) {
-        const value = Number.parseFloat(String(newValue).replace(',', '.'));
+        const value = parseFloat(String(newValue).replace(',', '.'));
         if (!isNaN(value)) {
             this.velocityConfig[index].threshold = value;
             this.renderVelocityTable();

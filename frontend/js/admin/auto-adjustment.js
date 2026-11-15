@@ -80,8 +80,8 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         const previewContainer = document.getElementById('auto-adj-schedule-preview');
         if (!intervalSelect || !startHourInput || !previewContainer) return;
 
-        const interval = Number.parseInt(intervalSelect.value) || 4;
-        let startHour = Number.parseInt(startHourInput.value);
+        const interval = parseInt(intervalSelect.value) || 4;
+        let startHour = parseInt(startHourInput.value);
         if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
 
         const { hours, nextCycle } = this.calculateDailySchedule(interval, startHour);
@@ -113,8 +113,8 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         // Restore interval from saved scheduled_hours
         if (config.scheduled_hours && config.scheduled_hours.length >= 2) {
             // Infer interval from first two hours
-            const h1 = Number.parseInt(config.scheduled_hours[0].split(':')[0]);
-            const h2 = Number.parseInt(config.scheduled_hours[1].split(':')[0]);
+            const h1 = parseInt(config.scheduled_hours[0].split(':')[0]);
+            const h2 = parseInt(config.scheduled_hours[1].split(':')[0]);
             const inferredInterval = (h2 - h1 + 24) % 24;
             if (intervalSelect) intervalSelect.value = String(inferredInterval);
             // Infer start hour
@@ -140,8 +140,8 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         const intervalSelect = document.getElementById('auto-adj-interval');
         const startHourInput = document.getElementById('auto-adj-start-hour');
 
-        const interval = Number.parseInt(intervalSelect?.value) || 4;
-        let startHour = Number.parseInt(startHourInput?.value);
+        const interval = parseInt(intervalSelect?.value) || 4;
+        let startHour = parseInt(startHourInput?.value);
         if (isNaN(startHour) || startHour < 0 || startHour > 23) startHour = 0;
 
         const { hours: scheduledHours } = this.calculateDailySchedule(interval, startHour);
@@ -149,7 +149,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         // Collect selected cluster indices
         const selectedClusters = [];
         document.querySelectorAll('.auto-adj-cluster-cb:checked').forEach(cb => {
-            selectedClusters.push(Number.parseInt(cb.value));
+            selectedClusters.push(parseInt(cb.value));
         });
 
         const stationOwner = new Map();

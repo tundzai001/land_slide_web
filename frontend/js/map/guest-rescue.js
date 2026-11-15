@@ -153,16 +153,16 @@ async function setupGuestRescueUI() {
                         row.append(icon, copy);
                         btn.append(row);
                         btn.addEventListener('click', () => {
-                            if (latEl) latEl.value = Number.parseFloat(item.lat).toFixed(6);
-                            if (lonEl) lonEl.value = Number.parseFloat(item.lon).toFixed(6);
+                            if (latEl) latEl.value = parseFloat(item.lat).toFixed(6);
+                            if (lonEl) lonEl.value = parseFloat(item.lon).toFixed(6);
                             searchInput.value = item.display_name;
                             searchResults.style.display = 'none';
                             window.toast?.success('Đã ghim toạ độ từ địa chỉ!');
 
                             // Optional: Draw marker on map directly
                             if (window.map) {
-                                const lat = Number.parseFloat(item.lat);
-                                const lon = Number.parseFloat(item.lon);
+                                const lat = parseFloat(item.lat);
+                                const lon = parseFloat(item.lon);
                                 if (window.userLocationMarker) {
                                     window.map.removeLayer(window.userLocationMarker);
                                 }
@@ -331,8 +331,8 @@ async function submitGuestRescueRequest() {
     const submitBtn = document.getElementById('btn-guest-rescue-submit');
     if (!nameEl || !phoneEl || !noteEl || !latEl || !lonEl || !submitBtn) return;
 
-    const latitude = Number.parseFloat(latEl.value);
-    const longitude = Number.parseFloat(lonEl.value);
+    const latitude = parseFloat(latEl.value);
+    const longitude = parseFloat(lonEl.value);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         window.toast?.warning('Vui lòng bấm "Lấy vị trí hiện tại" trước khi gửi');
         return;

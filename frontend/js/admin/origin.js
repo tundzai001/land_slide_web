@@ -29,7 +29,7 @@ class AdminOriginFeature extends window.AdminManager {
                     topic: topic,
                     mqtt: {
                         host: document.getElementById('cfg-gnss-mqtt-host')?.value?.trim() || '',
-                        port: document.getElementById('cfg-gnss-mqtt-port')?.value ? Number.parseInt(document.getElementById('cfg-gnss-mqtt-port').value) : null,
+                        port: document.getElementById('cfg-gnss-mqtt-port')?.value ? parseInt(document.getElementById('cfg-gnss-mqtt-port').value) : null,
                         username: document.getElementById('cfg-gnss-mqtt-user')?.value?.trim() || '',
                         password: document.getElementById('cfg-gnss-mqtt-pass')?.value?.trim() || '',
                         use_tls: !!document.getElementById('cfg-gnss-mqtt-tls')?.checked
@@ -43,9 +43,9 @@ class AdminOriginFeature extends window.AdminManager {
                 const latEl = document.getElementById('origin-lat');
                 const lonEl = document.getElementById('origin-lon');
                 const hEl = document.getElementById('origin-h');
-                const currentLat = Number.parseFloat(latEl?.value);
-                const currentLon = Number.parseFloat(lonEl?.value);
-                const currentH = Number.parseFloat(hEl?.value);
+                const currentLat = parseFloat(latEl?.value);
+                const currentLon = parseFloat(lonEl?.value);
+                const currentH = parseFloat(hEl?.value);
                 const hasOrigin = Number.isFinite(currentLat) && Number.isFinite(currentLon);
 
                 if (!hasOrigin) {

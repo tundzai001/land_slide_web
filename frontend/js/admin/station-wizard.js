@@ -677,7 +677,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         const scope = stationModalEl || document;
 
         scope.querySelectorAll('.wizard-step').forEach(step => {
-            const stepNum = Number.parseInt(step.dataset.step);
+            const stepNum = parseInt(step.dataset.step);
             step.classList.toggle('active', stepNum === this.currentStep);
             step.classList.toggle('completed', stepNum < this.currentStep);
             if (stepNum === this.currentStep) step.setAttribute('aria-current', 'step');
@@ -685,7 +685,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         });
 
         scope.querySelectorAll('.wizard-content').forEach(content => {
-            const stepNum = Number.parseInt(content.dataset.step);
+            const stepNum = parseInt(content.dataset.step);
             const isActive = stepNum === this.currentStep;
             content.classList.toggle('active', isActive);
             content.style.display = isActive ? 'block' : 'none';

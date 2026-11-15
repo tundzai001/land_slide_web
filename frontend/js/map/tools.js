@@ -332,7 +332,7 @@ function setupTimelineSlider() {
     if (!slider || !label || !wrap) return;
 
     slider.addEventListener('input', () => {
-        const dayValue = Number.parseInt(slider.value, 10);
+        const dayValue = parseInt(slider.value, 10);
         const targetDate = new Date();
         targetDate.setDate(targetDate.getDate() - (30 - dayValue));
         const dateStr = targetDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
