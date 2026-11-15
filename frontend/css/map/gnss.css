@@ -193,7 +193,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    transition: all 0.25s ease;
+    transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
@@ -256,7 +256,7 @@
 .sensor-clickable {
     cursor: pointer;
     position: relative;
-    transition: all 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
 }
 
 .sensor-clickable:hover {
@@ -414,7 +414,7 @@
     background: transparent;
 }
 .gnss-cluster-results-list::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
+    background: rgba(148, 163, 184, 0.3);
     border-radius: 4px;
 }
 
@@ -1009,30 +1009,5 @@ body:has(.top-navbar) #gnssTerminalModal {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
     }
-}
-
-.gnss-result-panel {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.gnss-cluster-results-list {
-    flex-grow: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    min-height: 0;
-    margin-bottom: 8px;
-}
-
-.gnss-cluster-results-list::-webkit-scrollbar {
-    width: 6px;
-}
-.gnss-cluster-results-list::-webkit-scrollbar-track {
-    background: transparent;
-}
-.gnss-cluster-results-list::-webkit-scrollbar-thumb {
-    background: rgba(148, 163, 184, 0.3);
-    border-radius: 4px;
 }
 
