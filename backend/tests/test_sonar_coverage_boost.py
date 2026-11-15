@@ -307,3 +307,43 @@ class SonarCoverageBoostTests(unittest.TestCase):
                     self.assertIsNotNone(run_obj)
 
         asyncio.run(run_test())
+
+    def test_other_sensors_and_gnss_audit_coverage(self):
+        import asyncio
+        from app.mqtt.bridge.sensor_pipeline.other_sensors import OtherSensorPayloadMixin
+        from app.mqtt.persistence.gnss_audit import GnssAuditPersistenceMixin
+
+        # 1. other sensors (rain / water)
+        handler = OtherSensorPayloadMixin()
+        proc = MagicMock()
+        proc.process.return_value = {"rain": 5.0}
+
+        async def run_sensors():
+            res = await handler._process_other_sensor_payload(
+                {"type": "rain"}, '{"value": 5.0}', 1, 10, "ST10", proc, {}, 1, False, 1000
+            )
+            self.assertEqual(res, {"rain": 5.0})
+
+        asyncio.run(run_sensors())
+
+        # 2. gnss audit anomaly with buffer lock
+        class MockAudit(GnssAuditPersistenceMixin):
+            def __init__(self):
+                self._buffer_lock = asyncio.Lock()
+                self._active_gnss_anomalies = set()
+
+        audit = MockAudit()
+
+        async def run_audit():
+            # non anomaly status
+            self.assertFalse(await audit._should_record_gnss_anomaly(1, {"status": "FIXED"}))
+            # anomaly status UNSTABLE_FIX
+            self.assertTrue(await audit._should_record_gnss_anomaly(1, {"status": "UNSTABLE_FIX"}))
+            # duplicate anomaly status
+            self.assertFalse(await audit._should_record_gnss_anomaly(1, {"status": "UNSTABLE_FIX"}))
+            # clear anomaly
+            await audit._clear_gnss_anomaly(1)
+            # anomaly can be recorded again
+            self.assertTrue(await audit._should_record_gnss_anomaly(1, {"status": "UNSTABLE_FIX"}))
+
+        asyncio.run(run_audit())
