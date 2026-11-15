@@ -198,6 +198,18 @@ class RoundRobinObservationMixin:
         return bool(waiter and waiter.echo_seen)
 
 
+    @staticmethod
+    def _detect_rtcm_preamble(raw: bytes) -> bool:
+        if b"\xd3" not in raw:
+            return False
+        for index, value in enumerate(raw):
+            if value != 0xD3 or index + 2 >= len(raw):
+                continue
+            frame_length = ((raw[index + 1] & 0x03) << 8) | raw[index + 2]
+            if 0 < frame_length <= 1023:
+                return True
+        return False
+
     def observe_gnss_payload(self, info: Dict[str, Any], payload: bytes) -> None:
         """Remember what each receiver is actually publishing on its GNSS topic.
 
@@ -217,17 +229,7 @@ class RoundRobinObservationMixin:
         now = time.monotonic()
         has_agrica = b"#AGRICA" in upper
         has_gga = bool(re.search(rb"\$G[NP]GGA,", upper))
-        # A valid RTCM3 frame starts with D3 followed by a ten-bit payload length.
-        # A complete frame is preferred, but retaining a plausible fragmented
-        # preamble is important because MQTT/serial chunk boundaries are arbitrary.
-        has_rtcm = b"\xd3" in raw
-        for index, value in enumerate(raw):
-            if value != 0xD3 or index + 2 >= len(raw):
-                continue
-            frame_length = ((raw[index + 1] & 0x03) << 8) | raw[index + 2]
-            if 0 < frame_length <= 1023:
-                has_rtcm = True
-                break
+        has_rtcm = self._detect_rtcm_preamble(raw)
 
         with self._gnss_stream_health_lock:
             from app.mqtt.ntrip_pusher import Rtcm3FrameFilter

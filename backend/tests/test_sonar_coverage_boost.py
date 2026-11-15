@@ -347,3 +347,32 @@ class SonarCoverageBoostTests(unittest.TestCase):
             self.assertTrue(await audit._should_record_gnss_anomaly(1, {"status": "UNSTABLE_FIX"}))
 
         asyncio.run(run_audit())
+
+    def test_refactored_helpers_coverage(self):
+        import asyncio
+        from processors.gnss_adjustment.observation import RoundRobinObservationMixin
+        self.assertTrue(RoundRobinObservationMixin._detect_rtcm_preamble(b"\xd3\x00\x05data"))
+        self.assertFalse(RoundRobinObservationMixin._detect_rtcm_preamble(b"normal text"))
+
+        from app.mqtt.transport import MQTTTransportMixin
+        self.assertEqual(MQTTTransportMixin._decode_incoming_payload("gnss", b"$GPGGA,123456*00\n"), "$GPGGA,123456*00")
+        self.assertEqual(MQTTTransportMixin._decode_incoming_payload("rain", b'{"rain": 1.2}'), '{"rain": 1.2}')
+        self.assertIsNone(MQTTTransportMixin._decode_incoming_payload("rain", b'\xff\xfe\xfa'))
+
+        from app.mqtt.persistence.alerts import AlertPersistenceMixin
+        self.assertEqual(AlertPersistenceMixin._highest_alert_priority(["LOW", "CRITICAL", "MEDIUM"]), "CRITICAL")
+        self.assertEqual(AlertPersistenceMixin._highest_alert_priority([]), "LOW")
+
+        class MockAlerts(AlertPersistenceMixin):
+            def _get_sensor_offline_threshold(self, cfg, sensor_type):
+                return 60
+
+        alerts = MockAlerts()
+        ttl_map = alerts._build_alert_ttl_map({})
+        self.assertEqual(ttl_map['gnss_velocity'], 120)
+
+        from app.shared.project_location import _dem_center_point
+        async def run_dem():
+            res = await _dem_center_point(None, 999999)
+            self.assertIsNone(res)
+        asyncio.run(run_dem())

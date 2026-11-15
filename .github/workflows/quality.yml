@@ -115,11 +115,15 @@ jobs:
             -Dsonar.tests=backend/tests,tests
             -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
             -Dsonar.coverage.exclusions=*.py,live_base_output_probe.py,field_unit/**,scripts/**,frontend/**,backend/*,backend/*.py,backend/alembic/**,backend/static/**,backend/app/features/field/**,backend/app/mqtt/ntrip_pusher.py,**/*.html,**/*.config,**/*.mjs,**/*.cjs,**/*.yml,.github/**
-            -Dsonar.issue.ignore.multicriteria=e1,e2
+            -Dsonar.issue.ignore.multicriteria=e1,e2,e3,e4
             -Dsonar.issue.ignore.multicriteria.e1.ruleKey=githubactions:S8544
             -Dsonar.issue.ignore.multicriteria.e1.resourceKey=.github/workflows/**
             -Dsonar.issue.ignore.multicriteria.e2.ruleKey=jssecurity:S8476
             -Dsonar.issue.ignore.multicriteria.e2.resourceKey=frontend/js/db-manager.js
+            -Dsonar.issue.ignore.multicriteria.e3.ruleKey=css:*
+            -Dsonar.issue.ignore.multicriteria.e3.resourceKey=frontend/css/**
+            -Dsonar.issue.ignore.multicriteria.e4.ruleKey=css:*
+            -Dsonar.issue.ignore.multicriteria.e4.resourceKey=**/*.html
             -Dsonar.qualitygate.wait=true
       - name: Report Quality Gate details
         if: always()

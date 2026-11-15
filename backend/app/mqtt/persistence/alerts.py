@@ -254,6 +254,33 @@ class AlertPersistenceMixin:
         finally:
             in_flight.discard(station_id)
             attempts[station_id] = max(attempts[station_id], time.monotonic())
+    def _build_alert_ttl_map(self, station_config: Optional[dict]) -> Dict[str, int]:
+        cfg = station_config or {}
+        default_ttl = {
+            'gnss_velocity': max(90, self._get_sensor_offline_threshold(cfg, 'gnss') * 2),
+            'rainfall': max(120, self._get_sensor_offline_threshold(cfg, 'rain') * 2),
+            'water_level': max(120, self._get_sensor_offline_threshold(cfg, 'water') * 2),
+            'tilt': max(300, self._get_sensor_offline_threshold(cfg, 'imu')),
+            'tilt_warning': max(300, self._get_sensor_offline_threshold(cfg, 'imu')),
+            'tilt_critical': max(300, self._get_sensor_offline_threshold(cfg, 'imu')),
+            'shock': max(300, self._get_sensor_offline_threshold(cfg, 'imu')),
+        }
+        ttl_cfg = cfg.get('alert_ttl_seconds', {})
+        return {k: int(ttl_cfg.get(k, v)) for k, v in default_ttl.items()}
+
+    @staticmethod
+    def _highest_alert_priority(unresolved_levels: list) -> str:
+        priority = {
+            "EXTREME": 5,
+            "CRITICAL": 4,
+            "HIGH": 3,
+            "WARNING": 2,
+            "MEDIUM": 1,
+            "LOW": 0,
+        }
+        normalized = [str(l).upper() for l in unresolved_levels if l is not None]
+        return max(normalized, key=lambda l: priority.get(l, 0), default="LOW")
+
     async def _get_station_active_alert_summary(
         self,
         station_id: int,
@@ -266,31 +293,7 @@ class AlertPersistenceMixin:
                 return {"risk_level": "LOW", "unresolved_count": 0}
 
             now_ts = int(time.time())
-            gnss_offline = self._get_sensor_offline_threshold(station_config or {}, 'gnss')
-            rain_offline = self._get_sensor_offline_threshold(station_config or {}, 'rain')
-            water_offline = self._get_sensor_offline_threshold(station_config or {}, 'water')
-            imu_offline = self._get_sensor_offline_threshold(station_config or {}, 'imu')
-
-            default_ttl = {
-                'gnss_velocity': max(90, gnss_offline * 2),
-                'rainfall': max(120, rain_offline * 2),
-                'water_level': max(120, water_offline * 2),
-                'tilt': max(300, imu_offline),
-                'tilt_warning': max(300, imu_offline),
-                'tilt_critical': max(300, imu_offline),
-                'shock': max(300, imu_offline),
-            }
-
-            ttl_cfg = (station_config or {}).get('alert_ttl_seconds', {}) if station_config else {}
-            alert_ttl = {
-                'gnss_velocity': int(ttl_cfg.get('gnss_velocity', default_ttl['gnss_velocity'])),
-                'rainfall': int(ttl_cfg.get('rainfall', default_ttl['rainfall'])),
-                'water_level': int(ttl_cfg.get('water_level', default_ttl['water_level'])),
-                'tilt': int(ttl_cfg.get('tilt', default_ttl['tilt'])),
-                'tilt_warning': int(ttl_cfg.get('tilt_warning', default_ttl['tilt_warning'])),
-                'tilt_critical': int(ttl_cfg.get('tilt_critical', default_ttl['tilt_critical'])),
-                'shock': int(ttl_cfg.get('shock', default_ttl['shock'])),
-            }
+            alert_ttl = self._build_alert_ttl_map(station_config)
 
             stmt = (
                 select(model_data.Alert.level, model_data.Alert.category, model_data.Alert.timestamp)
@@ -321,34 +324,17 @@ class AlertPersistenceMixin:
                     normalized_level = 'CRITICAL'
                 unresolved_levels.append(normalized_level)
 
-            priority = {
-                "EXTREME": 5,
-                "CRITICAL": 4,
-                "HIGH": 3,
-                "WARNING": 2,
-                "MEDIUM": 1,
-                "LOW": 0,
-            }
-            normalized_levels = [str(level).upper() for level in unresolved_levels if level is not None]
-            highest_level = "LOW"
-            highest_score = -1
-            for level in normalized_levels:
-                score = priority.get(level, 0)
-                if score > highest_score:
-                    highest_level = level
-                    highest_score = score
-
-            if highest_level in priority and highest_level != "LOW":
-                return {
-                    "risk_level": highest_level,
-                    "unresolved_count": len(unresolved_levels),
-                    "stale_count": stale_count,
-                }
+            highest_level = self._highest_alert_priority(unresolved_levels)
             return {
-                "risk_level": "LOW",
+                "risk_level": highest_level,
                 "unresolved_count": len(unresolved_levels),
                 "stale_count": stale_count,
             }
+        except Exception as e:
+            logger.error(f"❌ Error reading active alert summary for station {station_id}: {e}")
+            # Database uncertainty is not a safe reading.  Callers must keep
+            # the last durable siren/alert state and avoid auto-stop actions.
+            return {"risk_level": "UNKNOWN", "unresolved_count": 0, "degraded": True}
         except Exception as e:
             logger.error(f"❌ Error reading active alert summary for station {station_id}: {e}")
             # Database uncertainty is not a safe reading.  Callers must keep

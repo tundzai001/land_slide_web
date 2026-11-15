@@ -719,6 +719,295 @@ function renderGnssAdjustmentAuditResult(message) {
     return renderGnssAdjustmentResultPanel(message, { auditOnly: true });
 }
 
+function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
+    const sampleCount = Number.isFinite(Number(data.velocity_sample_count)) ? Number(data.velocity_sample_count) : '--';
+    const durationS = safeNumber(data.velocity_window_duration_s, 1);
+    const rms = safeNumber(data.velocity_residual_rms_mm, 2);
+    const mad = safeNumber(data.velocity_residual_mad_mm, 2);
+    const uncert = safeNumber(data.velocity_uncertainty_mm_s, 4);
+    const ci95 = safeNumber(data.velocity_confidence_95_mm_s, 4);
+
+    if (advancedVisible) {
+        setText('adv-val-method', 'Theil-Sen Robust Estimator');
+        setText('adv-val-samples', sampleCount);
+        setText('adv-val-duration', durationS);
+        setText('adv-val-rms', rms);
+        setText('adv-val-mad', mad);
+        setText('adv-val-uncert', `± ${uncert}`);
+        setText('adv-val-ci95', `± ${ci95}`);
+
+        setText('adv-val-raw-ve', safeNumber(data.raw_vel_e_mm_s, 4));
+        setText('adv-val-raw-vn', safeNumber(data.raw_vel_n_mm_s, 4));
+        setText('adv-val-raw-vu', safeNumber(data.raw_vel_u_mm_s, 4));
+        setText('adv-val-raw-2d', safeNumber(data.raw_speed_2d_mm_s, 4));
+
+        setText('adv-val-filt-ve', formatGnssVelocityValue(data.vel_e, data, 4));
+        setText('adv-val-filt-vn', formatGnssVelocityValue(data.vel_n, data, 4));
+        setText('adv-val-filt-vu', formatGnssVelocityValue(data.vel_u, data, 4));
+        setText('adv-val-filt-2d', formatGnssVelocityValue(data.speed_2d_mm_s, data, 4));
+
+        setText('adv-val-disp-total', safeNumber(data.total_displacement_mm, 2));
+        setText('adv-val-disp-peak', safeNumber(data.peak_displacement_mm, 2));
+        setText('adv-val-disp-noise', safeNumber(data.displacement_noise_floor_mm, 3));
+        setText('adv-val-disp-uncert', safeNumber(data.displacement_uncertainty_mm, 3));
+        setText('adv-val-disp-window', Number.isFinite(Number(data.displacement_sample_count)) ? Number(data.displacement_sample_count) : '--');
+        setText('adv-val-disp-dur', safeNumber(data.displacement_window_duration_s, 1));
+
+        setText('adv-val-sats', Number.isFinite(Number(data.num_sats)) ? Number(data.num_sats) : '--');
+        setText('adv-val-hdop', safeNumber(data.hdop, 1));
+
+        if (data.gga_utc) {
+            const utcStr = data.gga_utc.toString();
+            if (utcStr.length >= 6) {
+                setText('adv-val-ts-gga', `${utcStr.substring(0,2)}:${utcStr.substring(2,4)}:${utcStr.substring(4,6)} UTC`);
+            } else {
+                setText('adv-val-ts-gga', data.gga_utc);
+            }
+        } else {
+            setText('adv-val-ts-gga', '--');
+        }
+        if (data.timestamp) {
+            const recvDate = new Date(normalizeEpochMs(data.timestamp));
+            setText('adv-val-ts-recv', recvDate.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + recvDate.getMilliseconds());
+        } else {
+            setText('adv-val-ts-recv', '--');
+        }
+        const now = new Date();
+        setText('adv-val-ts-calc', now.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + now.getMilliseconds());
+    }
+
+    const evalSummaryEl = document.getElementById('gnss-eval-summary');
+    if (!evalSummaryEl) return;
+    evalSummaryEl.style.display = 'block';
+    const integrity = data.integrity || data.data;
+    const integrityState = String(integrity?.integrity_state || '').toUpperCase();
+    if (['REFERENCE_TRANSITION', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'].includes(integrityState)) {
+        const shift2d = Number.isFinite(Number(integrity.shift_2d_m))
+            ? `Δ2D ${Number(integrity.shift_2d_m).toFixed(3)} m` : '';
+        const label = integrityState === 'REFERENCE_TRANSITION'
+            ? `Đang kiểm tra reference ${integrity.candidate_count || 0}/${integrity.candidate_target || 6}`
+            : integrityState === 'UNTRUSTED_GEOMETRY'
+                ? 'RTK FIXED nhưng geometry không đạt ngưỡng monitoring'
+                : `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
+        evalSummaryEl.innerHTML = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
+        return;
+    }
+    let trendHtml = '';
+    const hasConfirmationField = Object.prototype.hasOwnProperty.call(data, 'velocity_confirmed');
+    const movementConfirmed = hasConfirmationField
+        ? data.velocity_confirmed === true
+        : data.velocity_significant === true;
+    const statisticalSignal = data.velocity_statistically_significant === true
+        || (!hasConfirmationField && data.velocity_significant === true);
+    const persistentVelocity = data.velocity_persistent === true;
+    if (movementConfirmed && data.velocity_reliable !== false) {
+        trendHtml = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
+    } else if (data.velocity_reliable === false) {
+        trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
+    } else if (persistentVelocity && data.position_change_significant !== true) {
+        trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
+    } else if (hasConfirmationField && statisticalSignal) {
+        const confirmedSamples = Number.isFinite(Number(data.velocity_confirmation_sample_count))
+            ? Number(data.velocity_confirmation_sample_count)
+            : 0;
+        const requiredSamples = Number.isFinite(Number(data.velocity_confirmation_required_samples))
+            ? Number(data.velocity_confirmation_required_samples)
+            : 3;
+        trendHtml = `<span class="gnss-eval-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
+    } else {
+        trendHtml = `<span class="gnss-eval-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
+    }
+    const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '--';
+    const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
+    const zScore = Number(data.velocity_z_score);
+    const zHtml = Number.isFinite(zScore)
+        ? `<span class="font-monospace">z=${zScore.toFixed(2)}σ / ngưỡng ${Number(data.velocity_min_sigma || 3).toFixed(1)}σ</span>`
+        : '';
+    evalSummaryEl.innerHTML = `
+        <div class="d-flex flex-column gap-1">
+            <div>${trendHtml}</div>
+            <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
+                <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="font-monospace">(${ciStr})</span>` : ''} ${zHtml}
+            </div>
+            <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
+                <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)
+            </div>
+        </div>
+    `;
+}
+
+function _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible) {
+    updateGnssFixBadge(data.fix_mode, data.fix_quality);
+    updateGnssIntegrityStatus(data);
+
+    const velocityMmS = getGnssVelocity(data);
+    if (velocityMmS !== null) {
+        setHTML('val-gnss-vel', `${velocityMmS.toFixed(4)}<span class="sensor-unit">mm/s</span>`);
+    }
+
+    if (data.adv_x !== undefined) {
+        if (advancedVisible) {
+            setText('adv-val-lat', safeNumber(data.adv_x, 3));
+            setText('adv-val-lon', safeNumber(data.adv_y, 3));
+            setText('adv-val-alt', safeNumber(data.adv_h, 3));
+            setText('adv-val-dx', safeNumber(data.adv_dx, 2));
+            setText('adv-val-dy', safeNumber(data.adv_dy, 2));
+            setText('adv-val-dh', safeNumber(data.adv_dh, 2));
+            setText('adv-val-vdx', formatGnssVelocityValue(data.adv_vdx, data, 2));
+            setText('adv-val-vdy', formatGnssVelocityValue(data.adv_vdy, data, 2));
+            setText('adv-val-vdh', formatGnssVelocityValue(data.adv_vdh, data, 2));
+        }
+
+        if (currentStationData?.sensors?.gnss?.latest) {
+            if (!currentStationData.sensors.gnss.latest.data) {
+                currentStationData.sensors.gnss.latest.data = {};
+            }
+            Object.assign(currentStationData.sensors.gnss.latest.data, {
+                lat: data.lat, lon: data.lon, h: data.h,
+                adv_x: data.adv_x, adv_y: data.adv_y, adv_h: data.adv_h,
+                adv_dx: data.adv_dx, adv_dy: data.adv_dy, adv_dh: data.adv_dh,
+                adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh,
+                velocity_method: data.velocity_method,
+                velocity_sample_count: data.velocity_sample_count,
+                velocity_window_duration_s: data.velocity_window_duration_s,
+                velocity_residual_rms_mm: data.velocity_residual_rms_mm,
+                velocity_residual_mad_mm: data.velocity_residual_mad_mm,
+                velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s,
+                velocity_confidence_95_mm_s: data.velocity_confidence_95_mm_s,
+                velocity_detection_threshold_mm_s: data.velocity_detection_threshold_mm_s,
+                velocity_z_score: data.velocity_z_score,
+                velocity_min_sigma: data.velocity_min_sigma,
+                velocity_significant: data.velocity_significant,
+                velocity_statistically_significant: data.velocity_statistically_significant,
+                velocity_persistent: data.velocity_persistent,
+                velocity_confirmed: data.velocity_confirmed,
+                velocity_confirmation_sample_count: data.velocity_confirmation_sample_count,
+                velocity_confirmation_duration_s: data.velocity_confirmation_duration_s,
+                velocity_confirmation_direction_cosine: data.velocity_confirmation_direction_cosine,
+                velocity_confirmation_accepted_sample: data.velocity_confirmation_accepted_sample,
+                velocity_confirmation_min_gap_s: data.velocity_confirmation_min_gap_s,
+                velocity_confirmation_required_samples: data.velocity_confirmation_required_samples,
+                velocity_confirmation_required_duration_s: data.velocity_confirmation_required_duration_s,
+                velocity_reliable: data.velocity_reliable,
+                vel_e: data.vel_e, vel_n: data.vel_n, vel_u: data.vel_u,
+                raw_vel_e_mm_s: data.raw_vel_e_mm_s,
+                raw_vel_n_mm_s: data.raw_vel_n_mm_s,
+                raw_vel_u_mm_s: data.raw_vel_u_mm_s,
+                raw_speed_2d_mm_s: data.raw_speed_2d_mm_s,
+                speed_2d_mm_s: data.speed_2d_mm_s,
+                total_displacement_mm: data.total_displacement_mm,
+                peak_displacement_mm: data.peak_displacement_mm,
+                displacement_noise_floor_mm: data.displacement_noise_floor_mm,
+                displacement_uncertainty_mm: data.displacement_uncertainty_mm,
+                candidate_step_displacement_mm: data.candidate_step_displacement_mm,
+                displacement_change_threshold_mm: data.displacement_change_threshold_mm,
+                position_change_significant: data.position_change_significant,
+                displacement_sample_count: data.displacement_sample_count,
+                integrity: data.integrity || data.data,
+                displacement_window_duration_s: data.displacement_window_duration_s,
+                num_sats: data.num_sats, hdop: data.hdop
+            });
+        }
+    }
+
+    clearGnssEvaluationSummary();
+    if (data.velocity_method === 'theil_sen_enu') {
+        _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible);
+    }
+
+    if (chartsVisible && charts['chart-gnss'] && velocityMmS !== null) {
+        const chart = charts['chart-gnss'];
+        chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        chart.data.datasets[0].data.push(velocityMmS);
+        if (chart.data.labels.length > 50) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update('none');
+    }
+}
+
+function _handleRealtimeRain(data, timestamp, chartsVisible) {
+    const intensity = finiteMetric(data.intensity_mm_h ?? data.intensity);
+    animateValue('val-rain', intensity, 1, 'mm/h');
+
+    if (chartsVisible && charts['chart-rain']) {
+        const chart = charts['chart-rain'];
+        chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        chart.data.datasets[0].data.push(intensity);
+        if (chart.data.labels.length > 50) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update('none');
+    }
+}
+
+function _handleRealtimeWater(data, timestamp, chartsVisible) {
+    const level = finiteMetric(data.water_level ?? data.level ?? data.processed_value_meters);
+    setHTML('val-water', formatWaterLevelDisplay(data));
+    if (chartsVisible && charts['chart-water']) {
+        const chart = charts['chart-water'];
+        chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        chart.data.datasets[0].data.push(level);
+        if (chart.data.labels.length > 50) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update('none');
+    }
+}
+
+function _handleRealtimeImu(data, stationId, timestamp, chartsVisible) {
+    if (stationId && timestamp) {
+        console.debug(`🧭 [IMU][WS] station=${stationId} ts=${timestamp}`, data);
+    }
+    updateImuOfflineBadge(true);
+    animateValue('val-imu-roll', data.raw_roll, 1, '°', true);
+    animateValue('val-imu-pitch', data.raw_pitch, 1, '°', true);
+    animateValue('val-imu-yaw', data.raw_yaw, 1, '°', true);
+
+    setText('val-imu-delta-roll', formatImuDelta(data.roll, 'roll'));
+    setText('val-imu-delta-pitch', formatImuDelta(data.pitch, 'pitch'));
+    setText('val-imu-delta-yaw', formatImuDelta(data.yaw, 'yaw'));
+
+    if (finiteMetric(data.drift_len_mm) !== null && data.drift_dir !== undefined && data.drift_dir !== null) {
+        animateValue('val-imu-drift-len', finiteMetric(data.drift_len_mm) / 10, 1, ' cm', true);
+        setText('val-imu-drift-dir', `(${data.drift_dir})`);
+    } else {
+        updateImuDrift(data.roll, data.pitch);
+    }
+
+    const batteryContainer = document.getElementById('battery-container');
+    const batteryVal = data.battery;
+    if (batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
+        if (batteryContainer) batteryContainer.style.display = '';
+        animateValue('val-battery', batteryVal, 2, 'V');
+    }
+
+    const imuCanvas = document.getElementById('chart-imu');
+    if (chartsVisible && !charts['chart-imu'] && imuCanvas) {
+        renderImuChart(currentStationData?.sensors?.imu?.history || []);
+    }
+    if (chartsVisible && charts['chart-imu']) {
+        const chart = charts['chart-imu'];
+        const ts = Number(timestamp) || Math.floor(Date.now() / 1000);
+        const timeLabel = new Date(normalizeEpochMs(ts)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        chart.data.labels.push(timeLabel);
+        chart.data.datasets[0].data.push(finiteMetric(data.roll));
+        chart.data.datasets[1].data.push(finiteMetric(data.pitch));
+        chart.data.datasets[2].data.push(finiteMetric(data.yaw));
+
+        if (chart.data.labels.length > 50) {
+            chart.data.labels.shift();
+            chart.data.datasets.forEach(ds => ds.data.shift());
+        }
+        chart.update('none');
+    }
+
+    maybeTriggerLocalImuCriticalFallback(stationId, data);
+}
+
 function updateRealtimeSensorValues(message) {
     if (message.sensor_type === 'gnss_adjusted' && message.data) {
         if (!isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return;
@@ -783,322 +1072,15 @@ function updateRealtimeSensorValues(message) {
             chart.update('none');
         });
     }
-    //console.log(`🔄 [REALTIME] ${sensor_type}:`, data);
 
     if (sensor_type === 'gnss' && data) {
-        updateGnssFixBadge(data.fix_mode, data.fix_quality);
-        updateGnssIntegrityStatus(data);
-
-        const velocityMmS = getGnssVelocity(data);
-
-        //console.log('📍 [GNSS] Velocity value:', velocityMmS, 'from data:', data);
-        if (velocityMmS !== null) {
-            setHTML('val-gnss-vel', `${velocityMmS.toFixed(4)}<span class="sensor-unit">mm/s</span>`);
-        }
-
-        // Update Advanced Sidepanel fields if it exists and data is available
-        if (data.adv_x !== undefined) {
-            if (advancedVisible) {
-             // Vị trí hiện tại: VN2000 NEH
-             setText('adv-val-lat', safeNumber(data.adv_x, 3));
-             setText('adv-val-lon', safeNumber(data.adv_y, 3));
-             setText('adv-val-alt', safeNumber(data.adv_h, 3));
-             // Biến dạng lũy kế
-            setText('adv-val-dx', safeNumber(data.adv_dx, 2));
-            setText('adv-val-dy', safeNumber(data.adv_dy, 2));
-            setText('adv-val-dh', safeNumber(data.adv_dh, 2));
-             // Vận tốc biến dạng (mm/phút)
-             setText('adv-val-vdx', formatGnssVelocityValue(data.adv_vdx, data, 2));
-             setText('adv-val-vdy', formatGnssVelocityValue(data.adv_vdy, data, 2));
-             setText('adv-val-vdh', formatGnssVelocityValue(data.adv_vdh, data, 2));
-            }
-
-             // ✅ CACHE: Lưu vào currentStationData để không bị mất khi refresh định kỳ
-             if (currentStationData?.sensors?.gnss?.latest) {
-                 if (!currentStationData.sensors.gnss.latest.data) {
-                     currentStationData.sensors.gnss.latest.data = {};
-                 }
-                 Object.assign(currentStationData.sensors.gnss.latest.data, {
-                     lat: data.lat, lon: data.lon, h: data.h,
-                     adv_x: data.adv_x, adv_y: data.adv_y, adv_h: data.adv_h,
-                     adv_dx: data.adv_dx, adv_dy: data.adv_dy, adv_dh: data.adv_dh,
-                     adv_vdx: data.adv_vdx, adv_vdy: data.adv_vdy, adv_vdh: data.adv_vdh,
-                     velocity_method: data.velocity_method,
-                     velocity_sample_count: data.velocity_sample_count,
-                     velocity_window_duration_s: data.velocity_window_duration_s,
-                     velocity_residual_rms_mm: data.velocity_residual_rms_mm,
-                     velocity_residual_mad_mm: data.velocity_residual_mad_mm,
-                     velocity_uncertainty_mm_s: data.velocity_uncertainty_mm_s,
-                     velocity_confidence_95_mm_s: data.velocity_confidence_95_mm_s,
-                     velocity_detection_threshold_mm_s: data.velocity_detection_threshold_mm_s,
-                     velocity_z_score: data.velocity_z_score,
-                     velocity_min_sigma: data.velocity_min_sigma,
-                     velocity_significant: data.velocity_significant,
-                     velocity_statistically_significant: data.velocity_statistically_significant,
-                     velocity_persistent: data.velocity_persistent,
-                     velocity_confirmed: data.velocity_confirmed,
-                     velocity_confirmation_sample_count: data.velocity_confirmation_sample_count,
-                     velocity_confirmation_duration_s: data.velocity_confirmation_duration_s,
-                     velocity_confirmation_direction_cosine: data.velocity_confirmation_direction_cosine,
-                     velocity_confirmation_accepted_sample: data.velocity_confirmation_accepted_sample,
-                     velocity_confirmation_min_gap_s: data.velocity_confirmation_min_gap_s,
-                     velocity_confirmation_required_samples: data.velocity_confirmation_required_samples,
-                     velocity_confirmation_required_duration_s: data.velocity_confirmation_required_duration_s,
-                     velocity_reliable: data.velocity_reliable,
-                     vel_e: data.vel_e, vel_n: data.vel_n, vel_u: data.vel_u,
-                     raw_vel_e_mm_s: data.raw_vel_e_mm_s,
-                     raw_vel_n_mm_s: data.raw_vel_n_mm_s,
-                     raw_vel_u_mm_s: data.raw_vel_u_mm_s,
-                     raw_speed_2d_mm_s: data.raw_speed_2d_mm_s,
-                     speed_2d_mm_s: data.speed_2d_mm_s,
-                     total_displacement_mm: data.total_displacement_mm,
-                     peak_displacement_mm: data.peak_displacement_mm,
-                     displacement_noise_floor_mm: data.displacement_noise_floor_mm,
-                     displacement_uncertainty_mm: data.displacement_uncertainty_mm,
-                     candidate_step_displacement_mm: data.candidate_step_displacement_mm,
-                     displacement_change_threshold_mm: data.displacement_change_threshold_mm,
-                     position_change_significant: data.position_change_significant,
-                     displacement_sample_count: data.displacement_sample_count,
-                     integrity: data.integrity || data.data,
-                     displacement_window_duration_s: data.displacement_window_duration_s,
-                     num_sats: data.num_sats, hdop: data.hdop
-                 });
-             }
-        }
-
-        // Update Theil-Sen display in both Main Sidebar and Advanced Panel
-        clearGnssEvaluationSummary();
-        if (data.velocity_method === 'theil_sen_enu') {
-            const sampleCount = Number.isFinite(Number(data.velocity_sample_count)) ? Number(data.velocity_sample_count) : '--';
-            const durationS = safeNumber(data.velocity_window_duration_s, 1);
-            const rms = safeNumber(data.velocity_residual_rms_mm, 2);
-            const mad = safeNumber(data.velocity_residual_mad_mm, 2);
-            const uncert = safeNumber(data.velocity_uncertainty_mm_s, 4);
-            const ci95 = safeNumber(data.velocity_confidence_95_mm_s, 4);
-
-            if (advancedVisible) {
-            // Advanced Panel - Theil-Sen section
-            setText('adv-val-method', 'Theil-Sen Robust Estimator');
-            setText('adv-val-samples', sampleCount);
-            setText('adv-val-duration', durationS);
-            setText('adv-val-rms', rms);
-            setText('adv-val-mad', mad);
-            setText('adv-val-uncert', `± ${uncert}`);
-            setText('adv-val-ci95', `± ${ci95}`);
-
-            // Advanced Panel - Raw velocity (trước lọc)
-            setText('adv-val-raw-ve', safeNumber(data.raw_vel_e_mm_s, 4));
-            setText('adv-val-raw-vn', safeNumber(data.raw_vel_n_mm_s, 4));
-            setText('adv-val-raw-vu', safeNumber(data.raw_vel_u_mm_s, 4));
-            setText('adv-val-raw-2d', safeNumber(data.raw_speed_2d_mm_s, 4));
-
-            // Advanced Panel - Filtered velocity (sau Theil-Sen)
-            setText('adv-val-filt-ve', formatGnssVelocityValue(data.vel_e, data, 4));
-            setText('adv-val-filt-vn', formatGnssVelocityValue(data.vel_n, data, 4));
-            setText('adv-val-filt-vu', formatGnssVelocityValue(data.vel_u, data, 4));
-            setText('adv-val-filt-2d', formatGnssVelocityValue(data.speed_2d_mm_s, data, 4));
-
-            // Advanced Panel - Displacement
-            setText('adv-val-disp-total', safeNumber(data.total_displacement_mm, 2));
-            setText('adv-val-disp-peak', safeNumber(data.peak_displacement_mm, 2));
-            setText('adv-val-disp-noise', safeNumber(data.displacement_noise_floor_mm, 3));
-            setText('adv-val-disp-uncert', safeNumber(data.displacement_uncertainty_mm, 3));
-            setText('adv-val-disp-window', Number.isFinite(Number(data.displacement_sample_count)) ? Number(data.displacement_sample_count) : '--');
-            setText('adv-val-disp-dur', safeNumber(data.displacement_window_duration_s, 1));
-
-            // Advanced Panel - GNSS quality
-            setText('adv-val-sats', Number.isFinite(Number(data.num_sats)) ? Number(data.num_sats) : '--');
-            setText('adv-val-hdop', safeNumber(data.hdop, 1));
-
-            // Advanced Panel - Timestamps
-            if (data.gga_utc) {
-                const utcStr = data.gga_utc.toString();
-                if (utcStr.length >= 6) {
-                    setText('adv-val-ts-gga', `${utcStr.substring(0,2)}:${utcStr.substring(2,4)}:${utcStr.substring(4,6)} UTC`);
-                } else {
-                    setText('adv-val-ts-gga', data.gga_utc);
-                }
-            } else {
-                setText('adv-val-ts-gga', '--');
-            }
-            if (data.timestamp) {
-                const recvDate = new Date(normalizeEpochMs(data.timestamp));
-                setText('adv-val-ts-recv', recvDate.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + recvDate.getMilliseconds());
-            } else {
-                setText('adv-val-ts-recv', '--');
-            }
-            const now = new Date();
-            setText('adv-val-ts-calc', now.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + now.getMilliseconds());
-            }
-
-            // Main sidebar eval summary — use backend flag, no UI-side filtering
-            const evalSummaryEl = document.getElementById('gnss-eval-summary');
-            if (evalSummaryEl) {
-                evalSummaryEl.style.display = 'block';
-                const integrity = data.integrity || data.data;
-                const integrityState = String(integrity?.integrity_state || '').toUpperCase();
-                if (['REFERENCE_TRANSITION', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'].includes(integrityState)) {
-                    const shift2d = Number.isFinite(Number(integrity.shift_2d_m))
-                        ? `Δ2D ${Number(integrity.shift_2d_m).toFixed(3)} m` : '';
-                    const label = integrityState === 'REFERENCE_TRANSITION'
-                        ? `Đang kiểm tra reference ${integrity.candidate_count || 0}/${integrity.candidate_target || 6}`
-                        : integrityState === 'UNTRUSTED_GEOMETRY'
-                            ? 'RTK FIXED nhưng geometry không đạt ngưỡng monitoring'
-                            : `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
-                    evalSummaryEl.innerHTML = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
-                    return;
-                }
-                let trendHtml = '';
-                const hasConfirmationField = Object.prototype.hasOwnProperty.call(data, 'velocity_confirmed');
-                const movementConfirmed = hasConfirmationField
-                    ? data.velocity_confirmed === true
-                    : data.velocity_significant === true;
-                const statisticalSignal = data.velocity_statistically_significant === true
-                    || (!hasConfirmationField && data.velocity_significant === true);
-                const persistentVelocity = data.velocity_persistent === true;
-                if (movementConfirmed && data.velocity_reliable !== false) {
-                    trendHtml = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
-                } else if (data.velocity_reliable === false) {
-                    trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
-                } else if (persistentVelocity && data.position_change_significant !== true) {
-                    trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
-                } else if (hasConfirmationField && statisticalSignal) {
-                    const confirmedSamples = Number.isFinite(Number(data.velocity_confirmation_sample_count))
-                        ? Number(data.velocity_confirmation_sample_count)
-                        : 0;
-                    const requiredSamples = Number.isFinite(Number(data.velocity_confirmation_required_samples))
-                        ? Number(data.velocity_confirmation_required_samples)
-                        : 3;
-                    trendHtml = `<span class="gnss-eval-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
-                } else {
-                    trendHtml = `<span class="gnss-eval-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
-                }
-                const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '--';
-                const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
-                const zScore = Number(data.velocity_z_score);
-                const zHtml = Number.isFinite(zScore)
-                    ? `<span class="font-monospace">z=${zScore.toFixed(2)}σ / ngưỡng ${Number(data.velocity_min_sigma || 3).toFixed(1)}σ</span>`
-                    : '';
-                evalSummaryEl.innerHTML = `
-                    <div class="d-flex flex-column gap-1">
-                        <div>${trendHtml}</div>
-                        <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="font-monospace">(${ciStr})</span>` : ''} ${zHtml}
-                        </div>
-                        <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
-                            <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)
-                        </div>
-                    </div>
-                `;
-            }
-        }
-
-        if (chartsVisible && charts['chart-gnss']) {
-            const chart = charts['chart-gnss'];
-            if (velocityMmS !== null) {
-                chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-                chart.data.datasets[0].data.push(velocityMmS);
-
-                if (chart.data.labels.length > 50) {
-                    chart.data.labels.shift();
-                    chart.data.datasets[0].data.shift();
-                }
-
-                chart.update('none');
-            }
-        }
-    }
-
-    if (sensor_type === 'rain' && data) {
-        const intensity = finiteMetric(data.intensity_mm_h ?? data.intensity);
-        animateValue('val-rain', intensity, 1, 'mm/h');
-
-        if (chartsVisible && charts['chart-rain']) {
-            const chart = charts['chart-rain'];
-            chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-            chart.data.datasets[0].data.push(intensity);
-
-            if (chart.data.labels.length > 50) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
-
-            chart.update('none');
-        }
-    }
-
-    if (sensor_type === 'water' && data) {
-        const level = finiteMetric(data.water_level ?? data.level ?? data.processed_value_meters);
-        setHTML('val-water', formatWaterLevelDisplay(data));
-        console.log('💧 [WATER] Level value:', level, 'from data:', data);
-        if (chartsVisible && charts['chart-water']) {
-            const chart = charts['chart-water'];
-            chart.data.labels.push(new Date(normalizeEpochMs(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-            chart.data.datasets[0].data.push(level);
-
-            if (chart.data.labels.length > 50) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
-
-            chart.update('none');
-        }
-    }
-
-    if (sensor_type === 'imu' && data) {
-        if (stationId && timestamp) {
-            console.debug(`🧭 [IMU][WS] station=${stationId} ts=${timestamp}`, data);
-        }
-        updateImuOfflineBadge(true);
-        animateValue('val-imu-roll', data.raw_roll, 1, '°', true);
-        animateValue('val-imu-pitch', data.raw_pitch, 1, '°', true);
-        animateValue('val-imu-yaw', data.raw_yaw, 1, '°', true);
-
-        // Delta values (secondary display) — với mũi tên hướng lệch
-        setText('val-imu-delta-roll', formatImuDelta(data.roll, 'roll'));
-        setText('val-imu-delta-pitch', formatImuDelta(data.pitch, 'pitch'));
-        setText('val-imu-delta-yaw', formatImuDelta(data.yaw, 'yaw'));
-
-        // Use backend drift calculation if available, fallback to JS
-        if (finiteMetric(data.drift_len_mm) !== null && data.drift_dir !== undefined && data.drift_dir !== null) {
-            animateValue('val-imu-drift-len', finiteMetric(data.drift_len_mm) / 10, 1, ' cm', true);
-            setText('val-imu-drift-dir', `(${data.drift_dir})`);
-        } else {
-            updateImuDrift(data.roll, data.pitch);
-        }
-
-        // Update battery in real-time
-        const batteryContainer = document.getElementById('battery-container');
-        const batteryVal = data.battery;
-        if (batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
-            if (batteryContainer) batteryContainer.style.display = '';
-            animateValue('val-battery', batteryVal, 2, 'V');
-        }
-
-        // Update IMU chart in real-time
-        const imuCanvas = document.getElementById('chart-imu');
-        if (chartsVisible && !charts['chart-imu'] && imuCanvas) {
-            renderImuChart(currentStationData?.sensors?.imu?.history || []);
-        }
-        if (chartsVisible && charts['chart-imu']) {
-            const chart = charts['chart-imu'];
-            const ts = Number(timestamp) || Math.floor(Date.now() / 1000);
-            const timeLabel = new Date(normalizeEpochMs(ts)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            chart.data.labels.push(timeLabel);
-            chart.data.datasets[0].data.push(finiteMetric(data.roll));
-            chart.data.datasets[1].data.push(finiteMetric(data.pitch));
-            chart.data.datasets[2].data.push(finiteMetric(data.yaw));
-
-            if (chart.data.labels.length > 50) {
-                chart.data.labels.shift();
-                chart.data.datasets.forEach(ds => ds.data.shift());
-            }
-
-            chart.update('none');
-        }
-
-        // Fallback phía client: vẫn báo đỏ/banner nếu IMU vượt ngưỡng nhưng backend chưa phát alert.
-        maybeTriggerLocalImuCriticalFallback(stationId, data);
+        _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible);
+    } else if (sensor_type === 'rain' && data) {
+        _handleRealtimeRain(data, timestamp, chartsVisible);
+    } else if (sensor_type === 'water' && data) {
+        _handleRealtimeWater(data, timestamp, chartsVisible);
+    } else if (sensor_type === 'imu' && data) {
+        _handleRealtimeImu(data, stationId, timestamp, chartsVisible);
     }
 }
 

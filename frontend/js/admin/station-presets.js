@@ -245,6 +245,48 @@ class AdminStationPresetsFeature extends window.AdminManager {
         return confirm(message);
     }
 
+    _collectSensorConfig(type) {
+        const checkbox = document.getElementById(`edit-${type}`);
+        if (!checkbox || !checkbox.checked) return null;
+
+        const topicInput = document.getElementById(`topic-${type}`);
+        const topic = topicInput?.value?.trim();
+        if (!topic) {
+            window.toast?.error(`Vui lòng nhập MQTT Topic cho ${type.toUpperCase()}`);
+            topicInput?.focus();
+            return { error: true };
+        }
+
+        const mqttHost = document.getElementById(`cfg-${type}-mqtt-host`)?.value?.trim() || null;
+        const mqttPort = document.getElementById(`cfg-${type}-mqtt-port`)?.value ? parseInt(document.getElementById(`cfg-${type}-mqtt-port`).value) : null;
+        const mqttTls = !!document.getElementById(`cfg-${type}-mqtt-tls`)?.checked;
+        const mqttUser = document.getElementById(`cfg-${type}-mqtt-user`)?.value?.trim() || null;
+        const mqttPass = document.getElementById(`cfg-${type}-mqtt-pass`)?.value?.trim() || null;
+
+        const cfg = { 
+            topic: topic,
+            mqtt: {
+                host: mqttHost,
+                port: mqttPort,
+                use_tls: mqttTls,
+                username: mqttUser,
+                password: mqttPass
+            }
+        };
+
+        const prefix = type === 'gnss' ? 'origin' : `origin-${type}`;
+        const lat = document.getElementById(`${prefix}-lat`)?.value;
+        const lon = document.getElementById(`${prefix}-lon`)?.value;
+        const h = document.getElementById(`${prefix}-h`)?.value;
+
+        if (lat && lon) {
+            cfg.lat = parseFloat(lat);
+            cfg.lon = parseFloat(lon);
+            cfg.h = parseFloat(h) || 0;
+        }
+        return { config: cfg };
+    }
+
     async saveStation() {
         const code = document.getElementById('edit-code').value.trim();
         const name = document.getElementById('edit-name').value.trim();
@@ -257,63 +299,15 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
         const sensors = {};
         const sensorTypes = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
-        let hasError = false;
 
-        sensorTypes.forEach(type => {
-            const checkbox = document.getElementById(`edit-${type}`);
-            if (checkbox && checkbox.checked) {
-                const topicInput = document.getElementById(`topic-${type}`);
-                const topic = topicInput?.value?.trim();
-
-                if (!topic) {
-                    window.toast?.error(`Vui lòng nhập MQTT Topic cho ${type.toUpperCase()}`);
-                    topicInput?.focus();
-                    hasError = true;
-                    return;
-                }
-
-                const mqttHost = document.getElementById(`cfg-${type}-mqtt-host`)?.value?.trim() || null;
-                const mqttPort = document.getElementById(`cfg-${type}-mqtt-port`)?.value ? parseInt(document.getElementById(`cfg-${type}-mqtt-port`).value) : null;
-                const mqttTls = !!document.getElementById(`cfg-${type}-mqtt-tls`)?.checked;
-                const mqttUser = document.getElementById(`cfg-${type}-mqtt-user`)?.value?.trim() || null;
-                const mqttPass = document.getElementById(`cfg-${type}-mqtt-pass`)?.value?.trim() || null;
-
-                sensors[type] = { 
-                    topic: topic,
-                    mqtt: {
-                        host: mqttHost,
-                        port: mqttPort,
-                        use_tls: mqttTls,
-                        username: mqttUser,
-                        password: mqttPass
-                    }
-                };
-
-                if (type === 'gnss') {
-                    const lat = document.getElementById('origin-lat').value;
-                    const lon = document.getElementById('origin-lon').value;
-                    const h = document.getElementById('origin-h').value;
-
-                    if (lat && lon) {
-                        sensors[type].lat = parseFloat(lat);
-                        sensors[type].lon = parseFloat(lon);
-                        sensors[type].h = parseFloat(h) || 0;
-                    }
-                } else {
-                    const lat = document.getElementById(`origin-${type}-lat`)?.value;
-                    const lon = document.getElementById(`origin-${type}-lon`)?.value;
-                    const h = document.getElementById(`origin-${type}-h`)?.value;
-
-                    if (lat && lon) {
-                        sensors[type].lat = parseFloat(lat);
-                        sensors[type].lon = parseFloat(lon);
-                        sensors[type].h = parseFloat(h) || 0;
-                    }
-                }
+        for (const type of sensorTypes) {
+            const res = this._collectSensorConfig(type);
+            if (res) {
+                if (res.error) return;
+                sensors[type] = res.config;
             }
-        });
+        }
 
-        if (hasError) return;
         if (typeof this.validateAllMqttTopics === 'function' && !(await this.validateAllMqttTopics())) {
             window.toast?.error('MQTT topic đang bị trùng hoặc chưa hợp lệ');
             return;

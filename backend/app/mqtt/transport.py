@@ -130,32 +130,40 @@ class MQTTTransportMixin:
 
         return match.group(0).decode('ascii', errors='ignore').strip()
 
+    def _resolve_topic_info(self, userdata, topic):
+        if isinstance(userdata, tuple) and len(userdata) >= 5:
+            broker_key = userdata
+        else:
+            broker_key = (
+                self.runtime_mqtt["broker"],
+                self.runtime_mqtt["port"],
+                self.runtime_mqtt["user"] or None,
+                self.runtime_mqtt["password"] or None,
+                False
+            )
+        info = self.topic_map.get((broker_key, topic))
+        if not info:
+            tls_key = (broker_key[0], broker_key[1], broker_key[2], broker_key[3], True)
+            info = self.topic_map.get((tls_key, topic))
+        return info, broker_key
+
+    @staticmethod
+    def _decode_incoming_payload(sensor_type, payload_bytes):
+        try:
+            if sensor_type == 'gnss':
+                return payload_bytes.decode('utf-8', errors='ignore').strip()
+            return payload_bytes.decode('utf-8').strip()
+        except UnicodeDecodeError:
+            return None
+
     def on_message(self, client, userdata, msg):
         try:
             topic = msg.topic
-            
             if topic.startswith("command/ntrip/"):
                 self._handle_ntrip_command(msg)
                 return
-            
-            # Resolve the correct broker key for lookup
-            if isinstance(userdata, tuple) and len(userdata) >= 5:
-                broker_key = userdata
-            else:
-                # Default client's broker key
-                broker_key = (
-                    self.runtime_mqtt["broker"],
-                    self.runtime_mqtt["port"],
-                    self.runtime_mqtt["user"] or None,
-                    self.runtime_mqtt["password"] or None,
-                    False
-                )
-                
-            info = self.topic_map.get((broker_key, topic))
-            if not info:
-                # Fallback to check with TLS=True in case default client gets hit
-                info = self.topic_map.get(((broker_key[0], broker_key[1], broker_key[2], broker_key[3], True), topic))
-                
+
+            info, broker_key = self._resolve_topic_info(userdata, topic)
             if not info:
                 if self._diag_should_log(f"unknown_topic:{broker_key}:{topic}", 60):
                     logger.warning(f"[MQTT] Received message from {broker_key[0]}:{broker_key[1]} on unknown topic: {topic}")
@@ -167,45 +175,27 @@ class MQTTTransportMixin:
                 if station_code:
                     from app.mqtt.ntrip_pusher import ntrip_manager
                     ntrip_manager.feed_data(station_code, msg.payload)
-                # Inspect the original bytes before text decoding. RTCM is binary
-                # and is intentionally discarded by the normal sensor pipeline.
                 self.round_robin_manager.observe_gnss_payload(info, msg.payload)
-                    
-            try:
-                if sensor_type == 'gnss':
-                    # Decode full text payload, retaining AGRICA and other sentences
-                    payload_str = msg.payload.decode('utf-8', errors='ignore')
-                    decrypted_payload = payload_str.strip()
-                else:
-                    payload_str = msg.payload.decode('utf-8')
-                    decrypted_payload = payload_str.strip()
 
-                if sensor_type == 'gnss' and not decrypted_payload:
-                    # Binary RTCM is still device activity, even without text
-                    # for the position-processing pipeline.
-                    if msg.payload:
-                        self._submit_threadsafe(
-                            self._touch_online_heartbeat(info["device_id"], info["station_id"], int(time.time())),
-                            "gnss-heartbeat",
-                        )
-                    return
-
-                if sensor_type == 'gnss':
-                    # SET socket data only proves that AICaster echoed the bytes.
-                    # Receiver acceptance is reported on this rover's own GNSS
-                    # MQTT topic as: exact command echo, then OK/ERROR.
-                    self.round_robin_manager.add_receiver_command_payload(
-                        decrypted_payload,
-                        info,
-                        topic,
+            decrypted_payload = self._decode_incoming_payload(sensor_type, msg.payload)
+            if sensor_type == 'gnss' and not decrypted_payload:
+                if msg.payload:
+                    self._submit_threadsafe(
+                        self._touch_online_heartbeat(info["device_id"], info["station_id"], int(time.time())),
+                        "gnss-heartbeat",
                     )
-                
-            except UnicodeDecodeError:
-                return # Bỏ qua dữ liệu nhị phân (RTCM)
+                return
+
+            if sensor_type == 'gnss' and decrypted_payload:
+                self.round_robin_manager.add_receiver_command_payload(
+                    decrypted_payload,
+                    info,
+                    topic,
+                )
 
             if not decrypted_payload:
                 return
-            
+
             self._submit_threadsafe(
                 self.process_pipeline(info, decrypted_payload),
                 "sensor-pipeline",

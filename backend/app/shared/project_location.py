@@ -86,6 +86,23 @@ def utm48_to_wgs84(easting: float, northing: float) -> tuple[float, float]:
     return (round(math.degrees(lat), 7), round(math.degrees(lon), 7))
 
 
+async def _dem_center_point(db, project_id):
+    try:
+        from .project_dem_db import get_project_dem_models
+        models = await get_project_dem_models(db, project_id)
+        if not models:
+            return None
+        first = models[0]
+        keys = ("xllcorner", "yllcorner", "ncols", "nrows", "cellsize")
+        if all(first.get(k) is not None for k in keys):
+            ec = float(first["xllcorner"]) + (float(first["ncols"]) * float(first["cellsize"])) / 2.0
+            nc = float(first["yllcorner"]) + (float(first["nrows"]) * float(first["cellsize"])) / 2.0
+            return utm48_to_wgs84(ec, nc)
+    except Exception:
+        pass
+    return None
+
+
 async def save_project_map_position(db, project, position=None):
     if position is not None:
         validate_map_position(position)
@@ -99,17 +116,7 @@ async def save_project_map_position(db, project, position=None):
         points = [point for row in rows if (point := coordinates(row)) is not None]
         point = tuple(round(sum(values) / len(points), 8) for values in zip(*points)) if points else None
         if point is None:
-            try:
-                from .project_dem_db import get_project_dem_models
-                models = await get_project_dem_models(db, project.id)
-                if models:
-                    first = models[0]
-                    if all(first.get(k) is not None for k in ("xllcorner", "yllcorner", "ncols", "nrows", "cellsize")):
-                        ec = float(first["xllcorner"]) + (float(first["ncols"]) * float(first["cellsize"])) / 2.0
-                        nc = float(first["yllcorner"]) + (float(first["nrows"]) * float(first["cellsize"])) / 2.0
-                        point = utm48_to_wgs84(ec, nc)
-            except Exception:
-                pass
+            point = await _dem_center_point(db, project.id)
     location.update(map_mode=mode, lat=point[0] if point else None, lon=point[1] if point else None)
     project.location = location
 

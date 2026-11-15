@@ -358,6 +358,70 @@ class AdminProjectConfigFeature extends window.AdminManager {
         }
     }
 
+    _parseClusterRow(row) {
+        const name = row.querySelector('.cluster-name')?.value.trim();
+        if (!name) return null;
+
+        const desc = row.querySelector('.cluster-desc')?.value.trim() || '';
+        const baseSelect = row.querySelector('.cluster-base-select');
+        const baseStation = baseSelect?.value || '';
+        const selectedOpt = baseSelect?.options[baseSelect.selectedIndex];
+        const baseLat = selectedOpt?.dataset?.lat ? parseFloat(selectedOpt.dataset.lat) : null;
+        const baseLon = selectedOpt?.dataset?.lon ? parseFloat(selectedOpt.dataset.lon) : null;
+        const baseAlt = selectedOpt?.dataset?.alt ? parseFloat(selectedOpt.dataset.alt) : null;
+        const backupSelect = row.querySelector('.cluster-backup-base-select');
+        const backupOpt = backupSelect?.options[backupSelect.selectedIndex];
+        const backupStreamSelect = row.querySelector('.cluster-backup-stream-select');
+        const primaryStreamSelect = row.querySelector('.cluster-stream-select');
+        const st = Array.from(row.querySelectorAll('.station-checkbox:checked')).map(c => c.value);
+        const conflictBasesSelect = row.querySelector('.cluster-conflict-bases-select');
+        const conflictBases = conflictBasesSelect ? Array.from(conflictBasesSelect.selectedOptions).map(opt => ({
+            serial: opt.value,
+            name: opt.dataset.name
+        })) : [];
+
+        const backupBaseStation = backupSelect?.value || '';
+        const backupStreamHost = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.host || '') : '';
+        const backupStreamMp = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
+        const primaryStreamMp = primaryStreamSelect?.selectedIndex >= 0 ? (primaryStreamSelect.options[primaryStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
+        let error = '';
+        if (backupBaseStation && backupBaseStation === baseStation) {
+            error = `${name}: base dự phòng phải khác base chính.`;
+        } else if (backupBaseStation && (!backupStreamHost || !backupStreamMp)) {
+            error = `${name}: hãy chọn đúng luồng CORS S1/S2 cho base dự phòng.`;
+        } else if (backupBaseStation && backupStreamMp !== primaryStreamMp) {
+            error = `${name}: luồng S2 dự phòng phải gửi vào cùng mountpoint của S1 chính.`;
+        }
+
+        const cluster = {
+            name, description: desc,
+            base_station: baseStation,
+            base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt,
+            base_stream: row.querySelector('.cluster-stream-select')?.value || '',
+            base_stream_host: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.host || '') : '',
+            base_stream_port: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.port || '') : '',
+            base_stream_mp: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.mp || '') : '',
+            base_service_config: selectedOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(selectedOpt.dataset.serviceConfig)) : {},
+            base_serial: selectedOpt?.dataset?.serial || '',
+            base_server_id: row.querySelector('.cluster-stream-select')?.selectedIndex >= 0 ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.serverId || '') : '',
+            backup_base_station: backupBaseStation,
+            backup_base_lat: backupOpt?.dataset?.lat ? parseFloat(backupOpt.dataset.lat) : null,
+            backup_base_lon: backupOpt?.dataset?.lon ? parseFloat(backupOpt.dataset.lon) : null,
+            backup_base_alt: backupOpt?.dataset?.alt ? parseFloat(backupOpt.dataset.alt) : null,
+            backup_base_stream: backupStreamSelect?.value || '',
+            backup_base_stream_host: backupStreamHost,
+            backup_base_stream_port: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.port || '') : '',
+            backup_base_stream_mp: backupStreamMp,
+            backup_base_service_config: backupOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(backupOpt.dataset.serviceConfig)) : {},
+            backup_base_serial: backupOpt?.dataset?.serial || '',
+            backup_base_server_id: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.serverId || '') : '',
+            cluster_type: row.querySelector('.cluster-type')?.value || 'normal',
+            conflict_bases: conflictBases,
+            stations: st
+        };
+        return { cluster, error };
+    }
+
     async saveProjectConfig() {
         if (document.getElementById('project-config-save-btn')?.disabled) return;
         const projectId = this.currentProjectId;
@@ -379,63 +443,10 @@ class AdminProjectConfigFeature extends window.AdminManager {
         const clusters = [];
         let clusterConfigError = '';
         document.querySelectorAll('#project-gnss-clusters-container .cluster-row').forEach(row => {
-            const name = row.querySelector('.cluster-name').value.trim();
-            if (name) {
-                const desc = row.querySelector('.cluster-desc').value.trim();
-                const baseSelect = row.querySelector('.cluster-base-select');
-                const baseStation = baseSelect?.value || '';
-                const selectedOpt = baseSelect?.options[baseSelect.selectedIndex];
-                const baseLat = selectedOpt?.dataset?.lat ? parseFloat(selectedOpt.dataset.lat) : null;
-                const baseLon = selectedOpt?.dataset?.lon ? parseFloat(selectedOpt.dataset.lon) : null;
-                const baseAlt = selectedOpt?.dataset?.alt ? parseFloat(selectedOpt.dataset.alt) : null;
-                const backupSelect = row.querySelector('.cluster-backup-base-select');
-                const backupOpt = backupSelect?.options[backupSelect.selectedIndex];
-                const backupStreamSelect = row.querySelector('.cluster-backup-stream-select');
-                const primaryStreamSelect = row.querySelector('.cluster-stream-select');
-                const st = Array.from(row.querySelectorAll('.station-checkbox:checked')).map(c => c.value);
-                const conflictBasesSelect = row.querySelector('.cluster-conflict-bases-select');
-                const conflictBases = conflictBasesSelect ? Array.from(conflictBasesSelect.selectedOptions).map(opt => ({
-                    serial: opt.value,
-                    name: opt.dataset.name
-                })) : [];
-                
-                const backupBaseStation = backupSelect?.value || '';
-                const backupStreamHost = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.host || '') : '';
-                const backupStreamMp = backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
-                const primaryStreamMp = primaryStreamSelect?.selectedIndex >= 0 ? (primaryStreamSelect.options[primaryStreamSelect.selectedIndex]?.dataset?.mp || '') : '';
-                if (backupBaseStation && backupBaseStation === baseStation) {
-                    clusterConfigError ||= `${name}: base dự phòng phải khác base chính.`;
-                } else if (backupBaseStation && (!backupStreamHost || !backupStreamMp)) {
-                    clusterConfigError ||= `${name}: hãy chọn đúng luồng CORS S1/S2 cho base dự phòng.`;
-                } else if (backupBaseStation && backupStreamMp !== primaryStreamMp) {
-                    clusterConfigError ||= `${name}: luồng S2 dự phòng phải gửi vào cùng mountpoint của S1 chính.`;
-                }
-                clusters.push({
-                    name, description: desc,
-                    base_station: baseStation,
-                    base_lat: baseLat, base_lon: baseLon, base_alt: baseAlt,
-                    base_stream: row.querySelector('.cluster-stream-select')?.value || '',
-                    base_stream_host: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.host || '') : '',
-                    base_stream_port: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.port || '') : '',
-                    base_stream_mp: (row.querySelector('.cluster-stream-select')?.selectedIndex >= 0) ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.mp || '') : '',
-                    base_service_config: selectedOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(selectedOpt.dataset.serviceConfig)) : {},
-                    base_serial: selectedOpt?.dataset?.serial || '',
-                    base_server_id: row.querySelector('.cluster-stream-select')?.selectedIndex >= 0 ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.serverId || '') : '',
-                    backup_base_station: backupBaseStation,
-                    backup_base_lat: backupOpt?.dataset?.lat ? parseFloat(backupOpt.dataset.lat) : null,
-                    backup_base_lon: backupOpt?.dataset?.lon ? parseFloat(backupOpt.dataset.lon) : null,
-                    backup_base_alt: backupOpt?.dataset?.alt ? parseFloat(backupOpt.dataset.alt) : null,
-                    backup_base_stream: backupStreamSelect?.value || '',
-                    backup_base_stream_host: backupStreamHost,
-                    backup_base_stream_port: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.port || '') : '',
-                    backup_base_stream_mp: backupStreamMp,
-                    backup_base_service_config: backupOpt?.dataset?.serviceConfig ? JSON.parse(decodeURIComponent(backupOpt.dataset.serviceConfig)) : {},
-                    backup_base_serial: backupOpt?.dataset?.serial || '',
-                    backup_base_server_id: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.serverId || '') : '',
-                    cluster_type: row.querySelector('.cluster-type')?.value || 'normal',
-                    conflict_bases: conflictBases,
-                    stations: st
-                });
+            const parsed = this._parseClusterRow(row);
+            if (parsed) {
+                if (parsed.error) clusterConfigError ||= parsed.error;
+                clusters.push(parsed.cluster);
             }
         });
 
