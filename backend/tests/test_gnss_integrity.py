@@ -565,7 +565,7 @@ class GnssFixedOnlyTests(unittest.TestCase):
         self.assertTrue(shifted_results)
         self.assertNotIn("TRACKING_REACQUIRED", {result.get("status") for result in shifted_results})
         quarantined = next(result for result in shifted_results if result.get("status") == "UNVERIFIED_POSITION_SHIFT")
-        self.assertEqual(quarantined["data"]["possible_ground_movement"], True)
+        self.assertTrue(quarantined["data"]["possible_ground_movement"])
         self.assertIn("shift_e_m", quarantined["data"])
         self.assertLess(float(processor.history[-1]["pos_enu"][0]), 0.01)
         self.assertLess(float(processor.disp_enu_state[0]), 0.01)

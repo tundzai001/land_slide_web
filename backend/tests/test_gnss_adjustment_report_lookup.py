@@ -165,9 +165,10 @@ class GnssAdjustmentReportLookupTests(unittest.IsolatedAsyncioTestCase):
                 return await super(TimeoutOnEvidence, inner_self).execute(statement)
 
         phases = []
+        timeout_session = TimeoutOnEvidence(self.db)
         with self.assertRaisesRegex(TimeoutError, "evidence query timed out"):
             await find_adjustment(
-                TimeoutOnEvidence(self.db),
+                timeout_session,
                 project_id=17,
                 requested_url=url,
                 request_id="request-test",

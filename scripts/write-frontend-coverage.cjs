@@ -8,12 +8,13 @@ async function main() {
   if (!directory) throw new Error('FRONTEND_COVERAGE_DIR is required');
   const coverage = createCoverageMap({});
   for (const name of readdirSync(directory).filter(name => name.endsWith('.json'))) {
-    for (const entry of JSON.parse(readFileSync(join(directory, name), 'utf8'))) {
+    const entries = JSON.parse(readFileSync(join(directory, name), 'utf8'));
+    await Promise.all(entries.map(async entry => {
       const converter = v8toIstanbul(entry.path);
       await converter.load();
       converter.applyCoverage(entry.functions);
       coverage.merge(converter.toIstanbul());
-    }
+    }));
   }
   if (!coverage.files().length) throw new Error('No frontend source coverage was collected');
   let lcov = '';

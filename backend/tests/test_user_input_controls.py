@@ -73,7 +73,7 @@ class UserInputControlTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.put("/api/admin/users/2/status", json=payload)
             self.assertEqual(response.status_code, 422, response.text)
         response = await self.client.put("/api/admin/users/2/status", json={"is_active": False})
-        self.assertEqual(response.json()["is_active"], False)
+        self.assertFalse(response.json()["is_active"])
         self.actor.id = 2
         response = await self.client.put("/api/admin/users/2/status", json={"is_active": False})
         self.assertEqual(response.status_code, 400)

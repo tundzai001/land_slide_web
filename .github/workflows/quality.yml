@@ -34,7 +34,7 @@ jobs:
           AUTH_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_auth
           CONFIG_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_config
           DATA_DB_URL: postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_data
-        run: python -m pytest backend/tests -q --disable-warnings --tb=short --show-capture=no --cov=backend/app --cov=field_unit --cov-report=xml:coverage.xml
+        run: python -m pytest backend/tests -q --disable-warnings --tb=short --show-capture=no --cov=backend/app --cov=backend/processors --cov=field_unit --cov-report=xml:coverage.xml
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -110,9 +110,9 @@ jobs:
             -Dsonar.projectKey=tundzai001_land_slide_web
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.javascript.lcov.reportPaths=coverage-js/lcov.info
-            -Dsonar.sources=.
+            -Dsonar.sources=backend/app,backend/processors,field_unit,frontend
             -Dsonar.tests=backend/tests,tests
-            -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**
+            -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
             -Dsonar.qualitygate.wait=true
 
   release-package:

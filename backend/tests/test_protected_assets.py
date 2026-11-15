@@ -86,10 +86,11 @@ class ProtectedAssetTests(unittest.TestCase):
             "gnss_adjustment_18_1700000000.json",
             "gnss_adjustment_17_1700000000.html",
         ):
+            req = _request()
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(
                     gnss_adjustment_reports.download_gnss_adjustment_report(
-                        _request(), 17, invalid_name, db, user
+                        req, 17, invalid_name, db, user
                     )
                 )
             self.assertEqual(raised.exception.status_code, 404)
@@ -97,10 +98,11 @@ class ProtectedAssetTests(unittest.TestCase):
     def test_operator_cannot_download_another_projects_report(self):
         user = SimpleNamespace(role="operator", assigned_projects=[99])
         db = _ProjectSession(SimpleNamespace(id=17))
+        req = _request()
         with self.assertRaises(HTTPException) as raised:
             asyncio.run(
                 gnss_adjustment_reports.download_gnss_adjustment_report(
-                    _request(), 17, "gnss_adjustment_17_1700000000.json", db, user
+                    req, 17, "gnss_adjustment_17_1700000000.json", db, user
                 )
             )
         self.assertEqual(raised.exception.status_code, 403)

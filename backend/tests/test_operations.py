@@ -81,7 +81,8 @@ def test_admin_only_and_persistent_schedule_with_audit():
         assert browser.get('/api/admin/operations/backups').json()['schedule']['next_at'] == 1800000000
         assert browser.put('/api/admin/operations/backup-schedule', json={'frequency': 'hourly'}).status_code == 422
         result = browser.get('/api/admin/operations/logs?username=tester&limit=2').json()
-        assert result['total'] >= 2 and len(result['rows']) == 2
+        assert result['total'] >= 2
+        assert len(result['rows']) == 2
     assert store.get_setting('backup_schedule')['frequency'] == 'daily'
     assert any(row['details']['changes'] for row in store.query('audit_log', limit=100)['rows'] if row['action'].startswith('PUT'))
 
@@ -114,7 +115,8 @@ def test_audit_before_after_bulk_and_rollback_are_redacted():
         assert browser.post('/api/admin/change').status_code == 200
     log = store.query('audit_log')['rows'][0]
     encoded = json.dumps(log)
-    assert 'password-secret' not in encoded and 'new-secret' not in encoded
+    assert 'password-secret' not in encoded
+    assert 'new-secret' not in encoded
     changes = log['details']['changes']
     assert changes[0]['changes']['role'] == {'old': 'viewer', 'new': 'operator'}
     assert changes[1]['old'][0]['full_name'] is None
@@ -245,7 +247,8 @@ def test_backup_creation_and_isolated_restore_never_target_live_database():
         with patch.object(backups, 'DATABASES', {key: engine for key in ['auth','config','data']}), patch.object(backups.shutil, 'which', return_value='/pg_restore'), patch.object(backups, 'run_tool', side_effect=fake_restore):
             await backups.restore('d' * 32, 'c' * 32)
         result = backups.job('d' * 32)
-        assert result['status'] == 'completed' and result['live_database_changed'] is False
+        assert result['status'] == 'completed'
+        assert result['live_database_changed'] is False
         assert len(calls) == 3
     asyncio.run(run())
 
@@ -271,7 +274,8 @@ def test_ntp_rejects_spoofed_originate_and_unsynchronized_server():
     with patch.object(socket, 'getaddrinfo', return_value=[(socket.AF_INET, 2, 0, '', ('127.0.0.1', 123))]), patch.object(socket, 'socket', return_value=fake):
         fake.invalid = False
         result = ntp_probe('test.local')
-        assert result['clock_changed'] is False and result['stratum'] == 2
+        assert result['clock_changed'] is False
+        assert result['stratum'] == 2
         fake.invalid = True
         with pytest.raises(ValueError, match='originate'):
             ntp_probe('test.local')
@@ -316,7 +320,8 @@ def test_industrial_profile_rejects_invalid_mapping_and_keeps_mqtt_default():
 
 def test_csv_excel_scope_unicode_formula_and_invalid_dates(tmp_path):
     request = ExportExcelRequest(tables=['sensor_data'], format='both', station_ids=[7], sensor_types=['water'], start_date='2026-10-01', end_date='2026-10-06')
-    assert request.station_ids == [7] and request.format == 'both'
+    assert request.station_ids == [7]
+    assert request.format == 'both'
     with pytest.raises(ValidationError):
         ExportExcelRequest(tables=['sensor_data'], start_date='2026-10-07', end_date='2026-10-01')
     path = tmp_path / 'export.zip'

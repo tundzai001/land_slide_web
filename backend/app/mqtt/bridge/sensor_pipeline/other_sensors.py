@@ -13,6 +13,20 @@ logger = logging.getLogger(__name__)
 
 
 class OtherSensorPayloadMixin:
+    def _handle_imu_baseline_lock(self, station_id: int, processor: Any, processed_data: dict | None) -> None:
+        if processed_data and processor.origin_locked and not hasattr(processor, '_baseline_saved'):
+            processor._baseline_saved = True
+            baseline_data = {
+                "baseline_roll": processor.baseline["roll"],
+                "baseline_pitch": processor.baseline["pitch"],
+                "baseline_yaw": processor.baseline["yaw"],
+            }
+            task = asyncio.create_task(self._save_imu_baseline(station_id, baseline_data))
+            if not hasattr(self, '_baseline_save_tasks'):
+                self._baseline_save_tasks = set()
+            self._baseline_save_tasks.add(task)
+            task.add_done_callback(self._baseline_save_tasks.discard)
+
     async def _process_other_sensor_payload(
         self,
         info: dict,
@@ -42,19 +56,7 @@ class OtherSensorPayloadMixin:
             elif sensor_type == 'water': processed_data = processor.process(payload_json, current_timestamp)
             elif sensor_type == 'imu': 
                 processed_data = processor.process(payload_json, station_config)
-                # ✅ Auto-save baseline to DB khi vừa khóa lần đầu
-                if processed_data and processor.origin_locked and not hasattr(processor, '_baseline_saved'):
-                    processor._baseline_saved = True
-                    baseline_data = {
-                        "baseline_roll": processor.baseline["roll"],
-                        "baseline_pitch": processor.baseline["pitch"],
-                        "baseline_yaw": processor.baseline["yaw"]
-                    }
-                    task = asyncio.create_task(self._save_imu_baseline(station_id, baseline_data))
-                    if not hasattr(self, '_baseline_save_tasks'):
-                        self._baseline_save_tasks = set()
-                    self._baseline_save_tasks.add(task)
-                    task.add_done_callback(self._baseline_save_tasks.discard)
+                self._handle_imu_baseline_lock(station_id, processor, processed_data)
         except json.JSONDecodeError:
             return
         except Exception as e:

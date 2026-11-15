@@ -25,7 +25,7 @@ class AlertPersistenceContractTests(unittest.TestCase):
         self.assertEqual(result["overall_risk"], "CRITICAL")
         self.assertEqual(len(result["active_alerts"]), 1)
         self.assertEqual(len(result["stale_alerts"]), 1)
-        self.assertEqual(result["active_alerts"][0]["stale"], True)
+        self.assertTrue(result["active_alerts"][0]["stale"])
         self.assertEqual(result["active_alerts"][0]["message"], alert.message)
         self.assertEqual(result["fresh_alerts"], [])
 

@@ -11,5 +11,6 @@ def test_production_allows_broker_credential_transition_but_rejects_default_sign
     )
     Settings(**values, SECRET_KEY="a" * 48).validate_security()
 
+    invalid_settings = Settings(**values, SECRET_KEY="super_secret_key_change_me_in_production")
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
-        Settings(**values, SECRET_KEY="super_secret_key_change_me_in_production").validate_security()
+        invalid_settings.validate_security()

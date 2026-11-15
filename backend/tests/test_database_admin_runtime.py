@@ -106,13 +106,15 @@ class SensorDataFastPageTests(unittest.TestCase):
         self.assertNotIn("SENSOR_DATA.DATA", sql)
 
     def test_internal_stream_requires_explicit_opt_in(self):
+        resp = Response()
+        sensor_db = _SensorDb([])
         with self.assertRaises(HTTPException) as raised:
             asyncio.run(admin_get_sensor_data(
-                response=Response(),
+                response=resp,
                 sensor_type="gnss_adjusted",
                 include_total=False,
                 include_data=False,
-                db=_SensorDb([]),
+                db=sensor_db,
                 current_user=None,
             ))
 

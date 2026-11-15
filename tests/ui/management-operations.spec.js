@@ -349,7 +349,9 @@ test('protected download errors include the backend phase and request ID', async
   });
 
   await expect.poll(() => page.evaluate(() => window.downloadFailureMessage)).toContain('Tìm bản ghi bình sai');
-  await expect.poll(() => page.evaluate(() => window.downloadFailureMessage)).toContain('request-456');
+  const failureMessage = await page.evaluate(() => window.downloadFailureMessage);
+  expect(failureMessage).toContain('Tìm bản ghi bình sai');
+  expect(failureMessage).toContain('request-456');
 });
 
 test('adjustment XLSX progress popup clears after download completes', async ({ page }) => {

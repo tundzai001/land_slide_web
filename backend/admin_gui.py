@@ -299,7 +299,7 @@ class SIEMAdminGUI(ttk.Window):
                     threat_type = event.get("type", "NORMAL")
                     
                     # Ocean / Unresolved
-                    if lat is None or lon is None or (lat == 0.0 and lon == 0.0): continue
+                    if lat is None or lon is None or (abs(float(lat)) < 1e-6 and abs(float(lon)) < 1e-6): continue
                     
                     if HAS_MAPVIEW and hasattr(self, 'map_widget'):
                         mrk = self.map_widget.set_marker(lat, lon, text=f"{event['ip']}\n({threat_type})")
