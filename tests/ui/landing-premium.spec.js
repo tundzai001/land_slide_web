@@ -10,6 +10,8 @@ const landingJs = readFileSync(join(__dirname, '..', '..', 'frontend/dist/landin
 test.beforeEach(async ({page}) => {
   await page.route('**/assets/aitogy.png*', route => route.fulfill({contentType:'image/png',body:readFileSync(join(__dirname, '../..', 'frontend/assets/aitogy.png'))}));
   await page.route('**/lenis*.js*', route => route.fulfill({contentType:'application/javascript', body:'window.Lenis=class{constructor(){this.options={}}raf(){}on(){}destroy(){}};' }));
+  await page.route('**fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+  await page.route('**fonts.gstatic.com/**', route => route.fulfill({ status: 200, body: '' }));
 });
 
 test('index is semantic and progressively enhanced without React', async () => {
@@ -168,6 +170,7 @@ test('public navigation reflects the session and keeps theme controls consistent
 });
 
 test('desktop story advances without shifting the fixed navigation', async ({ page }) => {
+  test.slow();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route('http://127.0.0.1:8000/about', route => route.fulfill({
