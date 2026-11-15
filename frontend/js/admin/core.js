@@ -627,7 +627,21 @@ class AdminManager {
             this.fetchRescueCounts();
         } catch (e) {
             if (!silent) window.toast?.error('Không tải được danh sách rescue requests');
-            body.innerHTML = `<div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được queue</strong><p>${this.escapeHtml?.(e.message) || e.message}</p><button class="btn btn-outline-primary" onclick="window.adminManager.loadRescueRequests()">Thử lại</button></div>`;
+            body.replaceChildren();
+            const div = document.createElement('div');
+            div.className = 'ops-empty is-error';
+            const icon = document.createElement('i');
+            icon.className = 'bi bi-exclamation-circle';
+            const strong = document.createElement('strong');
+            strong.textContent = 'Không tải được queue';
+            const p = document.createElement('p');
+            p.textContent = e?.message || 'Lỗi không xác định';
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-primary';
+            btn.textContent = 'Thử lại';
+            btn.onclick = () => window.adminManager?.loadRescueRequests();
+            div.append(icon, strong, p, btn);
+            body.appendChild(div);
             console.error('loadRescueRequests error:', e);
         }
     }

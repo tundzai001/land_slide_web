@@ -129,8 +129,14 @@ jobs:
           echo "=== Quality Gate Project Status ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=tundzai001_land_slide_web" || true
           echo ""
-          echo "=== Open Vulnerabilities on New Code ==="
-          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&sinceLeakPeriod=true&types=VULNERABILITY" || true
+          echo "=== Issues Breakdown by Type, Severity & Top Rules ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&facets=types,severities,rules&ps=1" | jq -r '.facets[] | "\(.property): " + ([\(.values[] | "\(.val)=\(.count)")] | join(", "))' || true
+          echo ""
+          echo "=== Top Open Issues (Blocker / Critical) ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&severities=BLOCKER,CRITICAL&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.type)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
+          echo ""
+          echo "=== All Open Bugs in Repo ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&types=BUG&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
 
   release-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

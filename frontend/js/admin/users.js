@@ -141,7 +141,17 @@ class AdminUsersFeature extends window.AdminManager {
             button.disabled = false;
         } catch (error) {
             if (Number(document.getElementById('edit-user-id').value) !== Number(userId)) return;
-            container.innerHTML = `<span class="text-danger small" role="alert">${this.escapeUserValue(error.message)}</span><button type="button" class="btn btn-outline-primary btn-sm" onclick="window.adminManager.loadEditUserProjects()">Thử lại</button>`;
+            container.replaceChildren();
+            const span = document.createElement('span');
+            span.className = 'text-danger small';
+            span.setAttribute('role', 'alert');
+            span.textContent = error?.message || 'Không tải được dự án';
+            const retryBtn = document.createElement('button');
+            retryBtn.type = 'button';
+            retryBtn.className = 'btn btn-outline-primary btn-sm ms-2';
+            retryBtn.textContent = 'Thử lại';
+            retryBtn.onclick = () => window.adminManager?.loadEditUserProjects();
+            container.append(span, retryBtn);
         } finally {
             if (Number(document.getElementById('edit-user-id').value) === Number(userId)) container.removeAttribute('aria-busy');
         }
