@@ -213,17 +213,17 @@ window.LegacyTemplateParts['shell'] = String.raw`
                     <div class="adv-section-title">Biến dạng lũy kế (cm)</div>
                     <div class="adv-item">
                         <span class="adv-label">Biến dạng &Delta;X (East)</span>
-                        <div class="adv-value-row"><span class="adv-value highlight-dx" id="adv-val-dx">--</span><span
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-dx">--</span><span
                                 class="adv-unit">cm</span></div>
                     </div>
                     <div class="adv-item">
                         <span class="adv-label">Biến dạng &Delta;Y (North)</span>
-                        <div class="adv-value-row"><span class="adv-value highlight-dy" id="adv-val-dy">--</span><span
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-dy">--</span><span
                                 class="adv-unit">cm</span></div>
                     </div>
                     <div class="adv-item">
                         <span class="adv-label">Biến dạng &Delta;H (Up)</span>
-                        <div class="adv-value-row"><span class="adv-value highlight-dh" id="adv-val-dh">--</span><span
+                        <div class="adv-value-row"><span class="adv-value" id="adv-val-dh">--</span><span
                                 class="adv-unit">cm</span></div>
                     </div>
                 </div>

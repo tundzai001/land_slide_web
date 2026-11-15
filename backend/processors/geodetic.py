@@ -80,7 +80,7 @@ def parse_vn2000_central_meridian(raw_value, default: float = 105.0) -> Tuple[fl
         return default, "default"
 
     import re
-    dms_match = re.match(r"^([+-]?\d+(?:\.\d+)?)\s*(?:°|d|\s)\s*(\d+(?:\.\d+)?)\s*(?:'|m)?$", raw, re.I)
+    dms_match = re.match(r"^([+-]?\d+(?:\.\d+)?)(?:\s*[°d]\s*|\s+)(\d+(?:\.\d+)?)\s*(?:'|m)?$", raw, re.I)
     if dms_match:
         deg = float(dms_match.group(1))
         minutes = float(dms_match.group(2))

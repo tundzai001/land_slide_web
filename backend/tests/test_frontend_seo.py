@@ -13,6 +13,8 @@ def test_built_public_shells_have_consistent_absolute_metadata():
 
     assert '<link rel="canonical" href="https://monitoring.aitogy.com/">' in index
     assert '<link rel="canonical" href="https://monitoring.aitogy.com/map">' in map_shell
+    assert '<main class="route-loading">' in map_shell
+    assert '<output>Đang tải không gian vận hành Aitogy Monitoring…</output>' in map_shell
     assert 'property="og:url" content="https://monitoring.aitogy.com/' in index
     assert 'property="og:url" content="https://monitoring.aitogy.com/map"' in map_shell
     assert 'content="noindex, noarchive"' in private

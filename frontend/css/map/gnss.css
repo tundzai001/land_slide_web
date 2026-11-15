@@ -236,23 +236,6 @@
     opacity: 0.6;
 }
 
-/* Highlight specific displacement values */
-.highlight-dx {
-    color: #f472b6 !important;
-}
-
-/* Pink 400 */
-.highlight-dy {
-    color: #4ade80 !important;
-}
-
-/* Green 400 */
-.highlight-dh {
-    color: #60a5fa !important;
-}
-
-/* Blue 400 */
-
 .sensor-clickable {
     cursor: pointer;
     position: relative;

@@ -50,3 +50,14 @@ test('daily schedule is anchored at midnight and previews the next day', async (
   expect(result.preview).toContain('20:00');
   expect(result.preview).toContain('Ngày kế tiếp 00:00');
 });
+
+test('central meridian accepts degree-minute formats and long invalid input', async ({ page }) => {
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.addScriptTag({ content: readFileSync(join(__dirname, '..', '..', 'frontend/js/admin/core.js'), 'utf8') });
+  const parsed = await page.evaluate(() => {
+    const manager = Object.create(window.AdminManager.prototype);
+    return ['105°30\'', '105   30', '104.45', '105' + ' '.repeat(10000) + 'x']
+      .map(value => manager.parseVn2000CentralMeridian(value));
+  });
+  expect(parsed.map(item => item.value)).toEqual([105.5, 105.5, 104.75, 105]);
+});

@@ -24,7 +24,10 @@ class ImuBaselineTaskTests(unittest.IsolatedAsyncioTestCase):
         )
         await started.wait()
         assert result == {'roll': 1}
-        assert not processor._baseline_save_task.done()
+        task, = handler._baseline_save_tasks
+        assert not task.done()
         release.set()
-        await processor._baseline_save_task
+        await task
+        await asyncio.sleep(0)
+        assert not handler._baseline_save_tasks
         handler._save_imu_baseline.assert_awaited_once_with(2, {'baseline_roll': 1, 'baseline_pitch': 2, 'baseline_yaw': 3})

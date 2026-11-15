@@ -88,7 +88,7 @@ class AdminManager {
         const raw = String(rawValue ?? '').trim().replace(',', '.');
         if (!raw) return { value: 105.0, format: 'default' };
 
-        const dmsMatch = raw.match(/^([+-]?\d+(?:\.\d+)?)\s*(?:°|d|\s)\s*(\d+(?:\.\d+)?)\s*(?:'|m)?$/i);
+        const dmsMatch = raw.match(/^([+-]?\d+(?:\.\d+)?)(?:\s*[°d]\s*|\s+)(\d+(?:\.\d+)?)\s*(?:'|m)?$/i);
         if (dmsMatch) {
             const deg = Number(dmsMatch[1]);
             const minutes = Number(dmsMatch[2]);
