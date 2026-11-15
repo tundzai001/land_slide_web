@@ -50,7 +50,7 @@ class OtherSensorPayloadMixin:
                         "baseline_pitch": processor.baseline["pitch"],
                         "baseline_yaw": processor.baseline["yaw"]
                     }
-                    asyncio.ensure_future(self._save_imu_baseline(station_id, baseline_data))
+                    processor._baseline_save_task = asyncio.create_task(self._save_imu_baseline(station_id, baseline_data))
         except json.JSONDecodeError:
             return
         except Exception as e:
