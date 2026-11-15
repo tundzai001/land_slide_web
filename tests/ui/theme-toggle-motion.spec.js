@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./coverage-fixture');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const source = file => readFileSync(join(__dirname, '../..', file), 'utf8');

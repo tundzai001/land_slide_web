@@ -1002,6 +1002,8 @@ body:has(.top-navbar) #gnssTerminalModal {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .adv-item,
+    .sensor-clickable,
     #gnssTerminalModal *,
     #gnss-adjustment-running-pill {
         scroll-behavior: auto !important;

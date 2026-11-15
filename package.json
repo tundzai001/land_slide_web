@@ -8,7 +8,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.54.0",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "istanbul-lib-coverage": "^3.2.2",
+    "v8-to-istanbul": "^9.3.0"
   },
   "dependencies": {
     "gsap": "^3.13.0",

@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./coverage-fixture');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
@@ -162,3 +162,13 @@ test('GNSS terminal header and debug controls stay clear of map navbar and float
   }
 });
 
+
+test('GNSS cards respect reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent('<div class="adv-item">GNSS</div><div class="sensor-clickable">Sensor</div>');
+  await page.addStyleTag({ content: gnssCss });
+  for (const selector of ['.adv-item', '.sensor-clickable']) {
+    const duration = await page.locator(selector).evaluate(element => getComputedStyle(element).transitionDuration);
+    expect(duration.split(',').every(value => parseFloat(value) <= 0.00001)).toBe(true);
+  }
+});
