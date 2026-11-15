@@ -111,6 +111,23 @@ class RescueInputControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.status_code, 413)
             decode.assert_not_called()
 
+    def test_persist_data_url_sha256_success(self):
+        png_1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(storage, "RESCUE_IMAGE_DIR", Path(tmp)):
+                url = storage.persist_data_url(png_1x1)
+                self.assertIsNotNone(url)
+                self.assertTrue(url.startswith(storage.RESCUE_IMAGE_URL_PREFIX))
+                self.assertTrue(url.endswith(".png"))
+                files = list(Path(tmp).iterdir())
+                self.assertEqual(len(files), 1)
+
+    async def test_persist_upload_none_and_empty(self):
+        self.assertIsNone(await storage.persist_upload(None))
+        empty = AsyncMock()
+        empty.read.return_value = b""
+        self.assertIsNone(await storage.persist_upload(empty))
+
 
 if __name__ == "__main__":
     unittest.main()
