@@ -4,7 +4,8 @@ Workflow `.github/workflows/quality.yml` chạy khi có pull request và khi đ�
 
 - Backend: Python 3.11, các phụ thuộc backend và gateway, toàn bộ `backend/tests`.
 - Frontend: `npm ci`, build production, xác nhận `frontend/dist` đã được commit đúng với mã nguồn, rồi chạy kiểm thử tương tác Chromium cho bản đồ, Heatmap, điều hướng và theme.
-- Sau khi cả hai job qua trên `main`, workflow tạo artifact `monitoring-release-<commit>` chứa mã backend, tài nguyên frontend và field unit đã được kiểm tra. Artifact được giữ 14 ngày.
+- SonarQube Cloud: quét mã và chờ kết quả quality gate bằng secret `SONAR_TOKEN`.
+- Sau khi cả ba job qua trên `main`, workflow tạo artifact `monitoring-release-<commit>` chứa mã backend, tài nguyên frontend và field unit đã được kiểm tra. Artifact được giữ 14 ngày.
 
 Backend CI dùng khóa ký dành riêng cho test và URL DB giả trên cổng đóng; các bài kiểm thử thay thế kết nối bằng mock hoặc SQLite tạm. Không cần `.env` hay secret production. Chế độ production được giữ để kiểm tra cookie và các kiểm soát bảo mật đúng với môi trường triển khai.
 

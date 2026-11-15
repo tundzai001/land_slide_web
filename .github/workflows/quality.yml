@@ -61,9 +61,24 @@ jobs:
           tests/ui/login-premium.spec.js
           --project=chromium --reporter=line
 
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: SonarSource/sonarqube-scan-action@v7
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >-
+            -Dsonar.organization=tundzai001
+            -Dsonar.projectKey=tundzai001_land_slide_web
+            -Dsonar.qualitygate.wait=true
+
   release-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, frontend]
+    needs: [backend, frontend, sonar]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
