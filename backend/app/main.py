@@ -318,7 +318,6 @@ install_error_handlers(app)
 @app.exception_handler(SQLAlchemyTimeoutError)
 async def timeout_exception_handler(request: Request, exc: Exception):
     """Return a bounded outage response instead of an ASGI traceback storm."""
-    await asyncio.sleep(0)
 
     phase = getattr(request.state, "operation_phase", "dependencies")
     request_id = getattr(request.state, "request_id", "unknown")

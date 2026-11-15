@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import time
 
 from app.mqtt.bridge.sensor_pipeline.alerts import SensorAlertMixin
@@ -97,9 +96,7 @@ class SensorPipelineMixin(
         await self._broadcast_sensor_data(
             station_id, sensor_type, current_timestamp, processed_data, project_id=public_project_id
         )
-        fwd_res = self._forward_gnss(info, station_id, sensor_type, processed_data)
-        if inspect.isawaitable(fwd_res):
-            await fwd_res
+        self._forward_gnss(info, station_id, sensor_type, processed_data)
         await self._update_latest_sensor_cache(
             station_id, sensor_type, current_timestamp, processed_data
         )

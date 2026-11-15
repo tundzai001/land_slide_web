@@ -88,7 +88,6 @@ class RoundRobinSessionLifecycleMixin:
         if project_id not in self._sessions:
             raise ValueError(f"project {project_id} has no configured adjustment session")
         self.running_tasks[project_id] = asyncio.create_task(self._run_cycle(project_id))
-        await asyncio.sleep(0)
 
     def pause_project(self, project_id: int) -> bool:
         session = self._sessions.get(int(project_id))

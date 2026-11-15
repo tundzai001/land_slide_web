@@ -59,22 +59,20 @@ class GnssAuditPersistenceMixin:
         status = str((result or {}).get("status") or "").upper()
         if status not in self._GNSS_ANOMALY_STATUSES:
             return False
-        async with self._buffer_lock:
-            active = getattr(self, "_active_gnss_anomalies", None)
-            if active is None:
-                active = self._active_gnss_anomalies = set()
-            key = (int(device_id), status)
-            if key in active:
-                return False
-            active.add(key)
-            return True
+        active = getattr(self, "_active_gnss_anomalies", None)
+        if active is None:
+            active = self._active_gnss_anomalies = set()
+        key = (int(device_id), status)
+        if key in active:
+            return False
+        active.add(key)
+        return True
     async def _clear_gnss_anomaly(self, device_id: int) -> None:
-        async with self._buffer_lock:
-            active = getattr(self, "_active_gnss_anomalies", None)
-            if active is None:
-                return
-            target = int(device_id)
-            active.difference_update(key for key in tuple(active) if key[0] == target)
+        active = getattr(self, "_active_gnss_anomalies", None)
+        if active is None:
+            return
+        target = int(device_id)
+        active.difference_update(key for key in tuple(active) if key[0] == target)
     async def _buffer_gnss_audit(
         self,
         device_id: int,

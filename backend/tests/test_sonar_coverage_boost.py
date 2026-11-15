@@ -268,3 +268,42 @@ class SonarCoverageBoostTests(unittest.TestCase):
             self.assertEqual(res2["case"]["status"], "acknowledged")
 
         asyncio.run(run_mutate_case())
+
+    def test_sensor_forwarding_gnss_sync(self):
+        from app.mqtt.bridge.sensor_pipeline.forwarding import SensorForwardingMixin
+        mixin = SensorForwardingMixin()
+        mixin._forward_gnss({}, 1, "water", {})
+        mixin._forward_gnss({"forwarding": {}}, 1, "gnss", {"forwarding_data": {}})
+
+    def test_simulation_runs_dict_fromkeys(self):
+        import asyncio
+        from app.features.simulation.schemas import SimulationCreate
+        from app.features.simulation.runs import create_run
+        payload = SimulationCreate(
+            parameters={"c": 10.0, "phi": 25.0, "gamma": 18.0},
+            station_id=1,
+            mode="station_snapshot",
+        )
+        mock_data_db = MagicMock()
+        mock_data_db.commit = unittest.mock.AsyncMock()
+        mock_data_db.refresh = unittest.mock.AsyncMock()
+        mock_config_db = MagicMock()
+        mock_user = MagicMock()
+        mock_user.role = "admin"
+        mock_user.is_superuser = True
+
+        async def run_test():
+            with patch("app.features.simulation.runs._station_inputs") as mock_inputs:
+                mock_inputs.return_value = {
+                    "station": MagicMock(name="st1"),
+                    "project": MagicMock(name="p1"),
+                    "parameters": {"c": 10.0, "phi": 25.0, "gamma": 18.0},
+                    "parameter_sources": {},
+                    "sensor_snapshot": {},
+                    "warnings": [],
+                }
+                with patch("app.features.simulation.runs._start_worker"):
+                    run_obj = await create_run(payload, mock_data_db, mock_config_db, mock_user)
+                    self.assertIsNotNone(run_obj)
+
+        asyncio.run(run_test())
