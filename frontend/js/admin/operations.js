@@ -1,7 +1,7 @@
 (() => {
 class AdminOperationsFeature extends window.AdminManager {
     selectOperationView(view) {
-        this.closeOperationInspector();
+        void this.closeOperationInspector();
         this.operationView = view;
         const logs = ['audit_log', 'operation_log'].includes(view);
         document.querySelectorAll('[data-ops-tab]').forEach(button => {
@@ -349,7 +349,7 @@ class AdminOperationsFeature extends window.AdminManager {
         drawer.onclick = event => {
             if (event.target !== drawer) return;
             const bounds = drawer.getBoundingClientRect();
-            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) this.closeOperationInspector();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) void this.closeOperationInspector();
         };
     }
 

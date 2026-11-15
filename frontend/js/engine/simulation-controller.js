@@ -89,8 +89,6 @@ class SimulationController {
         this.weather = null;
 
         this.clock = new THREE.Clock();
-
-        void this.init();
     }
 
     async init() {
@@ -968,6 +966,7 @@ window.openDigitalTwin = async function(stationData) {
     // Lazy init
     if (!window.digitalTwin) {
         window.digitalTwin = new SimulationController();
+        await window.digitalTwin.init();
         // Wait a frame for layout to compute sizes
         await new Promise(r => setTimeout(r, 100));
         window.digitalTwin.sceneManager.onResize();

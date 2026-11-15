@@ -417,7 +417,7 @@ class AdminStationWizardFeature extends window.AdminManager {
                 const input = document.getElementById(id);
                 if (input) input.value = simulationProfile[key] ?? fallback;
             });
-            this.loadAICasterUsers(
+            await this.loadAICasterUsers(
                 cfg.gnss_aicaster_user || cfg.gnss_aicaster_client || {}
             );
 

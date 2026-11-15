@@ -594,7 +594,7 @@ function setupEventListeners() {
                 ? ['BASE', to]
                 : to === 'BASE'
                     ? ['BASE', from]
-                    : [from, to].sort();
+                    : [from, to].sort((a, b) => String(a).localeCompare(String(b)));
             const direction = from === orderedPair[0] && to === orderedPair[1] ? 1 : -1;
             from = orderedPair[0];
             to = orderedPair[1];

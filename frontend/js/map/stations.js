@@ -617,6 +617,7 @@ async function loadStations() {
             return;
         }
         allStations = stations;
+        if (typeof window !== 'undefined') window.allStations = stations;
         refreshHeatmapData();
 
         const validStationIds = new Set(stations.filter(station => hasValidLatLon(station.location)).map(station => String(station.id)));

@@ -11,7 +11,7 @@ let currentTileLayer = null;
 let markers = {};
 let charts = {};
 let currentStationData = null;
-let allStations = [];
+let allStations = typeof window !== 'undefined' && Array.isArray(window.allStations) ? window.allStations : [];
 let stationSelectionController = null;
 let stationSelectionSequence = 0;
 let stationHistoryController = null;
@@ -310,8 +310,9 @@ function normalizeGnssStationIds(stationIds) {
 }
 
 function gnssRoversFromStationIds(stationIds, excluded = new Set()) {
+    const list = typeof window !== 'undefined' && Array.isArray(window.allStations) ? window.allStations : allStations;
     return normalizeGnssStationIds(stationIds).map((stationId, index) => {
-        const station = allStations.find(item => Number(item.id) === Number(stationId));
+        const station = list.find(item => Number(item.id) === Number(stationId));
         const name = String(station?.station_code || station?.name || `Trạm ${stationId}`).trim();
         gnssAdjustmentDebugState.workflowStationIdByRoverName[name] = Number(stationId);
         return { stationId: Number(stationId), name, index, excluded: excluded.has(Number(stationId)) };

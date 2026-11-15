@@ -6,7 +6,7 @@ REPO_DIR=${1:-$(pwd)}
 PYTHON=$(which python3 || which python)
 SERVICE_PATH=/etc/systemd/system/landslide-audio.service
 
-if [ -z "$PYTHON" ]; then
+if [[ -z "$PYTHON" ]]; then
   echo "Python not found. Install python3 first." && exit 1
 fi
 

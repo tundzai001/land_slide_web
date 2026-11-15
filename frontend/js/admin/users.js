@@ -286,7 +286,7 @@ class AdminUsersFeature extends window.AdminManager {
                 bootstrap.Modal.getInstance(document.getElementById('addUserModal'))?.hide();
                 document.getElementById('addUserForm').reset();
                 document.getElementById('project-assign-group').style.display = 'block';
-                this.loadUsers();
+                await this.loadUsers();
             } else {
                 throw new Error(await this.userResponseError(res));
             }
@@ -309,7 +309,7 @@ class AdminUsersFeature extends window.AdminManager {
             });
             if (res.ok) {
                 window.toast?.success('Đã xóa người dùng');
-                this.loadUsers();
+                await this.loadUsers();
             } else {
                 const err = await res.json();
                 throw new Error(err.detail || 'Lỗi xóa');

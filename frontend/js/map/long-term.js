@@ -165,7 +165,7 @@ function renderLongTermAnalysis(data) {
     renderCombinedLongTermChart(data);
 
     // === 3D Simulations ===
-    init3DVisualizations(data);
+    void init3DVisualizations(data);
 
     // === NEW: Inverse Velocity (Fukuzono) ===
     renderInverseVelocitySection(data);

@@ -172,6 +172,16 @@ async def wait_for_llh(feed: LiveFeed, station: str, timeout: float = 15.0):
     raise RuntimeError(f"No complete AGRICA LLH received for {station}")
 
 
+async def _wait_for_rover_restored(feed: LiveFeed, station: str, restore_started: float, timeout: float = 15.0) -> None:
+    deadline = restore_started + timeout
+    while time.monotonic() < deadline:
+        if feed.latest_agrica_time(station) >= restore_started:
+            print(f"{station}: ROVER restore verified by fresh AGRICA output.")
+            return
+        await asyncio.sleep(0.25)
+    print(f"WARNING {station}: restore commands completed but fresh AGRICA was not seen.")
+
+
 async def probe_station(
     manager: RoundRobinAdjustmentManager,
     feed: LiveFeed,
@@ -236,14 +246,7 @@ async def probe_station(
                 project_id=None,
             )
             restore_started = time.monotonic()
-            deadline = restore_started + 15
-            while time.monotonic() < deadline:
-                if feed.latest_agrica_time(station) >= restore_started:
-                    print(f"{station}: ROVER restore verified by fresh AGRICA output.")
-                    break
-                await asyncio.sleep(0.25)
-            else:
-                print(f"WARNING {station}: restore commands completed but fresh AGRICA was not seen.")
+            await _wait_for_rover_restored(feed, station, restore_started, timeout=15.0)
         except Exception:
             logging.exception("CRITICAL: ROVER restoration failed for %s", station)
             if base_applied:

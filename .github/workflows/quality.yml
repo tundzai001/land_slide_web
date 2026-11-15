@@ -137,6 +137,9 @@ jobs:
           echo ""
           echo "=== All Open Bugs in Repo ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&types=BUG&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
+          echo ""
+          echo "=== Top Issues (Security & Reliability: Blocker, High, Medium) ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&impactSoftwareQualities=SECURITY,RELIABILITY&impactSeverities=BLOCKER,HIGH,MEDIUM&ps=100" | jq -r '.issues[] | "[\(.impacts[0].softwareQuality // "")] [\(.impacts[0].severity // .severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
 
   release-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

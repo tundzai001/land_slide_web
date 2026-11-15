@@ -333,7 +333,7 @@ class AdminPiCenterFeature extends window.AdminManager {
             const data = await res.json();
             window.toast?.success(`✅ Đã gán Pi vào trạm "${data.station_name}"`);
             // Reload the wizard Pi section
-            this.loadWizardPendingDevices();
+            await this.loadWizardPendingDevices();
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
         }
@@ -350,7 +350,7 @@ class AdminPiCenterFeature extends window.AdminManager {
             if (!res.ok) throw new Error('Lỗi');
             window.toast?.success('✅ Đã bỏ gán Pi');
             this._assignedPiId = null;
-            this.loadWizardPendingDevices();
+            await this.loadWizardPendingDevices();
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
         }

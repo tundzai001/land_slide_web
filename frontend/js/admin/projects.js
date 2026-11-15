@@ -331,7 +331,7 @@ class AdminProjectsFeature extends window.AdminManager {
             modal.hide();
 
             document.getElementById('createProjectForm').reset();
-            this.loadProjects();
+            await this.loadProjects();
 
         } catch (e) {
             window.toast?.error('❌ ' + e.message);
@@ -352,7 +352,7 @@ class AdminProjectsFeature extends window.AdminManager {
             if (!res.ok) throw new Error('Failed');
 
             window.toast?.success('✅ Xóa dự án thành công!');
-            this.loadProjects();
+            await this.loadProjects();
 
         } catch (e) {
             window.toast?.error('❌ Lỗi xóa dự án');

@@ -274,7 +274,7 @@ class AdminManager {
                 // Thử kết nối lại sau 5 giây nếu mất kết nối
                 this._wsReconnectTimer = setTimeout(() => {
                     this._wsReconnectTimer = null;
-                    this.setupWebSocketListener();
+                    void this.setupWebSocketListener();
                 }, 5000);
             };
         } catch (e) {
@@ -283,7 +283,7 @@ class AdminManager {
             if (!this._disposed && document.documentElement.dataset.appView === 'admin') {
                 this._wsReconnectTimer = setTimeout(() => {
                     this._wsReconnectTimer = null;
-                    this.setupWebSocketListener();
+                    void this.setupWebSocketListener();
                 }, 5000);
             }
         }
@@ -336,7 +336,7 @@ class AdminManager {
         } else if (tabId === 'tab-pi') {
             this.loadPiDevices?.();
         } else if (tabId === 'tab-rescue') {
-            this.loadRescueRequests?.();
+            void this.loadRescueRequests?.();
         } else if (tabId === 'tab-users') {
             this.loadUsers?.();
         }
@@ -402,7 +402,7 @@ class AdminManager {
             window.dbManager?.datasetRequestController?.abort?.();
             this.switchTab(this._safeFallbackTab(), null, true, { replace: true, restore: true });
         }
-        if (this.currentUserRole === 'admin' && !this.ws) this.setupWebSocketListener();
+        if (this.currentUserRole === 'admin' && !this.ws) void this.setupWebSocketListener();
         if (this.currentUserRole !== 'admin' && this.ws) {
             this.ws.close(1000, 'authorization changed');
             this.ws = null;
@@ -420,7 +420,7 @@ class AdminManager {
         if (initialTab === 'tab-operations') this.loadOperations?.();
         if (this.canAccessTab('tab-projects')) this.loadProjects?.();
         if (this.canAccessTab('tab-users')) this.loadUsers?.();
-        if (this.currentUserRole === 'admin') this.setupWebSocketListener();
+        if (this.currentUserRole === 'admin') void this.setupWebSocketListener();
     }
 
     init() {
@@ -505,7 +505,7 @@ class AdminManager {
         }
 
         // Resolve authz before any private manager starts a loader/socket.
-        this.bootstrapRoleFirst();
+        void this.bootstrapRoleFirst();
 
         // ✅ Auto-refresh Pi Devices tab every 15s to see online status quickly
         this._refreshIntervals.push(setInterval(() => {
@@ -518,7 +518,7 @@ class AdminManager {
         this._refreshIntervals.push(setInterval(() => {
             const rescueTab = document.getElementById('tab-rescue');
             if (rescueTab && rescueTab.classList.contains('active')) {
-                this.loadRescueRequests(true);
+                void this.loadRescueRequests(true);
             }
         }, 20000));
 
@@ -624,7 +624,7 @@ class AdminManager {
             state.total = Number(res.headers.get('X-Total-Count') || state.rows.length);
             this.renderRescueRequests(rows || []);
             this.renderRescuePagination();
-            this.fetchRescueCounts();
+            await this.fetchRescueCounts();
         } catch (e) {
             if (!silent) window.toast?.error('Không tải được danh sách rescue requests');
             body.replaceChildren();
@@ -716,7 +716,7 @@ class AdminManager {
         this.rescueState.status = status;
         this.rescueState.offset = 0;
         document.querySelectorAll('.rescue-status-tabs button').forEach(el => el.classList.toggle('active', el === button));
-        this.loadRescueRequests();
+        void this.loadRescueRequests();
     }
 
     scheduleRescueSearch() {
@@ -724,21 +724,21 @@ class AdminManager {
         this.rescueSearchTimer = setTimeout(() => {
             this.rescueState.q = document.getElementById('rescue-search')?.value.trim() || '';
             this.rescueState.offset = 0;
-            this.loadRescueRequests();
+            void this.loadRescueRequests();
         }, 250);
     }
 
     changeRescueSort(value) {
         this.rescueState.sort = value === 'newest' ? '-created_at' : 'created_at';
         this.rescueState.offset = 0;
-        this.loadRescueRequests();
+        void this.loadRescueRequests();
     }
 
     changeRescuePage(direction) {
         const next = this.rescueState.offset + direction * this.rescueState.limit;
         if (next < 0 || next >= this.rescueState.total) return;
         this.rescueState.offset = next;
-        this.loadRescueRequests();
+        void this.loadRescueRequests();
     }
 
     renderRescuePagination() {

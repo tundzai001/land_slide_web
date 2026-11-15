@@ -68,7 +68,7 @@
 
     0%,
     100% {
-        background: #fa5252 !important;
+        background: #fa5252;
         box-shadow: 0 0 8px rgba(250, 82, 82, 0.6),
             0 0 20px rgba(250, 82, 82, 0.3);
         transform: scale(1);
@@ -76,7 +76,7 @@
     }
 
     50% {
-        background: #c92a2a !important;
+        background: #c92a2a;
         box-shadow: 0 0 20px rgba(250, 82, 82, 1),
             0 0 50px rgba(250, 82, 82, 0.6),
             0 0 80px rgba(250, 82, 82, 0.3);

@@ -168,7 +168,7 @@ for (const shellName of ['index.html', 'about.html', 'map.html', 'app.html']) {
 const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'about.min.js', 'about.html', 'app-runtime.min.js',
   'digital-twin.min.js', 'index.html', 'map.html', 'app.html', 'aitogy.png', 'social-card.png'
-].sort();
+].sort((a, b) => a.localeCompare(b));
 // The manifest is committed and checked in CI. Identical inputs must produce
 // identical bytes; release timestamps belong to the workflow run metadata.
 const manifest = { version: 1, build: buildVersion, assets: {} };

@@ -198,7 +198,7 @@ async function setupGuestRescueUI() {
         searchInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                performSearch();
+                void performSearch();
             }
         });
 

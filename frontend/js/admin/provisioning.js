@@ -189,7 +189,7 @@ class AdminProvisioningFeature extends window.AdminManager {
             window.toast?.success(`✅ Pi ${device_code} đã gán vào trạm & license đã gửi!`);
 
             // Refresh pending list (device should disappear)
-            this.loadAdminPendingDevices();
+            await this.loadAdminPendingDevices();
         } catch (e) {
             console.error('Generate & provision error:', e);
             window.toast?.error('❌ ' + e.message);
@@ -224,9 +224,9 @@ class AdminProvisioningFeature extends window.AdminManager {
 
             window.toast?.success('✅ Thiết bị đã được gán thành công');
             // refresh lists
-            this.loadAdminPendingDevices();
+            await this.loadAdminPendingDevices();
             // reload station devices view if open
-            this.editStation(this.currentStationId);
+            await this.editStation(this.currentStationId);
         } catch (e) {
             console.error('Provision error:', e);
             window.toast?.error('❌ ' + e.message);
