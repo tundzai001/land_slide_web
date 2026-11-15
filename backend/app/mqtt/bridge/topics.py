@@ -224,6 +224,7 @@ class MQTTTopicMixin:
                                 logger.info(f"🔒 Enabled TLS for client {broker_host}:{broker_port}")
                             except Exception as tls_e:
                                 logger.error(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
+                                continue
                         
                         try:
                             client.connect_async(broker_host, broker_port, 60)

@@ -9,6 +9,12 @@ from app.mqtt.bridge.topics import MQTTTopicMixin
 
 class BrokerIsolationTests(unittest.IsolatedAsyncioTestCase):
     async def test_device_brokers_start_independently_and_failed_setup_is_retried(self):
+        await self.check_broker_retry()
+
+    async def test_tls_setup_failure_never_connects_without_tls(self):
+        await self.check_broker_retry(tls_failure=True)
+
+    async def check_broker_retry(self, tls_failure=False):
         bridge = MQTTTopicMixin()
         bridge.runtime_mqtt = dict(broker="default.example", port=1883, user="", password="")
         bridge.processors_cache = {"device_1": None, "device_2": None}
@@ -24,7 +30,7 @@ class BrokerIsolationTests(unittest.IsolatedAsyncioTestCase):
         for index, host in enumerate(("aitogy.asia", "aitogy.click"), 1):
             device = SimpleNamespace(
                 id=index, name=host, device_code=str(index), device_type="rain",
-                mqtt_topic=f"gnss/{index}", config={"mqtt": {"host": host}},
+                mqtt_topic=f"gnss/{index}", config={"mqtt": {"host": host, "use_tls": tls_failure}},
             )
             station = SimpleNamespace(
                 id=index, name=host, station_code=str(index), config={},
@@ -36,7 +42,10 @@ class BrokerIsolationTests(unittest.IsolatedAsyncioTestCase):
         context = AsyncMock()
         context.__aenter__.return_value = session
         failed_client, healthy_client, retried_client = Mock(), Mock(), Mock()
-        failed_client.connect_async.side_effect = ValueError("invalid setup")
+        if tls_failure:
+            failed_client.tls_set_context.side_effect = ValueError("invalid TLS setup")
+        else:
+            failed_client.connect_async.side_effect = ValueError("invalid setup")
 
         with (
             patch("app.mqtt.bridge.topics.ConfigSessionLocal", return_value=context),
@@ -46,6 +55,9 @@ class BrokerIsolationTests(unittest.IsolatedAsyncioTestCase):
             for _ in range(2):
                 with self.assertRaises(asyncio.CancelledError):
                     await bridge.reload_topics_from_db()
+
+        if tls_failure:
+            failed_client.connect_async.assert_not_called()
 
         healthy_client.connect_async.assert_called_once_with("aitogy.click", 1883, 60)
         healthy_client.loop_start.assert_called_once()
