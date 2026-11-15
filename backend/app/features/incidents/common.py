@@ -16,6 +16,7 @@ from ...models import auth as model_auth
 from ...models import data as model_data
 from .cases import (
     PRIORITY_ORDER,
+    can_view_case,
     case_project_ids,
     serialize_case,
 )

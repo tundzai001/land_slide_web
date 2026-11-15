@@ -19,7 +19,7 @@ from .config import settings
 _bearer_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 
-async def oauth2_scheme(request: Request, bearer_token: Optional[str] = Depends(_bearer_scheme)):
+def oauth2_scheme(request: Request, bearer_token: Optional[str] = Depends(_bearer_scheme)):
     from .browser_session import request_token
     return request_token(request)
 
@@ -155,7 +155,7 @@ def get_user_permissions(user):
     return []
 
 def require_permission(permission: str):
-    async def permission_checker(current_user: model_auth.User = Depends(get_current_user)):
+    def permission_checker(current_user: model_auth.User = Depends(get_current_user)):
         perms = get_user_permissions(current_user)
         if permission not in perms:
              raise HTTPException(status_code=403, detail="Not enough permissions")

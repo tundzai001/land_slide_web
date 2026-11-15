@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -37,7 +38,10 @@ async def _mutate_case(
     if expected is not None and int(expected) != int(case.version):
         raise HTTPException(status_code=409, detail={"code": "VERSION_CONFLICT", "message": "Incident đã được cập nhật", "current": serialize_case(case, include_private=_is_manager(user))})
     before_sequence = int(case.last_event_sequence or 0) + 1
-    changed, event_type, event_note, event_payload = await mutate(case)
+    mutate_result = mutate(case)
+    if inspect.isawaitable(mutate_result):
+        mutate_result = await mutate_result
+    changed, event_type, event_note, event_payload = mutate_result
     events = []
     if changed:
         event = await append_event(db, case, event_type, actor_kind="user", actor_user_id=int(user.id), actor_username=getattr(user, "username", None), note=event_note, payload=event_payload)
@@ -77,7 +81,7 @@ async def set_incident_scope(
     if not _is_admin(current_user):
         raise HTTPException(status_code=403, detail="Chỉ admin được đổi scope incident")
 
-    async def mutate(case):
+    def mutate(case):
         previous_project_id = case.project_id
         if case.project_id == body.project_id and case.station_id == body.station_id and case.scope_state == "SCOPED":
             return False, "scope_changed", None, {"project_id": body.project_id, "station_id": body.station_id}
@@ -98,7 +102,7 @@ async def acknowledge_incident(
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_INCIDENTS)),
 ):
-    async def mutate(case):
+    def mutate(case):
         changed = case.status == "new"
         if body.assign_to_self and case.assigned_to_user_id is None:
             case.assigned_to_user_id = int(current_user.id); case.assigned_to_username = current_user.username; changed = True
@@ -120,7 +124,7 @@ async def set_incident_priority(
     requested = body.priority.strip().upper()
     if requested not in VALID_PRIORITIES:
         raise HTTPException(status_code=422, detail={"code": "INVALID_PRIORITY", "message": "Priority không hợp lệ"})
-    async def mutate(case):
+    def mutate(case):
         if case.priority == requested:
             return False, "priority_changed", body.note, {"priority": requested}
         if case.priority != "UNTRIAGED" and PRIORITY_ORDER[requested] < PRIORITY_ORDER[case.priority] and not body.note:
@@ -140,7 +144,7 @@ async def assign_incident(
 ):
     if not _is_admin(current_user) and body.assignee_user_id not in {None, int(current_user.id)}:
         raise HTTPException(status_code=403, detail="Operator chỉ được tự nhận hoặc bỏ nhận sự cố")
-    async def mutate(case):
+    def mutate(case):
         if case.assigned_to_user_id == body.assignee_user_id:
             return False, "assigned", None, {"assigned_to_user_id": body.assignee_user_id}
         case.assigned_to_user_id = body.assignee_user_id
@@ -161,7 +165,7 @@ async def transition_incident(
     target = body.to_status.strip().lower()
     if target not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail={"code": "INVALID_STATUS", "message": "Status không hợp lệ"})
-    async def mutate(case):
+    def mutate(case):
         if case.status == target:
             return False, "status_changed", body.note, {"status": target}
         allowed = {
@@ -192,6 +196,6 @@ async def add_incident_note(
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_INCIDENTS)),
 ):
-    async def mutate(case):
+    def mutate(case):
         return True, "note_added", body.message, {}
     return await _mutate_case(db, current_user, incident_id, "notes", body.model_dump(), idempotency_key, mutate)

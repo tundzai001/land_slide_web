@@ -172,3 +172,99 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertIsNone(_CommandResponseMatcher.search("$command,singlepart"))
         self.assertIsNone(_CommandResponseMatcher.search("$command,cmd,notresponse"))
         self.assertIsNone(_CommandResponseMatcher.search("$command,cmd,responsenocolon"))
+
+    def test_auth_and_incident_coverage(self):
+        import asyncio
+        from app.auth import oauth2_scheme, require_permission, Permission
+        from app.features.incidents.cases import append_event
+        from app.features.incidents.write_router import _mutate_case
+
+        # 1. oauth2_scheme
+        from app.auth import create_access_token, Role
+        valid_tok = create_access_token({"sub": "admin", "role": "admin"})
+        scope = {
+            "type": "http",
+            "headers": [(b"authorization", f"Bearer {valid_tok}".encode())],
+        }
+        req = Request(scope)
+        self.assertEqual(oauth2_scheme(req), valid_tok)
+
+        # 2. require_permission
+        checker = require_permission(Permission.MANAGE_INCIDENTS)
+        admin_user = MagicMock()
+        admin_user.is_superuser = False
+        admin_user.role = Role.ADMIN
+        self.assertEqual(checker(admin_user), admin_user)
+
+        normal_user = MagicMock()
+        normal_user.is_superuser = False
+        normal_user.role = Role.VIEWER
+        with self.assertRaises(HTTPException) as ctx:
+            checker(normal_user)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+        # 3. append_event with async flush
+        async def run_append():
+            mock_db = MagicMock()
+            mock_db.flush = unittest.mock.AsyncMock()
+            case = MagicMock()
+            case.id = 42
+            case.last_event_sequence = 2
+            ev = await append_event(
+                mock_db, case, "status_changed", actor_kind="user", note="test note"
+            )
+            mock_db.flush.assert_awaited_once()
+            self.assertEqual(ev.sequence, 3)
+            return ev
+
+        asyncio.run(run_append())
+
+        # 4. _mutate_case with sync and async mutate
+        async def run_mutate_case():
+            mock_db = MagicMock()
+            def mock_add(obj):
+                if hasattr(obj, "id") and getattr(obj, "id", None) is None:
+                    obj.id = 99
+            mock_db.add.side_effect = mock_add
+            mock_db.execute = unittest.mock.AsyncMock()
+            mock_db.flush = unittest.mock.AsyncMock()
+            mock_db.commit = unittest.mock.AsyncMock()
+            mock_db.refresh = unittest.mock.AsyncMock()
+
+            mock_case = MagicMock()
+            mock_case.id = 10
+            mock_case.version = 1
+            mock_case.last_event_sequence = 0
+            mock_case.status = "new"
+            mock_case.project_id = 1
+            mock_case.station_id = 1
+
+            result_case = MagicMock()
+            result_case.scalar_one_or_none.return_value = mock_case
+            result_none = MagicMock()
+            result_none.scalar_one_or_none.return_value = None
+
+            # 1st: load_case -> mock_case, 2nd: existing_mutation -> None
+            # 3rd: load_case -> mock_case, 4th: existing_mutation -> None
+            mock_db.execute.side_effect = [result_case, result_none, result_case, result_none]
+
+            # sync mutate without changes
+            def sync_mutate_fn(c):
+                return False, "noop", None, {}
+
+            res = await _mutate_case(
+                mock_db, admin_user, 10, "test", {}, "idemp-key-1", sync_mutate_fn
+            )
+            self.assertEqual(res["case"]["status"], "new")
+
+            # async mutate with changes
+            async def async_mutate_fn(c):
+                c.status = "acknowledged"
+                return True, "status_changed", "acknowledged", {}
+
+            res2 = await _mutate_case(
+                mock_db, admin_user, 10, "test", {}, "idemp-key-2", async_mutate_fn
+            )
+            self.assertEqual(res2["case"]["status"], "acknowledged")
+
+        asyncio.run(run_mutate_case())

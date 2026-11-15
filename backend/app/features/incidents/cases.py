@@ -130,6 +130,7 @@ async def append_event(
         mutation_request_id=mutation_request_id,
     )
     db.add(event)
+    await db.flush()
     return event
 
 
