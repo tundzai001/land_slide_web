@@ -47,7 +47,6 @@ BACKEND_URL = os.getenv('BACKEND_URL', 'https://monitoring.aitogy.com')
 
 # Runtime values (may be overridden by local config)
 DEVICE_CODE = None
-MY_STATION_ID = MY_STATION_ID
 
 # =====================================================
 # LOGGING

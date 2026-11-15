@@ -1377,7 +1377,6 @@ function setupEventListeners() {
                 return `HTTP ${response.status}`;
             }
         }
-        window.gnssBoardState?.fitToResult?.();
     }
 
     async function controlGnssAdjustment(action) {

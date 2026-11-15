@@ -776,13 +776,16 @@ function renderCrossConsensusSection(data) {
     const alertingSet = new Set(cs.sensors_alerting || []);
     const corrobSet = new Set(cs.sensors_corroborating || []);
     const conflictSet = new Set(cs.sensors_conflicting || []);
-    sensorsEl.innerHTML = (cs.sensors_with_data || []).map(s => {
-        let extra = '';
-        if (conflictSet.has(s)) extra = 'sensor-chip-conflict';
-        else if (corrobSet.has(s)) extra = 'sensor-chip-ok';
-        else if (alertingSet.has(s)) extra = 'sensor-chip-alert';
-        return `<span class="sensor-chip ${extra}">${sensorLabels[s] || s}</span>`;
-    }).join('');
+    sensorsEl.replaceChildren();
+    for (const sensor of cs.sensors_with_data || []) {
+        const chip = document.createElement('span');
+        chip.className = 'sensor-chip';
+        if (conflictSet.has(sensor)) chip.classList.add('sensor-chip-conflict');
+        else if (corrobSet.has(sensor)) chip.classList.add('sensor-chip-ok');
+        else if (alertingSet.has(sensor)) chip.classList.add('sensor-chip-alert');
+        chip.textContent = Object.hasOwn(sensorLabels, sensor) ? sensorLabels[sensor] : String(sensor);
+        sensorsEl.append(chip);
+    }
 
     // Trend agreement
     const trendMap = {
@@ -800,14 +803,20 @@ function renderCrossConsensusSection(data) {
     }
 
     // Notes list
-    notesEl.innerHTML = (cs.notes || []).map(n =>
-        `<div class="consensus-note-item"><i class="bi bi-arrow-right-short me-1"></i>${n}</div>`
-    ).join('');
+    notesEl.replaceChildren();
+    for (const note of cs.notes || []) {
+        const item = document.createElement('div');
+        item.className = 'consensus-note-item';
+        const icon = document.createElement('i');
+        icon.className = 'bi bi-arrow-right-short me-1';
+        item.append(icon, document.createTextNode(String(note)));
+        notesEl.append(item);
+    }
 }
 
 function sanitizeLongTermText(text) {
     return String(text || '')
-        .replace(/[📈✅📉🚨]/g, '')
+        .replace(/[📈✅📉🚨]/gu, '')
         .replace(/\s{2,}/g, ' ')
         .trim();
 }
