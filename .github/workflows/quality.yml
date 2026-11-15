@@ -110,7 +110,6 @@ jobs:
             -Dsonar.projectKey=tundzai001_land_slide_web
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.javascript.lcov.reportPaths=coverage-js/lcov.info
-            -Dsonar.sources=backend/app,backend/processors,field_unit,frontend
             -Dsonar.tests=backend/tests,tests
             -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
             -Dsonar.qualitygate.wait=true
