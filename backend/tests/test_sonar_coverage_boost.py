@@ -137,16 +137,38 @@ class SonarCoverageBoostTests(unittest.TestCase):
             assert exc.value.status_code == 403
 
     def test_security_core_waf_granular(self):
-        from security_core import check_waf_granular
+        from security_core import check_waf_granular, async_add_threat_map, security_state
         self.assertEqual(check_waf_granular("union select * from users"), "SQLI")
         self.assertEqual(check_waf_granular("select id from stations"), "SQLI")
+        self.assertEqual(check_waf_granular("insert into test values(1)"), "SQLI")
+        self.assertEqual(check_waf_granular("drop table test"), "SQLI")
+        self.assertEqual(check_waf_granular("update test set foo=1"), "SQLI")
         self.assertEqual(check_waf_granular("<script>alert(1)</script>"), "XSS")
+        self.assertEqual(check_waf_granular("javascript:alert(1)"), "XSS")
+        self.assertEqual(check_waf_granular("<img src=x onerror=alert(1)>"), "XSS")
+        self.assertEqual(check_waf_granular("<body onload=alert(1)>"), "XSS")
         self.assertEqual(check_waf_granular("../../etc/passwd"), "LFI")
+        self.assertEqual(check_waf_granular("win.ini"), "LFI")
         self.assertIsNone(check_waf_granular("normal clean input"))
 
+        async_add_threat_map("1.2.3.4", "SQLI")
+        security_state.clean_old_records()
+
     def test_session_command_response_re(self):
-        from processors.gnss_adjustment.session import _COMMAND_RESPONSE_RE
+        from processors.gnss_adjustment.session import _COMMAND_RESPONSE_RE, _CommandResponseMatcher
         m = _COMMAND_RESPONSE_RE.search("$COMMAND,mode rover survey,Response:OK*00")
         self.assertIsNotNone(m)
         self.assertEqual(m.group("command"), "mode rover survey")
         self.assertEqual(m.group("response"), "OK")
+        self.assertEqual(m.group(0), "$COMMAND,mode rover survey,RESPONSE:OK")
+        self.assertEqual(m.group(1), "mode rover survey")
+        self.assertEqual(m.group(2), "OK")
+        self.assertEqual(m.start(), 0)
+        with self.assertRaises(IndexError):
+            m.group(99)
+
+        self.assertIsNone(_CommandResponseMatcher.search(""))
+        self.assertIsNone(_CommandResponseMatcher.search("plain text"))
+        self.assertIsNone(_CommandResponseMatcher.search("$command,singlepart"))
+        self.assertIsNone(_CommandResponseMatcher.search("$command,cmd,notresponse"))
+        self.assertIsNone(_CommandResponseMatcher.search("$command,cmd,responsenocolon"))
