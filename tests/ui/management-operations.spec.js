@@ -554,3 +554,22 @@ test('sidebar guides download directly with loading feedback', async ({page}) =>
   await expect(page.getByTitle('Tải hướng dẫn sử dụng PDF', {exact:true})).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('database export rejects unsafe task IDs and escapes project IDs', async ({ page }) => {
+  await page.setContent('<select id="export-project-select"></select>');
+  await page.addScriptTag({ content: source('frontend/js/db-manager.js') });
+  const result = await page.evaluate(async () => {
+    const manager = Object.create(DatabaseManager.prototype);
+    let resets = 0;
+    let requests = 0;
+    manager.resetExportTask = () => { resets += 1; };
+    manager.onExportProjectChange = async () => {};
+    manager.fetchJson = async () => [{ id: '\"><img src=x onerror=alert(1)>', project_code: 'P', name: 'Test' }];
+    window.fetch = async () => { requests += 1; };
+    manager.startExportPolling('../unexpected');
+    await manager.downloadCompletedExport('../unexpected', {});
+    await manager.populateExportProjects();
+    return { resets, requests, injected: !!document.querySelector('img'), value: document.querySelectorAll('#export-project-select option')[1].value };
+  });
+  expect(result).toEqual({ resets: 2, requests: 0, injected: false, value: '\"><img src=x onerror=alert(1)>' });
+});
