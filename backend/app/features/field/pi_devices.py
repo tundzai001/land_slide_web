@@ -162,7 +162,7 @@ async def register_pi_device(
             }
         else:
             # New Pi device
-            logger.info(f"✨ New Pi registration: {payload.serial} ({payload.device_type})")
+            logger.info("✨ New Pi registration: %r (%r)", payload.serial, payload.device_type)
             new_pi = PiDevice(
                 serial        = payload.serial,
                 name          = payload.name,

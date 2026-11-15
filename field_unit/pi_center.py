@@ -264,7 +264,7 @@ def auto_register_device():
         # Use new schema: field "serial" (matches new PiDevice model)
         payload = {'serial': serial, 'name': device_name, 'device_type': prefix}
 
-        logger.info(f"📡 Registering/heartbeat to {url} (serial={serial})")
+        logger.info("📡 Registering/heartbeat to %r (serial=%r)", url, serial)
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
 
@@ -273,7 +273,7 @@ def auto_register_device():
         status      = result.get('status', 'pending')
         station_id  = result.get('station_id') or existing_cfg.get('station_id', 0)
 
-        logger.info(f"✅ Registration OK: device_id={device_id}, status={status}, station_id={station_id}")
+        logger.info("✅ Registration OK: device_id=%r, status=%r, station_id=%r", device_id, status, station_id)
 
         # Update local config with fresh data from backend
         cfg = {

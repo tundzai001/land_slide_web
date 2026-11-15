@@ -112,7 +112,7 @@ async def upload_project_dem(
     db: AsyncSession = Depends(get_config_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
 ):
-    logger.info("Project DEM upload received project_id=%s filename=%s bytes=%s", project_id, dem_file.filename, getattr(dem_file, "size", None))
+    logger.info("Project DEM upload received project_id=%s filename=%r bytes=%s", project_id, dem_file.filename, getattr(dem_file, "size", None))
     project = await db.get(model_config.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Không tìm thấy dự án.")
@@ -123,7 +123,7 @@ async def upload_project_dem(
     await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
     await refresh_project_map_position(db, project_id)
     await db.commit()
-    logger.info("Saved project DEM project_id=%s dem_id=%s filename=%s bytes=%s", project_id, result["dem_id"], dem_file.filename, dem_file.size)
+    logger.info("Saved project DEM project_id=%s dem_id=%s filename=%r bytes=%s", project_id, result["dem_id"], dem_file.filename, dem_file.size)
     return {"project_id": project_id, **result}
 
 
@@ -157,7 +157,7 @@ async def update_project_dem(
     await save_project_dem_catalog(db, project_id, result["models"], current_user.username)
     await refresh_project_map_position(db, project_id)
     await db.commit()
-    logger.info("Updated project DEM project_id=%s dem_id=%s xllcorner=%s yllcorner=%s", project_id, dem_id, payload.xllcorner, payload.yllcorner)
+    logger.info("Updated project DEM project_id=%s dem_id=%r xllcorner=%s yllcorner=%s", project_id, dem_id, payload.xllcorner, payload.yllcorner)
     return {"project_id": project_id, **result}
 
 
