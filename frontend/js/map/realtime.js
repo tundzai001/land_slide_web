@@ -1070,7 +1070,7 @@ function updateRealtimeSensorValues(message) {
         // Update battery in real-time
         const batteryContainer = document.getElementById('battery-container');
         const batteryVal = data.battery;
-        if (batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+        if (batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
             if (batteryContainer) batteryContainer.style.display = '';
             animateValue('val-battery', batteryVal, 2, 'V');
         }

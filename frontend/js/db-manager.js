@@ -1004,14 +1004,14 @@ class DatabaseManager {
         const projectId = document.getElementById('export-project-select')?.value;
         const stationId = document.getElementById('export-station-select')?.value;
         const clusterIndex = document.getElementById('export-cluster-select')?.value;
-        const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId, 10)] : null;
-        const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId, 10)] : null;
-        const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [parseInt(clusterIndex, 10)] : null;
+        const projectIds = projectId && projectId !== 'all' ? [Number.parseInt(projectId, 10)] : null;
+        const stationIds = stationId && stationId !== 'all' ? [Number.parseInt(stationId, 10)] : null;
+        const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [Number.parseInt(clusterIndex, 10)] : null;
         const selectedStation = stationIds
             ? this.exportStations.find(s => String(s.id) === String(stationIds[0]))
             : null;
         const effectiveProjectIds = projectIds
-            || (selectedStation?.project_id ? [parseInt(selectedStation.project_id, 10)] : null);
+            || (selectedStation?.project_id ? [Number.parseInt(selectedStation.project_id, 10)] : null);
         return {
             effectiveProjectIds,
             stationIds,

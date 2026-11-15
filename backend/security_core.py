@@ -71,7 +71,7 @@ def async_add_threat_map(ip: str, threat_type: str):
 
 # --- WAF Rules ---
 # Granular signatures
-SQLI_PATTERN = re.compile(r"(?i)(\bunion\s+select\b|\bselect\s+[^\r\n]+?\s+from\b|\binsert\s+into\b|\bdrop\s+table\b|\bupdate\s+[^\r\n]+?\s+set\b)")
+SQLI_PATTERN = re.compile(r"(?i)(\bunion\s+select\b|\bselect\b[^\r\n]+?\bfrom\b|\binsert\s+into\b|\bdrop\s+table\b|\bupdate\b[^\r\n]+?\bset\b)")
 XSS_PATTERN = re.compile(r"(?i)(<script[^>]*>.*?</script>|javascript:|onerror=|onload=)")
 LFI_PATTERN = re.compile(r"(?i)(\.\./\.\./|etc/passwd|win\.ini)")
 
