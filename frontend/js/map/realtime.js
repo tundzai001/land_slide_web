@@ -944,7 +944,7 @@ function updateRealtimeSensorValues(message) {
                         : integrityState === 'UNTRUSTED_GEOMETRY'
                             ? 'RTK FIXED nhưng geometry không đạt ngưỡng monitoring'
                             : `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
-                    evalSummaryEl.innerHTML = `<span class="text-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
+                    evalSummaryEl.innerHTML = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
                     return;
                 }
                 let trendHtml = '';
@@ -956,11 +956,11 @@ function updateRealtimeSensorValues(message) {
                     || (!hasConfirmationField && data.velocity_significant === true);
                 const persistentVelocity = data.velocity_persistent === true;
                 if (movementConfirmed && data.velocity_reliable !== false) {
-                    trendHtml = `<span class="text-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
+                    trendHtml = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
                 } else if (data.velocity_reliable === false) {
-                    trendHtml = `<span class="text-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
+                    trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
                 } else if (persistentVelocity && data.position_change_significant !== true) {
-                    trendHtml = `<span class="text-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
+                    trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
                 } else if (hasConfirmationField && statisticalSignal) {
                     const confirmedSamples = Number.isFinite(Number(data.velocity_confirmation_sample_count))
                         ? Number(data.velocity_confirmation_sample_count)
@@ -968,9 +968,9 @@ function updateRealtimeSensorValues(message) {
                     const requiredSamples = Number.isFinite(Number(data.velocity_confirmation_required_samples))
                         ? Number(data.velocity_confirmation_required_samples)
                         : 3;
-                    trendHtml = `<span class="text-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
+                    trendHtml = `<span class="gnss-eval-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
                 } else {
-                    trendHtml = `<span class="text-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
+                    trendHtml = `<span class="gnss-eval-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
                 }
                 const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '--';
                 const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
@@ -981,10 +981,10 @@ function updateRealtimeSensorValues(message) {
                 evalSummaryEl.innerHTML = `
                     <div class="d-flex flex-column gap-1">
                         <div>${trendHtml}</div>
-                        <div class="text-muted fw-normal" style="font-size: 0.75rem;">
+                        <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
                             <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="font-monospace">(${ciStr})</span>` : ''} ${zHtml}
                         </div>
-                        <div class="text-muted fw-normal" style="font-size: 0.75rem;">
+                        <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
                             <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)
                         </div>
                     </div>

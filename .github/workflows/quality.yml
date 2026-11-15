@@ -62,6 +62,7 @@ jobs:
           tests/ui/map-heatmap.spec.js
           tests/ui/theme-toggle-motion.spec.js
           tests/ui/theme-contract.spec.js
+          tests/ui/gnss-summary-theme.spec.js
           tests/ui/map-workspace-tools.spec.js
           tests/ui/project-map-overview.spec.js
           tests/ui/project-dem-dashboard.spec.js

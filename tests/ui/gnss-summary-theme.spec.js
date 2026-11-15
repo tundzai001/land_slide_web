@@ -51,7 +51,7 @@ for (const theme of ['light', 'dark']) {
           return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
         }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
         const background = luminance(getComputedStyle(summary.closest('.sensor-item')).backgroundColor);
-        return [...summary.querySelectorAll('span, strong, .text-muted')].map(element => {
+        return [...summary.querySelectorAll('span, strong, .gnss-eval-muted')].map(element => {
           const foreground = luminance(getComputedStyle(element).color);
           return { text: element.textContent, color: getComputedStyle(element).color,
             ratio: (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05) };
