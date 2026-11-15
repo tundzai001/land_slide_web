@@ -169,6 +169,25 @@ class RoverStreamHealthTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NtripHandshakeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_propagates_cancellation_of_caller(self):
+        cleanup_started = asyncio.Event()
+
+        async def worker():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleanup_started.set()
+                await asyncio.Event().wait()
+
+        pusher = NtripPusher("S1", "caster", 2101, "S1_BASE", "secret")
+        pusher.task = asyncio.create_task(worker())
+        await asyncio.sleep(0)
+        stopping = asyncio.create_task(pusher.stop())
+        await cleanup_started.wait()
+        stopping.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await stopping
+
     async def asyncTearDown(self):
         await NtripPusherManager.stop_pusher("FANOUT")
 

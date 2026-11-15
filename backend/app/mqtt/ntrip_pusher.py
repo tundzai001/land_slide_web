@@ -295,7 +295,8 @@ class NtripPusher:
             try:
                 await self.task
             except asyncio.CancelledError:
-                pass
+                if asyncio.current_task().cancelling():
+                    raise
             self.task = None
 
 

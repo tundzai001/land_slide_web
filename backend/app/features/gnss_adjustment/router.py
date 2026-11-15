@@ -511,7 +511,8 @@ async def stop_gnss_adjustment(
                 try:
                     await running_task
                 except asyncio.CancelledError:
-                    pass
+                    if asyncio.current_task().cancelling():
+                        raise
         for run_id in run_ids:
             await mqtt_service.round_robin_manager.restore_common_fixed_base_topology(run_id)
 
