@@ -4,6 +4,33 @@ class AdminOriginFeature extends window.AdminManager {
     // FETCH ORIGIN COORDINATES (LIVE FROM DEVICE)
     // =========================================================================
 
+    _applyLiveOriginResult(result, statusEl) {
+        const latEl = document.getElementById('origin-lat');
+        const lonEl = document.getElementById('origin-lon');
+        const hEl = document.getElementById('origin-h');
+        const currentLat = parseFloat(latEl?.value);
+        const currentLon = parseFloat(lonEl?.value);
+        const currentH = parseFloat(hEl?.value);
+        const hasOrigin = Number.isFinite(currentLat) && Number.isFinite(currentLon);
+
+        if (!hasOrigin) {
+            // No existing origin -> allow filling
+            if (latEl) latEl.value = result.lat;
+            if (lonEl) lonEl.value = result.lon;
+            if (hEl) hEl.value = result.h;
+            this.updateOriginActionButtons(true);
+
+            statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
+            window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
+        } else {
+            // Existing origin -> verification only, do NOT overwrite locked origin fields
+            const deltaM = this.computeGeoDistanceMeters(currentLat, currentLon, result.lat, result.lon);
+            const deltaH = Number.isFinite(currentH) ? (result.h - currentH) : 0;
+            statusEl.innerHTML = `<span class="text-info"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Kiểm tra trực tiếp: Δxy=${deltaM.toFixed(3)}m, Δh=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
+            window.toast?.info('Đã kiểm tra live GNSS. Origin hiện tại không bị ghi đè.');
+        }
+    }
+
     async fetchLatestOrigin() {
         const topic = document.getElementById('topic-gnss')?.value.trim();
         if (!topic) {
@@ -39,34 +66,10 @@ class AdminOriginFeature extends window.AdminManager {
 
             const result = await res.json();
 
-            if (res.ok) {
-                const latEl = document.getElementById('origin-lat');
-                const lonEl = document.getElementById('origin-lon');
-                const hEl = document.getElementById('origin-h');
-                const currentLat = parseFloat(latEl?.value);
-                const currentLon = parseFloat(lonEl?.value);
-                const currentH = parseFloat(hEl?.value);
-                const hasOrigin = Number.isFinite(currentLat) && Number.isFinite(currentLon);
-
-                if (!hasOrigin) {
-                    // No existing origin -> allow filling
-                    if (latEl) latEl.value = result.lat;
-                    if (lonEl) lonEl.value = result.lon;
-                    if (hEl) hEl.value = result.h;
-                    this.updateOriginActionButtons(true);
-
-                    statusEl.innerHTML = `<span class="text-success">✅ Đã nhận: Sats ${result.num_sats}, Fix ${result.fix_quality}</span>`;
-                    window.toast?.success('Đã lấy tọa độ thực từ thiết bị!');
-                } else {
-                    // Existing origin -> verification only, do NOT overwrite locked origin fields
-                    const deltaM = this.computeGeoDistanceMeters(currentLat, currentLon, result.lat, result.lon);
-                    const deltaH = Number.isFinite(currentH) ? (result.h - currentH) : 0;
-                    statusEl.innerHTML = `<span class="text-info"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Kiểm tra trực tiếp: Δxy=${deltaM.toFixed(3)}m, Δh=${deltaH.toFixed(3)}m (Sats ${result.num_sats}, Fix ${result.fix_quality})</span>`;
-                    window.toast?.info('Đã kiểm tra live GNSS. Origin hiện tại không bị ghi đè.');
-                }
-            } else {
+            if (!res.ok) {
                 throw new Error(result.detail || 'Timeout hoặc thiết bị offline');
             }
+            this._applyLiveOriginResult(result, statusEl);
         } catch (e) {
             console.error(e);
             statusEl.innerHTML = `<span class="text-danger">❌ Lỗi: ${e.message}</span>`;

@@ -176,15 +176,18 @@ class _CommandResponseMatch:
         raise IndexError(name_or_idx)
 
 
+_CMD_PREFIX = "$command"
+
+
 class _CommandResponseMatcher:
     @staticmethod
     def search(line: str) -> Optional[_CommandResponseMatch]:
-        if not line or "$command" not in line.casefold():
+        if not line or _CMD_PREFIX not in line.casefold():
             return None
-        idx = line.casefold().find("$command")
+        idx = line.casefold().find(_CMD_PREFIX)
         sub = line[idx:].strip()
         parts = sub.split(",")
-        if len(parts) < 3 or parts[0].strip().casefold() != "$command":
+        if len(parts) < 3 or parts[0].strip().casefold() != _CMD_PREFIX:
             return None
         cmd = parts[1].strip()
         rest = ",".join(parts[2:]).strip()
