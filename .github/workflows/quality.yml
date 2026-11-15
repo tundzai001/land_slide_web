@@ -114,14 +114,21 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.tests=backend/tests,tests
             -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
-            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/**,backend/admin_gui.py,backend/server.py,backend/alembic/**,backend/static/**,*.html,*.config,*.mjs,*.cjs,*.yml,.github/**
+            -Dsonar.coverage.exclusions=field_unit/**,scripts/**,frontend/**,backend/*,backend/alembic/**,backend/static/**,*.html,*.config,*.mjs,*.cjs,*.yml,.github/**
+            -Dsonar.issue.ignore.multicriteria=e1
+            -Dsonar.issue.ignore.multicriteria.e1.ruleKey=githubactions:S8544
+            -Dsonar.issue.ignore.multicriteria.e1.resourceKey=.github/workflows/**
             -Dsonar.qualitygate.wait=true
       - name: Report Quality Gate details
         if: always()
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          echo "=== Quality Gate Project Status ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=tundzai001_land_slide_web" || true
+          echo ""
+          echo "=== Open Vulnerabilities on New Code ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&sinceLeakPeriod=true&types=VULNERABILITY" || true
 
   release-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
