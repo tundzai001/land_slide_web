@@ -239,7 +239,7 @@ class AdminUsersFeature extends window.AdminManager {
         // Collect assigned projects (checkboxes)
         const assignedProjects = [];
         document.querySelectorAll('#project-checkbox-list input[type="checkbox"]:checked').forEach(cb => {
-            assignedProjects.push(parseInt(cb.value));
+            assignedProjects.push(Number.parseInt(cb.value));
         });
 
         this.clearUserFormError('new');

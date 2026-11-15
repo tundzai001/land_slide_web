@@ -365,8 +365,8 @@ class AdminStationsFeature extends window.AdminManager {
 
     onDemUtmInput() {
         if (!this._managementDemGrid || !window.DemGrid) return;
-        const xll = parseFloat(document.getElementById('edit-dem-xll')?.value);
-        const yll = parseFloat(document.getElementById('edit-dem-yll')?.value);
+        const xll = Number.parseFloat(document.getElementById('edit-dem-xll')?.value);
+        const yll = Number.parseFloat(document.getElementById('edit-dem-yll')?.value);
         if (!Number.isFinite(xll) || !Number.isFinite(yll)) return;
         const grid = this._managementDemGrid;
         const centerE = xll + (grid.ncols * grid.cellsize) / 2;
@@ -380,8 +380,8 @@ class AdminStationsFeature extends window.AdminManager {
 
     onDemWgsInput() {
         if (!this._managementDemGrid || !window.DemGrid?.wgs84ToUtm48) return;
-        const lat = parseFloat(document.getElementById('edit-dem-lat')?.value);
-        const lon = parseFloat(document.getElementById('edit-dem-lon')?.value);
+        const lat = Number.parseFloat(document.getElementById('edit-dem-lat')?.value);
+        const lon = Number.parseFloat(document.getElementById('edit-dem-lon')?.value);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
         const utm = window.DemGrid.wgs84ToUtm48(lat, lon);
         const grid = this._managementDemGrid;
@@ -396,8 +396,8 @@ class AdminStationsFeature extends window.AdminManager {
     async saveDemCoordinates() {
         const demId = document.getElementById('edit-dem-id')?.value;
         const name = document.getElementById('edit-dem-name')?.value?.trim();
-        const xll = parseFloat(document.getElementById('edit-dem-xll')?.value);
-        const yll = parseFloat(document.getElementById('edit-dem-yll')?.value);
+        const xll = Number.parseFloat(document.getElementById('edit-dem-xll')?.value);
+        const yll = Number.parseFloat(document.getElementById('edit-dem-yll')?.value);
         const saveBtn = document.getElementById('btn-save-dem-coords');
 
         if (!demId || !this.currentProjectId) return;

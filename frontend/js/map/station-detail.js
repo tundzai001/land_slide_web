@@ -405,7 +405,7 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
         return defaultValue;
     }
 
-    const num = parseFloat(value);
+    const num = Number.parseFloat(value);
     if (isNaN(num)) {
         return defaultValue;
     }
@@ -420,7 +420,7 @@ function formatWaterLevelDisplay(waterLatest) {
     }
 
     const unitRaw = String(waterLatest?.water_display_unit || '').trim().toLowerCase();
-    const displayRaw = parseFloat(waterLatest?.water_display_value);
+    const displayRaw = Number.parseFloat(waterLatest?.water_display_value);
     let levelCm = null;
 
     if (!Number.isNaN(displayRaw)) {
@@ -439,14 +439,14 @@ function formatWaterLevelDisplay(waterLatest) {
     }
 
     if (levelCm === null) {
-        const cmRaw = parseFloat(waterLatest?.water_level_cm);
+        const cmRaw = Number.parseFloat(waterLatest?.water_level_cm);
         if (!Number.isNaN(cmRaw)) {
             levelCm = cmRaw;
         }
     }
 
     if (levelCm === null) {
-        const meterRaw = parseFloat(waterLatest?.water_level ?? waterLatest?.processed_value_meters);
+        const meterRaw = Number.parseFloat(waterLatest?.water_level ?? waterLatest?.processed_value_meters);
         if (!Number.isNaN(meterRaw)) {
             levelCm = meterRaw * 100;
         }
@@ -464,7 +464,7 @@ function formatWaterLevelDisplay(waterLatest) {
 }
 
 function formatImuDelta(val, axis) {
-    const num = parseFloat(val);
+    const num = Number.parseFloat(val);
     if (isNaN(num)) return '-- cm';
     const dispMm = Math.sin(num * Math.PI / 180) * 0.09 * 1000; // mm
     const sign = dispMm > 0 ? '+' : '';
@@ -926,7 +926,7 @@ function updateSidebarUI(data) {
         // ✅ Battery Voltage: chỉ hiển thị khi IMU online và có giá trị > 0
         const batteryContainer = document.getElementById('battery-container');
         const batteryVal = imuLatest?.battery;
-        if (imuOnline && batteryVal !== undefined && batteryVal !== null && parseFloat(batteryVal) > 0) {
+        if (imuOnline && batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
             if (batteryContainer) batteryContainer.style.display = '';
             setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
         } else {
@@ -1143,7 +1143,7 @@ function renderChart(id, history, key, color, label) {
     const values = (history || []).map(h => {
         const val = h.data?.[key];
         if (val === null || val === undefined || val === '') return null;
-        const num = parseFloat(val);
+        const num = Number.parseFloat(val);
         return Number.isFinite(num) ? num : null;
     });
     const numericValues = values.filter(value => value !== null);
@@ -1188,9 +1188,9 @@ function renderChart(id, history, key, color, label) {
     // Extract RGB from hex for gradient
     let r = 13, g = 110, b = 253; // Default blue
     if (color.startsWith('#') && color.length === 7) {
-        r = parseInt(color.slice(1, 3), 16);
-        g = parseInt(color.slice(3, 5), 16);
-        b = parseInt(color.slice(5, 7), 16);
+        r = Number.parseInt(color.slice(1, 3), 16);
+        g = Number.parseInt(color.slice(3, 5), 16);
+        b = Number.parseInt(color.slice(5, 7), 16);
     }
     
     let gradient = ctx.createLinearGradient(0, 0, 0, 300);

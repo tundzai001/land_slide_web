@@ -385,9 +385,9 @@ class AdminProjectConfigFeature extends window.AdminManager {
                 const baseSelect = row.querySelector('.cluster-base-select');
                 const baseStation = baseSelect?.value || '';
                 const selectedOpt = baseSelect?.options[baseSelect.selectedIndex];
-                const baseLat = selectedOpt?.dataset?.lat ? parseFloat(selectedOpt.dataset.lat) : null;
-                const baseLon = selectedOpt?.dataset?.lon ? parseFloat(selectedOpt.dataset.lon) : null;
-                const baseAlt = selectedOpt?.dataset?.alt ? parseFloat(selectedOpt.dataset.alt) : null;
+                const baseLat = selectedOpt?.dataset?.lat ? Number.parseFloat(selectedOpt.dataset.lat) : null;
+                const baseLon = selectedOpt?.dataset?.lon ? Number.parseFloat(selectedOpt.dataset.lon) : null;
+                const baseAlt = selectedOpt?.dataset?.alt ? Number.parseFloat(selectedOpt.dataset.alt) : null;
                 const backupSelect = row.querySelector('.cluster-backup-base-select');
                 const backupOpt = backupSelect?.options[backupSelect.selectedIndex];
                 const backupStreamSelect = row.querySelector('.cluster-backup-stream-select');
@@ -422,9 +422,9 @@ class AdminProjectConfigFeature extends window.AdminManager {
                     base_serial: selectedOpt?.dataset?.serial || '',
                     base_server_id: row.querySelector('.cluster-stream-select')?.selectedIndex >= 0 ? (row.querySelector('.cluster-stream-select')?.options[row.querySelector('.cluster-stream-select')?.selectedIndex]?.dataset?.serverId || '') : '',
                     backup_base_station: backupBaseStation,
-                    backup_base_lat: backupOpt?.dataset?.lat ? parseFloat(backupOpt.dataset.lat) : null,
-                    backup_base_lon: backupOpt?.dataset?.lon ? parseFloat(backupOpt.dataset.lon) : null,
-                    backup_base_alt: backupOpt?.dataset?.alt ? parseFloat(backupOpt.dataset.alt) : null,
+                    backup_base_lat: backupOpt?.dataset?.lat ? Number.parseFloat(backupOpt.dataset.lat) : null,
+                    backup_base_lon: backupOpt?.dataset?.lon ? Number.parseFloat(backupOpt.dataset.lon) : null,
+                    backup_base_alt: backupOpt?.dataset?.alt ? Number.parseFloat(backupOpt.dataset.alt) : null,
                     backup_base_stream: backupStreamSelect?.value || '',
                     backup_base_stream_host: backupStreamHost,
                     backup_base_stream_port: backupStreamSelect?.selectedIndex >= 0 ? (backupStreamSelect.options[backupStreamSelect.selectedIndex]?.dataset?.port || '') : '',

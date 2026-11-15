@@ -171,7 +171,7 @@ class SimulationController {
             if (!el) continue;
 
             el.addEventListener('input', () => {
-                const val = parseFloat(el.value);
+                const val = Number.parseFloat(el.value);
                 this.params[cfg.key] = cfg.scale ? val * cfg.scale : val;
                 if (out) out.textContent = val;
 
@@ -224,7 +224,7 @@ class SimulationController {
             if (!el) continue;
 
             el.addEventListener('input', () => {
-                const val = parseFloat(el.value);
+                const val = Number.parseFloat(el.value);
                 this.fosThresholds[cfg.key] = val;
                 if (out) out.textContent = val.toFixed(1);
 
@@ -238,7 +238,7 @@ class SimulationController {
         const durationEl = document.getElementById('param-sim-duration');
         if (durationEl) {
             durationEl.addEventListener('change', () => {
-                this.maxSimTime = parseInt(durationEl.value);
+                this.maxSimTime = Number.parseInt(durationEl.value);
                 const durationOut = document.getElementById('val-sim-duration');
                 if (durationOut) {
                     const h = Math.round(this.maxSimTime / 3600);
@@ -272,7 +272,7 @@ class SimulationController {
 
         // Speed selector
         document.getElementById('tl-speed').addEventListener('change', (e) => {
-            this.simSpeed = parseInt(e.target.value);
+            this.simSpeed = Number.parseInt(e.target.value);
         });
 
         // Toggle panel

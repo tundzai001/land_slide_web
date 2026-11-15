@@ -1268,7 +1268,7 @@ function getDefaultAlertMessageForStationStatus(riskUi) {
 function getImuCriticalThresholdDegFromCurrentStation() {
     const cfg = currentStationData?.config || {};
     const imuCfg = cfg.ImuAlerting || cfg.imu_alerting || {};
-    const raw = parseFloat(imuCfg.tilt_critical_deg);
+    const raw = Number.parseFloat(imuCfg.tilt_critical_deg);
     return Number.isFinite(raw) && raw > 0 ? raw : 15.0;
 }
 
@@ -1290,8 +1290,8 @@ function maybeTriggerLocalImuCriticalFallback(stationId, data) {
     if (!stationId || !data) return;
     if (isImuCriticalAlertAlreadyKnown(stationId)) return;
 
-    const roll = parseFloat(data.roll);
-    const pitch = parseFloat(data.pitch);
+    const roll = Number.parseFloat(data.roll);
+    const pitch = Number.parseFloat(data.pitch);
     if (!Number.isFinite(roll) || !Number.isFinite(pitch)) return;
 
     const deltaTiltDeg = Math.sqrt((roll * roll) + (pitch * pitch));

@@ -921,14 +921,14 @@ class DatabaseManager {
             const startDate = document.getElementById('export-start-date')?.value;
             const endDate = document.getElementById('export-end-date')?.value;
             
-            const projectIds = projectId && projectId !== 'all' ? [parseInt(projectId)] : null;
-            const stationIds = stationId && stationId !== 'all' ? [parseInt(stationId)] : null;
-            const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [parseInt(clusterIndex)] : null;
+            const projectIds = projectId && projectId !== 'all' ? [Number.parseInt(projectId)] : null;
+            const stationIds = stationId && stationId !== 'all' ? [Number.parseInt(stationId)] : null;
+            const clusterIndices = clusterIndex && clusterIndex !== 'all' ? [Number.parseInt(clusterIndex)] : null;
             const selectedStation = stationIds
                 ? this.exportStations.find(s => String(s.id) === String(stationIds[0]))
                 : null;
             const effectiveProjectIds = projectIds
-                || (selectedStation?.project_id ? [parseInt(selectedStation.project_id)] : null);
+                || (selectedStation?.project_id ? [Number.parseInt(selectedStation.project_id)] : null);
             
             // Lấy Sensor types nếu có chọn sensor_data
             let sensorTypes = null;

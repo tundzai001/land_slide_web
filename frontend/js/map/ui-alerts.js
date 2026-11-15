@@ -2,13 +2,13 @@
 // IMU DRIFT CALCULATION
 // =========================================================================
 function updateImuDrift(rollVal, pitchVal) {
-    if (rollVal === null || rollVal === undefined || pitchVal === null || pitchVal === undefined || isNaN(parseFloat(rollVal)) || isNaN(parseFloat(pitchVal))) {
+    if (rollVal === null || rollVal === undefined || pitchVal === null || pitchVal === undefined || isNaN(Number.parseFloat(rollVal)) || isNaN(Number.parseFloat(pitchVal))) {
         setText('val-imu-drift-len', '-- cm');
         setText('val-imu-drift-dir', '(--)');
         return;
     }
-    const r = parseFloat(rollVal) || 0;
-    const p = parseFloat(pitchVal) || 0;
+    const r = Number.parseFloat(rollVal) || 0;
+    const p = Number.parseFloat(pitchVal) || 0;
     const r_rad = r * Math.PI / 180;
     const p_rad = p * Math.PI / 180;
 
@@ -56,7 +56,7 @@ function animateValue(id, newValue, decimals = 2, unit = '', textOnly = false) {
     const el = document.getElementById(id);
     if (!el) return;
 
-    const numVal = parseFloat(newValue);
+    const numVal = Number.parseFloat(newValue);
     if (isNaN(numVal) || newValue === null || newValue === undefined) {
         // Non-numeric → direct set
         if (textOnly) {
