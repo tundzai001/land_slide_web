@@ -122,7 +122,26 @@ class DatabaseManager {
         } catch (e) {
             if (e.name === 'AbortError' || loadSequence !== this.datasetLoadSequence) return;
             console.error('[DB MANAGER] load error:', e);
-            tbody.innerHTML = `<tr><td colspan="5"><div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được dữ liệu</strong><p>${this.escapeHtml(e.message)}</p><button class="btn btn-outline-primary" onclick="window.dbManager.loadAllData()">Thử lại</button></div></td></tr>`;
+            tbody.replaceChildren();
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 5;
+            const div = document.createElement('div');
+            div.className = 'ops-empty is-error';
+            const icon = document.createElement('i');
+            icon.className = 'bi bi-exclamation-circle';
+            const strong = document.createElement('strong');
+            strong.textContent = 'Không tải được dữ liệu';
+            const p = document.createElement('p');
+            p.textContent = e?.message || 'Lỗi không xác định';
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-primary';
+            btn.textContent = 'Thử lại';
+            btn.onclick = () => window.dbManager?.loadAllData();
+            div.append(icon, strong, p, btn);
+            td.appendChild(div);
+            tr.appendChild(td);
+            tbody.appendChild(tr);
         }
     }
 
@@ -529,7 +548,24 @@ class DatabaseManager {
                 Object.assign(record, await response.json(), { _table: table });
                 if (this.selectedRecord !== record) return;
             } catch (error) {
-                document.getElementById('db-inspector-content').innerHTML = `<div class="ops-empty is-error"><i class="bi bi-exclamation-circle"></i><strong>Không tải được chi tiết</strong><p>${this.escapeHtml(error.message)}</p><button class="btn btn-outline-primary" onclick="window.dbManager.viewRecord('${table}', ${id})">Thử lại</button></div>`;
+                const inspectorContent = document.getElementById('db-inspector-content');
+                if (inspectorContent) {
+                    inspectorContent.replaceChildren();
+                    const div = document.createElement('div');
+                    div.className = 'ops-empty is-error';
+                    const icon = document.createElement('i');
+                    icon.className = 'bi bi-exclamation-circle';
+                    const strong = document.createElement('strong');
+                    strong.textContent = 'Không tải được chi tiết';
+                    const p = document.createElement('p');
+                    p.textContent = error?.message || 'Lỗi không xác định';
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-outline-primary';
+                    btn.textContent = 'Thử lại';
+                    btn.onclick = () => window.dbManager?.viewRecord(table, id);
+                    div.append(icon, strong, p, btn);
+                    inspectorContent.appendChild(div);
+                }
                 return;
             }
         }

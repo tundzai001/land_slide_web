@@ -344,10 +344,13 @@ async def timeout_exception_handler(request: Request, exc: Exception):
         headers={"Retry-After": "5", "X-Operation-Phase": phase},
     )
 
-# Add Security Middleware FIRST (Before CORS or Routing)
+# Add Security and Performance Middlewares
 app.add_middleware(AdvancedSecurityMiddleware)
 app.add_middleware(CharsetMiddleware)
 app.add_middleware(AuditMiddleware)
+app.add_middleware(VersionedAssetCacheMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+# CORSMiddleware must be added last so it is the outermost middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.settings.allowed_cors_origins,
@@ -379,10 +382,6 @@ app.include_router(simulations_router.router)
 app.include_router(incidents_router.router)
 app.include_router(health_router.router)
 app.include_router(operations_router.router)
-
-# ── Anti-cache middleware for frontend assets ──
-app.add_middleware(VersionedAssetCacheMiddleware)
-app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # ADMIN - PROJECTS API
 # ============================================================================
