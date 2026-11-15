@@ -98,7 +98,7 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     await expect(page.locator('.access-management h3')).toHaveCSS('color', 'rgb(240, 253, 250)');
     if (size.name === 'desktop') {
       await page.waitForTimeout(250);
-      await page.screenshot({ path: 'test-results/landing-portal-dark.png', fullPage: true });
+      await page.screenshot({ path: 'test-results/landing-portal-dark.png', fullPage: true, animations: 'disabled' });
     }
     await themeButton.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
@@ -122,6 +122,7 @@ test(`semantic landing is usable on ${size.name}`, async ({ page }) => {
     await page.screenshot({
       path: `test-results/landing-premium-${size.name}.png`,
       fullPage: true,
+      animations: 'disabled',
     });
   });
 }
@@ -202,7 +203,7 @@ test('desktop story advances without shifting the fixed navigation', async ({ pa
   const after = await page.locator('.header-inner').boundingBox();
   expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
-  await page.screenshot({ path: 'test-results/landing-story-desktop.png' });
+  await page.screenshot({ path: 'test-results/landing-story-desktop.png', animations: 'disabled' });
 });
 
 test('story fallback stays compact when progressive enhancement is unavailable', async ({ page }) => {
