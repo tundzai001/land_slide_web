@@ -32,4 +32,5 @@ async def get_admin_cors_failover_status(
         auth.require_permission(auth.Permission.MANAGE_USERS)
     ),
 ):
+    await asyncio.sleep(0)
     return {"pairs": copy.deepcopy(cors_failover_status)}

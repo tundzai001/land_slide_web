@@ -360,7 +360,7 @@ async def get_gnss_adjustment_status(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
 ):
     """Return the authoritative terminal state when a WebSocket event is missed."""
-
+    await asyncio.sleep(0)
     phase = str(mqtt_service.adjustment_phase.get(project_id) or "IDLE").upper()
     message = str(mqtt_service.adjustment_message.get(project_id) or "")
     result = (

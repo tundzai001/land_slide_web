@@ -69,6 +69,7 @@ async def job_status(identifier: str, user=Depends(admin)):
 
 @router.get('/backups/{identifier}/download')
 async def download_backup(identifier: str, user=Depends(admin)):
+    await asyncio.sleep(0)
     try:
         path = backups.backup_path(identifier)
     except ValueError as exc:
@@ -151,6 +152,7 @@ async def get_ntp(user=Depends(admin)):
 
 @router.put('/ntp')
 async def save_ntp(body: NTPConfig, user=Depends(admin)):
+    await asyncio.sleep(0)
     raise HTTPException(409, 'NTP server is managed by NTP_SERVER in backend/.env; restart the service after changing it')
 
 
@@ -177,6 +179,7 @@ async def check_ntp(user=Depends(admin)):
 
 @router.get('/ntp/chrony-config', response_class=PlainTextResponse)
 async def chrony_config(user=Depends(admin)):
+    await asyncio.sleep(0)
     config = NTPConfig(server=settings.NTP_SERVER).model_dump()
     return f"# Apply on the server/gateway through your OS administrator\nserver {config['server']} iburst\nmakestep 1.0 3\nrtcsync\n"
 
@@ -217,16 +220,19 @@ async def gateway_config(device_id: int = Query(..., ge=1), db=Depends(get_confi
 
 @router.get('/integration-guide', response_class=PlainTextResponse)
 async def integration_guide(user=Depends(admin)):
+    await asyncio.sleep(0)
     return (Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.md').read_text(encoding='utf-8')
 
 
 @router.get('/integration-guide/download')
 async def download_integration_guide(user=Depends(admin)):
+    await asyncio.sleep(0)
     path = Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.pdf'
     return FileResponse(path, filename='huong-dan-van-hanh-tich-hop.pdf', media_type='application/pdf')
 
 
 @router.get('/user-guide/download')
 async def download_user_guide(user=Depends(admin)):
+    await asyncio.sleep(0)
     path = Path(__file__).resolve().parents[4] / 'docs' / 'USER_GUIDE.pdf'
     return FileResponse(path, filename='huong-dan-su-dung-web.pdf', media_type='application/pdf')

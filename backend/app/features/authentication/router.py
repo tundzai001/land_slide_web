@@ -102,6 +102,7 @@ async def get_current_user_info(
     token: str = Depends(auth.oauth2_scheme),
     current_user: model_auth.User = Depends(auth.get_current_user)
 ):
+    await asyncio.sleep(0)
     claims = auth.decode_access_token(token)
     if claims.get("transport") == "cookie":
         csrf_name = browser_session.cookie_names()[1]

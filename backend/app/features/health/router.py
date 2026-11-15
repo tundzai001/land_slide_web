@@ -36,12 +36,14 @@ async def _probe_engine(engine, timeout: float = 2.0) -> dict[str, Any]:
 @router.get("/api/health/live")
 async def health_live() -> dict[str, Any]:
     """Process/event-loop liveness only; dependencies are intentionally omitted."""
+    await asyncio.sleep(0)
     return {"status": "live", "ts": int(time.time())}
 
 
 @router.get("/api/health")
 async def health_check() -> dict[str, Any]:
     """Legacy liveness endpoint; avoid claiming healthy dependencies without probing."""
+    await asyncio.sleep(0)
     return {"status": "live", "ts": int(time.time())}
 
 

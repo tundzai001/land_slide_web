@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class SensorForwardingMixin:
-    async def _forward_gnss(
+    def _forward_gnss(
         self, info: dict, station_id: int, sensor_type: str, processed_data: dict
     ) -> None:
         if sensor_type == 'gnss' and processed_data.get('forwarding_data'):

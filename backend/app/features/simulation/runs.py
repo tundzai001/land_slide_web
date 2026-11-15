@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/simulations", tags=["Landslide simulations"])
 @router.post("/runs", status_code=202)
 async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(get_data_db), config_db: AsyncSession = Depends(get_config_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     now, warnings = int(time.time()), []
-    sources = {key: "Nhập thủ công" for key in payload.parameters}
+    sources = dict.fromkeys(payload.parameters, "Nhập thủ công")
     sensor_snapshot: dict[str, Any] = {}
     project = station = None
     if payload.mode == "station_snapshot":

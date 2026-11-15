@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from fastapi import APIRouter, Request
@@ -15,7 +16,8 @@ PUBLIC_SOUND_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}\.mp3$")
 
 router = APIRouter()
 
-def _frontend_document(file_name: str, *, private: bool = False):
+async def _frontend_document(file_name: str, *, private: bool = False):
+    await asyncio.sleep(0)
     file_path = FRONTEND_DIR / file_name
     if not file_path.exists():
         return JSONResponse(status_code=503, content={"error": "Frontend not found"})
@@ -27,6 +29,7 @@ def _frontend_document(file_name: str, *, private: bool = False):
 @router.get("/static/sounds/{file_name}")
 async def get_public_sound(file_name: str):
     """Serve only known-safe MP3 filenames from the public sound directory."""
+    await asyncio.sleep(0)
     if PUBLIC_SOUND_NAME.fullmatch(file_name) is None:
         return JSONResponse(status_code=404, content={"detail": "Sound not found"})
     sound_path = (PUBLIC_SOUND_DIR / file_name).resolve()
@@ -46,12 +49,12 @@ async def read_root(request: Request):
         return RedirectResponse(url="/management", status_code=307)
     if legacy_view in {"map", "login"}:
         return RedirectResponse(url=f"/{legacy_view}", status_code=307)
-    return _frontend_document("index.html")
+    return await _frontend_document("index.html")
 
 
 @router.get("/about")
 async def read_about():
-    return _frontend_document("about.html")
+    return await _frontend_document("about.html")
 
 
 @router.get("/management")
@@ -59,21 +62,22 @@ async def read_about():
 @router.get("/admin")
 @router.get("/admin.html")
 async def read_app():
-    return _frontend_document("app.html", private=True)
+    return await _frontend_document("app.html", private=True)
 
 
 @router.get("/map")
 async def read_map():
-    return _frontend_document("map.html")
+    return await _frontend_document("map.html")
 
 
 @router.get("/login")
 async def read_login():
-    return _frontend_document("app.html", private=True)
+    return await _frontend_document("app.html", private=True)
 
 
 @router.get("/robots.txt")
 async def robots_txt():
+    await asyncio.sleep(0)
     site_url = settings.PUBLIC_SITE_URL.rstrip("/")
     if settings.ENVIRONMENT.lower() != "production":
         return PlainTextResponse("User-agent: *\nDisallow: /\n")
@@ -84,6 +88,7 @@ async def robots_txt():
 
 @router.get("/sitemap.xml")
 async def sitemap_xml():
+    await asyncio.sleep(0)
     if settings.ENVIRONMENT.lower() != "production":
         return Response(status_code=404)
     site_url = settings.PUBLIC_SITE_URL.rstrip("/")
@@ -100,6 +105,7 @@ async def sitemap_xml():
 
 @router.get("/favicon.ico", include_in_schema=False)
 async def favicon_ico():
+    await asyncio.sleep(0)
     file_path = FRONTEND_DIR / "aitogy.png"
     if file_path.exists():
         return FileResponse(file_path, media_type="image/png")
@@ -108,6 +114,7 @@ async def favicon_ico():
 
 @router.get("/img/aitogy.png", include_in_schema=False)
 async def aitogy_logo():
+    await asyncio.sleep(0)
     file_path = FRONTEND_DIR / "aitogy.png"
     if file_path.exists():
         return FileResponse(file_path, media_type="image/png")

@@ -518,12 +518,8 @@ class RoundRobinReceiverMixin:
                     stability_targets = set(verified_participants)
                     solver_window_open = False
                     reset_count = 0
-                    drift_failure_counts = {
-                        name: 0 for name in stability_targets
-                    }
-                    drift_evaluation_epochs = {
-                        name: None for name in stability_targets
-                    }
+                    drift_failure_counts = dict.fromkeys(stability_targets, 0)
+                    drift_evaluation_epochs = dict.fromkeys(stability_targets, None)
                     stability_deadline = (
                         loop.time() + self.CROSS_BASE_STABILITY_TIMEOUT_SECONDS
                     )
@@ -593,9 +589,7 @@ class RoundRobinReceiverMixin:
                                 if on_stable_collection_invalid:
                                     on_stable_collection_invalid("drift")
                                 solver_window_open = False
-                                drift_failure_counts = {
-                                    name: 0 for name in stability_targets
-                                }
+                                drift_failure_counts = dict.fromkeys(stability_targets, 0)
                                 await self._emit_progress(
                                     project_id,
                                     (
@@ -664,9 +658,7 @@ class RoundRobinReceiverMixin:
                                 + self.CROSS_BASE_STABLE_MIN_DURATION_SECONDS
                                 + self.CROSS_BASE_STATUS_POLL_SECONDS * 2,
                             )
-                            drift_failure_counts = {
-                                name: 0 for name in stability_targets
-                            }
+                            drift_failure_counts = dict.fromkeys(stability_targets, 0)
                             drift_evaluation_epochs = {
                                 name: rolling.get(name, {}).get("latest_epoch")
                                 for name in stability_targets

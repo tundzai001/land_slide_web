@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -22,6 +23,7 @@ async def download_export_excel(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Tải file ZIP đã xuất xong."""
+    await asyncio.sleep(0)
     if task_id not in EXPORT_TASKS:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -57,6 +59,7 @@ async def get_export_progress(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy tiến độ của tác vụ xuất."""
+    await asyncio.sleep(0)
     if task_id not in EXPORT_TASKS:
         raise HTTPException(status_code=404, detail="Task not found")
     return EXPORT_TASKS[task_id]
@@ -69,6 +72,7 @@ async def start_export_database_excel(
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Bắt đầu tác vụ xuất Excel chạy ngầm."""
+    await asyncio.sleep(0)
     allowed = {'projects', 'stations', 'devices', 'sensor_data', 'gnss_adjustments', 'alerts', 'simulations'}
     selected = [table for table in request.tables if table in allowed]
     if not selected:

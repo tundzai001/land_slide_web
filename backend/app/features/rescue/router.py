@@ -1,4 +1,5 @@
 """Public rescue intake and administrative rescue workflow routes."""
+import asyncio
 import logging
 import time
 import uuid
@@ -71,6 +72,7 @@ async def get_rescue_image(
     file_name: str,
     current_user: model_auth.User = Depends(auth.get_current_user),
 ):
+    await asyncio.sleep(0)
     _require_admin(current_user)
     image_path = rescue_storage.resolve_image_path(
         f"{rescue_storage.RESCUE_IMAGE_URL_PREFIX}{file_name}"
@@ -94,6 +96,7 @@ async def get_rescue_image(
 
 @router.get("/api/public/rescue-config")
 async def get_rescue_config(response: Response):
+    await asyncio.sleep(0)
     response.headers["Cache-Control"] = "no-store"
     return {"enabled": settings.RESCUE_REQUEST_ENABLED}
 

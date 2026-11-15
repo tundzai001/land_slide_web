@@ -1,4 +1,5 @@
 """Bounded API errors that never reflect submitted secret values or internals."""
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
@@ -29,6 +30,7 @@ def operation_phase_label(phase: str) -> str:
 def install_error_handlers(app: FastAPI):
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request: Request, exc: RequestValidationError):
+        await asyncio.sleep(0)
         # Pydantic's raw errors include `input` and `ctx`, potentially a password.
         errors = [{"loc": item.get("loc"), "msg": item.get("msg"),
                    "type": item.get("type")} for item in exc.errors()]
@@ -36,12 +38,14 @@ def install_error_handlers(app: FastAPI):
 
     @app.exception_handler(HTTPException)
     async def bounded_http_error(_request: Request, exc: HTTPException):
+        await asyncio.sleep(0)
         detail = exc.detail if exc.status_code < 500 else "The request could not be completed."
         return JSONResponse({"detail": detail}, status_code=exc.status_code,
                             headers=exc.headers)
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception):
+        await asyncio.sleep(0)
         phase = getattr(request.state, "operation_phase", "dependencies")
         request_id = getattr(request.state, "request_id", "unknown")
         logger.error(
