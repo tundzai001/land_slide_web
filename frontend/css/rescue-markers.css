@@ -136,7 +136,7 @@
 
 .map-layer-checkbox:checked::after {
     content: "\F272";
-    font-family: "bootstrap-icons";
+    font-family: "bootstrap-icons", sans-serif;
     position: absolute;
     top: 50%;
     left: 50%;

@@ -74,8 +74,8 @@ jobs:
           tests/ui/login-premium.spec.js
           tests/ui/landing-premium.spec.js
           --project=chromium --reporter=line
-      - name: Test database export input safety
-        run: npx --no-install playwright test tests/ui/management-operations.spec.js --project=chromium --reporter=line -g "database export rejects unsafe"
+      - name: Test database explorer and export input safety
+        run: npx --no-install playwright test tests/ui/management-operations.spec.js --project=chromium --reporter=line -g "database explorer loads one paginated|database explorer prefetches|database export rejects unsafe"
 
   sonar:
     needs: [backend]

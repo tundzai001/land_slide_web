@@ -59,13 +59,13 @@ class DatabaseManager {
         const dbTabBtn = document.querySelector('button[data-bs-target="#tab-database"]');
         if (dbTabBtn) {
             dbTabBtn.addEventListener('shown.bs.tab', () => {
-                this.loadAllData();
+                void this.loadAllData();
             });
         }
         const dbSidebarLink = document.querySelector('[data-tab="tab-database"]');
         if (dbSidebarLink && !window.adminManager?.switchTab) {
             dbSidebarLink.addEventListener('click', () => {
-                this.loadAllData();
+                void this.loadAllData();
             });
         }
 
@@ -111,7 +111,8 @@ class DatabaseManager {
         this.datasetRequestController?.abort();
         this.datasetRequestController = new AbortController();
         tbody.innerHTML = '<tr><td colspan="5"><div class="ops-loading"><span class="spinner-border spinner-border-sm" role="status"></span><span>Đang tải dataset…</span></div></td></tr>';
-        document.getElementById('db-current-meta').textContent = 'Đang đồng bộ dữ liệu…';
+        const currentMeta = document.getElementById('db-current-meta');
+        if (currentMeta) currentMeta.textContent = 'Đang đồng bộ dữ liệu…';
         try {
             await this.fetchCurrentDataset(this.datasetRequestController.signal);
             if (loadSequence === this.datasetLoadSequence) {
@@ -228,7 +229,7 @@ class DatabaseManager {
         this.searchTimer = setTimeout(() => {
             this.clearDatasetPageCache();
             this.offset = 0;
-            this.loadAllData();
+            void this.loadAllData();
         }, 250);
     }
 
@@ -248,7 +249,7 @@ class DatabaseManager {
             : 'Lọc các bản ghi trên trang này…';
         this.renderContextFilters();
         this.closeInspector();
-        this.loadAllData();
+        void this.loadAllData();
     }
 
     filterSelect(label, key, options) {
@@ -310,21 +311,21 @@ class DatabaseManager {
         if (value === '') delete this.filters[key];
         else this.filters[key] = value;
         this.offset = 0;
-        this.loadAllData();
+        void this.loadAllData();
     }
 
     changeSort(value) {
         this.clearDatasetPageCache();
         this.sort = value === 'id' ? 'id' : '-id';
         this.offset = 0;
-        this.loadAllData();
+        void this.loadAllData();
     }
 
     changePageSize(value) {
         this.clearDatasetPageCache();
         this.limit = Math.max(25, Math.min(100, Number(value) || 50));
         this.offset = 0;
-        this.loadAllData();
+        void this.loadAllData();
     }
 
     changePage(direction) {
@@ -332,7 +333,7 @@ class DatabaseManager {
         if (nextOffset < 0 || (direction > 0 && !this.hasMore && !this.hasExactTotal)) return;
         if (this.hasExactTotal && nextOffset >= this.total) return;
         this.offset = nextOffset;
-        this.loadAllData();
+        void this.loadAllData();
     }
 
     renderTable() {
@@ -691,7 +692,7 @@ class DatabaseManager {
             window.toast?.success('✅ Cập nhật thành công!');
             this.currentEditModal.hide();
             this.closeInspector();
-            this.loadAllData();
+            void this.loadAllData();
 
         } catch (e) {
             console.error('❌ Error saving record:', e);
@@ -715,7 +716,7 @@ class DatabaseManager {
 
             window.toast?.success('✅ Đã xóa!');
             this.closeInspector();
-            this.loadAllData();
+            void this.loadAllData();
 
         } catch (e) {
             console.error('❌ Error deleting record:', e);
@@ -1267,7 +1268,7 @@ class DatabaseManager {
             const result = await res.json();
             window.toast?.success(`✅ ${result.message}`, 5000);
 
-            this.loadAllData(); // Reload lại bảng
+            void this.loadAllData(); // Reload lại bảng
 
         } catch (e) {
             console.error(e);
@@ -1292,7 +1293,7 @@ class DatabaseManager {
 
             const result = await res.json();
             window.toast?.success(`✅ ${result.message || 'Đã xóa dữ liệu'}`);
-            this.loadAllData();
+            void this.loadAllData();
 
         } catch (e) {
             window.toast?.error('Lỗi: ' + e.message);
@@ -1301,7 +1302,7 @@ class DatabaseManager {
 
     // Alias
     loadStations() {
-        this.loadAllData();
+        return this.loadAllData();
     }
 }
 

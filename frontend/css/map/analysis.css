@@ -454,7 +454,6 @@
 
 .sm-model-event-badge-danger {
     background: rgba(239, 68, 68, 0.15);
-    color: #b91c1c;
     border-color: rgba(239, 68, 68, 0.3);
     gap: 16px;
     font-size: 0.82rem;
