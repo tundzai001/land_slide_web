@@ -1066,7 +1066,7 @@ function renderImuLongTermSection(imuData) {
     const nodataEl = document.getElementById('imu-longterm-nodata');
     const contentEl = document.getElementById('imu-longterm-content');
 
-    if (!imuData || imuData.status !== 'success') {
+    if (imuData?.status !== 'success') {
         if (nodataEl) {
             nodataEl.style.display = 'block';
             const msgEl = document.getElementById('imu-nodata-msg');

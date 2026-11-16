@@ -108,7 +108,7 @@ function _showSirenIfAlerting(stationId, data) {
     }
 
     if (isAlerting) {
-        currentAlertStationId = stationId;
+        window.currentAlertStationId = stationId;
         const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
         if (sirenBtns.length > 0) {
             sirenBtns.forEach(b => {
@@ -128,8 +128,8 @@ function _showSirenIfAlerting(stationId, data) {
             });
         }
     } else {
-        if (currentAlertStationId === stationId) {
-            currentAlertStationId = null;
+        if (window.currentAlertStationId === stationId) {
+            window.currentAlertStationId = null;
         }
 
         // Apply idle or offline if not alerting
@@ -904,12 +904,11 @@ function updateSidebarUI(data) {
         
         const adjCached = data.sensors?.gnss_adjusted;
         if (
-            adjCached
-            && adjCached.latest
+            adjCached?.latest
             && isGnssAdjustmentResultRelevant(adjCached.latest, adjCached.latest_timestamp)
         ) {
             const cacheData = adjCached.latest;
-            pendingGnssAdjustmentResult = cacheData;
+            window.pendingGnssAdjustmentResult = cacheData;
             const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
             if (terminalVisible) window.gnssBoardState?.loadAdjustmentResult?.(cacheData);
             if (adjStatusEl) {
@@ -943,7 +942,7 @@ function updateSidebarUI(data) {
             }
             if (terminalVisible) window.gnssBoardState?.fitToResult?.();
         } else {
-            pendingGnssAdjustmentResult = null;
+            window.pendingGnssAdjustmentResult = null;
             if (adjResultsSection) adjResultsSection.style.display = 'none';
             if (adjPointsList) adjPointsList.innerHTML = '';
         }

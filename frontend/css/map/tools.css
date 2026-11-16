@@ -181,7 +181,7 @@
 
 [data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-info {
     color: #ffffff !important;
-    background: #0284c7 !important;
+    background: #0369a1 !important;
 }
 
 /* Hide default Leaflet controls */

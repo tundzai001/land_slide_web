@@ -249,7 +249,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
     _collectSensorConfig(type) {
         const checkbox = document.getElementById(`edit-${type}`);
-        if (!checkbox || !checkbox.checked) return null;
+        if (!checkbox?.checked) return null;
 
         const topicInput = document.getElementById(`topic-${type}`);
         const topic = topicInput?.value?.trim();

@@ -268,18 +268,18 @@
 }
 
 [data-theme="dark"] .sm-model-popup-status.status-ok {
-    background: rgba(34, 197, 94, 0.2);
-    color: #86efac;
+    background: #14532d;
+    color: #bbf7d0;
 }
 
 [data-theme="dark"] .sm-model-popup-status.status-warn {
-    background: rgba(245, 158, 11, 0.2);
-    color: #fde047;
+    background: #78350f;
+    color: #fef08a;
 }
 
 [data-theme="dark"] .sm-model-popup-status.status-fail {
-    background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
+    background: #7f1d1d;
+    color: #fecaca;
 }
 
 .sm-model-popup-grid {
@@ -503,13 +503,13 @@
 }
 
 [data-theme="dark"] .sm-model-event-badge {
-    background: rgba(14, 165, 233, 0.25);
-    color: #e0f2fe;
+    background: #075985;
+    color: #f0f9ff;
 }
 
 [data-theme="dark"] .sm-model-event-badge-danger {
-    background: rgba(239, 68, 68, 0.25);
-    color: #fee2e2;
+    background: #991b1b;
+    color: #fef2f2;
 }
 
 /*  CHART BOX (DÃ¹ng chung)  */

@@ -836,6 +836,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after,
+    .btn-gradient,
+    .btn-gradient:hover,
     .sensor-config-section,
     #stationConfigModal .wizard-content.active,
     #stationConfigModal .wizard-content,

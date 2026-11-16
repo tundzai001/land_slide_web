@@ -382,7 +382,7 @@ async function loadRescueMarkers() {
     rescueMarkersFetchInFlight = true;
     try {
         const userRole = window.authManager?.getUserInfo?.()?.role;
-        if (!window.authManager || !window.authManager.isAuthenticated() || userRole !== 'admin') {
+        if (!window.authManager?.isAuthenticated() || userRole !== 'admin') {
             Object.values(rescueMarkers).forEach(marker => {
                 const leafletMap = getLeafletMap();
                 if (leafletMap) leafletMap.removeLayer(marker);
@@ -394,7 +394,7 @@ async function loadRescueMarkers() {
         }
 
         const res = await window.authManager.apiFetch('/api/admin/rescue-requests?limit=100');
-        if (!res || !res.ok) return;
+        if (!res?.ok) return;
 
         const requests = await res.json();
         if (!Array.isArray(requests)) return;

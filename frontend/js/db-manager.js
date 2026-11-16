@@ -725,6 +725,7 @@ class DatabaseManager {
             link.click();
             setTimeout(() => URL.revokeObjectURL(href), 1000);
         } catch (error) {
+            console.error('Không thể tải báo cáo mô phỏng:', error);
             window.toast?.error('Không thể tải báo cáo mô phỏng');
         }
     }

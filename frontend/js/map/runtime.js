@@ -1124,7 +1124,7 @@ function resetGnssAdjustmentDebug({ projectId, stationIds } = {}) {
         const elapsed = Math.floor((Date.now() - gnssAdjustmentDebugState.startedAt) / 1000);
         if (elapsed >= 10 && gnssAdjustmentDebugState.baselineCount === 0 && gnssAdjustmentDebugState.phase === 'COLLECTING_BASELINE') {
             const last = gnssAdjustmentDebugState.entries.at(-1);
-            if (!last || last.label !== 'WAIT') {
+            if (last?.label !== 'WAIT') {
                 addGnssAdjustmentDebug('WAIT', 'Chưa nhận baseline hợp lệ. Đang kiểm tra #AGRICA, RTK Fixed và tiến độ seed trên máy chủ.', 'warning');
             }
         } else {

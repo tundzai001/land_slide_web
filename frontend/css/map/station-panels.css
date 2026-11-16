@@ -555,18 +555,21 @@ body.map-is-moving .detail-sidebar,
 }
 
 .btn-action:not(.secondary) {
-    background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+    background-color: #0e7490;
+    background-image: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
     color: #ffffff;
 }
 
 .btn-action:not(.secondary):hover {
-    background: linear-gradient(135deg, #0e7490 0%, #155e75 100%);
+    background-color: #155e75;
+    background-image: linear-gradient(135deg, #0e7490 0%, #155e75 100%);
     box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
     transform: translateY(-2px);
 }
 
 .btn-action.secondary {
-    background: linear-gradient(135deg, #6d28d9 0%, #5b21b6 100%);
+    background-color: #5b21b6;
+    background-image: linear-gradient(135deg, #6d28d9 0%, #5b21b6 100%);
     color: white;
 }
 

@@ -317,13 +317,13 @@ function handleRealtimeUpdate(message) {
             }
 
             // 2. Dismiss alert banner nếu đang hiện cho trạm này
-            if (currentAlertStationId === stationId) {
+            if (window.currentAlertStationId === stationId) {
                 const banner = document.getElementById('alert-banner');
                 if (banner) {
                     banner.classList.remove('show', 'level-warning', 'level-critical');
                 }
-                currentAlertStationId = null;
-                lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
+                window.currentAlertStationId = null;
+                window.lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
             }
             delete alertBannerSnoozeUntil[stationId];
             delete acknowledgedAlertKeyByStation[stationId];
@@ -433,7 +433,7 @@ function handleRealtimeUpdate(message) {
             const user = window.authManager?.getUserInfo();
             const userRole = user?.role;
             if (userRole === 'admin' || userRole === 'operator') {
-                currentAlertStationId = stationId;
+                window.currentAlertStationId = stationId;
                 // Transition idle/offline buttons to alerting
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
                     const target = b.dataset.target;
@@ -488,8 +488,8 @@ function handleRealtimeUpdate(message) {
         if (!isAcknowledged) {
             delete bannerSuppressedUntilByStation[incomingAlert.station_id];
         }
-        if (alertKey !== lastAlertKey && !isAcknowledged) {
-            lastAlertKey = alertKey;
+        if (alertKey !== window.lastAlertKey && !isAcknowledged) {
+            window.lastAlertKey = alertKey;
             showAlertBanner(incomingAlert);
         }
         // Highlight sensor card nếu đang xem trạm đang báo
@@ -509,7 +509,7 @@ function handleRealtimeUpdate(message) {
             const user = window.authManager?.getUserInfo();
             const userRole = user?.role;
             if (userRole === 'admin' || userRole === 'operator') {
-                currentAlertStationId = incomingAlert.station_id;
+                window.currentAlertStationId = incomingAlert.station_id;
                 const piDevices = currentStationData.pi_devices || [];
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
                     const target = b.dataset.target;
@@ -1017,7 +1017,7 @@ function _handleRealtimeImu(data, stationId, timestamp, chartsVisible) {
 function updateRealtimeSensorValues(message) {
     if (message.sensor_type === 'gnss_adjusted' && message.data) {
         if (!isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return;
-        pendingGnssAdjustmentResult = message.data;
+        window.pendingGnssAdjustmentResult = message.data;
         const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
         if (terminalVisible) renderGnssAdjustmentResultPanel(message);
 

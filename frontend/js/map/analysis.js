@@ -662,7 +662,7 @@ function renderMultiWindowSection(data) {
     if (!section) return;
 
     const mw = data.multi_window;
-    if (!mw || !mw.available) {
+    if (!mw?.available) {
         section.style.display = 'none';
         return;
     }
@@ -752,7 +752,7 @@ function renderCrossConsensusSection(data) {
     if (!section) return;
 
     const cs = data.cross_sensor_consensus;
-    if (!cs || !cs.available) {
+    if (!cs?.available) {
         section.style.display = 'none';
         return;
     }
