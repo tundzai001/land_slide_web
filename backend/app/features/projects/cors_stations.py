@@ -39,109 +39,121 @@ _SERVICE_DISPLAY_FIELDS = {
     "server2_stream_active", "server1_stream_on_demand", "server2_stream_on_demand",
 }
 
+def _resolve_cors_online_status(item: dict, status_text: str) -> bool:
+    if isinstance(item.get("is_online"), bool):
+        return bool(item.get("is_online"))
+    if status_text:
+        return status_text in {"online", "active", "connected", "streaming"}
+    return bool(item.get("ntrip_connected"))
+
+
+def _extract_cors_streams(item: dict, service_config: dict) -> list:
+    streams = []
+    raw_streams = item.get("streams") if isinstance(item.get("streams"), list) else []
+    for position, raw_stream in enumerate(raw_streams, start=1):
+        if not isinstance(raw_stream, dict):
+            continue
+        stream = {key: raw_stream[key] for key in (
+            "server_id", "stream_id", "host", "port", "mountpoint", "enabled"
+        ) if key in raw_stream}
+        raw_server_id = stream.get("server_id")
+        if raw_server_id in (None, ""):
+            stream_token = str(stream.get("stream_id") or "")
+            digits = "".join(char for char in stream_token if char.isdigit())
+            raw_server_id = digits or position
+        try:
+            stream["server_id"] = int(raw_server_id)
+        except (TypeError, ValueError):
+            continue
+        streams.append(stream)
+
+    if not streams:
+        for server_id in (1, 2):
+            host = str(
+                service_config.get(f"serverhost{server_id}")
+                or service_config.get(f"server{server_id}_host")
+                or ""
+            ).strip()
+            mountpoint = str(
+                service_config.get(f"mountpoint{server_id}") or ""
+            ).strip()
+            if not host or not mountpoint:
+                continue
+            port = (
+                service_config.get(f"serverport{server_id}")
+                or service_config.get(f"server{server_id}_port")
+                or 2101
+            )
+            streams.append({
+                "server_id": server_id,
+                "stream_id": f"s{server_id}",
+                "host": host,
+                "port": port,
+                "mountpoint": mountpoint,
+                "enabled": bool(
+                    service_config.get(f"server{server_id}_enabled", True)
+                ),
+            })
+    return streams
+
+
+def _parse_cors_station_item(item: dict) -> Optional[dict]:
+    if not isinstance(item, dict):
+        return None
+
+    name = str(item.get("name") or "").strip()
+    try:
+        lat = float(item.get("lat"))
+        lon = float(item.get("lon"))
+        alt = float(item.get("alt")) if item.get("alt") is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(lat) and math.isfinite(lon) and math.isfinite(alt)
+            and -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+
+    service_config = (
+        item.get("service_config")
+        if isinstance(item.get("service_config"), dict)
+        else {}
+    )
+    status_text = str(item.get("status") or "").strip().casefold()
+    is_online = _resolve_cors_online_status(item, status_text)
+    streams = _extract_cors_streams(item, service_config)
+
+    return {
+        "serial": item.get("serial"),
+        "name": name,
+        "status": item.get("status"),
+        "is_online": is_online,
+        "lat": lat,
+        "lon": lon,
+        "alt": alt,
+        "mountpoint": (
+            service_config.get("mountpoint1")
+            or item.get("mountpoint")
+            or name
+        ),
+        "streams": streams,
+        "service_config": {key: value for key, value in service_config.items()
+                           if key in _SERVICE_DISPLAY_FIELDS},
+        "is_provisioned": bool(item.get("is_provisioned")),
+        "server_host": service_config.get("serverhost1"),
+        "stream_active": bool(service_config.get("stream_active")),
+        "ntrip_connected": bool(item.get("ntrip_connected")),
+        "bps": item.get("bps"),
+    }
+
+
 def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw_stations, list):
         return []
 
     stations: List[Dict[str, Any]] = []
     for item in raw_stations:
-        if not isinstance(item, dict):
-            continue
-
-        name = str(item.get("name") or "").strip()
-        try:
-            lat = float(item.get("lat"))
-            lon = float(item.get("lon"))
-            alt = float(item.get("alt")) if item.get("alt") is not None else 0.0
-        except (TypeError, ValueError):
-            continue
-        if not (math.isfinite(lat) and math.isfinite(lon) and math.isfinite(alt)
-                and -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-            continue
-
-        service_config = (
-            item.get("service_config")
-            if isinstance(item.get("service_config"), dict)
-            else {}
-        )
-        status_text = str(item.get("status") or "").strip().casefold()
-        if isinstance(item.get("is_online"), bool):
-            is_online = bool(item.get("is_online"))
-        elif status_text:
-            is_online = status_text in {"online", "active", "connected", "streaming"}
-        else:
-            is_online = bool(item.get("ntrip_connected"))
-        streams = []
-        for position, raw_stream in enumerate(
-            item.get("streams") if isinstance(item.get("streams"), list) else [],
-            start=1,
-        ):
-            if not isinstance(raw_stream, dict):
-                continue
-            stream = {key: raw_stream[key] for key in (
-                "server_id", "stream_id", "host", "port", "mountpoint", "enabled"
-            ) if key in raw_stream}
-            raw_server_id = stream.get("server_id")
-            if raw_server_id in (None, ""):
-                stream_token = str(stream.get("stream_id") or "")
-                digits = "".join(char for char in stream_token if char.isdigit())
-                raw_server_id = digits or position
-            try:
-                stream["server_id"] = int(raw_server_id)
-            except (TypeError, ValueError):
-                continue
-            streams.append(stream)
-
-        if not streams:
-            for server_id in (1, 2):
-                host = str(
-                    service_config.get(f"serverhost{server_id}")
-                    or service_config.get(f"server{server_id}_host")
-                    or ""
-                ).strip()
-                mountpoint = str(
-                    service_config.get(f"mountpoint{server_id}") or ""
-                ).strip()
-                if not host or not mountpoint:
-                    continue
-                port = (
-                    service_config.get(f"serverport{server_id}")
-                    or service_config.get(f"server{server_id}_port")
-                    or 2101
-                )
-                streams.append({
-                    "server_id": server_id,
-                    "stream_id": f"s{server_id}",
-                    "host": host,
-                    "port": port,
-                    "mountpoint": mountpoint,
-                    "enabled": bool(
-                        service_config.get(f"server{server_id}_enabled", True)
-                    ),
-                })
-
-        stations.append({
-            "serial": item.get("serial"),
-            "name": name,
-            "status": item.get("status"),
-            "is_online": is_online,
-            "lat": lat,
-            "lon": lon,
-            "alt": alt,
-            "mountpoint": (
-                service_config.get("mountpoint1")
-                or item.get("mountpoint")
-                or name
-            ),
-            "streams": streams,
-            "service_config": {key: value for key, value in service_config.items()
-                               if key in _SERVICE_DISPLAY_FIELDS},
-            "is_provisioned": bool(item.get("is_provisioned")),
-            "server_host": service_config.get("serverhost1"),
-            "stream_active": bool(service_config.get("stream_active")),
-            "ntrip_connected": bool(item.get("ntrip_connected")),
-            "bps": item.get("bps"),
-        })
+        parsed = _parse_cors_station_item(item)
+        if parsed is not None:
+            stations.append(parsed)
 
     return sorted(stations, key=lambda station: station["name"])
 

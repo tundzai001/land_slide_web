@@ -1111,6 +1111,50 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertEqual(formatted["adv_h"], 30.0)
         self.assertEqual(formatted["adv_dx"], 0.0)
 
+    def test_cors_base_stations_helpers(self):
+        from app.features.projects.cors_stations import (
+            _resolve_cors_online_status,
+            _extract_cors_streams,
+            _parse_cors_station_item,
+        )
+
+        # _resolve_cors_online_status
+        self.assertTrue(_resolve_cors_online_status({"is_online": True}, ""))
+        self.assertTrue(_resolve_cors_online_status({}, "active"))
+        self.assertTrue(_resolve_cors_online_status({"ntrip_connected": True}, ""))
+        self.assertFalse(_resolve_cors_online_status({}, "offline"))
+
+        # _extract_cors_streams fallback
+        svc_cfg = {
+            "serverhost1": "cors1.vn",
+            "mountpoint1": "BASE01",
+            "serverport1": 2101,
+            "server1_enabled": True,
+        }
+        streams = _extract_cors_streams({}, svc_cfg)
+        self.assertEqual(len(streams), 1)
+        self.assertEqual(streams[0]["server_id"], 1)
+
+        # _parse_cors_station_item invalid
+        self.assertIsNone(_parse_cors_station_item(None))
+        self.assertIsNone(_parse_cors_station_item({"lat": "bad", "lon": 105.0}))
+        self.assertIsNone(_parse_cors_station_item({"lat": 95.0, "lon": 105.0}))
+
+        # _parse_cors_station_item valid
+        item = {
+            "name": "HN01",
+            "lat": 21.0,
+            "lon": 105.0,
+            "alt": 20.0,
+            "status": "online",
+            "service_config": svc_cfg,
+        }
+        parsed = _parse_cors_station_item(item)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["name"], "HN01")
+        self.assertTrue(parsed["is_online"])
+
+
 
 
 
