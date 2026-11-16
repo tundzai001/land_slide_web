@@ -173,6 +173,52 @@ async def get_mqtt_topic_availability(
     }
 
 
+async def _validate_new_station_inputs(db: AsyncSession, station_data: schemas.StationCreate):
+    exist = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_data.station_code))
+    if exist.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Mã trạm đã tồn tại")
+
+    sensors = station_data.sensors or {}
+    if any(not isinstance(info, dict) for info in sensors.values()):
+        raise HTTPException(status_code=422, detail='Loại cảm biến hoặc cấu hình cảm biến không hợp lệ')
+    await validate_custom_sensor_selection(db, sensors, station_data.config or {})
+    requested_topics = [
+        normalize_mqtt_topic(info.get("topic"))
+        for info in sensors.values()
+        if isinstance(info, dict) and normalize_mqtt_topic(info.get("topic"))
+    ]
+    duplicates = duplicate_mqtt_topics(requested_topics)
+    if duplicates:
+        raise HTTPException(status_code=409, detail=f"MQTT topic bị trùng trong form: {', '.join(duplicates)}")
+    conflicts = await find_mqtt_topic_conflicts(db, requested_topics)
+    if conflicts:
+        conflict = conflicts[0]
+        raise HTTPException(
+            status_code=409,
+            detail=f"MQTT topic '{conflict.mqtt_topic}' đã được dùng bởi thiết bị {conflict.device_code}",
+        )
+
+
+def _create_station_devices(db: AsyncSession, new_station: model_config.Station, sensors: dict):
+    if not sensors:
+        return
+    now_ts = int(time.time())
+    for s_type, info in sensors.items():
+        topic = (info.get('topic') or '').strip()
+        if topic:
+            db.add(model_config.Device(
+                device_code=f"{new_station.station_code}_{s_type.upper()}",
+                name=f"{new_station.name} - {s_type.upper()}",
+                station_id=new_station.id,
+                device_type=s_type,
+                mqtt_topic=topic,
+                is_active=True,
+                config={"mqtt": info.get('mqtt')} if info.get('mqtt') else {},
+                created_at=now_ts,
+                updated_at=now_ts,
+            ))
+
+
 @router.post("/api/admin/projects/{project_id}/stations", response_model=schemas.StationResponse)
 async def create_station_in_project(
     project_id: int,
@@ -183,34 +229,13 @@ async def create_station_in_project(
     # Enforce operator project access
     check_operator_project_access(current_user, project_id)
     try:
-        # 1. Kiểm tra mã trạm
-        exist = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_data.station_code))
-        if exist.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Mã trạm đã tồn tại")
-
-        if any(not isinstance(info, dict) for info in (station_data.sensors or {}).values()):
-            raise HTTPException(status_code=422, detail='Loại cảm biến hoặc cấu hình cảm biến không hợp lệ')
-        await validate_custom_sensor_selection(db, station_data.sensors or {}, station_data.config or {})
-        requested_topics = [
-            normalize_mqtt_topic(info.get("topic"))
-            for info in (station_data.sensors or {}).values()
-            if isinstance(info, dict) and normalize_mqtt_topic(info.get("topic"))
-        ]
-        duplicates = duplicate_mqtt_topics(requested_topics)
-        if duplicates:
-            raise HTTPException(status_code=409, detail=f"MQTT topic bị trùng trong form: {', '.join(duplicates)}")
-        conflicts = await find_mqtt_topic_conflicts(db, requested_topics)
-        if conflicts:
-            conflict = conflicts[0]
-            raise HTTPException(
-                status_code=409,
-                detail=f"MQTT topic '{conflict.mqtt_topic}' đã được dùng bởi thiết bị {conflict.device_code}",
-            )
+        await _validate_new_station_inputs(db, station_data)
 
         # 2. TỰ ĐỘNG TÍNH TOẠ ĐỘ TRẠM
         final_location = calculate_station_location(station_data.sensors, station_data.location)
 
         # 3. Tạo trạm
+        now_ts = int(time.time())
         new_station = model_config.Station(
             station_code=station_data.station_code,
             name=station_data.name,
@@ -218,28 +243,14 @@ async def create_station_in_project(
             location=final_location, # Dùng tọa độ đã tính toán
             status="offline",
             config=station_data.config or {},
-            created_at=int(time.time()),
-            updated_at=int(time.time())
+            created_at=now_ts,
+            updated_at=now_ts
         )
         db.add(new_station)
         await db.flush()
 
         # 4. Tạo thiết bị
-        if station_data.sensors:
-            for s_type, info in station_data.sensors.items():
-                topic = info.get('topic', '').strip()
-                if topic:
-                    db.add(model_config.Device(
-                        device_code=f"{new_station.station_code}_{s_type.upper()}",
-                        name=f"{new_station.name} - {s_type.upper()}",
-                        station_id=new_station.id,
-                        device_type=s_type,
-                        mqtt_topic=topic,
-                        is_active=True,
-                        config={"mqtt": info.get('mqtt')} if info.get('mqtt') else {},
-                        created_at=int(time.time()),
-                        updated_at=int(time.time())
-                    ))
+        _create_station_devices(db, new_station, station_data.sensors)
 
         await refresh_project_map_position(db, project_id)
         await db.commit()

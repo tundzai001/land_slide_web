@@ -947,3 +947,15 @@ class SonarCoverageBoostTests(unittest.TestCase):
         http_err = requests.HTTPError(response=mock_resp)
         with self.assertRaises(requests.HTTPError):
             _handle_cors_fetch_exception(http_err, False, 10.0)
+
+    def test_station_create_devices_helper(self):
+        from app.features.stations.query_router import _create_station_devices
+
+        db_mock = MagicMock()
+        st_mock = MagicMock(station_code="ST01", name="Station 01", id=10)
+        sensors = {
+            "gnss": {"topic": "station/ST01/gnss", "mqtt": {"qos": 1}},
+            "rain": {"topic": ""},  # Empty topic skipped
+        }
+        _create_station_devices(db_mock, st_mock, sensors)
+        self.assertEqual(db_mock.add.call_count, 1)
