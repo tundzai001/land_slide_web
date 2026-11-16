@@ -56,12 +56,8 @@ class MQTTAdjustmentMixin:
         self.adjustment_cluster_results.setdefault(int(context["project_id"]), {})
         return context
 
-    def _refresh_project_adjustment_state(self, project_id: int) -> tuple[str, dict]:
-        contexts = [
-            context
-            for context in self.adjustment_run_contexts.values()
-            if int(context.get("project_id") or 0) == int(project_id)
-        ]
+    @staticmethod
+    def _compute_adjustment_phase(contexts: list[dict]) -> str:
         active = [
             context for context in contexts
             if context.get("status") in {"STARTING", "COLLECTING_BASELINE", "FREE_NETWORK", "PAUSED"}
@@ -69,23 +65,29 @@ class MQTTAdjustmentMixin:
         if active:
             statuses = {context.get("status") for context in active}
             if statuses == {"PAUSED"}:
-                phase = "PAUSED"
-            elif "FREE_NETWORK" in statuses:
-                phase = "FREE_NETWORK"
-            else:
-                phase = "COLLECTING_BASELINE"
-        else:
-            terminal = {str(context.get("status") or "") for context in contexts}
-            failed = terminal.intersection({"ERROR", "FAILED_QUALITY_GATE"})
-            completed = "COMPLETED" in terminal
-            if failed and completed:
-                phase = "PARTIAL_FAILED"
-            elif terminal == {"FAILED_QUALITY_GATE"}:
-                phase = "FAILED_QUALITY_GATE"
-            elif failed:
-                phase = "ERROR"
-            else:
-                phase = "COMPLETED"
+                return "PAUSED"
+            if "FREE_NETWORK" in statuses:
+                return "FREE_NETWORK"
+            return "COLLECTING_BASELINE"
+
+        terminal = {str(context.get("status") or "") for context in contexts}
+        failed = terminal.intersection({"ERROR", "FAILED_QUALITY_GATE"})
+        completed = "COMPLETED" in terminal
+        if failed and completed:
+            return "PARTIAL_FAILED"
+        if terminal == {"FAILED_QUALITY_GATE"}:
+            return "FAILED_QUALITY_GATE"
+        if failed:
+            return "ERROR"
+        return "COMPLETED"
+
+    def _refresh_project_adjustment_state(self, project_id: int) -> tuple[str, dict]:
+        contexts = [
+            context
+            for context in self.adjustment_run_contexts.values()
+            if int(context.get("project_id") or 0) == int(project_id)
+        ]
+        phase = self._compute_adjustment_phase(contexts)
         self.adjustment_phase[int(project_id)] = phase
         results = self.adjustment_cluster_results.get(int(project_id), {})
         ordered_results = sorted(

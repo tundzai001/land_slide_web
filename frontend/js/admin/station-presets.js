@@ -399,31 +399,59 @@ class AdminStationPresetsFeature extends window.AdminManager {
         return stationLocation;
     }
 
+    _collectSimulationProfile() {
+        return {
+            version: 1,
+            cohesion_kpa: Number.parseFloat(document.getElementById('sim-profile-cohesion')?.value || 15),
+            friction_angle_deg: Number.parseFloat(document.getElementById('sim-profile-friction')?.value || 30),
+            unit_weight_kn_m3: Number.parseFloat(document.getElementById('sim-profile-unit-weight')?.value || 18),
+            slip_depth_m: Number.parseFloat(document.getElementById('sim-profile-slip-depth')?.value || 5),
+            slope_angle_deg: Number.parseFloat(document.getElementById('sim-profile-slope')?.value || 25),
+            saturated_conductivity_m_s: Number.parseFloat(document.getElementById('sim-profile-ks')?.value || 0.000015),
+            porosity: Number.parseFloat(document.getElementById('sim-profile-porosity')?.value || 0.25),
+            base_pore_pressure_ratio: Number.parseFloat(document.getElementById('sim-profile-base-ru')?.value || 0),
+            water_level_dry_m: Number.parseFloat(document.getElementById('sim-profile-water-dry')?.value || 0),
+            water_level_saturated_m: Number.parseFloat(document.getElementById('sim-profile-water-saturated')?.value || 1),
+            base_seismic_coeff: 0,
+            house_count: Number.parseInt(document.getElementById('sim-profile-houses')?.value || 40),
+            tree_count: Number.parseInt(document.getElementById('sim-profile-trees')?.value || 300),
+        };
+    }
+
+    _collectOrigins() {
+        const parseOrigin = (prefix) => {
+            const latVal = document.getElementById(`origin-${prefix}-lat`)?.value;
+            const lonVal = document.getElementById(`origin-${prefix}-lon`)?.value;
+            const hVal = document.getElementById(`origin-${prefix}-h`)?.value;
+            return {
+                lat: latVal !== '' ? latVal : undefined,
+                lon: lonVal !== '' ? lonVal : undefined,
+                h: hVal !== '' ? hVal : undefined,
+            };
+        };
+        return {
+            gnss_origin: {
+                lat: document.getElementById('origin-lat')?.value || null,
+                lon: document.getElementById('origin-lon')?.value || null,
+                h: document.getElementById('origin-h')?.value || 0
+            },
+            rain_origin: parseOrigin('rain'),
+            water_origin: parseOrigin('water'),
+            imu_origin: parseOrigin('imu'),
+        };
+    }
+
     _buildStationConfig(finalConfirmSteps) {
         const offlineThresholds = this._collectOfflineThresholds();
         const rtkForwarding = this._collectRtkForwarding();
         const vn2000 = this._collectVn2000();
         const stationMqtt = this._collectStationMqtt();
         const gnssAicasterUser = this._collectGnssAicasterUser();
+        const origins = this._collectOrigins();
 
         const config = {
             active_preset: this.activePreset || '',
-            simulation_profile: {
-                version: 1,
-                cohesion_kpa: Number.parseFloat(document.getElementById('sim-profile-cohesion')?.value || 15),
-                friction_angle_deg: Number.parseFloat(document.getElementById('sim-profile-friction')?.value || 30),
-                unit_weight_kn_m3: Number.parseFloat(document.getElementById('sim-profile-unit-weight')?.value || 18),
-                slip_depth_m: Number.parseFloat(document.getElementById('sim-profile-slip-depth')?.value || 5),
-                slope_angle_deg: Number.parseFloat(document.getElementById('sim-profile-slope')?.value || 25),
-                saturated_conductivity_m_s: Number.parseFloat(document.getElementById('sim-profile-ks')?.value || 0.000015),
-                porosity: Number.parseFloat(document.getElementById('sim-profile-porosity')?.value || 0.25),
-                base_pore_pressure_ratio: Number.parseFloat(document.getElementById('sim-profile-base-ru')?.value || 0),
-                water_level_dry_m: Number.parseFloat(document.getElementById('sim-profile-water-dry')?.value || 0),
-                water_level_saturated_m: Number.parseFloat(document.getElementById('sim-profile-water-saturated')?.value || 1),
-                base_seismic_coeff: 0,
-                house_count: Number.parseInt(document.getElementById('sim-profile-houses')?.value || 40),
-                tree_count: Number.parseInt(document.getElementById('sim-profile-trees')?.value || 300),
-            },
+            simulation_profile: this._collectSimulationProfile(),
             alerting: {
                 enabled: !document.getElementById('station-alerting-disabled')?.checked
             },
@@ -472,26 +500,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 baseline_pitch: Number.parseFloat(document.getElementById('cfg-imu-base-pitch')?.value) || 0.0,
                 baseline_yaw: Number.parseFloat(document.getElementById('cfg-imu-base-yaw')?.value) || 0.0
             },
-            gnss_origin: {
-                lat: document.getElementById('origin-lat')?.value || null,
-                lon: document.getElementById('origin-lon')?.value || null,
-                h: document.getElementById('origin-h')?.value || 0
-            },
-            rain_origin: {
-                lat: document.getElementById('origin-rain-lat')?.value !== '' ? document.getElementById('origin-rain-lat').value : undefined,
-                lon: document.getElementById('origin-rain-lon')?.value !== '' ? document.getElementById('origin-rain-lon').value : undefined,
-                h: document.getElementById('origin-rain-h')?.value !== '' ? document.getElementById('origin-rain-h').value : undefined
-            },
-            water_origin: {
-                lat: document.getElementById('origin-water-lat')?.value !== '' ? document.getElementById('origin-water-lat').value : undefined,
-                lon: document.getElementById('origin-water-lon')?.value !== '' ? document.getElementById('origin-water-lon').value : undefined,
-                h: document.getElementById('origin-water-h')?.value !== '' ? document.getElementById('origin-water-h').value : undefined
-            },
-            imu_origin: {
-                lat: document.getElementById('origin-imu-lat')?.value !== '' ? document.getElementById('origin-imu-lat').value : undefined,
-                lon: document.getElementById('origin-imu-lon')?.value !== '' ? document.getElementById('origin-imu-lon').value : undefined,
-                h: document.getElementById('origin-imu-h')?.value !== '' ? document.getElementById('origin-imu-h').value : undefined
-            },
+            ...origins,
             velocity_classification: this.velocityConfig,
             offline_thresholds: offlineThresholds,
             gnss_aicaster_user: gnssAicasterUser,
@@ -644,16 +653,34 @@ class AdminStationPresetsFeature extends window.AdminManager {
         }, 20_000);
     }
 
-    async resetGnssOrigin(stationId) {
+    _validateCanResetOrigin(stationId) {
         if (this._gnssOriginRelockInProgress) {
             window.toast?.warning('Đang khóa lại tọa độ gốc; hãy chờ hoàn tất');
-            return;
+            return false;
         }
         if (!stationId || Number.isNaN(Number(stationId))) {
             window.toast?.warning('Hãy lưu trạm trước khi hiệu chuẩn offset GNSS');
-            return;
+            return false;
         }
-        if (!confirm('Thu mẫu RTK FIXED ổn định trong 60 giây để hiệu chuẩn offset? Tọa độ gốc sẽ được giữ nguyên.')) return;
+        return confirm('Thu mẫu RTK FIXED ổn định trong 60 giây để hiệu chuẩn offset? Tọa độ gốc sẽ được giữ nguyên.');
+    }
+
+    _applyCalibrationSuccess(data, statusEl) {
+        const calibration = data.calibrations?.[0];
+        const horizontalShiftMm = calibration
+            ? Math.hypot(calibration.shift_e_m, calibration.shift_n_m) * 1000
+            : 0;
+        const totalOffsetMm = calibration?.new_tracking_offset_2d_mm || 0;
+        this.renderGnssCalibrationResult(calibration);
+        window.toast?.success(`Calibrated ${data.calibrated_count} GNSS offset(s); origin unchanged`);
+        if (statusEl) {
+            statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> Applied ${horizontalShiftMm.toFixed(1)} mm; total tracking offset ${totalOffsetMm.toFixed(1)} mm. Origin unchanged.`;
+            statusEl.className = 'text-success small';
+        }
+    }
+
+    async resetGnssOrigin(stationId) {
+        if (!this._validateCanResetOrigin(stationId)) return;
 
         const resetBtn = document.getElementById('btn-reset-origin');
         const statusEl = document.getElementById('origin-status');
@@ -684,17 +711,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 await this._handleGnssHttpError(res, data, 'gnss-calibration');
             }
 
-            const calibration = data.calibrations?.[0];
-            const horizontalShiftMm = calibration
-                ? Math.hypot(calibration.shift_e_m, calibration.shift_n_m) * 1000
-                : 0;
-            const totalOffsetMm = calibration?.new_tracking_offset_2d_mm || 0;
-            this.renderGnssCalibrationResult(calibration);
-            window.toast?.success(`Calibrated ${data.calibrated_count} GNSS offset(s); origin unchanged`);
-            if (statusEl) {
-                statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> Applied ${horizontalShiftMm.toFixed(1)} mm; total tracking offset ${totalOffsetMm.toFixed(1)} mm. Origin unchanged.`;
-                statusEl.className = 'text-success small';
-            }
+            this._applyCalibrationSuccess(data, statusEl);
         } catch (e) {
             window.toast?.error('Offset calibration failed: ' + e.message);
         } finally {
@@ -762,24 +779,48 @@ class AdminStationPresetsFeature extends window.AdminManager {
         window.toast?.success('Đã khóa lại tọa độ gốc GNSS.');
     }
 
-    async relockGnssOrigin(stationId) {
+    _validateCanRelockOrigin(stationId) {
         if (this._gnssOriginRelockInProgress) {
             window.toast?.warning('Đang có thao tác khóa lại tọa độ gốc; hãy chờ hoàn tất');
-            return;
+            return null;
         }
         if (this._gnssCalibrationInProgress) {
             window.toast?.warning('Đang hiệu chuẩn offset GNSS; hãy chờ hoàn tất');
-            return;
+            return null;
         }
         if (!stationId || Number.isNaN(Number(stationId))) {
             window.toast?.warning('Hãy lưu trạm trước khi khóa lại tọa độ gốc');
-            return;
+            return null;
         }
         const topic = document.getElementById('topic-gnss')?.value.trim();
         if (!topic) {
             window.toast?.warning('Vui lòng nhập MQTT Topic của GNSS trước');
-            return;
+            return null;
         }
+        return topic;
+    }
+
+    _handleRelockOriginCatch(e, stationId, statusEl) {
+        this._gnssOriginRelockInProgress = false;
+        this._gnssOriginRelockStationId = null;
+        if (Number(this.currentStationId) === Number(stationId)) {
+            this.updateGnssOriginRelockProgress?.({
+                ...this._gnssOriginRelockLastProgress,
+                phase: 'failed',
+                message: e.message,
+            });
+            if (statusEl) {
+                statusEl.textContent = e.message;
+                statusEl.className = 'text-danger small';
+            }
+        }
+        window.toast?.error('Không khóa lại được tọa độ gốc: ' + e.message);
+    }
+
+    async relockGnssOrigin(stationId) {
+        const topic = this._validateCanRelockOrigin(stationId);
+        if (!topic) return;
+
         if (!confirm('Khóa lại gốc theo vị trí GNSS hiện tại? Hệ thống sẽ thu 61 mẫu RTK FIXED ổn định trong ít nhất 60 giây. Gốc cũ được lưu lịch sử và chuyển vị tracking sẽ bắt đầu lại từ gốc mới.')) return;
 
         const setActionButtonsDisabled = (disabled) => {
@@ -826,25 +867,35 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
             this._applyRelockSuccessResult(data.relock, stationId, statusEl);
         } catch (e) {
-            this._gnssOriginRelockInProgress = false;
-            this._gnssOriginRelockStationId = null;
-            if (Number(this.currentStationId) === Number(stationId)) {
-                this.updateGnssOriginRelockProgress?.({
-                    ...this._gnssOriginRelockLastProgress,
-                    phase: 'failed',
-                    message: e.message,
-                });
-            }
-            window.toast?.error('Không khóa lại được tọa độ gốc: ' + e.message);
-            if (statusEl && Number(this.currentStationId) === Number(stationId)) {
-                statusEl.textContent = e.message;
-                statusEl.className = 'text-danger small';
-            }
+            this._handleRelockOriginCatch(e, stationId, statusEl);
         } finally {
             if (!awaitingRealtimeCompletion && !this._gnssOriginRelockInProgress) {
                 setActionButtonsDisabled(false);
             }
         }
+    }
+
+    _renderRelockComplete(bar, label, detail, remainingEl) {
+        bar.classList.add('bg-success');
+        bar.classList.remove('progress-bar-animated');
+        if (label) label.textContent = 'Đã khóa lại tọa độ gốc';
+        if (detail) detail.textContent = 'Chuyển vị tracking đang tính từ mốc mới.';
+        if (remainingEl) remainingEl.textContent = 'Hoàn tất';
+    }
+
+    _renderRelockFailed(bar, label, detail, remainingEl, message) {
+        bar.classList.add('bg-danger');
+        bar.classList.remove('progress-bar-animated');
+        if (label) label.textContent = 'Chưa thể khóa lại tọa độ gốc';
+        if (detail) detail.textContent = message || 'Thu mẫu RTK FIXED chưa đạt yêu cầu.';
+        if (remainingEl) remainingEl.textContent = 'Đã dừng';
+    }
+
+    _renderRelockCollecting(bar, label, detail, remainingEl, remaining) {
+        bar.classList.add('bg-info', 'progress-bar-animated');
+        if (label) label.textContent = 'Đang thu mẫu RTK FIXED';
+        if (detail) detail.textContent = 'Giữ RTK FIXED ổn định trong lúc thu mẫu.';
+        if (remainingEl) remainingEl.textContent = `Còn khoảng ${remaining} giây`;
     }
 
     _updateRelockPhaseUI(phase, progress, remaining, bar) {
@@ -854,22 +905,11 @@ class AdminStationPresetsFeature extends window.AdminManager {
 
         bar.classList.remove('bg-info', 'bg-success', 'bg-danger');
         if (phase === 'complete') {
-            bar.classList.add('bg-success');
-            bar.classList.remove('progress-bar-animated');
-            if (label) label.textContent = 'Đã khóa lại tọa độ gốc';
-            if (detail) detail.textContent = 'Chuyển vị tracking đang tính từ mốc mới.';
-            if (remainingEl) remainingEl.textContent = 'Hoàn tất';
+            this._renderRelockComplete(bar, label, detail, remainingEl);
         } else if (phase === 'failed') {
-            bar.classList.add('bg-danger');
-            bar.classList.remove('progress-bar-animated');
-            if (label) label.textContent = 'Chưa thể khóa lại tọa độ gốc';
-            if (detail) detail.textContent = progress.message || 'Thu mẫu RTK FIXED chưa đạt yêu cầu.';
-            if (remainingEl) remainingEl.textContent = 'Đã dừng';
+            this._renderRelockFailed(bar, label, detail, remainingEl, progress.message);
         } else {
-            bar.classList.add('bg-info', 'progress-bar-animated');
-            if (label) label.textContent = 'Đang thu mẫu RTK FIXED';
-            if (detail) detail.textContent = 'Giữ RTK FIXED ổn định trong lúc thu mẫu.';
-            if (remainingEl) remainingEl.textContent = `Còn khoảng ${remaining} giây`;
+            this._renderRelockCollecting(bar, label, detail, remainingEl, remaining);
         }
     }
 

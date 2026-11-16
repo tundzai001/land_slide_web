@@ -240,6 +240,42 @@ window.addEventListener('spa:navigate', (event) => {
     }
 });
 
+function _handleRealtimeGnssStatus(message) {
+    const fixMode = message.data?.fix_mode;
+    const fixQuality = Number(message.data?.fix_quality);
+    if (
+        gnssAdjustmentDebugState.active
+        && gnssAdjustmentDebugState.expectedStationIds.includes(Number(message.station_id))
+    ) {
+        const now = Date.now();
+        const lastAt = Number(gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] || 0);
+        if (now - lastAt >= 5000) {
+            gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] = now;
+            addGnssAdjustmentDebug(
+                'GNSS',
+                `Trạm #${message.station_id} có GGA: ${fixMode || 'UNKNOWN'} (quality=${fixQuality || 0}). Đang chờ #AGRICA.`,
+                fixQuality >= 4 ? 'info' : 'warning',
+            );
+        }
+    }
+    updateGnssFixBadge(fixMode, fixQuality);
+
+    const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
+    const isNoData = (
+        !normalizedMode ||
+        normalizedMode === 'UNKNOWN' ||
+        normalizedMode === 'INVALID' ||
+        normalizedMode === 'NO_DATA' ||
+        normalizedMode === 'GNSS_UNKNOWN' ||
+        normalizedMode === 'GNSS_INVALID' ||
+        fixQuality <= 0
+    );
+
+    if (isNoData) {
+        setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+    }
+}
+
 function _handleRealtimeSensorStatus(message) {
     if (!currentStationData || message.station_id !== currentStationData.id) return;
 
@@ -252,39 +288,7 @@ function _handleRealtimeSensorStatus(message) {
     }
 
     if (message.sensor_type === 'gnss') {
-        const fixMode = message.data?.fix_mode;
-        const fixQuality = Number(message.data?.fix_quality);
-        if (
-            gnssAdjustmentDebugState.active
-            && gnssAdjustmentDebugState.expectedStationIds.includes(Number(message.station_id))
-        ) {
-            const now = Date.now();
-            const lastAt = Number(gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] || 0);
-            if (now - lastAt >= 5000) {
-                gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] = now;
-                addGnssAdjustmentDebug(
-                    'GNSS',
-                    `Trạm #${message.station_id} có GGA: ${fixMode || 'UNKNOWN'} (quality=${fixQuality || 0}). Đang chờ #AGRICA.`,
-                    fixQuality >= 4 ? 'info' : 'warning',
-                );
-            }
-        }
-        updateGnssFixBadge(fixMode, fixQuality);
-
-        const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
-        const isNoData = (
-            !normalizedMode ||
-            normalizedMode === 'UNKNOWN' ||
-            normalizedMode === 'INVALID' ||
-            normalizedMode === 'NO_DATA' ||
-            normalizedMode === 'GNSS_UNKNOWN' ||
-            normalizedMode === 'GNSS_INVALID' ||
-            fixQuality <= 0
-        );
-
-        if (isNoData) {
-            setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
-        }
+        _handleRealtimeGnssStatus(message);
     }
 }
 
@@ -372,6 +376,50 @@ function _updateStationStatusSidebarAndList(stationId, riskUi) {
     }
 }
 
+function _updateCurrentStationActiveAlertUI(stationId, riskUi) {
+    if (currentAlertStationId !== stationId || (riskUi.normalized !== 'MEDIUM' && riskUi.normalized !== 'CRITICAL')) {
+        return;
+    }
+    const banner = document.getElementById('alert-banner');
+    if (banner?.classList.contains('show')) {
+        const nextLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+        updateAlertBannerTheme(nextLevel);
+        const alertTitle = document.getElementById('alert-title');
+        if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
+            alertTitle.textContent = `${riskUi.display} ALERT!`;
+        }
+    }
+
+    if (currentStationData && stationId === currentStationData.id) {
+        const alertLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+        Object.values(SENSOR_CARD_IDS).forEach(id => {
+            const card = document.getElementById(id);
+            if (card && (card.classList.contains('sensor-alert-warning') || card.classList.contains('sensor-alert-critical'))) {
+                card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
+                card.classList.add(alertLevel === 'CRITICAL' ? 'sensor-alert-critical' : 'sensor-alert-warning');
+            }
+        });
+    }
+}
+
+function _updateCriticalSirenState(stationId, riskUi) {
+    if (riskUi.normalized !== 'CRITICAL' || !currentStationData || stationId !== currentStationData.id) {
+        return;
+    }
+    const user = window.authManager?.getUserInfo();
+    const userRole = user?.role;
+    if (userRole === 'admin' || userRole === 'operator') {
+        window.currentAlertStationId = stationId;
+        document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+            const target = b.dataset.target;
+            const currentState = b.dataset.sirenState;
+            if (currentState === 'idle' || currentState === 'offline') {
+                setSirenButtonState('alerting', target);
+            }
+        });
+    }
+}
+
 function _handleRealtimeStationStatus(message) {
     const riskLevel = String(message.risk_level || 'LOW').toUpperCase();
     const riskUi = getRiskPresentation(riskLevel);
@@ -385,43 +433,8 @@ function _handleRealtimeStationStatus(message) {
         _handleStationStatusAlerting(message, stationId, riskUi);
     }
 
-    if (currentAlertStationId === stationId && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
-        const banner = document.getElementById('alert-banner');
-        if (banner?.classList.contains('show')) {
-            const nextLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-            updateAlertBannerTheme(nextLevel);
-            const alertTitle = document.getElementById('alert-title');
-            if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
-                alertTitle.textContent = `${riskUi.display} ALERT!`;
-            }
-        }
-
-        if (currentStationData && stationId === currentStationData.id) {
-            const alertLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-            Object.values(SENSOR_CARD_IDS).forEach(id => {
-                const card = document.getElementById(id);
-                if (card && (card.classList.contains('sensor-alert-warning') || card.classList.contains('sensor-alert-critical'))) {
-                    card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
-                    card.classList.add(alertLevel === 'CRITICAL' ? 'sensor-alert-critical' : 'sensor-alert-warning');
-                }
-            });
-        }
-    }
-
-    if (riskUi.normalized === 'CRITICAL' && currentStationData && stationId === currentStationData.id) {
-        const user = window.authManager?.getUserInfo();
-        const userRole = user?.role;
-        if (userRole === 'admin' || userRole === 'operator') {
-            window.currentAlertStationId = stationId;
-            document.querySelectorAll('.btn-siren-toggle').forEach(b => {
-                const target = b.dataset.target;
-                const currentState = b.dataset.sirenState;
-                if (currentState === 'idle' || currentState === 'offline') {
-                    setSirenButtonState('alerting', target);
-                }
-            });
-        }
-    }
+    _updateCurrentStationActiveAlertUI(stationId, riskUi);
+    _updateCriticalSirenState(stationId, riskUi);
 
     updateStationMarker(stationId, riskUi.normalized);
     _updateStationStatusSidebarAndList(stationId, riskUi);

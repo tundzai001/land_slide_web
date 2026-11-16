@@ -16,6 +16,7 @@ from ...models import auth as model_auth
 from ...shared.pagination import normalize_page, set_pagination_headers
 
 
+USER_NOT_FOUND = "User not found"
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
@@ -32,7 +33,7 @@ async def toggle_user_status(
     result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND)
 
     if user.username == 'admin':
         raise HTTPException(status_code=400, detail="Cannot change status of the admin user")
@@ -96,7 +97,7 @@ async def update_user(
         await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
     ).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND)
 
     role = payload.role or user.role
     if role not in {"admin", "operator", "viewer"}:
@@ -134,7 +135,7 @@ async def delete_user(
     result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND)
 
     if user.username == 'admin':
         raise HTTPException(status_code=400, detail="Cannot delete the admin user")
@@ -157,7 +158,7 @@ async def update_user_projects(
     result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND)
 
     user.assigned_projects = payload.assigned_projects if user.role != "admin" else []
     await db.commit()

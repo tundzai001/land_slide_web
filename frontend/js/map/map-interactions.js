@@ -1424,53 +1424,6 @@ function setupEventListeners() {
         }
     }
 
-        async function _callStartAdjustmentApi(payload) {
-        if (window.authManager?.token) {
-            return await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        }
-        const res = await fetch('/api/admin/gnss/adjustment/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error('Bạn cần đăng nhập với quyền Quản trị viên để thực hiện tính năng này');
-        return res;
-    }
-
-    function _processAdjustmentStartResponse(startResult, resStatus) {
-        if (Array.isArray(startResult.expected_station_ids)) {
-            applyGnssAdjustmentRoster(startResult.roster);
-            syncGnssExpectedStationIds(startResult.expected_station_ids);
-        }
-        if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
-            addGnssAdjustmentDebug(
-                'ONLINE',
-                `Đã loại các trạm GNSS offline: ${startResult.skipped_offline_station_ids.join(', ')}.`,
-                'warning',
-            );
-            upsertGnssWorkflowNode('online-filter', {
-                title: 'Lọc cụm GNSS đang hoạt động',
-                detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm không có heartbeat GNSS gần đây (ID ${startResult.skipped_offline_station_ids.join(', ')}); còn ${gnssAdjustmentDebugState.expectedStationIds.length} rover ứng viên, đang chờ #AGRICA RTK Fixed để xác nhận.`,
-                status: 'warning',
-                icon: 'bi-funnel',
-            });
-        }
-        setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
-        addGnssAdjustmentDebug(
-            'API',
-            startResult.existing
-                ? `HTTP ${resStatus}: đã nối lại phiên đang chạy, không reset dữ liệu server.`
-                : `HTTP ${resStatus}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
-            'success',
-        );
-        startGnssAdjustmentStatusPolling();
-        void syncGnssAdjustmentStatus();
-    }
-
     window.requestGnssAdjustment = async function(projectId, stationIds) {
         if (!canOperateMap()) {
             showAdjustmentError('Không có quyền', 'Chỉ operator hoặc admin được chạy bình sai GNSS.');
@@ -1667,6 +1620,53 @@ function showGnssTerminalModal(modal) {
         backdrop: false,
         focus: false,
     }).show();
+}
+
+async function _callStartAdjustmentApi(payload) {
+    if (window.authManager?.token) {
+        return await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+    }
+    const res = await fetch('/api/admin/gnss/adjustment/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Bạn cần đăng nhập với quyền Quản trị viên để thực hiện tính năng này');
+    return res;
+}
+
+function _processAdjustmentStartResponse(startResult, resStatus) {
+    if (Array.isArray(startResult.expected_station_ids)) {
+        applyGnssAdjustmentRoster(startResult.roster);
+        syncGnssExpectedStationIds(startResult.expected_station_ids);
+    }
+    if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
+        addGnssAdjustmentDebug(
+            'ONLINE',
+            `Đã loại các trạm GNSS offline: ${startResult.skipped_offline_station_ids.join(', ')}.`,
+            'warning',
+        );
+        upsertGnssWorkflowNode('online-filter', {
+            title: 'Lọc cụm GNSS đang hoạt động',
+            detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm không có heartbeat GNSS gần đây (ID ${startResult.skipped_offline_station_ids.join(', ')}); còn ${gnssAdjustmentDebugState.expectedStationIds.length} rover ứng viên, đang chờ #AGRICA RTK Fixed để xác nhận.`,
+            status: 'warning',
+            icon: 'bi-funnel',
+        });
+    }
+    setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
+    addGnssAdjustmentDebug(
+        'API',
+        startResult.existing
+            ? `HTTP ${resStatus}: đã nối lại phiên đang chạy, không reset dữ liệu server.`
+            : `HTTP ${resStatus}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
+        'success',
+    );
+    startGnssAdjustmentStatusPolling();
+    void syncGnssAdjustmentStatus();
 }
 
 async function readApiError(response) {

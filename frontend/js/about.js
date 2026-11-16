@@ -134,8 +134,7 @@ import { renderAboutTemplate } from './templates/about-template.js';
             }
         });
 
-        // Merge multi-primitive objects (e.g. 68-primitive satellites, drones, forest, helicopters) into 1 draw call each
-        groupsToMerge.forEach(({ node, childMeshes }) => {
+        function _expandChildMeshGeometry(childMeshes) {
             let totalVerts = 0;
             const expanded = [];
             for (const m of childMeshes) {
@@ -153,8 +152,10 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 expanded.push({ pos, norm, colAttr, r, gr, b, count: pos.count });
                 totalVerts += pos.count;
             }
-            if (!totalVerts || expanded.length < 2) return;
+            return { expanded, totalVerts };
+        }
 
+        function _buildMergedMeshGeometry(expanded, totalVerts) {
             const mergedPos = new Float32Array(totalVerts * 3);
             const mergedNorm = new Float32Array(totalVerts * 3);
             const mergedCol = new Float32Array(totalVerts * 3);
@@ -189,11 +190,23 @@ import { renderAboutTemplate } from './templates/about-template.js';
             mergedGeo.setAttribute('normal', new THREE.BufferAttribute(mergedNorm, 3));
             mergedGeo.setAttribute('color', new THREE.BufferAttribute(mergedCol, 3));
             mergedGeo.computeBoundingSphere();
+            return mergedGeo;
+        }
 
+        function _mergeChildMeshesGroup(node, childMeshes, mergedVertexMat) {
+            const { expanded, totalVerts } = _expandChildMeshGeometry(childMeshes);
+            if (!totalVerts || expanded.length < 2) return;
+
+            const mergedGeo = _buildMergedMeshGeometry(expanded, totalVerts);
             childMeshes.forEach(m => node.remove(m));
             const singleMesh = new THREE.Mesh(mergedGeo, mergedVertexMat);
             singleMesh.name = `${node.name}_Merged`;
             node.add(singleMesh);
+        }
+
+        // Merge multi-primitive objects (e.g. 68-primitive satellites, drones, forest, helicopters) into 1 draw call each
+        groupsToMerge.forEach(({ node, childMeshes }) => {
+            _mergeChildMeshesGroup(node, childMeshes, mergedVertexMat);
         });
 
         // Convert heavy PBR MeshStandardMaterial into ultra-fast MeshLambertMaterial once across the shared template
@@ -347,28 +360,33 @@ import { renderAboutTemplate } from './templates/about-template.js';
             blending: THREE.AdditiveBlending
         });
 
-        const activeVehicles = [];
-        vehicleConfigs.forEach(cfg => {
-            const obj = nodes[cfg.name];
-            if (!obj) return;
-            const beamCone = new THREE.Mesh(headConeGeo, headConeMat);
-            beamCone.position.set(0, 0.055, 0.46);
-            obj.add(beamCone);
+        function _createVehicleInstances(nodes, vehicleConfigs, headConeGeo, headConeMat, strobeSphereGeo, redStrobeMat, blueStrobeMat, amberStrobeMat) {
+            const activeVehicles = [];
+            vehicleConfigs.forEach(cfg => {
+                const obj = nodes[cfg.name];
+                if (!obj) return;
+                const beamCone = new THREE.Mesh(headConeGeo, headConeMat);
+                beamCone.position.set(0, 0.055, 0.46);
+                obj.add(beamCone);
 
-            let redLamp = null, blueLamp = null, amberLamp = null;
-            if (cfg.police) {
-                redLamp = new THREE.Mesh(strobeSphereGeo, redStrobeMat.clone());
-                redLamp.position.set(-0.06, 0.24, 0.0);
-                blueLamp = new THREE.Mesh(strobeSphereGeo, blueStrobeMat.clone());
-                blueLamp.position.set(0.06, 0.24, 0.0);
-                obj.add(redLamp, blueLamp);
-            } else if (cfg.rescue) {
-                amberLamp = new THREE.Mesh(strobeSphereGeo, amberStrobeMat.clone());
-                amberLamp.position.set(0.0, 0.31, 0.15);
-                obj.add(amberLamp);
-            }
-            activeVehicles.push({ ...cfg, obj, redLamp, blueLamp, amberLamp });
-        });
+                let redLamp = null, blueLamp = null, amberLamp = null;
+                if (cfg.police) {
+                    redLamp = new THREE.Mesh(strobeSphereGeo, redStrobeMat.clone());
+                    redLamp.position.set(-0.06, 0.24, 0.0);
+                    blueLamp = new THREE.Mesh(strobeSphereGeo, blueStrobeMat.clone());
+                    blueLamp.position.set(0.06, 0.24, 0.0);
+                    obj.add(redLamp, blueLamp);
+                } else if (cfg.rescue) {
+                    amberLamp = new THREE.Mesh(strobeSphereGeo, amberStrobeMat.clone());
+                    amberLamp.position.set(0.0, 0.31, 0.15);
+                    obj.add(amberLamp);
+                }
+                activeVehicles.push({ ...cfg, obj, redLamp, blueLamp, amberLamp });
+            });
+            return activeVehicles;
+        }
+
+        const activeVehicles = _createVehicleInstances(nodes, vehicleConfigs, headConeGeo, headConeMat, strobeSphereGeo, redStrobeMat, blueStrobeMat, amberStrobeMat);
 
         // 2. Attach Volumetric Searchlight & LiDAR Scan Cones to Both Rescue Helicopters & Quadcopter Drones
         const heli1 = nodes.Rescue_Helicopter_01;
@@ -749,6 +767,148 @@ import { renderAboutTemplate } from './templates/about-template.js';
             }
         });
 
+        function _updateTwinSensors(nodes, isHero, elapsed) {
+            if (isHero) return;
+            if (nodes.IMU_Casing) {
+                nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
+                nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
+            }
+            if (nodes.IMU_Gimbal_Roll) nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
+            if (nodes.IMU_Gimbal_Pitch) nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
+            if (nodes.IMU_Gimbal_Yaw) nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
+
+            if (nodes.Rain_TippingBucket) {
+                const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
+                nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
+            }
+            if (nodes.Rain_FallingDrops) nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
+            if (nodes.Piezo_WaterFlowParticles) nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
+            if (nodes.Piezometer_Probe) nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
+        }
+
+        function _updateTwinPackets(glbPackets, elapsed) {
+            glbPackets.forEach(pk => {
+                const t = (elapsed * pk.speed + pk.phase) % 1.0;
+                const inv = 1.0 - t;
+                pk.obj.position.set(
+                    inv * inv * pk.p0.x + 2 * inv * t * pk.p1.x + t * t * pk.p2.x,
+                    inv * inv * pk.p0.y + 2 * inv * t * pk.p1.y + t * t * pk.p2.y,
+                    inv * inv * pk.p0.z + 2 * inv * t * pk.p1.z + t * t * pk.p2.z
+                );
+                pk.obj.rotation.y = elapsed * 2.5;
+            });
+        }
+
+        function _updateTwinVehicles(activeVehicles, elapsed, span, halfDepth) {
+            activeVehicles.forEach(v => {
+                const dir = v.north ? 1.0 : -1.0;
+                const rawRy = (((v.ry0 + 5.0 + dir * elapsed * v.speed) % span) + span) % span - 5.0;
+                const rc = 2.65 + 0.24 * Math.sin((rawRy / halfDepth) * 1.5);
+                const vx = rc + v.laneX;
+                const vz = sampleRoadElevation(rawRy) + 0.030;
+                const dxDy = 0.24 * (1.5 / halfDepth) * Math.cos((rawRy / halfDepth) * 1.5);
+                const yaw = v.north ? Math.atan2(dxDy, -1.0) : Math.atan2(-dxDy, 1.0);
+
+                v.obj.position.set(vx, vz, -rawRy);
+                v.obj.rotation.set(0, yaw, 0);
+
+                if (v.redLamp && v.blueLamp) {
+                    const flash = Math.sin(elapsed * 22.0) > 0;
+                    v.redLamp.scale.setScalar(flash ? 1.5 : 0.55);
+                    v.blueLamp.scale.setScalar(flash ? 0.55 : 1.5);
+                }
+                if (v.amberLamp) {
+                    const pulse = 0.75 + Math.abs(Math.sin(elapsed * 14.0)) * 0.80;
+                    v.amberLamp.scale.setScalar(pulse);
+                }
+            });
+        }
+
+        function _updateTwinHelicopters(heli1, heli1Rotor, heli1Tail, heliBeam1, heli2, heli2Rotor, heli2Tail, heliBeam2, elapsed) {
+            if (heli1) {
+                const hAng = elapsed * 0.38;
+                const hx = -0.35 + Math.cos(hAng) * 1.95;
+                const hy = -0.25 + Math.sin(hAng * 2.0) * 1.15;
+                const hz = 2.78 + Math.sin(hAng * 1.5) * 0.16;
+                const vx = -Math.sin(hAng) * 1.95;
+                const vzThree = -Math.cos(hAng * 2.0) * 2.30;
+                const hyaw = Math.atan2(vx, vzThree);
+                heli1.position.set(hx, hz, -hy);
+                heli1.rotation.set(0.09, hyaw, Math.sin(hAng) * 0.12);
+                if (heliBeam1) {
+                    heliBeam1.material.opacity = 0.14 + Math.abs(Math.sin(elapsed * 2.8)) * 0.12;
+                }
+            }
+            if (heli1Rotor) heli1Rotor.rotation.y = elapsed * 24.0;
+            if (heli1Tail) heli1Tail.rotation.x = elapsed * 32.0;
+
+            if (heli2) {
+                const hAng2 = elapsed * 0.34 + 1.2;
+                const hx2 = 4.05 + Math.sin(hAng2) * 1.10;
+                const hy2 = -0.85 + Math.cos(hAng2) * 0.95;
+                const hz2 = 2.18 + Math.cos(hAng2 * 2.0) * 0.12;
+                const vx2 = Math.cos(hAng2) * 1.10;
+                const vzThree2 = Math.sin(hAng2) * 0.95;
+                const hyaw2 = Math.atan2(vx2, vzThree2);
+                heli2.position.set(hx2, hz2, -hy2);
+                heli2.rotation.set(0.07, hyaw2, -Math.cos(hAng2) * 0.10);
+                if (heliBeam2) {
+                    heliBeam2.material.opacity = 0.12 + Math.abs(Math.cos(elapsed * 2.5)) * 0.10;
+                }
+            }
+            if (heli2Rotor) heli2Rotor.rotation.y = -elapsed * 24.0;
+            if (heli2Tail) heli2Tail.rotation.x = -elapsed * 32.0;
+        }
+
+        function _updateTwinDishes(nodes, isHero, elapsed) {
+            if (nodes.OpsBeaconCore) nodes.OpsBeaconCore.rotation.y = elapsed * 2.2;
+            if (nodes.OpsTrackingDish) {
+                nodes.OpsTrackingDish.rotation.y = Math.sin(elapsed * 0.65) * 0.55;
+                nodes.OpsTrackingDish.rotation.x = Math.cos(elapsed * 0.42) * 0.08;
+            }
+            if (nodes.OpsSecondaryDish) {
+                nodes.OpsSecondaryDish.rotation.y = -Math.sin(elapsed * 0.52) * 0.48;
+                nodes.OpsSecondaryDish.rotation.x = Math.sin(elapsed * 0.38) * 0.07;
+            }
+            if (!isHero && nodes.OpsHoloTerrain) {
+                nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
+                nodes.OpsHoloTerrain.position.y = 0.51 + Math.sin(elapsed * 2.4) * 0.016;
+            }
+        }
+
+        function _updateTwinDrones(drone, lidarCone, drone2, lidarCone2, elapsed) {
+            if (drone) {
+                const dAng = elapsed * 0.55;
+                const bx = 2.15 + Math.cos(dAng) * 2.35;
+                const by = -0.65 + Math.sin(dAng * 2.0) * 0.85;
+                const bz = 1.15 + Math.sin(dAng * 1.5) * 0.18 + (bx < 1.2 ? (1.2 - bx) * 0.25 : 0);
+                drone.position.set(bx, bz, -by);
+                drone.rotation.set(
+                    Math.cos(dAng * 2.0) * 0.10,
+                    dAng + Math.PI * 0.5,
+                    Math.sin(dAng) * 0.12
+                );
+                if (lidarCone) {
+                    lidarCone.material.opacity = 0.15 + Math.abs(Math.sin(elapsed * 3.5)) * 0.12;
+                }
+            }
+            if (drone2) {
+                const dAng2 = elapsed * 0.48 + 1.4;
+                const bx2 = -1.35 + Math.sin(dAng2) * 1.85;
+                const by2 = 0.65 + Math.cos(dAng2 * 2.0) * 0.95;
+                const bz2 = 1.55 + Math.cos(dAng2 * 1.4) * 0.16 + Math.max(0, -bx2 * 0.22);
+                drone2.position.set(bx2, bz2, -by2);
+                drone2.rotation.set(
+                    Math.sin(dAng2 * 2.0) * 0.09,
+                    -dAng2,
+                    Math.cos(dAng2) * 0.10
+                );
+                if (lidarCone2) {
+                    lidarCone2.material.opacity = 0.14 + Math.abs(Math.cos(elapsed * 3.2)) * 0.12;
+                }
+            }
+        }
+
         const span = 10.0;
         const halfDepth = 5.4;
         return {
@@ -756,168 +916,12 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 if (!isHero && storyProg > 0.65) {
                     drawLiveGrafanaDashboard(elapsed);
                 }
-
-                if (!isHero) {
-                    // Animate Surface MEMS IMU Box Tilting & 3-Axis Orthogonal Gyroscope Gimbal Rings
-                    if (nodes.IMU_Casing) {
-                        nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
-                        nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
-                    }
-                    if (nodes.IMU_Gimbal_Roll) {
-                        nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
-                    }
-                    if (nodes.IMU_Gimbal_Pitch) {
-                        nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
-                    }
-                    if (nodes.IMU_Gimbal_Yaw) {
-                        nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
-                    }
-
-                    // Animate Tipping-Bucket Rain Gauge Seesaw & Falling Rain Drops
-                    if (nodes.Rain_TippingBucket) {
-                        const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
-                        nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
-                    }
-                    if (nodes.Rain_FallingDrops) {
-                        nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
-                    }
-
-                    // Animate Underground Groundwater Flow Streamlines & Droplets Past the Suspended Borehole Piezometer Probe
-                    if (nodes.Piezo_WaterFlowParticles) {
-                        nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
-                    }
-                    if (nodes.Piezometer_Probe) {
-                        nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
-                    }
-                }
-
-                // Animate 10 3D Data Packet Capsules Streaming Along Telemetry Conduits into the Data Center
-                glbPackets.forEach(pk => {
-                    const t = (elapsed * pk.speed + pk.phase) % 1.0;
-                    const inv = 1.0 - t;
-                    pk.obj.position.set(
-                        inv * inv * pk.p0.x + 2 * inv * t * pk.p1.x + t * t * pk.p2.x,
-                        inv * inv * pk.p0.y + 2 * inv * t * pk.p1.y + t * t * pk.p2.y,
-                        inv * inv * pk.p0.z + 2 * inv * t * pk.p1.z + t * t * pk.p2.z
-                    );
-                    pk.obj.rotation.y = elapsed * 2.5;
-                });
-
-                // Move all 12 vehicles continuously along the curved 10.8m mountain highway in their exact forward lane direction
-                activeVehicles.forEach(v => {
-                    const dir = v.north ? 1.0 : -1.0;
-                    const rawRy = (((v.ry0 + 5.0 + dir * elapsed * v.speed) % span) + span) % span - 5.0;
-                    const rc = 2.65 + 0.24 * Math.sin((rawRy / halfDepth) * 1.5);
-                    const vx = rc + v.laneX;
-                    const vz = sampleRoadElevation(rawRy) + 0.030;
-                    const dxDy = 0.24 * (1.5 / halfDepth) * Math.cos((rawRy / halfDepth) * 1.5);
-                    const yaw = v.north ? Math.atan2(dxDy, -1.0) : Math.atan2(-dxDy, 1.0);
-
-                    v.obj.position.set(vx, vz, -rawRy);
-                    v.obj.rotation.set(0, yaw, 0);
-
-                    if (v.redLamp && v.blueLamp) {
-                        const flash = Math.sin(elapsed * 22.0) > 0;
-                        v.redLamp.scale.setScalar(flash ? 1.5 : 0.55);
-                        v.blueLamp.scale.setScalar(flash ? 0.55 : 1.5);
-                    }
-                    if (v.amberLamp) {
-                        const pulse = 0.75 + Math.abs(Math.sin(elapsed * 14.0)) * 0.80;
-                        v.amberLamp.scale.setScalar(pulse);
-                    }
-                });
-
-                // Fly Both AW101 Rescue Helicopters & Spin Main + Tail Rotors at High Speed
-                if (heli1) {
-                    const hAng = elapsed * 0.38;
-                    const hx = -0.35 + Math.cos(hAng) * 1.95;
-                    const hy = -0.25 + Math.sin(hAng * 2.0) * 1.15;
-                    const hz = 2.78 + Math.sin(hAng * 1.5) * 0.16;
-                    const vx = -Math.sin(hAng) * 1.95;
-                    const vzThree = -Math.cos(hAng * 2.0) * 2.30;
-                    const hyaw = Math.atan2(vx, vzThree);
-                    heli1.position.set(hx, hz, -hy);
-                    heli1.rotation.set(0.09, hyaw, Math.sin(hAng) * 0.12);
-                    if (heliBeam1) {
-                        heliBeam1.material.opacity = 0.14 + Math.abs(Math.sin(elapsed * 2.8)) * 0.12;
-                    }
-                }
-                if (heli1Rotor) {
-                    heli1Rotor.rotation.y = elapsed * 24.0;
-                }
-                if (heli1Tail) {
-                    heli1Tail.rotation.x = elapsed * 32.0;
-                }
-
-                if (heli2) {
-                    const hAng2 = elapsed * 0.34 + 1.2;
-                    const hx2 = 4.05 + Math.sin(hAng2) * 1.10;
-                    const hy2 = -0.85 + Math.cos(hAng2) * 0.95;
-                    const hz2 = 2.18 + Math.cos(hAng2 * 2.0) * 0.12;
-                    const vx2 = Math.cos(hAng2) * 1.10;
-                    const vzThree2 = Math.sin(hAng2) * 0.95;
-                    const hyaw2 = Math.atan2(vx2, vzThree2);
-                    heli2.position.set(hx2, hz2, -hy2);
-                    heli2.rotation.set(0.07, hyaw2, -Math.cos(hAng2) * 0.10);
-                    if (heliBeam2) {
-                        heliBeam2.material.opacity = 0.12 + Math.abs(Math.cos(elapsed * 2.5)) * 0.10;
-                    }
-                }
-                if (heli2Rotor) {
-                    heli2Rotor.rotation.y = -elapsed * 24.0;
-                }
-                if (heli2Tail) {
-                    heli2Tail.rotation.x = -elapsed * 32.0;
-                }
-
-                // Rotate Data Center Phased-Array Doppler Radar, Dual Ku-Band Dishes & Control Room 3D Hologram
-                if (nodes.OpsBeaconCore) {
-                    nodes.OpsBeaconCore.rotation.y = elapsed * 2.2;
-                }
-                if (nodes.OpsTrackingDish) {
-                    nodes.OpsTrackingDish.rotation.y = Math.sin(elapsed * 0.65) * 0.55;
-                    nodes.OpsTrackingDish.rotation.x = Math.cos(elapsed * 0.42) * 0.08;
-                }
-                if (nodes.OpsSecondaryDish) {
-                    nodes.OpsSecondaryDish.rotation.y = -Math.sin(elapsed * 0.52) * 0.48;
-                    nodes.OpsSecondaryDish.rotation.x = Math.sin(elapsed * 0.38) * 0.07;
-                }
-                if (!isHero && nodes.OpsHoloTerrain) {
-                    nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
-                    nodes.OpsHoloTerrain.position.y = 0.51 + Math.sin(elapsed * 2.4) * 0.016;
-                }
-
-                // Fly Autonomous Survey Quadcopter Drones across the Data Center & Landslide Slip Zone
-                if (drone) {
-                    const dAng = elapsed * 0.55;
-                    const bx = 2.15 + Math.cos(dAng) * 2.35;
-                    const by = -0.65 + Math.sin(dAng * 2.0) * 0.85;
-                    const bz = 1.15 + Math.sin(dAng * 1.5) * 0.18 + (bx < 1.2 ? (1.2 - bx) * 0.25 : 0);
-                    drone.position.set(bx, bz, -by);
-                    drone.rotation.set(
-                        Math.cos(dAng * 2.0) * 0.10,
-                        dAng + Math.PI * 0.5,
-                        Math.sin(dAng) * 0.12
-                    );
-                    if (lidarCone) {
-                        lidarCone.material.opacity = 0.15 + Math.abs(Math.sin(elapsed * 3.5)) * 0.12;
-                    }
-                }
-                if (drone2) {
-                    const dAng2 = elapsed * 0.48 + 1.4;
-                    const bx2 = -1.35 + Math.sin(dAng2) * 1.85;
-                    const by2 = 0.65 + Math.cos(dAng2 * 2.0) * 0.95;
-                    const bz2 = 1.55 + Math.cos(dAng2 * 1.4) * 0.16 + Math.max(0, -bx2 * 0.22);
-                    drone2.position.set(bx2, bz2, -by2);
-                    drone2.rotation.set(
-                        Math.sin(dAng2 * 2.0) * 0.09,
-                        -dAng2,
-                        Math.cos(dAng2) * 0.10
-                    );
-                    if (lidarCone2) {
-                        lidarCone2.material.opacity = 0.14 + Math.abs(Math.cos(elapsed * 3.2)) * 0.12;
-                    }
-                }
+                _updateTwinSensors(nodes, isHero, elapsed);
+                _updateTwinPackets(glbPackets, elapsed);
+                _updateTwinVehicles(activeVehicles, elapsed, span, halfDepth);
+                _updateTwinHelicopters(heli1, heli1Rotor, heli1Tail, heliBeam1, heli2, heli2Rotor, heli2Tail, heliBeam2, elapsed);
+                _updateTwinDishes(nodes, isHero, elapsed);
+                _updateTwinDrones(drone, lidarCone, drone2, lidarCone2, elapsed);
             }
         };
     }
@@ -1423,56 +1427,34 @@ import { renderAboutTemplate } from './templates/about-template.js';
         const frameIntervalMs = (isMobileDevice || currentQualityTier !== 'high') ? 33 : 24;
         const lookTarget = new THREE.Vector3();
 
-        function applyProgressState(progress, elapsed = 0) {
-            const p = THREE.MathUtils.clamp(progress, 0, 1);
-            const step = Math.min(3, Math.floor(p * 4));
+        function _getScanTargetAndColor(p) {
+            if (p < 0.14) return { target: anchors.gnss_mid, color: 0xd7ef73 };
+            if (p < 0.30) return { target: anchors.imu_borehole, color: 0xffb020 };
+            if (p < 0.41) return { target: anchors.rain_gauge, color: 0x38bdf8 };
+            if (p < 0.58) return { target: anchors.piezometer, color: 0x38bdf8 };
+            return null;
+        }
 
-            // Smooth weights for each storytelling act
-            const wDetect = 1 - gsap.utils.clamp(0, 1, (p - 0.24) / 0.12);
-            const wContext = gsap.utils.clamp(0, 1, (p - 0.20) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.56) / 0.12));
-            const wVerify = gsap.utils.clamp(0, 1, (p - 0.46) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.80) / 0.12));
-            const wResponse = gsap.utils.clamp(0, 1, (p - 0.64) / 0.18);
-
-            // 1. Camera Spline Position & Target
-            camCurve.getPoint(p, camera.position);
-            lookCurve.getPoint(p, lookTarget);
-            camera.lookAt(lookTarget);
-
-            // 2. Active Device Scanning Halo
-            let scanTarget = null;
-            let scanColor = 0x5eead4;
-            if (p < 0.14) {
-                scanTarget = anchors.gnss_mid;
-                scanColor = 0xd7ef73;
-            } else if (p < 0.30) {
-                scanTarget = anchors.imu_borehole;
-                scanColor = 0xffb020;
-            } else if (p < 0.41) {
-                scanTarget = anchors.rain_gauge;
-                scanColor = 0x38bdf8;
-            } else if (p < 0.58) {
-                scanTarget = anchors.piezometer;
-                scanColor = 0x38bdf8;
-            }
-            if (scanTarget) {
-                activeScanGroup.visible = true;
-                activeScanGroup.position.set(scanTarget[0], scanTarget[1] - 0.45, scanTarget[2]);
-                const pulse = 0.85 + Math.sin(elapsed * 5.0) * 0.18;
-                scanRingMesh.scale.setScalar(pulse);
-                scanCylMesh.position.y = 0.35 + Math.sin(elapsed * 4.0) * 0.15;
-                scanCylMat.color.setHex(scanColor);
-                scanCylMat.opacity = 0.05 + Math.abs(Math.sin(elapsed * 4.0)) * 0.05;
-                scanRingMat.opacity = 0.65;
-            } else {
+        function _updateScanHalo(p, elapsed) {
+            const scan = _getScanTargetAndColor(p);
+            if (!scan) {
                 activeScanGroup.visible = false;
+                return;
             }
+            activeScanGroup.visible = true;
+            activeScanGroup.position.set(scan.target[0], scan.target[1] - 0.45, scan.target[2]);
+            const pulse = 0.85 + Math.sin(elapsed * 5.0) * 0.18;
+            scanRingMesh.scale.setScalar(pulse);
+            scanCylMesh.position.y = 0.35 + Math.sin(elapsed * 4.0) * 0.15;
+            scanCylMat.color.setHex(scan.color);
+            scanCylMat.opacity = 0.05 + Math.abs(Math.sin(elapsed * 4.0)) * 0.05;
+            scanRingMat.opacity = 0.65;
+        }
 
-            // 3. Terrain Cutaway Translucency
+        function _updateStoryTerrainAndWedge(wDetect, wVerify, wResponse) {
             if (twinNodes.TerrainSurface) {
                 twinNodes.TerrainSurface.material.opacity = 0.84 + 0.12 * Math.max(wVerify, wResponse);
             }
-
-            // 4. Act 1 & 3: Surface MEMS IMU Box Vibration & Unstable Wedge Shear along Slip Surface
             const shearAmount = 0.04 * wDetect + 0.14 * wVerify + 0.08 * wResponse;
             if (twinNodes.UnstableWedge && initialWedgePos) {
                 twinNodes.UnstableWedge.position.x = initialWedgePos.x + shearAmount;
@@ -1489,8 +1471,9 @@ import { renderAboutTemplate } from './templates/about-template.js';
             if (twinNodes.SlipSurface?.material) {
                 twinNodes.SlipSurface.material.opacity = 0.45 + 0.45 * Math.max(wDetect, wVerify);
             }
+        }
 
-            // 5. Act 2: Rain Storm & Rising Subsurface Groundwater Table in Open Cutaway Trench
+        function _updateStoryWaterAndRain(wContext, wVerify, wResponse) {
             rainMat.opacity = Math.max(0.14, wContext * 0.86 + wVerify * 0.28);
             const waterRise = wContext * 0.26 + wVerify * 0.18 + wResponse * 0.12;
             if (twinNodes.GroundwaterTable) {
@@ -1501,8 +1484,9 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 twinNodes.PiezometerWaterColumn.scale.y = 1 + waterRise * 0.65;
                 twinNodes.PiezometerWaterColumn.position.y = waterRise * 0.22;
             }
+        }
 
-            // 6. Act 3: Multi-Sensor Baseline Triangulation Lasers & Satellite Carrier Beams
+        function _updateStorySatellitesAndBaselines(wVerify, wResponse, elapsed) {
             baselineLines.forEach(line => {
                 line.material.opacity = 0.22 + wVerify * 0.68 + wResponse * 0.28;
             });
@@ -1519,9 +1503,9 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 posAttr.needsUpdate = true;
                 beam.material.opacity = (0.18 + wVerify * 0.32 + wResponse * 0.16) + Math.max(0, Math.sin(elapsed * 2.4 + phase)) * 0.16;
             });
+        }
 
-            // 7. Always-Visible Telemetry Data Packets + Motorized Sliding Entrance Doors Opening + Control Room Interior!
-            const streamWeight = Math.max(0.45, wVerify * 0.92, wResponse);
+        function _updateStoryOpsDoorsAndPackets(p, elapsed, streamWeight) {
             dispatchLines.forEach(line => {
                 line.material.opacity = streamWeight * 0.78;
             });
@@ -1531,15 +1515,10 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 pkt.curve.getPoint(t, pkt.mesh.position);
             });
 
-            // Slide Operations Center Entrance Doors (OpsDoor_Left & OpsDoor_Right) wide open as camera approaches (p = 0.68 -> 0.81)!
             const doorRaw = gsap.utils.clamp(0, 1, (p - 0.68) / 0.13);
             const doorEase = doorRaw * doorRaw * (3 - 2 * doorRaw);
-            if (twinNodes.OpsDoor_Left) {
-                twinNodes.OpsDoor_Left.position.x = -0.56 * doorEase;
-            }
-            if (twinNodes.OpsDoor_Right) {
-                twinNodes.OpsDoor_Right.position.x = 0.56 * doorEase;
-            }
+            if (twinNodes.OpsDoor_Left) twinNodes.OpsDoor_Left.position.x = -0.56 * doorEase;
+            if (twinNodes.OpsDoor_Right) twinNodes.OpsDoor_Right.position.x = 0.56 * doorEase;
 
             if (streamWeight > 0.02) {
                 const cycle = (elapsed * 0.65) % 1;
@@ -1548,6 +1527,38 @@ import { renderAboutTemplate } from './templates/about-template.js';
             } else {
                 opsPulseRing.material.opacity = 0;
             }
+        }
+
+        function applyProgressState(progress, elapsed = 0) {
+            const p = THREE.MathUtils.clamp(progress, 0, 1);
+            const step = Math.min(3, Math.floor(p * 4));
+
+            // Smooth weights for each storytelling act
+            const wDetect = 1 - gsap.utils.clamp(0, 1, (p - 0.24) / 0.12);
+            const wContext = gsap.utils.clamp(0, 1, (p - 0.20) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.56) / 0.12));
+            const wVerify = gsap.utils.clamp(0, 1, (p - 0.46) / 0.12) * (1 - gsap.utils.clamp(0, 1, (p - 0.80) / 0.12));
+            const wResponse = gsap.utils.clamp(0, 1, (p - 0.64) / 0.18);
+
+            // 1. Camera Spline Position & Target
+            camCurve.getPoint(p, camera.position);
+            lookCurve.getPoint(p, lookTarget);
+            camera.lookAt(lookTarget);
+
+            // 2. Active Device Scanning Halo
+            _updateScanHalo(p, elapsed);
+
+            // 3 & 4. Terrain Cutaway Translucency & Unstable Wedge Shear
+            _updateStoryTerrainAndWedge(wDetect, wVerify, wResponse);
+
+            // 5. Rain Storm & Groundwater Table
+            _updateStoryWaterAndRain(wContext, wVerify, wResponse);
+
+            // 6. Baseline Triangulation & Satellites
+            _updateStorySatellitesAndBaselines(wVerify, wResponse, elapsed);
+
+            // 7. Telemetry Packets & Ops Center Doors
+            const streamWeight = Math.max(0.45, wVerify * 0.92, wResponse);
+            _updateStoryOpsDoorsAndPackets(p, elapsed, streamWeight);
 
             livingDynamics?.update(elapsed, p);
             updateCalloutPins(step, p);
@@ -1861,6 +1872,17 @@ import { renderAboutTemplate } from './templates/about-template.js';
             toast.hidden = true;
         };
 
+        const handleLowFps = () => {
+            slowCount++;
+            if (slowCount >= 2 && currentQualityTier !== 'lite') {
+                if (toastText) toastText.textContent = 'Thiết bị đang chạy chậm. Bạn có muốn giảm hiệu ứng để mượt hơn?';
+                if (toastBtn) toastBtn.textContent = 'Bật chế độ tiết kiệm (Lite)';
+                toast.hidden = false;
+                toast.classList.add('is-visible');
+                monitoring = false;
+            }
+        };
+
         const checkFPS = now => {
             if (!monitoring) return;
             frames++;
@@ -1869,15 +1891,8 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 frames = 0;
                 lastTime = now;
                 if (fps < 28) {
-                    slowCount++;
-                    if (slowCount >= 2 && currentQualityTier !== 'lite') {
-                        if (toastText) toastText.textContent = 'Thiết bị đang chạy chậm. Bạn có muốn giảm hiệu ứng để mượt hơn?';
-                        if (toastBtn) toastBtn.textContent = 'Bật chế độ tiết kiệm (Lite)';
-                        toast.hidden = false;
-                        toast.classList.add('is-visible');
-                        monitoring = false;
-                        return;
-                    }
+                    handleLowFps();
+                    if (!monitoring) return;
                 } else {
                     slowCount = Math.max(0, slowCount - 1);
                 }

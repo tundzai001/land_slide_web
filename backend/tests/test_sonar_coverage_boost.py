@@ -397,3 +397,41 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertEqual(map_mode({"map_mode": "manual"}), "manual")
         self.assertEqual(map_mode({"lat": 10.0, "lon": 106.0}), "manual")
         self.assertEqual(map_mode({}), "auto")
+
+    def test_adjustment_phase_computation(self):
+        from app.mqtt.bridge.adjustment import MQTTAdjustmentMixin
+        from app.features.users.router import USER_NOT_FOUND
+
+        self.assertEqual(USER_NOT_FOUND, "User not found")
+
+        # Active states
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "PAUSED"}]),
+            "PAUSED"
+        )
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "FREE_NETWORK"}]),
+            "FREE_NETWORK"
+        )
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "STARTING"}]),
+            "COLLECTING_BASELINE"
+        )
+
+        # Terminal states
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "COMPLETED"}, {"status": "ERROR"}]),
+            "PARTIAL_FAILED"
+        )
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "FAILED_QUALITY_GATE"}]),
+            "FAILED_QUALITY_GATE"
+        )
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "ERROR"}]),
+            "ERROR"
+        )
+        self.assertEqual(
+            MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "COMPLETED"}]),
+            "COMPLETED"
+        )

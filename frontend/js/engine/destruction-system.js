@@ -230,6 +230,48 @@ export class DestructionSystem {
         }
     }
 
+    _applyFragmentGroundCollision(frag, groundY = -0.5) {
+        if (frag.mesh.position.y >= groundY) return;
+        frag.mesh.position.y = groundY;
+        frag.velocity.y *= -0.15;
+        frag.velocity.x *= 0.65;
+        frag.velocity.z *= 0.65;
+        frag.angularVel.multiplyScalar(0.4);
+    }
+
+    _applyFragmentFade(frag) {
+        const fadeStart = frag.maxLife * 0.7;
+        if (frag.life <= fadeStart || !frag.mesh.material) return;
+        const opacity = 1 - (frag.life - fadeStart) / (frag.maxLife - fadeStart);
+        frag.mesh.material.transparent = true;
+        frag.mesh.material.opacity = Math.max(0, opacity);
+    }
+
+    _stepSingleFragment(frag, dt) {
+        frag.velocity.y -= this.gravity * dt;
+        if (frag.isDust) {
+            frag.velocity.multiplyScalar(1 - dt * 1.5);
+            frag.mesh.scale.multiplyScalar(1 + dt * 0.3);
+        }
+
+        frag.mesh.position.x += frag.velocity.x * dt;
+        frag.mesh.position.y += frag.velocity.y * dt;
+        frag.mesh.position.z += frag.velocity.z * dt;
+
+        frag.mesh.rotation.x += frag.angularVel.x * dt;
+        frag.mesh.rotation.y += frag.angularVel.y * dt;
+        frag.mesh.rotation.z += frag.angularVel.z * dt;
+
+        this._applyFragmentGroundCollision(frag);
+        this._applyFragmentFade(frag);
+    }
+
+    _disposeFragment(frag) {
+        this.scene.remove(frag.mesh);
+        if (frag.mesh.geometry) frag.mesh.geometry.dispose();
+        if (frag.mesh.material && !frag.isTree) frag.mesh.material.dispose();
+    }
+
     /**
      * Update fragment positions (physics)
      */
@@ -246,56 +288,13 @@ export class DestructionSystem {
                 continue;
             }
 
-            // Gravity
-            frag.velocity.y -= this.gravity * dt;
-
-            // Drag for dust
-            if (frag.isDust) {
-                frag.velocity.multiplyScalar(1 - dt * 1.5);
-                // Grow dust clouds
-                frag.mesh.scale.multiplyScalar(1 + dt * 0.3);
-            }
-
-            // Position
-            frag.mesh.position.x += frag.velocity.x * dt;
-            frag.mesh.position.y += frag.velocity.y * dt;
-            frag.mesh.position.z += frag.velocity.z * dt;
-
-            // Rotation
-            frag.mesh.rotation.x += frag.angularVel.x * dt;
-            frag.mesh.rotation.y += frag.angularVel.y * dt;
-            frag.mesh.rotation.z += frag.angularVel.z * dt;
-
-            // Ground collision
-            const groundY = -0.5;
-            if (frag.mesh.position.y < groundY) {
-                frag.mesh.position.y = groundY;
-                frag.velocity.y *= -0.15;
-                frag.velocity.x *= 0.65;
-                frag.velocity.z *= 0.65;
-                frag.angularVel.multiplyScalar(0.4);
-            }
-
-            // Fade out near end of life
-            const fadeStart = frag.maxLife * 0.7;
-            if (frag.life > fadeStart) {
-                const opacity = 1 - (frag.life - fadeStart) / (frag.maxLife - fadeStart);
-                if (frag.mesh.material && !frag.mesh.material.transparent) {
-                    frag.mesh.material.transparent = true;
-                }
-                if (frag.mesh.material) {
-                    frag.mesh.material.opacity = Math.max(0, opacity);
-                }
-            }
+            this._stepSingleFragment(frag, dt);
         }
 
         // Remove expired fragments
         for (let i = toRemove.length - 1; i >= 0; i--) {
             const idx = toRemove[i];
-            const frag = this.fragments[idx];
-            this.scene.remove(frag.mesh);
-            if (frag.mesh.geometry) frag.mesh.geometry.dispose();
-            if (frag.mesh.material && !frag.isTree) frag.mesh.material.dispose();
+            this._disposeFragment(this.fragments[idx]);
             this.fragments.splice(idx, 1);
         }
     }

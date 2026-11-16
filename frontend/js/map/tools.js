@@ -298,39 +298,37 @@ function _disableHeatmap(btn, checkbox) {
     updateHeatmapLegend([]);
 }
 
+async function _canActivateHeatmap(btn, checkbox) {
+    if (!buildHeatmapData().length) {
+        if (checkbox) checkbox.checked = false;
+        window.toast?.info('Hiện không có trạm cảnh báo có tọa độ để hiển thị.');
+        return false;
+    }
+    if (!(await _ensureHeatmapLibraryLoaded(btn, checkbox))) {
+        return false;
+    }
+    if (L.heatLayer === undefined) {
+        if (checkbox) checkbox.checked = false;
+        window.toast?.error('Plugin heatmap chưa sẵn sàng.');
+        return false;
+    }
+    return true;
+}
+
 async function toggleHeatmap() {
     const btn = document.getElementById('heatmap-toggle');
     const checkbox = document.getElementById('layer-heatmap');
     if (!map || heatmapLoading) return;
-    if (!heatmapVisible && !buildHeatmapData().length) {
-        if (checkbox) checkbox.checked = false;
-        window.toast?.info('Hiện không có trạm cảnh báo có tọa độ để hiển thị.');
-        return;
-    }
-    if (!heatmapVisible && !(await _ensureHeatmapLibraryLoaded(btn, checkbox))) {
-        return;
-    }
-    if (L.heatLayer === undefined) {
-        if (checkbox) checkbox.checked = heatmapVisible;
-        window.toast?.error('Plugin heatmap chưa sẵn sàng.');
+
+    if (!heatmapVisible) {
+        if (!(await _canActivateHeatmap(btn, checkbox))) return;
+        heatmapVisible = true;
+        _enableHeatmap(buildHeatmapData(), btn, checkbox);
         return;
     }
 
-    heatmapVisible = !heatmapVisible;
-
-    if (heatmapVisible) {
-        const data = buildHeatmapData();
-        if (!data.length) {
-            heatmapVisible = false;
-            if (checkbox) checkbox.checked = false;
-            setMapState({ layers: { heatmap: false } });
-            window.toast?.info('Hiện không có trạm cảnh báo có tọa độ để hiển thị.');
-            return;
-        }
-        _enableHeatmap(data, btn, checkbox);
-    } else {
-        _disableHeatmap(btn, checkbox);
-    }
+    heatmapVisible = false;
+    _disableHeatmap(btn, checkbox);
 }
 
 runWhenDomReady(() => {
