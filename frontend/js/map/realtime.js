@@ -721,7 +721,7 @@ function renderGnssAdjustmentAuditResult(message) {
     return renderGnssAdjustmentResultPanel(message, { auditOnly: true });
 }
 
-function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
+function _populateAdvancedGnssMetrics(data) {
     const sampleCount = Number.isFinite(Number(data.velocity_sample_count)) ? Number(data.velocity_sample_count) : '--';
     const durationS = safeNumber(data.velocity_window_duration_s, 1);
     const rms = safeNumber(data.velocity_residual_rms_mm, 2);
@@ -729,53 +729,87 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
     const uncert = safeNumber(data.velocity_uncertainty_mm_s, 4);
     const ci95 = safeNumber(data.velocity_confidence_95_mm_s, 4);
 
+    setText('adv-val-method', 'Theil-Sen Robust Estimator');
+    setText('adv-val-samples', sampleCount);
+    setText('adv-val-duration', durationS);
+    setText('adv-val-rms', rms);
+    setText('adv-val-mad', mad);
+    setText('adv-val-uncert', `± ${uncert}`);
+    setText('adv-val-ci95', `± ${ci95}`);
+
+    setText('adv-val-raw-ve', safeNumber(data.raw_vel_e_mm_s, 4));
+    setText('adv-val-raw-vn', safeNumber(data.raw_vel_n_mm_s, 4));
+    setText('adv-val-raw-vu', safeNumber(data.raw_vel_u_mm_s, 4));
+    setText('adv-val-raw-2d', safeNumber(data.raw_speed_2d_mm_s, 4));
+
+    setText('adv-val-filt-ve', formatGnssVelocityValue(data.vel_e, data, 4));
+    setText('adv-val-filt-vn', formatGnssVelocityValue(data.vel_n, data, 4));
+    setText('adv-val-filt-vu', formatGnssVelocityValue(data.vel_u, data, 4));
+    setText('adv-val-filt-2d', formatGnssVelocityValue(data.speed_2d_mm_s, data, 4));
+
+    setText('adv-val-disp-total', safeNumber(data.total_displacement_mm, 2));
+    setText('adv-val-disp-peak', safeNumber(data.peak_displacement_mm, 2));
+    setText('adv-val-disp-noise', safeNumber(data.displacement_noise_floor_mm, 3));
+    setText('adv-val-disp-uncert', safeNumber(data.displacement_uncertainty_mm, 3));
+    setText('adv-val-disp-window', Number.isFinite(Number(data.displacement_sample_count)) ? Number(data.displacement_sample_count) : '--');
+    setText('adv-val-disp-dur', safeNumber(data.displacement_window_duration_s, 1));
+
+    setText('adv-val-sats', Number.isFinite(Number(data.num_sats)) ? Number(data.num_sats) : '--');
+    setText('adv-val-hdop', safeNumber(data.hdop, 1));
+
+    if (data.gga_utc) {
+        const utcStr = data.gga_utc.toString();
+        if (utcStr.length >= 6) {
+            setText('adv-val-ts-gga', `${utcStr.substring(0,2)}:${utcStr.substring(2,4)}:${utcStr.substring(4,6)} UTC`);
+        } else {
+            setText('adv-val-ts-gga', data.gga_utc);
+        }
+    } else {
+        setText('adv-val-ts-gga', '--');
+    }
+    if (data.timestamp) {
+        const recvDate = new Date(normalizeEpochMs(data.timestamp));
+        setText('adv-val-ts-recv', recvDate.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + recvDate.getMilliseconds());
+    } else {
+        setText('adv-val-ts-recv', '--');
+    }
+    const now = new Date();
+    setText('adv-val-ts-calc', now.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + now.getMilliseconds());
+}
+
+function _resolveGnssTrendHtml(data) {
+    const hasConfirmationField = Object.hasOwn(data, 'velocity_confirmed');
+    const movementConfirmed = hasConfirmationField
+        ? data.velocity_confirmed === true
+        : data.velocity_significant === true;
+    const statisticalSignal = data.velocity_statistically_significant === true
+        || (!hasConfirmationField && data.velocity_significant === true);
+    const persistentVelocity = data.velocity_persistent === true;
+
+    if (movementConfirmed && data.velocity_reliable !== false) {
+        return `<span class="gnss-eval-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
+    }
+    if (data.velocity_reliable === false) {
+        return `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
+    }
+    if (persistentVelocity && data.position_change_significant !== true) {
+        return `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
+    }
+    if (hasConfirmationField && statisticalSignal) {
+        const confirmedSamples = Number.isFinite(Number(data.velocity_confirmation_sample_count))
+            ? Number(data.velocity_confirmation_sample_count)
+            : 0;
+        const requiredSamples = Number.isFinite(Number(data.velocity_confirmation_required_samples))
+            ? Number(data.velocity_confirmation_required_samples)
+            : 3;
+        return `<span class="gnss-eval-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
+    }
+    return `<span class="gnss-eval-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
+}
+
+function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
     if (advancedVisible) {
-        setText('adv-val-method', 'Theil-Sen Robust Estimator');
-        setText('adv-val-samples', sampleCount);
-        setText('adv-val-duration', durationS);
-        setText('adv-val-rms', rms);
-        setText('adv-val-mad', mad);
-        setText('adv-val-uncert', `± ${uncert}`);
-        setText('adv-val-ci95', `± ${ci95}`);
-
-        setText('adv-val-raw-ve', safeNumber(data.raw_vel_e_mm_s, 4));
-        setText('adv-val-raw-vn', safeNumber(data.raw_vel_n_mm_s, 4));
-        setText('adv-val-raw-vu', safeNumber(data.raw_vel_u_mm_s, 4));
-        setText('adv-val-raw-2d', safeNumber(data.raw_speed_2d_mm_s, 4));
-
-        setText('adv-val-filt-ve', formatGnssVelocityValue(data.vel_e, data, 4));
-        setText('adv-val-filt-vn', formatGnssVelocityValue(data.vel_n, data, 4));
-        setText('adv-val-filt-vu', formatGnssVelocityValue(data.vel_u, data, 4));
-        setText('adv-val-filt-2d', formatGnssVelocityValue(data.speed_2d_mm_s, data, 4));
-
-        setText('adv-val-disp-total', safeNumber(data.total_displacement_mm, 2));
-        setText('adv-val-disp-peak', safeNumber(data.peak_displacement_mm, 2));
-        setText('adv-val-disp-noise', safeNumber(data.displacement_noise_floor_mm, 3));
-        setText('adv-val-disp-uncert', safeNumber(data.displacement_uncertainty_mm, 3));
-        setText('adv-val-disp-window', Number.isFinite(Number(data.displacement_sample_count)) ? Number(data.displacement_sample_count) : '--');
-        setText('adv-val-disp-dur', safeNumber(data.displacement_window_duration_s, 1));
-
-        setText('adv-val-sats', Number.isFinite(Number(data.num_sats)) ? Number(data.num_sats) : '--');
-        setText('adv-val-hdop', safeNumber(data.hdop, 1));
-
-        if (data.gga_utc) {
-            const utcStr = data.gga_utc.toString();
-            if (utcStr.length >= 6) {
-                setText('adv-val-ts-gga', `${utcStr.substring(0,2)}:${utcStr.substring(2,4)}:${utcStr.substring(4,6)} UTC`);
-            } else {
-                setText('adv-val-ts-gga', data.gga_utc);
-            }
-        } else {
-            setText('adv-val-ts-gga', '--');
-        }
-        if (data.timestamp) {
-            const recvDate = new Date(normalizeEpochMs(data.timestamp));
-            setText('adv-val-ts-recv', recvDate.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + recvDate.getMilliseconds());
-        } else {
-            setText('adv-val-ts-recv', '--');
-        }
-        const now = new Date();
-        setText('adv-val-ts-calc', now.toLocaleTimeString('vi-VN', { hour12: false }) + '.' + now.getMilliseconds());
+        _populateAdvancedGnssMetrics(data);
     }
 
     const evalSummaryEl = document.getElementById('gnss-eval-summary');
@@ -796,31 +830,9 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
         evalSummaryEl.innerHTML = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
         return;
     }
-    let trendHtml = '';
-    const hasConfirmationField = Object.hasOwn(data, 'velocity_confirmed');
-    const movementConfirmed = hasConfirmationField
-        ? data.velocity_confirmed === true
-        : data.velocity_significant === true;
-    const statisticalSignal = data.velocity_statistically_significant === true
-        || (!hasConfirmationField && data.velocity_significant === true);
-    const persistentVelocity = data.velocity_persistent === true;
-    if (movementConfirmed && data.velocity_reliable !== false) {
-        trendHtml = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-arrow-right-circle-fill me-1"></i>Đủ bằng chứng chuyển dịch</span>`;
-    } else if (data.velocity_reliable === false) {
-        trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-question-circle-fill me-1"></i>Vận tốc chưa đủ tin cậy để kết luận</span>`;
-    } else if (persistentVelocity && data.position_change_significant !== true) {
-        trendHtml = `<span class="gnss-eval-secondary fw-bold"><i class="bi bi-shield-exclamation me-1"></i>Vận tốc kéo dài nhưng chưa đủ bằng chứng vị trí</span>`;
-    } else if (hasConfirmationField && statisticalSignal) {
-        const confirmedSamples = Number.isFinite(Number(data.velocity_confirmation_sample_count))
-            ? Number(data.velocity_confirmation_sample_count)
-            : 0;
-        const requiredSamples = Number.isFinite(Number(data.velocity_confirmation_required_samples))
-            ? Number(data.velocity_confirmation_required_samples)
-            : 3;
-        trendHtml = `<span class="gnss-eval-info fw-bold"><i class="bi bi-hourglass-split me-1"></i>Đang xác minh chuyển dịch (${confirmedSamples}/${requiredSamples} cửa sổ)</span>`;
-    } else {
-        trendHtml = `<span class="gnss-eval-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
-    }
+    const trendHtml = _resolveGnssTrendHtml(data);
+    const sampleCount = Number.isFinite(Number(data.velocity_sample_count)) ? Number(data.velocity_sample_count) : '--';
+    const durationS = safeNumber(data.velocity_window_duration_s, 1);
     const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '--';
     const ciHtml = data.velocity_confidence_95_mm_s
         ? `<span class="font-monospace">(± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)})</span>`
@@ -1014,24 +1026,21 @@ function _handleRealtimeImu(data, stationId, timestamp, chartsVisible) {
     maybeTriggerLocalImuCriticalFallback(stationId, data);
 }
 
-function updateRealtimeSensorValues(message) {
-    if (message.sensor_type === 'gnss_adjusted' && message.data) {
-        if (!isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return;
-        window.pendingGnssAdjustmentResult = message.data;
-        const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
-        if (terminalVisible) renderGnssAdjustmentResultPanel(message);
+function _handleRealtimeGnssAdjusted(message) {
+    if (!isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return;
+    window.pendingGnssAdjustmentResult = message.data;
+    const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
+    if (terminalVisible) renderGnssAdjustmentResultPanel(message);
 
-        const ind = document.getElementById('gnss-phase-indicator');
-        gnssAdjustmentDebugState.phase = 'COMPLETED';
-        if (ind) {
-            ind.textContent = `Phase: COMPLETED`;
-            ind.className = 'ms-4 text-success fw-bold font-monospace';
-        }
-        return;
+    const ind = document.getElementById('gnss-phase-indicator');
+    gnssAdjustmentDebugState.phase = 'COMPLETED';
+    if (ind) {
+        ind.textContent = `Phase: COMPLETED`;
+        ind.className = 'ms-4 text-success fw-bold font-monospace';
     }
-    const { sensor_type, data, timestamp, station_id } = message;
-    const stationId = station_id || currentStationData?.id;
+}
 
+function _syncRealtimeSensorCache(stationId, sensor_type, data, timestamp) {
     if (stationId && sensor_type && timestamp) {
         latestRealtimeSensorTs[`${stationId}_${sensor_type}`] = Number(timestamp);
     }
@@ -1045,6 +1054,32 @@ function updateRealtimeSensorValues(message) {
         }
         currentStationData.sensors[sensor_type].latest_timestamp = Number(timestamp || Date.now() / 1000);
     }
+}
+
+function _appendSensorFieldChartPoint(chart, field, data, timestamp, isExtensometer) {
+    if (!chart) return;
+    chart.data.labels.push(new Date(normalizeEpochMs(data.measured_at || timestamp)).toLocaleTimeString('vi-VN'));
+    let sampleVal = null;
+    if (data.quality !== 'invalid') {
+        sampleVal = (isExtensometer ? data.points?.[field] : data[field]) ?? null;
+    }
+    chart.data.datasets[0].data.push(sampleVal);
+    if (chart.data.labels.length > 2000) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
+    chart.update('none');
+}
+
+function updateRealtimeSensorValues(message) {
+    if (message.sensor_type === 'gnss_adjusted' && message.data) {
+        _handleRealtimeGnssAdjusted(message);
+        return;
+    }
+    const { sensor_type, data, timestamp, station_id } = message;
+    const stationId = station_id || currentStationData?.id;
+
+    _syncRealtimeSensorCache(stationId, sensor_type, data, timestamp);
 
     const isSelectedStation = mapUiState.selectedStation != null
         && Number(stationId) === Number(mapUiState.selectedStation);
@@ -1064,23 +1099,15 @@ function updateRealtimeSensorValues(message) {
     if (stationSensorCatalog(currentStationData).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
         renderMonitoringSensors(currentStationData);
         const spec = stationSensorCatalog(currentStationData).find(sensor => sensor.key === sensor_type);
-        const fields = sensor_type === 'extensometer' ? [...document.querySelectorAll('#extensometer-charts canvas')].map(canvas => canvas.dataset.point) : spec.fields;
+        const isExt = sensor_type === 'extensometer';
+        const fields = isExt ? [...document.querySelectorAll('#extensometer-charts canvas')].map(canvas => canvas.dataset.point) : spec.fields;
         if (chartsVisible && sensor_type === 'accelerometer') renderAccelerometerWaveform(currentStationData.sensors.accelerometer);
-        if (chartsVisible) fields.forEach((field, index) => {
-            const chart = charts[sensor_type === 'extensometer' ? `chart-extensometer-${index}` : `chart-${sensor_type}-${field}`];
-            if (!chart) return;
-            chart.data.labels.push(new Date(normalizeEpochMs(data.measured_at || timestamp)).toLocaleTimeString('vi-VN'));
-            let sampleVal = null;
-            if (data.quality !== 'invalid') {
-                sampleVal = (sensor_type === 'extensometer' ? data.points?.[field] : data[field]) ?? null;
-            }
-            chart.data.datasets[0].data.push(sampleVal);
-            if (chart.data.labels.length > 2000) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
-            chart.update('none');
-        });
+        if (chartsVisible) {
+            fields.forEach((field, index) => {
+                const chartKey = isExt ? `chart-extensometer-${index}` : `chart-${sensor_type}-${field}`;
+                _appendSensorFieldChartPoint(charts[chartKey], field, data, timestamp, isExt);
+            });
+        }
     }
 
     if (sensor_type === 'gnss' && data) {
