@@ -151,7 +151,7 @@ function renderInverseVelocitySection(data) {
     if (!section) return;
 
     const invVel = data.gnss?.inverse_velocity;
-    if (!invVel || !invVel.available) {
+    if (!invVel?.available) {
         section.style.display = 'none';
         return;
     }

@@ -139,139 +139,7 @@ class AdminManager {
                     console.debug('Invalid WS message payload:', err);
                     return;
                 }
-                if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
-                    console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
-                    const relocked = !!message.data?.relocked;
-
-                    // Cập nhật ngay lập tức lên UI
-                    const latEl = document.getElementById('origin-lat');
-                    const lonEl = document.getElementById('origin-lon');
-                    const hEl = document.getElementById('origin-h');
-                    const statusEl = document.getElementById('origin-status');
-
-                    if (latEl) latEl.value = message.data.lat;
-                    if (lonEl) lonEl.value = message.data.lon;
-                    if (hEl) hEl.value = message.data.h;
-
-                    if (statusEl) {
-                        statusEl.innerHTML = relocked
-                            ? '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã khóa lại tọa độ gốc mới.</span>'
-                            : '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
-                        statusEl.className = 'small mt-1';
-                    }
-
-                    window.toast?.success(relocked
-                        ? 'Đã khóa lại tọa độ gốc GNSS.'
-                        : 'Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
-                } else if (message.type === 'gnss_origin_relock_progress' &&
-                    (message.station_id == this.currentStationId ||
-                        message.station_id == this._gnssOriginRelockStationId)) {
-                    const progress = message.data || {};
-                    const statusEl = document.getElementById('origin-status');
-                    const button = document.getElementById('btn-relock-origin');
-                    if (progress.phase === 'complete') {
-                        const isActiveStation = message.station_id == this.currentStationId;
-                        const isLocalOperation = message.station_id == this._gnssOriginRelockStationId;
-                        if (isLocalOperation) {
-                            this._gnssOriginRelockCompleted = true;
-                            this._gnssOriginRelockInProgress = false;
-                            this._gnssOriginRelockStationId = null;
-                        }
-                        if (isActiveStation || isLocalOperation) {
-                            if (button) button.disabled = false;
-                            ['btn-reset-origin', 'btn-fetch-origin'].forEach(id => {
-                                const relatedButton = document.getElementById(id);
-                                if (relatedButton) relatedButton.disabled = false;
-                            });
-                        }
-                        if (isActiveStation) {
-                            this.updateGnssOriginRelockProgress?.(progress);
-                            if (statusEl) {
-                                statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Đã khóa lại gốc; chuyển vị tracking tính từ mốc mới.</span>';
-                                statusEl.className = 'text-success small';
-                            }
-                            this.renderGnssTrackingOffset?.([0, 0, 0], {
-                                state: 'Gốc mới đã khóa',
-                                source: `${progress.sample_count || 0} mẫu RTK FIXED`,
-                                duration: `${Number(progress.duration_s || 0).toFixed(1)} giây`,
-                            });
-                        }
-                    } else if (progress.phase === 'failed') {
-                        const isActiveStation = message.station_id == this.currentStationId;
-                        const isLocalOperation = message.station_id == this._gnssOriginRelockStationId;
-                        if (isLocalOperation) {
-                            this._gnssOriginRelockInProgress = false;
-                            this._gnssOriginRelockStationId = null;
-                        }
-                        if (isActiveStation || isLocalOperation) {
-                            if (button) button.disabled = false;
-                            ['btn-reset-origin', 'btn-fetch-origin'].forEach(id => {
-                                const relatedButton = document.getElementById(id);
-                                if (relatedButton) relatedButton.disabled = false;
-                            });
-                        }
-                        if (isActiveStation) {
-                            this.updateGnssOriginRelockProgress?.(progress);
-                            if (statusEl) {
-                                statusEl.textContent = progress.message || 'Không thể khóa lại tọa độ gốc.';
-                                statusEl.className = 'text-danger small';
-                            }
-                            window.toast?.error(progress.message || 'Không thể khóa lại tọa độ gốc.');
-                        }
-                    } else if (message.station_id == this.currentStationId) {
-                        this.updateGnssOriginRelockProgress?.(progress);
-                        if (statusEl) {
-                            statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu mẫu RTK FIXED ổn định…';
-                            statusEl.className = 'text-info small';
-                        }
-                        [button, document.getElementById('btn-reset-origin'), document.getElementById('btn-fetch-origin')]
-                            .filter(Boolean).forEach(actionButton => { actionButton.disabled = true; });
-                    }
-                } else if (message.type === 'gnss_offset_calibration_progress' &&
-                    (message.station_id == null || message.station_id == this.currentStationId)) {
-                    const progress = message.data || {};
-                    const statusEl = document.getElementById('origin-status');
-                    if (statusEl && (this._gnssCalibrationInProgress || progress.phase === 'complete')) {
-                        if (progress.phase === 'complete') {
-                            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Backend đã thu đủ mẫu và áp dụng offset.</span>';
-                            statusEl.className = 'text-success small';
-                            this._gnssCalibrationCompleted = true;
-                            this._gnssCalibrationInProgress = false;
-                            const resetBtn = document.getElementById('btn-reset-origin');
-                            if (resetBtn) resetBtn.disabled = false;
-                            Promise.resolve(this.refreshGnssTrackingOffset?.(this.currentStationId)).catch(() => {});
-                        } else {
-                            const duration = Number(progress.duration_s || 0).toFixed(1);
-                            const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));
-                            const sampleCount = Number(progress.sample_count || 0);
-                            const minimumSamples = Number(progress.minimum_samples || 61);
-                            const intervalCount = Math.max(0, sampleCount - 1);
-                            const minimumDuration = Number(progress.minimum_duration_s || 60).toFixed(1);
-                            statusEl.innerHTML = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu RTK FIXED… ${sampleCount}/${minimumSamples} mẫu · ${intervalCount} khoảng đo · ${duration}/${minimumDuration}s · còn ${remaining}s`;
-                            statusEl.className = 'text-info small';
-                        }
-                    }
-                } else if (message.type === 'gnss_adjustment_step') {
-                    const step = message.data;
-                    const terminal = document.getElementById('gnss-terminal-output');
-                    if (terminal) {
-                        const now = new Date().toLocaleTimeString('vi-VN');
-                        let colorClass = 'text-info';
-                        if (step.step === 5) colorClass = 'text-success fw-bold';
-                        if (step.error) colorClass = 'text-danger fw-bold';
-                        
-                        const div = document.createElement('div');
-                        div.className = 'mb-2';
-                        div.innerHTML = `<span class="text-secondary">[${now}]</span> <span class="${colorClass}">[Bước ${step.step}] ${step.title}:</span> ${step.message}`;
-                        
-                        terminal.appendChild(div);
-                        terminal.scrollTop = terminal.scrollHeight;
-                        
-                        if (step.step === 5 && !step.error && document.getElementById('gnssTerminalModal')?.classList.contains('show')) {
-                            window.toast?.success(step.message);
-                        }
-                    }
-                }
+                this._dispatchWsMessage(message);
             };
 
             this.ws.onclose = () => {
@@ -291,6 +159,155 @@ class AdminManager {
                     void this.setupWebSocketListener();
                 }, 5000);
             }
+        }
+    }
+
+    _dispatchWsMessage(message) {
+        if (!message?.type) return;
+        if (message.type === 'origin_locked_event') {
+            this._handleOriginLockedEvent(message);
+        } else if (message.type === 'gnss_origin_relock_progress') {
+            this._handleGnssOriginRelockProgress(message);
+        } else if (message.type === 'gnss_offset_calibration_progress') {
+            this._handleGnssOffsetCalibrationProgress(message);
+        } else if (message.type === 'gnss_adjustment_step') {
+            this._handleGnssAdjustmentStep(message);
+        }
+    }
+
+    _handleOriginLockedEvent(message) {
+        if (message.station_id != this.currentStationId) return;
+        console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
+        const relocked = !!message.data?.relocked;
+        const latEl = document.getElementById('origin-lat');
+        const lonEl = document.getElementById('origin-lon');
+        const hEl = document.getElementById('origin-h');
+        const statusEl = document.getElementById('origin-status');
+        if (latEl) latEl.value = message.data.lat;
+        if (lonEl) lonEl.value = message.data.lon;
+        if (hEl) hEl.value = message.data.h;
+        if (statusEl) {
+            statusEl.innerHTML = relocked
+                ? '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã khóa lại tọa độ gốc mới.</span>'
+                : '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Đã tự động cập nhật điểm gốc mới!</span>';
+            statusEl.className = 'small mt-1';
+        }
+        window.toast?.success(relocked
+            ? 'Đã khóa lại tọa độ gốc GNSS.'
+            : 'Thiết bị đã tự động khóa điểm gốc mới và cập nhật lên màn hình!');
+    }
+
+    _handleGnssOriginRelockProgress(message) {
+        const matchesCurrent = message.station_id == this.currentStationId;
+        const matchesRelock = message.station_id == this._gnssOriginRelockStationId;
+        if (!matchesCurrent && !matchesRelock) return;
+        const progress = message.data || {};
+        const statusEl = document.getElementById('origin-status');
+        const button = document.getElementById('btn-relock-origin');
+        if (progress.phase === 'complete') {
+            this._handleGnssRelockComplete(matchesCurrent, matchesRelock, progress, statusEl, button);
+        } else if (progress.phase === 'failed') {
+            this._handleGnssRelockFailed(matchesCurrent, matchesRelock, progress, statusEl, button);
+        } else if (matchesCurrent) {
+            this.updateGnssOriginRelockProgress?.(progress);
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu mẫu RTK FIXED ổn định…';
+                statusEl.className = 'text-info small';
+            }
+            [button, document.getElementById('btn-reset-origin'), document.getElementById('btn-fetch-origin')]
+                .filter(Boolean).forEach(actionButton => { actionButton.disabled = true; });
+        }
+    }
+
+    _handleGnssRelockComplete(isActiveStation, isLocalOperation, progress, statusEl, button) {
+        if (isLocalOperation) {
+            this._gnssOriginRelockCompleted = true;
+            this._gnssOriginRelockInProgress = false;
+            this._gnssOriginRelockStationId = null;
+        }
+        if (isActiveStation || isLocalOperation) {
+            if (button) button.disabled = false;
+            ['btn-reset-origin', 'btn-fetch-origin'].forEach(id => {
+                const relatedButton = document.getElementById(id);
+                if (relatedButton) relatedButton.disabled = false;
+            });
+        }
+        if (isActiveStation) {
+            this.updateGnssOriginRelockProgress?.(progress);
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Đã khóa lại gốc; chuyển vị tracking tính từ mốc mới.</span>';
+                statusEl.className = 'text-success small';
+            }
+            this.renderGnssTrackingOffset?.([0, 0, 0], {
+                state: 'Gốc mới đã khóa',
+                source: `${progress.sample_count || 0} mẫu RTK FIXED`,
+                duration: `${Number(progress.duration_s || 0).toFixed(1)} giây`,
+            });
+        }
+    }
+
+    _handleGnssRelockFailed(isActiveStation, isLocalOperation, progress, statusEl, button) {
+        if (isLocalOperation) {
+            this._gnssOriginRelockInProgress = false;
+            this._gnssOriginRelockStationId = null;
+        }
+        if (isActiveStation || isLocalOperation) {
+            if (button) button.disabled = false;
+            ['btn-reset-origin', 'btn-fetch-origin'].forEach(id => {
+                const relatedButton = document.getElementById(id);
+                if (relatedButton) relatedButton.disabled = false;
+            });
+        }
+        if (isActiveStation) {
+            this.updateGnssOriginRelockProgress?.(progress);
+            if (statusEl) {
+                statusEl.textContent = progress.message || 'Không thể khóa lại tọa độ gốc.';
+                statusEl.className = 'text-danger small';
+            }
+            window.toast?.error(progress.message || 'Không thể khóa lại tọa độ gốc.');
+        }
+    }
+
+    _handleGnssOffsetCalibrationProgress(message) {
+        if (message.station_id != null && message.station_id != this.currentStationId) return;
+        const progress = message.data || {};
+        const statusEl = document.getElementById('origin-status');
+        if (!statusEl || (!this._gnssCalibrationInProgress && progress.phase !== 'complete')) return;
+        if (progress.phase === 'complete') {
+            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Backend đã thu đủ mẫu và áp dụng offset.</span>';
+            statusEl.className = 'text-success small';
+            this._gnssCalibrationCompleted = true;
+            this._gnssCalibrationInProgress = false;
+            const resetBtn = document.getElementById('btn-reset-origin');
+            if (resetBtn) resetBtn.disabled = false;
+            Promise.resolve(this.refreshGnssTrackingOffset?.(this.currentStationId)).catch(() => {});
+        } else {
+            const duration = Number(progress.duration_s || 0).toFixed(1);
+            const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));
+            const sampleCount = Number(progress.sample_count || 0);
+            const minimumSamples = Number(progress.minimum_samples || 61);
+            const intervalCount = Math.max(0, sampleCount - 1);
+            const minimumDuration = Number(progress.minimum_duration_s || 60).toFixed(1);
+            statusEl.innerHTML = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang thu RTK FIXED… ${sampleCount}/${minimumSamples} mẫu · ${intervalCount} khoảng đo · ${duration}/${minimumDuration}s · còn ${remaining}s`;
+            statusEl.className = 'text-info small';
+        }
+    }
+
+    _handleGnssAdjustmentStep(message) {
+        const step = message.data;
+        const terminal = document.getElementById('gnss-terminal-output');
+        if (!terminal) return;
+        const now = new Date().toLocaleTimeString('vi-VN');
+        let colorClass = 'text-info';
+        if (step.step === 5) colorClass = 'text-success fw-bold';
+        if (step.error) colorClass = 'text-danger fw-bold';
+        const div = document.createElement('div');
+        div.className = 'mb-2';
+        div.innerHTML = `<span class="text-secondary">[${now}]</span> <span class="${colorClass}">[Bước ${step.step}] ${step.title}:</span> ${step.message}`;
+        terminal.appendChild(div);
+        terminal.scrollTop = terminal.scrollHeight;
+        if (step.step === 5 && !step.error && document.getElementById('gnssTerminalModal')?.classList.contains('show')) {
+            window.toast?.success(step.message);
         }
     }
 

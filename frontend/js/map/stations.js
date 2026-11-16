@@ -417,6 +417,50 @@ function isClusterSubset(subset, superset) {
     return true;
 }
 
+function _renderClusterSegment(cluster, proj, drawableClusters, colors, colorIdx, leafletMap) {
+    const { isTotal, latlngs } = cluster;
+    if (latlngs.length < 2) return colorIdx;
+    const multiLatLngs = [];
+    for (let i = 0; i < latlngs.length; i++) {
+        for (let j = i + 1; j < latlngs.length; j++) {
+            multiLatLngs.push([latlngs[i], latlngs[j]]);
+        }
+    }
+    const polyline = L.polyline(multiLatLngs, {
+        color: isTotal ? '#f43f5e' : colors[colorIdx % colors.length],
+        weight: isTotal ? 4 : 3,
+        opacity: isTotal ? 0.15 : 0.7,
+        dashArray: isTotal ? '10, 20' : '5, 10',
+        pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
+    });
+    const hitbox = L.polyline(multiLatLngs, {
+        color: 'transparent',
+        weight: 20,
+        opacity: 0,
+        pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
+    });
+    polyline.projectId = proj.id;
+    hitbox.projectId = proj.id;
+
+    const clickHandler = (e) => {
+        const choices = isTotal ? [cluster] : [
+            cluster,
+            ...drawableClusters.filter(candidate => isClusterSubset(cluster, candidate)),
+        ];
+        showAdjustmentPopup(proj.id, proj.name, choices, e.latlng);
+    };
+
+    polyline.on('click', clickHandler);
+    hitbox.on('click', clickHandler);
+
+    if (leafletMap) {
+        polyline.addTo(leafletMap);
+        hitbox.addTo(leafletMap);
+    }
+    clusterPolylines.push(polyline, hitbox);
+    return isTotal ? colorIdx : colorIdx + 1;
+}
+
 async function loadProjectsAndClusters() {
     if (mapInteractionActive) {
         pendingProjectsReload = true;
@@ -495,47 +539,7 @@ async function loadProjectsAndClusters() {
             }).filter(cluster => cluster.latlngs.length >= 2);
 
             drawableClusters.forEach(cluster => {
-                const { isTotal, latlngs } = cluster;
-                if (latlngs.length >= 2) {
-                    const multiLatLngs = []; for (let i = 0; i < latlngs.length; i++) { for (let j = i + 1; j < latlngs.length; j++) { multiLatLngs.push([latlngs[i], latlngs[j]]); } } const polyline = L.polyline(multiLatLngs, {
-                        color: isTotal ? '#f43f5e' : colors[colorIdx % colors.length],
-                        weight: isTotal ? 4 : 3,
-                        opacity: isTotal ? 0.15 : 0.7,
-                        dashArray: isTotal ? '10, 20' : '5, 10',
-                        pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
-                    });
-                    
-                    // Hitbox invisible polyline to make clicking easier
-                    const hitbox = L.polyline(multiLatLngs, {
-                        color: 'transparent',
-                        weight: 20,
-                        opacity: 0,
-                        pane: isTotal ? 'gnssTotalClusterPane' : 'gnssNormalClusterPane'
-                    });
-                    polyline.projectId = proj.id;
-                    hitbox.projectId = proj.id;
-
-                    const clickHandler = (e) => {
-                        // A normal cluster and a total cluster can share the exact
-                        // same segment. Offer both at that point instead of letting
-                        // Leaflet's topmost canvas path make one unreachable.
-                        const choices = isTotal ? [cluster] : [
-                            cluster,
-                            ...drawableClusters.filter(candidate => isClusterSubset(cluster, candidate)),
-                        ];
-                        showAdjustmentPopup(proj.id, proj.name, choices, e.latlng);
-                    };
-
-                    polyline.on('click', clickHandler);
-                    hitbox.on('click', clickHandler);
-                    
-                    if (leafletMap) {
-                        polyline.addTo(leafletMap);
-                        hitbox.addTo(leafletMap);
-                    }
-                    clusterPolylines.push(polyline, hitbox);
-                    if (!isTotal) colorIdx++;
-                }
+                colorIdx = _renderClusterSegment(cluster, proj, drawableClusters, colors, colorIdx, leafletMap);
             });
         });
         if (!projectOverviewInitialized && projectMapGroups.length && leafletMap) {

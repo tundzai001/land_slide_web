@@ -1,24 +1,34 @@
 (() => {
 class AdminPiDevicesFeature extends window.AdminManager {
-    async loadPiDevices(isAuto = false) {
-        if (isAuto && this._piSelectMode) return;
-        if (!isAuto) this._piSelectMode = false;
-        const body = document.getElementById('pi-grid-body');
-        const syncButton = document.getElementById('pi-sync-button');
-        if (!isAuto && body) body.innerHTML = '<div class="ops-loading"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Đang đồng bộ thiết bị…</span></div>';
-        if (!isAuto && syncButton) {
+    _setPiLoadingUi(isAuto, body, syncButton) {
+        if (isAuto) return;
+        this._piSelectMode = false;
+        if (body) body.innerHTML = '<div class="ops-loading"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Đang đồng bộ thiết bị…</span></div>';
+        if (syncButton) {
             syncButton.disabled = true;
             syncButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Đang đồng bộ';
         }
+    }
+
+    _filterOperatorPiDevices(devices) {
+        const isOperator = this.currentUserRole === 'operator';
+        if (isOperator && this.currentUserAssignedProjects?.length > 0) {
+            const allowed = this.currentUserAssignedProjects;
+            return devices.filter(device => device.status === 'assigned' && device.project_id && allowed.includes(device.project_id));
+        }
+        return devices;
+    }
+
+    async loadPiDevices(isAuto = false) {
+        if (isAuto && this._piSelectMode) return;
+        const body = document.getElementById('pi-grid-body');
+        const syncButton = document.getElementById('pi-sync-button');
+        this._setPiLoadingUi(isAuto, body, syncButton);
         try {
             const res = await fetch('/api/field/pi-devices', { headers: { 'Authorization': `Bearer ${this.token}` } });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            let devices = await res.json();
+            const devices = this._filterOperatorPiDevices(await res.json());
             const isOperator = this.currentUserRole === 'operator';
-            if (isOperator && this.currentUserAssignedProjects?.length > 0) {
-                const allowed = this.currentUserAssignedProjects;
-                devices = devices.filter(device => device.status === 'assigned' && device.project_id && allowed.includes(device.project_id));
-            }
             this._piDevicesData = devices;
             this._updatePiSummary(devices);
             this._renderPiGrid(devices);

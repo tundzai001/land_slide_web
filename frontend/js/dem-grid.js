@@ -10,8 +10,7 @@
         [1.00, [238, 226, 191]],
     ];
 
-    function parse(text) {
-        const source = String(text || '').replace(/^\uFEFF/, '');
+    function _parseDemHeader(source) {
         const lines = [];
         let cursor = 0;
         for (let i = 0; i < 6; i += 1) {
@@ -39,6 +38,11 @@
         }
         const xllcorner = header[xKey] - (xKey === 'xllcenter' ? cellsize / 2 : 0);
         const yllcorner = header[yKey] - (yKey === 'yllcenter' ? cellsize / 2 : 0);
+        return { ncols, nrows, cellsize, nodata, xllcorner, yllcorner, cursor };
+    }
+
+    function _parseDemGridValues(source, cursor, header) {
+        const { ncols, nrows, cellsize, nodata, xllcorner, yllcorner } = header;
         const expected = ncols * nrows;
         const values = new Float32Array(expected);
         let min = Infinity;
@@ -58,6 +62,12 @@
         if (i !== expected) throw new Error('Số ô dữ liệu không khớp kích thước DEM.');
         if (!Number.isFinite(min)) throw new Error('DEM không có độ cao hợp lệ.');
         return { ncols, nrows, cellsize, nodata, xllcorner, yllcorner, values, min, max, crs: 'EPSG:32648' };
+    }
+
+    function parse(text) {
+        const source = String(text || '').replace(/^\uFEFF/, '');
+        const header = _parseDemHeader(source);
+        return _parseDemGridValues(source, header.cursor, header);
     }
 
     function utm48ToWgs84(easting, northing) {
@@ -119,42 +129,10 @@
         return { easting, northing };
     }
 
-    async function mount(canvas, grid, { onSelect = null, selectable = false } = {}) {
-        const [THREE, { OrbitControls }] = await Promise.all([
-            import('three'),
-            import('three/addons/controls/OrbitControls.js'),
-        ]);
-        const listeners = new AbortController();
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0f252c);
-        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.15;
-
-        const target = new THREE.Vector3(0, 0, 0);
-        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100000);
-        const controls = new OrbitControls(camera, canvas);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.08;
-        controls.target.copy(target);
-        scene.add(new THREE.HemisphereLight(0xd9f4ff, 0x253c35, 2.0));
-        const sun = new THREE.DirectionalLight(0xffedc5, 2.7);
-        sun.position.set(-1, 2, 1.4);
-        scene.add(sun);
-        const fill = new THREE.DirectionalLight(0x74c8c6, 1.0);
-        fill.position.set(1, 0.5, -1);
-        scene.add(fill);
-
-        // Keep enough mesh detail for close inspection without overloading the GPU.
+    function _buildTerrainMesh(THREE, grid, verticalScale) {
         const step = Math.max(1, Math.ceil(Math.max(grid.ncols, grid.nrows) / 1024));
         const columns = Math.ceil((grid.ncols - 1) / step) + 1;
         const rows = Math.ceil((grid.nrows - 1) / step) + 1;
-        const width = (grid.ncols - 1) * grid.cellsize;
-        const depth = (grid.nrows - 1) * grid.cellsize;
-        const relief = Math.max(grid.max - grid.min, grid.cellsize);
-        const verticalScale = Math.max(1, Math.min(5, Math.max(width, depth) / relief * 0.16));
         const positions = new Float32Array(columns * rows * 3);
         const colors = new Float32Array(columns * rows * 3);
         const valid = new Uint8Array(columns * rows);
@@ -205,6 +183,81 @@
         const terrain = new THREE.Mesh(terrainGeometry, new THREE.MeshStandardMaterial({
             vertexColors: true, roughness: 0.88, metalness: 0, side: THREE.DoubleSide,
         }));
+        return { terrain, terrainGeometry };
+    }
+
+    function _bindDemInteractionEvents(canvas, listeners, selectable, onSelect, context) {
+        if (!selectable || !onSelect) return;
+        const { camera, terrain, grid, pointAt, setSelected, state, raycaster, pointer } = context;
+        let pointerStart = null;
+        canvas.addEventListener('pointerdown', event => {
+            pointerStart = event.isPrimary && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+        }, { signal: listeners.signal });
+        canvas.addEventListener('pointerup', event => {
+            if (!event.isPrimary || event.button !== 0) return;
+            if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
+            const box = canvas.getBoundingClientRect();
+            pointer.set((event.clientX - box.left) / box.width * 2 - 1, -((event.clientY - box.top) / box.height) * 2 + 1);
+            raycaster.setFromCamera(pointer, camera);
+            const hit = raycaster.intersectObject(terrain, false)[0];
+            if (!hit) return;
+            const column = Math.round(hit.point.x / grid.cellsize + (grid.ncols - 1) / 2);
+            const row = Math.round(hit.point.z / grid.cellsize + (grid.nrows - 1) / 2);
+            const point = pointAt(row, column);
+            if (!point) return;
+            setSelected(point);
+            onSelect(point, { commit: true, source: 'pointer' });
+            pointerStart = null;
+        }, { signal: listeners.signal });
+        canvas.addEventListener('pointercancel', () => { pointerStart = null; }, { signal: listeners.signal });
+        canvas.addEventListener('keydown', event => {
+            const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+            if (moves[event.key]) {
+                event.preventDefault();
+                const current = state.selected || pointAt(Math.floor(grid.nrows / 2), Math.floor(grid.ncols / 2));
+                if (!current) return;
+                const point = pointAt(current.row + moves[event.key][0], current.column + moves[event.key][1]);
+                if (point) { setSelected(point); onSelect(point, { commit: false, source: 'keyboard' }); }
+            } else if (event.key === 'Enter' && state.selected) {
+                event.preventDefault();
+                onSelect(state.selected, { commit: true, source: 'keyboard' });
+            }
+        }, { signal: listeners.signal });
+    }
+
+    async function mount(canvas, grid, { onSelect = null, selectable = false } = {}) {
+        const [THREE, { OrbitControls }] = await Promise.all([
+            import('three'),
+            import('three/addons/controls/OrbitControls.js'),
+        ]);
+        const listeners = new AbortController();
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f252c);
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
+
+        const target = new THREE.Vector3(0, 0, 0);
+        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100000);
+        const controls = new OrbitControls(camera, canvas);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.copy(target);
+        scene.add(new THREE.HemisphereLight(0xd9f4ff, 0x253c35, 2.0));
+        const sun = new THREE.DirectionalLight(0xffedc5, 2.7);
+        sun.position.set(-1, 2, 1.4);
+        scene.add(sun);
+        const fill = new THREE.DirectionalLight(0x74c8c6, 1.0);
+        fill.position.set(1, 0.5, -1);
+        scene.add(fill);
+
+        const width = (grid.ncols - 1) * grid.cellsize;
+        const depth = (grid.nrows - 1) * grid.cellsize;
+        const relief = Math.max(grid.max - grid.min, grid.cellsize);
+        const verticalScale = Math.max(1, Math.min(5, Math.max(width, depth) / relief * 0.16));
+        const { terrain, terrainGeometry } = _buildTerrainMesh(THREE, grid, verticalScale);
         scene.add(terrain);
 
         const marker = new THREE.Group();
@@ -268,41 +321,9 @@
             requestRender();
         };
 
-        let pointerStart = null;
-        canvas.addEventListener('pointerdown', event => {
-            pointerStart = event.isPrimary && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
-        }, { signal: listeners.signal });
-        canvas.addEventListener('pointerup', event => {
-            if (!selectable || !onSelect || !event.isPrimary || event.button !== 0) return;
-            if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
-            const box = canvas.getBoundingClientRect();
-            pointer.set((event.clientX - box.left) / box.width * 2 - 1, -((event.clientY - box.top) / box.height) * 2 + 1);
-            raycaster.setFromCamera(pointer, camera);
-            const hit = raycaster.intersectObject(terrain, false)[0];
-            if (!hit) return;
-            const column = Math.round(hit.point.x / grid.cellsize + (grid.ncols - 1) / 2);
-            const row = Math.round(hit.point.z / grid.cellsize + (grid.nrows - 1) / 2);
-            const point = pointAt(row, column);
-            if (!point) return;
-            setSelected(point);
-            onSelect(point, { commit: true, source: 'pointer' });
-            pointerStart = null;
-        }, { signal: listeners.signal });
-        canvas.addEventListener('pointercancel', () => { pointerStart = null; }, { signal: listeners.signal });
-        canvas.addEventListener('keydown', event => {
-            if (!selectable || !onSelect) return;
-            const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-            if (moves[event.key]) {
-                event.preventDefault();
-                const current = state.selected || pointAt(Math.floor(grid.nrows / 2), Math.floor(grid.ncols / 2));
-                if (!current) return;
-                const point = pointAt(current.row + moves[event.key][0], current.column + moves[event.key][1]);
-                if (point) { setSelected(point); onSelect(point, { commit: false, source: 'keyboard' }); }
-            } else if (event.key === 'Enter' && state.selected) {
-                event.preventDefault();
-                onSelect(state.selected, { commit: true, source: 'keyboard' });
-            }
-        }, { signal: listeners.signal });
+        _bindDemInteractionEvents(canvas, listeners, selectable, onSelect, {
+            camera, terrain, grid, pointAt, setSelected, state, raycaster, pointer
+        });
 
         controls.addEventListener('change', requestRender);
         const resizeObserver = new ResizeObserver(() => {

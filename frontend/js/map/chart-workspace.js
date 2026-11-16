@@ -62,9 +62,7 @@ function exportWorkspaceChart(id, format) {
     downloadChartArtifact(new Blob(['\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type:'text/csv;charset=utf-8' }), `${filename}.csv`);
 }
 
-function renderWorkspaceDataTable(chart, box, title) {
-    if (!chart) return;
-    const chartId = chart.canvas.id;
+function _ensureWorkspaceDetails(box, title, onToggle) {
     let details = box.querySelector('.chart-data-details');
     if (!details) {
         details = document.createElement('details');
@@ -78,40 +76,52 @@ function renderWorkspaceDataTable(chart, box, title) {
         scroll.setAttribute('aria-label', `Bảng số liệu: ${title}`);
         details.append(toggle, scroll);
         box.append(details);
-        details.addEventListener('toggle', () => {
-            if (details.open) renderWorkspaceDataTable(charts[chartId], box, title);
-        });
+        details.addEventListener('toggle', onToggle);
     }
-    // Render only the most recent 100 rows when expanded; CSV retains all loaded points.
-    if (!details.open) return;
-    const datasets = chart.data.datasets;
+    return details;
+}
+
+function _buildWorkspaceTable(chart, datasets, title) {
     const count = Math.max(0, ...datasets.map(dataset => dataset.data.length));
     const table = document.createElement('table');
     const caption = table.createCaption();
     caption.textContent = `${title} · ${Math.min(100, count)} / ${count} điểm gần nhất. Ô “—” là dữ liệu thiếu. Tải CSV để xem toàn bộ.`;
     const heading = table.createTHead().insertRow();
-    for (const label of [chart._monitoringTimestamps ? 'Thời gian (giờ địa phương)' : 'Trục X', ...datasets.map(dataset => dataset.label)]) {
+    const headers = [chart._monitoringTimestamps ? 'Thời gian (giờ địa phương)' : 'Trục X', ...datasets.map(d => d.label)];
+    for (const label of headers) {
         const cell = document.createElement('th');
-        cell.scope = 'col'; cell.textContent = label; heading.append(cell);
+        cell.scope = 'col';
+        cell.textContent = label;
+        heading.append(cell);
     }
     const body = table.createTBody();
     for (let index = count - 1; index >= Math.max(0, count - 100); index--) {
         const row = body.insertRow();
         const first = datasets[0]?.data[index];
         let x = chart.data.labels?.[index];
-        if (first && typeof first === 'object') {
-            x = first.x;
-        }
-        if (chart._monitoringTimestamps) {
-            x = formatChartTimestamp(chart._monitoringTimestamps[index]);
-        }
+        if (first && typeof first === 'object') x = first.x;
+        if (chart._monitoringTimestamps) x = formatChartTimestamp(chart._monitoringTimestamps[index]);
         row.insertCell().textContent = x ?? '—';
         for (const dataset of datasets) {
             const point = dataset.data[index];
             const value = point && typeof point === 'object' ? point.y : point;
-            row.insertCell().textContent = typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('vi-VN', { maximumFractionDigits: 6 }) : '—';
+            row.insertCell().textContent = typeof value === 'number' && Number.isFinite(value)
+                ? value.toLocaleString('vi-VN', { maximumFractionDigits: 6 })
+                : '—';
         }
     }
+    return table;
+}
+
+function renderWorkspaceDataTable(chart, box, title) {
+    if (!chart) return;
+    const chartId = chart.canvas.id;
+    const details = _ensureWorkspaceDetails(box, title, () => {
+        if (details.open) renderWorkspaceDataTable(charts[chartId], box, title);
+    });
+    // Render only the most recent 100 rows when expanded; CSV retains all loaded points.
+    if (!details.open) return;
+    const table = _buildWorkspaceTable(chart, chart.data.datasets, title);
     details.querySelector('.chart-data-scroll').replaceChildren(table);
 }
 

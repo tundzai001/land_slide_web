@@ -182,7 +182,7 @@ async function setupWebSocket() {
 }
 
 function syncWebSocketSubscription(stationId = currentStationData?.id) {
-    if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
+    if (wsConnection?.readyState !== WebSocket.OPEN) return;
     const normalizedStationId = Number(stationId || 0);
     try {
         wsConnection.send(JSON.stringify({

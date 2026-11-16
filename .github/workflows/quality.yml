@@ -144,8 +144,8 @@ jobs:
           echo "=== All JavaScript Issues (Top 100) ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&languages=js&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
           echo ""
-          echo "=== All CSS Non-S9423 Issues ==="
-          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&languages=css&ps=100" | jq -r '.issues[] | select(.rule != "css:S9423") | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
+          echo "=== All CSS Non-S9423 Issues (S7924 & S9440) ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&rules=css:S7924,css:S9440&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
 
   release-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

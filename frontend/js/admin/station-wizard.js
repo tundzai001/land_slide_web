@@ -321,20 +321,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         }
     }
 
-    _populateEditStationThresholds(cfg) {
-        const alertingDisabledEl = document.getElementById('station-alerting-disabled');
-        if (alertingDisabledEl) {
-            alertingDisabledEl.checked = (cfg.alerting?.enabled === false) || cfg.alerting_enabled === false;
-        }
-        const offlineDisplayEl = document.getElementById('station-offline-display-enabled');
-        if (offlineDisplayEl) {
-            offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
-        }
-        const processingStorageEl = document.getElementById('cfg-station-processing-storage-enabled');
-        if (processingStorageEl) {
-            processingStorageEl.checked = cfg.data_logging?.enabled !== false;
-        }
-        this.currentStationConfig = cfg;
+    _populateEditSimulationAndMqtt(cfg) {
         const simulationProfile = cfg.simulation_profile || {};
         const simulationFields = {
             'sim-profile-cohesion': ['cohesion_kpa', 15], 'sim-profile-friction': ['friction_angle_deg', 30],
@@ -360,7 +347,9 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (mqttUserEl) mqttUserEl.value = mqttCfg.username || '';
         const mqttPassEl = document.getElementById('station-mqtt-pass');
         if (mqttPassEl) mqttPassEl.value = mqttCfg.password || '';
+    }
 
+    _populateEditOfflineThresholds(cfg) {
         const offlineThresholds = cfg.offline_thresholds || {};
         const gnssThreshold = offlineThresholds.gnss ?? this.defaultOfflineThresholds.gnss;
         const rainThreshold = offlineThresholds.rain ?? this.defaultOfflineThresholds.rain;
@@ -390,11 +379,11 @@ class AdminStationWizardFeature extends window.AdminManager {
                 { name: 'Extremely rapid', threshold: 5, unit: 'm/s', description: '> 5 m/s', editable: true }
             ];
         }
+    }
 
-        const waterCfg = cfg.Water || {};
+    _populateEditWaterThresholds(waterCfg) {
         document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
         document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
-
         const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
         const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
         const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
@@ -420,12 +409,12 @@ class AdminStationWizardFeature extends window.AdminManager {
                 waterSafeConfirmSrc.className = wscs != null ? 'text-success small' : 'text-warning small';
             }
         }
+    }
 
-        const rainCfg = cfg.RainAlerting || {};
+    _populateEditRainThresholds(rainCfg) {
         document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
         document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
         document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
-
         const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
         const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
         const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
@@ -451,10 +440,12 @@ class AdminStationWizardFeature extends window.AdminManager {
                 rainSafeConfirmSrc.className = rscs != null ? 'text-success small' : 'text-warning small';
             }
         }
+    }
+
+    _populateEditImuAndGnssSteps(cfg) {
         const gnssCfg = cfg.GnssAlerting || {};
         document.getElementById('cfg-gnss-timeout').value = gnssCfg.gnss_degraded_timeout ?? 300;
         document.getElementById('cfg-gnss-hdop').value = gnssCfg.gnss_max_hdop ?? 4.0;
-
         const imuCfg = cfg.ImuAlerting || {};
         document.getElementById('cfg-imu-shock').value = imuCfg.shock_threshold_ms2 ?? 5.0;
         const tiltCritEl = document.getElementById('cfg-imu-tilt-crit');
@@ -477,6 +468,27 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (basePitchEl) basePitchEl.value = imuBaseline.baseline_pitch ?? 0;
         const baseYawEl = document.getElementById('cfg-imu-base-yaw');
         if (baseYawEl) baseYawEl.value = imuBaseline.baseline_yaw ?? 0;
+    }
+
+    _populateEditStationThresholds(cfg) {
+        const alertingDisabledEl = document.getElementById('station-alerting-disabled');
+        if (alertingDisabledEl) {
+            alertingDisabledEl.checked = (cfg.alerting?.enabled === false) || cfg.alerting_enabled === false;
+        }
+        const offlineDisplayEl = document.getElementById('station-offline-display-enabled');
+        if (offlineDisplayEl) {
+            offlineDisplayEl.checked = (cfg.offline_display?.enabled === true) || cfg.offline_display_enabled === true;
+        }
+        const processingStorageEl = document.getElementById('cfg-station-processing-storage-enabled');
+        if (processingStorageEl) {
+            processingStorageEl.checked = cfg.data_logging?.enabled !== false;
+        }
+        this.currentStationConfig = cfg;
+        this._populateEditSimulationAndMqtt(cfg);
+        this._populateEditOfflineThresholds(cfg);
+        this._populateEditWaterThresholds(cfg.Water || {});
+        this._populateEditRainThresholds(cfg.RainAlerting || {});
+        this._populateEditImuAndGnssSteps(cfg);
     }
 
     _populateEditStationForwarding(cfg) {
@@ -518,27 +530,27 @@ class AdminStationWizardFeature extends window.AdminManager {
         setToggle('fwd-toggle-vdy', fwdFields.VdY);
         setToggle('fwd-toggle-vdh', fwdFields.VdH);
         this.syncForwardingWrapStates();
+        this._populateEditStationVn2000(cfg);
+    }
 
+    _populateEditStationVn2000(cfg) {
         const vnCfg = cfg.vn2000 || cfg.vn2000_params || {};
         const vnEnabledEl = document.getElementById('vn2000-enabled');
         if (vnEnabledEl) {
             vnEnabledEl.checked = !!vnCfg.enabled;
             this.toggleVn2000AdvancedSlide(false);
         }
-        if (document.getElementById('vn-dx')) document.getElementById('vn-dx').value = vnCfg.dx ?? 191.90441429;
-        if (document.getElementById('vn-dy')) document.getElementById('vn-dy').value = vnCfg.dy ?? 39.30318279;
-        if (document.getElementById('vn-dz')) document.getElementById('vn-dz').value = vnCfg.dz ?? 111.45032835;
-        if (document.getElementById('vn-rx')) document.getElementById('vn-rx').value = vnCfg.rx ?? 0.00928836;
-        if (document.getElementById('vn-ry')) document.getElementById('vn-ry').value = vnCfg.ry ?? -0.01975479;
-        if (document.getElementById('vn-rz')) document.getElementById('vn-rz').value = vnCfg.rz ?? 0.00427372;
-        if (document.getElementById('vn-k')) document.getElementById('vn-k').value = vnCfg.k ?? 0.999999747093722;
-        if (document.getElementById('vn-l0')) document.getElementById('vn-l0').value = vnCfg.l0_deg ?? 105.0;
-        if (document.getElementById('vn-k0')) document.getElementById('vn-k0').value = vnCfg.k0 ?? 0.9999;
-        if (document.getElementById('vn-resb')) document.getElementById('vn-resb').value = vnCfg.res_b ?? 0.0;
-        if (document.getElementById('vn-resl')) document.getElementById('vn-resl').value = vnCfg.res_l ?? 0.0;
-        if (document.getElementById('vn-resh')) document.getElementById('vn-resh').value = vnCfg.res_h ?? 0.0;
-        if (document.getElementById('vn-resn')) document.getElementById('vn-resn').value = vnCfg.res_n ?? 0.0;
-        if (document.getElementById('vn-rese')) document.getElementById('vn-rese').value = vnCfg.res_e ?? 0.0;
+        const fields = {
+            'vn-dx': [vnCfg.dx, 191.90441429], 'vn-dy': [vnCfg.dy, 39.30318279], 'vn-dz': [vnCfg.dz, 111.45032835],
+            'vn-rx': [vnCfg.rx, 0.00928836], 'vn-ry': [vnCfg.ry, -0.01975479], 'vn-rz': [vnCfg.rz, 0.00427372],
+            'vn-k': [vnCfg.k, 0.999999747093722], 'vn-l0': [vnCfg.l0_deg, 105.0], 'vn-k0': [vnCfg.k0, 0.9999],
+            'vn-resb': [vnCfg.res_b, 0.0], 'vn-resl': [vnCfg.res_l, 0.0], 'vn-resh': [vnCfg.res_h, 0.0],
+            'vn-resn': [vnCfg.res_n, 0.0], 'vn-rese': [vnCfg.res_e, 0.0],
+        };
+        Object.entries(fields).forEach(([id, [val, fallback]]) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val ?? fallback;
+        });
     }
 
     _populateEditStationOrigins(cfg) {
