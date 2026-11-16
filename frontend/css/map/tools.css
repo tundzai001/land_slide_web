@@ -180,8 +180,8 @@
 }
 
 [data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-info {
-    color: #0f172a !important;
-    background: #0dcaf0 !important;
+    color: #ffffff !important;
+    background: #0284c7 !important;
 }
 
 /* Hide default Leaflet controls */
@@ -235,9 +235,9 @@
 }
 
 .heatmap-toggle-btn.active {
-    background: rgba(255, 107, 53, 0.3);
-    color: #c2410c;
-    border-color: rgba(255, 107, 53, 0.4);
+    background: #c2410c;
+    color: #ffffff;
+    border-color: #9a3412;
 }
 
 [data-theme="dark"] .heatmap-toggle-btn {

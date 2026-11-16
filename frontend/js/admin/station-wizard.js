@@ -31,7 +31,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (!feedback) {
             feedback = document.createElement('div');
             feedback.className = 'mqtt-topic-feedback';
-            input.insertAdjacentElement('afterend', feedback);
+            input.after(feedback);
         }
         input.classList.toggle('is-invalid', state === 'invalid');
         input.classList.toggle('is-valid', state === 'valid');
@@ -888,10 +888,11 @@ class AdminStationWizardFeature extends window.AdminManager {
         let visibleCount = 0;
         sensors.forEach(({ type, elId }) => {
             const inputEl = document.getElementById(elId);
-            const checkboxEl = document.getElementById(`edit-${type}`);
-            if (inputEl?.closest('.col-md-6')) {
+            const col = inputEl?.closest('.col-md-6');
+            if (col) {
+                const checkboxEl = document.getElementById(`edit-${type}`);
                 const isEnabled = Boolean(checkboxEl?.checked);
-                inputEl.closest('.col-md-6').style.display = isEnabled ? 'block' : 'none';
+                col.style.display = isEnabled ? 'block' : 'none';
                 if (isEnabled) visibleCount++;
             }
         });

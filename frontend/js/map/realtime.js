@@ -465,9 +465,10 @@ function handleRealtimeUpdate(message) {
             const listItem = listBadge.closest('.station-item');
             if (listItem) {
                 listItem.dataset.state = riskUi.normalized.toLowerCase();
-                listItem.dataset.connection = riskUi.normalized === 'OFFLINE'
-                    ? 'offline'
-                    : riskUi.normalized === 'STALE' ? 'stale' : 'online';
+                let conn = 'online';
+                if (riskUi.normalized === 'OFFLINE') conn = 'offline';
+                else if (riskUi.normalized === 'STALE') conn = 'stale';
+                listItem.dataset.connection = conn;
             }
             filterStations(document.getElementById('search-station')?.value || '');
 
@@ -557,15 +558,13 @@ function handleRealtimeUpdate(message) {
                 } else {
                     renderGnssAdjustmentAuditResult(resultMessage);
                 }
-                addGnssAdjustmentDebug(
-                    'REPORT',
-                    resultPhase === 'ERROR'
-                        ? 'Đã ghi hồ sơ lỗi JSON; các lịch chạy tiếp theo vẫn được giữ nguyên.'
-                        : ['FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(resultPhase)
-                        ? 'Hồ sơ audit đã sẵn sàng để tải; tọa độ không được publish.'
-                        : 'Đã nhận liên kết tải JSON và XLSX.',
-                    'success',
-                );
+                let reportMsg = 'Đã nhận liên kết tải JSON và XLSX.';
+                if (resultPhase === 'ERROR') {
+                    reportMsg = 'Đã ghi hồ sơ lỗi JSON; các lịch chạy tiếp theo vẫn được giữ nguyên.';
+                } else if (['FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(resultPhase)) {
+                    reportMsg = 'Hồ sơ audit đã sẵn sàng để tải; tọa độ không được publish.';
+                }
+                addGnssAdjustmentDebug('REPORT', reportMsg, 'success');
             }
         }
     }
@@ -586,7 +585,7 @@ function handleRealtimeUpdate(message) {
         const baseline = Array.isArray(message.baseline_neu)
             ? message.baseline_neu.map(finiteMetric)
             : null;
-        if (!baseline || baseline.some(value => value === null)) return;
+        if (!baseline || baseline.includes(null)) return;
         const belongsToActiveRun = (
             gnssAdjustmentDebugState.active
             && Number(message.project_id) === gnssAdjustmentDebugState.projectId
@@ -668,11 +667,13 @@ function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
     const retryButton = document.getElementById('gnss-retry-adjustment-btn');
 
     if (adjStatusEl) {
-        adjStatusEl.innerHTML = failed
-            ? '<span class="text-danger fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Bình sai lỗi – đã lưu hồ sơ JSON</span>'
-            : auditOnly
-            ? '<span class="text-warning fw-bold"><i class="bi bi-file-earmark-check-fill me-1"></i>Đã tạo hồ sơ audit – không publish tọa độ</span>'
-            : '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>';
+        let statusHtml = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>';
+        if (failed) {
+            statusHtml = '<span class="text-danger fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Bình sai lỗi – đã lưu hồ sơ JSON</span>';
+        } else if (auditOnly) {
+            statusHtml = '<span class="text-warning fw-bold"><i class="bi bi-file-earmark-check-fill me-1"></i>Đã tạo hồ sơ audit – không publish tọa độ</span>';
+        }
+        adjStatusEl.innerHTML = statusHtml;
     }
     if (adjTimeEl) {
         const timestamp = Number(message.timestamp || message.data.computed_at || Date.now() / 1000);

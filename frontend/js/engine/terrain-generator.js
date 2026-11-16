@@ -161,7 +161,7 @@ export class TerrainGenerator {
 
         const dx = (hR - hL) / (2 * eps);
         const dz = (hD - hU) / (2 * eps);
-        const slopeMag = Math.sqrt(dx * dx + dz * dz);
+        const slopeMag = Math.hypot(dx, dz);
 
         return Math.atan(slopeMag) * (180 / Math.PI);
     }
@@ -230,7 +230,7 @@ export class TerrainGenerator {
         const dx = (hR - hL) / (2 * eps * this.width);
         const dz = (hD - hU) / (2 * eps * this.depth);
 
-        return Math.sqrt(dx * dx + dz * dz);
+        return Math.hypot(dx, dz);
     }
 
     _setVertexColor(colors, i, height, slope) {

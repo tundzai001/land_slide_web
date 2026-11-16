@@ -53,12 +53,15 @@
         const attempts = method === 'GET' ? Math.max(1, Math.min(options.attempts || 2, 3)) : 1;
         const requestConfig = { ...options, method, headers, signal: controller.signal };
 
+        async function runAttempt(attempt) {
+            const result = await executeFetch(url, requestConfig, attempt, attempts);
+            if (result.done) return result.response;
+            await sleep(computeDelay(attempt));
+            return runAttempt(attempt + 1);
+        }
+
         try {
-            for (let attempt = 0; attempt < attempts; attempt += 1) {
-                const result = await executeFetch(url, requestConfig, attempt, attempts);
-                if (result.done) return result.response;
-                await sleep(computeDelay(attempt));
-            }
+            return await runAttempt(0);
         } finally {
             clearTimeout(timeout);
             if (key && active.get(key) === controller) active.delete(key);

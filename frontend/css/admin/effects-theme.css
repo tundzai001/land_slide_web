@@ -44,31 +44,10 @@
     }
 }
 
-@keyframes scanline {
-    0% {
-        background-position: 0% 0%;
-    }
-
-    100% {
-        background-position: 0% 100%;
-    }
-}
-
-
 /* Techno Card Decorations (Hidden by default/Light Mode) */
 .card-decoration-top-right,
 .card-scanner {
     display: none;
-}
-
-[data-theme="dark"] .card-decoration-top-right,
-[data-theme="dark"] .card-scanner {
-    display: block;
-}
-
-[data-theme="dark"] .card-decoration-top-right {
-    display: none;
-    /* User requested removal */
 }
 
 [data-theme="dark"] .card-scanner {
@@ -213,6 +192,11 @@
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
+    }
+
+    [data-theme="dark"] .card-scanner,
+    .tab-pane.active {
+        animation: none !important;
     }
 }
 

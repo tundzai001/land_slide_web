@@ -463,4 +463,11 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
+
+    .custom-marker-danger,
+    .custom-marker-warning,
+    .device-offline-marker,
+    .alert-icon {
+        animation: none !important;
+    }
 }

@@ -267,7 +267,8 @@ async function toggleHeatmap() {
         btn?.setAttribute('aria-busy', 'true');
         btn?.classList.add('is-loading');
         try { await window.loadFeatureLibrary?.('heat'); }
-        catch (_) {
+        catch (err) {
+            console.debug('Failed to load heat library:', err);
             if (checkbox) checkbox.checked = false;
             window.toast?.error('Không thể tải lớp heatmap.');
             return;

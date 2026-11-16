@@ -150,9 +150,9 @@
 
 /* Admin Button in Navbar */
 #admin-nav-btn {
-    background: linear-gradient(135deg, #0891b2, #0e7490);
+    background: linear-gradient(135deg, #0e7490, #155e75);
     border: none;
-    color: white;
+    color: #ffffff;
     font-weight: 600;
     padding: 6px 16px;
     border-radius: 8px;
@@ -164,8 +164,8 @@
 }
 
 #admin-nav-btn:hover {
-    background: linear-gradient(135deg, #0e7490, #155e75);
-    color: white;
+    background: linear-gradient(135deg, #155e75, #164e63);
+    color: #ffffff;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
     text-decoration: none;
@@ -322,15 +322,15 @@ body.map-is-moving .detail-sidebar,
     overflow-wrap: anywhere;
 }
 
-.sensor-label > .gnss-fix-badge,
-.sensor-label > .sensor-offline-badge,
-.sensor-label > .imu-offline-badge {
+.sensor-label > .gnss-fix-badge {
     justify-self: end;
     min-width: 0;
 }
 
 .sensor-label > .sensor-offline-badge,
 .sensor-label > .imu-offline-badge {
+    justify-self: end;
+    min-width: 0;
     grid-column: 2;
     grid-row: 2;
 }
@@ -430,7 +430,6 @@ body.map-is-moving .detail-sidebar,
 }
 
 /* Number text uses tabular-nums for stable width during counting */
-.sensor-value-large,
 .axis-num {
     font-variant-numeric: tabular-nums;
 }
@@ -558,12 +557,12 @@ body.map-is-moving .detail-sidebar,
 }
 
 .btn-action:not(.secondary) {
-    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
-    color: white;
+    background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+    color: #ffffff;
 }
 
 .btn-action:not(.secondary):hover {
-    background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+    background: linear-gradient(135deg, #0e7490 0%, #155e75 100%);
     box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
     transform: translateY(-2px);
 }
@@ -664,8 +663,8 @@ body.map-is-moving .detail-sidebar,
 .monitoring-values { display: grid; gap: 8px; margin-bottom: 12px; }
 .monitoring-values:empty { display: none; }
 .monitoring-value-card { min-width: 0; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); color: var(--text-primary); }
-.monitoring-value-card strong, .monitoring-value-card small { display: block; }
-.monitoring-value-card small { color: var(--text-secondary); font-size: 12px; margin: 4px 0; }
+.monitoring-value-card strong { display: block; }
+.monitoring-value-card small { display: block; color: var(--text-secondary); font-size: 12px; margin: 4px 0; }
 .monitoring-value-card div { font-size: 20px; font-variant-numeric: tabular-nums; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -676,5 +675,19 @@ body.map-is-moving .detail-sidebar,
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
+    }
+
+    .value-updated,
+    .sensor-item.value-updated,
+    .sensor-card-warning,
+    .sensor-card-danger,
+    .sensor-card-critical,
+    .btn-siren-active,
+    .siren-active,
+    .sidebar-close-tab i,
+    .btn-action {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
     }
 }

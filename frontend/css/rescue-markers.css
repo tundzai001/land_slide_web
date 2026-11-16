@@ -517,4 +517,12 @@ body.rescue-mode-active .toggle-list-btn {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
+
+    .map-floating-layer-item,
+    .rescue-fab,
+    .rescue-marker-pulse {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
+    }
 }

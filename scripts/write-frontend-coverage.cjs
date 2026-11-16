@@ -7,7 +7,8 @@ async function main() {
   const directory = process.env.FRONTEND_COVERAGE_DIR;
   if (!directory) throw new Error('FRONTEND_COVERAGE_DIR is required');
   const coverage = createCoverageMap({});
-  for (const name of readdirSync(directory).filter(name => name.endsWith('.json'))) {
+  const files = readdirSync(directory).filter(name => name.endsWith('.json'));
+  await Promise.all(files.map(async name => {
     const entries = JSON.parse(readFileSync(join(directory, name), 'utf8'));
     await Promise.all(entries.map(async entry => {
       const converter = v8toIstanbul(entry.path);
@@ -15,7 +16,7 @@ async function main() {
       converter.applyCoverage(entry.functions);
       coverage.merge(converter.toIstanbul());
     }));
-  }
+  }));
   if (!coverage.files().length) throw new Error('No frontend source coverage was collected');
   let lcov = '';
   for (const path of coverage.files()) {

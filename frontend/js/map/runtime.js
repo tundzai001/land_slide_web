@@ -367,9 +367,10 @@ function applyGnssAdjustmentRoster(roster = {}, runId = null) {
     if (selected.length) gnssAdjustmentDebugState.rosterStationIds = [...new Set(selected)];
     if (participating.length) gnssAdjustmentDebugState.participatingStationIds = participating;
     gnssAdjustmentDebugState.excludedStationIds = [...new Set(excluded)];
-    const displayIds = gnssAdjustmentDebugState.rosterStationIds.length
-        ? gnssAdjustmentDebugState.rosterStationIds
-        : (selected.length ? selected : participating);
+    let displayIds = gnssAdjustmentDebugState.rosterStationIds;
+    if (!displayIds.length) {
+        displayIds = selected.length ? selected : participating;
+    }
     window.gnssBoardState?.seedExpectedRovers?.(
         gnssRoversFromStationIds(displayIds, new Set(gnssAdjustmentDebugState.excludedStationIds))
     );

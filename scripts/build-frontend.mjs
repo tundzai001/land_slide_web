@@ -12,27 +12,27 @@ const isProduction = (process.env.ENVIRONMENT || 'production').toLowerCase() ===
 
 async function sourceFilesIn(directory = frontendRoot, relativeRoot = '') {
   const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
+  const fileGroups = await Promise.all(entries.map(async entry => {
     // DEM files here are local test fixtures, not production frontend assets.
-    if (entry.name === 'dist' || entry.name.startsWith('.') || (relativeRoot === 'assets' && entry.name === 'dem')) continue;
+    if (entry.name === 'dist' || entry.name.startsWith('.') || (relativeRoot === 'assets' && entry.name === 'dem')) return [];
     const relativePath = path.join(relativeRoot, entry.name);
     const absolutePath = path.join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...await sourceFilesIn(absolutePath, relativePath));
-    else files.push(relativePath);
-  }
-  return files;
+    if (entry.isDirectory()) return sourceFilesIn(absolutePath, relativePath);
+    return [relativePath];
+  }));
+  return fileGroups.flat();
 }
 
 const sourceFiles = (await sourceFilesIn()).sort();
 const versionHash = createHash('sha256');
-for (const relativePath of sourceFiles) {
+const sourceContents = await Promise.all(sourceFiles.map(relativePath => readFile(path.join(frontendRoot, relativePath))));
+sourceFiles.forEach((relativePath, i) => {
   versionHash.update(relativePath.replaceAll('\\', '/'));
-  versionHash.update(await readFile(path.join(frontendRoot, relativePath)));
-}
-for (const buildInput of [fileURLToPath(import.meta.url), path.join(projectRoot, 'package-lock.json')]) {
-  versionHash.update(await readFile(buildInput));
-}
+  versionHash.update(sourceContents[i]);
+});
+const buildInputs = [fileURLToPath(import.meta.url), path.join(projectRoot, 'package-lock.json')];
+const buildInputContents = await Promise.all(buildInputs.map(input => readFile(input)));
+buildInputContents.forEach(buf => versionHash.update(buf));
 versionHash.update(await readFile(path.join(projectRoot, 'backend/app/shared/sensor_catalog.json')));
 const buildVersion = versionHash.digest('hex').slice(0, 12);
 
@@ -83,11 +83,10 @@ const groups = {
 };
 
 async function concatenate(files, separator = '\n;\n') {
-  const parts = [];
-  for (const relativePath of files) {
+  const parts = await Promise.all(files.map(async relativePath => {
     const source = await readFile(path.join(frontendRoot, relativePath), 'utf8');
-    parts.push(`/* ${relativePath} */\n${source}`);
-  }
+    return `/* ${relativePath} */\n${source}`;
+  }));
   return parts.join(separator);
 }
 
@@ -153,17 +152,17 @@ await esbuild.build({
   external: ['three', 'three/*']
 });
 
-for (const assetName of ['aitogy.png', 'social-card.png']) {
-  await copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName));
-}
+await Promise.all(['aitogy.png', 'social-card.png'].map(assetName =>
+  copyFile(path.join(frontendRoot, 'assets', assetName), path.join(outputRoot, assetName))
+));
 
-for (const shellName of ['index.html', 'about.html', 'map.html', 'app.html']) {
+await Promise.all(['index.html', 'about.html', 'map.html', 'app.html'].map(async shellName => {
   const shell = (await readFile(path.join(frontendRoot, shellName), 'utf8'))
     .replaceAll('__BUILD_VERSION__', buildVersion)
     .replaceAll('__PUBLIC_SITE_URL__', publicSiteUrl)
     .replaceAll('__ROBOTS_META__', isProduction ? 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1' : 'noindex, nofollow');
   await writeFile(path.join(outputRoot, shellName), shell, 'utf8');
-}
+}));
 
 const artifactNames = [
   ...Object.keys(groups), 'landing.min.js', 'about.min.js', 'about.html', 'app-runtime.min.js',
@@ -172,31 +171,30 @@ const artifactNames = [
 // The manifest is committed and checked in CI. Identical inputs must produce
 // identical bytes; release timestamps belong to the workflow run metadata.
 const manifest = { version: 1, build: buildVersion, assets: {} };
-for (const name of artifactNames) {
+await Promise.all(artifactNames.map(async name => {
   const filePath = path.join(outputRoot, name);
-  const bytes = await readFile(filePath);
-  const metadata = await stat(filePath);
+  const [bytes, metadata] = await Promise.all([readFile(filePath), stat(filePath)]);
   manifest.assets[name] = {
     bytes: metadata.size,
     sha256: createHash('sha256').update(bytes).digest('hex')
   };
-}
+}));
 await writeFile(path.join(outputRoot, 'build-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
 // Absolute source URLs are forbidden. CDN URLs may legitimately contain
 // segments such as `/dist/js/`, so anchor this check to a string delimiter.
 const forbidden = /(?:["'`]\/(?:js|css)\/|sourceMappingURL|text\/babel|babel-runtime)/i;
-for (const name of artifactNames.filter(name => name.endsWith('.js'))) {
+await Promise.all(artifactNames.filter(name => name.endsWith('.js')).map(async name => {
   const output = await readFile(path.join(outputRoot, name), 'utf8');
   if (forbidden.test(output)) throw new Error(`${name} still references a source-only path or runtime compiler`);
-}
+}));
 
-for (const shellName of ['index.html', 'about.html', 'map.html', 'app.html']) {
+await Promise.all(['index.html', 'about.html', 'map.html', 'app.html'].map(async shellName => {
   const shell = await readFile(path.join(outputRoot, shellName), 'utf8');
   if (shell.includes('__BUILD_VERSION__') || /["']\/(?:js|css)\//i.test(shell)) {
     throw new Error(`${shellName} still references a source-only path or unresolved build version`);
   }
-}
+}));
 
 const totalBytes = Object.values(manifest.assets).reduce((sum, asset) => sum + asset.bytes, 0);
 process.stdout.write(`Built ${artifactNames.length} production assets (${totalBytes.toLocaleString('en-US')} bytes) in frontend/dist\n`);

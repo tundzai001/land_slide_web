@@ -404,10 +404,6 @@
         font-size: 0.8rem;
     }
 
-    .sensor-value-large {
-        font-size: 1.3rem;
-    }
-
     /* ACTION BUTTONS */
     .action-buttons {
         grid-template-columns: 1fr 1fr;

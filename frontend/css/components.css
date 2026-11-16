@@ -411,6 +411,17 @@ button,
 .session-manager-dialog button:disabled { opacity: .5; cursor: wait; }
 .session-manager-actions { flex-wrap: wrap; justify-content: flex-end; }
 @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    .btn,
+    .btn::before {
+        transition: none !important;
+    }
     .skeleton-loader { animation: none !important; }
-    .session-manager-dialog { transition: none; }
+    .session-manager-dialog { transition: none !important; }
 }

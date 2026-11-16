@@ -1,5 +1,14 @@
 /* Smooth theme switching */
+html {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+}
+
 body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
     transition: background-color 0.3s ease,
                 color 0.3s ease;
 }
@@ -51,10 +60,4 @@ body :where(
 /* Prevent layout shift during transition */
 * {
     box-sizing: border-box;
-}
-
-html, body {
-    margin: 0;
-    padding: 0;
-    overflow-x: hidden;
 }

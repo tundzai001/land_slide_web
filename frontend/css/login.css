@@ -92,7 +92,7 @@
     border: 1px solid rgba(153, 246, 228, .28);
     border-radius: 13px;
     background: #072d32;
-    color: #5eead4;
+    color: #ccfbf1;
     font-size: 1.1rem;
     box-shadow: inset 0 1px rgba(255,255,255,.1);
 }
@@ -347,7 +347,7 @@
     border: 1px solid #cbdcda;
     border-radius: 12px;
     background: #fbfdfd;
-    color: #4d6568;
+    color: #2d4346;
     transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
 
@@ -639,3 +639,23 @@
 [data-theme="dark"] .login-page .login-theme .theme-moon { opacity:0; transform:rotate(70deg) scale(.45); }
 [data-theme="dark"] .login-page .login-theme .theme-sun { opacity:1; transform:rotate(0) scale(1); }
 .login-page .login-theme:active { transform:scale(.94); }
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+
+    .login-page .login-theme,
+    .login-page .login-theme svg,
+    .login-page .login-submit,
+    .login-page .login-back {
+        transition: none !important;
+        transform: none !important;
+        animation: none !important;
+    }
+}

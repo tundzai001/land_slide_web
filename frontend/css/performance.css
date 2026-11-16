@@ -53,14 +53,16 @@ body #admin-nav-btn {
     flex-direction: column;
 }
 
-.station-item-copy strong,
-.station-item-copy small {
+.station-item-copy strong {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .station-item-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-secondary);
 }
 

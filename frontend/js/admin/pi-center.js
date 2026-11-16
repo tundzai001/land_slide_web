@@ -13,7 +13,7 @@ class AdminPiCenterFeature extends window.AdminManager {
         const pointIds = [];
         checked.forEach(cb => {
             const row = cb.closest('.pi-grid-row') || cb.closest('tr');
-            if (row?.dataset.piType === 'pi_point') {
+            if (row?.dataset?.piType === 'pi_point') {
                 pointIds.push(Number.parseInt(cb.dataset.piId));
             }
         });
@@ -103,9 +103,8 @@ class AdminPiCenterFeature extends window.AdminManager {
                 }
                 const centerId = selectedCenterId;
 
-                let ok = 0, fail = 0;
-                for (const pointId of pointIds) {
-                    try {
+                const results = await Promise.allSettled(
+                    pointIds.map(async pointId => {
                         const r = await fetch(`/api/field/pi-devices/${pointId}/assign-to-center`, {
                             method: 'PUT',
                             headers: {
@@ -114,8 +113,14 @@ class AdminPiCenterFeature extends window.AdminManager {
                             },
                             body: JSON.stringify({ pi_center_id: centerId })
                         });
-                        if (r.ok) ok++; else fail++;
-                    } catch { fail++; }
+                        return r.ok;
+                    })
+                );
+                let ok = 0;
+                let fail = 0;
+                for (const res of results) {
+                    if (res.status === 'fulfilled' && res.value) ok++;
+                    else fail++;
                 }
 
                 bsModal.hide();

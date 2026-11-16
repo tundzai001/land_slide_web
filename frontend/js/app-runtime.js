@@ -241,7 +241,7 @@
             if (event.key !== 'Tab') return;
             const focusable = Array.from(drawer.querySelectorAll('a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])')).filter(element => element.offsetParent !== null);
             if (!focusable.length) return;
-            const first = focusable[0], last = focusable[focusable.length - 1];
+            const first = focusable[0], last = focusable.at(-1);
             if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
             else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
         });

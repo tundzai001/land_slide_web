@@ -733,22 +733,22 @@ class SimulationController {
     }
 
     async _pollRun(runId) {
-        while (this._backendPending) {
-            const run = await this._api(`/api/simulations/runs/${runId}`, { requestKey: `simulation-${runId}` });
-            this.currentRun = run;
-            this._setRunUi('running', run.status === 'queued' ? 'Đang chờ bộ tính toán…' : `Đang tính toán · ${run.progress || 0}%`);
-            if (!['queued', 'running'].includes(run.status)) {
-                if (run.status === 'completed') this._loadResult(run);
-                else {
-                    this._setRunButton(false);
-                    this._setRunUi('stopped', run.error || `Lần chạy kết thúc với trạng thái ${run.status}`);
-                    this._renderResults(run);
-                    this._toggleResults(true);
-                }
-                return;
+        if (!this._backendPending) return;
+        const run = await this._api(`/api/simulations/runs/${runId}`, { requestKey: `simulation-${runId}` });
+        this.currentRun = run;
+        this._setRunUi('running', run.status === 'queued' ? 'Đang chờ bộ tính toán…' : `Đang tính toán · ${run.progress || 0}%`);
+        if (!['queued', 'running'].includes(run.status)) {
+            if (run.status === 'completed') this._loadResult(run);
+            else {
+                this._setRunButton(false);
+                this._setRunUi('stopped', run.error || `Lần chạy kết thúc với trạng thái ${run.status}`);
+                this._renderResults(run);
+                this._toggleResults(true);
             }
-            await new Promise(resolve => setTimeout(resolve, 500));
+            return;
         }
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return this._pollRun(runId);
     }
 
     _setInputMode(mode) {

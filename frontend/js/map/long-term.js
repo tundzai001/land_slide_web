@@ -483,7 +483,7 @@ async function init3DVisualizations(data) {
         const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
 
         // GNSS
-        if (data.gnss && data.gnss.status === 'success' && data.gnss.time_series) {
+        if (data?.gnss?.status === 'success' && data.gnss.time_series) {
             const gnssLoading = document.getElementById('gnss-3d-loading');
             if (gnssLoading) gnssLoading.style.display = 'block';
             const gnssContainer = document.getElementById('container-3d-gnss');
@@ -499,7 +499,7 @@ async function init3DVisualizations(data) {
         }
 
         // IMU
-        if (data.imu && data.imu.status === 'success' && data.imu.time_series) {
+        if (data?.imu?.status === 'success' && data.imu.time_series) {
             const imuLoading = document.getElementById('imu-3d-loading');
             if (imuLoading) imuLoading.style.display = 'block';
             const imuContainer = document.getElementById('container-3d-imu');
@@ -594,7 +594,7 @@ function initGNSS3D(timeSeries, THREE, OrbitControls) {
 
     // Analysis mode: keep marker at the latest GNSS position (no autoplay movement).
     if (points.length > 0) {
-        sphere.position.copy(points[points.length - 1]);
+        sphere.position.copy(points.at(-1));
     }
 
     function animate() {

@@ -985,14 +985,26 @@ body:has(.top-navbar) #gnssTerminalModal {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .adv-item,
-    .sensor-clickable,
-    #gnssTerminalModal *,
-    #gnss-adjustment-running-pill {
+    *,
+    *::before,
+    *::after {
         scroll-behavior: auto !important;
         transition-duration: 0.01ms !important;
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
+    }
+
+    .adv-item,
+    .sensor-clickable,
+    #gnssTerminalModal *,
+    #gnss-adjustment-running-pill,
+    .gnss-flow-node,
+    .gnss-flow-badge,
+    .gnss-flow-ring,
+    .gnss-flow-pulse {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
     }
 }
 

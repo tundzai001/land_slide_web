@@ -16,8 +16,8 @@
 .desktop-nav a[aria-current="page"],.desktop-nav a:hover { color:var(--teal); }
 .desktop-nav a[aria-current="page"]::after { content:""; position:absolute; left:0; right:0; bottom:-10px; height:2px; background:var(--teal); }
 .header-actions { display:flex; align-items:center; gap:9px; }
-.header-actions .button,.header-actions .icon-button,.header-actions .menu-button { min-height:44px; border-radius:999px; font-size:13px; font-weight:700; }
-.header-actions .button { display:inline-flex; align-items:center; justify-content:center; gap:9px; padding:9px 17px; border:1px solid var(--nav-line); }
+.header-actions .icon-button,.header-actions .menu-button { min-height:44px; border-radius:999px; font-size:13px; font-weight:700; }
+.header-actions .button { display:inline-flex; align-items:center; justify-content:center; gap:9px; min-height:44px; padding:9px 17px; border:1px solid var(--nav-line); border-radius:999px; font-size:13px; font-weight:700; }
 .header-actions .button svg { width:17px; height:17px; }
 .header-actions .button-ghost { background:var(--nav-surface); color:var(--ink); }
 .header-actions .button-primary { background:var(--teal); border-color:var(--teal); color:#fff; }

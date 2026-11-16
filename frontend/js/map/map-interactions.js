@@ -195,7 +195,7 @@ function setupEventListeners() {
             }
             if (currentStationData) {
                 console.log('🌋 [DIGITAL TWIN] Opening for station:', currentStationData.id);
-                const rainData = currentStationData.sensors && currentStationData.sensors.rain && currentStationData.sensors.rain.latest ? currentStationData.sensors.rain.latest.data : null;
+                const rainData = currentStationData?.sensors?.rain?.latest?.data ?? null;
                 const h24 = rainData ? (rainData.rain_24h || rainData.rain_last_24h || rainData.value || 0) : 0;
                 window.openDigitalTwin({
                     id: currentStationData.id,
@@ -417,7 +417,7 @@ function setupEventListeners() {
             this.resizePending = true;
             if (typeof ResizeObserver !== 'function') return;
             this.resizeObserver = new ResizeObserver(entries => {
-                const entry = entries[entries.length - 1];
+                const entry = entries.at(-1);
                 const rect = entry?.contentRect;
                 if (rect) {
                     this.pendingViewWidth = Math.floor(rect.width);
@@ -590,11 +590,14 @@ function setupEventListeners() {
             const de = Number(data?.de);
             const dh = Number(data?.dh);
             if (![dn, de, dh].every(Number.isFinite)) return;
-            const orderedPair = from === 'BASE'
-                ? ['BASE', to]
-                : to === 'BASE'
-                    ? ['BASE', from]
-                    : [from, to].sort((a, b) => String(a).localeCompare(String(b)));
+            let orderedPair;
+            if (from === 'BASE') {
+                orderedPair = ['BASE', to];
+            } else if (to === 'BASE') {
+                orderedPair = ['BASE', from];
+            } else {
+                orderedPair = [from, to].sort((a, b) => String(a).localeCompare(String(b)));
+            }
             const direction = from === orderedPair[0] && to === orderedPair[1] ? 1 : -1;
             from = orderedPair[0];
             to = orderedPair[1];
@@ -1373,11 +1376,13 @@ function setupEventListeners() {
         try {
             const data = await response.clone().json();
             return data.detail || data.message || data.error || `HTTP ${response.status}`;
-        } catch (_) {
+        } catch (jsonErr) {
+            console.debug('Failed to parse response JSON:', jsonErr);
             try {
                 const text = await response.text();
                 return text || `HTTP ${response.status}`;
-            } catch (__) {
+            } catch (textErr) {
+                console.debug('Failed to read response text:', textErr);
                 return `HTTP ${response.status}`;
             }
         }
@@ -1491,7 +1496,8 @@ function setupEventListeners() {
             let startResult = {};
             try {
                 startResult = await res.json();
-            } catch (_) {
+            } catch (err) {
+                console.debug('Failed to parse start adjustment response:', err);
                 startResult = {};
             }
             if (Array.isArray(startResult.expected_station_ids)) {

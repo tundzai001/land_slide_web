@@ -11,7 +11,8 @@ class AuthManager {
         try {
             const cachedUser = sessionStorage.getItem('auth_user');
             this.user = this.token && cachedUser ? JSON.parse(cachedUser) : null;
-        } catch (_) {
+        } catch (err) {
+            console.debug('Failed to parse cached user:', err);
             sessionStorage.removeItem('auth_user');
         }
         this.tokenCheckInterval = null;

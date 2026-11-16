@@ -751,7 +751,7 @@ function renderStationList(stations) {
     
     Array.from(container.children).forEach(child => {
         if (child.dataset?.stationId && !currentIds.has(child.dataset.stationId)) {
-            container.removeChild(child);
+            child.remove();
         }
     });
 

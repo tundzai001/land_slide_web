@@ -14,7 +14,7 @@ function updateImuDrift(rollVal, pitchVal) {
 
     // Using 1.0 meter (1000mm) as virtual pole length
     // Use sin for spatial spherical coordinates instead of tan to prevent overestimation
-    const total_tilt_rad = Math.sqrt(r_rad * r_rad + p_rad * p_rad);
+    const total_tilt_rad = Math.hypot(r_rad, p_rad);
     const drift = 1000 * Math.sin(total_tilt_rad);
 
     const dx = 1000 * Math.sin(r_rad);
@@ -339,9 +339,9 @@ const AlertSoundManager = (() => {
     }
 
     function _getHighestLevel() {
-        const levels = Object.values(_stationLevels).filter(Boolean);
-        if (levels.includes('CRITICAL')) return 'CRITICAL';
-        if (levels.includes('WARNING')) return 'WARNING';
+        const levels = new Set(Object.values(_stationLevels).filter(Boolean));
+        if (levels.has('CRITICAL')) return 'CRITICAL';
+        if (levels.has('WARNING')) return 'WARNING';
         return null;
     }
 
@@ -439,9 +439,9 @@ const AlertSoundManager = (() => {
  * @param {string|number} [stationId]
  * @param {string} [level='CRITICAL']
  */
-function playSiren(stationId, level) {
+function playSiren(stationId, level = 'CRITICAL') {
     const sid = stationId ?? currentAlertStationId;
-    const lvl = level ?? 'CRITICAL';
+    const lvl = level;
     if (sid != null) {
         AlertSoundManager.setStationAlert(sid, lvl);
     } else {

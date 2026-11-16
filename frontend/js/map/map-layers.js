@@ -156,9 +156,12 @@ function escapeHtml(value) {
 }
 
 function normalizeCorsBaseStations(payload) {
-    const rawStations = Array.isArray(payload)
-        ? payload
-        : (Array.isArray(payload?.value) ? payload.value : []);
+    let rawStations = [];
+    if (Array.isArray(payload)) {
+        rawStations = payload;
+    } else if (Array.isArray(payload?.value)) {
+        rawStations = payload.value;
+    }
 
     // Base stations: show all valid ones from CORS API
     return rawStations

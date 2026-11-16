@@ -169,9 +169,8 @@ function renderInverseVelocitySection(data) {
     }
 
     // Metrics
-    setText('inv-vel-prediction', invVel.predicted_failure
-        ? `Có — ${invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : ''}`
-        : 'Không');
+    const failureDateStr = invVel.predicted_failure_date ? new Date(invVel.predicted_failure_date).toLocaleDateString('vi-VN') : '';
+    setText('inv-vel-prediction', invVel.predicted_failure ? `Có — ${failureDateStr}` : 'Không');
     setText('inv-vel-days', invVel.predicted_failure
         ? `~${invVel.days_to_failure} ngày`
         : 'N/A');
@@ -259,7 +258,7 @@ function renderRainfallCorrelationSection(data) {
         return;
     }
 
-    if (!rainCorr || !rainCorr.available) {
+    if (!rainCorr?.available) {
         // Show the section with an informative status message instead of hiding it
         const msg = rainCorr?.message
             || 'Không đủ dữ liệu để chạy Slide model. Cần ít nhất 3 ngày chung giữa GNSS và cảm biến mưa.';
