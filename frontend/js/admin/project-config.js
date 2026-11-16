@@ -253,7 +253,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         const streamSelect = row.querySelector(
             isBackup ? '.cluster-backup-stream-select' : '.cluster-stream-select'
         );
-        const selectedStreamVal = streamSelect.getAttribute('data-selected-stream');
+        const selectedStreamVal = streamSelect.dataset.selectedStream;
         
         streamSelect.innerHTML = '<option value="">-- Chọn Luồng --</option>';
         

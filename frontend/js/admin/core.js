@@ -557,7 +557,7 @@ class AdminManager {
         document.querySelectorAll('.admin-sidebar .nav-item').forEach(item => {
             const link = item.querySelector('[data-tab]');
             if (link) {
-                const tab = link.getAttribute('data-tab');
+                const tab = link.dataset.tab;
                 if (['tab-users', 'tab-database', 'tab-rescue'].includes(tab)) {
                     item.style.display = 'none';
                 }
@@ -757,11 +757,17 @@ class AdminManager {
         this.selectedRescueRequest = row;
         const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
         const imageUrl = /^\/api\/admin\/rescue-images\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(String(row.image_url || '')) ? row.image_url : '';
-        const mapUrl = `https://maps.google.com/?q=${encodeURIComponent(`${row.latitude},${row.longitude}`)}`;
+        const coords = `${row.latitude},${row.longitude}`;
+        const mapUrl = `https://maps.google.com/?q=${encodeURIComponent(coords)}`;
         const urgency = this.getRescueUrgency(row);
+        const imageMarkup = imageUrl ? `<img class="rescue-evidence" data-auth-src="${esc(imageUrl)}" alt="Ảnh hiện trường của yêu cầu #${row.id}">` : '';
+        const accuracyText = row.accuracy_m ? `±${Number(row.accuracy_m).toFixed(1)} m` : '--';
         document.getElementById('rescue-inspector-title').textContent = `Yêu cầu #${row.id}`;
-        document.getElementById('rescue-inspector-content').innerHTML = `<section class="drawer-summary"><span class="rescue-priority ${urgency.className}">${esc(urgency.label)}</span><h6>${esc(row.requester_name || 'Người gửi ẩn danh')}</h6><p>${esc(row.phone || 'Không có số điện thoại')} · ${esc(this.formatRescueAge(row.created_at))}</p></section>${imageUrl ? `<img class="rescue-evidence" data-auth-src="${esc(imageUrl)}" alt="Ảnh hiện trường của yêu cầu #${row.id}">` : ''}<dl class="drawer-facts"><div><dt>Loại yêu cầu</dt><dd>${esc(row.rescue_type || '--')}</dd></div><div><dt>Khu vực</dt><dd>${esc(row.province_city || '--')}</dd></div><div><dt>Tọa độ</dt><dd><a href="${mapUrl}" target="_blank" rel="noopener">${Number(row.latitude).toFixed(6)}, ${Number(row.longitude).toFixed(6)}</a></dd></div><div><dt>Độ chính xác GPS</dt><dd>${row.accuracy_m ? `±${Number(row.accuracy_m).toFixed(1)} m` : '--'}</dd></div></dl><section class="drawer-message"><span>Mô tả</span><p>${esc(row.message || '--')}</p></section><label class="form-label" for="rescue-admin-note">Ghi chú xử lý</label><textarea class="form-control" id="rescue-admin-note" rows="4" maxlength="500" placeholder="Ghi lại kết quả liên hệ hoặc lý do xử lý…">${esc(row.admin_note || '')}</textarea>`;
-        document.getElementById('rescue-inspector-actions').innerHTML = row.status === 'pending' ? `<button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${row.id}, 'rejected')">Từ chối</button><button class="btn btn-success" onclick="window.adminManager.updateRescueRequestStatus(${row.id}, 'resolved')"><i class="bi bi-check2-circle me-1"></i>Đánh dấu đã xử lý</button>` : `<button class="btn btn-outline-danger" onclick="window.adminManager.deleteRescueRequest(${row.id})"><i class="bi bi-trash3 me-1"></i>Xóa case</button>`;
+        document.getElementById('rescue-inspector-content').innerHTML = `<section class="drawer-summary"><span class="rescue-priority ${urgency.className}">${esc(urgency.label)}</span><h6>${esc(row.requester_name || 'Người gửi ẩn danh')}</h6><p>${esc(row.phone || 'Không có số điện thoại')} · ${esc(this.formatRescueAge(row.created_at))}</p></section>${imageMarkup}<dl class="drawer-facts"><div><dt>Loại yêu cầu</dt><dd>${esc(row.rescue_type || '--')}</dd></div><div><dt>Khu vực</dt><dd>${esc(row.province_city || '--')}</dd></div><div><dt>Tọa độ</dt><dd><a href="${mapUrl}" target="_blank" rel="noopener">${Number(row.latitude).toFixed(6)}, ${Number(row.longitude).toFixed(6)}</a></dd></div><div><dt>Độ chính xác GPS</dt><dd>${accuracyText}</dd></div></dl><section class="drawer-message"><span>Mô tả</span><p>${esc(row.message || '--')}</p></section><label class="form-label" for="rescue-admin-note">Ghi chú xử lý</label><textarea class="form-control" id="rescue-admin-note" rows="4" maxlength="500" placeholder="Ghi lại kết quả liên hệ hoặc lý do xử lý…">${esc(row.admin_note || '')}</textarea>`;
+        const actionsMarkup = row.status === 'pending'
+            ? `<button class="btn btn-outline-secondary" onclick="window.adminManager.updateRescueRequestStatus(${row.id}, 'rejected')">Từ chối</button><button class="btn btn-success" onclick="window.adminManager.updateRescueRequestStatus(${row.id}, 'resolved')"><i class="bi bi-check2-circle me-1"></i>Đánh dấu đã xử lý</button>`
+            : `<button class="btn btn-outline-danger" onclick="window.adminManager.deleteRescueRequest(${row.id})"><i class="bi bi-trash3 me-1"></i>Xóa case</button>`;
+        document.getElementById('rescue-inspector-actions').innerHTML = actionsMarkup;
         document.getElementById('rescue-inspector').classList.add('open');
         document.getElementById('rescue-inspector').setAttribute('aria-hidden', 'false');
         document.getElementById('rescue-inspector-backdrop').classList.add('show');

@@ -31,7 +31,7 @@ class ThemeManager {
         console.log('🎨 Switching to:', theme);
 
         // Apply theme
-        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.dataset.theme = theme;
         localStorage.setItem('theme', theme);
         this.theme = theme;
 

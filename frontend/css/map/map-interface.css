@@ -1117,6 +1117,7 @@ textarea:focus-visible {
     min-width: 0;
     max-width: 100%;
     overflow-wrap: anywhere;
+    color: var(--map-text);
 }
 
 .gnss-advanced-sidepanel .adv-unit {
@@ -1151,10 +1152,6 @@ textarea:focus-visible {
 .gnss-advanced-sidepanel .adv-label,
 .gnss-advanced-sidepanel .adv-unit {
     color: var(--map-muted);
-}
-
-.gnss-advanced-sidepanel .adv-value {
-    color: var(--map-text);
 }
 
 /* ---------- Rescue action and form ---------- */

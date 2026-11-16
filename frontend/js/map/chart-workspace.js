@@ -50,7 +50,10 @@ function exportWorkspaceChart(id, format) {
     for (let index = 0; index < count; index++) {
         const timestamp = chart._monitoringTimestamps?.[index];
         const first = datasets[0]?.data[index];
-        const x = chart._monitoringTimestamps ? (Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '') : (typeof first === 'object' && first ? first.x : chart.data.labels?.[index]);
+        let x = typeof first === 'object' && first ? first.x : chart.data.labels?.[index];
+        if (chart._monitoringTimestamps) {
+            x = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
+        }
         rows.push([x, ...datasets.map(dataset => {
             const point = dataset.data[index];
             return point && typeof point === 'object' ? point.y : point;

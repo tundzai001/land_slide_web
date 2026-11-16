@@ -335,7 +335,7 @@ html[data-app-view="admin"] body {
 @media (max-width: 640px) {
     .custom-table { overflow: visible; background: transparent; border: 0; }
     .custom-table .table { min-width: 0; display: block; background: transparent; }
-    .custom-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+    .custom-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     .custom-table tbody { display: grid; gap: 10px; }
     .custom-table tbody tr {
         display: grid;

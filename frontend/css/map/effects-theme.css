@@ -6,7 +6,7 @@
     border-radius: 8px;
     padding: 8px 12px;
     width: 100%;
-    transition: all 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 #search-station:focus {
@@ -429,7 +429,7 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
     border-radius: 8px;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: transform 0.3s, background 0.3s, box-shadow 0.3s;
     display: flex;
     align-items: center;
     white-space: nowrap;
@@ -447,9 +447,20 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
     padding: 8px 12px;
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: background 0.3s, color 0.3s;
 }
 
 .btn-alert-dismiss:hover {
     background: rgba(255, 255, 255, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

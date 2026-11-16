@@ -12,7 +12,6 @@ body,
     text-rendering: optimizeLegibility;
 }
 
-.sidebar-brand { cursor: pointer; }
 .sidebar-brand .app-brand-plate { display:block; width:86px; min-height:0; padding:0; margin:0 auto 8px; background:transparent; border:0; border-radius:0; }
 .sidebar-brand .app-brand-plate img { display:block; width:100%; height:auto; }
 .sidebar-brand .app-brand-product { display:grid; line-height:1; text-align:center; }
@@ -63,14 +62,6 @@ body,
     justify-content: center;
 }
 
-/* Fix form inputs */
-.form-control,
-.form-select {
-    line-height: 1.5;
-    height: auto;
-    min-height: 42px;
-}
-
 /* Custom device picker cards (replace default browser radio/select look) */
 .device-pick-list {
     display: flex;
@@ -91,7 +82,7 @@ body,
     align-items: center;
     gap: 10px;
     text-align: left;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .device-pick-option:hover,
@@ -204,6 +195,7 @@ body {
 
 /* Sidebar Brand - Hidden/Icon only in narrow mode */
 .sidebar-brand {
+    cursor: pointer;
     padding: 20px 0;
     text-align: center;
     border-bottom: 1px solid var(--border-color);
@@ -246,7 +238,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     padding: 0;
 }
@@ -344,7 +336,7 @@ body {
     justify-content: center;
     border-radius: 50%;
     color: var(--text-secondary);
-    transition: all 0.2s;
+    transition: background 0.2s, color 0.2s;
 }
 
 .theme-toggle-mini:hover {
@@ -392,7 +384,7 @@ body {
 .breadcrumb-item a {
     color: var(--accent-primary);
     text-decoration: none;
-    transition: all 0.2s;
+    transition: color 0.2s;
 }
 
 .breadcrumb-item a:hover {
@@ -422,7 +414,7 @@ body {
     border-radius: 10px 10px 0 0;
     color: var(--text-secondary) !important;
     font-weight: 600;
-    transition: all 0.3s;
+    transition: background 0.3s, color 0.3s;
     background: transparent;
 }
 
@@ -475,7 +467,7 @@ body {
 
 .table tbody tr {
     background: var(--bg-secondary);
-    transition: all 0.2s;
+    transition: background 0.2s;
 }
 
 .table tbody tr:hover {
@@ -489,7 +481,7 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    transition: all 0.3s;
+    transition: border-color 0.3s, box-shadow 0.3s;
 }
 
 .card:hover {
@@ -505,7 +497,7 @@ body {
    HOVER EFFECTS
 ======================================== */
 .hover-lift {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .hover-lift:hover {
@@ -522,7 +514,7 @@ body {
     color: white;
     font-weight: 600;
     box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
-    transition: all 0.3s;
+    transition: transform 0.3s, box-shadow 0.3s;
 }
 
 .btn-gradient:hover {
@@ -571,7 +563,10 @@ body {
     color: var(--text-primary);
     border-radius: 8px;
     padding: 10px 16px;
-    transition: all 0.3s;
+    line-height: 1.5;
+    height: auto;
+    min-height: 42px;
+    transition: border-color 0.3s, background-color 0.3s, box-shadow 0.3s;
 }
 
 .form-control:focus,
@@ -636,4 +631,15 @@ body {
 
 .bi-cpu {
     color: #8b5cf6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

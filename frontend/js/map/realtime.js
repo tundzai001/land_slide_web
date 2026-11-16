@@ -435,8 +435,8 @@ function handleRealtimeUpdate(message) {
                 currentAlertStationId = stationId;
                 // Transition idle/offline buttons to alerting
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
-                    const target = b.getAttribute('data-target');
-                    const currentState = b.getAttribute('data-siren-state');
+                    const target = b.dataset.target;
+                    const currentState = b.dataset.sirenState;
                     if (currentState === 'idle' || currentState === 'offline') {
                         setSirenButtonState('alerting', target);
                     }
@@ -510,8 +510,8 @@ function handleRealtimeUpdate(message) {
                 currentAlertStationId = incomingAlert.station_id;
                 const piDevices = currentStationData.pi_devices || [];
                 document.querySelectorAll('.btn-siren-toggle').forEach(b => {
-                    const target = b.getAttribute('data-target');
-                    const currentState = b.getAttribute('data-siren-state');
+                    const target = b.dataset.target;
+                    const currentState = b.dataset.sirenState;
                     if (currentState === 'offline') return; // thiết bị offline, bỏ qua
                     // Kiểm tra pi device tương ứng có online không
                     const piDev = piDevices.find(d => d.device_type === target);
@@ -793,7 +793,7 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
         return;
     }
     let trendHtml = '';
-    const hasConfirmationField = Object.prototype.hasOwnProperty.call(data, 'velocity_confirmed');
+    const hasConfirmationField = Object.hasOwn(data, 'velocity_confirmed');
     const movementConfirmed = hasConfirmationField
         ? data.velocity_confirmed === true
         : data.velocity_significant === true;

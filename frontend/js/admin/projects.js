@@ -237,13 +237,28 @@ class AdminProjectsFeature extends window.AdminManager {
             return;
         }
 
-        container.innerHTML = `
-            <div class="project-directory-summary" aria-label="Tổng quan dự án">
-                <span><strong>${this.projectsData.length}</strong> dự án</span>
-                <span><strong>${this.projectsData.reduce((total, project) => total + (Number(project.station_count) || 0), 0)}</strong> trạm quan trắc</span>
-            </div>
-            <div class="row g-3 management-project-grid">
-                ${this.projectsData.map(p => `
+        const cardsHtml = this.projectsData.map(p => {
+            let locationText = '';
+            if (p.location) {
+                if (typeof p.location === 'string') {
+                    locationText = p.location;
+                } else {
+                    const coords = `${p.location.lat ?? ''}, ${p.location.lon ?? ''}`;
+                    locationText = p.location.address || p.location.source || coords;
+                }
+            }
+            const locationHtml = p.location
+                ? `<p class="project-location mb-0"><i class="bi bi-geo-alt" aria-hidden="true"></i><span>${this.escapeHtml(locationText)}</span></p>`
+                : '';
+
+            const editButtonsHtml = canEdit ? `<button class="btn btn-sm btn-outline-primary project-action-btn project-edit-btn" onclick="event.stopPropagation(); window.adminManager.openProjectConfigModal(${Number(p.id)})" title="Chỉnh sửa dự án" aria-label="Chỉnh sửa dự án ${this.escapeHtml(p.name)}">
+                                        <i class="bi bi-pencil-square" aria-hidden="true"></i><span>Chỉnh sửa</span>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger project-action-btn" onclick="event.stopPropagation(); window.adminManager.deleteProject(${Number(p.id)})" title="Xóa dự án" aria-label="Xóa dự án ${this.escapeHtml(p.name)}">
+                                        <i class="bi bi-trash" aria-hidden="true"></i>
+                                    </button>` : '';
+
+            return `
                     <div class="col-md-6 col-xl-4">
                         <article class="card project-card management-project-card h-100" onclick="window.adminManager.loadStations(${Number(p.id)})" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();window.adminManager.loadStations(${Number(p.id)})}" tabindex="0" aria-label="Mở dự án ${this.escapeHtml(p.name)}">
                             <div class="card-body">
@@ -258,7 +273,7 @@ class AdminProjectsFeature extends window.AdminManager {
                                     <span class="project-count"><strong>${Number(p.station_count) || 0}</strong> trạm</span>
                                 </div>
                                 <p class="project-description">${this.escapeHtml(p.description || 'Chưa có mô tả cho dự án này.')}</p>
-                                ${p.location ? `<p class="project-location mb-0"><i class="bi bi-geo-alt" aria-hidden="true"></i><span>${this.escapeHtml(typeof p.location === 'string' ? p.location : (p.location.address || p.location.source || `${p.location.lat ?? ''}, ${p.location.lon ?? ''}`))}</span></p>` : ''}
+                                ${locationHtml}
                                 <p class="project-dem-summary mb-0"><i class="bi bi-layers" aria-hidden="true"></i>${Number(p.dems?.length) || 0} khu địa hình DEM</p>
 
                             </div>
@@ -267,17 +282,20 @@ class AdminProjectsFeature extends window.AdminManager {
                                     <button class="btn btn-sm btn-primary flex-grow-1" onclick="event.stopPropagation(); window.adminManager.loadStations(${Number(p.id)})">
                                         Mở dự án <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i>
                                     </button>
-                                    ${canEdit ? `<button class="btn btn-sm btn-outline-primary project-action-btn project-edit-btn" onclick="event.stopPropagation(); window.adminManager.openProjectConfigModal(${Number(p.id)})" title="Chỉnh sửa dự án" aria-label="Chỉnh sửa dự án ${this.escapeHtml(p.name)}">
-                                        <i class="bi bi-pencil-square" aria-hidden="true"></i><span>Chỉnh sửa</span>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-danger project-action-btn" onclick="event.stopPropagation(); window.adminManager.deleteProject(${Number(p.id)})" title="Xóa dự án" aria-label="Xóa dự án ${this.escapeHtml(p.name)}">
-                                        <i class="bi bi-trash" aria-hidden="true"></i>
-                                    </button>` : ''}
+                                    ${editButtonsHtml}
                                 </div>
                             </div>
                         </article>
-                    </div>
-                `).join('')}
+                    </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="project-directory-summary" aria-label="Tổng quan dự án">
+                <span><strong>${this.projectsData.length}</strong> dự án</span>
+                <span><strong>${this.projectsData.reduce((total, project) => total + (Number(project.station_count) || 0), 0)}</strong> trạm quan trắc</span>
+            </div>
+            <div class="row g-3 management-project-grid">
+                ${cardsHtml}
             </div>
         `;
     }

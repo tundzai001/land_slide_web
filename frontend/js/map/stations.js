@@ -474,6 +474,7 @@ async function loadProjectsAndClusters() {
                     .filter(station => station && hasValidLatLon(station.location));
                 const stationIds = clusterMembers.map(station => station.id);
                 const isTotal = c.cluster_type === 'total';
+                const defaultLabel = isTotal ? 'Cụm tổng' : 'Cụm quan trắc';
                 return {
                     config: c,
                     isTotal,
@@ -481,7 +482,7 @@ async function loadProjectsAndClusters() {
                     stationIdSet: new Set(stationIds.map(Number)),
                     stationNames: clusterMembers.map(st => st.name || st.station_code || String(st.id)),
                     latlngs: clusterMembers.map(st => [Number(st.location.lat), Number(st.location.lon)]),
-                    label: String(c.name || (isTotal ? 'Cụm tổng' : 'Cụm quan trắc')),
+                    label: String(c.name || defaultLabel),
                 };
             }).filter(cluster => cluster.latlngs.length >= 2);
 

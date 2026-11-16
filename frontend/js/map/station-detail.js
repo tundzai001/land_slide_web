@@ -112,8 +112,8 @@ function _showSirenIfAlerting(stationId, data) {
         const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
         if (sirenBtns.length > 0) {
             sirenBtns.forEach(b => {
-                const target = b.getAttribute('data-target');
-                let currentState = b.getAttribute('data-siren-state');
+                const target = b.dataset.target;
+                let currentState = b.dataset.sirenState;
 
                 // Determine target default status (might be offline)
                 const isOffline = target === 'pi_center' ? centerDeviceStatus === 'offline' : pointDeviceStatus === 'offline';
@@ -474,12 +474,15 @@ function formatImuDelta(val, axis) {
         ? [(dispMm / 10).toFixed(2), 'cm']
         : [dispMm.toFixed(1), 'mm'];
     const threshold = unit === 'cm' ? 0.05 : 0.5;
-    const arrows = {
-        roll: dispMm > threshold ? ' →' : dispMm < -threshold ? ' ←' : '',
-        pitch: dispMm > threshold ? ' ↑' : dispMm < -threshold ? ' ↓' : '',
-        yaw: dispMm > threshold ? ' ↻' : dispMm < -threshold ? ' ↺' : '',
-    };
-    return `${sign}${displayVal} ${unit}${arrows[axis] || ''}`;
+    const positiveArrows = { roll: ' →', pitch: ' ↑', yaw: ' ↻' };
+    const negativeArrows = { roll: ' ←', pitch: ' ↓', yaw: ' ↺' };
+    let arrow = '';
+    if (dispMm > threshold) {
+        arrow = positiveArrows[axis] || '';
+    } else if (dispMm < -threshold) {
+        arrow = negativeArrows[axis] || '';
+    }
+    return `${sign}${displayVal} ${unit}${arrow}`;
 }
 
 function updateGnssFixBadge(fixMode, fixQuality) {
@@ -929,8 +932,8 @@ function updateSidebarUI(data) {
         if (imuOnline && batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
             if (batteryContainer) batteryContainer.style.display = '';
             setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
-        } else {
-            if (batteryContainer) batteryContainer.style.display = 'none';
+        } else if (batteryContainer) {
+            batteryContainer.style.display = 'none';
         }
     }
 }
@@ -1181,7 +1184,7 @@ function renderChart(id, history, key, color, label) {
     }
 
     // Theme-aware colors
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const isDark = document.documentElement.dataset.theme === 'dark';
     const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
     const tickColor = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
 
@@ -1287,7 +1290,7 @@ function renderImuChart(history) {
     }
 
     // Theme-aware colors
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const isDark = document.documentElement.dataset.theme === 'dark';
     const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
     const tickColor = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)';
     const legendColor = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)';

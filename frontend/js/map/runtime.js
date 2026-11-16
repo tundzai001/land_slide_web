@@ -618,12 +618,17 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             current.detail = message || current.detail;
             gnssAdjustmentDebugState.workflowRevision += 1;
         } else {
+            let title = 'Quy trình bị dừng';
+            if (normalizedPhase === 'PARTIAL_FAILED') {
+                title = 'Một số cụm không hoàn tất';
+            } else if (normalizedPhase === 'FAILED_QUALITY_GATE') {
+                title = 'Không đạt kiểm định chất lượng';
+            }
             upsertGnssWorkflowNode('error', {
-                title: normalizedPhase === 'PARTIAL_FAILED'
-                    ? 'Một số cụm không hoàn tất'
-                    : normalizedPhase === 'FAILED_QUALITY_GATE'
-                    ? 'Không đạt kiểm định chất lượng'
-                    : 'Quy trình bị dừng', detail: message || 'Máy chủ báo lỗi.', status: normalizedPhase === 'PARTIAL_FAILED' ? 'warning' : 'error', icon: 'bi-exclamation-triangle',
+                title,
+                detail: message || 'Máy chủ báo lỗi.',
+                status: normalizedPhase === 'PARTIAL_FAILED' ? 'warning' : 'error',
+                icon: 'bi-exclamation-triangle',
             });
         }
         renderGnssAdjustmentWorkflow();

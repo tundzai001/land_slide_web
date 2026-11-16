@@ -66,12 +66,21 @@ class AdminUsersFeature extends window.AdminManager {
             // Show assigned projects for operators (by name)
             let projectBadges = '';
             if ((u.role === 'operator' || u.role === 'viewer') && u.assigned_projects && u.assigned_projects.length > 0) {
-                projectBadges = `<br><small class="text-muted">Dự án: ${u.assigned_projects.map(
-                    pid => `<span class="user-project-badge">${this.escapeUserValue(this.getProjectName(pid))}</span>`
-                ).join(' ')}</small>`;
+                const projectItems = u.assigned_projects
+                    .map(pid => `<span class="user-project-badge">${this.escapeUserValue(this.getProjectName(pid))}</span>`)
+                    .join(' ');
+                projectBadges = `<br><small class="text-muted">Dự án: ${projectItems}</small>`;
             } else if (u.role === 'viewer') {
                 projectBadges = `<br><small class="text-muted">Dự án: <span class="user-project-badge">Tất cả</span></small>`;
             }
+
+            const adminActions = u.username === 'admin' ? '' : `
+                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}" aria-label="${u.is_active ? 'Khóa' : 'Mở khóa'} ${this.escapeUserValue(u.username)}">
+                            <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
+                        </button>
+                        <button class="btn btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteUser(${u.id})" title="Xóa tài khoản" aria-label="Xóa ${this.escapeUserValue(u.username)}">
+                            <i class="bi bi-trash"></i>
+                        </button>`;
 
             return `
             <tr class="management-table-row">
@@ -90,14 +99,7 @@ class AdminUsersFeature extends window.AdminManager {
                 <td>
                     <div class="btn-group btn-group-sm">
                         <button class="btn btn-outline-primary management-icon-btn" onclick="window.adminManager.showEditUserModal(${u.id})" title="Sửa cấu hình" aria-label="Sửa cấu hình ${this.escapeUserValue(u.username)}"><i class="bi bi-sliders"></i></button>
-                        ${u.username === 'admin' ? '' : `
-                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}" aria-label="${u.is_active ? 'Khóa' : 'Mở khóa'} ${this.escapeUserValue(u.username)}">
-                            <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
-                        </button>
-                        <button class="btn btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteUser(${u.id})" title="Xóa tài khoản" aria-label="Xóa ${this.escapeUserValue(u.username)}">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                        `}
+                        ${adminActions}
                     </div>
                 </td>
             </tr>
@@ -136,7 +138,7 @@ class AdminUsersFeature extends window.AdminManager {
             const projects = await res.json();
             if (Number(document.getElementById('edit-user-id').value) !== Number(userId)) return;
             const assigned = new Set((user.assigned_projects || []).map(Number));
-            container.innerHTML = projects.length ? projects.map(project => `<label class="user-project-option"><input type="checkbox" value="${Number(project.id)}" ${assigned.has(Number(project.id)) ? 'checked' : ''}><span><strong>${this.escapeUserValue(project.name || project.project_code)}</strong><small>${this.escapeUserValue(project.project_code || `#${project.id}`)}</small></span></label>`).join('') : '<span class="text-muted small">Chưa có dự án</span>';
+            container.innerHTML = projects.length ? projects.map(project => `<label class="user-project-option"><input type="checkbox" value="${Number(project.id)}" ${assigned.has(Number(project.id)) ? 'checked' : ''}><span><strong>${this.escapeUserValue(project.name || project.project_code)}</strong><small>${this.escapeUserValue(project.project_code || ('#' + project.id))}</small></span></label>`).join('') : '<span class="text-muted small">Chưa có dự án</span>';
             this.editUserProjectsReady = true;
             button.disabled = false;
         } catch (error) {
@@ -383,7 +385,7 @@ class AdminUsersFeature extends window.AdminManager {
         document.querySelectorAll('.admin-sidebar .nav-item').forEach(item => {
             const link = item.querySelector('[data-tab]');
             if (link) {
-                const tab = link.getAttribute('data-tab');
+                const tab = link.dataset.tab;
                 if (tab !== 'tab-projects') {
                     item.style.display = 'none';
                 }

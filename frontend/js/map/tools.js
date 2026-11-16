@@ -350,8 +350,8 @@ function setupTimelineSlider() {
             if (window.map) {
                 if (reqDaySlot <= dayValue) {
                     if (!window.map.hasLayer(marker)) marker.addTo(window.map);
-                } else {
-                    if (window.map.hasLayer(marker)) window.map.removeLayer(marker);
+                } else if (window.map.hasLayer(marker)) {
+                    window.map.removeLayer(marker);
                 }
             }
         });

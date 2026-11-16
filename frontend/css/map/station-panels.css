@@ -78,7 +78,7 @@
     border-radius: var(--radius-md);
     cursor: pointer;
     border: 2px solid transparent;
-    transition: all 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
     line-height: 1.5;
     min-height: 60px;
     display: flex;
@@ -99,6 +99,8 @@
     display: flex;
     align-items: baseline;
     gap: 4px;
+    color: var(--accent-primary);
+    transition: color 0.3s ease, transform 0.15s ease;
 }
 
 /*  NÃšT ÄÃ“NG SIDEBAR - Tab á»Ÿ mÃ©p pháº£i  */
@@ -119,7 +121,7 @@
     justify-content: center;
     font-size: 1rem;
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: var(--z-popover);
 }
 
@@ -154,7 +156,7 @@
     font-weight: 600;
     padding: 6px 16px;
     border-radius: 8px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
@@ -215,7 +217,7 @@ body.map-is-moving .detail-sidebar,
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
     font-size: 0.85rem;
 }
 
@@ -249,7 +251,7 @@ body.map-is-moving .detail-sidebar,
     padding: 14px;
     border-radius: var(--radius-md);
     border: 1px solid var(--glass-border);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
     width: 100%;
@@ -292,9 +294,13 @@ body.map-is-moving .detail-sidebar,
     color: var(--text-secondary);
     text-transform: uppercase;
     margin-bottom: 4px;
-    display: flex;
-    align-items: center;
     font-weight: 600;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 5px 6px;
+    min-width: 0;
+    align-items: start !important;
 }
 
 .gnss-fix-badge {
@@ -309,16 +315,6 @@ body.map-is-moving .detail-sidebar,
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-/* Keep status badges inside the sensor card at narrow desktop/tablet widths. */
-.sensor-label {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
-    gap: 5px 6px;
-    min-width: 0;
-    align-items: start !important;
 }
 
 .sensor-label > span:first-child {
@@ -358,12 +354,6 @@ body.map-is-moving .detail-sidebar,
     color: var(--state-danger-text);
     background: var(--state-danger-bg);
     border-color: var(--accent-danger);
-}
-
-.sensor-value-large {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--accent-primary);
 }
 
 .sensor-unit {
@@ -437,11 +427,6 @@ body.map-is-moving .detail-sidebar,
 /* Class applied briefly when value updates */
 .value-updated {
     animation: valueFlash 0.8s ease-out;
-}
-
-/* Smooth transitions on sensor value elements */
-.sensor-value-large {
-    transition: color 0.3s ease, transform 0.15s ease;
 }
 
 /* Number text uses tabular-nums for stable width during counting */
@@ -540,7 +525,7 @@ body.map-is-moving .detail-sidebar,
     font-weight: 600;
     font-size: 0.9rem;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -612,7 +597,7 @@ body.map-is-moving .detail-sidebar,
     justify-content: center;
     gap: 0.5rem;
     margin-top: 0.75rem;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     color: white;
 }
 
@@ -682,3 +667,14 @@ body.map-is-moving .detail-sidebar,
 .monitoring-value-card strong, .monitoring-value-card small { display: block; }
 .monitoring-value-card small { color: var(--text-secondary); font-size: 12px; margin: 4px 0; }
 .monitoring-value-card div { font-size: 20px; font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

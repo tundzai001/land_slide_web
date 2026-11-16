@@ -162,12 +162,10 @@ class AdminPiCenterFeature extends window.AdminManager {
                 !d.pi_center_id
             );
 
-            if (pointsToAssign.length === 0) {
-                if (optionsBox) {
+            if (optionsBox) {
+                if (pointsToAssign.length === 0) {
                     optionsBox.innerHTML = '<div class="text-muted small">(Không có Pi Hiện trường nào đang rảnh và đã Activated)</div>';
-                }
-            } else {
-                if (optionsBox) {
+                } else {
                     optionsBox.innerHTML = pointsToAssign.map(p => `
                         <button type="button" class="device-pick-option" data-point-id="${Number(p.id)}">
                             <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>

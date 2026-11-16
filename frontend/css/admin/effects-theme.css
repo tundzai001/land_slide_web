@@ -138,7 +138,7 @@
 
 [data-theme="dark"] .table tbody tr {
     background: transparent !important;
-    transition: all 0.2s;
+    transition: background 0.2s, box-shadow 0.2s;
 }
 
 [data-theme="dark"] .table tbody tr:hover {
@@ -203,5 +203,16 @@
 [data-theme="light"] .form-control,
 [data-theme="light"] .form-select {
     background: white;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }
 

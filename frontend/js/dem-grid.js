@@ -30,8 +30,8 @@
         const nrows = header.nrows;
         const cellsize = header.cellsize;
         const nodata = header.nodata_value;
-        const xKey = Object.prototype.hasOwnProperty.call(header, 'xllcorner') ? 'xllcorner' : 'xllcenter';
-        const yKey = Object.prototype.hasOwnProperty.call(header, 'yllcorner') ? 'yllcorner' : 'yllcenter';
+        const xKey = Object.hasOwn(header, 'xllcorner') ? 'xllcorner' : 'xllcenter';
+        const yKey = Object.hasOwn(header, 'yllcorner') ? 'yllcorner' : 'yllcenter';
         if (!Number.isInteger(ncols) || !Number.isInteger(nrows) || ncols < 1 || nrows < 1 || ncols * nrows > 10000000
             || !Number.isFinite(cellsize) || cellsize <= 0 || !Number.isFinite(nodata)
             || !Number.isFinite(header[xKey]) || !Number.isFinite(header[yKey])) {

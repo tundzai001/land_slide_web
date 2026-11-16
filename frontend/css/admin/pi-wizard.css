@@ -84,80 +84,13 @@
     margin-top: 16px;
 }
 
-#stationConfigModal .wizard-steps {
-    display: flex !important;
-    justify-content: space-between;
-    margin-bottom: 32px;
-    position: relative;
-}
-
-#stationConfigModal .wizard-steps::before {
-    content: '';
-    position: absolute;
-    top: 20px;
-    left: 10%;
-    right: 10%;
-    height: 2px;
-    background: var(--border-color);
-    z-index: 0;
-}
-
-#stationConfigModal .wizard-step {
-    flex: 1;
-    text-align: center;
-    position: relative;
-    z-index: 1;
-}
-
-#stationConfigModal .step-circle {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: var(--bg-tertiary);
-    border: 2px solid var(--border-color);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    margin-bottom: 8px;
-    transition: all 0.3s;
-}
-
-#stationConfigModal .wizard-step.active .step-circle {
-    background: var(--accent-primary);
-    color: white;
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
-}
-
-#stationConfigModal .step-label {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-
-#stationConfigModal .wizard-step.active .step-label {
-    color: var(--accent-primary);
-    font-weight: 600;
-}
-
 #stationConfigModal .wizard-content {
     display: none !important;
 }
 
 #stationConfigModal .wizard-content.active {
     display: block !important;
-    animation: fadeIn 0.3s;
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    animation: stationStepIn 220ms ease-out;
 }
 
 .btn-gradient {
@@ -165,7 +98,7 @@
     border: none;
     color: white;
     font-weight: 600;
-    transition: all 0.3s;
+    transition: transform 0.3s, box-shadow 0.3s;
 }
 
 .btn-gradient:hover {
@@ -180,40 +113,6 @@
     top: 0;
     z-index: 10;
     background: var(--bg-secondary);
-}
-
-#stationConfigModal .modal-content {
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    background-color: var(--bg-secondary) !important;
-    max-height: 85vh;
-}
-
-#stationConfigModal .modal-body {
-    position: relative;
-    z-index: 1;
-    overflow-y: auto;
-    flex: 1 1 auto;
-    padding-bottom: 24px;
-    min-height: 0;
-}
-
-#stationConfigModal .modal-header {
-    position: relative;
-    z-index: 50;
-    background-color: var(--bg-secondary) !important;
-    border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0;
-}
-
-#stationConfigModal .wizard-steps-container {
-    background-color: var(--bg-secondary) !important;
-    border-bottom: 1px solid var(--border-color);
-    z-index: 40;
-    position: relative;
-    padding: 24px 24px 0 24px;
-    flex-shrink: 0;
 }
 
 #stationConfigModal .modal-footer {
@@ -398,6 +297,9 @@
 }
 
 #stationConfigModal .modal-content {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     max-height: calc(100dvh - 32px);
     border: 1px solid color-mix(in srgb, var(--station-border) 88%, transparent);
     border-radius: 20px;
@@ -406,6 +308,9 @@
 }
 
 #stationConfigModal .modal-header {
+    position: relative;
+    z-index: 50;
+    flex-shrink: 0;
     min-height: 78px;
     padding: 16px 24px;
     background: var(--station-surface) !important;
@@ -476,14 +381,24 @@
 #stationConfigModal .wizard-steps-container {
     padding: 14px 24px 16px;
     background: var(--station-surface) !important;
+    border-bottom: 1px solid var(--station-border);
+    z-index: 40;
+    position: relative;
+    flex-shrink: 0;
 }
 
 #stationConfigModal .wizard-steps {
+    display: flex !important;
+    justify-content: space-between;
+    position: relative;
     gap: 0;
     margin: 0;
 }
 
 #stationConfigModal .wizard-steps::before {
+    content: '';
+    position: absolute;
+    z-index: 0;
     top: 17px;
     left: 12.5%;
     right: 12.5%;
@@ -492,12 +407,20 @@
 }
 
 #stationConfigModal .wizard-step {
+    flex: 1;
+    text-align: center;
+    position: relative;
+    z-index: 1;
     min-width: 0;
 }
 
 #stationConfigModal .step-circle {
     width: 34px;
     height: 34px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     margin-bottom: 7px;
     border: 1px solid var(--station-border);
     background: var(--station-surface);
@@ -537,14 +460,15 @@
 }
 
 #stationConfigModal .modal-body {
+    position: relative;
+    z-index: 1;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 26px 28px 30px;
     background: var(--station-subtle);
     scrollbar-color: color-mix(in srgb, var(--station-muted) 45%, transparent) transparent;
     scrollbar-width: thin;
-}
-
-#stationConfigModal .wizard-content.active {
-    animation: stationStepIn 220ms ease-out;
 }
 
 @keyframes stationStepIn {

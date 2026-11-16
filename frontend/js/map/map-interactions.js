@@ -1600,8 +1600,8 @@ function setupEventListeners() {
                 return;
             }
             if (!currentAlertStationId) return;
-            const state = sirenToggleBtn.getAttribute('data-siren-state');
-            const target = sirenToggleBtn.getAttribute('data-target') || 'all';
+            const state = sirenToggleBtn.dataset.sirenState;
+            const target = sirenToggleBtn.dataset.target || 'all';
             if (state === 'idle') return; // disabled, không làm gì
 
             try {
@@ -1639,7 +1639,7 @@ function setupEventListeners() {
                 console.error('Error toggling siren:', error);
                 window.toast?.error('Cannot connect to server');
                 // Khôi phục trạng thái cũ
-                const target = sirenToggleBtn.getAttribute('data-target') || 'all';
+                const target = sirenToggleBtn.dataset.target || 'all';
                 setSirenButtonState(state, target);
             }
         });

@@ -52,8 +52,12 @@ html[data-authz-lock="expired"] [data-private-content] {
 .btn {
     border-radius: 10px;
     font-weight: 600;
-    padding: 10px 24px;
-    transition: all var(--transition-fast);
+    padding: 10px 16px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
     position: relative;
     overflow: hidden;
 }
@@ -114,7 +118,7 @@ html[data-authz-lock="expired"] [data-private-content] {
     font-size: 1.5rem;
     color: white;
     z-index: var(--z-toast);
-    transition: all var(--transition-base);
+    transition: transform var(--transition-base), box-shadow var(--transition-base);
 }
 
 .theme-toggle:hover {
@@ -135,7 +139,7 @@ html[data-authz-lock="expired"] [data-private-content] {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: 16px;
-    transition: all var(--transition-base);
+    transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
 
 .card:hover {
@@ -151,7 +155,7 @@ html[data-authz-lock="expired"] [data-private-content] {
     color: var(--text-primary);
     border-radius: 8px;
     padding: 10px 16px;
-    transition: all var(--transition-fast);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 
 .form-control:focus,
@@ -251,7 +255,7 @@ html[data-authz-lock="expired"] [data-private-content] {
 
 .dropdown-item {
     color: var(--text-primary);
-    transition: all var(--transition-fast);
+    transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .dropdown-item:hover {
@@ -304,14 +308,6 @@ a.button {
 }
 
 /* Ensure all buttons have touch-friendly minimum heights */
-.btn {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 10px 16px;
-}
-
 .btn-sm {
     min-height: 44px;
     padding: 8px 12px;

@@ -158,9 +158,10 @@ class DatabaseManager {
     buildDatasetRequest(offset = this.offset) {
         const dataset = this.currentDataset;
         const config = this.datasetConfig(dataset);
-        const sort = ['sensor_data', 'gnss_adjustments'].includes(this.currentDataset)
-            ? (this.sort === 'id' ? 'timestamp' : '-timestamp')
-            : this.sort;
+        let sort = this.sort;
+        if (['sensor_data', 'gnss_adjustments'].includes(this.currentDataset)) {
+            sort = this.sort === 'id' ? 'timestamp' : '-timestamp';
+        }
         const query = new URLSearchParams({ offset: String(offset), limit: String(this.limit), sort });
         const search = document.getElementById('db-search')?.value.trim() || '';
         if (search && ['stations', 'devices'].includes(dataset)) query.set('q', search);

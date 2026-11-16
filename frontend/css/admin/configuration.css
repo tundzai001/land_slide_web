@@ -1,10 +1,12 @@
+
+
 .config-section {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 24px;
     margin-bottom: 24px;
-    transition: all 0.3s;
+    transition: border-color 0.3s, box-shadow 0.3s;
 }
 
 .config-section:hover {
@@ -111,39 +113,7 @@
     color: var(--text-primary) !important;
 }
 
-.config-section {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 24px;
-    margin-bottom: 24px;
-    transition: all 0.3s;
-}
 
-.config-section:hover {
-    border-color: var(--accent-primary);
-    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.1);
-}
-
-.section-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
-    padding-bottom: 12px;
-    border-bottom: 2px solid var(--border-color);
-}
-
-.section-header i {
-    font-size: 1.5rem;
-    color: var(--accent-primary);
-}
-
-.section-header h5 {
-    margin: 0;
-    font-weight: 700;
-    color: var(--text-primary);
-}
 
 /* Input Group Styling for Timeout Controls */
 .input-group .form-control {
@@ -311,6 +281,7 @@ input[type="number"] {
     font-family: var(--font-mono);
     font-weight: 600;
     letter-spacing: 0.5px;
+    -moz-appearance: textfield;
 }
 
 /* Remove spinner arrows in number inputs (optional) */
@@ -318,10 +289,6 @@ input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
-}
-
-input[type="number"] {
-    -moz-appearance: textfield;
 }
 
 /* Focus State Enhancement */

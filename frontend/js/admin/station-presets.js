@@ -205,7 +205,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
             }
             const compareBase = item.name === 'IMU' ? item.critical : Math.max(item.warning, item.critical);
             if (item.safe <= compareBase) {
-                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nên lớn hơn ${item.name === 'IMU' ? 'Critical' : 'Warning/Critical'} (${item.name === 'IMU' ? item.critical : `${item.warning}/${item.critical}`})`);
+                const targetLabel = item.name === 'IMU' ? 'Critical' : 'Warning/Critical';
+                const stepsSummary = item.name === 'IMU' ? item.critical : `${item.warning}/${item.critical}`;
+                warnings.push(`${item.name}: Safe Confirm Steps (${item.safe}) nên lớn hơn ${targetLabel} (${stepsSummary})`);
             }
         });
 

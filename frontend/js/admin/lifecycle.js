@@ -50,15 +50,13 @@ class AdminLifecycleFeature extends window.AdminManager {
                     content.style.maxHeight = '1000px';
                 }, 10);
             }
-        } else {
-            if (animate) {
-                content.style.maxHeight = '0px';
-                setTimeout(() => {
-                    content.style.display = 'none';
-                }, 300);
-            } else {
+        } else if (animate) {
+            content.style.maxHeight = '0px';
+            setTimeout(() => {
                 content.style.display = 'none';
-            }
+            }, 300);
+        } else {
+            content.style.display = 'none';
         }
     }
 
@@ -75,15 +73,13 @@ class AdminLifecycleFeature extends window.AdminManager {
                     content.style.maxHeight = '2000px';
                 }, 10);
             }
-        } else {
-            if (animate) {
-                content.style.maxHeight = '0px';
-                setTimeout(() => {
-                    content.style.display = 'none';
-                }, 300);
-            } else {
+        } else if (animate) {
+            content.style.maxHeight = '0px';
+            setTimeout(() => {
                 content.style.display = 'none';
-            }
+            }, 300);
+        } else {
+            content.style.display = 'none';
         }
     }
 }

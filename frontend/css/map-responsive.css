@@ -7,6 +7,11 @@
     --map-edge: 16px;
     --map-bottom-safe: max(18px, env(safe-area-inset-bottom));
     --map-control-size: 42px;
+    --map-panel-gap: 10px;
+    --map-panel-radius: 16px;
+    --map-detail-width: clamp(370px, 30vw, 440px);
+    --map-panel-surface: color-mix(in srgb, var(--bg-secondary) 96%, transparent);
+    --map-panel-shadow: 0 16px 42px rgba(15, 23, 42, .16);
 }
 
 .top-navbar {
@@ -57,22 +62,29 @@ html[data-app-view="map"] #app-root {
 }
 
 .station-list-sidebar {
-    top: calc(var(--map-navbar-h) + 8px);
-    height: calc(100svh - var(--map-navbar-h) - 8px);
+    top: calc(var(--map-navbar-h) + var(--map-panel-gap));
+    left: var(--map-panel-gap);
+    width: min(326px, calc(100vw - var(--map-panel-gap) * 2));
+    height: calc(100svh - var(--map-navbar-h) - var(--map-panel-gap) * 2);
+    border-radius: var(--map-panel-radius);
+    overflow: visible;
 }
 
 .detail-sidebar {
     top: calc(var(--map-navbar-h) + 8px);
-    width: clamp(360px, 34vw, 560px);
+    width: var(--map-detail-width);
     height: calc(100svh - var(--map-navbar-h) - 8px);
+    border-radius: var(--map-panel-radius);
+    border-right: 1px solid var(--border-color);
 }
 
 .gnss-advanced-sidepanel {
     top: calc(var(--map-navbar-h) + 8px);
     right: clamp(360px, 34vw, 560px);
-    width: clamp(300px, 28vw, 420px);
+    width: clamp(320px, 26vw, 400px);
     height: calc(100svh - var(--map-navbar-h) - 32px);
     max-height: none;
+    border-radius: var(--map-panel-radius);
 }
 
 .gnss-advanced-sidepanel.expanded {
@@ -96,38 +108,29 @@ html[data-app-view="map"] #app-root {
 }
 
 .sensor-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start !important;
     column-gap: 8px;
-}
-
-.sensor-label > .gnss-fix-badge,
-.sensor-label > .sensor-offline-badge,
-.sensor-label > .imu-offline-badge {
-flex: 0 0 auto;
-min-width: max-content;
-}
-
-/* Keep long RTK labels inside the sensor card at narrow desktop widths. */
-.sensor-label {
-display: flex;
-flex-wrap: wrap;
-align-items: center;
-justify-content: flex-start !important;
-row-gap: 6px;
+    row-gap: 6px;
 }
 
 .sensor-label > span:first-child {
-flex: 1 1 150px;
-min-width: 0;
+    flex: 1 1 150px;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .sensor-label > .gnss-fix-badge,
 .sensor-label > .sensor-offline-badge,
 .sensor-label > .imu-offline-badge {
-min-width: 0;
-max-width: 100%;
-overflow: hidden;
-text-overflow: ellipsis;
-white-space: nowrap;
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .sensor-label > .gnss-fix-badge {
@@ -520,15 +523,6 @@ html[data-realtime="disconnected"] .top-navbar::after {
     }
 }
 
-/* Unified map workspace: one spacing, surface and panel geometry system. */
-:root {
-    --map-panel-gap: 10px;
-    --map-panel-radius: 16px;
-    --map-detail-width: clamp(370px, 30vw, 440px);
-    --map-panel-surface: color-mix(in srgb, var(--bg-secondary) 96%, transparent);
-    --map-panel-shadow: 0 16px 42px rgba(15, 23, 42, .16);
-}
-
 .station-list-sidebar,
 .detail-sidebar,
 .charts-panel,
@@ -542,21 +536,6 @@ html[data-realtime="disconnected"] .top-navbar::after {
     background: var(--map-panel-surface) !important;
     backdrop-filter: blur(18px) saturate(130%) !important;
     -webkit-backdrop-filter: blur(18px) saturate(130%) !important;
-}
-
-.station-list-sidebar {
-    top: calc(var(--map-navbar-h) + var(--map-panel-gap));
-    left: var(--map-panel-gap);
-    width: min(326px, calc(100vw - var(--map-panel-gap) * 2));
-    height: calc(100svh - var(--map-navbar-h) - var(--map-panel-gap) * 2);
-    border-radius: var(--map-panel-radius);
-    overflow: visible;
-}
-
-.detail-sidebar {
-    width: var(--map-detail-width);
-    border-radius: var(--map-panel-radius);
-    border-right: 1px solid var(--border-color);
 }
 
 .detail-sidebar-header {
@@ -778,11 +757,6 @@ html[data-realtime="disconnected"] .top-navbar::after {
 #realtime-imu-3d-scene {
     width: 100%;
     height: 100%;
-}
-
-.gnss-advanced-sidepanel {
-    width: clamp(320px, 26vw, 400px);
-    border-radius: var(--map-panel-radius);
 }
 
 @media (min-width: 1800px) {

@@ -194,9 +194,9 @@
         navigation.addEventListener('click', (event) => {
             const button = event.target.closest('button');
             if (!button) return;
-            if (button.hasAttribute('data-more')) { more.hidden = !more.hidden; return; }
-            if (button.hasAttribute('data-theme-action')) { document.getElementById('theme-toggle')?.click(); more.hidden = true; return; }
-            if (button.hasAttribute('data-logout-action')) { document.getElementById('logout-btn')?.click(); return; }
+            if ('more' in button.dataset) { more.hidden = !more.hidden; return; }
+            if ('themeAction' in button.dataset) { document.getElementById('theme-toggle')?.click(); more.hidden = true; return; }
+            if ('logoutAction' in button.dataset) { document.getElementById('logout-btn')?.click(); return; }
             const tab = button.dataset.tab;
             if (tab) {
                 window.adminManager?.switchTab(tab, button);
@@ -249,8 +249,8 @@
     }
     async function bootLegacy(view) {
         document.documentElement.dataset.appView = view;
-        if (view === 'admin') root.setAttribute('data-private-content', '');
-        else root.removeAttribute('data-private-content');
+        if (view === 'admin') root.dataset.privateContent = '';
+        else delete root.dataset.privateContent;
         document.title = view === 'map' ? 'Bản đồ realtime · Monitoring' : 'Quản trị · Monitoring';
         const rescueAvailability = fetch('/api/public/rescue-config', {
             cache: 'no-store', signal: AbortSignal.timeout(3000),

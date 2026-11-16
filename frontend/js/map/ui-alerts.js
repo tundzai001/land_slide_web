@@ -189,8 +189,8 @@ function setSirenButtonState(state, target = null) {
         : document.querySelectorAll('.btn-siren-toggle');
 
     btns.forEach(btn => {
-        btn.setAttribute('data-siren-state', state);
-        const iconBase = btn.getAttribute('data-target') === 'pi_center' ? 'Center' : 'Point';
+        btn.dataset.sirenState = state;
+        const iconBase = btn.dataset.target === 'pi_center' ? 'Center' : 'Point';
 
         switch (state) {
             case 'idle':

@@ -462,18 +462,18 @@
     gap: 10px;
     padding: 0 18px;
     border: 0;
-    border-radius: 12px;
-    background: var(--login-accent);
+    border-radius: var(--control-radius);
+    background: var(--accent-primary);
     color: #fff;
     font: inherit;
     font-size: .9rem;
     font-weight: 760;
     cursor: pointer;
-    box-shadow: 0 12px 24px rgba(11, 148, 136, .2);
+    box-shadow: none;
     transition: background .2s ease, box-shadow .2s ease, transform .2s ease;
 }
 
-.login-page .login-submit:hover { background: var(--login-accent-strong); box-shadow: 0 14px 30px rgba(11, 148, 136, .25); }
+.login-page .login-submit:hover { background: var(--accent-primary-hover); box-shadow: none; }
 .login-page .login-submit:active { transform: translateY(1px); }
 .login-page .login-submit:disabled { cursor: wait; opacity: .65; box-shadow: none; }
 
@@ -579,9 +579,7 @@
 .login-capabilities small { margin-top:5px; font-size:13px; color:var(--workspace-chrome-muted); }
 .login-panel, [data-theme="dark"] .login-panel { background:var(--surface-canvas); }
 .login-card, [data-theme="dark"] .login-card { border:1px solid var(--border-color); border-radius:12px; background:var(--surface-default); box-shadow:var(--panel-shadow); }
-.login-field input, .login-input-shell, .login-password-row, .login-page .login-submit { border-radius:var(--control-radius); }
-.login-page .login-submit { background:var(--accent-primary); box-shadow:none; }
-.login-page .login-submit:hover { background:var(--accent-primary-hover); box-shadow:none; }
+.login-field input, .login-input-shell, .login-password-row { border-radius:var(--control-radius); }
 [data-theme="dark"] .login-page .login-submit { color:var(--bg-primary); }
 .login-theme { border-radius:var(--control-radius); box-shadow:none; }
 @media(max-width:900px) { .login-capabilities { display:none; }.login-visual-copy h1 { font-size:28px; } }

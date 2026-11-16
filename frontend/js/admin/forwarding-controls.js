@@ -63,16 +63,14 @@ class AdminForwardingControlsFeature extends window.AdminManager {
                 content.style.maxHeight = '600px';
                 content.style.opacity = '1';
             }
-        } else {
-            if (animate) {
-                content.style.maxHeight = '0px';
-                content.style.opacity = '0';
-                setTimeout(() => {
-                    content.style.display = 'none';
-                }, 300);
-            } else {
+        } else if (animate) {
+            content.style.maxHeight = '0px';
+            content.style.opacity = '0';
+            setTimeout(() => {
                 content.style.display = 'none';
-            }
+            }, 300);
+        } else {
+            content.style.display = 'none';
         }
     }
 

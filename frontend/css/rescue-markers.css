@@ -126,7 +126,7 @@
     position: relative;
     flex-shrink: 0 !important;
     margin: 0;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .map-layer-checkbox:checked {
@@ -203,7 +203,7 @@ body.rescue-mode-active .toggle-list-btn {
         0 6px 20px rgba(220, 53, 69, 0.45),
         0 2px 6px rgba(0, 0, 0, 0.15);
     overflow: hidden;
-    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: padding-right 0.35s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     animation: rescueFabPulse 2.5s infinite ease-in-out;
 }
 
@@ -406,7 +406,7 @@ body.rescue-mode-active .toggle-list-btn {
 .glass-modal-content .form-select {
     background: rgba(255, 255, 255, 0.5) !important;
     border: 1px solid rgba(0, 0, 0, 0.1) !important;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
     color: var(--text-primary) !important;
 }
 
@@ -506,4 +506,15 @@ body.rescue-mode-active .toggle-list-btn {
 [data-theme="dark"] .sensor-item:hover {
     background: rgba(0, 0, 0, 0.4) !important;
     border-color: var(--accent-primary) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

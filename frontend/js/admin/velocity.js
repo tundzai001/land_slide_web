@@ -30,12 +30,8 @@ class AdminVelocityFeature extends window.AdminManager {
                 `<option value="${u}"${u === vel.unit ? ' selected' : ''}>${u}</option>`
             ).join('');
 
-            return `
-            <tr>
-                <td><strong>${vel.name}</strong></td>
-                <td>
-                    ${vel.editable ? `
-                        <div class="input-group input-group-sm">
+            const thresholdHtml = vel.editable
+                ? `<div class="input-group input-group-sm">
                             <input type="number"
                                    class="form-control"
                                    value="${vel.threshold}"
@@ -46,9 +42,13 @@ class AdminVelocityFeature extends window.AdminManager {
                                     onchange="window.adminManager.updateVelocityUnit(${index}, this.value)">
                                 ${unitSelectHtml}
                             </select>
-                        </div>
-                    ` : `<code>${vel.threshold} ${vel.unit}</code>`}
-                </td>
+                        </div>`
+                : `<code>${vel.threshold} ${vel.unit}</code>`;
+
+            return `
+            <tr>
+                <td><strong>${vel.name}</strong></td>
+                <td>${thresholdHtml}</td>
                 <td class="text-muted small">${vel.description}</td>
             </tr>`;
         }).join('');

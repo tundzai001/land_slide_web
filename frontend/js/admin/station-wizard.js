@@ -715,8 +715,8 @@ class AdminStationWizardFeature extends window.AdminManager {
             this.loadWizardPendingDevices().catch((e) => {
                 console.error('Failed to load pending devices in step 3:', e);
             });
-        } else {
-            if (pendingSection) pendingSection.style.display = 'none';
+        } else if (pendingSection) {
+            pendingSection.style.display = 'none';
         }
 
         this.syncMqttSectionsForStep();

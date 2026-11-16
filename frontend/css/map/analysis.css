@@ -77,7 +77,7 @@
     justify-content: center;
     border-radius: 8px;
     font-size: 1.2rem;
-    transition: all 0.3s;
+    transition: background 0.3s, color 0.3s, transform 0.3s;
 }
 
 .charts-panel-header .btn:hover {
@@ -100,7 +100,7 @@
     padding: 1.5rem;
     margin-bottom: 1.5rem;
     border: 1px solid var(--border-color);
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
@@ -353,7 +353,7 @@
     font-weight: 600;
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -421,7 +421,7 @@
     border: 1px solid var(--border-color);
     border-radius: 10px;
     padding: 10px 12px;
-    transition: all 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .sm-model-event-item:hover {
@@ -504,7 +504,7 @@
     padding: 1.25rem;
     margin-bottom: 1.25rem;
     border: 1px solid var(--border-color);
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
@@ -533,7 +533,7 @@
     border-radius: 12px;
     padding: 16px;
     text-align: center;
-    transition: all 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .longterm-metric-card:hover {
@@ -701,7 +701,7 @@
     padding: 10px;
     background: var(--bg-secondary);
     border-radius: 8px;
-    transition: all 0.2s;
+    transition: background 0.2s, border 0.2s, transform 0.2s;
 }
 
 .classification-item.active {
@@ -849,4 +849,15 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

@@ -31,7 +31,7 @@ class AuthManager {
         const graceSeconds = Math.max(60, Math.min(Number(user?.private_authz_grace_seconds) || 300, 900));
         this.authzDeadlineAt = Date.now() + graceSeconds * 1000;
         this.authzLocked = false;
-        document.documentElement.removeAttribute('data-authz-lock');
+        delete document.documentElement.dataset.authzLock;
         if (this.authzDeadlineTimer) clearTimeout(this.authzDeadlineTimer);
         this.authzDeadlineTimer = setTimeout(() => this.enforceAuthzDeadline(), graceSeconds * 1000 + 20);
     }
@@ -39,7 +39,7 @@ class AuthManager {
     enforceAuthzDeadline() {
         if (!this.authzDeadlineAt || Date.now() < this.authzDeadlineAt) return false;
         this.authzLocked = true;
-        document.documentElement.setAttribute('data-authz-lock', 'expired');
+        document.documentElement.dataset.authzLock = 'expired';
         window.revokeAuthenticatedBlobUrls?.();
         const privateElements = document.querySelectorAll('[data-private-content]');
         privateElements.forEach(element => {
@@ -263,7 +263,7 @@ class AuthManager {
         this.authzDeadlineTimer = null;
         this.authzDeadlineAt = 0;
         this.authzLocked = false;
-        document.documentElement.removeAttribute('data-authz-lock');
+        delete document.documentElement.dataset.authzLock;
         this.token = null;
         this.user = null;
         window.authSession.clearToken();

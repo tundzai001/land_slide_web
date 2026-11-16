@@ -175,9 +175,11 @@ function renderInverseVelocitySection(data) {
         ? `~${invVel.days_to_failure} ngày`
         : 'N/A');
     setText('inv-vel-r2', invVel.r_squared !== undefined ? invVel.r_squared.toFixed(4) : '--');
-    setText('inv-vel-confidence', invVel.confidence
-        ? (invVel.confidence === 'high' ? 'Cao' : 'Trung bình')
-        : sanitizeLongTermText(invVel.message) || '--');
+    let confidenceText = sanitizeLongTermText(invVel.message) || '--';
+    if (invVel.confidence) {
+        confidenceText = invVel.confidence === 'high' ? 'Cao' : 'Trung bình';
+    }
+    setText('inv-vel-confidence', confidenceText);
 
     // Chart
     if (invVel.time_series) {
