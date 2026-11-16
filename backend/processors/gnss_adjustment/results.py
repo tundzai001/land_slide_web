@@ -1115,8 +1115,14 @@ class RoundRobinResultsMixin:
                     "not a network-quality failure."
                 ),
             }
-        independent_global_test = (
-            {
+        independent_global_test = None
+        if independent_result.global_test:
+            ref_std = (
+                math.sqrt(independent_result.variance_factor)
+                if independent_result.variance_factor is not None and independent_result.variance_factor >= 0
+                else None
+            )
+            independent_global_test = {
                 "statistic": independent_result.global_test.statistic,
                 "lower_critical_value": independent_result.global_test.lower_critical_value,
                 "upper_critical_value": independent_result.global_test.upper_critical_value,
@@ -1126,15 +1132,8 @@ class RoundRobinResultsMixin:
                 "assumption": "All accepted raw epochs are statistically independent.",
                 "used_for_published_solution": False,
                 "weighted_residual_sum": independent_result.weighted_residual_sum,
-                "reference_standard_deviation": (
-                    math.sqrt(independent_result.variance_factor)
-                    if independent_result.variance_factor is not None
-                    and independent_result.variance_factor >= 0
-                    else None
-                ),
+                "reference_standard_deviation": ref_std,
             }
-            if independent_result.global_test else None
-        )
         accepted_raw = [
             row for row in raw_rows
             if not any(
@@ -1209,13 +1208,12 @@ class RoundRobinResultsMixin:
                 "to": (worst_scatter_edge or {}).get("to"),
                 "max_session_mean_separation_m": max_session_separation,
             })
-        interpretation_status = (
-            "FAILED_QUALITY_GATE"
-            if not quality_gate_passed else
-            "PASS_WITH_WARNINGS"
-            if diagnostic_warnings else
-            "PASS"
-        )
+        if not quality_gate_passed:
+            interpretation_status = "FAILED_QUALITY_GATE"
+        elif diagnostic_warnings:
+            interpretation_status = "PASS_WITH_WARNINGS"
+        else:
+            interpretation_status = "PASS"
 
         return {
             "type": "gnss_adjusted",

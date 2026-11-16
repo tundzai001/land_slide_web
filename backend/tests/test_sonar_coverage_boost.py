@@ -376,3 +376,24 @@ class SonarCoverageBoostTests(unittest.TestCase):
             res = await _dem_center_point(None, 999999)
             self.assertIsNone(res)
         asyncio.run(run_dem())
+
+    def test_refactored_nested_ternaries_helpers(self):
+        from app.features.stations.query_router import _compute_station_status
+        self.assertEqual(_compute_station_status(True, False), "online")
+        self.assertEqual(_compute_station_status(False, True), "stale")
+        self.assertEqual(_compute_station_status(False, False), "offline")
+
+        from app.mqtt.bridge.sensor_pipeline.persistence import _extract_metric_values
+        self.assertEqual(_extract_metric_values("gnss", {"speed_2d_mm_s": 1.5, "total_displacement_mm": 2.5}), (1.5, 2.5))
+        self.assertEqual(_extract_metric_values("rain", {"intensity_mm_h": 10.0, "accumulated_mm": 25.0}), (10.0, 25.0))
+        self.assertEqual(_extract_metric_values("water", {"water_level": 3.0, "intensity_mm_h": 4.0}), (3.0, 4.0))
+        self.assertEqual(_extract_metric_values("imu", {"roll": 5.0, "pitch": 6.0}), (5.0, 6.0))
+
+        from app.shared.project_dem import _resolve_project_dem_dir
+        self.assertIsNotNone(_resolve_project_dem_dir())
+
+        from app.shared.project_location import map_mode
+        self.assertEqual(map_mode({"map_mode": "auto"}), "auto")
+        self.assertEqual(map_mode({"map_mode": "manual"}), "manual")
+        self.assertEqual(map_mode({"lat": 10.0, "lon": 106.0}), "manual")
+        self.assertEqual(map_mode({}), "auto")

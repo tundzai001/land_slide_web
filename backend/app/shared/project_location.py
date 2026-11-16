@@ -28,7 +28,9 @@ def location_object(location):
 
 def map_mode(location):
     location = location_object(location)
-    return location["map_mode"] if location.get("map_mode") in ("auto", "manual") else ("manual" if coordinates(location) else "auto")
+    if location.get("map_mode") in ("auto", "manual"):
+        return location["map_mode"]
+    return "manual" if coordinates(location) else "auto"
 
 
 def validate_map_position(position):

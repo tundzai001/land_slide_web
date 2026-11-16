@@ -40,7 +40,12 @@ async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(
             project = (await config_db.execute(select(model_config.Project).where(model_config.Project.id == payload.project_id))).scalar_one_or_none()
     parameters = normalize_parameters(parameters)
     seed = int(payload.seed if payload.seed is not None else secrets.randbelow(2_000_000_000))
-    subject = station.name if station else (project.name if project else "Kịch bản thủ công")
+    if station:
+        subject = station.name
+    elif project:
+        subject = project.name
+    else:
+        subject = "Kịch bản thủ công"
     display_name = payload.display_name or f"{subject} · {'Dữ liệu trạm' if station else 'Nhập thông số'} · {time.strftime('%d/%m/%Y %H:%M', time.localtime(now))}"
     run = model_data.SimulationRun(
         display_name=display_name, created_by_user_id=current_user.id, created_by_username=current_user.username,
@@ -104,4 +109,10 @@ async def rerun(run_id: int, db: AsyncSession = Depends(get_data_db), current_us
 async def evaluate_station(station_id: int, data_db: AsyncSession = Depends(get_data_db), config_db: AsyncSession = Depends(get_config_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     context = await _station_inputs(station_id, config_db, data_db)
     fos = calculate_fos(context["parameters"])
-    return {"station_id": station_id, "evaluated_at": int(time.time()), "fos": round(fos, 4), "classification": "Ổn định" if fos >= 1.5 else "Cảnh báo" if fos >= 1.0 else "Nguy hiểm", "parameters": context["parameters"], "parameter_sources": context["parameter_sources"], "sensor_snapshot": context["sensor_snapshot"], "warnings": context["warnings"]}
+    if fos >= 1.5:
+        classification = "Ổn định"
+    elif fos >= 1.0:
+        classification = "Cảnh báo"
+    else:
+        classification = "Nguy hiểm"
+    return {"station_id": station_id, "evaluated_at": int(time.time()), "fos": round(fos, 4), "classification": classification, "parameters": context["parameters"], "parameter_sources": context["parameter_sources"], "sensor_snapshot": context["sensor_snapshot"], "warnings": context["warnings"]}

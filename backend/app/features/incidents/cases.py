@@ -203,16 +203,19 @@ async def ensure_incident_case(
     await _lock_source_key(db, kind, source_id)
     case = await get_case_for_source(db, kind, source_id, for_update=True)
     if case is None:
+        if project_id is not None:
+            scope_state = "SCOPED"
+        elif kind == "RESCUE_REQUEST":
+            scope_state = "UNSCOPED"
+        else:
+            scope_state = "LOOKUP_PENDING"
         case = model_data.IncidentCase(
             reference=incident_reference(kind, source_id, timestamp),
             source_kind=kind,
             source_id=int(source_id),
             project_id=project_id,
             station_id=station_id,
-            scope_state=(
-                "SCOPED" if project_id is not None
-                else ("UNSCOPED" if kind == "RESCUE_REQUEST" else "LOOKUP_PENDING")
-            ),
+            scope_state=scope_state,
             project_name_snapshot=_text(project_name, 255) or None,
             project_code_snapshot=_text(project_code, 100) or None,
             station_name_snapshot=_text(station_name, 255) or None,

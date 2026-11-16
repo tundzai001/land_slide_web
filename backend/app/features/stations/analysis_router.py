@@ -517,7 +517,14 @@ async def get_long_term_analysis(
             if imu_analysis.get("status") == "success" and "time_series" in imu_analysis:
                 from collections import OrderedDict
                 from datetime import datetime as dt
-                fmt = '%H:%M:%S' if days < 1/24 else '%H:%M' if days <= 1 else '%d/%m %H:00' if days <= 7 else '%d/%m'
+                if days < 1 / 24:
+                    fmt = '%H:%M:%S'
+                elif days <= 1:
+                    fmt = '%H:%M'
+                elif days <= 7:
+                    fmt = '%d/%m %H:00'
+                else:
+                    fmt = '%d/%m'
 
                 daily_imu = OrderedDict()
                 for ts, r, p in zip(imu_analysis["time_series"]["raw_timestamps"], imu_analysis["time_series"]["rolls"], imu_analysis["time_series"]["pitches"]):

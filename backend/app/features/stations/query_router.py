@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 
 STATION_REQUEST_FAILED_DETAIL = "Unable to complete station request"
 
+
+def _compute_station_status(station_online: bool, offline_display_enabled: bool) -> str:
+    if station_online:
+        return "online"
+    if offline_display_enabled:
+        return "stale"
+    return "offline"
+
 @router.get("/api/admin/projects/{project_id}/stations")
 async def get_stations_by_project(
     project_id: int,
@@ -110,9 +118,10 @@ async def get_stations_by_project(
                 break
 
         offline_display_enabled = is_offline_display_enabled(station.config)
-        computed_status = (
-            "online" if station_online else ("stale" if offline_display_enabled else "offline")
-        ) if include_runtime else str(station.status or "offline")
+        if include_runtime:
+            computed_status = _compute_station_status(station_online, offline_display_enabled)
+        else:
+            computed_status = str(station.status or "offline")
 
         devices_list = []
         for d in devices:
@@ -376,7 +385,7 @@ async def get_stations(
             )
             computed_risk = risk_assessment.get("overall_risk", "LOW")
             offline_display_enabled = is_offline_display_enabled(station.config)
-            computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
+            computed_status = _compute_station_status(station_online, offline_display_enabled)
 
             stations_with_status.append({
                 "id": station.id,
@@ -650,7 +659,7 @@ async def get_station_detail(
 
         # ✅ Tính status dựa trên offline threshold tùy chỉnh
         offline_display_enabled = is_offline_display_enabled(station.config)
-        computed_status = "online" if station_online else ("stale" if offline_display_enabled else "offline")
+        computed_status = _compute_station_status(station_online, offline_display_enabled)
 
         # 4. Tính risk assessment
         risk_assessment = await _calculate_station_risk_assessment(

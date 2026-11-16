@@ -68,18 +68,24 @@ class MQTTAdjustmentMixin:
         ]
         if active:
             statuses = {context.get("status") for context in active}
-            phase = "PAUSED" if statuses == {"PAUSED"} else (
-                "FREE_NETWORK" if "FREE_NETWORK" in statuses else "COLLECTING_BASELINE"
-            )
+            if statuses == {"PAUSED"}:
+                phase = "PAUSED"
+            elif "FREE_NETWORK" in statuses:
+                phase = "FREE_NETWORK"
+            else:
+                phase = "COLLECTING_BASELINE"
         else:
             terminal = {str(context.get("status") or "") for context in contexts}
             failed = terminal.intersection({"ERROR", "FAILED_QUALITY_GATE"})
             completed = "COMPLETED" in terminal
-            phase = "PARTIAL_FAILED" if failed and completed else (
-                "FAILED_QUALITY_GATE" if terminal == {"FAILED_QUALITY_GATE"} else (
-                    "ERROR" if failed else "COMPLETED"
-                )
-            )
+            if failed and completed:
+                phase = "PARTIAL_FAILED"
+            elif terminal == {"FAILED_QUALITY_GATE"}:
+                phase = "FAILED_QUALITY_GATE"
+            elif failed:
+                phase = "ERROR"
+            else:
+                phase = "COMPLETED"
         self.adjustment_phase[int(project_id)] = phase
         results = self.adjustment_cluster_results.get(int(project_id), {})
         ordered_results = sorted(

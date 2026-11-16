@@ -15,13 +15,15 @@ from pathlib import Path
 from fastapi import HTTPException
 from ..config import settings
 
-PROJECT_DEM_DIR = (
-    Path(settings.PROJECT_DEM_DIR)
-    if settings.PROJECT_DEM_DIR
-    else Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Aitogy" / "Landslide" / "project_dems"
-    if os.name == "nt"
-    else Path(__file__).resolve().parents[3] / "runtime" / "project_dems"
-)
+def _resolve_project_dem_dir() -> Path:
+    if settings.PROJECT_DEM_DIR:
+        return Path(settings.PROJECT_DEM_DIR)
+    if os.name == "nt":
+        return Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Aitogy" / "Landslide" / "project_dems"
+    return Path(__file__).resolve().parents[3] / "runtime" / "project_dems"
+
+
+PROJECT_DEM_DIR = _resolve_project_dem_dir()
 LEGACY_PROJECT_DEM_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "dems"
 MAX_DEM_CELLS = 10_000_000
 DEM_ID_PATTERN = re.compile(r"^[a-f0-9]{16}$")

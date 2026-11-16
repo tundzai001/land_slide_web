@@ -65,15 +65,12 @@ def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
             else {}
         )
         status_text = str(item.get("status") or "").strip().casefold()
-        is_online = (
-            bool(item.get("is_online"))
-            if isinstance(item.get("is_online"), bool)
-            else (
-                status_text in {"online", "active", "connected", "streaming"}
-                if status_text
-                else bool(item.get("ntrip_connected"))
-            )
-        )
+        if isinstance(item.get("is_online"), bool):
+            is_online = bool(item.get("is_online"))
+        elif status_text:
+            is_online = status_text in {"online", "active", "connected", "streaming"}
+        else:
+            is_online = bool(item.get("ntrip_connected"))
         streams = []
         for position, raw_stream in enumerate(
             item.get("streams") if isinstance(item.get("streams"), list) else [],

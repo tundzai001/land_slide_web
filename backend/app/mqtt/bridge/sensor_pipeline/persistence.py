@@ -9,6 +9,28 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _extract_metric_values(sensor_type: str, processed_data: dict) -> tuple[float, float]:
+    if sensor_type == 'gnss':
+        return (
+            processed_data.get('speed_2d_mm_s', 0.0),
+            processed_data.get('total_displacement_mm', 0.0),
+        )
+    if sensor_type == 'rain':
+        return (
+            processed_data.get('intensity_mm_h', 0.0),
+            processed_data.get('accumulated_mm', 0.0),
+        )
+    if sensor_type == 'water':
+        return (
+            processed_data.get('water_level', 0.0),
+            processed_data.get('intensity_mm_h', 0.0),
+        )
+    return (
+        processed_data.get('roll', 0.0),
+        processed_data.get('pitch', 0.0),
+    )
+
+
 class SensorPersistenceMixin:
     async def _update_latest_sensor_cache(
         self, station_id: int, sensor_type: str, current_timestamp: int, processed_data: dict
@@ -99,6 +121,7 @@ class SensorPersistenceMixin:
         try:
             if save_data_now:
                 if is_dangerous:
+                    val_1, val_2 = _extract_metric_values(sensor_type, processed_data)
                     sensor_record = {
                         "station_id": station_id,
                         "timestamp": current_timestamp,
@@ -112,8 +135,8 @@ class SensorPersistenceMixin:
                             raw_payload,
                         ),
                         "data": processed_data,
-                        "value_1": processed_data.get('speed_2d_mm_s', 0.0) if sensor_type == 'gnss' else processed_data.get('intensity_mm_h', 0.0) if sensor_type == 'rain' else processed_data.get('water_level', 0.0) if sensor_type == 'water' else processed_data.get('roll', 0.0),
-                        "value_2": processed_data.get('total_displacement_mm', 0.0) if sensor_type == 'gnss' else processed_data.get('accumulated_mm', 0.0) if sensor_type == 'rain' else processed_data.get('intensity_mm_h', 0.0) if sensor_type == 'water' else processed_data.get('pitch', 0.0),
+                        "value_1": val_1,
+                        "value_2": val_2,
                         "value_3": 0.0 if sensor_type != 'imu' else processed_data.get('yaw', 0.0),
                         "value_4": 0.0 if sensor_type != 'imu' else processed_data.get('total_accel', 0.0),
                         "value_5": 0.0 if sensor_type != 'imu' else processed_data.get('battery', 0.0),

@@ -188,7 +188,12 @@ def run_simulation(parameters: dict[str, Any] | None, duration_seconds: int, see
         elapsed += dt
 
     final = series[-1]
-    classification = "Ổn định" if min_fos >= float(params["fos_warning"]) else "Cảnh báo" if min_fos >= float(params["fos_critical"]) else "Mất ổn định"
+    if min_fos >= float(params["fos_warning"]):
+        classification = "Ổn định"
+    elif min_fos >= float(params["fos_critical"]):
+        classification = "Cảnh báo"
+    else:
+        classification = "Mất ổn định"
     if any(event["state"] == "SLIDING" for event in events):
         classification = "Đã xảy ra trượt mô phỏng"
     summary = {

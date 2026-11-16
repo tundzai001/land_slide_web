@@ -1336,17 +1336,23 @@ class RoundRobinCycleMixin:
                                 )))
                                 record.solver_eligible = False
                                 record.quality_flags = flags
-                                record.source_diagnostic = (
-                                    "Stationarity was lost after the solver window opened; "
-                                    "the complete window was reset."
-                                    if reason_key == "drift" else
-                                    "Temporary-base source identity was not confirmed."
-                                    if reason_key == "source" else
-                                    "Stationarity was confirmed but minimum solver duration "
-                                    "was not reached before timeout."
-                                    if reason_key == "duration" else
+                                diagnostic_messages = {
+                                    "drift": (
+                                        "Stationarity was lost after the solver window opened; "
+                                        "the complete window was reset."
+                                    ),
+                                    "source": (
+                                        "Temporary-base source identity was not confirmed."
+                                    ),
+                                    "duration": (
+                                        "Stationarity was confirmed but minimum solver duration "
+                                        "was not reached before timeout."
+                                    ),
+                                }
+                                record.source_diagnostic = diagnostic_messages.get(
+                                    reason_key,
                                     "Collection duration was sufficient, but the non-overlapping "
-                                    "windows never satisfied mean/scatter/slope stationarity."
+                                    "windows never satisfied mean/scatter/slope stationarity.",
                                 )
                             solver_start_index = len(records)
                             current_cluster["current_stable_window_index"] = None

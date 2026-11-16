@@ -237,18 +237,25 @@ async def start_gnss_adjustment(
         mqtt_service.active_adjustment_clusters[session_id] = active_clusters
         if not hasattr(mqtt_service, "adjustment_run_contexts"):
             mqtt_service.adjustment_run_contexts = {}
-        mqtt_service.adjustment_run_contexts[session_id] = {
-            "run_id": session_id,
-            "started_at_ns": time.time_ns(),
-            "project_id": int(project.id),
-            "project_code": str(project.project_code or f"project-{project.id}"),
-            "cluster_index": req.cluster_index if req.cluster_index is not None else next(
+        if req.cluster_index is not None:
+            cluster_index = req.cluster_index
+        elif len(active_clusters) == 1 and isinstance(active_clusters[0], dict):
+            cluster_index = next(
                 (
                     index for index, configured in enumerate(project.gnss_clusters or [])
                     if str(configured.get("name") or "") == str(active_clusters[0].get("name") or "")
                 ),
                 None,
-            ) if len(active_clusters) == 1 and isinstance(active_clusters[0], dict) else None,
+            )
+        else:
+            cluster_index = None
+
+        mqtt_service.adjustment_run_contexts[session_id] = {
+            "run_id": session_id,
+            "started_at_ns": time.time_ns(),
+            "project_id": int(project.id),
+            "project_code": str(project.project_code or f"project-{project.id}"),
+            "cluster_index": cluster_index,
             "cluster_name": (
                 str(active_clusters[0].get("name") or "Cụm")
                 if len(active_clusters) == 1 else "Nhiều cụm"

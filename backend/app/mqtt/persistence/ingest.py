@@ -127,9 +127,12 @@ class SensorIngestPersistenceMixin:
                 result = await db.execute(model_data.SensorData.__table__.insert(), rows)
             await db.commit()
             rowcount = getattr(result, "rowcount", None)
-            metrics["inserted"] = inserted if dialect == 'postgresql' else (
-                int(rowcount) if isinstance(rowcount, int) and rowcount >= 0 else len(rows)
-            )
+            if dialect == 'postgresql':
+                metrics["inserted"] = inserted
+            elif isinstance(rowcount, int) and rowcount >= 0:
+                metrics["inserted"] = int(rowcount)
+            else:
+                metrics["inserted"] = len(rows)
             metrics["deduped"] = max(0, len(rows) - metrics["inserted"])
         return metrics
     async def _spool_failed_sensor_batch(self, sensor_batch: list[dict], reason: str) -> set[str]:
@@ -354,8 +357,11 @@ class SensorIngestPersistenceMixin:
             val_5 = processed_data.get('battery', 0.0) or 0.0
 
         if is_monitoring_type(sensor_type):
-            values = (list(processed_data['points'].values()) if sensor_type == 'extensometer' else
-                      [processed_data.get(field) for field in (['value'] if is_custom_sensor(sensor_type) else SENSOR_CATALOG[sensor_type]['fields'])])
+            if sensor_type == 'extensometer':
+                values = list(processed_data['points'].values())
+            else:
+                fields = ['value'] if is_custom_sensor(sensor_type) else SENSOR_CATALOG[sensor_type]['fields']
+                values = [processed_data.get(field) for field in fields]
             if processed_data.get('quality') == 'invalid':
                 values = []  # Keep evidence in JSON, exclude invalid values from numeric summaries.
             val_1, val_2, val_3, val_4, val_5 = (values + [None] * 5)[:5]
