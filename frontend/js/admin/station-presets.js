@@ -290,51 +290,30 @@ class AdminStationPresetsFeature extends window.AdminManager {
         return { config: cfg };
     }
 
-    async saveStation() {
-        const code = document.getElementById('edit-code').value.trim();
-        const name = document.getElementById('edit-name').value.trim();
-        const projectId = document.getElementById('edit-project-id').value;
-
-        if (!code || !name) {
-            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
-            return;
-        }
-
+    _collectStationSensors() {
         const sensors = {};
         const sensorTypes = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
-
         for (const type of sensorTypes) {
             const res = this._collectSensorConfig(type);
             if (res) {
-                if (res.error) return;
+                if (res.error) return null;
                 sensors[type] = res.config;
             }
         }
+        return sensors;
+    }
 
-        if (typeof this.validateAllMqttTopics === 'function' && !(await this.validateAllMqttTopics())) {
-            window.toast?.error('MQTT topic đang bị trùng hoặc chưa hợp lệ');
-            return;
-        }
-        if (!this.confirmConfirmStepWarnings()) return;
-
-        const finalRainWarningConfirm = Number.parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
-        const finalRainCriticalConfirm = Number.parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1;
-        const finalWaterWarningConfirm = Number.parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3;
-        const finalWaterCriticalConfirm = Number.parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2;
-        const finalGnssWarningConfirm = Number.parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3;
-        const finalGnssCriticalConfirm = Number.parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
-        const finalImuCriticalConfirm = Number.parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
-
-        // ✅ THÊM OFFLINE THRESHOLDS VÀO CONFIG
-        const offlineThresholds = {
+    _collectOfflineThresholds() {
+        return {
             gnss: Number.parseInt(document.getElementById('offline-gnss')?.value) || this.defaultOfflineThresholds.gnss,
             rain: Number.parseInt(document.getElementById('offline-rain')?.value) || this.defaultOfflineThresholds.rain,
             water: Number.parseInt(document.getElementById('offline-water')?.value) || this.defaultOfflineThresholds.water,
             imu: Number.parseInt(document.getElementById('offline-imu')?.value) || this.defaultOfflineThresholds.imu
         };
+    }
 
-        // ✅ ĐỌC GNSS RTK FORWARDING CONFIG
-        const rtkForwarding = {
+    _collectRtkForwarding() {
+        return {
             enabled: !!document.getElementById('cfg-fwd-enabled')?.checked,
             host: document.getElementById('gnss-rtk-host')?.value?.trim() || '',
             port: Number.parseInt(document.getElementById('gnss-rtk-port')?.value) || 1883,
@@ -354,13 +333,15 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 VdH: !!document.getElementById('fwd-toggle-vdh')?.checked
             }
         };
+    }
 
+    _collectVn2000() {
         const l0Raw = document.getElementById('vn-l0')?.value;
         const l0Parsed = this.parseVn2000CentralMeridian(l0Raw);
         const l0Input = document.getElementById('vn-l0');
         if (l0Input) l0Input.value = Number(l0Parsed.value.toFixed(10));
 
-        const vn2000 = {
+        return {
             enabled: !!document.getElementById('vn2000-enabled')?.checked,
             dx: Number.parseFloat(document.getElementById('vn-dx')?.value) || 191.90441429,
             dy: Number.parseFloat(document.getElementById('vn-dy')?.value) || 39.30318279,
@@ -379,28 +360,77 @@ class AdminStationPresetsFeature extends window.AdminManager {
             res_n: Number.parseFloat(document.getElementById('vn-resn')?.value) || 0.0,
             res_e: Number.parseFloat(document.getElementById('vn-rese')?.value) || 0.0
         };
+    }
 
-        const stationMqtt = {
+    _collectStationMqtt() {
+        return {
             host: document.getElementById('station-mqtt-host')?.value?.trim() || '',
             port: document.getElementById('station-mqtt-port')?.value ? Number.parseInt(document.getElementById('station-mqtt-port').value) : null,
             use_tls: !!document.getElementById('station-mqtt-tls')?.checked,
             username: document.getElementById('station-mqtt-user')?.value?.trim() || '',
             password: document.getElementById('station-mqtt-pass')?.value?.trim() || ''
         };
+    }
 
-        let gnssAicasterUser = { username: '', caster_host: '' };
+    _collectGnssAicasterUser() {
         const aicasterValue = document.getElementById('cfg-gnss-aicaster-user')?.value;
-        if (aicasterValue) {
-            try {
-                const selectedClient = JSON.parse(aicasterValue);
-                gnssAicasterUser = {
-                    username: String(selectedClient.username || '').trim(),
-                    caster_host: String(selectedClient.caster_host || '').trim()
-                };
-            } catch (error) {
-                console.error('Invalid AICaster client selection:', error);
-            }
+        if (!aicasterValue) return { username: '', caster_host: '' };
+        try {
+            const selectedClient = JSON.parse(aicasterValue);
+            return {
+                username: String(selectedClient.username || '').trim(),
+                caster_host: String(selectedClient.caster_host || '').trim()
+            };
+        } catch (error) {
+            console.error('Invalid AICaster client selection:', error);
+            return { username: '', caster_host: '' };
         }
+    }
+
+    _collectStationLocation() {
+        if (this.isEditMode || !this.pendingStationLocation) return null;
+        const stationLocation = { ...this.pendingStationLocation };
+        const editedLat = Number.parseFloat(document.getElementById('origin-lat')?.value || document.getElementById('origin-rain-lat')?.value || document.getElementById('origin-water-lat')?.value);
+        const editedLon = Number.parseFloat(document.getElementById('origin-lon')?.value || document.getElementById('origin-rain-lon')?.value || document.getElementById('origin-water-lon')?.value);
+        const editedH = Number.parseFloat(document.getElementById('origin-h')?.value || document.getElementById('origin-rain-h')?.value || document.getElementById('origin-water-h')?.value);
+        if (Number.isFinite(editedLat)) stationLocation.lat = editedLat;
+        if (Number.isFinite(editedLon)) stationLocation.lon = editedLon;
+        if (Number.isFinite(editedH)) stationLocation.h = editedH;
+        return stationLocation;
+    }
+
+    async saveStation() {
+        const code = document.getElementById('edit-code').value.trim();
+        const name = document.getElementById('edit-name').value.trim();
+        const projectId = document.getElementById('edit-project-id').value;
+
+        if (!code || !name) {
+            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
+            return;
+        }
+
+        const sensors = this._collectStationSensors();
+        if (!sensors) return;
+
+        if (typeof this.validateAllMqttTopics === 'function' && !(await this.validateAllMqttTopics())) {
+            window.toast?.error('MQTT topic đang bị trùng hoặc chưa hợp lệ');
+            return;
+        }
+        if (!this.confirmConfirmStepWarnings()) return;
+
+        const finalRainWarningConfirm = Number.parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
+        const finalRainCriticalConfirm = Number.parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1;
+        const finalWaterWarningConfirm = Number.parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3;
+        const finalWaterCriticalConfirm = Number.parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2;
+        const finalGnssWarningConfirm = Number.parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3;
+        const finalGnssCriticalConfirm = Number.parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
+        const finalImuCriticalConfirm = Number.parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
+
+        const offlineThresholds = this._collectOfflineThresholds();
+        const rtkForwarding = this._collectRtkForwarding();
+        const vn2000 = this._collectVn2000();
+        const stationMqtt = this._collectStationMqtt();
+        const gnssAicasterUser = this._collectGnssAicasterUser();
 
         const config = {
             active_preset: this.activePreset || '',
@@ -513,16 +543,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 return [axis, value === '' || value == null ? null : Number(value)];
             }));
         }
-        let stationLocation = null;
-        if (!this.isEditMode && this.pendingStationLocation) {
-            stationLocation = { ...this.pendingStationLocation };
-            const editedLat = Number.parseFloat(document.getElementById('origin-lat')?.value || document.getElementById('origin-rain-lat')?.value || document.getElementById('origin-water-lat')?.value);
-            const editedLon = Number.parseFloat(document.getElementById('origin-lon')?.value || document.getElementById('origin-rain-lon')?.value || document.getElementById('origin-water-lon')?.value);
-            const editedH = Number.parseFloat(document.getElementById('origin-h')?.value || document.getElementById('origin-rain-h')?.value || document.getElementById('origin-water-h')?.value);
-            if (Number.isFinite(editedLat)) stationLocation.lat = editedLat;
-            if (Number.isFinite(editedLon)) stationLocation.lon = editedLon;
-            if (Number.isFinite(editedH)) stationLocation.h = editedH;
-        }
+        const stationLocation = this._collectStationLocation();
 
         const payload = {
             station_code: code,
