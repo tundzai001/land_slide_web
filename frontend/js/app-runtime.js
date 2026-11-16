@@ -203,19 +203,33 @@
             }
         });
     }
+    function annotateTableRow(row, labels) {
+        for (let i = 0; i < row.children.length; i++) {
+            const cell = row.children[i];
+            if (!cell.dataset.label) {
+                cell.dataset.label = labels[i] || '';
+            }
+        }
+    }
+
+    function annotateTable(table) {
+        const labels = Array.from(table.querySelectorAll('thead th')).map(cell => cell.textContent.trim());
+        for (const row of table.querySelectorAll('tbody tr')) {
+            annotateTableRow(row, labels);
+        }
+    }
+
     function setupAdminResponsiveTables() {
         const annotate = () => {
-            document.querySelectorAll('.custom-table table').forEach(table => {
-                const labels = Array.from(table.querySelectorAll('thead th')).map(cell => cell.textContent.trim());
-                table.querySelectorAll('tbody tr').forEach(row => {
-                    Array.from(row.children).forEach((cell, index) => {
-                        if (!cell.dataset.label) cell.dataset.label = labels[index] || '';
-                    });
-                });
-            });
+            for (const table of document.querySelectorAll('.custom-table table')) {
+                annotateTable(table);
+            }
         };
         annotate();
-        new MutationObserver(annotate).observe(document.getElementById('admin-tab-content'), {childList: true, subtree: true});
+        const target = document.getElementById('admin-tab-content');
+        if (target) {
+            new MutationObserver(annotate).observe(target, {childList: true, subtree: true});
+        }
     }
     function setupAdminDrawerAccessibility() {
         const drawers = [

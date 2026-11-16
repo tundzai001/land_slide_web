@@ -409,6 +409,14 @@ function hasValidLatLon(location) {
         && !(Number(location.lat) === 0 && Number(location.lon) === 0);
 }
 
+function isClusterSubset(subset, superset) {
+    if (!superset?.isTotal || superset === subset) return false;
+    for (const id of subset.stationIds) {
+        if (!superset.stationIdSet?.has(Number(id))) return false;
+    }
+    return true;
+}
+
 async function loadProjectsAndClusters() {
     if (mapInteractionActive) {
         pendingProjectsReload = true;
@@ -513,11 +521,7 @@ async function loadProjectsAndClusters() {
                         // Leaflet's topmost canvas path make one unreachable.
                         const choices = isTotal ? [cluster] : [
                             cluster,
-                            ...drawableClusters.filter(candidate => (
-                                candidate.isTotal
-                                && candidate !== cluster
-                                && cluster.stationIds.every(id => candidate.stationIdSet.has(Number(id)))
-                            )),
+                            ...drawableClusters.filter(candidate => isClusterSubset(cluster, candidate)),
                         ];
                         showAdjustmentPopup(proj.id, proj.name, choices, e.latlng);
                     };

@@ -337,6 +337,7 @@ class AdminUsersFeature extends window.AdminManager {
                 throw new Error(err.detail || 'Lỗi xóa');
             }
         } catch (e) {
+            console.error('Lỗi khóa/mở khóa người dùng:', e);
             window.toast?.error(e.message);
         }
     }
@@ -363,6 +364,7 @@ class AdminUsersFeature extends window.AdminManager {
                 throw new Error(err.detail || `Lỗi ${action} tài khoản`);
             }
         } catch (e) {
+            console.error('Lỗi khóa/mở khóa người dùng:', e);
             window.toast?.error(e.message);
         }
     }

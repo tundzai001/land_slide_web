@@ -271,6 +271,7 @@
 @media (prefers-reduced-motion: reduce) {
     .map-simulation-nav,
     .dt-overlay-container button,
+    .dt-run-card[data-state="running"] .dt-run-status-line i,
     .dt-run-status-line i {
         animation: none !important;
         transition: none !important;

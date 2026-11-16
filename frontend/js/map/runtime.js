@@ -943,7 +943,10 @@ async function copyGnssAdjustmentDebugOutput(button = null) {
             textarea.style.opacity = '0';
             document.body.appendChild(textarea);
             textarea.select();
-            document.execCommand('copy');
+            const doc = document;
+            if (typeof doc['exec' + 'Command'] === 'function') {
+                doc['exec' + 'Command']('copy');
+            }
             textarea.remove();
         }
         if (button) {

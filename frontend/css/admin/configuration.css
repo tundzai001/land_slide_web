@@ -723,7 +723,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .monitoring-choice:hover, .monitoring-choice:has(input:checked) { background: var(--bg-tertiary); border-color: var(--accent-primary); }
 .monitoring-choice:focus-within { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
 .monitoring-picker-actions button { min-height: 44px; }
-@media (prefers-reduced-motion: reduce) { .monitoring-choice { transition: none; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .monitoring-choice { transition: none; } }
 .project-map-position {
     min-width: 0;
     padding: 16px;

@@ -854,6 +854,7 @@ class AdminStationWizardFeature extends window.AdminManager {
                 statusEl.className = `d-block ${users.length ? 'text-success' : 'text-warning'} mt-2`;
             }
         } catch (error) {
+            console.debug('Failed to load AICaster users:', error);
             select.innerHTML = '<option value="">-- Không tải được danh sách AICaster --</option>';
             if (desired?.username) {
                 const savedOption = document.createElement('option');

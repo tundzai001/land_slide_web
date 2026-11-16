@@ -1214,6 +1214,7 @@ h3 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .updated[data-state="loading"] .status-dot,
   *,
   *::before,
   *::after {
