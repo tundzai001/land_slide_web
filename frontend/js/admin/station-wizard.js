@@ -381,65 +381,38 @@ class AdminStationWizardFeature extends window.AdminManager {
         }
     }
 
+    _setConfirmThresholdInput(inputId, sourceId, value, defaultVal) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.value = value ?? defaultVal;
+        const source = sourceId ? document.getElementById(sourceId) : null;
+        if (source) {
+            source.textContent = value != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
+            source.className = value != null ? 'text-success small' : 'text-warning small';
+        }
+    }
+
     _populateEditWaterThresholds(waterCfg) {
         document.getElementById('cfg-water-warning').value = waterCfg.warning_threshold ?? 0.15;
         document.getElementById('cfg-water-critical').value = waterCfg.critical_threshold ?? 0.30;
-        const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
-        const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
-        const waterConfirmSrc = document.getElementById('cfg-water-confirm-source');
-        if (waterWarningConfirmEl) {
-            const wcs = waterCfg.water_warning_confirm_steps ?? waterCfg.water_confirm_steps;
-            waterWarningConfirmEl.value = wcs ?? 3;
-            if (waterConfirmSrc) {
-                waterConfirmSrc.textContent = wcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                waterConfirmSrc.className = wcs != null ? 'text-success small' : 'text-warning small';
-            }
-        }
-        if (waterCriticalConfirmEl) {
-            const wccs = waterCfg.water_critical_confirm_steps ?? waterCfg.water_confirm_steps;
-            waterCriticalConfirmEl.value = wccs ?? 2;
-        }
-        const waterSafeConfirmEl = document.getElementById('cfg-water-safe-confirm');
-        const waterSafeConfirmSrc = document.getElementById('cfg-water-safe-confirm-source');
-        if (waterSafeConfirmEl) {
-            const wscs = waterCfg.water_safe_confirm_steps;
-            waterSafeConfirmEl.value = wscs ?? 3;
-            if (waterSafeConfirmSrc) {
-                waterSafeConfirmSrc.textContent = wscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                waterSafeConfirmSrc.className = wscs != null ? 'text-success small' : 'text-warning small';
-            }
-        }
+        this._setConfirmThresholdInput('cfg-water-warning-confirm', 'cfg-water-confirm-source',
+            waterCfg.water_warning_confirm_steps ?? waterCfg.water_confirm_steps, 3);
+        this._setConfirmThresholdInput('cfg-water-critical-confirm', null,
+            waterCfg.water_critical_confirm_steps ?? waterCfg.water_confirm_steps, 2);
+        this._setConfirmThresholdInput('cfg-water-safe-confirm', 'cfg-water-safe-confirm-source',
+            waterCfg.water_safe_confirm_steps, 3);
     }
 
     _populateEditRainThresholds(rainCfg) {
         document.getElementById('cfg-rain-watch').value = rainCfg.rain_intensity_watch_threshold ?? 10.0;
         document.getElementById('cfg-rain-warning').value = rainCfg.rain_intensity_warning_threshold ?? 25.0;
         document.getElementById('cfg-rain-critical').value = rainCfg.rain_intensity_critical_threshold ?? 50.0;
-        const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
-        const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
-        const rainConfirmSrc = document.getElementById('cfg-rain-confirm-source');
-        if (rainWarningConfirmEl) {
-            const rcs = rainCfg.rain_warning_confirm_steps ?? rainCfg.rain_confirm_steps;
-            rainWarningConfirmEl.value = rcs ?? 2;
-            if (rainConfirmSrc) {
-                rainConfirmSrc.textContent = rcs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                rainConfirmSrc.className = rcs != null ? 'text-success small' : 'text-warning small';
-            }
-        }
-        if (rainCriticalConfirmEl) {
-            const rccs = rainCfg.rain_critical_confirm_steps ?? rainCfg.rain_confirm_steps;
-            rainCriticalConfirmEl.value = rccs ?? 1;
-        }
-        const rainSafeConfirmEl = document.getElementById('cfg-rain-safe-confirm');
-        const rainSafeConfirmSrc = document.getElementById('cfg-rain-safe-confirm-source');
-        if (rainSafeConfirmEl) {
-            const rscs = rainCfg.rain_safe_confirm_steps;
-            rainSafeConfirmEl.value = rscs ?? 3;
-            if (rainSafeConfirmSrc) {
-                rainSafeConfirmSrc.textContent = rscs != null ? '✅ Đã lưu riêng cho trạm' : '⚠ Sẽ dùng giá trị Hệ thống';
-                rainSafeConfirmSrc.className = rscs != null ? 'text-success small' : 'text-warning small';
-            }
-        }
+        this._setConfirmThresholdInput('cfg-rain-warning-confirm', 'cfg-rain-confirm-source',
+            rainCfg.rain_warning_confirm_steps ?? rainCfg.rain_confirm_steps, 2);
+        this._setConfirmThresholdInput('cfg-rain-critical-confirm', null,
+            rainCfg.rain_critical_confirm_steps ?? rainCfg.rain_confirm_steps, 1);
+        this._setConfirmThresholdInput('cfg-rain-safe-confirm', 'cfg-rain-safe-confirm-source',
+            rainCfg.rain_safe_confirm_steps, 3);
     }
 
     _populateEditImuAndGnssSteps(cfg) {

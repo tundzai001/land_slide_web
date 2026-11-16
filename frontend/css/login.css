@@ -499,7 +499,7 @@
 [data-theme="dark"] .login-card { border-color: rgba(153,246,228,.13); background: rgba(10,35,38,.92); box-shadow: 0 28px 90px rgba(0,0,0,.3); }
 [data-theme="dark"] .login-page .login-back,
 [data-theme="dark"] .login-page .login-theme { border-color: rgba(153,246,228,.14); background: #0a2528; color: #ccedea; }
-[data-theme="dark"] .login-icon { background: rgba(45,212,191,.12); color: #5eead4; }
+[data-theme="dark"] .login-icon { background: #042f2e; color: #5eead4; }
 [data-theme="dark"] .login-field > span { color: #c5d9d7; }
 [data-theme="dark"] .login-input-shell,
 [data-theme="dark"] .login-password-row { border-color: rgba(153,246,228,.18); background: rgba(2,18,22,.55); }
@@ -508,7 +508,7 @@
 [data-theme="dark"] .login-page input:-webkit-autofill { -webkit-text-fill-color: #eefcf9; box-shadow: 0 0 0 1000px #0a2528 inset; }
 [data-theme="dark"] .login-page .login-check { color: #cce0dd; }
 [data-theme="dark"] .login-page .login-check input { border-color: #64817e; background-color: #0b292c; }
-[data-theme="dark"] .login-error { border-color: rgba(251,113,133,.28); background: rgba(159,18,57,.16); color: #fda4af; }
+[data-theme="dark"] .login-error { border-color: rgba(251,113,133,.28); background: #4c0519; color: #fecdd3; }
 
 @media (max-width: 1040px) {
     .login-page { grid-template-columns: minmax(430px, .9fr) minmax(440px, 1.1fr); }

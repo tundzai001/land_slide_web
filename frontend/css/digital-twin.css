@@ -331,10 +331,15 @@
     border: 2px solid color-mix(in srgb, var(--on-surface) 20%, transparent);
     box-shadow: 0 0 8px var(--dt-accent-glow);
     cursor: pointer;
-    transition: transform 0.2s;
 }
-.dt-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
+
+@media (prefers-reduced-motion: no-preference) {
+    .dt-slider::-webkit-slider-thumb {
+        transition: transform 0.2s;
+    }
+    .dt-slider::-webkit-slider-thumb:hover {
+        transform: scale(1.2);
+    }
 }
 
 .dt-slider-rain::-webkit-slider-thumb {
@@ -785,6 +790,7 @@
     .dt-loading-spinner,
     .dt-viewport-overlay.sliding,
     .dt-warning-text,
+    .dt-slider::-webkit-slider-thumb,
     .camera-shake {
         animation: none !important;
         transition: none !important;

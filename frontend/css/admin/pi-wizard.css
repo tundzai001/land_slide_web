@@ -620,13 +620,13 @@
 }
 
 #stationConfigModal .station-option-icon-warning {
-    color: #a16207;
-    background: rgba(245, 158, 11, 0.11);
+    color: #78350f;
+    background: #fef3c7;
 }
 
 #stationConfigModal .station-option-icon-info {
-    color: #0369a1;
-    background: rgba(14, 165, 233, 0.1);
+    color: #075985;
+    background: #e0f2fe;
 }
 
 #stationConfigModal .station-option-copy {
@@ -873,8 +873,8 @@
 
 #stationConfigModal .station-step-status-success {
     border-color: rgba(22, 163, 74, 0.22);
-    color: #15803d;
-    background: rgba(22, 163, 74, 0.07);
+    color: #14532d;
+    background: #dcfce7;
 }
 
 #stationConfigModal .station-flow-hint,
@@ -1394,8 +1394,8 @@
 }
 
 #stationConfigModal .station-section-icon-success {
-    color: #15803d;
-    background: rgba(22, 163, 74, 0.1);
+    color: #14532d;
+    background: #dcfce7;
 }
 
 #stationConfigModal .station-section-badge {
@@ -1403,8 +1403,8 @@
     margin-left: auto;
     padding: 5px 9px;
     border-radius: 999px;
-    color: #15803d;
-    background: rgba(22, 163, 74, 0.1);
+    color: #14532d;
+    background: #dcfce7;
     font-size: 0.68rem;
     font-weight: 750;
 }

@@ -129,6 +129,33 @@
         return { easting, northing };
     }
 
+    function _sampleVertexColor(elevation, min, max, stops, color) {
+        const t = Math.max(0, Math.min(1, (elevation - min) / Math.max(max - min, 0.001)));
+        const stop = stops.findIndex(([limit]) => limit >= t);
+        if (stop <= 0) {
+            color.copy(stops[0][1]);
+        } else {
+            const [lo, lowColor] = stops[stop - 1];
+            const [hi, highColor] = stops[stop];
+            color.copy(lowColor).lerp(highColor, (t - lo) / (hi - lo));
+        }
+    }
+
+    function _computeGridIndices(columns, rows, valid) {
+        const indices = [];
+        for (let r = 0; r < rows - 1; r += 1) {
+            for (let c = 0; c < columns - 1; c += 1) {
+                const a = r * columns + c;
+                const b = a + 1;
+                const d = a + columns;
+                const e = d + 1;
+                if (valid[a] && valid[b] && valid[d]) indices.push(a, d, b);
+                if (valid[b] && valid[d] && valid[e]) indices.push(b, d, e);
+            }
+        }
+        return indices;
+    }
+
     function _buildTerrainMesh(THREE, grid, verticalScale) {
         const step = Math.max(1, Math.ceil(Math.max(grid.ncols, grid.nrows) / 1024));
         const columns = Math.ceil((grid.ncols - 1) / step) + 1;
@@ -153,28 +180,11 @@
                 positions[vertex * 3] = (sourceColumn - (grid.ncols - 1) / 2) * grid.cellsize;
                 positions[vertex * 3 + 1] = validVertex ? (elevation - grid.min) * verticalScale : 0;
                 positions[vertex * 3 + 2] = (sourceRow - (grid.nrows - 1) / 2) * grid.cellsize;
-                const t = Math.max(0, Math.min(1, (elevation - grid.min) / Math.max(grid.max - grid.min, 0.001)));
-                let stop = stops.findIndex(([limit]) => limit >= t);
-                if (stop <= 0) color.copy(stops[0][1]);
-                else {
-                    const [lo, lowColor] = stops[stop - 1];
-                    const [hi, highColor] = stops[stop];
-                    color.copy(lowColor).lerp(highColor, (t - lo) / (hi - lo));
-                }
+                _sampleVertexColor(elevation, grid.min, grid.max, stops, color);
                 color.toArray(colors, vertex * 3);
             }
         }
-        const indices = [];
-        for (let r = 0; r < rows - 1; r += 1) {
-            for (let c = 0; c < columns - 1; c += 1) {
-                const a = r * columns + c;
-                const b = a + 1;
-                const d = a + columns;
-                const e = d + 1;
-                if (valid[a] && valid[b] && valid[d]) indices.push(a, d, b);
-                if (valid[b] && valid[d] && valid[e]) indices.push(b, d, e);
-            }
-        }
+        const indices = _computeGridIndices(columns, rows, valid);
         const terrainGeometry = new THREE.BufferGeometry();
         terrainGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         terrainGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));

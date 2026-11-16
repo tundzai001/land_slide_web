@@ -842,7 +842,7 @@ html[data-app-view="admin"] body { font-family: var(--font-base); background: va
 [data-theme="dark"] #stationConfigModal .station-step-status-success {
     border-color: rgba(74, 222, 128, .3) !important;
     color: #86efac !important;
-    background: rgba(22, 163, 74, .12) !important;
+    background: #052e16 !important;
 }
 
 [data-theme="dark"] #stationConfigModal .station-footer-actions .btn,

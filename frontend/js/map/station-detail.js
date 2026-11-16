@@ -707,70 +707,33 @@ function renderMonitoringSensors(data) {
     }
 }
 
-function updateSidebarUI(data) {
-    renderMonitoringSensors(data);
-    clearGnssEvaluationSummary();
-    updateChartsAvailability(data);
-    setText('st-name', data.name);
-    setText('st-code', data.station_code);
-
-    // ✅ Handle offline_display_enabled to force STALE status and show old data
-    const isOfflineDisplayEnabled = ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
-    let effectiveStatus = data.status;
-    if (effectiveStatus === 'offline' && isOfflineDisplayEnabled) {
-        effectiveStatus = 'stale'; // turn yellow
-    }
-
-    const riskEl = document.getElementById('st-risk');
-    if (riskEl) {
-        const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, effectiveStatus);
-        riskEl.className = `status-badge ${riskUi.className}`;
-        riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
-    }
-
+function _determineSensorOnlineStates(data, effectiveStatus, isOfflineDisplayEnabled) {
     const gnssLatest = data.sensors?.gnss?.latest;
     const rainLatest = data.sensors?.rain?.latest;
     const waterLatest = data.sensors?.water?.latest;
     const imuLatest = data.sensors?.imu?.latest;
-    const stationId = data.id;
-    void window.restoreGnssAdjustmentStatus?.(data.project_id);
-    const imuApiTs = Number(data.sensors?.imu?.latest_timestamp || 0);
-    const imuRealtimeTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
-    const latestSensorTs = getLatestSensorTimestamp(data);
-
-    // ✅ Per-sensor online check: nếu sensor đó offline → hiển thị '--' dù trạm vẫn online
     const mqttConnected = data.mqtt_connected !== false;
-    renderStaleInfo(data, mqttConnected, latestSensorTs);
-    
-    // staleDisplay is true if station is stale OR if we forced it to stale because of offline_display_enabled
+    const isStationOffline = effectiveStatus === 'offline';
     const staleDisplay = (effectiveStatus === 'stale' || data.status === 'stale') && isOfflineDisplayEnabled;
-    
-    const gnssOnline = mqttConnected && effectiveStatus !== 'offline' &&
-        ((data.sensors?.gnss?.is_online ?? false) || (staleDisplay && !!gnssLatest));
-    const rainOnline = mqttConnected && effectiveStatus !== 'offline' &&
-        ((data.sensors?.rain?.is_online ?? false) || (staleDisplay && !!rainLatest));
-    const waterOnline = mqttConnected && effectiveStatus !== 'offline' &&
-        ((data.sensors?.water?.is_online ?? false) || (staleDisplay && !!waterLatest));
-    const imuOnline = mqttConnected && effectiveStatus !== 'offline' &&
-        ((data.sensors?.imu?.is_online ?? false) || (staleDisplay && !!imuLatest));
+    return {
+        gnssOnline: mqttConnected && !isStationOffline && ((data.sensors?.gnss?.is_online ?? false) || (staleDisplay && !!gnssLatest)),
+        rainOnline: mqttConnected && !isStationOffline && ((data.sensors?.rain?.is_online ?? false) || (staleDisplay && !!rainLatest)),
+        waterOnline: mqttConnected && !isStationOffline && ((data.sensors?.water?.is_online ?? false) || (staleDisplay && !!waterLatest)),
+        imuOnline: mqttConnected && !isStationOffline && ((data.sensors?.imu?.is_online ?? false) || (staleDisplay && !!imuLatest)),
+    };
+}
 
+function _renderAdvancedGnssSidebar(adv, gnssOnline) {
+    const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
+    const gnssOfflineBadgeEl = document.getElementById('gnss-offline-badge');
     if (gnssOnline) {
-        const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
-        const gnssOfflineBadgeEl = document.getElementById('gnss-offline-badge');
         if (gnssFixBadgeEl) gnssFixBadgeEl.style.display = '';
         if (gnssOfflineBadgeEl) gnssOfflineBadgeEl.style.display = 'none';
-        updateGnssFixBadge(gnssLatest?.fix_mode, gnssLatest?.fix_quality);
+        updateGnssFixBadge(adv?.fix_mode, adv?.fix_quality);
     } else {
-        const gnssFixBadgeEl = document.getElementById('gnss-fix-badge');
-        const gnssOfflineBadgeEl = document.getElementById('gnss-offline-badge');
         if (gnssFixBadgeEl) gnssFixBadgeEl.style.display = 'none';
         if (gnssOfflineBadgeEl) gnssOfflineBadgeEl.style.display = '';
     }
-
-    // ✅ POPULATE: Điền dữ liệu Advanced GNSS — luôn hiển thị dữ liệu cuối cùng,
-    // kể cả khi sensor offline (tránh bị mất chữ khi refresh)
-    // API trả data flat trên gnssLatest, WS cache lưu dưới gnssLatest.data
-    const adv = gnssLatest?.data || gnssLatest;
     updateGnssIntegrityStatus(adv);
     if (adv) {
         setText('adv-val-raw-ve', safeNumber(adv.raw_vel_e_mm_s, 4));
@@ -783,28 +746,66 @@ function updateSidebarUI(data) {
         setText('adv-val-filt-2d', formatGnssVelocityValue(adv.speed_2d_mm_s, adv, 4));
     }
     if (adv?.adv_x !== undefined) {
-        // Vị trí hiện tại: Lat/Lon/Alt từ GNGGA
         setText('adv-val-lat', safeNumber(adv.adv_x, 3));
         setText('adv-val-lon', safeNumber(adv.adv_y, 3));
         setText('adv-val-alt', safeNumber(adv.adv_h ?? adv.h, 3));
-        // Biến dạng lũy kế
         setText('adv-val-dx', safeNumber(adv.adv_dx, 2));
         setText('adv-val-dy', safeNumber(adv.adv_dy, 2));
         setText('adv-val-dh', safeNumber(adv.adv_dh, 2));
-        // Vận tốc biến dạng
         setText('adv-val-vdx', formatGnssVelocityValue(adv.adv_vdx, adv, 4));
         setText('adv-val-vdy', formatGnssVelocityValue(adv.adv_vdy, adv, 4));
         setText('adv-val-vdh', formatGnssVelocityValue(adv.adv_vdh, adv, 4));
     }
-    updateSensorOfflineBadge('rain', rainOnline);
-    updateSensorOfflineBadge('water', waterOnline);
-    updateImuOfflineBadge(imuOnline);
+}
 
-    // ✅ Khi toàn trạm offline → hiển thị '--' cho TẤT CẢ sensor
-    if (effectiveStatus === 'offline') {
+function _renderSidebarSensorsOffline() {
+    setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+    setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
+    setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
+    setText('val-imu-roll', '--°');
+    setText('val-imu-pitch', '--°');
+    setText('val-imu-yaw', '--°');
+    setText('val-imu-delta-roll', '-- mm');
+    setText('val-imu-delta-pitch', '-- mm');
+    setText('val-imu-delta-yaw', '-- mm');
+    updateImuDrift(null, null);
+    setSirenButtonState('idle');
+    const batteryContainer = document.getElementById('battery-container');
+    if (batteryContainer) batteryContainer.style.display = 'none';
+}
+
+function _renderSidebarSensorsOnline(data, states) {
+    const { gnssOnline, rainOnline, waterOnline, imuOnline } = states;
+    const gnssLatest = data.sensors?.gnss?.latest;
+    const rainLatest = data.sensors?.rain?.latest;
+    const waterLatest = data.sensors?.water?.latest;
+    const imuLatest = data.sensors?.imu?.latest;
+    const stationId = data.id;
+
+    if (gnssOnline) {
+        const gnssSpeed = getGnssVelocity(gnssLatest);
+        setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
+    } else {
         setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+    }
+
+    if (rainOnline) {
+        setHTML('val-rain', `${safeNumber(rainLatest?.intensity_mm_h ?? null, 1)}<span class="sensor-unit">mm/h</span>`);
+    } else {
         setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
+    }
+
+    if (waterOnline) {
+        setHTML('val-water', formatWaterLevelDisplay(waterLatest));
+    } else {
         setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
+    }
+
+    _renderSidebarImuSensor(stationId, data, imuLatest, imuOnline);
+}
+
+function _renderSidebarImuSensor(stationId, data, imuLatest, imuOnline) {
+    if (!imuOnline) {
         setText('val-imu-roll', '--°');
         setText('val-imu-pitch', '--°');
         setText('val-imu-yaw', '--°');
@@ -812,151 +813,139 @@ function updateSidebarUI(data) {
         setText('val-imu-delta-pitch', '-- mm');
         setText('val-imu-delta-yaw', '-- mm');
         updateImuDrift(null, null);
-
-        // ✅ Khi offline, nút tắt còi chuyển xám (idle)
-        setSirenButtonState('idle');
-
-        // Ẩn battery khi offline
-        const batteryContainer = document.getElementById('battery-container');
-        if (batteryContainer) batteryContainer.style.display = 'none';
-    } else {
-        // GNSS: chỉ hiện giá trị khi sensor đang online
-        if (gnssOnline) {
-            const gnssSpeed = getGnssVelocity(gnssLatest);
-            setHTML('val-gnss-vel', `${safeNumber(gnssSpeed, 4)}<span class="sensor-unit">mm/s</span>`);
-        } else {
-            setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
-        }
-
-        // Rain
-        if (rainOnline) {
-            const rainIntensity = rainLatest?.intensity_mm_h ?? null;
-            setHTML('val-rain', `${safeNumber(rainIntensity, 1)}<span class="sensor-unit">mm/h</span>`);
-        } else {
-            setHTML('val-rain', `--<span class="sensor-unit">mm/h</span>`);
-        }
-
-        // Water
-        if (waterOnline) {
-            setHTML('val-water', formatWaterLevelDisplay(waterLatest));
-        } else {
-            setHTML('val-water', `--<span class="sensor-unit">cm</span>`);
-        }
-
-        // IMU
-        if (imuOnline) {
-            const useApiImu = !imuRealtimeTs || !imuApiTs || imuApiTs >= imuRealtimeTs;
-            console.debug(`🧭 [IMU][MERGE] station=${stationId} api_ts=${imuApiTs || 'none'} ws_ts=${imuRealtimeTs || 'none'} source=${useApiImu ? 'api' : 'ws-cache'}`);
-
-            if (useApiImu) {
-                setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
-                setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
-                setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
-                setText('val-imu-delta-roll', formatImuDelta(imuLatest?.roll, 'roll'));
-                setText('val-imu-delta-pitch', formatImuDelta(imuLatest?.pitch, 'pitch'));
-                setText('val-imu-delta-yaw', formatImuDelta(imuLatest?.yaw, 'yaw'));
-            } else {
-                console.warn(`⏭️ [IMU] Skip stale API overwrite station=${stationId} api_ts=${imuApiTs} < ws_ts=${imuRealtimeTs}`);
-            }
-
-            // Use backend drift calculation if available
-            if (useApiImu) {
-                if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
-                    const driftLengthMm = Number(imuLatest.drift_len_mm);
-                    setText(
-                        'val-imu-drift-len',
-                        Number.isFinite(driftLengthMm) ? `${safeNumber(driftLengthMm / 10, 1)} cm` : '-- cm'
-                    );
-                    setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
-
-                    // Update realtime 3D if active
-                    if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
-                        const pitch = Number(imuLatest.pitch);
-                        const roll = Number(imuLatest.roll);
-                        if (Number.isFinite(pitch) && Number.isFinite(roll)) {
-                            const currPitch = pitch * Math.PI / 180;
-                            const currRoll = roll * Math.PI / 180;
-                            const targetQuaternion = new _THREE.Quaternion();
-                            const euler = new _THREE.Euler(currPitch, 0, currRoll, 'XYZ');
-                            targetQuaternion.setFromEuler(euler);
-                            realtimeImuTargetQuaternion = targetQuaternion;
-                        }
-                    }
-                } else {
-                    updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
-                }
-            }
-        } else {
-            setText('val-imu-roll', '--°');
-            setText('val-imu-pitch', '--°');
-            setText('val-imu-yaw', '--°');
-            setText('val-imu-delta-roll', '-- mm');
-            setText('val-imu-delta-pitch', '-- mm');
-            setText('val-imu-delta-yaw', '-- mm');
-            updateImuDrift(null, null);
-        }
-
-        // ✅ GNSS Adjusted Cache Rendering
-        const adjResultsSection = document.getElementById('adj-results-section');
-        const adjStatusEl = document.getElementById('adj-process-status');
-        const adjTimeEl = document.getElementById('adj-val-time');
-        const adjPointsList = document.getElementById('adj-points-list');
-        
-        const adjCached = data.sensors?.gnss_adjusted;
-        if (
-            adjCached?.latest
-            && isGnssAdjustmentResultRelevant(adjCached.latest, adjCached.latest_timestamp)
-        ) {
-            const cacheData = adjCached.latest;
-            window.pendingGnssAdjustmentResult = cacheData;
-            const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
-            if (terminalVisible) window.gnssBoardState?.loadAdjustmentResult?.(cacheData);
-            if (adjStatusEl) {
-                adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
-            }
-            if (adjTimeEl && adjCached.latest_timestamp) {
-                adjTimeEl.textContent = new Date(normalizeEpochMs(adjCached.latest_timestamp)).toLocaleString();
-            }
-            if (adjResultsSection) {
-                adjResultsSection.style.display = 'block';
-            }
-            if (adjPointsList) {
-                adjPointsList.innerHTML = '';
-                
-                if (cacheData.points) {
-                    for (const [ptName, ptCoords] of Object.entries(cacheData.points)) {
-                        const coordinates = getAdjustedPointCoordinates(ptCoords);
-                        const item = document.createElement('div');
-                        item.className = 'list-group-item bg-transparent text-slate-300 py-1.5 px-0 d-flex justify-content-between align-items-center border-bottom border-white/5';
-                        item.innerHTML = `
-                            <span class="fw-semibold text-teal-400 font-monospace">${ptName}</span>
-                            <span class="text-glow font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
-                                X: ${formatAdjustedCoordinate(coordinates[0])}<br>
-                                Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
-                                Z: ${formatAdjustedCoordinate(coordinates[2])}
-                            </span>
-                        `;
-                        adjPointsList.appendChild(item);
-                    }
-                }
-            }
-            if (terminalVisible) window.gnssBoardState?.fitToResult?.();
-        } else {
-            window.pendingGnssAdjustmentResult = null;
-            if (adjResultsSection) adjResultsSection.style.display = 'none';
-            if (adjPointsList) adjPointsList.innerHTML = '';
-        }
-
-        // ✅ Battery Voltage: chỉ hiển thị khi IMU online và có giá trị > 0
-        const batteryContainer = document.getElementById('battery-container');
-        const batteryVal = imuLatest?.battery;
-        if (imuOnline && batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
-            if (batteryContainer) batteryContainer.style.display = '';
-            setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
-        } else if (batteryContainer) {
-            batteryContainer.style.display = 'none';
-        }
+        return;
     }
+    const imuApiTs = Number(data.sensors?.imu?.latest_timestamp || 0);
+    const imuRealtimeTs = Number(latestRealtimeSensorTs[`${stationId}_imu`] || 0);
+    const useApiImu = !imuRealtimeTs || !imuApiTs || imuApiTs >= imuRealtimeTs;
+    if (useApiImu) {
+        setText('val-imu-roll', `${safeNumber(imuLatest?.raw_roll, 1)}°`);
+        setText('val-imu-pitch', `${safeNumber(imuLatest?.raw_pitch, 1)}°`);
+        setText('val-imu-yaw', `${safeNumber(imuLatest?.raw_yaw, 1)}°`);
+        setText('val-imu-delta-roll', formatImuDelta(imuLatest?.roll, 'roll'));
+        setText('val-imu-delta-pitch', formatImuDelta(imuLatest?.pitch, 'pitch'));
+        setText('val-imu-delta-yaw', formatImuDelta(imuLatest?.yaw, 'yaw'));
+        _updateImuDriftAnd3D(imuLatest);
+    }
+}
+
+function _updateImuDriftAnd3D(imuLatest) {
+    if (imuLatest?.drift_len_mm !== undefined && imuLatest?.drift_dir !== undefined) {
+        const driftLengthMm = Number(imuLatest.drift_len_mm);
+        setText(
+            'val-imu-drift-len',
+            Number.isFinite(driftLengthMm) ? `${safeNumber(driftLengthMm / 10, 1)} cm` : '-- cm'
+        );
+        setText('val-imu-drift-dir', `(${imuLatest.drift_dir})`);
+        if (realtimeImuActive && realtimeImuSensorBlock && _THREE) {
+            const pitch = Number(imuLatest.pitch);
+            const roll = Number(imuLatest.roll);
+            if (Number.isFinite(pitch) && Number.isFinite(roll)) {
+                const targetQuaternion = new _THREE.Quaternion();
+                targetQuaternion.setFromEuler(new _THREE.Euler(pitch * Math.PI / 180, 0, roll * Math.PI / 180, 'XYZ'));
+                realtimeImuTargetQuaternion = targetQuaternion;
+            }
+        }
+    } else {
+        updateImuDrift(imuLatest?.roll, imuLatest?.pitch);
+    }
+}
+
+function _populateAdjustedPointsList(adjPointsList, points) {
+    adjPointsList.innerHTML = '';
+    if (!points) return;
+    for (const [ptName, ptCoords] of Object.entries(points)) {
+        const coordinates = getAdjustedPointCoordinates(ptCoords);
+        const item = document.createElement('div');
+        item.className = 'list-group-item bg-transparent text-slate-300 py-1.5 px-0 d-flex justify-content-between align-items-center border-bottom border-white/5';
+        item.innerHTML = `
+            <span class="fw-semibold text-teal-400 font-monospace">${ptName}</span>
+            <span class="text-glow font-monospace text-end" style="font-size:0.68rem; line-height: 1.2;">
+                X: ${formatAdjustedCoordinate(coordinates[0])}<br>
+                Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
+                Z: ${formatAdjustedCoordinate(coordinates[2])}
+            </span>
+        `;
+        adjPointsList.appendChild(item);
+    }
+}
+
+function _renderSidebarGnssAdjustedSection(data, imuLatest, imuOnline) {
+    const adjResultsSection = document.getElementById('adj-results-section');
+    const adjStatusEl = document.getElementById('adj-process-status');
+    const adjTimeEl = document.getElementById('adj-val-time');
+    const adjPointsList = document.getElementById('adj-points-list');
+    const adjCached = data.sensors?.gnss_adjusted;
+    if (adjCached?.latest && isGnssAdjustmentResultRelevant(adjCached.latest, adjCached.latest_timestamp)) {
+        const cacheData = adjCached.latest;
+        window.pendingGnssAdjustmentResult = cacheData;
+        const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
+        if (terminalVisible) window.gnssBoardState?.loadAdjustmentResult?.(cacheData);
+        if (adjStatusEl) {
+            adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
+        }
+        if (adjTimeEl && adjCached.latest_timestamp) {
+            adjTimeEl.textContent = new Date(normalizeEpochMs(adjCached.latest_timestamp)).toLocaleString();
+        }
+        if (adjResultsSection) adjResultsSection.style.display = 'block';
+        if (adjPointsList) _populateAdjustedPointsList(adjPointsList, cacheData.points);
+        if (terminalVisible) window.gnssBoardState?.fitToResult?.();
+    } else {
+        window.pendingGnssAdjustmentResult = null;
+        if (adjResultsSection) adjResultsSection.style.display = 'none';
+        if (adjPointsList) adjPointsList.innerHTML = '';
+    }
+
+    const batteryContainer = document.getElementById('battery-container');
+    const batteryVal = imuLatest?.battery;
+    if (imuOnline && batteryVal !== undefined && batteryVal !== null && Number.parseFloat(batteryVal) > 0) {
+        if (batteryContainer) batteryContainer.style.display = '';
+        setHTML('val-battery', `${safeNumber(batteryVal, 2)}<span class="sensor-unit">V</span>`);
+    } else if (batteryContainer) {
+        batteryContainer.style.display = 'none';
+    }
+}
+
+function updateSidebarUI(data) {
+    renderMonitoringSensors(data);
+    clearGnssEvaluationSummary();
+    updateChartsAvailability(data);
+    setText('st-name', data.name);
+    setText('st-code', data.station_code);
+
+    const isOfflineDisplayEnabled = ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
+    let effectiveStatus = data.status;
+    if (effectiveStatus === 'offline' && isOfflineDisplayEnabled) {
+        effectiveStatus = 'stale';
+    }
+
+    const riskEl = document.getElementById('st-risk');
+    if (riskEl) {
+        const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, effectiveStatus);
+        riskEl.className = `status-badge ${riskUi.className}`;
+        riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
+    }
+
+    const gnssLatest = data.sensors?.gnss?.latest;
+    const imuLatest = data.sensors?.imu?.latest;
+    void window.restoreGnssAdjustmentStatus?.(data.project_id);
+    const latestSensorTs = getLatestSensorTimestamp(data);
+    const mqttConnected = data.mqtt_connected !== false;
+    renderStaleInfo(data, mqttConnected, latestSensorTs);
+
+    const onlineStates = _determineSensorOnlineStates(data, effectiveStatus, isOfflineDisplayEnabled);
+    const adv = gnssLatest?.data || gnssLatest;
+    _renderAdvancedGnssSidebar(adv, onlineStates.gnssOnline);
+    updateSensorOfflineBadge('rain', onlineStates.rainOnline);
+    updateSensorOfflineBadge('water', onlineStates.waterOnline);
+    updateImuOfflineBadge(onlineStates.imuOnline);
+
+    if (effectiveStatus === 'offline') {
+        _renderSidebarSensorsOffline();
+    } else {
+        _renderSidebarSensorsOnline(data, onlineStates);
+    }
+    _renderSidebarGnssAdjustedSection(data, imuLatest, onlineStates.imuOnline);
 }
 
 function destroyStationCharts() {

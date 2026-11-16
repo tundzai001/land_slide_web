@@ -81,11 +81,26 @@ function _ensureWorkspaceDetails(box, title, onToggle) {
     return details;
 }
 
+function _appendWorkspaceTableRow(body, chart, datasets, index) {
+    const row = body.insertRow();
+    const first = datasets[0]?.data[index];
+    let x = chart.data.labels?.[index];
+    if (first && typeof first === 'object') x = first.x;
+    if (chart._monitoringTimestamps) x = formatChartTimestamp(chart._monitoringTimestamps[index]);
+    row.insertCell().textContent = x ?? '—';
+    for (const dataset of datasets) {
+        const point = dataset.data[index];
+        const value = point && typeof point === 'object' ? point.y : point;
+        row.insertCell().textContent = typeof value === 'number' && Number.isFinite(value)
+            ? value.toLocaleString('vi-VN', { maximumFractionDigits: 6 })
+            : '—';
+    }
+}
+
 function _buildWorkspaceTable(chart, datasets, title) {
     const count = Math.max(0, ...datasets.map(dataset => dataset.data.length));
     const table = document.createElement('table');
-    const caption = table.createCaption();
-    caption.textContent = `${title} · ${Math.min(100, count)} / ${count} điểm gần nhất. Ô “—” là dữ liệu thiếu. Tải CSV để xem toàn bộ.`;
+    table.createCaption().textContent = `${title} · ${Math.min(100, count)} / ${count} điểm gần nhất. Ô “—” là dữ liệu thiếu. Tải CSV để xem toàn bộ.`;
     const heading = table.createTHead().insertRow();
     const headers = [chart._monitoringTimestamps ? 'Thời gian (giờ địa phương)' : 'Trục X', ...datasets.map(d => d.label)];
     for (const label of headers) {
@@ -96,19 +111,7 @@ function _buildWorkspaceTable(chart, datasets, title) {
     }
     const body = table.createTBody();
     for (let index = count - 1; index >= Math.max(0, count - 100); index--) {
-        const row = body.insertRow();
-        const first = datasets[0]?.data[index];
-        let x = chart.data.labels?.[index];
-        if (first && typeof first === 'object') x = first.x;
-        if (chart._monitoringTimestamps) x = formatChartTimestamp(chart._monitoringTimestamps[index]);
-        row.insertCell().textContent = x ?? '—';
-        for (const dataset of datasets) {
-            const point = dataset.data[index];
-            const value = point && typeof point === 'object' ? point.y : point;
-            row.insertCell().textContent = typeof value === 'number' && Number.isFinite(value)
-                ? value.toLocaleString('vi-VN', { maximumFractionDigits: 6 })
-                : '—';
-        }
+        _appendWorkspaceTableRow(body, chart, datasets, index);
     }
     return table;
 }
