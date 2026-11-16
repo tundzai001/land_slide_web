@@ -13,6 +13,7 @@ class VelocityAnalysisMixin:
         config: Dict,
         window_days: float = 30.0
     ) -> Dict[str, Any]:
+        _ = window_days
         try:
             if not historical_data or len(historical_data) < 2:
                 return {"status": "insufficient_data", "message": "Cần ít nhất 2 điểm dữ liệu."}
@@ -175,7 +176,6 @@ class VelocityAnalysisMixin:
                     "reliability_message": reliability_message,
                     "min_reliable_duration_days": round(min_reliable_duration_days, 4),
                     "min_reliable_points": 3,
-                    "window_days": window_days,
                     "duration_days": round(duration_days, 4),
                     "data_points_used": len(sorted_data),
                     "start_date": datetime.fromtimestamp(first_point['timestamp']).isoformat(),
@@ -193,11 +193,12 @@ class VelocityAnalysisMixin:
     def _classify_velocity_extended(
         self,
         velocity_mm_s: float,
-        _velocity_mm_day: float, 
-        _velocity_mm_year: float,
+        velocity_mm_day: float, 
+        velocity_mm_year: float,
         config: Dict,
         station_id: Optional[int] = None
     ) -> str:
+        _ = (velocity_mm_day, velocity_mm_year)
         def _normalize_unit(raw_unit: Any) -> str:
             u = str(raw_unit or 'mm/s').strip().lower().replace(' ', '')
             aliases = {

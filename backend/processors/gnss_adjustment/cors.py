@@ -373,8 +373,9 @@ class RoundRobinCorsMixin:
     def _cors_stream_is_managed_by_adjustment(
         self,
         serial: str,
-        _server_id: int,
+        server_id: int,
     ) -> bool:
+        _ = server_id
         target_serial = str(serial or "").strip().casefold()
         # Even a single-stream hold owns a full configure-service document.
         # Failover must not overwrite it via the other stream of this receiver.

@@ -17,6 +17,7 @@ class WindowAnalysisMixin:
         Phân tích trên các chu kỳ lịch sử dụng: Ngày hôm trước, Tuần này (bao nhiêu ngày tính bấy nhiêu),
         Tháng này thay thế cho 'Multi Window' động đơn thuần.
         """
+        _ = (station_id, windows)
         if not historical_data or len(historical_data) < 2:
             return {"available": False, "message": "Không đủ dữ liệu."}
 
@@ -126,8 +127,6 @@ class WindowAnalysisMixin:
 
             return {
                 "available": True,
-                "station_id": station_id,
-                "configured_windows": windows,
                 "windows": window_results,
                 "acceleration_alert": acceleration_alert
             }

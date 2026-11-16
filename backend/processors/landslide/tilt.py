@@ -16,6 +16,7 @@ class TiltAnalysisMixin:
         Phân tích xu hướng nghiêng dài hạn từ dữ liệu IMU.
         Phát hiện đất dần dần nghiêng theo thời gian.
         """
+        _ = station_id
         try:
             if not historical_data or len(historical_data) < 2:
                 return {"status": "insufficient_data", "message": "Cần ít nhất 2 điểm dữ liệu IMU."}
@@ -109,7 +110,6 @@ class TiltAnalysisMixin:
             
             return {
                 "status": "success",
-                "station_id": station_id,
                 "analysis": {
                     "total_tilt_change_deg": round(total_tilt_change, 2),
                     "avg_rate_deg_per_day": round(avg_rate_deg_per_day, 4),

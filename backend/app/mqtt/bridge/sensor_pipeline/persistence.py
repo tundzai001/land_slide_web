@@ -42,7 +42,7 @@ class SensorPersistenceMixin:
 
     async def _save_processed_data(
         self,
-        _info: dict,
+        info: dict,
         raw_payload: str,
         processed_data: dict,
         alert: dict | None,
@@ -55,6 +55,7 @@ class SensorPersistenceMixin:
         station_config: dict,
         current_timestamp: int,
     ) -> None:
+        _ = info
         save_data_now = False
         is_waveform = sensor_type == 'accelerometer' and bool(processed_data.get('waveform'))
 

@@ -31,15 +31,16 @@ class OtherSensorPayloadMixin:
         self,
         info: dict,
         raw_payload: str,
-        _public_project_id: int,
+        public_project_id: int,
         station_id: int,
-        _station_name: str,
+        station_name: str,
         processor: Any,
         station_config: dict,
-        _device_id: int,
-        _adjustment_only: bool,
+        device_id: int,
+        adjustment_only: bool,
         current_timestamp: int,
     ) -> dict | None:
+        _ = (public_project_id, station_name, device_id, adjustment_only)
         sensor_type = info["type"]
         processed_data = None
         try:

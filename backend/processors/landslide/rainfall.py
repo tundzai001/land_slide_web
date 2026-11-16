@@ -27,10 +27,10 @@ class RainfallAnalysisMixin:
         - Rain acceleration ratio (rain vs dry day displacement).
         - Risk insights tổng hợp.
         """
+        _ = window_days
         result = {
             "available": False,
             "model": "slide_model",
-            "window_days": float(window_days),
             "message": ""
         }
 
