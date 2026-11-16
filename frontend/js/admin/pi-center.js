@@ -14,7 +14,7 @@ class AdminPiCenterFeature extends window.AdminManager {
         checked.forEach(cb => {
             const row = cb.closest('.pi-grid-row') || cb.closest('tr');
             if (row && row.dataset.piType === 'pi_point') {
-                pointIds.push(parseInt(cb.dataset.piId));
+                pointIds.push(Number.parseInt(cb.dataset.piId));
             }
         });
         if (pointIds.length === 0) {
@@ -88,7 +88,7 @@ class AdminPiCenterFeature extends window.AdminManager {
                 item.addEventListener('click', () => {
                     modal.querySelectorAll('.center-pick-item').forEach(x => x.classList.remove('is-selected'));
                     item.classList.add('is-selected');
-                    selectedCenterId = parseInt(item.dataset.centerId, 10);
+                    selectedCenterId = Number.parseInt(item.dataset.centerId, 10);
                 });
             });
 
@@ -212,7 +212,7 @@ class AdminPiCenterFeature extends window.AdminManager {
                     'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ pi_center_id: parseInt(centerId) })
+                body: JSON.stringify({ pi_center_id: Number.parseInt(centerId) })
             });
 
             if (!res.ok) {
@@ -299,7 +299,7 @@ class AdminPiCenterFeature extends window.AdminManager {
                 r.addEventListener('click', () => {
                     listEl.querySelectorAll('.wizard-pi-option').forEach(x => x.classList.remove('is-selected'));
                     r.classList.add('is-selected');
-                    this._selectedWizardPiId = parseInt(r.dataset.piId, 10);
+                    this._selectedWizardPiId = Number.parseInt(r.dataset.piId, 10);
                     if (btnRow) btnRow.style.display = 'block';
                 });
             });

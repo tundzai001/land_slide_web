@@ -579,18 +579,18 @@ function formatRateWithUnit(valueMm, periodLabel) {
 
 function formatLongTermVelocityDisplay(metrics) {
     if (metrics && metrics.velocity_reliable === false) {
-        const minDurationDays = parseFloat(metrics.min_reliable_duration_days) || (1 / 24);
+        const minDurationDays = Number.parseFloat(metrics.min_reliable_duration_days) || (1 / 24);
         return {
             text: `Chờ đủ ${formatDurationString(minDurationDays)}`,
             ciText: `(${metrics.reliability_message || 'Chưa đủ thời lượng quan sát để kết luận vận tốc trung bình.'})`
         };
     }
 
-    const durationDays = parseFloat(metrics?.duration_days) || 0;
-    const mmYear = parseFloat(metrics?.velocity_mm_year) || 0;
-    const mmDay = parseFloat(metrics?.velocity_mm_day) || (mmYear / 365);
-    const mmSecond = parseFloat(metrics?.velocity_mm_second) || (mmDay / 86400);
-    const ciYear = parseFloat(metrics?.velocity_ci_95) || 0;
+    const durationDays = Number.parseFloat(metrics?.duration_days) || 0;
+    const mmYear = Number.parseFloat(metrics?.velocity_mm_year) || 0;
+    const mmDay = Number.parseFloat(metrics?.velocity_mm_day) || (mmYear / 365);
+    const mmSecond = Number.parseFloat(metrics?.velocity_mm_second) || (mmDay / 86400);
+    const ciYear = Number.parseFloat(metrics?.velocity_ci_95) || 0;
 
     let primary;
     let ciValue;

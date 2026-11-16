@@ -142,9 +142,16 @@
 
     /* Mobile Breakpoints (for reference/comments) */
     /* Extra small: 320px - 375px (iPhone SE, iPhone 12 mini) */
-    /* Small: 375px - 480px (iPhone 12, 13) */
-    /* Medium: 480px - 768px (Tablets in portrait) */
-    /* Large: 768px+ (Desktop, tablets in landscape) */
+    --control-radius: 6px;
+    --panel-radius: 10px;
+    --control-height: 44px;
+    --control-focus: color-mix(in srgb, var(--accent-primary) 32%, transparent);
+    --panel-shadow: 0 2px 8px rgb(15 42 46 / 5%);
+    --overlay-shadow: 0 12px 36px rgb(15 42 46 / 14%);
+    --motion-control: 160ms;
+
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* === DARK MODE OVERRIDE === */
@@ -205,19 +212,14 @@
 
     --gradient-card: linear-gradient(145deg, #0b2427 0%, #071a1c 100%);
     --gradient-button: var(--accent-primary);
-}
 
-/* Smooth font rendering for light mode */
-:root {
+    --panel-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+    --overlay-shadow: 0 12px 36px rgb(0 0 0 / 28%);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* Smooth font rendering for dark mode */
-[data-theme="dark"] {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
+
 
 /* === SMOOTH THEME TRANSITION === */
 /* === BODY BASE === */
@@ -296,17 +298,4 @@ html[data-theme="light"] {
     color: white;
 }
 
-/* Shared component contract: restrained surfaces and deliberate interaction. */
-:root {
-    --control-radius: 6px;
-    --panel-radius: 10px;
-    --control-height: 44px;
-    --control-focus: color-mix(in srgb, var(--accent-primary) 32%, transparent);
-    --panel-shadow: 0 2px 8px rgb(15 42 46 / 5%);
-    --overlay-shadow: 0 12px 36px rgb(15 42 46 / 14%);
-    --motion-control: 160ms;
-}
-[data-theme="dark"] {
-    --panel-shadow: 0 2px 8px rgb(0 0 0 / 12%);
-    --overlay-shadow: 0 12px 36px rgb(0 0 0 / 28%);
-}
+

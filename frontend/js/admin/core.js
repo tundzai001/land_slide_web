@@ -599,7 +599,7 @@ class AdminManager {
 
             if (input && displayEl) {
                 input.addEventListener('input', function () {
-                    const seconds = parseInt(this.value) || 0;
+                    const seconds = Number.parseInt(this.value) || 0;
                     displayEl.textContent = window.adminManager.formatOfflineTime(seconds);
                 });
             }

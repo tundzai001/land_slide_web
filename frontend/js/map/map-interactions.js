@@ -201,7 +201,7 @@ function setupEventListeners() {
                     id: currentStationData.id,
                     name: currentStationData.name || currentStationData.station_name || currentStationData.code,
                     code: currentStationData.code || currentStationData.station_code,
-                    rain: { h24: parseFloat(h24) }
+                    rain: { h24: Number.parseFloat(h24) }
                 });
             } else {
                 window.openDigitalTwin(null);

@@ -25,7 +25,7 @@ def _frontend_document(file_name: str, *, private: bool = False):
 
 
 @router.get("/static/sounds/{file_name}")
-async def get_public_sound(file_name: str):
+def get_public_sound(file_name: str):
     """Serve only known-safe MP3 filenames from the public sound directory."""
     if PUBLIC_SOUND_NAME.fullmatch(file_name) is None:
         return JSONResponse(status_code=404, content={"detail": "Sound not found"})
@@ -40,7 +40,7 @@ async def get_public_sound(file_name: str):
 
 
 @router.get("/")
-async def read_root(request: Request):
+def read_root(request: Request):
     legacy_view = (request.query_params.get("view") or "").lower()
     if legacy_view in {"admin", "management"}:
         return RedirectResponse(url="/management", status_code=307)
@@ -50,7 +50,7 @@ async def read_root(request: Request):
 
 
 @router.get("/about")
-async def read_about():
+def read_about():
     return _frontend_document("about.html")
 
 
@@ -58,22 +58,22 @@ async def read_about():
 @router.get("/management.html")
 @router.get("/admin")
 @router.get("/admin.html")
-async def read_app():
+def read_app():
     return _frontend_document("app.html", private=True)
 
 
 @router.get("/map")
-async def read_map():
+def read_map():
     return _frontend_document("map.html")
 
 
 @router.get("/login")
-async def read_login():
+def read_login():
     return _frontend_document("app.html", private=True)
 
 
 @router.get("/robots.txt")
-async def robots_txt():
+def robots_txt():
     site_url = settings.PUBLIC_SITE_URL.rstrip("/")
     if settings.ENVIRONMENT.lower() != "production":
         return PlainTextResponse("User-agent: *\nDisallow: /\n")
@@ -83,7 +83,7 @@ async def robots_txt():
 
 
 @router.get("/sitemap.xml")
-async def sitemap_xml():
+def sitemap_xml():
     if settings.ENVIRONMENT.lower() != "production":
         return Response(status_code=404)
     site_url = settings.PUBLIC_SITE_URL.rstrip("/")
@@ -99,7 +99,7 @@ async def sitemap_xml():
 
 
 @router.get("/favicon.ico", include_in_schema=False)
-async def favicon_ico():
+def favicon_ico():
     file_path = FRONTEND_DIR / "aitogy.png"
     if file_path.exists():
         return FileResponse(file_path, media_type="image/png")
@@ -107,7 +107,7 @@ async def favicon_ico():
 
 
 @router.get("/img/aitogy.png", include_in_schema=False)
-async def aitogy_logo():
+def aitogy_logo():
     file_path = FRONTEND_DIR / "aitogy.png"
     if file_path.exists():
         return FileResponse(file_path, media_type="image/png")
