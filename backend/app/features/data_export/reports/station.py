@@ -16,7 +16,7 @@ from ....models import data as model_data
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
-@router.get("/export/station/{station_id}/pdf")
+@router.get("/export/station/{station_id}/pdf", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def export_station_pdf(
     station_id: int,
     config_db: AsyncSession = Depends(get_config_db),

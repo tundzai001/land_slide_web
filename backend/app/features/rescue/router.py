@@ -66,7 +66,7 @@ def _require_admin(user: model_auth.User) -> None:
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
 
-@router.get("/api/admin/rescue-images/{file_name}")
+@router.get("/api/admin/rescue-images/{file_name}", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def get_rescue_image(
     file_name: str,
     current_user: model_auth.User = Depends(auth.get_current_user),
@@ -154,7 +154,7 @@ async def _broadcast_rescue_request_events(row, incident_case, incident_event, c
         logger.exception("Failed to broadcast rescue request WebSocket notification")
 
 
-@router.post("/api/public/rescue-requests")
+@router.post("/api/public/rescue-requests", responses={404: {"description": "Not Found"}, 415: {"description": "Unsupported Media Type"}, 422: {"description": "Unprocessable Entity"}})
 async def create_rescue_request(
     request: Request,
     db: AsyncSession = Depends(get_data_db),
@@ -206,7 +206,7 @@ async def create_rescue_request(
     return {"status": "ok", "id": int(row.id), "created_at": row.created_at}
 
 
-@router.get("/api/admin/rescue-requests")
+@router.get("/api/admin/rescue-requests", responses={403: {"description": "Forbidden"}, 422: {"description": "Unprocessable Entity"}})
 async def get_rescue_requests(
     response: Response,
     status_filter: Optional[str] = None,
@@ -273,7 +273,7 @@ async def get_rescue_requests(
     return result
 
 
-@router.patch("/api/admin/rescue-requests/{request_id}")
+@router.patch("/api/admin/rescue-requests/{request_id}", responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def update_rescue_request(
     request_id: int,
     payload: RescueRequestUpdate,
@@ -344,7 +344,7 @@ async def update_rescue_request(
     return {"status": "ok", "id": int(row.id), "new_status": row.status}
 
 
-@router.delete("/api/admin/rescue-requests/{request_id}")
+@router.delete("/api/admin/rescue-requests/{request_id}", responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def delete_rescue_request(
     request_id: int,
     db: AsyncSession = Depends(get_data_db),

@@ -15,7 +15,7 @@ from .cors_stations import _fetch_cors_base_stations_sync
 router = APIRouter(tags=["Projects"])
 logger = logging.getLogger(__name__)
 
-@router.get("/api/admin/projects/cors-stations")
+@router.get("/api/admin/projects/cors-stations", responses={502: {"description": "Bad Gateway"}})
 async def get_admin_cors_stations(
     _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):

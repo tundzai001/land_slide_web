@@ -129,6 +129,15 @@ jobs:
           echo "=== Quality Gate Project Status ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=tundzai001_land_slide_web" || true
           echo ""
+          echo "=== Full Issue Dump (all open issues, paginated) ==="
+          TOTAL=$(curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&ps=1" | jq -r '.total')
+          echo "TOTAL_OPEN_ISSUES=$TOTAL"
+          PAGES=$(( (TOTAL + 499) / 500 ))
+          for p in $(seq 1 "$PAGES"); do
+            curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&ps=500&p=$p" \
+              | jq -r '.issues[] | "[\(.rule)] \(.severity) \(.component):\(.line // 0) \(.message)"'
+          done || true
+          echo ""
           echo "=== Issues Breakdown by Type, Severity & Top Rules ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&facets=types,severities,rules&ps=1" | jq -r '.facets[] | "\(.property): " + ([.values[] | "\(.val)=\(.count)"] | join(", "))' || true
           echo ""

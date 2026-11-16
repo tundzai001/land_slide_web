@@ -125,7 +125,7 @@ class PiAssignToCenterRequest(BaseModel):
     pi_center_id: int
 
 
-@router.post("/register", response_model=PiRegisterResponse)
+@router.post("/register", response_model=PiRegisterResponse, responses={500: {"description": "Internal Server Error"}})
 async def register_pi_device(
     payload: PiRegisterRequest,
     db: AsyncSession = Depends(get_config_db)
@@ -191,7 +191,7 @@ async def register_pi_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/heartbeat")
+@router.post("/heartbeat", responses={500: {"description": "Internal Server Error"}})
 async def heartbeat_pi_device(
     payload: PiRegisterRequest,
     db: AsyncSession = Depends(get_config_db)
@@ -220,7 +220,7 @@ async def heartbeat_pi_device(
         raise HTTPException(status_code=500, detail="Heartbeat failed")
 
 
-@router.get("/pi-devices")
+@router.get("/pi-devices", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def list_pi_devices(
     response: Response,
     q: Optional[str] = None,
@@ -316,7 +316,7 @@ async def list_pi_devices(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/pi-devices/available")
+@router.get("/pi-devices/available", responses={500: {"description": "Internal Server Error"}})
 async def list_available_pi_devices(
     db: AsyncSession = Depends(get_config_db),
     _user=Depends(auth.require_permission(auth.Permission.VIEW_FIELD_DEVICES))
@@ -335,7 +335,7 @@ async def list_available_pi_devices(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pi-devices/{pi_id}/activate")
+@router.post("/pi-devices/{pi_id}/activate", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def activate_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -381,7 +381,7 @@ async def activate_pi_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pi-devices/{pi_id}/confirm")
+@router.post("/pi-devices/{pi_id}/confirm", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def confirm_pi_activation(
     pi_id: int,
     payload: PiConfirmRequest,
@@ -416,7 +416,7 @@ async def confirm_pi_activation(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/pi-devices/{pi_id}/assign")
+@router.put("/pi-devices/{pi_id}/assign", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def assign_pi_to_station(
     pi_id: int,
     payload: PiAssignRequest,
@@ -466,7 +466,7 @@ async def assign_pi_to_station(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/pi-devices/{pi_id}/unassign")
+@router.put("/pi-devices/{pi_id}/unassign", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def unassign_pi(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -499,7 +499,7 @@ async def unassign_pi(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/pi-devices/{pi_id}/lock")
+@router.put("/pi-devices/{pi_id}/lock", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def toggle_lock_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -530,7 +530,7 @@ async def toggle_lock_pi_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/pi-devices/{pi_id}")
+@router.delete("/pi-devices/{pi_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def delete_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -554,7 +554,7 @@ async def delete_pi_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pi-devices/{pi_id}/reset")
+@router.post("/pi-devices/{pi_id}/reset", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def reset_pi_device(
     pi_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -596,7 +596,7 @@ async def reset_pi_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/pi-devices/{pi_id}/assign-to-center")
+@router.put("/pi-devices/{pi_id}/assign-to-center", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def assign_pi_to_center(
     pi_id: int,
     payload: PiAssignToCenterRequest,

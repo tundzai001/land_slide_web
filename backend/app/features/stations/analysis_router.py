@@ -152,7 +152,7 @@ async def _calculate_station_risk_assessment(
         return {"overall_risk": "UNKNOWN", "active_alerts": []}
 
 
-@router.get("/api/stations/{station_id}/long-term-analysis")
+@router.get("/api/stations/{station_id}/long-term-analysis", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def get_long_term_analysis(
     station_id: int,
     days: float = 30.0,
@@ -641,7 +641,7 @@ async def get_long_term_analysis(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/stations/{station_id}/gnss-daily-summary")
+@router.get("/api/stations/{station_id}/gnss-daily-summary", responses={500: {"description": "Internal Server Error"}})
 async def get_gnss_daily_summary(
     station_id: int,
     limit: int = 30,
@@ -684,7 +684,7 @@ async def get_gnss_daily_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/stations/{station_id}/gnss-weekly-summary")
+@router.get("/api/stations/{station_id}/gnss-weekly-summary", responses={500: {"description": "Internal Server Error"}})
 async def get_gnss_weekly_summary(
     station_id: int,
     limit: int = 12,

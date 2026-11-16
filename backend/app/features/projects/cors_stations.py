@@ -233,7 +233,7 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
         return copy.deepcopy(stations)
 
 
-@router.get("/api/public/cors-base-stations")
+@router.get("/api/public/cors-base-stations", responses={502: {"description": "Bad Gateway"}})
 async def get_cors_base_stations(
     request: Request,
     db_config: AsyncSession = Depends(get_config_db),

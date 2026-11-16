@@ -116,7 +116,7 @@ async def get_database_stats(
         return {"stations": 0, "devices": 0, "sensor_data": 0, "gnss_adjustments": 0, "alerts": 0}
 
 
-@router.get("/api/admin/db/stations")
+@router.get("/api/admin/db/stations", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def admin_get_all_stations(
     response: Response,
     q: Optional[str] = None,
@@ -198,7 +198,7 @@ async def admin_get_all_stations(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/admin/db/devices")
+@router.get("/api/admin/db/devices", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def admin_get_all_devices(
     response: Response,
     q: Optional[str] = None,
@@ -268,7 +268,7 @@ async def admin_get_all_devices(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/admin/db/sensor-data")
+@router.get("/api/admin/db/sensor-data", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def admin_get_sensor_data(
     response: Response,
     offset: int = 0,
@@ -428,7 +428,7 @@ async def admin_get_sensor_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/admin/db/sensor-data/{record_id}")
+@router.get("/api/admin/db/sensor-data/{record_id}", responses={404: {"description": "Not Found"}})
 async def admin_get_sensor_data_record(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
@@ -455,7 +455,7 @@ async def admin_get_sensor_data_record(
     }
 
 
-@router.get("/api/admin/db/alerts")
+@router.get("/api/admin/db/alerts", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def admin_get_alerts(
     response: Response,
     offset: int = 0,
@@ -505,7 +505,7 @@ async def admin_get_alerts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/admin/db/simulations")
+@router.get("/api/admin/db/simulations", responses={422: {"description": "Unprocessable Entity"}})
 async def admin_get_simulations(
     response: Response,
     offset: int = 0,

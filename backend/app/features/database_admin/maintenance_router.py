@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
 
 
-@router.post("/db/clear-table/{table_name}")
+@router.post("/db/clear-table/{table_name}", responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}, 500: {"description": "Internal Server Error"}})
 async def clear_specific_table(
     table_name: str,
     _config_db: AsyncSession = Depends(get_config_db),
@@ -64,7 +64,7 @@ async def clear_specific_table(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/db/factory-reset")
+@router.post("/db/factory-reset", responses={403: {"description": "Forbidden"}})
 async def factory_reset_database(
     config_db: AsyncSession = Depends(get_config_db),
     data_db: AsyncSession = Depends(get_data_db),
@@ -103,7 +103,7 @@ async def factory_reset_database(
         await data_db.rollback()
 
 
-@router.post("/db/clear-all")
+@router.post("/db/clear-all", responses={403: {"description": "Forbidden"}, 500: {"description": "Internal Server Error"}})
 async def clear_all_database(
     _config_db: AsyncSession = Depends(get_config_db),
     data_db: AsyncSession = Depends(get_data_db),

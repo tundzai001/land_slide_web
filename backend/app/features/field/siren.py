@@ -12,7 +12,7 @@ from ...database import get_config_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/field", tags=["Field Unit API"])
 
-@router.post("/stations/{station_id}/stop-siren")
+@router.post("/stations/{station_id}/stop-siren", responses={500: {"description": "Internal Server Error"}})
 async def stop_siren_command(
     station_id: int,
     target: Optional[str] = 'all',
@@ -84,7 +84,7 @@ async def stop_siren_command(
         raise HTTPException(status_code=500, detail="Failed to send command to device")
 
 
-@router.post("/stations/{station_id}/enable-siren")
+@router.post("/stations/{station_id}/enable-siren", responses={500: {"description": "Internal Server Error"}})
 async def enable_siren_command(
     station_id: int,
     target: Optional[str] = 'all',

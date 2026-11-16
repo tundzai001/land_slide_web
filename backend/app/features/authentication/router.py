@@ -45,7 +45,7 @@ async def _validate_user_credentials(form_data: OAuth2PasswordRequestForm, db: A
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
-@router.post("/api/auth/login", response_model=schemas.Token)
+@router.post("/api/auth/login", response_model=schemas.Token, responses={401: {"description": "Unauthorized"}, 503: {"description": "Service Unavailable"}})
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -88,7 +88,7 @@ async def login(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.post("/api/auth/logout")
+@router.post("/api/auth/logout", responses={503: {"description": "Service Unavailable"}})
 async def logout(response: Response,
                  _user: model_auth.User = Depends(auth.get_current_user),
                  token: str = Depends(auth.oauth2_scheme)):
@@ -139,7 +139,7 @@ async def get_current_user_info(
     return user_response
 
 
-@router.get("/api/auth/sessions")
+@router.get("/api/auth/sessions", responses={503: {"description": "Service Unavailable"}})
 async def list_sessions(current_user: model_auth.User = Depends(auth.get_current_user),
                         token: str = Depends(auth.oauth2_scheme)):
     try:
@@ -149,7 +149,7 @@ async def list_sessions(current_user: model_auth.User = Depends(auth.get_current
         raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
 
 
-@router.delete("/api/auth/sessions/{session_id}")
+@router.delete("/api/auth/sessions/{session_id}", responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 503: {"description": "Service Unavailable"}})
 async def revoke_session(session_id: str,
                          current_user: model_auth.User = Depends(auth.get_current_user),
                          token: str = Depends(auth.oauth2_scheme)):
@@ -167,7 +167,7 @@ async def revoke_session(session_id: str,
     return {"status": "revoked"}
 
 
-@router.post("/api/auth/sessions/revoke-others")
+@router.post("/api/auth/sessions/revoke-others", responses={503: {"description": "Service Unavailable"}})
 async def revoke_other_sessions(current_user: model_auth.User = Depends(auth.get_current_user),
                                 token: str = Depends(auth.oauth2_scheme)):
     current_id = auth.decode_access_token(token)["jti"]
@@ -183,7 +183,7 @@ async def revoke_other_sessions(current_user: model_auth.User = Depends(auth.get
     return {"revoked": sum(not row["current"] for row in rows)}
 
 
-@router.post("/api/auth/ws-ticket")
+@router.post("/api/auth/ws-ticket", responses={422: {"description": "Unprocessable Entity"}, 503: {"description": "Service Unavailable"}})
 async def create_websocket_ticket(
     current_user: model_auth.User = Depends(auth.get_current_user),
     body: dict | None = Body(default=None),

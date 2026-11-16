@@ -13,7 +13,7 @@ from ...models import config as model_config
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
-@router.post("/gnss/reset-origin/{station_id}")
+@router.post("/gnss/reset-origin/{station_id}", responses={404: {"description": "Not Found"}, 409: {"description": "Conflict"}})
 async def reset_gnss_origin(
     station_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -58,7 +58,7 @@ async def reset_gnss_origin(
     }
 
 
-@router.post("/gnss/relock-origin/{station_id}")
+@router.post("/gnss/relock-origin/{station_id}", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 409: {"description": "Conflict"}})
 async def relock_gnss_origin(
     station_id: int,
     request_data: dict,

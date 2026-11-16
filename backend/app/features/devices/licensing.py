@@ -60,7 +60,7 @@ class ProvisionDeviceRequest(BaseModel):
     mqtt_topic: Optional[str] = None
 
 
-@router.get("/devices/pending")
+@router.get("/devices/pending", responses={500: {"description": "Internal Server Error"}})
 async def get_pending_devices(
     db: AsyncSession = Depends(get_config_db),
     _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
@@ -93,7 +93,7 @@ async def get_pending_devices(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/devices/generate-license")
+@router.post("/devices/generate-license", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def generate_license_for_device(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_config_db),
@@ -159,7 +159,7 @@ async def generate_license_for_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/devices/provision")
+@router.post("/devices/provision", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def provision_device(
     payload: ProvisionDeviceRequest,
     db: AsyncSession = Depends(get_config_db),

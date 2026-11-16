@@ -36,7 +36,7 @@ def validate_project_fields(data, creating=False):
             raise HTTPException(422, f"Trường {key} không hợp lệ (tối đa {limit} ký tự).")
         data[key] = value.strip()
 
-@router.get("/api/admin/projects")
+@router.get("/api/admin/projects", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def get_projects(
     response: Response,
     q: Optional[str] = None,
@@ -104,7 +104,7 @@ async def get_projects(
         raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")
 
 
-@router.post("/api/admin/projects/{project_id}/dems")
+@router.post("/api/admin/projects/{project_id}/dems", responses={404: {"description": "Not Found"}, 415: {"description": "Unsupported Media Type"}})
 async def upload_project_dem(
     project_id: int,
     dem_name: str = Form(..., max_length=100),
@@ -134,7 +134,7 @@ class UpdateProjectDemRequest(BaseModel):
     name: Optional[str] = None
 
 
-@router.put("/api/admin/projects/{project_id}/dems/{dem_id}")
+@router.put("/api/admin/projects/{project_id}/dems/{dem_id}", responses={404: {"description": "Not Found"}})
 async def update_project_dem(
     project_id: int,
     dem_id: str,
@@ -163,7 +163,7 @@ async def update_project_dem(
     return {"project_id": project_id, **result}
 
 
-@router.post("/api/admin/projects")
+@router.post("/api/admin/projects", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def create_project(
     project_data: dict,
     db: AsyncSession = Depends(get_config_db),
@@ -205,7 +205,7 @@ async def create_project(
         raise HTTPException(status_code=500, detail="Không thể tạo dự án.")
 
 
-@router.put("/api/admin/projects/{project_id}")
+@router.put("/api/admin/projects/{project_id}", responses={404: {"description": "Not Found"}, 409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def update_project(
     project_id: int,
     project_data: dict,
@@ -287,7 +287,7 @@ async def update_project(
         raise HTTPException(status_code=500, detail="Không thể cập nhật dự án.")
 
 
-@router.get("/api/admin/projects/{project_id}")
+@router.get("/api/admin/projects/{project_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def get_project(
     project_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -316,7 +316,7 @@ async def get_project(
         raise HTTPException(status_code=500, detail="Không thể tải dự án.")
 
 
-@router.delete("/api/admin/projects/{project_id}")
+@router.delete("/api/admin/projects/{project_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def delete_project(
     project_id: int,
     db: AsyncSession = Depends(get_config_db),

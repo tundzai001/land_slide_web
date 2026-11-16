@@ -27,7 +27,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/api/admin/gnss/aicaster-users")
+@router.get("/api/admin/gnss/aicaster-users", responses={503: {"description": "Service Unavailable"}})
 async def list_aicaster_users(
     _user: model_auth.User = Depends(
         auth.require_permission(auth.Permission.EDIT_STATIONS)
@@ -55,7 +55,7 @@ async def list_aicaster_users(
         ]
     }
 
-@router.post("/api/admin/gnss/adjustment/start")
+@router.post("/api/admin/gnss/adjustment/start", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def start_gnss_adjustment(
     req: GnssAdjustmentStartRequest,
     db: AsyncSession = Depends(get_config_db),
@@ -409,7 +409,7 @@ async def get_gnss_adjustment_status(
     }
 
 
-@router.post("/api/admin/gnss/adjustment/pause")
+@router.post("/api/admin/gnss/adjustment/pause", responses={409: {"description": "Conflict"}})
 async def pause_gnss_adjustment(
     req: GnssAdjustmentControlRequest,
     _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
@@ -452,7 +452,7 @@ async def pause_gnss_adjustment(
     return {"status": "success", "phase": "PAUSED", "run_ids": paused_run_ids}
 
 
-@router.post("/api/admin/gnss/adjustment/resume")
+@router.post("/api/admin/gnss/adjustment/resume", responses={409: {"description": "Conflict"}})
 async def resume_gnss_adjustment(
     req: GnssAdjustmentControlRequest,
     _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
@@ -494,7 +494,7 @@ async def resume_gnss_adjustment(
     return {"status": "success", "phase": resumed_phase, "run_ids": resumed_run_ids}
 
 
-@router.post("/api/admin/gnss/adjustment/stop")
+@router.post("/api/admin/gnss/adjustment/stop", responses={500: {"description": "Internal Server Error"}})
 async def stop_gnss_adjustment(
     req: GnssAdjustmentStartRequest,
     _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))

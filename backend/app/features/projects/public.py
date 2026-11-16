@@ -26,7 +26,7 @@ def public_clusters(clusters):
         for cluster in (clusters or []) if isinstance(cluster, dict)
     ]
 
-@router.get("/api/projects")
+@router.get("/api/projects", responses={422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def get_public_projects(
     request: Request,
     response: Response,
@@ -114,7 +114,7 @@ async def _project_dem_access(project_id: int, request: Request, db: AsyncSessio
     return project
 
 
-@router.get("/api/projects/{project_id}/dems")
+@router.get("/api/projects/{project_id}/dems", responses={404: {"description": "Not Found"}})
 async def get_project_dems(
     project_id: int,
     request: Request,
@@ -125,7 +125,7 @@ async def get_project_dems(
     return {"project_id": project_id, "models": await get_project_dem_models(db, project_id)}
 
 
-@router.get("/api/projects/{project_id}/dems/{dem_id}")
+@router.get("/api/projects/{project_id}/dems/{dem_id}", responses={404: {"description": "Not Found"}})
 async def get_project_dem_file(
     project_id: int,
     dem_id: str,

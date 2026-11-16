@@ -125,7 +125,7 @@ async def _download(
     )
 
 
-@router.get("/api/admin/gnss/adjustment/reports/{project_id}/{filename}")
+@router.get("/api/admin/gnss/adjustment/reports/{project_id}/{filename}", responses={404: {"description": "Not Found"}})
 async def download_gnss_adjustment_report(
     request: Request,
     project_id: int,
@@ -160,7 +160,7 @@ async def download_gnss_adjustment_report(
     )
 
 
-@router.get("/api/admin/gnss/adjustment/reports/{project_code}/{cluster_name}/{path:path}")
+@router.get("/api/admin/gnss/adjustment/reports/{project_code}/{cluster_name}/{path:path}", responses={404: {"description": "Not Found"}})
 async def download_scoped_gnss_adjustment_report(
     request: Request,
     project_code: str,

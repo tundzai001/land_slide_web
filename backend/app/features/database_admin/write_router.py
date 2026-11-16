@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.put("/api/admin/db/stations/{record_id}")
+@router.put("/api/admin/db/stations/{record_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def admin_update_station(
     record_id: int,
     update_data: dict,
@@ -56,7 +56,7 @@ async def admin_update_station(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/api/admin/db/stations/{record_id}")
+@router.delete("/api/admin/db/stations/{record_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def admin_delete_station(
     record_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -85,7 +85,7 @@ async def admin_delete_station(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/api/admin/db/devices/{record_id}")
+@router.put("/api/admin/db/devices/{record_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def admin_update_device(
     record_id: int,
     update_data: dict,
@@ -114,7 +114,7 @@ async def admin_update_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/api/admin/db/devices/{record_id}")
+@router.delete("/api/admin/db/devices/{record_id}", responses={500: {"description": "Internal Server Error"}})
 async def admin_delete_device(
     record_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -131,7 +131,7 @@ async def admin_delete_device(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/api/admin/db/sensor-data/{record_id}")
+@router.delete("/api/admin/db/sensor-data/{record_id}", responses={500: {"description": "Internal Server Error"}})
 async def admin_delete_sensor_data(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
@@ -149,7 +149,7 @@ async def admin_delete_sensor_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/api/admin/db/alerts/{record_id}")
+@router.delete("/api/admin/db/alerts/{record_id}", responses={500: {"description": "Internal Server Error"}})
 async def admin_delete_alert(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
@@ -167,7 +167,7 @@ async def admin_delete_alert(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/api/admin/db/simulations/{record_id}")
+@router.delete("/api/admin/db/simulations/{record_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def admin_delete_simulation(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),

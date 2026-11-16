@@ -19,7 +19,7 @@ from .service import _run_view, _start_worker, _station_inputs
 
 router = APIRouter(prefix="/api/simulations", tags=["Landslide simulations"])
 
-@router.post("/runs", status_code=202)
+@router.post("/runs", status_code=202, responses={422: {"description": "Unprocessable Entity"}})
 async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(get_data_db), config_db: AsyncSession = Depends(get_config_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     now, warnings = int(time.time()), []
     sources = dict.fromkeys(payload.parameters, "Nhập thủ công")
@@ -72,7 +72,7 @@ async def list_runs(_response: Response, project_id: Optional[int] = None, stati
     return [_run_view(row, detail=False) for row in rows]
 
 
-@router.get("/runs/{run_id}")
+@router.get("/runs/{run_id}", responses={404: {"description": "Not Found"}})
 async def get_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     run = await db.get(model_data.SimulationRun, run_id)
     if not run:
@@ -91,7 +91,7 @@ async def stop_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: 
     return _run_view(run, detail=False)
 
 
-@router.post("/runs/{run_id}/rerun", status_code=202)
+@router.post("/runs/{run_id}/rerun", status_code=202, responses={404: {"description": "Not Found"}})
 async def rerun(run_id: int, db: AsyncSession = Depends(get_data_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     original = await db.get(model_data.SimulationRun, run_id)
     if not original:

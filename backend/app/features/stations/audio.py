@@ -19,7 +19,7 @@ class PlayAudioRequest(BaseModel):
     audio_code: str
 
 
-@router.post("/stations/{station_id}/command/play")
+@router.post("/stations/{station_id}/command/play", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def send_audio_command(
     station_id: int,
     payload: PlayAudioRequest,

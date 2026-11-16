@@ -15,7 +15,7 @@ from ...shared.project_location import refresh_project_map_position
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
-@router.delete("/stations/{station_id}")
+@router.delete("/stations/{station_id}", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def delete_station(
     station_id: int,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
@@ -43,7 +43,7 @@ async def delete_station(
         raise HTTPException(status_code=500, detail=f"Lỗi khi xóa trạm: {str(e)}")
 
 
-@router.post("/stations", response_model=schemas.StationResponse)
+@router.post("/stations", response_model=schemas.StationResponse, responses={400: {"description": "Bad Request"}, 500: {"description": "Internal Server Error"}})
 async def create_station(
     station_in: schemas.StationCreate,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB

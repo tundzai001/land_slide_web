@@ -28,7 +28,7 @@ def _check_private_device_scope(user: model_auth.User, project_id: int) -> None:
         raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thiết bị của dự án này")
 
 
-@router.get("/api/admin/stations/{station_id}/devices")
+@router.get("/api/admin/stations/{station_id}/devices", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def get_station_devices(
     station_id: int,
     db: AsyncSession = Depends(get_config_db),
@@ -82,7 +82,7 @@ async def get_station_devices(
         logger.error(f"Error loading devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/api/admin/stations/{station_id}/devices")
+@router.post("/api/admin/stations/{station_id}/devices", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def create_device_in_station(
     station_id: int,
     device_data: dict,
@@ -131,7 +131,7 @@ async def create_device_in_station(
         logger.error(f"Error creating device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/api/admin/devices/{device_id}")
+@router.delete("/api/admin/devices/{device_id}", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def delete_device(
     device_id: int,
     db: AsyncSession = Depends(get_config_db),

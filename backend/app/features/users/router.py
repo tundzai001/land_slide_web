@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
 
 
-@router.put("/users/{user_id}/status")
+@router.put("/users/{user_id}/status", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}})
 async def toggle_user_status(
     user_id: int,
     payload: schemas.UserStatusUpdate,
@@ -46,7 +46,7 @@ async def toggle_user_status(
     return {"status": "success", "is_active": user.is_active}
 
 
-@router.get("/users", response_model=List[schemas.UserResponse])
+@router.get("/users", response_model=List[schemas.UserResponse], responses={422: {"description": "Unprocessable Entity"}})
 async def get_users(
     response: Response,
     q: Optional[str] = Query(None, max_length=150),
@@ -86,7 +86,7 @@ async def get_users(
     return users
 
 
-@router.put("/users/{user_id}", response_model=schemas.UserResponse)
+@router.put("/users/{user_id}", response_model=schemas.UserResponse, responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}})
 async def update_user(
     user_id: int,
     payload: schemas.UserUpdate,
@@ -123,7 +123,7 @@ async def update_user(
     return user
 
 
-@router.delete("/users/{user_id}")
+@router.delete("/users/{user_id}", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}})
 async def delete_user(
     user_id: int,
     db: AsyncSession = Depends(get_auth_db), # ✅ Dùng Auth DB
@@ -147,7 +147,7 @@ async def delete_user(
     return {"status": "success"}
 
 
-@router.put("/users/{user_id}/projects")
+@router.put("/users/{user_id}/projects", responses={404: {"description": "Not Found"}})
 async def update_user_projects(
     user_id: int,
     payload: schemas.UserProjectsUpdate,
@@ -166,7 +166,7 @@ async def update_user_projects(
     return {"status": "success", "assigned_projects": user.assigned_projects}
 
 
-@router.post("/users", response_model=schemas.UserResponse)
+@router.post("/users", response_model=schemas.UserResponse, responses={400: {"description": "Bad Request"}, 409: {"description": "Conflict"}})
 async def create_user(
     user_in: schemas.UserCreate,
     db: AsyncSession = Depends(get_auth_db), # ✅ Dùng Auth DB

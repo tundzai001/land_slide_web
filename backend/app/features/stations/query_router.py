@@ -50,7 +50,7 @@ def _compute_station_status(station_online: bool, offline_display_enabled: bool)
         return "stale"
     return "offline"
 
-@router.get("/api/admin/projects/{project_id}/stations")
+@router.get("/api/admin/projects/{project_id}/stations", responses={422: {"description": "Unprocessable Entity"}})
 async def get_stations_by_project(
     project_id: int,
     response: Response,
@@ -219,7 +219,7 @@ def _create_station_devices(db: AsyncSession, new_station: model_config.Station,
             ))
 
 
-@router.post("/api/admin/projects/{project_id}/stations", response_model=schemas.StationResponse)
+@router.post("/api/admin/projects/{project_id}/stations", response_model=schemas.StationResponse, responses={400: {"description": "Bad Request"}, 409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def create_station_in_project(
     project_id: int,
     station_data: schemas.StationCreate,
@@ -265,7 +265,7 @@ async def create_station_in_project(
         raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 
 
-@router.get("/api/public/dashboard-summary")
+@router.get("/api/public/dashboard-summary", responses={422: {"description": "Unprocessable Entity"}})
 async def get_public_dashboard_summary(
     db_config: AsyncSession = Depends(get_config_db),
     db_data: AsyncSession = Depends(get_data_db),
@@ -308,7 +308,7 @@ def parse_station_bbox(value: str) -> tuple[float, float, float, float]:
     return west, south, east, north
 
 
-@router.get("/api/stations")
+@router.get("/api/stations", responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def get_stations(
     request: Request,
     response: Response,
@@ -441,7 +441,7 @@ async def get_stations(
         raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 
 
-@router.get("/api/stations/{station_id}/history")
+@router.get("/api/stations/{station_id}/history", responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def get_station_history(
     station_id: int,
     request: Request,
@@ -559,7 +559,7 @@ async def _fetch_station_pi_devices(db_config: AsyncSession, station_id: int, cu
     return pi_devices_status
 
 
-@router.get("/api/stations/{station_id}/detail")
+@router.get("/api/stations/{station_id}/detail", responses={403: {"description": "Forbidden"}, 500: {"description": "Internal Server Error"}})
 async def get_station_detail(
     station_id: int,
     request: Request,

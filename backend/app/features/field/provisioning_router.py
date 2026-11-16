@@ -35,7 +35,7 @@ def _require_device_token(request: Request, cfg: Dict[str, Any], payload: Option
     if expected and not hmac.compare_digest(_device_token(request, payload, query_token), expected):
         raise HTTPException(status_code=403, detail="invalid device token")
 
-@router.post("/api/field/provision")
+@router.post("/api/field/provision", responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def field_provision(payload: Dict[str, Any], db: AsyncSession = Depends(get_config_db)):
     """Provision device with station assignment and configs.
     Payload: {"device_code":"hw123","enroll_token":"...","station_id":1,"mqtt":{...},"audio_files":[...],"license":"..."}
@@ -83,7 +83,7 @@ async def field_provision(payload: Dict[str, Any], db: AsyncSession = Depends(ge
     return {"status": "ok", "device_id": device.id, "station_id": station_id, "mqtt_topic": mqtt_topic}
 
 
-@router.get("/api/field/{device_code}/config")
+@router.get("/api/field/{device_code}/config", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def field_get_config(device_code: str, request: Request, token: Optional[str] = None, db: AsyncSession = Depends(get_config_db)):
     """Device fetches its config. Provide enroll_token or provision token as query param 'token'"""
     result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))
@@ -96,7 +96,7 @@ async def field_get_config(device_code: str, request: Request, token: Optional[s
     return {"device_code": device.device_code, "device_id": device.id, "station_id": device.station_id, "mqtt_topic": device.mqtt_topic, "config": cfg}
 
 
-@router.post("/api/field/{device_code}/status")
+@router.post("/api/field/{device_code}/status", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}})
 async def field_status(device_code: str, payload: Dict[str, Any], request: Request, db: AsyncSession = Depends(get_config_db)):
     """Device posts health/status. payload example: {"status":"ok","uptime":1234, "audio_files": [...] }"""
     result = await db.execute(select(model_config.Device).where(model_config.Device.device_code == device_code))

@@ -16,7 +16,7 @@ from .common import (_STATUS_ATTENTION_ORDER, _attention_rank, _base_scope_stmt,
 
 router = APIRouter(tags=["Incidents"])
 
-@router.get("/api/incidents")
+@router.get("/api/incidents", responses={422: {"description": "Unprocessable Entity"}})
 async def list_incidents(
     response: Response,
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -152,7 +152,7 @@ async def get_incident(
     return {"case": serialize_case(case, include_private=_is_manager(current_user)), "events": await _event_rows(db, incident_id)}
 
 
-@router.get("/api/incidents/{incident_id}/events")
+@router.get("/api/incidents/{incident_id}/events", responses={422: {"description": "Unprocessable Entity"}})
 async def get_incident_events(
     incident_id: int,
     response: Response,

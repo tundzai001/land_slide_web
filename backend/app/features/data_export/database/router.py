@@ -15,7 +15,7 @@ from .job import EXPORT_TASKS, _export_excel_task
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
-@router.get("/db/export-excel/{task_id}/download")
+@router.get("/db/export-excel/{task_id}/download", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}})
 async def download_export_excel(
     task_id: str,
     background_tasks: BackgroundTasks,
@@ -51,7 +51,7 @@ async def download_export_excel(
     )
 
 
-@router.get("/db/export-excel/{task_id}/progress")
+@router.get("/db/export-excel/{task_id}/progress", responses={404: {"description": "Not Found"}})
 async def get_export_progress(
     task_id: str,
     _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
@@ -62,7 +62,7 @@ async def get_export_progress(
     return EXPORT_TASKS[task_id]
 
 
-@router.post("/db/export-excel/start")
+@router.post("/db/export-excel/start", responses={400: {"description": "Bad Request"}})
 async def start_export_database_excel(
     request: ExportExcelRequest,
     background_tasks: BackgroundTasks,

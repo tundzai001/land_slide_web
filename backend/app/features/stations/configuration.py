@@ -185,7 +185,7 @@ def _auto_compute_station_location(station):
         logger.info(f"📍 [LOCATION] Auto-set station {station.id} location to ({avg_lat:.6f}, {avg_lon:.6f}) from {len(lats)} origins")
 
 
-@router.put("/stations/{station_id}/config")
+@router.put("/stations/{station_id}/config", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def update_station_config(
     station_id: int,
     config_data: dict,
@@ -246,7 +246,7 @@ async def update_station_config(
         raise HTTPException(status_code=500, detail=f"Lỗi cập nhật cấu hình: {str(e)}")
 
 
-@router.post("/stations/{station_id}/reset-config")
+@router.post("/stations/{station_id}/reset-config", responses={404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def reset_station_config(
     station_id: int,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
@@ -278,7 +278,7 @@ async def reset_station_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/stations/{station_id}/config")
+@router.get("/stations/{station_id}/config", responses={404: {"description": "Not Found"}})
 async def get_station_config(
     station_id: int,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB

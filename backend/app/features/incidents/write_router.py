@@ -70,7 +70,7 @@ async def _mutate_case(
     ], "changed": changed, "idempotent_replay": False, "version": case.version, "revision": case.revision}
 
 
-@router.post("/api/incidents/{incident_id}/scope")
+@router.post("/api/incidents/{incident_id}/scope", responses={403: {"description": "Forbidden"}, 409: {"description": "Conflict"}})
 async def set_incident_scope(
     incident_id: int,
     body: ScopeBody,
@@ -94,7 +94,7 @@ async def set_incident_scope(
     return await _mutate_case(db, current_user, incident_id, "scope", body.model_dump(), idempotency_key, mutate)
 
 
-@router.post("/api/incidents/{incident_id}/acknowledge")
+@router.post("/api/incidents/{incident_id}/acknowledge", responses={409: {"description": "Conflict"}})
 async def acknowledge_incident(
     incident_id: int,
     body: AcknowledgeBody,
@@ -113,7 +113,7 @@ async def acknowledge_incident(
     return await _mutate_case(db, current_user, incident_id, "acknowledge", body.model_dump(), idempotency_key, mutate)
 
 
-@router.post("/api/incidents/{incident_id}/priority")
+@router.post("/api/incidents/{incident_id}/priority", responses={409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}})
 async def set_incident_priority(
     incident_id: int,
     body: PriorityBody,
@@ -134,7 +134,7 @@ async def set_incident_priority(
     return await _mutate_case(db, current_user, incident_id, "priority", body.model_dump(), idempotency_key, mutate)
 
 
-@router.post("/api/incidents/{incident_id}/assign")
+@router.post("/api/incidents/{incident_id}/assign", responses={403: {"description": "Forbidden"}, 409: {"description": "Conflict"}})
 async def assign_incident(
     incident_id: int,
     body: AssignBody,
@@ -154,7 +154,7 @@ async def assign_incident(
     return await _mutate_case(db, current_user, incident_id, "assign", body.model_dump(), idempotency_key, mutate)
 
 
-@router.post("/api/incidents/{incident_id}/transition")
+@router.post("/api/incidents/{incident_id}/transition", responses={409: {"description": "Conflict"}, 422: {"description": "Unprocessable Entity"}})
 async def transition_incident(
     incident_id: int,
     body: TransitionBody,
@@ -188,7 +188,7 @@ async def transition_incident(
     return await _mutate_case(db, current_user, incident_id, "transition", body.model_dump(), idempotency_key, mutate)
 
 
-@router.post("/api/incidents/{incident_id}/notes")
+@router.post("/api/incidents/{incident_id}/notes", responses={409: {"description": "Conflict"}})
 async def add_incident_note(
     incident_id: int,
     body: NoteBody,

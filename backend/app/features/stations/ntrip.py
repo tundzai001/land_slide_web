@@ -12,7 +12,7 @@ from ...models import config as model_config
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 
-@router.post("/stations/{station_code}/ntrip_route/stop")
+@router.post("/stations/{station_code}/ntrip_route/stop", responses={404: {"description": "Not Found"}})
 async def stop_ntrip_route(
     station_code: str,
     _admin: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
@@ -34,7 +34,7 @@ async def stop_ntrip_route(
     return {"status": "ok", "message": f"NTRIP route stopped for {station_code}"}
 
 
-@router.post("/stations/{station_code}/ntrip_route/start")
+@router.post("/stations/{station_code}/ntrip_route/start", responses={404: {"description": "Not Found"}})
 async def start_ntrip_route(
     station_code: str,
     payload: schemas.NtripRouteStart,

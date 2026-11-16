@@ -55,7 +55,7 @@ async def start_backup(tasks: BackgroundTasks, _user=Depends(admin)):
     return {'job_id': identifier}
 
 
-@router.get('/jobs/{identifier}')
+@router.get('/jobs/{identifier}', responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}})
 async def job_status(identifier: str, _user=Depends(admin)):
     try:
         backups.backup_path(identifier)
@@ -67,7 +67,7 @@ async def job_status(identifier: str, _user=Depends(admin)):
     return record
 
 
-@router.get('/backups/{identifier}/download')
+@router.get('/backups/{identifier}/download', responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}})
 async def download_backup(identifier: str, _user=Depends(admin)):
     try:
         path = backups.backup_path(identifier)
@@ -78,7 +78,7 @@ async def download_backup(identifier: str, _user=Depends(admin)):
     return FileResponse(path, filename=f'landslide_{identifier}.zip', media_type='application/zip')
 
 
-@router.post('/backups/upload')
+@router.post('/backups/upload', responses={413: {"description": "Payload Too Large"}, 422: {"description": "Unprocessable Entity"}})
 async def upload_backup(file: UploadFile, _user=Depends(admin)):
     identifier = uuid.uuid4().hex
     path = backups.backup_path(identifier)
@@ -108,7 +108,7 @@ class RestoreRequest(BaseModel):
     confirmation: Literal['RESTORE INTO ISOLATED DATABASES']
 
 
-@router.post('/backups/{identifier}/restore')
+@router.post('/backups/{identifier}/restore', responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}})
 async def restore_backup(identifier: str, _body: RestoreRequest, tasks: BackgroundTasks, _user=Depends(admin)):
     try:
         path = backups.backup_path(identifier)
@@ -149,12 +149,12 @@ async def get_ntp(_user=Depends(admin)):
             'system_clock': await asyncio.to_thread(system_time_status)}
 
 
-@router.put('/ntp')
+@router.put('/ntp', responses={409: {"description": "Conflict"}})
 async def save_ntp(_body: NTPConfig, _user=Depends(admin)):
     raise HTTPException(409, 'NTP server is managed by NTP_SERVER in backend/.env; restart the service after changing it')
 
 
-@router.post('/ntp/check')
+@router.post('/ntp/check', responses={502: {"description": "Bad Gateway"}})
 async def check_ntp(_user=Depends(admin)):
     config = NTPConfig(server=settings.NTP_SERVER).model_dump()
     try:
@@ -188,7 +188,7 @@ async def devices(db=Depends(get_config_db), _user=Depends(admin)):
              'acquisition': (d.config or {}).get('acquisition', {'protocol': 'mqtt', 'enabled': False})} for d in rows]
 
 
-@router.put('/devices/{device_id}/acquisition')
+@router.put('/devices/{device_id}/acquisition', responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}})
 async def acquisition(device_id: int, body: AcquisitionProfile, db=Depends(get_config_db), _user=Depends(admin)):
     device = await db.get(Device, device_id)
     if not device:
@@ -206,7 +206,7 @@ async def acquisition(device_id: int, body: AcquisitionProfile, db=Depends(get_c
     return {'status': 'saved', 'transport': 'mqtt', 'gateway_deployment_required': body.protocol != 'mqtt'}
 
 
-@router.get('/gateway-config')
+@router.get('/gateway-config', responses={404: {"description": "Not Found"}})
 async def gateway_config(device_id: int = Query(..., ge=1), db=Depends(get_config_db), _user=Depends(admin)):
     rows = (await db.execute(select(Device).where(Device.is_active.is_(True), Device.id == device_id))).scalars().all()
     if not rows:

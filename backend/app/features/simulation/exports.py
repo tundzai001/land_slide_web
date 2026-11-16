@@ -22,7 +22,7 @@ from .service import _download_header, _safe_name
 
 router = APIRouter(prefix="/api/simulations", tags=["Landslide simulations"])
 
-@router.get("/runs/{run_id}/export")
+@router.get("/runs/{run_id}/export", responses={404: {"description": "Not Found"}})
 async def export_run(run_id: int, format: Literal["pdf", "xlsx", "json"] = "pdf", db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     run = await db.get(model_data.SimulationRun, run_id)
     if not run:
@@ -33,7 +33,7 @@ async def export_run(run_id: int, format: Literal["pdf", "xlsx", "json"] = "pdf"
     return StreamingResponse(BytesIO(body), media_type=builders[format][1], headers={"Content-Disposition": _download_header(filename, f"simulation_{run.id}.{format}"), "Cache-Control": "no-store"})
 
 
-@router.get("/runs/{run_id}/bundle")
+@router.get("/runs/{run_id}/bundle", responses={404: {"description": "Not Found"}})
 async def export_bundle(run_id: int, db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     run = await db.get(model_data.SimulationRun, run_id)
     if not run:
