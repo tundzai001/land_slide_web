@@ -171,14 +171,17 @@ const artifactNames = [
 // The manifest is committed and checked in CI. Identical inputs must produce
 // identical bytes; release timestamps belong to the workflow run metadata.
 const manifest = { version: 1, build: buildVersion, assets: {} };
-await Promise.all(artifactNames.map(async name => {
+const assetEntries = await Promise.all(artifactNames.map(async name => {
   const filePath = path.join(outputRoot, name);
   const [bytes, metadata] = await Promise.all([readFile(filePath), stat(filePath)]);
-  manifest.assets[name] = {
+  return [name, {
     bytes: metadata.size,
     sha256: createHash('sha256').update(bytes).digest('hex')
-  };
+  }];
 }));
+for (const [name, meta] of assetEntries) {
+  manifest.assets[name] = meta;
+}
 await writeFile(path.join(outputRoot, 'build-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
 // Absolute source URLs are forbidden. CDN URLs may legitimately contain
