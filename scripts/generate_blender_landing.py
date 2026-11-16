@@ -30,6 +30,7 @@ JS_OUT = PROJECT_ROOT / "frontend" / "js" / "blender-assets.js"
 # Expanded monumental terrain dimensions (15.6m x 10.8m)
 TERRAIN_WIDTH = 15.6
 TERRAIN_DEPTH = 10.8
+PRINCIPLED_BSDF_NODE = "Principled BSDF"
 
 
 def clear_scene():
@@ -62,7 +63,7 @@ def make_material(
 
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
-    bsdf = nodes.get("Principled BSDF")
+    bsdf = nodes.get(PRINCIPLED_BSDF_NODE)
     if bsdf:
         bsdf.inputs["Base Color"].default_value = base_color
         bsdf.inputs["Metallic"].default_value = metallic
@@ -1413,7 +1414,7 @@ def create_grafana_wall_material():
     mat.diffuse_color = (0.12, 0.78, 0.92, 1.0)
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
-    bsdf = nodes.get("Principled BSDF")
+    bsdf = nodes.get(PRINCIPLED_BSDF_NODE)
     tex_node = nodes.new("ShaderNodeTexImage")
     tex_node.image = img
     tex_node.extension = "CLIP"
@@ -2122,7 +2123,7 @@ def import_web_vehicles(root, mats):
             mat.metallic = 0.25
             mat.roughness = 0.24
             if mat.node_tree:
-                bsdf = mat.node_tree.nodes.get("Principled BSDF")
+                bsdf = mat.node_tree.nodes.get(PRINCIPLED_BSDF_NODE)
                 if bsdf:
                     bsdf.inputs["Roughness"].default_value = 0.24
                     bsdf.inputs["Metallic"].default_value = 0.25

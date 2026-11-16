@@ -64,19 +64,46 @@ async def _consume_ws_ticket(jti: str) -> bool:
     return bool(jti and await asyncio.to_thread(sessions.consume_ws_ticket, jti))
 
 
-async def _authorize_websocket(websocket: WebSocket) -> bool:
+async def _validate_ws_preconditions(websocket: WebSocket) -> str | None:
     origin = websocket.headers.get("origin")
     if origin and origin not in settings.allowed_cors_origins:
         await websocket.close(code=1008, reason="Origin not allowed")
-        return False
+        return None
 
     if websocket.url.path not in {WS_ADMIN_PATH, "/ws/operations", "/ws/updates"}:
         await websocket.close(code=1008, reason="Unknown channel")
-        return False
+        return None
 
     token = websocket.query_params.get("ticket")
     if not token:
         await websocket.close(code=1008, reason="Authentication required")
+        return None
+    return token
+
+
+def _validate_ws_payload(payload: dict, ws_path: str) -> tuple[str, str, str, str]:
+    username = payload.get("sub")
+    channel = str(payload.get("channel") or "legacy_admin").lower()
+    required_channel = {"/ws/operations": "operations", "/ws/updates": "updates"}.get(ws_path)
+    if required_channel and channel != required_channel:
+        raise ValueError("Wrong WebSocket channel")
+    if ws_path == WS_ADMIN_PATH and channel not in {"legacy_admin", "admin"}:
+        raise ValueError("Wrong WebSocket channel")
+    jti = payload.get("jti")
+    if (
+        not username
+        or payload.get("purpose") != "websocket"
+        or not isinstance(jti, str)
+        or not jti
+    ):
+        raise ValueError("Token has no subject")
+    parent_session = str(payload.get("session_id") or "")
+    return username, channel, jti, parent_session
+
+
+async def _authorize_websocket(websocket: WebSocket) -> bool:
+    token = await _validate_ws_preconditions(websocket)
+    if not token:
         return False
 
     try:
@@ -86,23 +113,7 @@ async def _authorize_websocket(websocket: WebSocket) -> bool:
             algorithms=[settings.ALGORITHM],
             options={"require": ["sub", "exp", "iat", "jti", "purpose", "channel", "session_id", "authz_scope_hash"]},
         )
-        username = payload.get("sub")
-        channel = str(payload.get("channel") or "legacy_admin").lower()
-        required_channel = {"/ws/operations": "operations", "/ws/updates": "updates"}.get(websocket.url.path)
-        if required_channel and channel != required_channel:
-            raise ValueError("Wrong WebSocket channel")
-        if websocket.url.path == WS_ADMIN_PATH and channel not in {"legacy_admin", "admin"}:
-            raise ValueError("Wrong WebSocket channel")
-        jti = payload.get("jti")
-        if (
-            not username
-            or payload.get("purpose") != "websocket"
-            or not isinstance(jti, str)
-            or not jti
-        ):
-            raise ValueError("Token has no subject")
-
-        parent_session = str(payload.get("session_id") or "")
+        username, channel, jti, parent_session = _validate_ws_payload(payload, websocket.url.path)
         user = await _await_session_user(username, parent_session)
         if websocket.url.path == WS_ADMIN_PATH and str(user.role or "") != auth.Role.ADMIN:
             raise ValueError("Admin channel requires admin role")

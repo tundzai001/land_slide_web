@@ -37,28 +37,24 @@ def is_offline_display_enabled(station_config: Optional[Dict[str, Any]]) -> bool
     )
 
 
-def calculate_station_location(sensors: dict, manual_location: dict = None):
-    # A DEM grid pick is the station's chosen map position; sensor reference
-    # coordinates are separate origins and must not override it.
-    if isinstance(manual_location, dict) and manual_location.get("source") == "project-dem-grid":
-        return manual_location
+def _extract_sensor_coordinates(sensors: dict) -> list[dict]:
     coords = []
-    if sensors:
-        for s_type, info in sensors.items():
-            # Kiểm tra nếu sensor info có chứa lat/lon
-            if isinstance(info, dict) and info.get('lat') is not None and info.get('lon') is not None:
-                try:
-                    coords.append({
-                        "lat": float(info['lat']),
-                        "lon": float(info['lon']),
-                        "h": float(info.get('h', 0))
-                    })
-                except (ValueError, TypeError):
-                    continue
+    if not sensors:
+        return coords
+    for info in sensors.values():
+        if isinstance(info, dict) and info.get('lat') is not None and info.get('lon') is not None:
+            try:
+                coords.append({
+                    "lat": float(info['lat']),
+                    "lon": float(info['lon']),
+                    "h": float(info.get('h', 0))
+                })
+            except (ValueError, TypeError):
+                continue
+    return coords
 
-    if not coords:
-        return manual_location
 
+def _format_computed_location(coords: list[dict]) -> dict:
     if len(coords) == 1:
         return {
             "lat": coords[0]['lat'],
@@ -66,16 +62,28 @@ def calculate_station_location(sensors: dict, manual_location: dict = None):
             "h": coords[0]['h'],
             "source": "Single Sensor (Auto)"
         }
-    else:
-        avg_lat = sum(c['lat'] for c in coords) / len(coords)
-        avg_lon = sum(c['lon'] for c in coords) / len(coords)
-        avg_h = sum(c['h'] for c in coords) / len(coords)
-        return {
-            "lat": round(avg_lat, 8),
-            "lon": round(avg_lon, 8),
-            "h": round(avg_h, 3),
-            "source": f"Average of {len(coords)} sensors"
-        }
+    avg_lat = sum(c['lat'] for c in coords) / len(coords)
+    avg_lon = sum(c['lon'] for c in coords) / len(coords)
+    avg_h = sum(c['h'] for c in coords) / len(coords)
+    return {
+        "lat": round(avg_lat, 8),
+        "lon": round(avg_lon, 8),
+        "h": round(avg_h, 3),
+        "source": f"Average of {len(coords)} sensors"
+    }
+
+
+def calculate_station_location(sensors: dict, manual_location: dict = None):
+    # A DEM grid pick is the station's chosen map position; sensor reference
+    # coordinates are separate origins and must not override it.
+    if isinstance(manual_location, dict) and manual_location.get("source") == "project-dem-grid":
+        return manual_location
+
+    coords = _extract_sensor_coordinates(sensors)
+    if not coords:
+        return manual_location
+
+    return _format_computed_location(coords)
 
 
 async def _load_station_runtime_maps(

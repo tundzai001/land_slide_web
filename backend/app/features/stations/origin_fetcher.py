@@ -18,6 +18,22 @@ class GNSSLiveFetcher:
         self.received_data = None
         self.is_connected = False
 
+    @staticmethod
+    def _parse_coordinates(lat_str: str, lat_dir: str, lon_str: str, lon_dir: str) -> Optional[tuple[float, float]]:
+        if not lat_str or not lon_str or lat_dir not in ('N', 'S') or lon_dir not in ('E', 'W'):
+            return None
+        lat_deg = int(lat_str[:2])
+        lat_min = float(lat_str[2:])
+        lon_deg = int(lon_str[:3])
+        lon_min = float(lon_str[3:])
+        if not (0.0 <= lat_min < 60.0 and 0.0 <= lon_min < 60.0):
+            return None
+        lat = (float(lat_deg) + lat_min / 60.0) * (-1 if lat_dir == 'S' else 1)
+        lon = (float(lon_deg) + lon_min / 60.0) * (-1 if lon_dir == 'W' else 1)
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            return None
+        return lat, lon
+
     def _parse_gngga(self, gngga_string: str) -> Optional[dict]:
         try:
             if not self._verify_nmea_checksum(gngga_string):
@@ -26,38 +42,16 @@ class GNSSLiveFetcher:
             if len(parts) < 12:
                 return None
 
-            lat_str, lon_str = parts[2], parts[4]
             lat_dir = parts[3].upper() if parts[3] else ''
             lon_dir = parts[5].upper() if parts[5] else ''
-            if not lat_str or not lon_str:
-                return None
-            if lat_dir not in ('N', 'S') or lon_dir not in ('E', 'W'):
+            coords = self._parse_coordinates(parts[2], lat_dir, parts[4], lon_dir)
+            if not coords or not parts[9] or not parts[11]:
                 return None
 
-            # Persisted origins use ellipsoidal height. Missing geoid would
-            # silently store MSL and shift the origin by tens of metres.
-            if not parts[9] or not parts[11]:
-                return None
+            lat, lon = coords
             altitude_msl = float(parts[9])
             geoid_sep = float(parts[11])
             h = altitude_msl + geoid_sep
-
-            lat_deg = int(lat_str[:2])
-            lat_min = float(lat_str[2:])
-            lon_deg = int(lon_str[:3])
-            lon_min = float(lon_str[3:])
-            if not (0.0 <= lat_min < 60.0 and 0.0 <= lon_min < 60.0):
-                return None
-
-            lat = float(lat_deg) + lat_min / 60.0
-            if lat_dir == 'S':
-                lat = -lat
-            lon = float(lon_deg) + lon_min / 60.0
-            if lon_dir == 'W':
-                lon = -lon
-            if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-                return None
-
             fix_quality = int(parts[6]) if parts[6] else 0
             num_sats = int(parts[7]) if parts[7] else 0
             return {'lat': lat, 'lon': lon, 'h': h, 'fix_quality': fix_quality, 'num_sats': num_sats}

@@ -785,6 +785,48 @@ class AdminStationWizardFeature extends window.AdminManager {
         return option;
     }
 
+    _populateAICasterUserList(select, users, desired) {
+        select.innerHTML = '<option value="">-- Chọn user AICaster của rover --</option>';
+        let matched = false;
+        users.forEach(user => {
+            const option = this._buildAICasterUserOption(user, desired);
+            if (!option) return;
+            if (option.selected) matched = true;
+            select.appendChild(option);
+        });
+
+        if (desired?.username && !matched) {
+            const offlineOption = document.createElement('option');
+            offlineOption.value = JSON.stringify({
+                username: String(desired.username),
+                caster_host: String(desired.caster_host || '')
+            });
+            offlineOption.textContent = `${desired.username} · đã lưu, hiện không còn trong user table`;
+            offlineOption.selected = true;
+            select.appendChild(offlineOption);
+        }
+        select.dataset.loaded = '1';
+    }
+
+    _handleAICasterLoadError(select, desired, error, statusEl) {
+        console.debug('Failed to load AICaster users:', error);
+        select.innerHTML = '<option value="">-- Không tải được danh sách AICaster --</option>';
+        if (desired?.username) {
+            const savedOption = document.createElement('option');
+            savedOption.value = JSON.stringify({
+                username: String(desired.username),
+                caster_host: String(desired.caster_host || '')
+            });
+            savedOption.textContent = `${desired.username} · cấu hình đã lưu`;
+            savedOption.selected = true;
+            select.appendChild(savedOption);
+        }
+        if (statusEl) {
+            statusEl.textContent = `Không đọc được AICaster: ${error.message}`;
+            statusEl.className = 'd-block text-danger mt-2';
+        }
+    }
+
     async loadAICasterUsers(selectedBinding = null) {
         const select = document.getElementById('cfg-gnss-aicaster-user');
         const statusEl = document.getElementById('aicaster-user-status');
@@ -808,26 +850,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             if (!response.ok) throw new Error(payload.detail || 'Không đọc được user table');
 
             const users = Array.isArray(payload.users) ? payload.users : [];
-            select.innerHTML = '<option value="">-- Chọn user AICaster của rover --</option>';
-            let matched = false;
-            users.forEach(user => {
-                const option = this._buildAICasterUserOption(user, desired);
-                if (!option) return;
-                if (option.selected) matched = true;
-                select.appendChild(option);
-            });
-
-            if (desired?.username && !matched) {
-                const offlineOption = document.createElement('option');
-                offlineOption.value = JSON.stringify({
-                    username: String(desired.username),
-                    caster_host: String(desired.caster_host || '')
-                });
-                offlineOption.textContent = `${desired.username} · đã lưu, hiện không còn trong user table`;
-                offlineOption.selected = true;
-                select.appendChild(offlineOption);
-            }
-            select.dataset.loaded = '1';
+            this._populateAICasterUserList(select, users, desired);
             if (statusEl) {
                 statusEl.textContent = users.length
                     ? `Đã đọc ${users.length} user AICaster. Chọn tài khoản mà rover vật lý đang sử dụng.`
@@ -835,22 +858,7 @@ class AdminStationWizardFeature extends window.AdminManager {
                 statusEl.className = `d-block ${users.length ? 'text-success' : 'text-warning'} mt-2`;
             }
         } catch (error) {
-            console.debug('Failed to load AICaster users:', error);
-            select.innerHTML = '<option value="">-- Không tải được danh sách AICaster --</option>';
-            if (desired?.username) {
-                const savedOption = document.createElement('option');
-                savedOption.value = JSON.stringify({
-                    username: String(desired.username),
-                    caster_host: String(desired.caster_host || '')
-                });
-                savedOption.textContent = `${desired.username} · cấu hình đã lưu`;
-                savedOption.selected = true;
-                select.appendChild(savedOption);
-            }
-            if (statusEl) {
-                statusEl.textContent = `Không đọc được AICaster: ${error.message}`;
-                statusEl.className = 'd-block text-danger mt-2';
-            }
+            this._handleAICasterLoadError(select, desired, error, statusEl);
         } finally {
             select.disabled = false;
             if (refreshButton) refreshButton.disabled = false;

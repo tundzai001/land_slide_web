@@ -67,64 +67,35 @@ async function loadLongTermAnalysis(options = {}) {
 // Store last analysis data for re-rendering on time range change
 let _lastLongTermData = null;
 
-function _renderLongTermGnssSection(gnss) {
-    const sourceNoteEl = document.getElementById('lt-gnss-source-note');
-    if (gnss?.status === 'success') {
-        const analysis = gnss.analysis;
+function _renderGnssWarningBanner(gnss) {
+    const warningEl = document.getElementById('longterm-warning');
+    const warningTextEl = document.getElementById('warning-text');
+    if (!warningEl || !warningTextEl) return;
+    if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
+        warningEl.style.display = 'block';
+        warningEl.className = `alert ${gnss.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'} mb-3`;
+        warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
+    } else if (gnss.risk_level === 'INFO') {
+        warningEl.style.display = 'block';
+        warningEl.className = 'alert alert-success mb-3';
+        warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
+    } else {
+        warningEl.style.display = 'none';
+    }
+}
 
-        const warningEl = document.getElementById('longterm-warning');
-        const warningTextEl = document.getElementById('warning-text');
-        const reliabilityNoteEl = document.getElementById('lt-reliability-note');
-        const reliabilityTextEl = document.getElementById('lt-reliability-text');
+function _renderGnssTrendAndCusum(analysis) {
+    const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
+    const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
 
-        if (gnss.risk_level === 'CRITICAL' || gnss.risk_level === 'WARNING') {
-            warningEl.style.display = 'block';
-            warningEl.className = `alert ${gnss.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'} mb-3`;
-            warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
-        } else if (gnss.risk_level === 'INFO') {
-            warningEl.style.display = 'block';
-            warningEl.className = `alert alert-success mb-3`;
-            warningTextEl.textContent = sanitizeLongTermText(gnss.warning_message);
-        } else {
-            warningEl.style.display = 'none';
-        }
+    const trendIconEl = document.getElementById('trend-icon');
+    const trendValueEl = document.getElementById('trend-value');
+    if (trendIconEl) trendIconEl.textContent = trendIcons[analysis.trend] || '';
+    if (trendValueEl) trendValueEl.textContent = trendTexts[analysis.trend] || 'Không xác định';
 
-        const velocityDisplay = formatLongTermVelocityDisplay(analysis);
-        setText('lt-velocity', velocityDisplay.text);
-        setText('lt-velocity-ci', velocityDisplay.ciText);
-        setText('lt-classification', analysis.classification || 'N/A');
-
-        // Use auto cm/mm formatting
-        setText('lt-total-disp', formatDisplacementString(analysis.total_displacement_mm, 1));
-
-        setText('lt-duration', formatDurationString(analysis.duration_days));
-
-        if (analysis.velocity_reliable === false) {
-            reliabilityNoteEl.style.display = 'flex';
-            reliabilityTextEl.textContent = analysis.reliability_message || 'Chưa đủ thời lượng quan sát.';
-        } else {
-            reliabilityNoteEl.style.display = 'none';
-            reliabilityTextEl.textContent = '';
-        }
-
-        if (sourceNoteEl) {
-            if (gnss.source === 'daily_summary_rollup') {
-                sourceNoteEl.style.display = 'block';
-                sourceNoteEl.innerHTML = '<i class="bi bi-calendar-week me-2"></i>GNSS đang phân tích từ dữ liệu tổng hợp ngày (daily summary). Dữ liệu raw cũ có thể đã được dọn để tối ưu hệ thống.';
-            } else {
-                sourceNoteEl.style.display = 'block';
-                sourceNoteEl.innerHTML = '<i class="bi bi-broadcast me-2"></i>GNSS đang phân tích trực tiếp từ dữ liệu raw theo thời gian thực.';
-            }
-        }
-
-        const trendIcons = { 'accelerating': '', 'stable': '', 'decelerating': '' };
-        const trendTexts = { 'accelerating': 'Đang tăng tốc', 'stable': 'Ổn định', 'decelerating': 'Đang giảm tốc' };
-
-        document.getElementById('trend-icon').textContent = trendIcons[analysis.trend] || '';
-        document.getElementById('trend-value').textContent = trendTexts[analysis.trend] || 'Không xác định';
-
-        const cusumBadge = document.getElementById('cusum-badge');
-        const cusumMessage = document.getElementById('cusum-message');
+    const cusumBadge = document.getElementById('cusum-badge');
+    const cusumMessage = document.getElementById('cusum-message');
+    if (cusumBadge && cusumMessage) {
         if (analysis.cusum_change) {
             cusumBadge.style.display = 'inline-block';
             cusumMessage.textContent = analysis.cusum_message || 'Có thay đổi xu hướng';
@@ -133,24 +104,74 @@ function _renderLongTermGnssSection(gnss) {
             cusumBadge.style.display = 'none';
             cusumMessage.style.display = 'none';
         }
-    } else {
-        const warningEl = document.getElementById('longterm-warning');
-        const reliabilityNoteEl = document.getElementById('lt-reliability-note');
-        const reliabilityTextEl = document.getElementById('lt-reliability-text');
-        if (warningEl) warningEl.style.display = 'none';
-        if (reliabilityNoteEl) reliabilityNoteEl.style.display = 'none';
-        if (reliabilityTextEl) reliabilityTextEl.textContent = '';
-        if (sourceNoteEl) {
-            sourceNoteEl.style.display = 'none';
-            sourceNoteEl.textContent = '';
+    }
+}
+
+function _renderGnssSuccess(gnss, analysis) {
+    _renderGnssWarningBanner(gnss);
+
+    const velocityDisplay = formatLongTermVelocityDisplay(analysis);
+    setText('lt-velocity', velocityDisplay.text);
+    setText('lt-velocity-ci', velocityDisplay.ciText);
+    setText('lt-classification', analysis.classification || 'N/A');
+    setText('lt-total-disp', formatDisplacementString(analysis.total_displacement_mm, 1));
+    setText('lt-duration', formatDurationString(analysis.duration_days));
+
+    const reliabilityNoteEl = document.getElementById('lt-reliability-note');
+    const reliabilityTextEl = document.getElementById('lt-reliability-text');
+    if (reliabilityNoteEl && reliabilityTextEl) {
+        if (analysis.velocity_reliable === false) {
+            reliabilityNoteEl.style.display = 'flex';
+            reliabilityTextEl.textContent = analysis.reliability_message || 'Chưa đủ thời lượng quan sát.';
+        } else {
+            reliabilityNoteEl.style.display = 'none';
+            reliabilityTextEl.textContent = '';
         }
-        setText('lt-velocity', 'N/A');
-        setText('lt-velocity-ci', '(Chưa có thông tin)');
-        setText('lt-classification', 'N/A');
-        setText('lt-total-disp', 'N/A');
-        setText('lt-duration', 'N/A');
-        document.getElementById('cusum-badge').style.display = 'none';
-        document.getElementById('cusum-message').style.display = 'none';
+    }
+
+    const sourceNoteEl = document.getElementById('lt-gnss-source-note');
+    if (sourceNoteEl) {
+        sourceNoteEl.style.display = 'block';
+        if (gnss.source === 'daily_summary_rollup') {
+            sourceNoteEl.innerHTML = '<i class="bi bi-calendar-week me-2"></i>GNSS đang phân tích từ dữ liệu tổng hợp ngày (daily summary). Dữ liệu raw cũ có thể đã được dọn để tối ưu hệ thống.';
+        } else {
+            sourceNoteEl.innerHTML = '<i class="bi bi-broadcast me-2"></i>GNSS đang phân tích trực tiếp từ dữ liệu raw theo thời gian thực.';
+        }
+    }
+
+    _renderGnssTrendAndCusum(analysis);
+}
+
+function _renderGnssUnavailable() {
+    const warningEl = document.getElementById('longterm-warning');
+    const reliabilityNoteEl = document.getElementById('lt-reliability-note');
+    const reliabilityTextEl = document.getElementById('lt-reliability-text');
+    const sourceNoteEl = document.getElementById('lt-gnss-source-note');
+    const cusumBadge = document.getElementById('cusum-badge');
+    const cusumMessage = document.getElementById('cusum-message');
+
+    if (warningEl) warningEl.style.display = 'none';
+    if (reliabilityNoteEl) reliabilityNoteEl.style.display = 'none';
+    if (reliabilityTextEl) reliabilityTextEl.textContent = '';
+    if (sourceNoteEl) {
+        sourceNoteEl.style.display = 'none';
+        sourceNoteEl.textContent = '';
+    }
+    if (cusumBadge) cusumBadge.style.display = 'none';
+    if (cusumMessage) cusumMessage.style.display = 'none';
+
+    setText('lt-velocity', 'N/A');
+    setText('lt-velocity-ci', '(Chưa có thông tin)');
+    setText('lt-classification', 'N/A');
+    setText('lt-total-disp', 'N/A');
+    setText('lt-duration', 'N/A');
+}
+
+function _renderLongTermGnssSection(gnss) {
+    if (gnss?.status === 'success') {
+        _renderGnssSuccess(gnss, gnss.analysis);
+    } else {
+        _renderGnssUnavailable();
     }
 }
 

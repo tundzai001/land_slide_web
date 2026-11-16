@@ -98,6 +98,62 @@ async def get_rescue_config(response: Response):
     return {"enabled": settings.RESCUE_REQUEST_ENABLED}
 
 
+async def _parse_rescue_request_payload(request: Request, content_type: str) -> tuple[RescueRequestCreate, str | None]:
+    if "multipart/form-data" in content_type:
+        async with request.form(max_files=1, max_fields=12) as form:
+            payload = RescueRequestCreate.model_validate(dict(form))
+            raw_file = form.get("image_file")
+            image_url = await rescue_storage.persist_upload(
+                raw_file if isinstance(raw_file, StarletteUploadFile) else None
+            )
+            return payload, image_url
+    if content_type.split(";", 1)[0].strip() == "application/json":
+        payload = RescueRequestCreate.model_validate(await request.json())
+        image_url = rescue_storage.persist_data_url(payload.image_data_url)
+        return payload, image_url
+    raise HTTPException(status_code=415, detail="Use JSON or multipart form data")
+
+
+async def _broadcast_rescue_request_events(row, incident_case, incident_event, created, parsed):
+    try:
+        await ws_manager.broadcast_operations(
+            {
+                "protocol": 2,
+                "type": "incident_changed",
+                "event_id": int(incident_event.id) if incident_event is not None else None,
+                "sequence_from": incident_event.sequence if incident_event is not None else None,
+                "sequence_to": incident_event.sequence if incident_event is not None else None,
+                "incident_id": int(incident_case.id),
+                "incident_revision": int(incident_case.revision),
+                "workflow_version": int(incident_case.version),
+                "action": "created" if created else "updated",
+                "project_id": incident_case.project_id,
+                "station_id": incident_case.station_id,
+                "summary": serialize_case(incident_case),
+            }
+        )
+        await ws_manager.broadcast_admins(
+            {
+                "type": "rescue_request",
+                "id": int(row.id),
+                "created_at": row.created_at,
+                "requester_name": row.requester_name,
+                "phone": row.phone,
+                "message": parsed["text"],
+                "latitude": row.latitude,
+                "longitude": row.longitude,
+                "accuracy_m": row.accuracy_m,
+                "status": row.status,
+                "rescue_type": parsed["rescue_type"],
+                "province_city": parsed["province_city"],
+                "source_link": parsed["source_link"],
+                "image_url": parsed["image_url"],
+            }
+        )
+    except Exception:
+        logger.exception("Failed to broadcast rescue request WebSocket notification")
+
+
 @router.post("/api/public/rescue-requests")
 async def create_rescue_request(
     request: Request,
@@ -107,18 +163,7 @@ async def create_rescue_request(
         raise HTTPException(status_code=404, detail="Tiếp nhận yêu cầu cứu hộ đang tắt.")
     content_type = (request.headers.get("content-type") or "").lower()
     try:
-        if "multipart/form-data" in content_type:
-            async with request.form(max_files=1, max_fields=12) as form:
-                payload = RescueRequestCreate.model_validate(dict(form))
-                raw_file = form.get("image_file")
-                image_url = await rescue_storage.persist_upload(
-                    raw_file if isinstance(raw_file, StarletteUploadFile) else None
-                )
-        elif content_type.split(";", 1)[0].strip() == "application/json":
-            payload = RescueRequestCreate.model_validate(await request.json())
-            image_url = rescue_storage.persist_data_url(payload.image_data_url)
-        else:
-            raise HTTPException(status_code=415, detail="Use JSON or multipart form data")
+        payload, image_url = await _parse_rescue_request_payload(request, content_type)
     except (ValidationError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Dữ liệu cứu hộ không hợp lệ. Kiểm tra tọa độ, liên kết và độ dài nội dung.") from exc
 
@@ -141,7 +186,7 @@ async def create_rescue_request(
     )
     db.add(row)
     await db.flush()
-    incident_case, _created, incident_event = await ensure_incident_case(
+    incident_case, created, incident_event = await ensure_incident_case(
         db,
         source_kind="RESCUE_REQUEST",
         source_id=int(row.id),
@@ -157,43 +202,7 @@ async def create_rescue_request(
         await db.refresh(incident_event)
 
     parsed = rescue_storage.unpack_message(row.message)
-    try:
-        await ws_manager.broadcast_operations(
-            {
-                "protocol": 2,
-                "type": "incident_changed",
-                "event_id": int(incident_event.id) if incident_event is not None else None,
-                "sequence_from": incident_event.sequence if incident_event is not None else None,
-                "sequence_to": incident_event.sequence if incident_event is not None else None,
-                "incident_id": int(incident_case.id),
-                "incident_revision": int(incident_case.revision),
-                "workflow_version": int(incident_case.version),
-                "action": "created" if _created else "updated",
-                "project_id": incident_case.project_id,
-                "station_id": incident_case.station_id,
-                "summary": serialize_case(incident_case),
-            }
-        )
-        await ws_manager.broadcast_admins(
-            {
-                "type": "rescue_request",
-                "id": int(row.id),
-                "created_at": row.created_at,
-                "requester_name": row.requester_name,
-                "phone": row.phone,
-                "message": parsed["text"],
-                "latitude": row.latitude,
-                "longitude": row.longitude,
-                "accuracy_m": row.accuracy_m,
-                "status": row.status,
-                "rescue_type": parsed["rescue_type"],
-                "province_city": parsed["province_city"],
-                "source_link": parsed["source_link"],
-                "image_url": rescue_storage.protected_image_url(parsed["image_url"]),
-            }
-        )
-    except Exception as exc:
-        logger.warning("WS rescue_request broadcast failed: %s", exc)
+    await _broadcast_rescue_request_events(row, incident_case, incident_event, created, parsed)
     return {"status": "ok", "id": int(row.id), "created_at": row.created_at}
 
 

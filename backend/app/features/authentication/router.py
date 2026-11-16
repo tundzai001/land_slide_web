@@ -27,6 +27,21 @@ from . import sessions
 AUTH_UNAVAILABLE_DETAIL = "Authentication unavailable"
 _DUMMY_PASSWORD_HASH = bcrypt.hashpw(secrets.token_urlsafe(24).encode(), bcrypt.gensalt()).decode()
 
+async def _validate_user_credentials(form_data: OAuth2PasswordRequestForm, db: AsyncSession) -> model_auth.User:
+    if len(form_data.username) > 254 or len(form_data.password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    result = await db.execute(
+        select(model_auth.User).where(model_auth.User.username == form_data.username)
+    )
+    user = result.scalar_one_or_none()
+    password_valid = await auth.verify_password(
+        form_data.password, user.hashed_password if user else _DUMMY_PASSWORD_HASH
+    )
+    if not user or not password_valid or not user.is_active:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    return user
+
+
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
@@ -36,23 +51,14 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_auth_db)
 ):
-    if len(form_data.username) > 254 or len(form_data.password.encode("utf-8")) > 72:
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
     try:
         await asyncio.to_thread(sessions.check_login, request.client.host if request.client else "unknown", form_data.username)
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(503, AUTH_UNAVAILABLE_DETAIL) from None
-    result = await db.execute(
-        select(model_auth.User).where(model_auth.User.username == form_data.username)
-    )
-    user = result.scalar_one_or_none()
-    
-    password_valid = await auth.verify_password(
-        form_data.password, user.hashed_password if user else _DUMMY_PASSWORD_HASH)
-    if not user or not password_valid or not user.is_active:
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    user = await _validate_user_credentials(form_data, db)
     remember_me = 'remember_me' in (form_data.scopes or [])
     expires = timedelta(hours=12) if remember_me else None
 
