@@ -139,6 +139,45 @@ class SimulationController {
         }
     }
 
+    _updateTerrainAndEnvironmentOnParamChange(key, val) {
+        if (key === 'houseCount') this.envBuilder.houseCount = val;
+        if (key === 'treeCount') this.envBuilder.treeCount = val;
+
+        if (this.isRunning && this.state !== SimState.STABLE) return;
+
+        if (key === 'slopeAngle') {
+            this.terrainGen.slopeAngle = val;
+            if (this.terrainGen.mesh) {
+                this.sceneManager.scene.remove(this.terrainGen.mesh);
+                this.terrainGen.geometry.dispose();
+                this.terrainGen.mesh.material.dispose();
+            }
+            this.terrainGen.generate();
+        }
+
+        this.envBuilder.clear();
+        this.envBuilder.build();
+        this.destruction.fragments.forEach(f => {
+            if (f.mesh) this.sceneManager.scene.remove(f.mesh);
+        });
+        this.destruction.fragments = [];
+    }
+
+    _handleParamSliderChange(cfg, val, out) {
+        this.params[cfg.key] = cfg.scale ? val * cfg.scale : val;
+        if (out) out.textContent = val;
+
+        if (!this.isRunning || this.state === SimState.STABLE) {
+            this._updateFoS();
+        }
+        if (cfg.key === 'rainfall') {
+            this.weather.setRainIntensity(val / 200);
+        }
+        if (cfg.key === 'houseCount' || cfg.key === 'treeCount' || cfg.key === 'slopeAngle') {
+            this._updateTerrainAndEnvironmentOnParamChange(cfg.key, val);
+        }
+    }
+
     // ─── UI BINDING ─────────────────────────────────────────────────
     _bindUI() {
         // Sliders → params
@@ -169,48 +208,7 @@ class SimulationController {
 
             el.addEventListener('input', () => {
                 const val = Number.parseFloat(el.value);
-                this.params[cfg.key] = cfg.scale ? val * cfg.scale : val;
-                if (out) out.textContent = val;
-
-                // Live update FoS when not sliding
-                if (!this.isRunning || this.state === SimState.STABLE) {
-                    this._updateFoS();
-                }
-
-                // Live update weather
-                if (cfg.key === 'rainfall') {
-                    this.weather.setRainIntensity(val / 200); // 0–1
-                }
-
-                // Live update environment and terrain
-                if (cfg.key === 'houseCount' || cfg.key === 'treeCount' || cfg.key === 'slopeAngle') {
-                    if (cfg.key === 'houseCount') this.envBuilder.houseCount = val;
-                    if (cfg.key === 'treeCount') this.envBuilder.treeCount = val;
-
-                    if (!this.isRunning || this.state === SimState.STABLE) {
-                        
-                        if (cfg.key === 'slopeAngle') {
-                            this.terrainGen.slopeAngle = val;
-                            // Remove old terrain mesh
-                            if (this.terrainGen.mesh) {
-                                this.sceneManager.scene.remove(this.terrainGen.mesh);
-                                this.terrainGen.geometry.dispose();
-                                this.terrainGen.mesh.material.dispose();
-                            }
-                            this.terrainGen.generate(); // Assuming generate() recreates it
-                            // Need to update physics engine references if any, but physics reads from terrainGen dynamically
-                        }
-
-                        this.envBuilder.clear();
-                        this.envBuilder.build();
-                        
-                        // Clean up old destruction fragments
-                        this.destruction.fragments.forEach(f => {
-                            if (f.mesh) this.sceneManager.scene.remove(f.mesh);
-                        });
-                        this.destruction.fragments = [];
-                    }
-                }
+                this._handleParamSliderChange(cfg, val, out);
             });
         }
 

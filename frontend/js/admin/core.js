@@ -83,30 +83,40 @@ class AdminManager {
         this.init();
     }
 
+    _parseDmsCentralMeridian(raw) {
+        const dmsMatch = /^([+-]?\d+(?:\.\d+)?)(?:\s*[°d]|\s)\s*(\d+(?:\.\d+)?)\s*['m]?$/i.exec(raw);
+        if (!dmsMatch) return null;
+        const deg = Number(dmsMatch[1]);
+        const minutes = Number(dmsMatch[2]);
+        if (Number.isFinite(deg) && Number.isFinite(minutes) && minutes >= 0 && minutes < 60) {
+            const sign = deg < 0 ? -1 : 1;
+            return { value: sign * (Math.abs(deg) + minutes / 60), format: 'deg_min' };
+        }
+        return null;
+    }
+
+    _parseCompactCentralMeridian(raw) {
+        const compactMatch = /^([+-]?\d+)\.(\d{2})$/.exec(raw);
+        if (!compactMatch) return null;
+        const deg = Number(compactMatch[1]);
+        const minutes = Number(compactMatch[2]);
+        if (Number.isFinite(deg) && minutes > 0 && minutes < 60) {
+            const sign = deg < 0 ? -1 : 1;
+            return { value: sign * (Math.abs(deg) + minutes / 60), format: 'deg_min_compact' };
+        }
+        return null;
+    }
+
     /** Lắng nghe các sự kiện realtime từ Server */
     parseVn2000CentralMeridian(rawValue) {
         const raw = String(rawValue ?? '').trim().replace(',', '.');
         if (!raw) return { value: 105.0, format: 'default' };
 
-        const dmsMatch = /^([+-]?\d+(?:\.\d+)?)(?:\s*[°d]|\s)\s*(\d+(?:\.\d+)?)\s*['m]?$/i.exec(raw);
-        if (dmsMatch) {
-            const deg = Number(dmsMatch[1]);
-            const minutes = Number(dmsMatch[2]);
-            if (Number.isFinite(deg) && Number.isFinite(minutes) && minutes >= 0 && minutes < 60) {
-                const sign = deg < 0 ? -1 : 1;
-                return { value: sign * (Math.abs(deg) + minutes / 60), format: 'deg_min' };
-            }
-        }
+        const dms = this._parseDmsCentralMeridian(raw);
+        if (dms) return dms;
 
-        const compactMatch = /^([+-]?\d+)\.(\d{2})$/.exec(raw);
-        if (compactMatch) {
-            const deg = Number(compactMatch[1]);
-            const minutes = Number(compactMatch[2]);
-            if (Number.isFinite(deg) && minutes > 0 && minutes < 60) {
-                const sign = deg < 0 ? -1 : 1;
-                return { value: sign * (Math.abs(deg) + minutes / 60), format: 'deg_min_compact' };
-            }
-        }
+        const compact = this._parseCompactCentralMeridian(raw);
+        if (compact) return compact;
 
         const decimal = Number(raw);
         return { value: Number.isFinite(decimal) ? decimal : 105.0, format: 'decimal_deg' };

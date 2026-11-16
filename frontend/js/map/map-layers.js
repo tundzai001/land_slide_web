@@ -213,24 +213,7 @@ async function loadCorsBaseStations() {
     }
 }
 
-function addOrUpdateCorsBaseMarker(station) {
-    if (!station?.name || !Number.isFinite(station.lat) || !Number.isFinite(station.lon)) return;
-
-    const stateCacheKey = JSON.stringify([
-        station.lat,
-        station.lon,
-        station.status,
-        station.station_online,
-        station.is_online,
-        station.mountpoint_connected,
-        station.ntrip_connected,
-        station.failover_active,
-        station.mountpoint,
-        station.correction_source,
-    ]);
-    if (corsBaseMarkers[station.name] && corsBaseStateCache[station.name] === stateCacheKey) return;
-    corsBaseStateCache[station.name] = stateCacheKey;
-
+function _resolveCorsBaseMarkerStatus(station) {
     const normalizedStatus = String(station.status || '').trim().toLowerCase();
     const hasExplicitPhysicalState = typeof station.station_online === 'boolean'
         || typeof station.is_online === 'boolean';
@@ -242,24 +225,32 @@ function addOrUpdateCorsBaseMarker(station) {
     const isFailoverActive = station.failover_active === true;
     const fill = isStationOnline ? '#0ea5e9' : '#ef4444';
     const glow = isStationOnline ? 'rgba(14, 165, 233, 0.55)' : 'rgba(239, 68, 68, 0.50)';
-    const safeName = escapeHtml(station.name);
-    const safeMountpoint = escapeHtml(station.mountpoint || station.name);
-    const safeCorrectionSource = escapeHtml(
-        station.correction_source || `${station.name}/S1`
-    );
-    const stationStateLabel = isStationOnline ? 'ONLINE' : 'OFFLINE';
-    const mountpointStateLabel = isMountpointConnected ? 'connected' : 'disconnected';
 
-    const icon = L.divIcon({
+    return {
+        isStationOnline,
+        isMountpointConnected,
+        isFailoverActive,
+        fill,
+        glow,
+        safeName: escapeHtml(station.name),
+        safeMountpoint: escapeHtml(station.mountpoint || station.name),
+        safeCorrectionSource: escapeHtml(station.correction_source || `${station.name}/S1`),
+        stationStateLabel: isStationOnline ? 'ONLINE' : 'OFFLINE',
+        mountpointStateLabel: isMountpointConnected ? 'connected' : 'disconnected'
+    };
+}
+
+function _buildCorsBaseIcon(meta) {
+    return L.divIcon({
         className: 'custom-cors-base-marker',
         html: `
-            <div title="${safeName}" style="
+            <div title="${meta.safeName}" style="
                 width: 0;
                 height: 0;
                 border-left: 13px solid transparent;
                 border-right: 13px solid transparent;
-                border-bottom: 24px solid ${fill};
-                filter: drop-shadow(0 0 8px ${glow});
+                border-bottom: 24px solid ${meta.fill};
+                filter: drop-shadow(0 0 8px ${meta.glow});
                 position: relative;
             ">
                 <div style="
@@ -280,8 +271,10 @@ function addOrUpdateCorsBaseMarker(station) {
         iconAnchor: [13, 18],
         popupAnchor: [0, -18],
     });
+}
 
-    const popupContent = `
+function _buildCorsBasePopup(station, meta) {
+    return `
         <div style="
             min-width: 230px;
             overflow: hidden;
@@ -297,16 +290,16 @@ function addOrUpdateCorsBaseMarker(station) {
                 align-items: center;
                 gap: 8px;
                 padding: 10px 12px;
-                color: ${isStationOnline ? '#0369a1' : '#b91c1c'};
+                color: ${meta.isStationOnline ? '#0369a1' : '#b91c1c'};
                 font-weight: 800;
                 border-bottom: 1px solid #e2e8f0;
             ">
-                <span style="color:${fill};"><i class="bi bi-triangle-fill"></i></span>
-                <span>${safeName}</span>
+                <span style="color:${meta.fill};"><i class="bi bi-triangle-fill"></i></span>
+                <span>${meta.safeName}</span>
             </div>
             <div style="padding: 10px 12px; display: grid; gap: 7px;">
                 <div style="display:flex;justify-content:space-between;gap:14px;">
-                    <span style="color:#64748b;">Name</span><strong>${safeName}</strong>
+                    <span style="color:#64748b;">Name</span><strong>${meta.safeName}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:14px;">
                     <span style="color:#64748b;">Lat</span><code style="color:#0f172a;">${station.lat.toFixed(9)}</code>
@@ -315,49 +308,72 @@ function addOrUpdateCorsBaseMarker(station) {
                     <span style="color:#64748b;">Lon</span><code style="color:#0f172a;">${station.lon.toFixed(9)}</code>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:14px;">
-                    <span style="color:#64748b;">Mountpoint</span><strong>${safeMountpoint}</strong>
+                    <span style="color:#64748b;">Mountpoint</span><strong>${meta.safeMountpoint}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
                     <span style="color:#64748b;">Trạm vật lý</span>
                     <span style="
                         padding: 2px 8px;
                         border-radius: 999px;
-                        background: ${isStationOnline ? '#dcfce7' : '#fee2e2'};
-                        color: ${isStationOnline ? '#166534' : '#b91c1c'};
+                        background: ${meta.isStationOnline ? '#dcfce7' : '#fee2e2'};
+                        color: ${meta.isStationOnline ? '#166534' : '#b91c1c'};
                         font-weight: 700;
-                    ">${stationStateLabel}</span>
+                    ">${meta.stationStateLabel}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
                     <span style="color:#64748b;">Mountpoint</span>
                     <span style="
                         padding: 2px 8px;
                         border-radius: 999px;
-                        background: ${isMountpointConnected ? '#dcfce7' : '#f1f5f9'};
-                        color: ${isMountpointConnected ? '#166534' : '#475569'};
+                        background: ${meta.isMountpointConnected ? '#dcfce7' : '#f1f5f9'};
+                        color: ${meta.isMountpointConnected ? '#166534' : '#475569'};
                         font-weight: 700;
-                    ">${mountpointStateLabel}</span>
+                    ">${meta.mountpointStateLabel}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
                     <span style="color:#64748b;">Nguồn RTCM</span>
-                    <strong style="color:${isFailoverActive ? '#d97706' : '#0f172a'};">
-                        ${safeCorrectionSource}${isFailoverActive ? ' (backup)' : ''}
+                    <strong style="color:${meta.isFailoverActive ? '#d97706' : '#0f172a'};">
+                        ${meta.safeCorrectionSource}${meta.isFailoverActive ? ' (backup)' : ''}
                     </strong>
                 </div>
             </div>
         </div>
     `;
+}
+
+function addOrUpdateCorsBaseMarker(station) {
+    if (!station?.name || !Number.isFinite(station.lat) || !Number.isFinite(station.lon)) return;
+
+    const stateCacheKey = JSON.stringify([
+        station.lat,
+        station.lon,
+        station.status,
+        station.station_online,
+        station.is_online,
+        station.mountpoint_connected,
+        station.ntrip_connected,
+        station.failover_active,
+        station.mountpoint,
+        station.correction_source,
+    ]);
+    if (corsBaseMarkers[station.name] && corsBaseStateCache[station.name] === stateCacheKey) return;
+    corsBaseStateCache[station.name] = stateCacheKey;
+
+    const meta = _resolveCorsBaseMarkerStatus(station);
+    const icon = _buildCorsBaseIcon(meta);
+    const popupContent = _buildCorsBasePopup(station, meta);
 
     if (corsBaseMarkers[station.name]) {
         corsBaseMarkers[station.name]
             .setLatLng([station.lat, station.lon])
             .setIcon(icon)
-            .bindTooltip(safeName, { direction: 'top', offset: [0, -18] })
+            .bindTooltip(meta.safeName, { direction: 'top', offset: [0, -18] })
             .bindPopup(popupContent, { maxWidth: 300 });
         return;
     }
 
     const marker = L.marker([station.lat, station.lon], { icon, zIndexOffset: 300 })
-        .bindTooltip(safeName, { direction: 'top', offset: [0, -18] })
+        .bindTooltip(meta.safeName, { direction: 'top', offset: [0, -18] })
         .bindPopup(popupContent, { maxWidth: 300 });
 
     const leafletMap = getLeafletMap();

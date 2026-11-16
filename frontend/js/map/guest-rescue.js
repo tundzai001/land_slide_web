@@ -316,32 +316,19 @@ function fillGuestRescueLocation(showToast = false) {
     );
 }
 
-async function submitGuestRescueRequest() {
-    if (!guestRescueEnabled) return;
-    const nameEl = document.getElementById('guest-rescue-name');
-    const phoneEl = document.getElementById('guest-rescue-phone');
-    const noteEl = document.getElementById('guest-rescue-note');
-    const typeEl = document.querySelector('input[name="guest-rescue-type"]:checked');
-    const provinceEl = document.getElementById('guest-rescue-province');
-    const sourceLinkEl = document.getElementById('guest-rescue-source-link');
-    const imagePreview = document.getElementById('guest-rescue-image-preview');
-    const imagePreviewWrap = document.getElementById('guest-rescue-image-preview-wrap');
-    const imageInput = document.getElementById('guest-rescue-image');
-    const latEl = document.getElementById('guest-rescue-lat');
-    const lonEl = document.getElementById('guest-rescue-lon');
-    const submitBtn = document.getElementById('btn-guest-rescue-submit');
-    if (!nameEl || !phoneEl || !noteEl || !latEl || !lonEl || !submitBtn) return;
-
-    const latitude = Number.parseFloat(latEl.value);
-    const longitude = Number.parseFloat(lonEl.value);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        window.toast?.warning('Vui lòng bấm "Lấy vị trí hiện tại" trước khi gửi');
-        return;
+function _formatRescueMessage(note, manualAddress, typedAddress) {
+    let message = note;
+    if (manualAddress) {
+        message = `[Địa chỉ chi tiết]: ${manualAddress}\n\n${message}`;
     }
+    if (typedAddress) {
+        message = `[Khu vực vị trí Map]: ${typedAddress}\n${message}`;
+    }
+    return message;
+}
 
-    let message = String(noteEl.value || '').trim();
-    const requesterName = String(nameEl.value || '').trim();
-    const phone = String(phoneEl.value || '').trim();
+function _resolveRescueType() {
+    const typeEl = document.querySelector('input[name="guest-rescue-type"]:checked');
     let rescueType = String(typeEl?.value || 'can_cuu_ho');
     if (rescueType === 'khac') {
         const otherInput = document.getElementById('guest-rescue-other-input');
@@ -349,45 +336,94 @@ async function submitGuestRescueRequest() {
             rescueType = `Khác: ${otherInput.value.trim()}`;
         }
     }
-    const provinceCity = String(provinceEl?.value || '').trim();
-    const sourceLink = String(sourceLinkEl?.value || '').trim();
+    return rescueType;
+}
+
+function _collectRescueFormData() {
+    const nameEl = document.getElementById('guest-rescue-name');
+    const phoneEl = document.getElementById('guest-rescue-phone');
+    const noteEl = document.getElementById('guest-rescue-note');
+    const provinceEl = document.getElementById('guest-rescue-province');
+    const sourceLinkEl = document.getElementById('guest-rescue-source-link');
+    const latEl = document.getElementById('guest-rescue-lat');
+    const lonEl = document.getElementById('guest-rescue-lon');
+    if (!nameEl || !phoneEl || !noteEl || !latEl || !lonEl) return null;
+
+    const latitude = Number.parseFloat(latEl.value);
+    const longitude = Number.parseFloat(lonEl.value);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        window.toast?.warning('Vui lòng bấm "Lấy vị trí hiện tại" trước khi gửi');
+        return null;
+    }
 
     const searchAddressEl = document.getElementById('guest-rescue-address-search');
     const manualAddressEl = document.getElementById('guest-rescue-address-manual');
-    const typedAddress = String(searchAddressEl?.value || '').trim();
-    const manualAddress = String(manualAddressEl?.value || '').trim();
-
-    if (manualAddress) {
-        message = `[Địa chỉ chi tiết]: ${manualAddress}\n\n${message}`;
-    }
-    if (typedAddress) {
-        message = `[Khu vực vị trí Map]: ${typedAddress}\n${message}`;
-    }
+    const message = _formatRescueMessage(
+        String(noteEl.value || '').trim(),
+        String(manualAddressEl?.value || '').trim(),
+        String(searchAddressEl?.value || '').trim()
+    );
 
     if (!message) {
         window.toast?.warning('Hãy nhập mô tả ngắn tình trạng cần cứu hộ');
-        return;
+        return null;
     }
+
+    const formData = new FormData();
+    formData.append('requester_name', String(nameEl.value || '').trim());
+    formData.append('phone', String(phoneEl.value || '').trim());
+    formData.append('message', message);
+    formData.append('latitude', String(latitude));
+    formData.append('longitude', String(longitude));
+    formData.append('accuracy_m', String(Number(latEl.dataset.accuracy || 0) || ''));
+    formData.append('rescue_type', _resolveRescueType());
+    formData.append('province_city', String(provinceEl?.value || '').trim());
+    formData.append('source_link', String(sourceLinkEl?.value || '').trim());
+    if (guestRescueImageBlob) {
+        formData.append('image_file', guestRescueImageBlob, 'rescue.jpg');
+    }
+    return formData;
+}
+
+function _resetRescueFormInputs() {
+    ['guest-rescue-name', 'guest-rescue-phone', 'guest-rescue-note',
+     'guest-rescue-province', 'guest-rescue-source-link',
+     'guest-rescue-other-input', 'guest-rescue-address-search',
+     'guest-rescue-address-manual', 'guest-rescue-image'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+
+    const defaultTypeEl = document.getElementById('guest-rescue-type-emergency');
+    if (defaultTypeEl) {
+        defaultTypeEl.checked = true;
+        defaultTypeEl.dispatchEvent(new Event('change'));
+    }
+
+    guestRescueImageBlob = null;
+    const imagePreview = document.getElementById('guest-rescue-image-preview');
+    if (imagePreview) imagePreview.src = '';
+    if (guestRescueImagePreviewUrl) {
+        URL.revokeObjectURL(guestRescueImagePreviewUrl);
+        guestRescueImagePreviewUrl = null;
+    }
+    const imagePreviewWrap = document.getElementById('guest-rescue-image-preview-wrap');
+    if (imagePreviewWrap) imagePreviewWrap.style.display = 'none';
+}
+
+async function submitGuestRescueRequest() {
+    if (!guestRescueEnabled) return;
+    const submitBtn = document.getElementById('btn-guest-rescue-submit');
+    if (!submitBtn) return;
+
+    const formData = _collectRescueFormData();
+    if (!formData) return;
 
     const oldHtml = submitBtn.innerHTML;
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang gửi...';
 
     try {
-        const formData = new FormData();
-        formData.append('requester_name', requesterName);
-        formData.append('phone', phone);
-        formData.append('message', message);
-        formData.append('latitude', String(latitude));
-        formData.append('longitude', String(longitude));
-        formData.append('accuracy_m', String(Number(latEl.dataset.accuracy || 0) || ''));
-        formData.append('rescue_type', rescueType);
-        formData.append('province_city', provinceCity);
-        formData.append('source_link', sourceLink);
-        if (guestRescueImageBlob) {
-            formData.append('image_file', guestRescueImageBlob, 'rescue.jpg');
-        }
-
         const res = await fetch('/api/public/rescue-requests', {
             method: 'POST',
             body: formData,
@@ -395,35 +431,7 @@ async function submitGuestRescueRequest() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         window.toast?.success('Đã gửi yêu cầu cứu hộ thành công. Admin sẽ kiểm tra ngay.');
         if (window.rescueFormModal) window.rescueFormModal.hide();
-        nameEl.value = '';
-        phoneEl.value = '';
-        noteEl.value = '';
-        if (provinceEl) provinceEl.value = '';
-        if (sourceLinkEl) sourceLinkEl.value = '';
-        const defaultTypeEl = document.getElementById('guest-rescue-type-emergency');
-        if (defaultTypeEl) {
-            defaultTypeEl.checked = true;
-            defaultTypeEl.dispatchEvent(new Event('change'));
-        }
-        const otherInput = document.getElementById('guest-rescue-other-input');
-        if (otherInput) otherInput.value = '';
-        if (searchAddressEl) searchAddressEl.value = '';
-        const manualAddressEl = document.getElementById('guest-rescue-address-manual');
-        if (manualAddressEl) manualAddressEl.value = '';
-        guestRescueImageBlob = null;
-        if (imagePreview) {
-            imagePreview.src = '';
-        }
-        if (guestRescueImagePreviewUrl) {
-            URL.revokeObjectURL(guestRescueImagePreviewUrl);
-            guestRescueImagePreviewUrl = null;
-        }
-        if (imagePreviewWrap) {
-            imagePreviewWrap.style.display = 'none';
-        }
-        if (imageInput) {
-            imageInput.value = '';
-        }
+        _resetRescueFormInputs();
     } catch (e) {
         console.error('submitGuestRescueRequest error:', e);
         window.toast?.error('Gửi yêu cầu thất bại, vui lòng thử lại.');

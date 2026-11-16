@@ -240,9 +240,306 @@ window.addEventListener('spa:navigate', (event) => {
     }
 });
 
-function handleRealtimeUpdate(message) {
-    //console.log('📡 [WS] Received:', message);
+function _handleRealtimeSensorStatus(message) {
+    if (!currentStationData || message.station_id !== currentStationData.id) return;
 
+    if (message.sensor_type === 'gnss_adjusted') {
+        scheduleRealtimeSensorUiUpdate(message);
+        if (gnssAdjustmentDebugState.active) {
+            addGnssAdjustmentDebug('RESULT', 'Đã nhận kết quả bình sai từ server.', 'success');
+        }
+        return;
+    }
+
+    if (message.sensor_type === 'gnss') {
+        const fixMode = message.data?.fix_mode;
+        const fixQuality = Number(message.data?.fix_quality);
+        if (
+            gnssAdjustmentDebugState.active
+            && gnssAdjustmentDebugState.expectedStationIds.includes(Number(message.station_id))
+        ) {
+            const now = Date.now();
+            const lastAt = Number(gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] || 0);
+            if (now - lastAt >= 5000) {
+                gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] = now;
+                addGnssAdjustmentDebug(
+                    'GNSS',
+                    `Trạm #${message.station_id} có GGA: ${fixMode || 'UNKNOWN'} (quality=${fixQuality || 0}). Đang chờ #AGRICA.`,
+                    fixQuality >= 4 ? 'info' : 'warning',
+                );
+            }
+        }
+        updateGnssFixBadge(fixMode, fixQuality);
+
+        const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
+        const isNoData = (
+            !normalizedMode ||
+            normalizedMode === 'UNKNOWN' ||
+            normalizedMode === 'INVALID' ||
+            normalizedMode === 'NO_DATA' ||
+            normalizedMode === 'GNSS_UNKNOWN' ||
+            normalizedMode === 'GNSS_INVALID' ||
+            fixQuality <= 0
+        );
+
+        if (isNoData) {
+            setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
+        }
+    }
+}
+
+function _handleStationStatusSafe(stationId) {
+    if (markerAlertState[stationId]) {
+        clearMarkerAlert(stationId);
+    }
+    if (window.currentAlertStationId === stationId) {
+        const banner = document.getElementById('alert-banner');
+        if (banner) {
+            banner.classList.remove('show', 'level-warning', 'level-critical');
+        }
+        window.currentAlertStationId = null;
+        window.lastAlertKey = null;
+    }
+    delete alertBannerSnoozeUntil[stationId];
+    delete acknowledgedAlertKeyByStation[stationId];
+    delete bannerSuppressedUntilByStation[stationId];
+    clearAllSensorCardAlerts();
+
+    if (currentStationData && stationId === currentStationData.id) {
+        setSirenButtonState('idle');
+    }
+    AlertSoundManager.clearStationAlert(stationId);
+}
+
+function _handleStationStatusAlerting(message, stationId, riskUi) {
+    const soundLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+    AlertSoundManager.setStationAlert(stationId, soundLevel);
+
+    const banner = document.getElementById('alert-banner');
+    const isVisible = !!banner?.classList.contains('show');
+    const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
+
+    if (Date.now() >= snoozeUntil) {
+        const incomingSeverity = getAlertSeverity(soundLevel);
+        const currentSeverity = getAlertSeverity(banner?.dataset?.alertLevel || 'WARNING');
+        const sameStation = currentAlertStationId === stationId;
+        const shouldShowOrReplace = !isVisible || sameStation || incomingSeverity > currentSeverity;
+
+        if (shouldShowOrReplace) {
+            const cachedAlert = latestAlertByStation[stationId];
+            const candidateAlert = cachedAlert ? {
+                ...cachedAlert,
+                level: soundLevel
+            } : {
+                station_id: stationId,
+                level: soundLevel,
+                message: message.message || message.warning_message || getDefaultAlertMessageForStationStatus(riskUi)
+            };
+            const candidateKey = buildAlertKey(candidateAlert);
+            if (candidateKey && acknowledgedAlertKeyByStation[stationId] === candidateKey) return;
+            if (isBannerSuppressed(stationId)) return;
+            showAlertBanner(candidateAlert, { silent: true });
+        }
+    }
+}
+
+function _updateStationStatusSidebarAndList(stationId, riskUi) {
+    if (currentStationData && stationId === currentStationData.id) {
+        const riskEl = document.getElementById('st-risk');
+        if (riskEl) {
+            riskEl.className = `status-badge ${riskUi.className}`;
+            riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
+        }
+    }
+
+    const listBadge = document.getElementById(`list-badge-${stationId}`);
+    if (listBadge) {
+        listBadge.className = `badge station-status ${getRiskBadgeClass(riskUi.className)}`;
+        listBadge.innerText = getStationListRiskLabel(riskUi.normalized);
+        const listItem = listBadge.closest('.station-item');
+        if (listItem) {
+            listItem.dataset.state = riskUi.normalized.toLowerCase();
+            let conn = 'online';
+            if (riskUi.normalized === 'OFFLINE') conn = 'offline';
+            else if (riskUi.normalized === 'STALE') conn = 'stale';
+            listItem.dataset.connection = conn;
+        }
+        filterStations(document.getElementById('search-station')?.value || '');
+
+        listBadge.style.transition = '0.3s';
+        listBadge.style.transform = 'scale(1.2)';
+        setTimeout(() => { listBadge.style.transform = 'scale(1)'; }, 300);
+    }
+}
+
+function _handleRealtimeStationStatus(message) {
+    const riskLevel = String(message.risk_level || 'LOW').toUpperCase();
+    const riskUi = getRiskPresentation(riskLevel);
+    const stationId = message.station_id;
+
+    if (riskUi.normalized === 'LOW' || riskUi.normalized === 'OFFLINE') {
+        _handleStationStatusSafe(stationId);
+    }
+
+    if (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL') {
+        _handleStationStatusAlerting(message, stationId, riskUi);
+    }
+
+    if (currentAlertStationId === stationId && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
+        const banner = document.getElementById('alert-banner');
+        if (banner?.classList.contains('show')) {
+            const nextLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+            updateAlertBannerTheme(nextLevel);
+            const alertTitle = document.getElementById('alert-title');
+            if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
+                alertTitle.textContent = `${riskUi.display} ALERT!`;
+            }
+        }
+
+        if (currentStationData && stationId === currentStationData.id) {
+            const alertLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
+            Object.values(SENSOR_CARD_IDS).forEach(id => {
+                const card = document.getElementById(id);
+                if (card && (card.classList.contains('sensor-alert-warning') || card.classList.contains('sensor-alert-critical'))) {
+                    card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
+                    card.classList.add(alertLevel === 'CRITICAL' ? 'sensor-alert-critical' : 'sensor-alert-warning');
+                }
+            });
+        }
+    }
+
+    if (riskUi.normalized === 'CRITICAL' && currentStationData && stationId === currentStationData.id) {
+        const user = window.authManager?.getUserInfo();
+        const userRole = user?.role;
+        if (userRole === 'admin' || userRole === 'operator') {
+            window.currentAlertStationId = stationId;
+            document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+                const target = b.dataset.target;
+                const currentState = b.dataset.sirenState;
+                if (currentState === 'idle' || currentState === 'offline') {
+                    setSirenButtonState('alerting', target);
+                }
+            });
+        }
+    }
+
+    updateStationMarker(stationId, riskUi.normalized);
+    _updateStationStatusSidebarAndList(stationId, riskUi);
+}
+
+function _handleRealtimeAlertMessage(message) {
+    const incomingAlert = normalizeIncomingAlert(message);
+    latestAlertByStation[incomingAlert.station_id] = incomingAlert;
+    const alertKey = buildAlertKey(incomingAlert);
+    const isAcknowledged = acknowledgedAlertKeyByStation[incomingAlert.station_id] === alertKey;
+    if (!isAcknowledged) {
+        delete bannerSuppressedUntilByStation[incomingAlert.station_id];
+    }
+    if (alertKey !== window.lastAlertKey && !isAcknowledged) {
+        window.lastAlertKey = alertKey;
+        showAlertBanner(incomingAlert);
+    }
+    if (currentStationData && incomingAlert.station_id === currentStationData.id && incomingAlert.sensor_type) {
+        setSensorCardAlert(incomingAlert.sensor_type, incomingAlert.level);
+    }
+    setMarkerAlert(incomingAlert.station_id, true);
+
+    const alertSoundLevel = normalizeAlertLevel(incomingAlert.level) === 'CRITICAL' ? 'CRITICAL' : 'WARNING';
+    AlertSoundManager.setStationAlert(incomingAlert.station_id, alertSoundLevel);
+
+    if (currentStationData && incomingAlert.station_id === currentStationData.id) {
+        const user = window.authManager?.getUserInfo();
+        const userRole = user?.role;
+        if (userRole === 'admin' || userRole === 'operator') {
+            window.currentAlertStationId = incomingAlert.station_id;
+            const piDevices = currentStationData.pi_devices || [];
+            document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+                const target = b.dataset.target;
+                const currentState = b.dataset.sirenState;
+                if (currentState === 'offline') return;
+                const piDev = piDevices.find(d => d.device_type === target);
+                if (piDev && !piDev.is_online) {
+                    setSirenButtonState('offline', target);
+                    return;
+                }
+                if (currentState === 'idle') {
+                    setSirenButtonState('alerting', target);
+                }
+            });
+        }
+    }
+}
+
+function _handleRealtimeGnssAdjustmentProgress(message) {
+    const belongsToActiveRun = (
+        !gnssAdjustmentDebugState.projectId
+        || Number(message.project_id) === gnssAdjustmentDebugState.projectId
+    );
+    if (!belongsToActiveRun) return;
+
+    applyGnssAdjustmentRoster(message.roster, message.run_id);
+    if (Array.isArray(message.expected_station_ids)) {
+        syncGnssExpectedStationIds(message.expected_station_ids, message.run_id);
+    }
+    setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
+    const resultPhase = String(message.phase || '').toUpperCase();
+    if (message.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(resultPhase)) {
+        const resultMessage = {
+            sensor_type: 'gnss_adjusted',
+            timestamp: message.timestamp || message.data.computed_at || Math.floor(Date.now() / 1000),
+            data: message.data,
+        };
+        if (resultPhase === 'COMPLETED') {
+            updateRealtimeSensorValues(resultMessage);
+        } else {
+            renderGnssAdjustmentAuditResult(resultMessage);
+        }
+        let reportMsg = 'Đã nhận liên kết tải JSON và XLSX.';
+        if (resultPhase === 'ERROR') {
+            reportMsg = 'Đã ghi hồ sơ lỗi JSON; các lịch chạy tiếp theo vẫn được giữ nguyên.';
+        } else if (['FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(resultPhase)) {
+            reportMsg = 'Hồ sơ audit đã sẵn sàng để tải; tọa độ không được publish.';
+        }
+        addGnssAdjustmentDebug('REPORT', reportMsg, 'success');
+    }
+}
+
+function _handleRealtimeGnssBaselineCollected(message) {
+    const baseline = Array.isArray(message.baseline_neu)
+        ? message.baseline_neu.map(finiteMetric)
+        : null;
+    if (!baseline || baseline.includes(null)) return;
+    const belongsToActiveRun = (
+        gnssAdjustmentDebugState.active
+        && Number(message.project_id) === gnssAdjustmentDebugState.projectId
+    );
+    if (belongsToActiveRun) {
+        if (!isGnssAdjustmentExpectedStation(message.station_id)) return;
+        gnssAdjustmentDebugState.baselineCount += 1;
+        syncGnssWorkflowBaseline(message);
+        addGnssAdjustmentDebug(
+            'BASELINE',
+            `${message.rover_name}: dN=${baseline[0].toFixed(4)}, dE=${baseline[1].toFixed(4)}, dH=${baseline[2].toFixed(4)}`,
+            'success',
+        );
+    }
+    if (belongsToActiveRun && window.gnssBoardState?.ctx) {
+        const fromPoint = String(message.from || 'BASE');
+        window.gnssBoardState.addPoint('BASE', 0, 0, true);
+        const origin = window.gnssBoardState.points[fromPoint] || window.gnssBoardState.points.BASE;
+        const relX = origin.x + baseline[1];
+        const relY = origin.y + baseline[0];
+        window.gnssBoardState.addPoint(message.rover_name, relX, relY, false, message.station_id);
+        window.gnssBoardState.addBaseline(fromPoint, message.rover_name, {
+            dn: baseline[0],
+            de: baseline[1],
+            dh: baseline[2],
+            full_data: message.full_data
+        });
+    }
+}
+
+function handleRealtimeUpdate(message) {
     if (message.type === 'hello') {
         syncWebSocketSubscription();
         return;
@@ -253,320 +550,32 @@ function handleRealtimeUpdate(message) {
         if (currentStationData && message.station_id === currentStationData.id) {
             scheduleRealtimeSensorUiUpdate(message);
         }
+        return;
     }
 
     if (message.type === 'sensor_status') {
-        if (
-            currentStationData
-            && message.station_id === currentStationData.id
-            && message.sensor_type === 'gnss_adjusted'
-        ) {
-            scheduleRealtimeSensorUiUpdate(message);
-            if (gnssAdjustmentDebugState.active) {
-                addGnssAdjustmentDebug('RESULT', 'Đã nhận kết quả bình sai từ server.', 'success');
-            }
-        }
-        if (currentStationData && message.station_id === currentStationData.id && message.sensor_type === 'gnss') {
-            const fixMode = message.data?.fix_mode;
-            const fixQuality = Number(message.data?.fix_quality);
-            if (
-                gnssAdjustmentDebugState.active
-                && gnssAdjustmentDebugState.expectedStationIds.includes(Number(message.station_id))
-            ) {
-                const now = Date.now();
-                const lastAt = Number(gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] || 0);
-                if (now - lastAt >= 5000) {
-                    gnssAdjustmentDebugState.lastGnssStatusAtByStation[message.station_id] = now;
-                    addGnssAdjustmentDebug(
-                        'GNSS',
-                        `Trạm #${message.station_id} có GGA: ${fixMode || 'UNKNOWN'} (quality=${fixQuality || 0}). Đang chờ #AGRICA.`,
-                        fixQuality >= 4 ? 'info' : 'warning',
-                    );
-                }
-            }
-            updateGnssFixBadge(fixMode, fixQuality);
-
-            const normalizedMode = (fixMode || '').toString().trim().toUpperCase();
-            const isNoData = (
-                !normalizedMode ||
-                normalizedMode === 'UNKNOWN' ||
-                normalizedMode === 'INVALID' ||
-                normalizedMode === 'NO_DATA' ||
-                normalizedMode === 'GNSS_UNKNOWN' ||
-                normalizedMode === 'GNSS_INVALID' ||
-                fixQuality <= 0
-            );
-
-            // Chỉ reset velocity khi trạng thái GNSS thực sự không có dữ liệu.
-            if (isNoData) {
-                setHTML('val-gnss-vel', `--<span class="sensor-unit">mm/s</span>`);
-            }
-        }
+        _handleRealtimeSensorStatus(message);
+        return;
     }
 
     if (message.type === 'station_status') {
-        const riskLevel = String(message.risk_level || 'LOW').toUpperCase();
-        const riskUi = getRiskPresentation(riskLevel);
-        const stationId = message.station_id;
-
-        // ✅ Nếu trạm về AN TOÀN → Reset tất cả UI state liên quan + dừng âm thanh
-        if (riskUi.normalized === 'LOW' || riskUi.normalized === 'OFFLINE') {
-            // 1. Clear marker flashing (phải gọi TRƯỚC updateStationMarker)
-            if (markerAlertState[stationId]) {
-                clearMarkerAlert(stationId);
-            }
-
-            // 2. Dismiss alert banner nếu đang hiện cho trạm này
-            if (window.currentAlertStationId === stationId) {
-                const banner = document.getElementById('alert-banner');
-                if (banner) {
-                    banner.classList.remove('show', 'level-warning', 'level-critical');
-                }
-                window.currentAlertStationId = null;
-                window.lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
-            }
-            delete alertBannerSnoozeUntil[stationId];
-            delete acknowledgedAlertKeyByStation[stationId];
-            delete bannerSuppressedUntilByStation[stationId];
-            // Clear tất cả sensor card highlight khi trạm về safe
-            clearAllSensorCardAlerts();
-
-            // 3. Reset siren buttons to idle if viewing this station
-            if (currentStationData && stationId === currentStationData.id) {
-                setSirenButtonState('idle');
-            }
-
-            // 4. ✅ Xóa cảnh báo âm thanh cho trạm này → âm thanh dừng nếu không còn trạm nào báo
-            AlertSoundManager.clearStationAlert(stationId);
-        }
-
-        const isAlertingRisk = (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL');
-        if (isAlertingRisk) {
-            // ✅ Cập nhật âm thanh theo mức cảnh báo của trạm
-            const soundLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-            AlertSoundManager.setStationAlert(stationId, soundLevel);
-
-            const banner = document.getElementById('alert-banner');
-            const isVisible = !!banner?.classList.contains('show');
-            const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
-
-            if (Date.now() >= snoozeUntil) {
-                const incomingLevel = soundLevel;
-                const incomingSeverity = getAlertSeverity(incomingLevel);
-                const currentSeverity = getAlertSeverity(banner?.dataset?.alertLevel || 'WARNING');
-                const sameStation = currentAlertStationId === stationId;
-                const shouldShowOrReplace = !isVisible || sameStation || incomingSeverity > currentSeverity;
-
-                if (shouldShowOrReplace) {
-                    const cachedAlert = latestAlertByStation[stationId];
-                    const candidateAlert = cachedAlert ? {
-                        ...cachedAlert,
-                        level: incomingLevel
-                    } : {
-                        station_id: stationId,
-                        level: incomingLevel,
-                        message: message.message || message.warning_message || getDefaultAlertMessageForStationStatus(riskUi)
-                    };
-                    const candidateKey = buildAlertKey(candidateAlert);
-                    if (candidateKey && acknowledgedAlertKeyByStation[stationId] === candidateKey) {
-                        return;
-                    }
-                    if (isBannerSuppressed(stationId)) {
-                        return;
-                    }
-                    showAlertBanner(candidateAlert, { silent: true });
-                }
-            }
-        }
-
-        if (currentAlertStationId === stationId && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
-            const banner = document.getElementById('alert-banner');
-            if (banner?.classList.contains('show')) {
-                const nextLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-                // Luôn cập nhật theme theo mức cảnh báo hiện tại (WARNING → vàng, CRITICAL → đỏ)
-                updateAlertBannerTheme(nextLevel);
-                const alertTitle = document.getElementById('alert-title');
-                if (alertTitle && !alertTitle.textContent.includes('(persistent)')) {
-                    alertTitle.textContent = `${riskUi.display} ALERT!`;
-                }
-            }
-
-            // ✅ Cập nhật sensor card highlight theo mức cảnh báo mới
-            // Khi CRITICAL → WARNING: chuyển card đang nháy đỏ sang nháy vàng
-            // Khi WARNING → CRITICAL: chuyển card đang nháy vàng sang nháy đỏ
-            if (currentStationData && stationId === currentStationData.id) {
-                const alertLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-                Object.values(SENSOR_CARD_IDS).forEach(id => {
-                    const card = document.getElementById(id);
-                    if (card && (card.classList.contains('sensor-alert-warning') || card.classList.contains('sensor-alert-critical'))) {
-                        card.classList.remove('sensor-alert-warning', 'sensor-alert-critical');
-                        card.classList.add(alertLevel === 'CRITICAL' ? 'sensor-alert-critical' : 'sensor-alert-warning');
-                    }
-                });
-            }
-        }
-
-        if (currentStationData && stationId === currentStationData.id && (riskUi.normalized === 'MEDIUM' || riskUi.normalized === 'CRITICAL')) {
-            const banner = document.getElementById('alert-banner');
-            const isVisible = !!banner?.classList.contains('show');
-            const snoozeUntil = Number(alertBannerSnoozeUntil[stationId] || 0);
-            if (!isVisible && Date.now() >= snoozeUntil) {
-                const cachedAlert = latestAlertByStation[stationId];
-                if (cachedAlert) {
-                    // Ghi đè level bằng mức rủi ro HIỆN TẠI của trạm
-                    // để banner luôn phản ánh đúng màu (WARNING→vàng, CRITICAL→đỏ)
-                    const currentLevel = (riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING');
-                    const candidateAlert = { ...cachedAlert, level: currentLevel };
-                    const candidateKey = buildAlertKey(candidateAlert);
-                    if (!candidateKey || acknowledgedAlertKeyByStation[stationId] !== candidateKey) {
-                        if (isBannerSuppressed(stationId)) {
-                            return;
-                        }
-                        showAlertBanner(candidateAlert, { silent: true });
-                    }
-                }
-            }
-        }
-
-        // ✅ Nếu trạm chuyển sang EXTREME/CRITICAL → Cập nhật siren buttons
-        if (riskUi.normalized === 'CRITICAL' && currentStationData && stationId === currentStationData.id) {
-            const user = window.authManager?.getUserInfo();
-            const userRole = user?.role;
-            if (userRole === 'admin' || userRole === 'operator') {
-                window.currentAlertStationId = stationId;
-                // Transition idle/offline buttons to alerting
-                document.querySelectorAll('.btn-siren-toggle').forEach(b => {
-                    const target = b.dataset.target;
-                    const currentState = b.dataset.sirenState;
-                    if (currentState === 'idle' || currentState === 'offline') {
-                        setSirenButtonState('alerting', target);
-                    }
-                });
-            }
-        }
-
-        // Update marker color on map
-        updateStationMarker(stationId, riskUi.normalized);
-
-        // Update status badge in sidebar
-        if (currentStationData && stationId === currentStationData.id) {
-            const riskEl = document.getElementById('st-risk');
-            if (riskEl) {
-                riskEl.className = `status-badge ${riskUi.className}`;
-                riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
-            }
-        }
-
-        // Update station list badge
-        const listBadge = document.getElementById(`list-badge-${stationId}`);
-        if (listBadge) {
-            listBadge.className = `badge station-status ${getRiskBadgeClass(riskUi.className)}`;
-            listBadge.innerText = getStationListRiskLabel(riskUi.normalized);
-            const listItem = listBadge.closest('.station-item');
-            if (listItem) {
-                listItem.dataset.state = riskUi.normalized.toLowerCase();
-                let conn = 'online';
-                if (riskUi.normalized === 'OFFLINE') conn = 'offline';
-                else if (riskUi.normalized === 'STALE') conn = 'stale';
-                listItem.dataset.connection = conn;
-            }
-            filterStations(document.getElementById('search-station')?.value || '');
-
-            listBadge.style.transition = '0.3s';
-            listBadge.style.transform = 'scale(1.2)';
-            setTimeout(() => listBadge.style.transform = 'scale(1)', 300);
-        }
+        _handleRealtimeStationStatus(message);
+        return;
     }
 
-    // ✅ XỬ LÝ CẢNH BÁO MỚI — Chỉ hiện 1 lần per alert (dedup)
     if (message.type === 'alert') {
-        const incomingAlert = normalizeIncomingAlert(message);
-        latestAlertByStation[incomingAlert.station_id] = incomingAlert;
-        // Dedup theo station + sensor + level để không nuốt cảnh báo mới cùng level từ sensor khác.
-        const alertKey = buildAlertKey(incomingAlert);
-        const isAcknowledged = acknowledgedAlertKeyByStation[incomingAlert.station_id] === alertKey;
-        if (!isAcknowledged) {
-            delete bannerSuppressedUntilByStation[incomingAlert.station_id];
-        }
-        if (alertKey !== window.lastAlertKey && !isAcknowledged) {
-            window.lastAlertKey = alertKey;
-            showAlertBanner(incomingAlert);
-        }
-        // Highlight sensor card nếu đang xem trạm đang báo
-        if (currentStationData && incomingAlert.station_id === currentStationData.id && incomingAlert.sensor_type) {
-            setSensorCardAlert(incomingAlert.sensor_type, incomingAlert.level);
-        }
-        // ✅ Marker chuyển đỏ + nhấp nháy khi có cảnh báo
-        setMarkerAlert(incomingAlert.station_id, true);
-
-        // ✅ Phát âm thanh theo cấp độ cảnh báo — loop liên tục cho đến khi về bình thường
-        const alertSoundLevel = normalizeAlertLevel(incomingAlert.level) === 'CRITICAL' ? 'CRITICAL' : 'WARNING';
-        AlertSoundManager.setStationAlert(incomingAlert.station_id, alertSoundLevel);
-
-        // ✅ Cập nhật siren buttons nếu đang xem trạm này
-        // Phân biệt pi_point / pi_center — chỉ set 'alerting' nếu thiết bị online
-        if (currentStationData && incomingAlert.station_id === currentStationData.id) {
-            const user = window.authManager?.getUserInfo();
-            const userRole = user?.role;
-            if (userRole === 'admin' || userRole === 'operator') {
-                window.currentAlertStationId = incomingAlert.station_id;
-                const piDevices = currentStationData.pi_devices || [];
-                document.querySelectorAll('.btn-siren-toggle').forEach(b => {
-                    const target = b.dataset.target;
-                    const currentState = b.dataset.sirenState;
-                    if (currentState === 'offline') return; // thiết bị offline, bỏ qua
-                    // Kiểm tra pi device tương ứng có online không
-                    const piDev = piDevices.find(d => d.device_type === target);
-                    if (piDev && !piDev.is_online) {
-                        setSirenButtonState('offline', target);
-                        return;
-                    }
-                    if (currentState === 'idle') {
-                        setSirenButtonState('alerting', target);
-                    }
-                });
-            }
-        }
+        _handleRealtimeAlertMessage(message);
+        return;
     }
 
-    // ✅ Handle rescue request updates from WebSocket
     if (message.type === 'rescue_request') {
         updateRescueMarkerFromWebSocket(message);
+        return;
     }
-    
-    // ✅ Handle gnss adjustment progress
+
     if (message.type === 'gnss_adjustment_progress') {
-        const belongsToActiveRun = (
-            !gnssAdjustmentDebugState.projectId
-            || Number(message.project_id) === gnssAdjustmentDebugState.projectId
-        );
-        if (belongsToActiveRun) {
-            applyGnssAdjustmentRoster(message.roster, message.run_id);
-            if (Array.isArray(message.expected_station_ids)) {
-                syncGnssExpectedStationIds(message.expected_station_ids, message.run_id);
-            }
-            setGnssAdjustmentPhase(message.phase, message.message || 'Server đã cập nhật phase.');
-            const resultPhase = String(message.phase || '').toUpperCase();
-            if (message.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(resultPhase)) {
-                const resultMessage = {
-                    sensor_type: 'gnss_adjusted',
-                    timestamp: message.timestamp || message.data.computed_at || Math.floor(Date.now() / 1000),
-                    data: message.data,
-                };
-                if (resultPhase === 'COMPLETED') {
-                    updateRealtimeSensorValues(resultMessage);
-                } else {
-                    renderGnssAdjustmentAuditResult(resultMessage);
-                }
-                let reportMsg = 'Đã nhận liên kết tải JSON và XLSX.';
-                if (resultPhase === 'ERROR') {
-                    reportMsg = 'Đã ghi hồ sơ lỗi JSON; các lịch chạy tiếp theo vẫn được giữ nguyên.';
-                } else if (['FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(resultPhase)) {
-                    reportMsg = 'Hồ sơ audit đã sẵn sàng để tải; tọa độ không được publish.';
-                }
-                addGnssAdjustmentDebug('REPORT', reportMsg, 'success');
-            }
-        }
+        _handleRealtimeGnssAdjustmentProgress(message);
+        return;
     }
 
     if (message.type === 'gnss_adjustment_debug') {
@@ -578,44 +587,11 @@ function handleRealtimeUpdate(message) {
             const station = message.station_id ? `Trạm #${message.station_id}: ` : '';
             addGnssAdjustmentDebug('AGRICA', `${station}${message.message || '-'}`, message.level || 'info');
         }
+        return;
     }
 
-    // ✅ Handle gnss baseline collected (Draw board)
     if (message.type === 'gnss_baseline_collected') {
-        const baseline = Array.isArray(message.baseline_neu)
-            ? message.baseline_neu.map(finiteMetric)
-            : null;
-        if (!baseline || baseline.includes(null)) return;
-        const belongsToActiveRun = (
-            gnssAdjustmentDebugState.active
-            && Number(message.project_id) === gnssAdjustmentDebugState.projectId
-        );
-        if (belongsToActiveRun) {
-            if (!isGnssAdjustmentExpectedStation(message.station_id)) {
-                return;
-            }
-            gnssAdjustmentDebugState.baselineCount += 1;
-            syncGnssWorkflowBaseline(message);
-            addGnssAdjustmentDebug(
-                'BASELINE',
-                `${message.rover_name}: dN=${baseline[0].toFixed(4)}, dE=${baseline[1].toFixed(4)}, dH=${baseline[2].toFixed(4)}`,
-                'success',
-            );
-        }
-        if (belongsToActiveRun && window.gnssBoardState?.ctx) {
-            const fromPoint = String(message.from || 'BASE');
-            window.gnssBoardState.addPoint('BASE', 0, 0, true);
-            const origin = window.gnssBoardState.points[fromPoint] || window.gnssBoardState.points.BASE;
-            const relX = origin.x + baseline[1];
-            const relY = origin.y + baseline[0];
-            window.gnssBoardState.addPoint(message.rover_name, relX, relY, false, message.station_id);
-            window.gnssBoardState.addBaseline(fromPoint, message.rover_name, {
-                dn: baseline[0],
-                de: baseline[1],
-                dh: baseline[2],
-                full_data: message.full_data
-            });
-        }
+        _handleRealtimeGnssBaselineCollected(message);
     }
 }
 
@@ -655,16 +631,38 @@ function isGnssAdjustmentResultRelevant(result, timestamp = null) {
     return true;
 }
 
-function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
-    if (!message?.data || !isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return false;
-    const failed = String(message.data.status || '').toLowerCase() === 'failed'
-        || ['ERROR', 'PARTIAL_FAILED'].includes(gnssAdjustmentDebugState.phase);
-    window.gnssBoardState?.loadAdjustmentResult?.(message.data);
-    const adjResultsSection = document.getElementById('adj-results-section');
+function _renderAdjustedPointsList(adjPointsList, points, failed, errorMsg) {
+    if (!adjPointsList) return;
+    adjPointsList.innerHTML = '';
+    if (failed) {
+        const errorItem = document.createElement('div');
+        errorItem.className = 'alert alert-danger py-2 px-3 mb-0 small';
+        errorItem.textContent = errorMsg || 'Quy trình bình sai đã dừng do lỗi.';
+        adjPointsList.appendChild(errorItem);
+        return;
+    }
+    for (const [ptName, ptCoords] of Object.entries(points || {})) {
+        const coordinates = getAdjustedPointCoordinates(ptCoords);
+        const item = document.createElement('div');
+        item.className = 'list-group-item bg-transparent text-slate-300 py-1 px-0 d-flex justify-content-between align-items-center border-bottom border-secondary';
+        item.innerHTML = `
+            <span class="fw-semibold text-info font-monospace" style="font-size:0.75rem;">${ptName}</span>
+            <span class="text-light font-monospace text-end" style="font-size:0.68rem; line-height:1.2;">
+                X: ${formatAdjustedCoordinate(coordinates[0])}<br>
+                Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
+                Z: ${formatAdjustedCoordinate(coordinates[2])}
+            </span>
+        `;
+        adjPointsList.appendChild(item);
+    }
+}
+
+function _updateAdjustmentResultHeaderUI(failed, auditOnly, timestamp) {
     const adjStatusEl = document.getElementById('adj-process-status');
     const adjTimeEl = document.getElementById('adj-val-time');
-    const adjPointsList = document.getElementById('adj-points-list');
+    const adjResultsSection = document.getElementById('adj-results-section');
     const retryButton = document.getElementById('gnss-retry-adjustment-btn');
+    const terminalModal = document.getElementById('gnssTerminalModal');
 
     if (adjStatusEl) {
         let statusHtml = '<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công</span>';
@@ -676,43 +674,28 @@ function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
         adjStatusEl.innerHTML = statusHtml;
     }
     if (adjTimeEl) {
-        const timestamp = Number(message.timestamp || message.data.computed_at || Date.now() / 1000);
         adjTimeEl.textContent = new Date(normalizeEpochMs(timestamp)).toLocaleString();
     }
     if (adjResultsSection) adjResultsSection.style.display = 'flex';
-    const terminalModal = document.getElementById('gnssTerminalModal');
     terminalModal?.classList.add('gnss-result-visible');
     if (retryButton) retryButton.style.display = failed || auditOnly ? 'inline-flex' : 'none';
     if (failed) {
-        // A terminal error no longer needs two large live panes. Collapse Debug
-        // once to guarantee that the result actions remain visible and clickable.
         terminalModal?.querySelector('#gnss-data-column')?.classList.add('gnss-debug-collapsed');
     }
-    if (adjPointsList) {
-        adjPointsList.innerHTML = '';
-        if (failed) {
-            const errorItem = document.createElement('div');
-            errorItem.className = 'alert alert-danger py-2 px-3 mb-0 small';
-            errorItem.textContent = message.data.error?.message || 'Quy trình bình sai đã dừng do lỗi.';
-            adjPointsList.appendChild(errorItem);
-            window.gnssBoardState?.fitToResult?.();
-            return true;
-        }
-        for (const [ptName, ptCoords] of Object.entries(message.data.points || {})) {
-            const coordinates = getAdjustedPointCoordinates(ptCoords);
-            const item = document.createElement('div');
-            item.className = 'list-group-item bg-transparent text-slate-300 py-1 px-0 d-flex justify-content-between align-items-center border-bottom border-secondary';
-            item.innerHTML = `
-                <span class="fw-semibold text-info font-monospace" style="font-size:0.75rem;">${ptName}</span>
-                <span class="text-light font-monospace text-end" style="font-size:0.68rem; line-height:1.2;">
-                    X: ${formatAdjustedCoordinate(coordinates[0])}<br>
-                    Y: ${formatAdjustedCoordinate(coordinates[1])}<br>
-                    Z: ${formatAdjustedCoordinate(coordinates[2])}
-                </span>
-            `;
-            adjPointsList.appendChild(item);
-        }
-    }
+}
+
+function renderGnssAdjustmentResultPanel(message, { auditOnly = false } = {}) {
+    if (!message?.data || !isGnssAdjustmentResultRelevant(message.data, message.timestamp)) return false;
+    const failed = String(message.data.status || '').toLowerCase() === 'failed'
+        || ['ERROR', 'PARTIAL_FAILED'].includes(gnssAdjustmentDebugState.phase);
+    window.gnssBoardState?.loadAdjustmentResult?.(message.data);
+
+    const timestamp = Number(message.timestamp || message.data.computed_at || Date.now() / 1000);
+    _updateAdjustmentResultHeaderUI(failed, auditOnly, timestamp);
+
+    const adjPointsList = document.getElementById('adj-points-list');
+    _renderAdjustedPointsList(adjPointsList, message.data.points, failed, message.data.error?.message);
+
     window.gnssBoardState?.fitToResult?.();
     return true;
 }

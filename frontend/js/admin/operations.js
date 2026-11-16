@@ -128,6 +128,30 @@ class AdminOperationsFeature extends window.AdminManager {
             : 'Chưa có phép đo. Chọn “Kiểm tra độ lệch” để bắt đầu.';
     }
 
+    async _handleBackupAction(action, id) {
+        const result = await this.operationJSON(action === 'backup' ? '/backups' : `/backups/${id}/restore`, 'POST',
+            action === 'restore' ? { confirmation: 'RESTORE INTO ISOLATED DATABASES' } : {});
+        sessionStorage.setItem('operations-active-job', result.job_id);
+        this.watchOperationJob(result.job_id);
+        this.operationFeedback('Đã nhận tác vụ. Bạn có thể theo dõi trạng thái tại mục sao lưu.');
+    }
+
+    async _handleScheduleAction() {
+        const date = document.getElementById('operations-next').value;
+        const freq = document.getElementById('operations-frequency').value;
+        await this.operationJSON('/backup-schedule', 'PUT', {
+            frequency: freq,
+            next_at: date ? Math.floor(new Date(date).getTime() / 1000) : 0,
+            retention_count: Number(document.getElementById('operations-retention').value || 30),
+        });
+        document.getElementById('operations-schedule-label').textContent = { disabled: 'Đang tắt', daily: 'Hằng ngày', weekly: 'Hằng tuần' }[freq];
+        this.operationFeedback('Đã lưu lịch sao lưu.');
+    }
+
+    async _handleNtpAction() {
+        this.renderOperationNTP(await this.operationJSON('/ntp/check', 'POST', {}));
+    }
+
     async operationAction(button, action, id) {
         if (button.disabled) return;
         if (action === 'restore' && !window.confirm('Phục hồi bản sao vào ba CSDL riêng để kiểm tra? Thu thập MQTT tiếp tục trên CSDL hiện tại.')) return;
@@ -137,22 +161,11 @@ class AdminOperationsFeature extends window.AdminManager {
         button.textContent = 'Đang xử lý…';
         try {
             if (action === 'backup' || action === 'restore') {
-                const result = await this.operationJSON(action === 'backup' ? '/backups' : `/backups/${id}/restore`, 'POST',
-                    action === 'restore' ? { confirmation: 'RESTORE INTO ISOLATED DATABASES' } : {});
-                sessionStorage.setItem('operations-active-job', result.job_id);
-                this.watchOperationJob(result.job_id);
-                this.operationFeedback('Đã nhận tác vụ. Bạn có thể theo dõi trạng thái tại mục sao lưu.');
+                await this._handleBackupAction(action, id);
             } else if (action === 'schedule') {
-                const date = document.getElementById('operations-next').value;
-                await this.operationJSON('/backup-schedule', 'PUT', {
-                    frequency: document.getElementById('operations-frequency').value,
-                    next_at: date ? Math.floor(new Date(date).getTime() / 1000) : 0,
-                    retention_count: Number(document.getElementById('operations-retention').value || 30),
-                });
-                document.getElementById('operations-schedule-label').textContent = { disabled: 'Đang tắt', daily: 'Hằng ngày', weekly: 'Hằng tuần' }[document.getElementById('operations-frequency').value];
-                this.operationFeedback('Đã lưu lịch sao lưu.');
+                await this._handleScheduleAction();
             } else if (action === 'ntp') {
-                this.renderOperationNTP(await this.operationJSON('/ntp/check', 'POST', {}));
+                await this._handleNtpAction();
             }
         } catch (error) {
             if (action === 'ntp') {
@@ -261,52 +274,92 @@ class AdminOperationsFeature extends window.AdminManager {
         if (method.disabled) method.value = '';
     }
 
-    async loadOperationLogs() {
-        const request = this.operationLogRequest = (this.operationLogRequest || 0) + 1;
-        const offset = this.operationLogOffset || 0;
-        const query = new URLSearchParams({ kind: document.getElementById('operations-log-kind').value,
-            offset, limit: 25, username: document.getElementById('operations-log-user').value,
+    _formatLogResultLabel(row) {
+        if (row.status != null) {
+            const statusText = row.status < 400 ? 'Thành công' : 'Thất bại';
+            return `${statusText} · ${row.status}`;
+        }
+        if (row.action.includes('failed') || row.action.includes('error')) {
+            return 'Thất bại';
+        }
+        return 'Đã ghi nhận';
+    }
+
+    _renderLogRow(row, queryKind) {
+        const tr = document.createElement('tr');
+        const resultLabel = this._formatLogResultLabel(row);
+        const actor = row.username || (queryKind === 'audit_log' ? 'Chưa xác định' : 'Hệ thống');
+        const method = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /.exec(row.action)?.[1] || '—';
+        const values = [
+            new Date(row.timestamp * 1000).toLocaleString('vi-VN'),
+            `${actor} / ${row.role || '—'}`,
+            this.operationEventLabel(row.action),
+            method,
+            resultLabel
+        ];
+        const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Method', 'Kết quả'];
+        for (const [index, value] of values.entries()) {
+            const cell = document.createElement('td');
+            cell.dataset.label = labels[index];
+            cell.textContent = value;
+            if (index === 4) cell.className = resultLabel.startsWith('Thất bại') ? 'operations-result is-error' : 'operations-result';
+            tr.append(cell);
+        }
+        const cell = document.createElement('td');
+        const details = document.createElement('button');
+        cell.className = 'operations-log-detail';
+        details.className = 'btn btn-outline-secondary operations-detail-button';
+        details.textContent = 'Xem chi tiết';
+        details.onclick = () => this.openOperationInspector(row, details, queryKind);
+        cell.append(details);
+        tr.append(cell);
+        return tr;
+    }
+
+    _buildLogQueryParams(offset) {
+        const query = new URLSearchParams({
+            kind: document.getElementById('operations-log-kind').value,
+            offset, limit: 25,
+            username: document.getElementById('operations-log-user').value,
             action: document.getElementById('operations-log-action').value,
-            method: document.getElementById('operations-log-method').value });
-        for (const field of ['start','end']) {
+            method: document.getElementById('operations-log-method').value
+        });
+        for (const field of ['start', 'end']) {
             const value = document.getElementById(`operations-log-${field}`).value;
             if (value) query.set(field, Math.floor(new Date(value).getTime() / 1000));
         }
+        return query;
+    }
+
+    async loadOperationLogs() {
+        const request = this.operationLogRequest = (this.operationLogRequest || 0) + 1;
+        const offset = this.operationLogOffset || 0;
+        const query = this._buildLogQueryParams(offset);
         const table = document.querySelector('.operations-table-wrap');
         table.setAttribute('aria-busy', 'true');
         try {
             const result = await (await this.operationRequest(`/logs?${query}`)).json();
             if (request !== this.operationLogRequest || this._disposed) return;
-            const body = document.getElementById('operations-logs'); body.replaceChildren();
+            const body = document.getElementById('operations-logs');
+            body.replaceChildren();
+            const queryKind = query.get('kind');
             for (const row of result.rows) {
-                const tr = document.createElement('tr');
-                let resultLabel = 'Đã ghi nhận';
-                if (row.status != null) {
-                    const statusText = row.status < 400 ? 'Thành công' : 'Thất bại';
-                    resultLabel = `${statusText} · ${row.status}`;
-                } else if (row.action.includes('failed') || row.action.includes('error')) {
-                    resultLabel = 'Thất bại';
-                }
-                const actor = row.username || (query.get('kind') === 'audit_log' ? 'Chưa xác định' : 'Hệ thống');
-                const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${actor} / ${row.role || '—'}`, this.operationEventLabel(row.action), /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /.exec(row.action)?.[1] || '—', resultLabel];
-                const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Method', 'Kết quả'];
-                for (const [index, value] of values.entries()) {
-                    const cell = document.createElement('td'); cell.dataset.label = labels[index]; cell.textContent = value; tr.append(cell);
-                    if (index === 4) cell.className = resultLabel.startsWith('Thất bại') ? 'operations-result is-error' : 'operations-result';
-                }
-                const cell = document.createElement('td'), details = document.createElement('button');
-                cell.className = 'operations-log-detail';
-                details.className = 'btn btn-outline-secondary operations-detail-button';
-                details.textContent = 'Xem chi tiết';
-                details.onclick = () => this.openOperationInspector(row, details, query.get('kind'));
-                cell.append(details); tr.append(cell); body.append(tr);
+                body.append(this._renderLogRow(row, queryKind));
             }
-            if (!result.rows.length) { const tr = body.insertRow(); const cell = tr.insertCell(); cell.colSpan = 6; cell.textContent = 'Không có nhật ký phù hợp.'; }
+            if (!result.rows.length) {
+                const tr = body.insertRow();
+                const cell = tr.insertCell();
+                cell.colSpan = 6;
+                cell.textContent = 'Không có nhật ký phù hợp.';
+            }
             document.getElementById('operations-log-count').textContent = `${result.total ? offset + 1 : 0}–${offset + result.rows.length} / ${result.total}`;
             document.getElementById('operations-log-prev').disabled = offset === 0;
             document.getElementById('operations-log-next').disabled = offset + 25 >= result.total;
-        } catch (error) { this.operationFeedback(error.message, true); }
-        finally { if (request === this.operationLogRequest) table.setAttribute('aria-busy', 'false'); }
+        } catch (error) {
+            this.operationFeedback(error.message, true);
+        } finally {
+            if (request === this.operationLogRequest) table.setAttribute('aria-busy', 'false');
+        }
     }
 
     operationLogPage(direction) {
