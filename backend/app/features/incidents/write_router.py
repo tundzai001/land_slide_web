@@ -37,7 +37,6 @@ async def _mutate_case(
     expected = body.get("expected_version")
     if expected is not None and int(expected) != int(case.version):
         raise HTTPException(status_code=409, detail={"code": "VERSION_CONFLICT", "message": "Incident đã được cập nhật", "current": serialize_case(case, include_private=_is_manager(user))})
-    before_sequence = int(case.last_event_sequence or 0) + 1
     mutate_result = mutate(case)
     if inspect.isawaitable(mutate_result):
         mutate_result = await mutate_result

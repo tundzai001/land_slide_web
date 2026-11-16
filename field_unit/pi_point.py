@@ -233,7 +233,7 @@ class MQTTPointClient:
             self.client.loop_start()
             return True
         except Exception as e:
-            logger.error(f"❌ Connect failed: {e}")
+            logger.exception(f"❌ Connect failed: {e}")
             return False
             
     def disconnect(self):
@@ -263,7 +263,7 @@ class MQTTPointClient:
             elif msg.topic == self.topic_command or (self.topic_pi_command and msg.topic == self.topic_pi_command):
                 self._handle_command(payload)
         except Exception as e:
-            logger.error(f"Error handling message: {e}")
+            logger.exception(f"Error handling message: {e}")
 
     def _handle_alert(self, payload):
         global is_continuous_alert
@@ -407,7 +407,7 @@ class MQTTPointClient:
             else:
                 logger.warning("❌ License mismatch")
         except Exception as e:
-            logger.error(e)
+            logger.exception(e)
 
     def _handle_set_station(self, data):
         new_station = data.get('station_id')

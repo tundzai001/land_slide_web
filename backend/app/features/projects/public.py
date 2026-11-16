@@ -99,7 +99,7 @@ async def get_public_projects(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error loading public projects: {e}")
+        logger.exception(f"Error loading public projects: {e}")
         raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")
 
 

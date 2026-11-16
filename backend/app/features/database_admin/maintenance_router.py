@@ -98,7 +98,7 @@ async def factory_reset_database(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         await _config_db.rollback()
         await data_db.rollback()
 
@@ -133,5 +133,5 @@ async def clear_all_database(
         raise
     except Exception as e:
         await data_db.rollback()
-        logger.error(f"❌ Clear database error: {e}")
+        logger.exception(f"❌ Clear database error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -31,7 +31,7 @@ class SensorCachePersistenceMixin:
                     await db.commit()
                     logger.info(f"💾 [IMU] Baseline saved to DB for station {station_id}: {baseline_data}")
         except Exception as e:
-            logger.error(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
+            logger.exception(f"❌ [IMU] Failed to save baseline for station {station_id}: {e}")
     async def _upsert_latest_sensor_cache(self, station_id: int, sensor_type: str, timestamp: int, data: dict):
         cache_key = (int(station_id), str(sensor_type))
         row = {

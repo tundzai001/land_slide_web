@@ -79,7 +79,7 @@ async def get_station_devices(
         ]
 
     except Exception as e:
-        logger.error(f"Error loading devices: {e}")
+        logger.exception(f"Error loading devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/api/admin/stations/{station_id}/devices", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
@@ -128,7 +128,7 @@ async def create_device_in_station(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error creating device: {e}")
+        logger.exception(f"Error creating device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/api/admin/devices/{device_id}", responses={403: {"description": "Forbidden"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
@@ -163,7 +163,7 @@ async def delete_device(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error deleting device: {e}")
+        logger.exception(f"Error deleting device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================

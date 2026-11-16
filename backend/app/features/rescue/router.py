@@ -378,7 +378,6 @@ async def delete_rescue_request(
             for other in other_rows
         )
 
-    cleanup_job = None
     if can_delete_image and target_image_url:
         now_ts = int(time.time())
         upload_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(target_image_url)))

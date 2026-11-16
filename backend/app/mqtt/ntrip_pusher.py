@@ -197,7 +197,7 @@ class NtripPusher:
         except Exception as e:
             self._startup_error = e
             self._ready.set()
-            logger.error(f"[NTRIP Pusher] {self.station_code}: Error in push loop: {e}")
+            logger.exception(f"[NTRIP Pusher] {self.station_code}: Error in push loop: {e}")
         finally:
             self.is_running = False
             self._ready.set()
@@ -370,7 +370,7 @@ class NtripPusherManager:
                                         )
                                 pusher._loop.call_soon_threadsafe(enqueue)
                 except Exception as exc:
-                    logger.error(f"[NTRIP Pusher] {station_code}: Could not queue RTCM data: {exc}")
+                    logger.exception(f"[NTRIP Pusher] {station_code}: Could not queue RTCM data: {exc}")
 
     @classmethod
     def get_diagnostics(cls, station_code: str) -> dict:

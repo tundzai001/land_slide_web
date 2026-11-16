@@ -131,7 +131,7 @@ async def run(config):
                         raise ConnectionError('MQTT publish acknowledgement timed out')
                     logger.info('Published device %s', identifier)
                 except Exception as exc:
-                    logger.error('Device %s read/publish failed: %s', identifier, type(exc).__name__)
+                    logger.exception('Device %s read/publish failed: %s', identifier, type(exc).__name__)
                 next_read[identifier] = time.monotonic() + max(1, float(device['profile'].get('poll_seconds', 5)))
             await asyncio.sleep(0.2)
     finally:

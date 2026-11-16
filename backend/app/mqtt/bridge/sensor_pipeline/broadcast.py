@@ -24,4 +24,4 @@ class SensorBroadcastMixin:
                 "data": processed_data,
             })
         except Exception as exc:
-            logger.error("❌ WS Sensor Error: %s", exc)
+            logger.exception("❌ WS Sensor Error: %s", exc)

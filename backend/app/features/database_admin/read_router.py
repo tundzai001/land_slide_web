@@ -112,7 +112,7 @@ async def get_database_stats(
         _stats_cache_expires_at = now + _STATS_CACHE_TTL_SECONDS
         return _stats_cache
     except Exception as e:
-        logger.error(f"Stats error: {e}")
+        logger.exception(f"Stats error: {e}")
         return {"stations": 0, "devices": 0, "sensor_data": 0, "gnss_adjustments": 0, "alerts": 0}
 
 
@@ -194,7 +194,7 @@ async def admin_get_all_stations(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching stations: {e}")
+        logger.exception(f"Error fetching stations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -264,7 +264,7 @@ async def admin_get_all_devices(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching devices: {e}")
+        logger.exception(f"Error fetching devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -424,7 +424,7 @@ async def admin_get_sensor_data(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching sensor data: {e}")
+        logger.exception(f"Error fetching sensor data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -501,7 +501,7 @@ async def admin_get_alerts(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching alerts: {e}")
+        logger.exception(f"Error fetching alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

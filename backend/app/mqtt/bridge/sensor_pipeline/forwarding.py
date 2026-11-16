@@ -66,4 +66,4 @@ class SensorForwardingMixin:
                         self._get_client_for_station(station_id).publish(target_topic, json.dumps(payload))
                         logger.debug(f"📤 [FORWARD-LOCAL] Published 1Hz data to {target_topic}")
                 except Exception as ex:
-                    logger.error(f"❌ [FORWARD] Error publishing: {ex}")
+                    logger.exception(f"❌ [FORWARD] Error publishing: {ex}")

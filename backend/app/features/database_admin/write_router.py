@@ -52,7 +52,7 @@ async def admin_update_station(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error updating station: {e}")
+        logger.exception(f"Error updating station: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

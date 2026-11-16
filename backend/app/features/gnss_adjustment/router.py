@@ -38,7 +38,7 @@ async def list_aicaster_users(
     try:
         users = await mqtt_service.round_robin_manager.list_aicaster_users()
     except Exception as exc:
-        logger.error("Could not load AICaster user table: %s", exc)
+        logger.exception("Could not load AICaster user table: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
         "users": [

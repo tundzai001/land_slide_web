@@ -1084,7 +1084,7 @@ class RoundRobinCycleMixin:
                                     }
                                 await asyncio.sleep(2.0)
                             except Exception as e:
-                                logger.error(f"Failed to sleep conflict base {cb_name}: {e}")
+                                logger.exception(f"Failed to sleep conflict base {cb_name}: {e}")
 
                     self._exclude_fixed_base_records(
                         cluster,
@@ -1169,7 +1169,6 @@ class RoundRobinCycleMixin:
                         if str(candidate).casefold() not in current_keys
                     }
 
-                cluster_coverage_complete = False
                 rotation_queue = list(rovers)
                 initial_rotation_count = len(rotation_queue)
                 completed_mandatory_rotations: set[str] = set()
@@ -1186,7 +1185,6 @@ class RoundRobinCycleMixin:
                     cluster["current_stable_window_index"] = None
                     next_stable_window_index = 0
                     is_graph_recovery = rotation_index >= initial_rotation_count
-                    mandatory_rotation_completed = False
                     if is_graph_recovery:
                         existing_edges, _ = current_solver_eligible_cross_coverage()
                         expected_cross_rovers = recovery_targets(rover_code, existing_edges)
@@ -1587,15 +1585,8 @@ class RoundRobinCycleMixin:
                             for record in eligible
                         }
                         missing_rovers = sorted(expected_cross_rovers - collected_rovers)
-                        cross_edges, cross_participants = current_solver_eligible_cross_coverage()
-                        required_cross_edges = max(len(rovers) - 1, 1)
-                        components = _graph_components(rovers, cross_edges)
-                        cluster_coverage_complete = (
-                            len(cross_edges) >= required_cross_edges
-                            and len(components) == 1
-                        )
+                        current_solver_eligible_cross_coverage()
                         if collected_count > 0:
-                            mandatory_rotation_completed = True
                             if not is_graph_recovery:
                                 completed_mandatory_rotations.add(
                                     str(rover_code).casefold()
@@ -1809,7 +1800,7 @@ class RoundRobinCycleMixin:
                         copy.deepcopy(snapshot["service_config"]),
                     )
                 except Exception as e:
-                    logger.error(
+                    logger.exception(
                         "Failed to restore conflict base %s in finally block: %s",
                         snapshot["serial"],
                         e,

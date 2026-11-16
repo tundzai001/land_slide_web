@@ -40,7 +40,7 @@ async def download_export_excel(
             os.remove(filepath)
             del EXPORT_TASKS[task_id]
         except Exception as e:
-            logger.error(f"Failed to delete temp export file {filepath}: {e}")
+            logger.exception(f"Failed to delete temp export file {filepath}: {e}")
 
     background_tasks.add_task(cleanup_file)
 

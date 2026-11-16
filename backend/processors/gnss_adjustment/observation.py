@@ -708,7 +708,7 @@ class RoundRobinObservationMixin:
                 rover_name=rover_name,
             )
         except Exception as exc:
-            logger.error("Error parsing AGRICA in RoundRobin: %s", exc)
+            logger.exception("Error parsing AGRICA in RoundRobin: %s", exc)
             self._last_ingest_diagnostics[project_id] = {
                 "level": "error",
                 "message": f"AGRICA parse failed: {exc}",
@@ -1024,7 +1024,6 @@ class RoundRobinObservationMixin:
                 flag: str,
                 diagnostic_message: str,
             ) -> None:
-                records = cluster["observations"]
                 for record_index, record in source_valid_indexed:
                     if (
                         record_index < start_index

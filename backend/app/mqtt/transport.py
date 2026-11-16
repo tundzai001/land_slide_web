@@ -23,7 +23,7 @@ class MQTTTransportMixin:
                 done_task.result()
             except Exception as exc:
                 if not self._stopping:
-                    logger.error("MQTT background task failed: %s", exc)
+                    logger.exception("MQTT background task failed: %s", exc)
 
         task.add_done_callback(consume_result)
         return task
@@ -43,7 +43,7 @@ class MQTTTransportMixin:
                 done_future.result()
             except Exception as exc:
                 if not self._stopping:
-                    logger.error("MQTT async task %s failed: %s", label, exc)
+                    logger.exception("MQTT async task %s failed: %s", label, exc)
 
         future.add_done_callback(consume_result)
         return future
@@ -71,7 +71,7 @@ class MQTTTransportMixin:
             self._fwd_clients[key] = client
             return client
         except Exception as e:
-            logger.error(f"❌ [FORWARD] Failed to connect to external broker {host}:{port}: {e}")
+            logger.exception(f"❌ [FORWARD] Failed to connect to external broker {host}:{port}: {e}")
             return None
 
     def on_connect(self, client, userdata, _flags, rc, _properties=None):

@@ -80,7 +80,7 @@ async def stop_siren_command(
         )
         return {"status": "success", "message": "Stop siren command sent"}
     except Exception as e:
-        logger.error(f"Failed to send MQTT stop_siren: {e}")
+        logger.exception(f"Failed to send MQTT stop_siren: {e}")
         raise HTTPException(status_code=500, detail="Failed to send command to device")
 
 
@@ -148,5 +148,5 @@ async def enable_siren_command(
         )
         return {"status": "success", "message": "Enable siren command sent"}
     except Exception as e:
-        logger.error(f"Failed to send MQTT enable_siren: {e}")
+        logger.exception(f"Failed to send MQTT enable_siren: {e}")
         raise HTTPException(status_code=500, detail="Failed to send command to device")

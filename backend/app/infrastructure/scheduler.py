@@ -328,14 +328,14 @@ async def reload_scheduler():
                                 minute,
                             )
                         except Exception as e:
-                            logger.error(
+                            logger.exception(
                                 "Invalid scheduled_hour %r for project %s: %s",
                                 hour_str,
                                 project.id,
                                 e,
                             )
     except Exception as e:
-        logger.error(f"Failed to reload schedules: {e}")
+        logger.exception(f"Failed to reload schedules: {e}")
 
 
 async def start_scheduler():

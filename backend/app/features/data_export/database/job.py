@@ -520,7 +520,6 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                             "id", "time", "timestamp", "project_code", "station_code", "station_id",
                             "level", "category", "message", "resolved",
                         ]
-                        alert_count = 0
                         alert_counts = {}
                         current_alert_key = None
                         bin_f = None
@@ -565,7 +564,6 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
                                 alert.timestamp, mapping["project_code"], mapping["station_code"], alert.station_id,
                                 alert.level, alert.category, alert.message, alert.is_resolved,
                             ])
-                            alert_count += 1
                             alert_dataset = (
                                 f"{mapping['project_code']}/{mapping['station_code']}/alerts"
                             )

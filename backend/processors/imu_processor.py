@@ -221,5 +221,5 @@ class IMUEngine:
             return result
 
         except Exception as e:
-            logger.error(f"Error processing IMU data: {e} | Payload: {payload}")
+            logger.exception(f"Error processing IMU data: {e} | Payload: {payload}")
             return self.last_valid_data.copy()

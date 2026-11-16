@@ -48,7 +48,7 @@ class SensorAlertMixin:
                 elif sensor_type == 'imu':
                     alert = self.analyzer.analyze_tilt(station_id, data_wrapper, station_config)
             except Exception as e:
-                logger.error(f"Analyzer error: {e}")
+                logger.exception(f"Analyzer error: {e}")
 
         is_dangerous = False
 
@@ -105,7 +105,7 @@ class SensorAlertMixin:
 
                 logger.warning(f"🚨 [{station_name}] Alert broadcast: {alert['message']}")
             except Exception as e:
-                logger.error(f"❌ WS Alert Broadcast Error: {e}")
+                logger.exception(f"❌ WS Alert Broadcast Error: {e}")
         elif not is_pending:
             # ✅ Tự động đánh dấu Resolved cho Alert của sensor này và tắt còi
             try:
@@ -199,7 +199,7 @@ class SensorAlertMixin:
                                     f"but {unresolved_count} alerts still active; keep siren active state."
                                 )
             except Exception as e:
-                logger.error(f"❌ Error auto-resolving alerts: {e}")
+                logger.exception(f"❌ Error auto-resolving alerts: {e}")
 
             # Chỉ gửi LOW khi trạm thực sự không còn alert unresolved.
             try:
@@ -211,5 +211,5 @@ class SensorAlertMixin:
                     "risk_level": summary['risk_level']
                 })
             except Exception as e:
-                logger.error(f"❌ WS Station Status Error: {e}")
+                logger.exception(f"❌ WS Station Status Error: {e}")
         return alert, is_dangerous, is_just_resolved

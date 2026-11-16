@@ -95,7 +95,6 @@ class RainfallAnalysisMixin:
             cumulative_disp = []
             daily_disp_inc = []
             prev_norm = None
-            cum_val = 0.0
             first_xyz = None
 
             for day in common_days:
@@ -117,7 +116,6 @@ class RainfallAnalysisMixin:
                 dup = u - prev_norm[2]
                 step_mm = math.sqrt(dep**2 + dnp**2 + dup**2) * 1000.0
                 daily_disp_inc.append(step_mm)
-                cum_val += step_mm
                 prev_norm = (e, n, u)
 
             # Cumulative displacement theo cách cũ (tổng bước) để giữ tương thích chart cũ

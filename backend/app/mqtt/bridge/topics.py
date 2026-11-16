@@ -199,7 +199,7 @@ class MQTTTopicMixin:
                 client.unsubscribe(t)
                 logger.info(f"   ✓ Dynamic Unsubscribed from {t} on {broker_host}:{broker_port}")
             except Exception as unsub_e:
-                logger.error(f"❌ Failed to unsubscribe from {t} on {broker_host}:{broker_port}: {unsub_e}")
+                logger.exception(f"❌ Failed to unsubscribe from {t} on {broker_host}:{broker_port}: {unsub_e}")
 
         self._client_topics[b_key] = new_topics
 

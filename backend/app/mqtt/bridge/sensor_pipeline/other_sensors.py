@@ -61,7 +61,7 @@ class OtherSensorPayloadMixin:
         except json.JSONDecodeError:
             return
         except Exception as e:
-            logger.error(f"Processing error ({sensor_type}): {e}")
+            logger.exception(f"Processing error ({sensor_type}): {e}")
             return None
         await asyncio.sleep(0)
         return processed_data

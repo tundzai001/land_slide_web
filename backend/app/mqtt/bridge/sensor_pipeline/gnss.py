@@ -252,7 +252,7 @@ class GnssPayloadMixin:
                                 "full_data": obs.full_data,
                             })
                         except Exception as exc:
-                            logger.error("Could not broadcast GNSS baseline: %s", exc)
+                            logger.exception("Could not broadcast GNSS baseline: %s", exc)
 
                     if (
                         phase == "COLLECTING_BASELINE"
@@ -333,7 +333,7 @@ class GnssPayloadMixin:
                             current_timestamp,
                         )
                     except Exception as touch_error:
-                        logger.error(f"❌ GNSS active-alert refresh during origin relock failed: {touch_error}")
+                        logger.exception(f"❌ GNSS active-alert refresh during origin relock failed: {touch_error}")
 
                     status_payload = {
                         "status": "ORIGIN_RELOCK_COLLECTING",
@@ -357,7 +357,7 @@ class GnssPayloadMixin:
                             "data": status_payload,
                         })
                     except Exception as ws_e:
-                        logger.error(f"❌ GNSS origin relock status update failed: {ws_e}")
+                        logger.exception(f"❌ GNSS origin relock status update failed: {ws_e}")
                     return
                 if res and res.get('type') == 'gnss_processed':
                     processed_data = res.get('data')
@@ -399,7 +399,7 @@ class GnssPayloadMixin:
                                 current_timestamp,
                             )
                         except Exception as touch_error:
-                            logger.error(f"❌ GNSS active-alert refresh failed: {touch_error}")
+                            logger.exception(f"❌ GNSS active-alert refresh failed: {touch_error}")
                         # Immediate buffering for anomalies can be disabled
                         # per station without stopping processing or alerts.
                         if (res.get('status') != 'ADJUSTMENT_IN_PROGRESS'
@@ -435,7 +435,7 @@ class GnssPayloadMixin:
                             "data": status_payload
                         })
                     except Exception as ws_e:
-                        logger.error(f"❌ WS GNSS status error: {ws_e}")
+                        logger.exception(f"❌ WS GNSS status error: {ws_e}")
                     return
                 elif res and res.get('type') == 'origin_locked':
                     logger.info(f"🎯 [{station_name}] GNSS Origin locked")
@@ -463,9 +463,9 @@ class GnssPayloadMixin:
                             "data": status_payload
                         })
                     except Exception as ws_e:
-                        logger.error(f"❌ WS GNSS origin status error: {ws_e}")
+                        logger.exception(f"❌ WS GNSS origin status error: {ws_e}")
                     return
         except Exception as e:
-            logger.error(f"Processing error ({sensor_type}): {e}")
+            logger.exception(f"Processing error ({sensor_type}): {e}")
             return None
         return processed_data

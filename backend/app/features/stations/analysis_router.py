@@ -148,7 +148,7 @@ async def _calculate_station_risk_assessment(
             ],
         }
     except Exception as e:
-        logger.error(f"Error calculating risk: {e}")
+        logger.exception(f"Error calculating risk: {e}")
         return {"overall_risk": "UNKNOWN", "active_alerts": []}
 
 

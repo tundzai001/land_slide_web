@@ -100,7 +100,7 @@ async def get_projects(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error loading projects: {e}")
+        logger.exception(f"Error loading projects: {e}")
         raise HTTPException(status_code=500, detail="Không thể tải danh sách dự án.")
 
 
@@ -201,7 +201,7 @@ async def create_project(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error creating project: {e}")
+        logger.exception(f"Error creating project: {e}")
         raise HTTPException(status_code=500, detail="Không thể tạo dự án.")
 
 
@@ -283,7 +283,7 @@ async def update_project(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error updating project: {e}")
+        logger.exception(f"Error updating project: {e}")
         raise HTTPException(status_code=500, detail="Không thể cập nhật dự án.")
 
 
@@ -312,7 +312,7 @@ async def get_project(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting project: {e}")
+        logger.exception(f"Error getting project: {e}")
         raise HTTPException(status_code=500, detail="Không thể tải dự án.")
 
 
@@ -345,5 +345,5 @@ async def delete_project(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error deleting project: {e}")
+        logger.exception(f"Error deleting project: {e}")
         raise HTTPException(status_code=500, detail="Không thể xóa dự án.")

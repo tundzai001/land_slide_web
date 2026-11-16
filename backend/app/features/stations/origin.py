@@ -62,5 +62,5 @@ async def fetch_live_gnss_origin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching live GNSS: {e}")
+        logger.exception(f"Error fetching live GNSS: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -44,7 +44,7 @@ class AlertPersistenceMixin:
                 )
                 await db_config.commit()
         except Exception as e:
-            logger.error(f"❌ Alert config update error: {e}")
+            logger.exception(f"❌ Alert config update error: {e}")
 
         try:
             async with DataSessionLocal() as db_data:
@@ -115,7 +115,7 @@ class AlertPersistenceMixin:
                         "summary": serialize_case(incident_case),
                     })
         except Exception as e:
-            logger.error(f"❌ Alert data save error: {e}")
+            logger.exception(f"❌ Alert data save error: {e}")
     async def _touch_active_alert(self, station_id: int, category: str, timestamp: int) -> int:
         """Refresh an unresolved alert without changing its level/message.
 
@@ -157,7 +157,7 @@ class AlertPersistenceMixin:
                 await db_data.commit()
                 return int(result.rowcount or 0)
         except Exception as exc:
-            logger.error(
+            logger.exception(
                 "❌ Failed to refresh active alert station=%s category=%s: %s: %r",
                 station_id,
                 category,
@@ -245,7 +245,7 @@ class AlertPersistenceMixin:
             })
         except Exception as e:
             if self._diag_should_log(f"alert_suppression:{station_id}", 30):
-                logger.error(
+                logger.exception(
                     "Error suppressing alerts for station %s: %s: %r",
                     station_id,
                     e.__class__.__name__,

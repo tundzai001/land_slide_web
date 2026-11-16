@@ -187,7 +187,7 @@ async def register_pi_device(
             }
 
     except Exception as e:
-        logger.error(f"Error registering Pi device: {e}")
+        logger.exception(f"Error registering Pi device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -312,7 +312,7 @@ async def list_pi_devices(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error listing Pi devices: {e}")
+        logger.exception(f"Error listing Pi devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -377,7 +377,7 @@ async def activate_pi_device(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error activating Pi: {e}")
+        logger.exception(f"Error activating Pi: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -462,7 +462,7 @@ async def assign_pi_to_station(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error assigning Pi: {e}")
+        logger.exception(f"Error assigning Pi: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -663,12 +663,12 @@ async def assign_pi_to_center(
                 qos=1
             )
         except Exception as e:
-            logger.error(f"Failed to send MQTT set_station for pi point: {e}")
+            logger.exception(f"Failed to send MQTT set_station for pi point: {e}")
 
         return {"status": "assigned", "station_id": pi_center.station_id, "pi_center_id": pi_center.id}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error assigning pi to center: {e}")
+        logger.exception(f"Error assigning pi to center: {e}")
         raise HTTPException(status_code=500, detail=str(e))

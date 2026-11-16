@@ -138,7 +138,7 @@ class WaterEngine:
             }
 
         except (ValueError, TypeError) as e:
-            logger.error(f"Error processing water data: {e}")
+            logger.exception(f"Error processing water data: {e}")
             return {
                 "water_level": round(self.last_valid_value, 3),
                 "water_level_cm": round(self.last_valid_value * 100, 2),
@@ -259,7 +259,7 @@ class RainEngine:
             }
 
         except (ValueError, TypeError) as e:
-            logger.error(f"Error processing rain data: {e}")
+            logger.exception(f"Error processing rain data: {e}")
             return {
                 "rainfall_mm": round(self.last_valid_rainfall, 2),
                 "intensity_mm_h": round(self.last_valid_intensity, 2),

@@ -110,7 +110,7 @@ class AudioPlayer:
                 logger.info("   ▶️ Playing via Windows native winmm")
                 return
             except Exception as e:
-                logger.error(f"❌ Windows native playback failed: {e}")
+                logger.exception(f"❌ Windows native playback failed: {e}")
                 return
         
         # Linux / Raspberry Pi
@@ -373,7 +373,7 @@ class MQTTAudioClient:
             self.client.loop_start()  # Start background loop
             logger.info("✅ MQTT loop started")
         except Exception as e:
-            logger.error(f"❌ MQTT connection failed: {e}")
+            logger.exception(f"❌ MQTT connection failed: {e}")
             return False
         return True
     
@@ -384,7 +384,7 @@ class MQTTAudioClient:
             self.client.disconnect()
             logger.info("🔌 MQTT disconnected")
         except Exception as e:
-            logger.error(f"Error disconnecting MQTT: {e}")
+            logger.exception(f"Error disconnecting MQTT: {e}")
     
     def _on_connect(self, client, userdata, flags, rc):
         """Callback khi kết nối thành công"""
@@ -418,7 +418,7 @@ class MQTTAudioClient:
                 self._handle_command(payload)
             
         except Exception as e:
-            logger.error(f"❌ Error handling MQTT message: {e}")
+            logger.exception(f"❌ Error handling MQTT message: {e}")
     
     def _handle_alert(self, payload: str):
         """Xử lý cảnh báo từ MQTT — chỉ log, không phát audio (đã xử lý trong _handle_command)"""
@@ -429,7 +429,7 @@ class MQTTAudioClient:
             logger.warning(f"🚨 ALERT [{level}]: {message}")
             # Audio đã được xử lý trong _handle_command, không phát lại ở đây
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Invalid JSON in alert: {e}")
+            logger.exception(f"❌ Invalid JSON in alert: {e}")
     
     def _handle_command(self, payload: str):
         """Xử lý lệnh trực tiếp từ MQTT"""
@@ -527,7 +527,7 @@ class MQTTAudioClient:
                     daemon=True
                 ).start()
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Invalid JSON in command: {e}")
+            logger.exception(f"❌ Invalid JSON in command: {e}")
 
     def _handle_install_license(self, data: dict):
         """Handle license installation command from admin/backend."""
@@ -618,7 +618,7 @@ class MQTTAudioClient:
                     pass
 
         except Exception as e:
-            logger.error(f"Error handling install_license: {e}")
+            logger.exception(f"Error handling install_license: {e}")
 
     def _handle_set_station(self, data: dict):
         """Handle set_station command from backend after Pi is assigned to a station."""
@@ -658,7 +658,7 @@ class MQTTAudioClient:
             logger.info(f"🔄 Resubscribed to station {new_station_id} topics")
 
         except Exception as e:
-            logger.error(f"Error handling set_station: {e}")
+            logger.exception(f"Error handling set_station: {e}")
 
     def _handle_reset(self):
         """Handle reset command from admin: delete local config (license, station, etc.)."""
@@ -689,7 +689,7 @@ class MQTTAudioClient:
             logger.info("✅ Pi reset complete. Restart Pi to re-register.")
 
         except Exception as e:
-            logger.error(f"Error handling reset: {e}")
+            logger.exception(f"Error handling reset: {e}")
 
     def _save_lock_state(self, locked: bool):
         """Persist lock state to local config."""
@@ -756,7 +756,7 @@ class WebSocketAudioClient:
                 
                 self.ws.run_forever(ping_interval=30, ping_timeout=10)
             except Exception as e:
-                logger.error(f"❌ WebSocket error: {e}")
+                logger.exception(f"❌ WebSocket error: {e}")
                 if self.running:
                     logger.info(f"⏳ Reconnecting in {self.reconnect_delay}s...")
                     time.sleep(self.reconnect_delay)
@@ -795,9 +795,9 @@ class WebSocketAudioClient:
                             daemon=True
                         ).start()
         except json.JSONDecodeError as e:
-            logger.error(f"❌ WebSocket parse error: {e}")
+            logger.exception(f"❌ WebSocket parse error: {e}")
         except Exception as e:
-            logger.error(f"❌ WebSocket error: {e}")
+            logger.exception(f"❌ WebSocket error: {e}")
     
     def _on_error(self, ws, error):
         """Lỗi kết nối"""
@@ -915,7 +915,7 @@ def main():
         sys.exit(0)
     
     except Exception as e:
-        logger.error(f"❌ Fatal error: {e}")
+        logger.exception(f"❌ Fatal error: {e}")
         mqtt_client.disconnect()
         if ws_client:
             ws_client.stop()

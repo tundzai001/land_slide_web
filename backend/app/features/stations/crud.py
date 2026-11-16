@@ -96,5 +96,5 @@ async def create_station(
         return new_station
     except Exception as e:
         await db.rollback()
-        logger.error(f"❌ Error creating station: {e}")
+        logger.exception(f"❌ Error creating station: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")

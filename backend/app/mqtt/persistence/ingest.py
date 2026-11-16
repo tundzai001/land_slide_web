@@ -160,7 +160,7 @@ class SensorIngestPersistenceMixin:
             try:
                 persisted = await spool.append(batch_id, payload, reason)
             except Exception as exc:
-                logger.error('Ingest spool write failed; retaining batch in RAM: %s', type(exc).__name__)
+                logger.exception('Ingest spool write failed; retaining batch in RAM: %s', type(exc).__name__)
                 persisted = False
             if persisted:
                 batch_ids.add(batch_id)
@@ -269,7 +269,7 @@ class SensorIngestPersistenceMixin:
                     f"(inserted={metrics['inserted']} deduped={metrics['deduped']})"
                 )
             except Exception as e:
-                logger.error(f"❌ Bulk sensor flush error: {e}")
+                logger.exception(f"❌ Bulk sensor flush error: {e}")
                 # The batch is removed from RAM before the transaction so the
                 # MQTT callback can keep accepting data. Hand failures to disk,
                 # retaining RAM only when that durable handoff is unavailable.
@@ -297,7 +297,7 @@ class SensorIngestPersistenceMixin:
                         await db.execute(stmt)
                     await db.commit()
             except Exception as exc:
-                logger.error("Latest sensor cache bulk UPSERT failed: %s", exc)
+                logger.exception("Latest sensor cache bulk UPSERT failed: %s", exc)
                 async with self._buffer_lock:
                     for row in latest_cache_batch:
                         key = (int(row["station_id"]), str(row["sensor_type"]))
@@ -320,7 +320,7 @@ class SensorIngestPersistenceMixin:
                     await db.commit()
                 logger.debug(f"✅ [BATCH CONFIG] {len(station_batch)} stations, {len(device_batch)} devices updated")
             except Exception as e:
-                logger.error(f"❌ Batch config update error: {e}")
+                logger.exception(f"❌ Batch config update error: {e}")
                 async with self._buffer_lock:
                     for sid, values in station_batch.items():
                         previous = self._station_update_buffer.get(sid)
