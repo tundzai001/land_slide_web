@@ -774,34 +774,42 @@ function setupEventListeners() {
                 downloadBtn.innerHTML = excelUrl
                     ? '<i class="bi bi-file-earmark-spreadsheet-fill me-2"></i>Tải kết quả Excel (.xlsx)'
                     : '<i class="bi bi-hourglass-split me-2"></i>Đang tạo file Excel...';
-                downloadBtn.onclick = excelUrl ? async () => {
-                    try {
-                        await window.downloadAuthenticatedFile(
-                            excelUrl,
-                            excelUrl.split('/').pop() || 'gnss_binh_sai.xlsx'
-                        );
-                    } catch (error) {
-                        console.error('[GNSS] Excel download failed:', error);
-                        const reason = error?.message ? `: ${error.message}` : '';
-                        window.toast?.error?.(`Không tải được báo cáo bình sai${reason}`);
-                    }
-                } : null;
+                if (excelUrl) {
+                    downloadBtn.onclick = async () => {
+                        try {
+                            await window.downloadAuthenticatedFile(
+                                excelUrl,
+                                excelUrl.split('/').pop() || 'gnss_binh_sai.xlsx'
+                            );
+                        } catch (error) {
+                            console.error('[GNSS] Excel download failed:', error);
+                            const reason = error?.message ? `: ${error.message}` : '';
+                            window.toast?.error?.(`Không tải được báo cáo bình sai${reason}`);
+                        }
+                    };
+                } else {
+                    downloadBtn.onclick = null;
+                }
             }
             if (auditJsonBtn) {
                 auditJsonBtn.disabled = !auditJsonUrl;
                 auditJsonBtn.classList.toggle('disabled', !auditJsonUrl);
-                auditJsonBtn.onclick = auditJsonUrl ? async () => {
-                    try {
-                        await window.downloadAuthenticatedFile(
-                            auditJsonUrl,
-                            auditJsonUrl.split('/').pop() || 'gnss_adjustment_audit.json'
-                        );
-                    } catch (error) {
-                        console.error('[GNSS] Audit download failed:', error);
-                        const reason = error?.message ? `: ${error.message}` : '';
-                        window.toast?.error?.(`Không tải được hồ sơ audit${reason}`);
-                    }
-                } : null;
+                if (auditJsonUrl) {
+                    auditJsonBtn.onclick = async () => {
+                        try {
+                            await window.downloadAuthenticatedFile(
+                                auditJsonUrl,
+                                auditJsonUrl.split('/').pop() || 'gnss_adjustment_audit.json'
+                            );
+                        } catch (error) {
+                            console.error('[GNSS] Audit download failed:', error);
+                            const reason = error?.message ? `: ${error.message}` : '';
+                            window.toast?.error?.(`Không tải được hồ sơ audit${reason}`);
+                        }
+                    };
+                } else {
+                    auditJsonBtn.onclick = null;
+                }
             }
             if (!result.points) return;
             if (!this.ctx) return;
@@ -1455,7 +1463,7 @@ function setupEventListeners() {
             };
             
             let res;
-            if (window.authManager && window.authManager.token) {
+            if (window.authManager?.token) {
                 res = await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

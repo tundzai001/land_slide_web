@@ -388,9 +388,10 @@ class DatabaseManager {
         document.getElementById('db-current-meta').textContent = this.hasExactTotal
             ? `${this.total.toLocaleString('vi-VN')} ${itemLabel}`
             : `${this.allData.length} ${itemLabel} mới nhất · tải nhanh`;
+        const moreSuffix = this.hasMore ? ' · còn dữ liệu' : '';
         document.getElementById('db-page-summary').textContent = this.hasExactTotal
             ? `Hiển thị ${start}–${Math.min(end, this.total)} / ${this.total.toLocaleString('vi-VN')} ${itemLabel}`
-            : `Hiển thị ${start}–${end}${this.hasMore ? ' · còn dữ liệu' : ''}`;
+            : `Hiển thị ${start}–${end}${moreSuffix}`;
         document.getElementById('db-page-number').textContent = `Trang ${Math.floor(this.offset / this.limit) + 1}`;
         document.getElementById('db-page-prev').disabled = this.offset === 0;
         document.getElementById('db-page-next').disabled = this.hasExactTotal

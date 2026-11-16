@@ -65,7 +65,7 @@ class AdminUsersFeature extends window.AdminManager {
         tbody.innerHTML = users.map(u => {
             // Show assigned projects for operators (by name)
             let projectBadges = '';
-            if ((u.role === 'operator' || u.role === 'viewer') && u.assigned_projects && u.assigned_projects.length > 0) {
+            if ((u.role === 'operator' || u.role === 'viewer') && u.assigned_projects?.length > 0) {
                 const projectItems = u.assigned_projects
                     .map(pid => `<span class="user-project-badge">${this.escapeUserValue(this.getProjectName(pid))}</span>`)
                     .join(' ');

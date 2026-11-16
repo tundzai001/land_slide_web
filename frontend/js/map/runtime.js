@@ -879,13 +879,12 @@ function refreshGnssAdjustmentDebugUi() {
             entriesToRender.forEach(entry => {
                 const row = document.createElement('div');
                 row.className = 'gnss-debug-row';
-                const color = entry.level === 'error'
-                    ? '#ff6b6b'
-                    : entry.level === 'warning'
-                        ? '#ffd166'
-                        : entry.level === 'success'
-                            ? '#5eead4'
-                            : '#93c5fd';
+                const levelColors = {
+                    error: '#ff6b6b',
+                    warning: '#ffd166',
+                    success: '#5eead4',
+                };
+                const color = levelColors[entry.level] || '#93c5fd';
                 row.style.color = color;
                 row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
                 fragment.appendChild(row);

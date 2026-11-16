@@ -40,7 +40,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         let html = '';
         clusterRows.forEach((row, idx) => {
             const nameInput = row.querySelector('.cluster-name');
-            const clusterName = nameInput ? nameInput.value.trim() : `Cụm ${idx + 1}`;
+            const clusterName = nameInput?.value.trim() || `Cụm ${idx + 1}`;
             if (!clusterName) return;
 
             const isChecked = savedClusters.includes(idx) ? 'checked' : '';
@@ -111,7 +111,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
         body.style.display = isEnabled ? 'block' : 'none';
 
         // Restore interval from saved scheduled_hours
-        if (config.scheduled_hours && config.scheduled_hours.length >= 2) {
+        if (config.scheduled_hours?.length >= 2) {
             // Infer interval from first two hours
             const h1 = Number.parseInt(config.scheduled_hours[0].split(':')[0]);
             const h2 = Number.parseInt(config.scheduled_hours[1].split(':')[0]);

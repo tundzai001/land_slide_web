@@ -140,6 +140,12 @@ jobs:
           echo ""
           echo "=== Top Issues (Security & Reliability: Blocker, High, Medium) ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&impactSoftwareQualities=SECURITY,RELIABILITY&impactSeverities=BLOCKER,HIGH,MEDIUM&ps=100" | jq -r '.issues[] | "[\(.impacts[0].softwareQuality // "")] [\(.impacts[0].severity // .severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
+          echo ""
+          echo "=== All JavaScript Issues (Top 100) ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&languages=js&ps=100" | jq -r '.issues[] | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
+          echo ""
+          echo "=== All CSS Non-S9423 Issues ==="
+          curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/issues/search?componentKeys=tundzai001_land_slide_web&resolved=false&languages=css&ps=100" | jq -r '.issues[] | select(.rule != "css:S9423") | "[\(.severity)] [\(.rule)] \(.component):\(.line // .textRange.startLine // 0) - \(.message)"' || true
 
   release-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

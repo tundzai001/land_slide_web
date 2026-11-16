@@ -50,13 +50,13 @@ function exportWorkspaceChart(id, format) {
     for (let index = 0; index < count; index++) {
         const timestamp = chart._monitoringTimestamps?.[index];
         const first = datasets[0]?.data[index];
-        let x = typeof first === 'object' && first ? first.x : chart.data.labels?.[index];
+        let x = typeof first === 'object' ? first?.x : chart.data.labels?.[index];
         if (chart._monitoringTimestamps) {
             x = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
         }
         rows.push([x, ...datasets.map(dataset => {
             const point = dataset.data[index];
-            return point && typeof point === 'object' ? point.y : point;
+            return typeof point === 'object' ? (point?.y ?? point) : point;
         })]);
     }
     downloadChartArtifact(new Blob(['\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type:'text/csv;charset=utf-8' }), `${filename}.csv`);

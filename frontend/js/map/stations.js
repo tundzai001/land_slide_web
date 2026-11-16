@@ -697,14 +697,16 @@ function ensureGlobalAlertBannerFromStations(stations) {
     if (Date.now() < snoozeUntil) return;
     if (isBannerSuppressed(stationId)) return;
 
-    const level = chosen.riskUi.normalized === 'CRITICAL' ? 'CRITICAL' : 'WARNING';
+    const isCritical = chosen.riskUi.normalized === 'CRITICAL';
+    const level = isCritical ? 'CRITICAL' : 'WARNING';
+    const fallbackMessage = isCritical
+        ? 'Critical risk detected from station state. Press Track to monitor now.'
+        : 'Warning risk detected from station state. Press Track to monitor now.';
     const cachedAlert = latestAlertByStation[stationId];
     const candidateAlert = cachedAlert ? { ...cachedAlert, level } : {
         station_id: stationId,
         level,
-        message: chosen.riskUi.normalized === 'CRITICAL'
-            ? 'Critical risk detected from station state. Press Track to monitor now.'
-            : 'Warning risk detected from station state. Press Track to monitor now.'
+        message: fallbackMessage
     };
     const candidateKey = buildAlertKey(candidateAlert);
     if (candidateKey && acknowledgedAlertKeyByStation[stationId] === candidateKey) return;

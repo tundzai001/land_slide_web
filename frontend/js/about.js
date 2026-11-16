@@ -168,7 +168,7 @@ import { renderAboutTemplate } from './templates/about-template.js';
                         mergedNorm[offset + i + 1] = 1;
                     }
                 }
-                if (item.colAttr && item.colAttr.itemSize >= 3) {
+                if (item.colAttr?.itemSize >= 3) {
                     for (let i = 0; i < item.count; i++) {
                         mergedCol[offset + i * 3] = item.colAttr.getX(i);
                         mergedCol[offset + i * 3 + 1] = item.colAttr.getY(i);
@@ -211,8 +211,8 @@ import { renderAboutTemplate } from './templates/about-template.js';
             let fastMat = matCache.get(cacheKey);
             if (!fastMat) {
                 fastMat = new THREE.MeshLambertMaterial({
-                    color: srcMat.color ? srcMat.color.clone() : new THREE.Color(0xffffff),
-                    emissive: srcMat.emissive ? srcMat.emissive.clone() : new THREE.Color(0x000000),
+                    color: srcMat.color?.clone() ?? new THREE.Color(0xffffff),
+                    emissive: srcMat.emissive?.clone() ?? new THREE.Color(0x000000),
                     emissiveIntensity: srcMat.emissiveIntensity ?? 1.0,
                     map: srcMat.map || null,
                     vertexColors: hasVertexCol || Boolean(srcMat.vertexColors),

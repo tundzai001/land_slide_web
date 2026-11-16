@@ -330,11 +330,11 @@ class SimulationController {
         if (card) card.dataset.state = state;
         if (status) status.textContent = message;
         if (statusIcon) {
-            statusIcon.className = state === 'running'
-                ? 'bi bi-arrow-repeat'
-                : state === 'complete'
-                    ? 'bi bi-check-circle-fill'
-                    : 'bi bi-circle-fill';
+            const icons = {
+                running: 'bi bi-arrow-repeat',
+                complete: 'bi bi-check-circle-fill',
+            };
+            statusIcon.className = icons[state] || 'bi bi-circle-fill';
         }
     }
 

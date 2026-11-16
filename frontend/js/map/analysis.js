@@ -687,7 +687,7 @@ function renderMultiWindowSection(data) {
     // Unify CUSUM and Fukuzono models into overall alert if any
     let unifiedMsg = [];
     if (data.gnss?.analysis?.cusum_change) unifiedMsg.push(data.gnss.analysis.cusum_message);
-    if (data.inverse_velocity && data.inverse_velocity.predicted_failure) {
+    if (data.inverse_velocity?.predicted_failure) {
         unifiedMsg.push(`Fukuzono (Ngịch đảo Vận tốc) dự báo sụp lún trong ~${data.inverse_velocity.days_to_failure} ngày.`);
     }
     if (unifiedMsg.length > 0 && warningEl) {

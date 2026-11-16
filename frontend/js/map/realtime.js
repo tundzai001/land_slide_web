@@ -115,7 +115,7 @@ async function setupWebSocket() {
         else refreshGnssAdjustmentDebugUi();
         if (wsHeartbeatId) clearInterval(wsHeartbeatId);
         wsHeartbeatId = setInterval(() => {
-            if (wsConnection === socket && socket.readyState === WebSocket.OPEN) {
+            if (wsConnection === socket && socket?.readyState === WebSocket.OPEN) {
                 try {
                     socket.send('ping');
                 } catch (error) {
@@ -602,7 +602,7 @@ function handleRealtimeUpdate(message) {
                 'success',
             );
         }
-        if (belongsToActiveRun && window.gnssBoardState && window.gnssBoardState.ctx) {
+        if (belongsToActiveRun && window.gnssBoardState?.ctx) {
             const fromPoint = String(message.from || 'BASE');
             window.gnssBoardState.addPoint('BASE', 0, 0, true);
             const origin = window.gnssBoardState.points[fromPoint] || window.gnssBoardState.points.BASE;

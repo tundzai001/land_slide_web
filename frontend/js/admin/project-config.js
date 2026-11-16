@@ -101,7 +101,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         }).join('') || '<div class="px-3 py-2 text-muted small">Không tìm thấy trạm nào</div>';
 
         let baseOptionsHtml = '<option value="">-- Chọn Trạm Base --</option>';
-        if (this.corsStationsData && this.corsStationsData.length > 0) {
+        if (this.corsStationsData?.length > 0) {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
                 const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
@@ -116,7 +116,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         const backupBaseCode = clusterConfig.backup_base_station || '';
         const backupBaseStream = clusterConfig.backup_base_stream || '';
         let backupBaseOptionsHtml = '<option value="">-- Backup fixed base (optional) --</option>';
-        if (this.corsStationsData && this.corsStationsData.length > 0) {
+        if (this.corsStationsData?.length > 0) {
             this.corsStationsData.forEach(st => {
                 const selected = (st.name === backupBaseCode || st.code === backupBaseCode) ? 'selected' : '';
                 const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
@@ -341,7 +341,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
     }
 
     async fetchCorsStations() {
-        if (this.corsStationsData && this.corsStationsData.length > 0) return; // Cache check
+        if (this.corsStationsData?.length > 0) return; // Cache check
 
         try {
             const res = await fetch('/api/admin/projects/cors-stations', {
