@@ -74,7 +74,7 @@ function renderLongTermAnalysis(data) {
     // === GNSS Section ===
     const gnss = data.gnss;
     const sourceNoteEl = document.getElementById('lt-gnss-source-note');
-    if (gnss && gnss.status === 'success') {
+    if (gnss?.status === 'success') {
         const analysis = gnss.analysis;
 
         const warningEl = document.getElementById('longterm-warning');
@@ -215,7 +215,7 @@ function updateRainCorrelationAiControls(rainCorr = null) {
         return;
     }
 
-    if (rainCorr && rainCorr.available) {
+    if (rainCorr?.available) {
         hintEl.textContent = 'Đã chạy AI Slide model thành công cho khoảng thời gian đang chọn.';
         return;
     }

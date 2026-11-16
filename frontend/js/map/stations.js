@@ -269,7 +269,7 @@ function createProjectMapGroup(project) {
     const dems = Array.isArray(project.dems) ? project.dems : [];
     if (!points.length && !hasValidLatLon(project.location) && dems.length > 0) {
         const dem = dems[0];
-        if (dem && dem.xllcorner != null && dem.yllcorner != null && dem.ncols && dem.nrows && dem.cellsize && window.DemGrid?.utm48ToWgs84) {
+        if (dem?.xllcorner != null && dem?.yllcorner != null && dem?.ncols && dem?.nrows && dem?.cellsize && window.DemGrid?.utm48ToWgs84) {
             const easting = Number(dem.xllcorner) + (Number(dem.ncols) * Number(dem.cellsize)) / 2;
             const northing = Number(dem.yllcorner) + (Number(dem.nrows) * Number(dem.cellsize)) / 2;
             const wgs = window.DemGrid.utm48ToWgs84(easting, northing);
@@ -644,7 +644,7 @@ async function loadStations() {
             }
 
             // ✅ THÊM: Nếu trạm đang xem bị đổi status (ví dụ offline/online, hoặc đổi risk_level)
-            if (currentStationData && currentStationData.id === station.id) {
+            if (currentStationData?.id === station.id) {
                 if (currentStationData.status !== station.status || currentStationData.risk_level !== station.risk_level) {
                     console.log(`🔄 [STATE] Station ${station.id} changed state: ${currentStationData.status}->${station.status}, updating UI...`);
                     currentStationData.status = station.status;

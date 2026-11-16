@@ -98,7 +98,13 @@ function renderWorkspaceDataTable(chart, box, title) {
     for (let index = count - 1; index >= Math.max(0, count - 100); index--) {
         const row = body.insertRow();
         const first = datasets[0]?.data[index];
-        const x = chart._monitoringTimestamps ? formatChartTimestamp(chart._monitoringTimestamps[index]) : (first && typeof first === 'object' ? first.x : chart.data.labels?.[index]);
+        let x = chart.data.labels?.[index];
+        if (first && typeof first === 'object') {
+            x = first.x;
+        }
+        if (chart._monitoringTimestamps) {
+            x = formatChartTimestamp(chart._monitoringTimestamps[index]);
+        }
         row.insertCell().textContent = x ?? '—';
         for (const dataset of datasets) {
             const point = dataset.data[index];
@@ -144,9 +150,15 @@ function enhanceChartWorkspace(data) {
             measurementCount += values.length;
             const line = document.createElement('p');
             const name = document.createElement('strong'); name.textContent = dataset.label;
-            line.append(name, document.createTextNode(values.length
-                ? ` · ${values.length.toLocaleString('vi-VN')} điểm${dataset.data.length > values.length ? ` · Thiếu ${dataset.data.length - values.length} mẫu` : ''} · Thấp ${Math.min(...values).toLocaleString('vi-VN', {maximumFractionDigits:4})} · Cao ${Math.max(...values).toLocaleString('vi-VN', {maximumFractionDigits:4})} · TB ${(values.reduce((total,value)=>total+value,0)/values.length).toLocaleString('vi-VN', {maximumFractionDigits:4})}`
-                : ' · Chưa có dữ liệu trong khoảng này'));
+            let seriesText = ' · Chưa có dữ liệu trong khoảng này';
+            if (values.length) {
+                const missingText = dataset.data.length > values.length ? ` · Thiếu ${dataset.data.length - values.length} mẫu` : '';
+                const minVal = Math.min(...values).toLocaleString('vi-VN', {maximumFractionDigits:4});
+                const maxVal = Math.max(...values).toLocaleString('vi-VN', {maximumFractionDigits:4});
+                const avgVal = (values.reduce((total,value)=>total+value,0)/values.length).toLocaleString('vi-VN', {maximumFractionDigits:4});
+                seriesText = ` · ${values.length.toLocaleString('vi-VN')} điểm${missingText} · Thấp ${minVal} · Cao ${maxVal} · TB ${avgVal}`;
+            }
+            line.append(name, document.createTextNode(seriesText));
             summary.append(line);
         }
         renderWorkspaceDataTable(chart, box, title);
@@ -156,7 +168,13 @@ function enhanceChartWorkspace(data) {
     if (select && [...select.options].some(option => option.value === previous)) select.value = previous;
     filterWorkspaceCharts();
     const latest = Object.values(charts).flatMap(chart => chart._monitoringTimestamps || []).filter(Number.isFinite).reduce((max, timestamp) => Math.max(max, timestamp), 0);
-    setChartWorkspaceStatus(measurementCount ? `Đã tải dữ liệu · ${data?._chartRangeLabel || getChartRange().label}.${latest ? ` Mẫu mới nhất: ${formatChartTimestamp(latest)}.` : ''} CSV chứa các điểm đã tải; thời gian xuất theo UTC.` : 'Chưa có dữ liệu trong khoảng này. Thử khoảng thời gian khác hoặc tải lại.', measurementCount ? 'ready' : 'empty');
+    let statusText = 'Chưa có dữ liệu trong khoảng này. Thử khoảng thời gian khác hoặc tải lại.';
+    if (measurementCount) {
+        const rangeLabel = data?._chartRangeLabel || getChartRange().label;
+        const latestText = latest ? ` Mẫu mới nhất: ${formatChartTimestamp(latest)}.` : '';
+        statusText = `Đã tải dữ liệu · ${rangeLabel}.${latestText} CSV chứa các điểm đã tải; thời gian xuất theo UTC.`;
+    }
+    setChartWorkspaceStatus(statusText, measurementCount ? 'ready' : 'empty');
 }
 
 function setupChartWorkspaceControls() {

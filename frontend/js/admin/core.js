@@ -510,14 +510,14 @@ class AdminManager {
         // ✅ Auto-refresh Pi Devices tab every 15s to see online status quickly
         this._refreshIntervals.push(setInterval(() => {
             const piTab = document.getElementById('tab-pi');
-            if (piTab && piTab.classList.contains('active')) {
+            if (piTab?.classList.contains('active')) {
                 this.loadPiDevices(true);
             }
         }, 15000));
 
         this._refreshIntervals.push(setInterval(() => {
             const rescueTab = document.getElementById('tab-rescue');
-            if (rescueTab && rescueTab.classList.contains('active')) {
+            if (rescueTab?.classList.contains('active')) {
                 void this.loadRescueRequests(true);
             }
         }, 20000));

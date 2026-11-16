@@ -50,7 +50,13 @@
 
     const rawFetch = window.fetch.bind(window);
     window.fetch = function (input, options = {}) {
-        const url = new URL(input instanceof URL ? input.href : typeof input === 'string' ? input : input.url, location.href);
+        let rawUrl = input?.url;
+        if (input instanceof URL) {
+            rawUrl = input.href;
+        } else if (typeof input === 'string') {
+            rawUrl = input;
+        }
+        const url = new URL(rawUrl, location.href);
         const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
         if (headers.get('Authorization') === `Bearer ${marker}`) headers.delete('Authorization');
         const method = String(options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();

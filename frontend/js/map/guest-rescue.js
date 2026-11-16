@@ -130,7 +130,7 @@ async function setupGuestRescueUI() {
                 if (!response.ok) throw new Error('Network response was not ok');
                 const data = await response.json();
 
-                if (data && data.length > 0) {
+                if (data?.length > 0) {
                     searchResults.innerHTML = '';
                     data.forEach(item => {
                         const btn = document.createElement('button');
@@ -344,7 +344,7 @@ async function submitGuestRescueRequest() {
     let rescueType = String(typeEl?.value || 'can_cuu_ho');
     if (rescueType === 'khac') {
         const otherInput = document.getElementById('guest-rescue-other-input');
-        if (otherInput && otherInput.value.trim() !== '') {
+        if (otherInput?.value.trim() !== '') {
             rescueType = `Khác: ${otherInput.value.trim()}`;
         }
     }

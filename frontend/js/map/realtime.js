@@ -42,7 +42,7 @@ async function setupRescueAdminSocket() {
         socket.onopen = () => { if (rescueAdminSocket === socket) { rescueAdminReconnectAttempt = 0; document.documentElement.dataset.rescueRealtime = 'connected'; } };
         socket.onmessage = event => {
             if (rescueAdminSocket !== socket) return;
-            try { const message = JSON.parse(event.data); if (message.type === 'rescue_request') updateRescueMarkerFromWebSocket(message); } catch (_) { /* keep the private channel fail-soft */ }
+            try { const message = JSON.parse(event.data); if (message.type === 'rescue_request') updateRescueMarkerFromWebSocket(message); } catch (err) { console.debug('Ignoring invalid admin websocket payload:', err); }
         };
         socket.onerror = () => { if (rescueAdminSocket === socket) document.documentElement.dataset.rescueRealtime = 'degraded'; };
         socket.onclose = async event => {
@@ -784,11 +784,12 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
     if (['REFERENCE_TRANSITION', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'].includes(integrityState)) {
         const shift2d = Number.isFinite(Number(integrity.shift_2d_m))
             ? `Δ2D ${Number(integrity.shift_2d_m).toFixed(3)} m` : '';
-        const label = integrityState === 'REFERENCE_TRANSITION'
-            ? `Đang kiểm tra reference ${integrity.candidate_count || 0}/${integrity.candidate_target || 6}`
-            : integrityState === 'UNTRUSTED_GEOMETRY'
-                ? 'RTK FIXED nhưng geometry không đạt ngưỡng monitoring'
-                : `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
+        let label = `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
+        if (integrityState === 'REFERENCE_TRANSITION') {
+            label = `Đang kiểm tra reference ${integrity.candidate_count || 0}/${integrity.candidate_target || 6}`;
+        } else if (integrityState === 'UNTRUSTED_GEOMETRY') {
+            label = 'RTK FIXED nhưng geometry không đạt ngưỡng monitoring';
+        }
         evalSummaryEl.innerHTML = `<span class="gnss-eval-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${label}</span>`;
         return;
     }

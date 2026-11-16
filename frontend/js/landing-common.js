@@ -30,8 +30,8 @@ function setupAuthLinks() {
                 link.textContent = label;
                 link.href = href;
             }
-        } catch (_) {
-            // Keep the neutral account link while session status is unavailable.
+        } catch (err) {
+            console.debug('Session status unavailable:', err);
         } finally { checking = false; }
     };
     void refresh();

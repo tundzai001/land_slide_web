@@ -271,7 +271,7 @@ function setupEventListeners() {
                 realtimeImu3dWrapper.style.display = 'block';
                 btnToggleImu3d.innerHTML = '<i class="bi bi-graph-up me-1"></i>2D Chart';
                 // Always re-init 3D scene when toggling on to ensure proper sizing
-                if (currentStationData && currentStationData.sensors && currentStationData.sensors.imu) {
+                if (currentStationData?.sensors?.imu) {
                     const latest = currentStationData.sensors.imu.latest;
                     if (latest) {
                         // Small delay to let display:block take effect
@@ -660,7 +660,7 @@ function setupEventListeners() {
             const minY = Math.min(...values.map(plotY), 0);
             const maxY = Math.max(...values.map(plotY), 0);
             const rosterEl = document.getElementById('gnss-roster-summary');
-            const rosterBottom = rosterEl && rosterEl.offsetHeight
+            const rosterBottom = rosterEl?.offsetHeight
                 ? rosterEl.offsetTop + rosterEl.offsetHeight
                 : 86;
             const topPadding = Math.min(
@@ -1613,7 +1613,7 @@ function setupEventListeners() {
                     const response = await window.authManager.apiFetch(`/api/field/stations/${currentAlertStationId}/stop-siren?target=${target}`, {
                         method: 'POST'
                     });
-                    if (response && response.ok) {
+                    if (response?.ok) {
                         window.toast?.success(`Mute command sent (${iconBase})`);
                         setSirenButtonState('muted', target);
                         // Tắt âm thanh trên trình duyệt web khi user nhấn Mute
@@ -1627,7 +1627,7 @@ function setupEventListeners() {
                     const response = await window.authManager.apiFetch(`/api/field/stations/${currentAlertStationId}/enable-siren?target=${target}`, {
                         method: 'POST'
                     });
-                    if (response && response.ok) {
+                    if (response?.ok) {
                         window.toast?.success(`Alarm re-enabled (${iconBase})`);
                         setSirenButtonState('alerting', target);
                     } else {

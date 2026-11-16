@@ -13,7 +13,7 @@ class AdminPiCenterFeature extends window.AdminManager {
         const pointIds = [];
         checked.forEach(cb => {
             const row = cb.closest('.pi-grid-row') || cb.closest('tr');
-            if (row && row.dataset.piType === 'pi_point') {
+            if (row?.dataset.piType === 'pi_point') {
                 pointIds.push(Number.parseInt(cb.dataset.piId));
             }
         });

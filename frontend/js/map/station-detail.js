@@ -249,7 +249,12 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
         if (stationHistoryController === controller && !controller.signal.aborted && error?.name !== 'AbortError') {
             console.error('[MAP] Error loading station history:', error);
             const retained = Object.values(charts).some(chart => chart.data.datasets.some(dataset => dataset.data.length));
-            setChartWorkspaceStatus(`Không tải được dữ liệu ${range.label}.${retained ? ` Đang giữ dữ liệu đã tải${chartsPanel?.dataset.rangeLabel ? ` (${chartsPanel.dataset.rangeLabel})` : ''}; chưa cập nhật.` : ''} Bấm tải lại để thử tiếp.`, 'error');
+            let retainedMsg = '';
+            if (retained) {
+                const rangeSuffix = chartsPanel?.dataset.rangeLabel ? ` (${chartsPanel.dataset.rangeLabel})` : '';
+                retainedMsg = ` Đang giữ dữ liệu đã tải${rangeSuffix}; chưa cập nhật.`;
+            }
+            setChartWorkspaceStatus(`Không tải được dữ liệu ${range.label}.${retainedMsg} Bấm tải lại để thử tiếp.`, 'error');
             window.toast?.error('Không tải được lịch sử biểu đồ');
         }
     } finally {
@@ -643,7 +648,13 @@ function renderMonitoringSensors(data) {
         title.textContent = spec.label;
         card.append(title);
         const status = document.createElement('small');
-        status.textContent = !sensor.latest ? 'Chưa có dữ liệu' : sensor.is_online && data.mqtt_connected !== false ? 'Đang nhận dữ liệu' : 'Dữ liệu cuối · mất kết nối';
+        let statusText = 'Dữ liệu cuối · mất kết nối';
+        if (!sensor.latest) {
+            statusText = 'Chưa có dữ liệu';
+        } else if (sensor.is_online && data.mqtt_connected !== false) {
+            statusText = 'Đang nhận dữ liệu';
+        }
+        status.textContent = statusText;
         card.append(status);
         const quality = document.createElement('small');
         quality.textContent = ({valid:'Chất lượng: hợp lệ', suspect:'Chất lượng: cần kiểm tra', invalid:'Chất lượng: không hợp lệ'})[sensor.latest?.quality] || 'Chất lượng: chưa xác định';
@@ -760,7 +771,7 @@ function updateSidebarUI(data) {
         setText('adv-val-filt-vu', formatGnssVelocityValue(adv.vel_u, adv, 4));
         setText('adv-val-filt-2d', formatGnssVelocityValue(adv.speed_2d_mm_s, adv, 4));
     }
-    if (adv && adv.adv_x !== undefined) {
+    if (adv?.adv_x !== undefined) {
         // Vị trí hiện tại: Lat/Lon/Alt từ GNGGA
         setText('adv-val-lat', safeNumber(adv.adv_x, 3));
         setText('adv-val-lon', safeNumber(adv.adv_y, 3));
@@ -1278,8 +1289,9 @@ function renderImuChart(history) {
     const labels = buildChartTimeLabels(history);
 
     const metricOrNull = value => {
+        if (value == null || value === '') return null;
         const number = Number(value);
-        return value == null || value === '' ? null : (Number.isFinite(number) ? number : null);
+        return Number.isFinite(number) ? number : null;
     };
     const rollData = (history || []).map(h => metricOrNull(h.data?.roll));
     const pitchData = (history || []).map(h => metricOrNull(h.data?.pitch));

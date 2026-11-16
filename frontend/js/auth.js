@@ -562,10 +562,13 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
             data = await response.json();
             const value = data?.detail || data?.message || '';
             detail = typeof value === 'string' ? value : JSON.stringify(value);
-        } catch (_) {
+        } catch (jsonErr) {
+            console.debug('Failed to parse response JSON:', jsonErr);
             try {
                 detail = await response.text();
-            } catch (_) {}
+            } catch (textErr) {
+                console.debug('Failed to read response text:', textErr);
+            }
         }
         const phase = data?.phase_label || response.headers?.get('X-Operation-Phase');
         const phaseCode = data?.phase && data.phase !== phase ? ` (${data.phase})` : '';

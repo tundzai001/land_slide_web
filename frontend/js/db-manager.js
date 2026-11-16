@@ -423,9 +423,15 @@ class DatabaseManager {
         if (item._table === 'gnss_adjustments') {
             const projectId = item.data?.project_id ?? item.project_id;
             const projectInfo = this.filterOptions?.projects?.find(project => String(project.id) === String(projectId));
-            const project = projectInfo ? this.projectLabel(projectId) : item.data?.project_code || item.project_code || (projectId != null ? this.projectLabel(projectId) : 'GNSS');
+            let project = item.data?.project_code || item.project_code || 'GNSS';
+            if (projectInfo || projectId != null) {
+                project = this.projectLabel(projectId);
+            }
             const index = item.data?.cluster_index ?? item.cluster_index;
-            const cluster = item.data?.cluster_name || item.cluster_name || projectInfo?.gnss_clusters?.[index]?.name || (index != null ? `Cụm ${Number(index) + 1}` : 'Cụm GNSS');
+            let cluster = item.data?.cluster_name || item.cluster_name || projectInfo?.gnss_clusters?.[index]?.name;
+            if (!cluster) {
+                cluster = index != null ? `Cụm ${Number(index) + 1}` : 'Cụm GNSS';
+            }
             return `${project} · ${cluster}`;
         }
         if (item._table === 'sensor_data') {
@@ -450,15 +456,26 @@ class DatabaseManager {
         }
         if (item._table === 'alerts') return `${this.stationLabel(item.station_id)} · ${item.level || '--'}`;
         if (item._table === 'simulations') return `${item.station_code || item.project_code || 'Kịch bản thủ công'} · ${item.summary?.classification || item.mode}`;
-        const location = item.location && typeof item.location === 'object'
-            ? item.location.name || item.location.address || ([item.location.lat, item.location.lon].every(Number.isFinite) ? `${item.location.lat}, ${item.location.lon}` : 'Chưa có vị trí')
-            : item.location || 'Chưa có vị trí';
+        let location = item.location || 'Chưa có vị trí';
+        if (item.location && typeof item.location === 'object') {
+            const hasCoords = [item.location.lat, item.location.lon].every(Number.isFinite);
+            const coordsText = hasCoords ? `${item.location.lat}, ${item.location.lon}` : 'Chưa có vị trí';
+            location = item.location.name || item.location.address || coordsText;
+        }
         return `${this.projectLabel(item.project_id)} · ${location}`;
     }
 
     getRecordStatus(item) {
         if (item._table === 'alerts') return item.is_resolved ? { label: 'Đã xử lý', className: 'is-success' } : { label: item.level || 'Đang mở', className: 'is-warning' };
-        if (item._table === 'simulations') return { label: item.status, className: item.status === 'completed' ? 'is-success' : ['failed', 'interrupted'].includes(item.status) ? 'is-offline' : 'is-warning' };
+        if (item._table === 'simulations') {
+            let className = 'is-warning';
+            if (item.status === 'completed') {
+                className = 'is-success';
+            } else if (['failed', 'interrupted'].includes(item.status)) {
+                className = 'is-offline';
+            }
+            return { label: item.status, className };
+        }
         if (item._table === 'devices') {
             if (!item.is_active) return { label: 'Đã tắt', className: 'is-secondary' };
             return item.effective_status === 'online' ? { label: 'Online', className: 'is-success' } : { label: 'Offline', className: 'is-offline' };
@@ -1320,7 +1337,7 @@ class DatabaseManager {
         if (submit) submit.disabled = true;
         document.querySelectorAll('#clearDatabaseModal .clear-db-option').forEach(option => option.classList.remove('is-selected'));
 
-        if (input && input.dataset.validationBound !== 'true') {
+        if (input?.dataset.validationBound !== 'true') {
             input.dataset.validationBound = 'true';
             input.addEventListener('input', () => this.syncClearDatabaseConfirmation());
         }

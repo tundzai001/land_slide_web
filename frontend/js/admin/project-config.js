@@ -230,11 +230,11 @@ class AdminProjectConfigFeature extends window.AdminManager {
         }
 
         const baseSelect = row.querySelector('.cluster-base-select');
-        if (baseSelect && baseSelect.value) {
+        if (baseSelect?.value) {
             this.onBaseStationSelected(baseSelect);
         }
         const backupBaseSelect = row.querySelector('.cluster-backup-base-select');
-        if (backupBaseSelect && backupBaseSelect.value) {
+        if (backupBaseSelect?.value) {
             this.onBaseStationSelected(backupBaseSelect);
         }
 
@@ -257,7 +257,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
         
         streamSelect.innerHTML = '<option value="">-- Chọn Luồng --</option>';
         
-        if (selectedOpt && selectedOpt.dataset.devices) {
+        if (selectedOpt?.dataset.devices) {
             try {
                 const devices = JSON.parse(decodeURIComponent(selectedOpt.dataset.devices));
                 const gnssDevices = devices.filter(d => d.device_type === 'gnss' || d.device_code.toLowerCase().includes('gnss') || d.device_code.toLowerCase().includes('s1') || d.device_code.toLowerCase().includes('s2'));
@@ -275,7 +275,7 @@ class AdminProjectConfigFeature extends window.AdminManager {
                 console.error("Error parsing devices config", e);
                 streamSelect.style.display = 'none';
             }
-        } else if (selectedOpt && selectedOpt.dataset.streams) {
+        } else if (selectedOpt?.dataset.streams) {
             try {
                 const streams = JSON.parse(decodeURIComponent(selectedOpt.dataset.streams));
                 if (streams.length > 0) {

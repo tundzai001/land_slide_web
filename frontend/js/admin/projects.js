@@ -3,7 +3,15 @@ class AdminProjectsFeature extends window.AdminManager {
     setupProjectMapPosition(prefix, location = null) {
         const mode = document.getElementById(`${prefix}-map-mode`);
         if (!mode) return;
-        mode.value = prefix === 'project' ? 'manual' : (location?.map_mode || (location?.lat != null && location?.lon != null ? 'manual' : 'auto'));
+        let defaultMode = 'auto';
+        if (prefix === 'project') {
+            defaultMode = 'manual';
+        } else if (location?.map_mode) {
+            defaultMode = location.map_mode;
+        } else if (location?.lat != null && location?.lon != null) {
+            defaultMode = 'manual';
+        }
+        mode.value = defaultMode;
         const pickerContainer = document.getElementById(`${prefix}-map-picker`);
         const pickerToggle = document.getElementById(`${prefix}-map-picker-toggle`);
         if (pickerContainer) pickerContainer.hidden = true;
@@ -150,11 +158,17 @@ class AdminProjectsFeature extends window.AdminManager {
                 input.value = points.length ? (points.reduce((sum, point) => sum + Number(point[key]), 0) / points.length).toFixed(8) : '';
             });
         }
-        document.getElementById(`${prefix}-map-hint`).textContent = manual
-            ? (prefix === 'project'
+        let hintText = '';
+        if (manual) {
+            hintText = prefix === 'project'
                 ? 'Điểm này đại diện cho công trình trên bản đồ; nhập tọa độ hoặc chọn vị trí trên bản đồ.'
-                : 'Tọa độ WGS84 (độ thập phân). Điểm nhập tay giữ nguyên khi cảm biến thay đổi.')
-            : (fields[0].value ? 'Tự cập nhật theo các trạm cảm biến có tọa độ hợp lệ.' : 'Điểm sẽ xuất hiện khi dự án có cảm biến với tọa độ hợp lệ.');
+                : 'Tọa độ WGS84 (độ thập phân). Điểm nhập tay giữ nguyên khi cảm biến thay đổi.';
+        } else {
+            hintText = fields[0].value
+                ? 'Tự cập nhật theo các trạm cảm biến có tọa độ hợp lệ.'
+                : 'Điểm sẽ xuất hiện khi dự án có cảm biến với tọa độ hợp lệ.';
+        }
+        document.getElementById(`${prefix}-map-hint`).textContent = hintText;
         this.updateProjectPickerMarker(prefix);
     }
 

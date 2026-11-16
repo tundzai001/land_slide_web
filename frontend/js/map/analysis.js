@@ -16,7 +16,7 @@ function renderCombinedLongTermChart(data) {
 
     // GNSS displacement → left Y-axis
     const gnss = data.gnss;
-    if (gnss && gnss.status === 'success' && gnss.time_series && gnss.time_series.labels.length > 0) {
+    if (gnss?.status === 'success' && gnss?.time_series?.labels?.length > 0) {
         allLabels = gnss.time_series.labels;
         hasGnss = true;
         datasets.push({
@@ -35,7 +35,7 @@ function renderCombinedLongTermChart(data) {
 
     // IMU roll/pitch → right Y-axis
     const imu = data.imu;
-    if (imu && imu.status === 'success' && imu.time_series) {
+    if (imu?.status === 'success' && imu?.time_series) {
         hasImu = true;
         // Use IMU labels if no GNSS labels, or merge
         if (allLabels.length === 0) {
@@ -260,9 +260,8 @@ function renderRainfallCorrelationSection(data) {
 
     if (!rainCorr || !rainCorr.available) {
         // Show the section with an informative status message instead of hiding it
-        const msg = (rainCorr && rainCorr.message)
-            ? rainCorr.message
-            : 'Không đủ dữ liệu để chạy Slide model. Cần ít nhất 3 ngày chung giữa GNSS và cảm biến mưa.';
+        const msg = rainCorr?.message
+            || 'Không đủ dữ liệu để chạy Slide model. Cần ít nhất 3 ngày chung giữa GNSS và cảm biến mưa.';
         section.style.display = 'block';
         section.innerHTML = `
             <h5 class="mb-3 text-info border-bottom pb-2">
@@ -580,7 +579,7 @@ function formatRateWithUnit(valueMm, periodLabel) {
 }
 
 function formatLongTermVelocityDisplay(metrics) {
-    if (metrics && metrics.velocity_reliable === false) {
+    if (metrics?.velocity_reliable === false) {
         const minDurationDays = Number.parseFloat(metrics.min_reliable_duration_days) || (1 / 24);
         return {
             text: `Chờ đủ ${formatDurationString(minDurationDays)}`,
@@ -832,7 +831,9 @@ function setText(id, val) {
 
 function setHTML(id, html) {
     const el = document.getElementById(id);
-    if (el && el.innerHTML !== html) el.innerHTML = html;
+    if (el && el.innerHTML !== html) {
+        el.innerHTML = html;
+    }
 }
 
 function getLatestSensorTimestamp(data) {

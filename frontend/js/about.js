@@ -65,7 +65,12 @@ import { renderAboutTemplate } from './templates/about-template.js';
             stencil: false,
             powerPreference: 'high-performance'
         });
-        const maxRatio = isMobileDevice ? 0.90 : (currentQualityTier === 'high' ? 1.15 : 1.0);
+        let maxRatio = 1.0;
+        if (isMobileDevice) {
+            maxRatio = 0.90;
+        } else if (currentQualityTier === 'high') {
+            maxRatio = 1.15;
+        }
         renderer.setPixelRatio(Math.min(devicePixelRatio || 1, maxRatio));
         renderer.setClearColor(0x000000, 0);
         renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1788,9 +1793,12 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 camMode.textContent = nextHud;
             }
             if (pinOpsVal) {
-                const nextOpsVal = progress > 0.84
-                    ? 'Control Room · 5 Màn hình Live'
-                    : (progress > 0.68 ? 'Đang mở cửa cổng chính…' : 'Đang nhận luồng gói tin');
+                let nextOpsVal = 'Đang nhận luồng gói tin';
+                if (progress > 0.84) {
+                    nextOpsVal = 'Control Room · 5 Màn hình Live';
+                } else if (progress > 0.68) {
+                    nextOpsVal = 'Đang mở cửa cổng chính…';
+                }
                 if (nextOpsVal !== lastOpsValText) {
                     lastOpsValText = nextOpsVal;
                     pinOpsVal.textContent = nextOpsVal;

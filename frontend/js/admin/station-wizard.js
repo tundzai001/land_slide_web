@@ -780,7 +780,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             ? selectedBinding
             : null;
         if (!desired && select.value) {
-            try { desired = JSON.parse(select.value); } catch (_) { desired = null; }
+            try { desired = JSON.parse(select.value); } catch (err) { console.debug('Cannot parse aicaster user JSON:', err); desired = null; }
         }
         if (!desired) {
             desired = this.currentStationConfig?.gnss_aicaster_user
@@ -886,8 +886,8 @@ class AdminStationWizardFeature extends window.AdminManager {
         sensors.forEach(({ type, elId }) => {
             const inputEl = document.getElementById(elId);
             const checkboxEl = document.getElementById(`edit-${type}`);
-            if (inputEl && inputEl.closest('.col-md-6')) {
-                const isEnabled = checkboxEl && checkboxEl.checked;
+            if (inputEl?.closest('.col-md-6')) {
+                const isEnabled = Boolean(checkboxEl?.checked);
                 inputEl.closest('.col-md-6').style.display = isEnabled ? 'block' : 'none';
                 if (isEnabled) visibleCount++;
             }

@@ -352,7 +352,9 @@ const AlertSoundManager = (() => {
             try {
                 _audio.pause();
                 _audio.src = '';
-            } catch (_) { }
+            } catch (err) {
+                console.debug('Failed to pause alert audio:', err);
+            }
             _audio = null;
         }
         _currentLevel = null;
@@ -506,7 +508,7 @@ runWhenDomReady(() => {
 
                 // 4. Hiện siren popup SAU KHI zoom xong
                 map.once('moveend', () => {
-                    if (currentStationData && currentStationData.id === alertStationId) {
+                    if (currentStationData?.id === alertStationId) {
                         _showSirenIfAlerting(alertStationId, currentStationData);
                     }
                 });

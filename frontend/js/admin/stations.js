@@ -47,11 +47,16 @@ class AdminStationsFeature extends window.AdminManager {
         const hasDem = dems.length > 0 || Boolean(project?.has_dem);
         const canUploadDem = this.currentUserRole === 'admin';
         if (actionButtons) {
-            actionButtons.innerHTML = `
-                ${canUploadDem ? `<input type="file" id="project-dem-file" accept=".asc,text/plain" hidden onchange="window.adminManager.uploadProjectDem(this.files[0]); this.value='';">
+            let uploadDemHtml = '';
+            if (canUploadDem) {
+                const uploadDemLabel = hasDem ? 'Thêm khu DEM' : 'Tải DEM';
+                uploadDemHtml = `<input type="file" id="project-dem-file" accept=".asc,text/plain" hidden onchange="window.adminManager.uploadProjectDem(this.files[0]); this.value='';">
                 <button class="btn btn-outline-primary" type="button" onclick="document.getElementById('project-dem-file').click()">
-                    <i class="bi bi-upload me-2" aria-hidden="true"></i>${hasDem ? 'Thêm khu DEM' : 'Tải DEM'}
-                </button>` : ''}
+                    <i class="bi bi-upload me-2" aria-hidden="true"></i>${uploadDemLabel}
+                </button>`;
+            }
+            actionButtons.innerHTML = `
+                ${uploadDemHtml}
                 <button class="btn btn-outline-primary" type="button" id="dem-placement-toggle" onclick="window.adminManager.toggleDemPlacementMode()" ${hasDem ? '' : 'disabled'} aria-pressed="false">
                     <i class="bi bi-crosshair me-2" aria-hidden="true"></i>Chọn ô đặt trạm
                 </button>
@@ -133,25 +138,38 @@ class AdminStationsFeature extends window.AdminManager {
     renderProjectDemWorkspace(project, canUpload) {
         const dems = project?.dems || [];
         const hasDem = dems.length > 0 || Boolean(project?.has_dem);
-        return `
-            <section class="management-dem-workspace" aria-labelledby="management-dem-title">
-                <div class="management-dem-heading">
-                    <div><h2 id="management-dem-title">Địa hình số · ${this.escapeHtml(project?.name || this.getProjectName(this.currentProjectId))}</h2>
-                    <p>${hasDem ? 'Mô hình DEM · EPSG:32648 · chọn ô lưới để đặt vị trí trạm.' : 'Tải DEM của công trình lên để xem địa hình và chọn vị trí trạm.'}</p></div>
-                    ${hasDem ? '<span class="badge text-bg-success">Đã có DEM</span>' : ''}
-                </div>
-                ${canUpload ? `
+        const headingDesc = hasDem ? 'Mô hình DEM · EPSG:32648 · chọn ô lưới để đặt vị trí trạm.' : 'Tải DEM của công trình lên để xem địa hình và chọn vị trí trạm.';
+        const badgeHtml = hasDem ? '<span class="badge text-bg-success">Đã có DEM</span>' : '';
+
+        let demUploadRowHtml = '';
+        if (canUpload) {
+            demUploadRowHtml = `
                     <div class="management-dem-upload-row">
                         <label for="project-dem-name">Tên khu địa hình</label>
                         <input class="form-control" id="project-dem-name" maxlength="100" placeholder="Ví dụ: Thân đập, Bờ mỏ">
                         <small class="text-muted">Tên đã có sẽ cập nhật đúng khu đó; tên mới sẽ tạo thêm một khu DEM.</small>
-                    </div>
-                ` : ''}
-                ${hasDem ? `
+                    </div>`;
+        }
+
+        let mainDemBody = '';
+        if (hasDem) {
+            let demSelectOrNameHtml = `<span class="management-dem-current-name">${this.escapeHtml(dems[0]?.name || 'Địa hình')}</span>`;
+            if (dems.length > 1) {
+                const optionsHtml = dems.map(model => `<option value="${this.escapeHtml(model.id)}" ${model.id === this._selectedDemId ? 'selected' : ''}>${this.escapeHtml(model.name)}</option>`).join('');
+                demSelectOrNameHtml = `<label class="management-dem-select-label" for="management-dem-select">Khu địa hình
+                    <select class="form-select form-select-sm" id="management-dem-select">${optionsHtml}</select>
+                </label>`;
+            }
+
+            const demSelectionText = canUpload ? 'Chọn “Chọn ô đặt trạm”, sau đó bấm một ô trên mô hình.' : 'Mô hình địa hình của dự án.';
+            const editDemButtonHtml = canUpload ? `
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-edit-dem-coords" onclick="window.adminManager.openEditDemCoordinatesModal()">
+                                    <i class="bi bi-pencil-square me-1"></i>Chỉnh sửa tọa độ DEM
+                                </button>` : '';
+
+            mainDemBody = `
                     <div class="management-dem-controls">
-                        ${dems.length > 1 ? `<label class="management-dem-select-label" for="management-dem-select">Khu địa hình
-                            <select class="form-select form-select-sm" id="management-dem-select">${dems.map(model => `<option value="${this.escapeHtml(model.id)}" ${model.id === this._selectedDemId ? 'selected' : ''}>${this.escapeHtml(model.name)}</option>`).join('')}</select>
-                        </label>` : `<span class="management-dem-current-name">${this.escapeHtml(dems[0]?.name || 'Địa hình')}</span>`}
+                        ${demSelectOrNameHtml}
                         <span class="small text-muted">Kéo để xoay · cuộn để zoom · chọn vị trí trên địa hình 3D</span>
                         <div class="dem-grid-toolbar" aria-label="Điều khiển mô hình DEM">
                             <button type="button" class="btn btn-sm btn-outline-secondary" data-dem-admin-action="out" aria-label="Thu nhỏ mô hình">−</button>
@@ -160,17 +178,14 @@ class AdminStationsFeature extends window.AdminManager {
                         </div>
                     </div>
                     <div class="dem-grid-viewport management-dem-viewport"><canvas id="management-dem-canvas" tabindex="0" role="application" aria-label="Mô hình DEM. Dùng phím mũi tên để chọn ô và Enter để đặt trạm."></canvas></div>
-                    <p class="management-dem-selection" id="management-dem-selection" role="status" aria-live="polite">${canUpload ? 'Chọn “Chọn ô đặt trạm”, sau đó bấm một ô trên mô hình.' : 'Mô hình địa hình của dự án.'}</p>
+                    <p class="management-dem-selection" id="management-dem-selection" role="status" aria-live="polite">${demSelectionText}</p>
                     <div class="card border mt-3 shadow-none bg-body-tertiary" id="management-dem-georef-card" style="border-radius: 8px;">
                         <div class="card-body p-3">
                             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                                 <span class="fw-bold small text-uppercase" style="letter-spacing: 0.5px;">
                                     <i class="bi bi-geo-alt-fill text-primary me-1" aria-hidden="true"></i>Thông số tọa độ &amp; Địa lý DEM
                                 </span>
-                                ${canUpload ? `
-                                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-edit-dem-coords" onclick="window.adminManager.openEditDemCoordinatesModal()">
-                                    <i class="bi bi-pencil-square me-1"></i>Chỉnh sửa tọa độ DEM
-                                </button>` : ''}
+                                ${editDemButtonHtml}
                             </div>
                             <div class="row g-2 small">
                                 <div class="col-6 col-md-3">
@@ -191,14 +206,27 @@ class AdminStationsFeature extends window.AdminManager {
                                 </div>
                             </div>
                         </div>
-                    </div>
-                ` : `
+                    </div>`;
+        } else {
+            const emptyTitle = canUpload ? 'Chưa có mô hình địa hình' : 'Dự án chưa có DEM';
+            const emptyDesc = canUpload ? 'Tải lên file ESRI ASCII Grid (.asc), hệ tọa độ UTM 48N.' : 'Liên hệ quản trị viên để tải mô hình DEM lên.';
+            mainDemBody = `
                     <div class="management-dem-empty" role="status">
                         <i class="bi bi-mountains" aria-hidden="true"></i>
-                        <strong>${canUpload ? 'Chưa có mô hình địa hình' : 'Dự án chưa có DEM'}</strong>
-                        <span>${canUpload ? 'Tải lên file ESRI ASCII Grid (.asc), hệ tọa độ UTM 48N.' : 'Liên hệ quản trị viên để tải mô hình DEM lên.'}</span>
-                    </div>
-                `}
+                        <strong>${emptyTitle}</strong>
+                        <span>${emptyDesc}</span>
+                    </div>`;
+        }
+
+        return `
+            <section class="management-dem-workspace" aria-labelledby="management-dem-title">
+                <div class="management-dem-heading">
+                    <div><h2 id="management-dem-title">Địa hình số · ${this.escapeHtml(project?.name || this.getProjectName(this.currentProjectId))}</h2>
+                    <p>${headingDesc}</p></div>
+                    ${badgeHtml}
+                </div>
+                ${demUploadRowHtml}
+                ${mainDemBody}
             </section>`;
     }
 
@@ -225,7 +253,7 @@ class AdminStationsFeature extends window.AdminManager {
             });
             const responseText = await response.text();
             let result = {};
-            try { result = JSON.parse(responseText); } catch { /* Proxy errors may be HTML. */ }
+            try { result = JSON.parse(responseText); } catch (err) { console.debug('Response is not JSON:', err); }
             if (!response.ok) {
                 const detail = result.detail || (response.status === 413
                     ? `Máy chủ từ chối file (HTTP 413): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB). Đối chiếu log backend “Project DEM upload received”; nếu không có dòng này, IIS hoặc proxy đã chặn trước ứng dụng.`

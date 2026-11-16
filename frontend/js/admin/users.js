@@ -185,8 +185,12 @@ class AdminUsersFeature extends window.AdminManager {
         const fieldId = mode === 'new' ? 'new-password' : 'edit-user-password';
         const password = document.getElementById(fieldId).value;
         if (!password && !required) return true;
-        const message = [...password].length < 12 ? 'Mật khẩu cần ít nhất 12 ký tự.'
-            : new TextEncoder().encode(password).length > 72 ? 'Mật khẩu quá dài. Giới hạn 72 byte UTF-8; ký tự có dấu có thể chiếm nhiều byte.' : '';
+        let message = '';
+        if ([...password].length < 12) {
+            message = 'Mật khẩu cần ít nhất 12 ký tự.';
+        } else if (new TextEncoder().encode(password).length > 72) {
+            message = 'Mật khẩu quá dài. Giới hạn 72 byte UTF-8; ký tự có dấu có thể chiếm nhiều byte.';
+        }
         if (message) this.showUserFormError(mode, message, fieldId);
         return !message;
     }

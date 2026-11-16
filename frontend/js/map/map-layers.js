@@ -437,7 +437,8 @@ function safeRescueSourceUrl(value) {
     try {
         const url = new URL(String(value || '').trim());
         return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
-    } catch (_) {
+    } catch (err) {
+        console.debug('Invalid rescue source URL:', err);
         return '';
     }
 }
@@ -587,7 +588,7 @@ function setupBasemapControls() {
         const value = event.target.value;
         if (!Object.hasOwn(MAP_BASEMAPS, value) || value === activeBasemap) return;
         activeBasemap = value;
-        try { localStorage.setItem('monitoring-basemap', value); } catch (_) { /* Keep session choice. */ }
+        try { localStorage.setItem('monitoring-basemap', value); } catch (err) { console.debug('Cannot persist basemap choice:', err); }
         switchMapTiles();
         sync();
     });

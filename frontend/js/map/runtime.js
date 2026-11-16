@@ -814,7 +814,7 @@ function refreshGnssAdjustmentDebugUi() {
         let phaseMsg = '';
         if (gnssAdjustmentDebugState.entries) {
             const lastPhaseEntry = [...gnssAdjustmentDebugState.entries].reverse().find(e => e.label === 'PHASE');
-            if (lastPhaseEntry && lastPhaseEntry.message) phaseMsg = lastPhaseEntry.message;
+            if (lastPhaseEntry?.message) phaseMsg = lastPhaseEntry.message;
         }
         indicator.innerHTML = `<span class="opacity-75">Phase:</span> ${phaseName}${phaseMsg ? ` <span class="text-light ms-2 px-2 py-1 bg-dark rounded border border-secondary" style="font-size: 0.8em;">${phaseMsg}</span>` : ''}`;
         indicator.className = phaseClassForGnssAdjustment(phaseName);
@@ -859,7 +859,7 @@ function refreshGnssAdjustmentDebugUi() {
     }
 
     const log = document.getElementById('gnss-debug-log');
-    if (log && log.offsetParent !== null) {
+    if (log?.offsetParent !== null) {
         const revision = String(gnssAdjustmentDebugState.entriesRevision);
         if (log.dataset.entriesRevision !== revision) {
             const previousScrollTop = log.scrollTop;
@@ -1139,7 +1139,7 @@ let activeBasemap = 'hybrid';
 try {
     const savedBasemap = localStorage.getItem('monitoring-basemap');
     if (Object.hasOwn(MAP_BASEMAPS, savedBasemap)) activeBasemap = savedBasemap;
-} catch (_) { /* Browser storage may be unavailable. */ }
+} catch (err) { console.debug('Browser storage unavailable:', err); }
 const TILE_OPTIONS = {
     light: {
         maxZoom: 20,

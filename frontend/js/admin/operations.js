@@ -271,8 +271,13 @@ class AdminOperationsFeature extends window.AdminManager {
             const body = document.getElementById('operations-logs'); body.replaceChildren();
             for (const row of result.rows) {
                 const tr = document.createElement('tr');
-                const resultLabel = row.status != null ? `${row.status < 400 ? 'Thành công' : 'Thất bại'} · ${row.status}`
-                    : row.action.includes('failed') || row.action.includes('error') ? 'Thất bại' : 'Đã ghi nhận';
+                let resultLabel = 'Đã ghi nhận';
+                if (row.status != null) {
+                    const statusText = row.status < 400 ? 'Thành công' : 'Thất bại';
+                    resultLabel = `${statusText} · ${row.status}`;
+                } else if (row.action.includes('failed') || row.action.includes('error')) {
+                    resultLabel = 'Thất bại';
+                }
                 const actor = row.username || (query.get('kind') === 'audit_log' ? 'Chưa xác định' : 'Hệ thống');
                 const values = [new Date(row.timestamp * 1000).toLocaleString('vi-VN'), `${actor} / ${row.role || '—'}`, this.operationEventLabel(row.action), /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /.exec(row.action)?.[1] || '—', resultLabel];
                 const labels = ['Thời gian', 'Tài khoản / Vai trò', 'Hành động', 'Method', 'Kết quả'];
