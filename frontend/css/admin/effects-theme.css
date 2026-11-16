@@ -194,9 +194,12 @@
         scroll-behavior: auto !important;
     }
 
+    .card-scanner,
     [data-theme="dark"] .card-scanner,
+    .tab-pane,
     .tab-pane.active {
         animation: none !important;
+        transition: none !important;
     }
 }
 

@@ -536,8 +536,6 @@ function updateGnssFixBadge(fixMode, fixQuality) {
             break;
         case 'GNSS_UNKNOWN':
         case 'NO_DATA':
-            cls = 'GNSS_UNKNOWN';
-            text = 'NO DATA';
             break;
         default:
             if (quality === 4) {
@@ -963,7 +961,7 @@ function updateSidebarUI(data) {
 }
 
 function destroyStationCharts() {
-    [...Object.keys(charts)].forEach(id => {
+    Object.keys(charts).forEach(id => {
         if (!charts[id]) return;
         charts[id].destroy();
         delete charts[id];
@@ -982,7 +980,7 @@ function renderAccelerometerWaveform(sensor) {
     if (!wave || latest.quality === 'invalid') return;
     for (const axis of ['x', 'y', 'z']) {
         const values = wave[axis];
-        if (!Array.isArray(values) || !values.length || !(wave.sample_rate_hz > 0)) continue;
+        if (!Array.isArray(values) || !values.length || wave.sample_rate_hz <= 0) continue;
         const box = document.createElement('div');
         box.className = 'chart-box';
         const title = document.createElement('div');

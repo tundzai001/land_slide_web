@@ -261,7 +261,7 @@ async function toggleHeatmap() {
         window.toast?.info('Hiện không có trạm cảnh báo có tọa độ để hiển thị.');
         return;
     }
-    if (!heatmapVisible && typeof L.heatLayer === 'undefined') {
+    if (!heatmapVisible && L.heatLayer === undefined) {
         heatmapLoading = true;
         if (btn) btn.disabled = true;
         btn?.setAttribute('aria-busy', 'true');
@@ -279,7 +279,7 @@ async function toggleHeatmap() {
             btn?.classList.remove('is-loading');
         }
     }
-    if (typeof L.heatLayer === 'undefined') {
+    if (L.heatLayer === undefined) {
         if (checkbox) checkbox.checked = heatmapVisible;
         window.toast?.error('Plugin heatmap chưa sẵn sàng.');
         return;

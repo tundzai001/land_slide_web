@@ -661,7 +661,7 @@ class DatabaseManager {
         const legacyPrefix = '/static/adjustments/';
         if (downloadUrl.startsWith(legacyPrefix)) {
             const filename = downloadUrl.slice(legacyPrefix.length);
-            const idMatch = filename.match(/^gnss_(?:binh_sai|adjustment)_(\d+)_/);
+            const idMatch = /^gnss_(?:binh_sai|adjustment)_(\d+)_/.exec(filename);
             if (idMatch) {
                 downloadUrl = `/api/admin/gnss/adjustment/reports/${idMatch[1]}/${filename}`;
             }

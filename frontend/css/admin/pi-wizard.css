@@ -837,6 +837,8 @@
 
 @media (prefers-reduced-motion: reduce) {
     .sensor-config-section,
+    #stationConfigModal .wizard-content.active,
+    #stationConfigModal .wizard-content,
     #stationConfigModal *,
     #stationConfigModal *::before,
     #stationConfigModal *::after {

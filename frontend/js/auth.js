@@ -546,7 +546,7 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
     // Auto-rewrite legacy /static/adjustments/ URLs from older DB records.
     if (safeUrl.startsWith('/static/adjustments/')) {
         const filename = safeUrl.slice('/static/adjustments/'.length);
-        const idMatch = filename.match(/^gnss_(?:binh_sai|adjustment)_(\d+)_/);
+        const idMatch = /^gnss_(?:binh_sai|adjustment)_(\d+)_/.exec(filename);
         if (idMatch) {
             safeUrl = `/api/admin/gnss/adjustment/reports/${idMatch[1]}/${filename}`;
             console.info('[Download] Chuyển URL cũ →', safeUrl);
@@ -583,8 +583,8 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
     const blobUrl = URL.createObjectURL(await response.blob());
     try {
         const disposition = response.headers.get('content-disposition') || '';
-        const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-        const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+        const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+        const plainName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
         const anchor = document.createElement('a');
         anchor.href = blobUrl;
         anchor.download = encodedName

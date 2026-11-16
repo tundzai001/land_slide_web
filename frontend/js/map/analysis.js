@@ -840,7 +840,8 @@ function setText(id, val) {
 
 function setHTML(id, html) {
     const el = document.getElementById(id);
-    if (el && el.innerHTML !== html) {
+    if (!el) return;
+    if (el.innerHTML !== html) {
         el.innerHTML = html;
     }
 }

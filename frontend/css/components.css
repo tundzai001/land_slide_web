@@ -422,6 +422,7 @@ button,
     .btn::before {
         transition: none !important;
     }
+    .skeleton,
     .skeleton-loader { animation: none !important; }
     .session-manager-dialog { transition: none !important; }
 }

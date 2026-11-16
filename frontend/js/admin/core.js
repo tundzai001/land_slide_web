@@ -133,7 +133,12 @@ class AdminManager {
             this._wsConnecting = false;
             this.ws.onmessage = (event) => {
                 let message;
-                try { message = JSON.parse(event.data); } catch (_) { return; }
+                try {
+                    message = JSON.parse(event.data);
+                } catch (err) {
+                    console.debug('Invalid WS message payload:', err);
+                    return;
+                }
                 if (message.type === 'origin_locked_event' && message.station_id == this.currentStationId) {
                     console.log('🎯 GNSS Origin Locked via WebSocket:', message.data);
                     const relocked = !!message.data?.relocked;
@@ -855,7 +860,7 @@ class AdminManager {
         const tabButtons = document.querySelectorAll('#mainTabs button[data-bs-toggle="tab"]');
         tabButtons.forEach(btn => {
             btn.addEventListener('shown.bs.tab', (e) => {
-                const targetId = e.target.getAttribute('data-bs-target');
+                const targetId = e.target.dataset.bsTarget;
                 if (targetId === '#tab-projects') {
                     this.resetNavigation();
                     this.loadProjects();

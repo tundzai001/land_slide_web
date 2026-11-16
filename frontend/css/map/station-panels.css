@@ -397,6 +397,7 @@ body.map-is-moving .detail-sidebar,
 .axis-num {
     font-size: 1.1rem;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--accent-warning);
     margin-top: 4px;
     transition: color 0.3s ease, opacity 0.2s ease;
@@ -429,10 +430,7 @@ body.map-is-moving .detail-sidebar,
     animation: valueFlash 0.8s ease-out;
 }
 
-/* Number text uses tabular-nums for stable width during counting */
-.axis-num {
-    font-variant-numeric: tabular-nums;
-}
+
 
 /* Status badge smooth color transition */
 .status-badge {
@@ -679,6 +677,9 @@ body.map-is-moving .detail-sidebar,
 
     .value-updated,
     .sensor-item.value-updated,
+    .sensor-item.sensor-alert-warning,
+    .sensor-item.sensor-alert-critical,
+    .btn-siren-toggle[data-siren-state="alerting"],
     .sensor-card-warning,
     .sensor-card-danger,
     .sensor-card-critical,

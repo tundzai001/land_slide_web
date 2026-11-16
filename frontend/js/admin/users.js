@@ -145,7 +145,16 @@ class AdminUsersFeature extends window.AdminManager {
             const projects = await res.json();
             if (Number(document.getElementById('edit-user-id').value) !== Number(userId)) return;
             const assigned = new Set((user.assigned_projects || []).map(Number));
-            container.innerHTML = projects.length ? projects.map(project => `<label class="user-project-option"><input type="checkbox" value="${Number(project.id)}" ${assigned.has(Number(project.id)) ? 'checked' : ''}><span><strong>${this.escapeUserValue(project.name || project.project_code)}</strong><small>${this.escapeUserValue(project.project_code || ('#' + project.id))}</small></span></label>`).join('') : '<span class="text-muted small">Chưa có dự án</span>';
+            if (!projects.length) {
+                container.innerHTML = '<span class="text-muted small">Chưa có dự án</span>';
+            } else {
+                container.innerHTML = projects.map(project => {
+                    const isChecked = assigned.has(Number(project.id)) ? 'checked' : '';
+                    const title = this.escapeUserValue(project.name || project.project_code);
+                    const code = this.escapeUserValue(project.project_code || ('#' + project.id));
+                    return `<label class="user-project-option"><input type="checkbox" value="${Number(project.id)}" ${isChecked}><span><strong>${title}</strong><small>${code}</small></span></label>`;
+                }).join('');
+            }
             this.editUserProjectsReady = true;
             button.disabled = false;
         } catch (error) {

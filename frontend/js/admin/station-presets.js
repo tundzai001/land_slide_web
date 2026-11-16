@@ -584,6 +584,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
             this.loadStations(this.currentProjectId);
 
         } catch (e) {
+            console.error('Lỗi xóa trạm:', e);
             window.toast?.error('❌ Lỗi xóa trạm');
         }
     }

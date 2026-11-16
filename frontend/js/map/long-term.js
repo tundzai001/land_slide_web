@@ -6,7 +6,11 @@ async function loadLongTermAnalysis(options = {}) {
         return null;
     }
     try { await window.loadFeatureLibrary?.('chart'); }
-    catch (_) { showLongTermError('Không thể tải thư viện biểu đồ.'); return null; }
+    catch (err) {
+        console.debug('Không thể tải thư viện biểu đồ:', err);
+        showLongTermError('Không thể tải thư viện biểu đồ.');
+        return null;
+    }
 
     const requestSequence = ++longTermRequestSequence;
     longTermRequestController?.abort();
@@ -255,8 +259,23 @@ function showSlideModelResultPopup(rainCorr) {
     overlay.querySelectorAll('.sm-model-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
     overlay.querySelectorAll('.sm-model-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
 
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    const fmtDate = (d) => { if (!d) return '--'; try { const [, m, dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = val;
+        }
+    };
+    const fmtDate = (d) => {
+        if (!d) {
+            return '--';
+        }
+        try {
+            const [, m, dd] = d.split('-');
+            return `${dd}/${m}`;
+        } catch {
+            return d;
+        }
+    };
 
     if (available) {
         // === Overview tab ===

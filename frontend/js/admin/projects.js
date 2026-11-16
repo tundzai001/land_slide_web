@@ -93,6 +93,7 @@ class AdminProjectsFeature extends window.AdminManager {
             }
             requestAnimationFrame(() => picker.map.invalidateSize());
         } catch (error) {
+            console.debug('Project map picker init error:', error);
             container.hidden = false;
             const hint = document.getElementById(`${prefix}-map-hint`);
             hint.textContent = error.message;
@@ -389,6 +390,7 @@ class AdminProjectsFeature extends window.AdminManager {
             await this.loadProjects();
 
         } catch (e) {
+            console.error('Lỗi xóa dự án:', e);
             window.toast?.error('❌ Lỗi xóa dự án');
         }
     }

@@ -778,7 +778,12 @@
         scroll-behavior: auto !important;
     }
 
+    .dt-status-badge,
+    .dt-status-badge.critical,
+    .dt-status-badge.sliding,
     .dt-status-dot,
+    .dt-loading-spinner,
+    .dt-viewport-overlay.sliding,
     .dt-warning-text,
     .camera-shake {
         animation: none !important;

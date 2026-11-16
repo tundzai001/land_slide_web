@@ -7,7 +7,6 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SceneManager } from './scene-manager.js?v=20260428v3';
 import { TerrainGenerator } from './terrain-generator.js?v=20260428v3';
 import { EnvironmentBuilder } from './environment-builder.js?v=20260428v3';

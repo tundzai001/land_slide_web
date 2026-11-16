@@ -586,7 +586,7 @@ function renderGnssAdjustmentWorkflow() {
 
 function gnssWorkflowRoverFromMessage(message) {
     const cleaned = String(message || '').replace(/^Cụm\s+[^:]{1,60}:\s*/i, '').trim();
-    const match = cleaned.match(/^([^:]{1,80}):\s*/);
+    const match = /^([^:]{1,80}):\s*/.exec(cleaned);
     return match ? match[1].trim() : '';
 }
 
@@ -1157,7 +1157,10 @@ const TILE_OPTIONS = {
 
 function runWhenDomReady(callback) {
     if (window.__MAP_BUNDLE_LOADING__) {
-        (window.__MAP_READY_QUEUE__ ||= []).push(callback);
+        if (!window.__MAP_READY_QUEUE__) {
+            window.__MAP_READY_QUEUE__ = [];
+        }
+        window.__MAP_READY_QUEUE__.push(callback);
         return;
     }
     if (document.readyState === 'loading') {
@@ -1305,7 +1308,7 @@ function maybeTriggerLocalImuCriticalFallback(stationId, data) {
     const pitch = Number.parseFloat(data.pitch);
     if (!Number.isFinite(roll) || !Number.isFinite(pitch)) return;
 
-    const deltaTiltDeg = Math.sqrt((roll * roll) + (pitch * pitch));
+    const deltaTiltDeg = Math.hypot(roll, pitch);
     const criticalDeg = getImuCriticalThresholdDegFromCurrentStation();
     if (deltaTiltDeg < criticalDeg) return;
 

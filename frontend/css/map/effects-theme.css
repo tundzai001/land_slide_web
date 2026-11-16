@@ -467,7 +467,11 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
     .custom-marker-danger,
     .custom-marker-warning,
     .device-offline-marker,
+    .marker-alert-pulse,
+    .marker-device-alert,
+    .alert-banner,
     .alert-icon {
         animation: none !important;
+        transition: none !important;
     }
 }

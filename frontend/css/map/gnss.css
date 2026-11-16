@@ -998,7 +998,9 @@ body:has(.top-navbar) #gnssTerminalModal {
     .sensor-clickable,
     #gnssTerminalModal *,
     #gnss-adjustment-running-pill,
+    .gnss-workflow-live i,
     .gnss-flow-node,
+    .gnss-flow-node.status-running .gnss-flow-marker::after,
     .gnss-flow-badge,
     .gnss-flow-ring,
     .gnss-flow-pulse {

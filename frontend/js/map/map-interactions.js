@@ -134,7 +134,11 @@ function setupEventListeners() {
     if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', async () => {
             try { await window.loadFeatureLibrary?.('chart'); }
-            catch (_) { window.toast?.error('Không thể tải thư viện biểu đồ.'); return; }
+            catch (err) {
+                console.debug('Không thể tải thư viện biểu đồ:', err);
+                window.toast?.error('Không thể tải thư viện biểu đồ.');
+                return;
+            }
             const stationContext = document.getElementById('charts-station-context');
             if (stationContext && currentStationData) {
                 stationContext.textContent = `${currentStationData.name} · ${currentStationData.station_code}`;
@@ -1329,13 +1333,6 @@ function setupEventListeners() {
     }
     window.ensureGnssTerminalModal = ensureGnssTerminalModal;
 
-    function showGnssTerminalModal(modal) {
-        bootstrap.Modal.getOrCreateInstance(modal, {
-            backdrop: false,
-            focus: false,
-        }).show();
-    }
-
     function showAdjustmentError(title, message) {
         const terminalModal = document.getElementById('gnssTerminalModal');
         if (terminalModal?.classList.contains('show')) {
@@ -1369,23 +1366,6 @@ function setupEventListeners() {
                 return Promise.resolve({ isConfirmed: true });
             }
         };
-    }
-
-    async function readApiError(response) {
-        if (!response) return 'Khong nhan duoc phan hoi tu may chu';
-        try {
-            const data = await response.clone().json();
-            return data.detail || data.message || data.error || `HTTP ${response.status}`;
-        } catch (jsonErr) {
-            console.debug('Failed to parse response JSON:', jsonErr);
-            try {
-                const text = await response.text();
-                return text || `HTTP ${response.status}`;
-            } catch (textErr) {
-                console.debug('Failed to read response text:', textErr);
-                return `HTTP ${response.status}`;
-            }
-        }
     }
 
     async function controlGnssAdjustment(action) {
@@ -1658,4 +1638,28 @@ function setupEventListeners() {
     });
 
     console.log('✅ [MAP] All event listeners setup complete');
+}
+
+function showGnssTerminalModal(modal) {
+    bootstrap.Modal.getOrCreateInstance(modal, {
+        backdrop: false,
+        focus: false,
+    }).show();
+}
+
+async function readApiError(response) {
+    if (!response) return 'Khong nhan duoc phan hoi tu may chu';
+    try {
+        const data = await response.clone().json();
+        return data.detail || data.message || data.error || `HTTP ${response.status}`;
+    } catch (jsonErr) {
+        console.debug('Failed to parse response JSON:', jsonErr);
+        try {
+            const text = await response.text();
+            return text || `HTTP ${response.status}`;
+        } catch (textErr) {
+            console.debug('Failed to read response text:', textErr);
+            return `HTTP ${response.status}`;
+        }
+    }
 }
