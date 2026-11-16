@@ -281,9 +281,10 @@ async def admin_get_sensor_data(
     include_data: bool = True,
     include_internal: bool = False,
     db: AsyncSession = Depends(get_data_db),
-    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    current_user: Optional[model_auth.User] = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy sensor data gần nhất"""
+    _ = current_user
     try:
         requested_sensor_type = sensor_type.strip().lower() if sensor_type and sensor_type.strip() else None
         if requested_sensor_type in INTERNAL_SENSOR_TYPES and not include_internal:
