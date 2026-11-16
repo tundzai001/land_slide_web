@@ -67,7 +67,7 @@ def _device_runtime_state(device, station, now_ts: int) -> dict:
 async def get_database_stats(
     config_db: AsyncSession = Depends(get_config_db),
     data_db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     global _stats_cache, _stats_cache_expires_at
     now = time.monotonic()
@@ -127,7 +127,7 @@ async def admin_get_all_stations(
     sort: Optional[str] = None,
     summary_only: bool = False,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy tất cả stations từ DB"""
     try:
@@ -209,7 +209,7 @@ async def admin_get_all_devices(
     limit: Optional[int] = None,
     sort: Optional[str] = None,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy tất cả devices từ DB"""
     try:
@@ -281,7 +281,7 @@ async def admin_get_sensor_data(
     include_data: bool = True,
     include_internal: bool = False,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy sensor data gần nhất"""
     try:
@@ -431,7 +431,7 @@ async def admin_get_sensor_data(
 async def admin_get_sensor_data_record(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
 ):
     record = (
         await db.execute(
@@ -464,7 +464,7 @@ async def admin_get_alerts(
     is_resolved: Optional[bool] = None,
     sort: str = "-timestamp",
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Lấy alerts gần nhất"""
     try:
@@ -515,7 +515,7 @@ async def admin_get_simulations(
     mode: Optional[str] = None,
     sort: str = "-id",
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS)),
 ):
     query = select(model_data.SimulationRun)
     if project_id is not None:

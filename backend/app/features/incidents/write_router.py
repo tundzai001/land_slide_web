@@ -196,6 +196,6 @@ async def add_incident_note(
     db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_INCIDENTS)),
 ):
-    def mutate(case):
+    def mutate(_case):
         return True, "note_added", body.message, {}
     return await _mutate_case(db, current_user, incident_id, "notes", body.model_dump(), idempotency_key, mutate)

@@ -55,7 +55,7 @@ async def get_users(
     limit: Optional[int] = None,
     sort: Optional[str] = None,
     db: AsyncSession = Depends(get_auth_db), # ✅ Dùng Auth DB
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     page_offset, page_limit = normalize_page(offset, limit)
     query = select(model_auth.User)
@@ -151,7 +151,7 @@ async def update_user_projects(
     user_id: int,
     payload: schemas.UserProjectsUpdate,
     db: AsyncSession = Depends(get_auth_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Update project assignments for a user (typically operator)."""
     result = await db.execute(select(model_auth.User).where(model_auth.User.id == user_id))
@@ -169,7 +169,7 @@ async def update_user_projects(
 async def create_user(
     user_in: schemas.UserCreate,
     db: AsyncSession = Depends(get_auth_db), # ✅ Dùng Auth DB
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     exists = await db.execute(select(model_auth.User).where(model_auth.User.username == user_in.username))
     if exists.scalar_one_or_none():

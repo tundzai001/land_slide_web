@@ -63,7 +63,7 @@ async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(
 
 
 @router.get("/runs")
-async def list_runs(response: Response, project_id: Optional[int] = None, station_id: Optional[int] = None, status: Optional[str] = None, mode: Optional[str] = None, start_ts: Optional[int] = None, end_ts: Optional[int] = None, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
+async def list_runs(_response: Response, project_id: Optional[int] = None, station_id: Optional[int] = None, status: Optional[str] = None, mode: Optional[str] = None, start_ts: Optional[int] = None, end_ts: Optional[int] = None, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     query = select(model_data.SimulationRun)
     for condition in [model_data.SimulationRun.project_id == project_id if project_id is not None else None, model_data.SimulationRun.station_id == station_id if station_id is not None else None, model_data.SimulationRun.status == status if status else None, model_data.SimulationRun.mode == mode if mode else None, model_data.SimulationRun.created_at >= start_ts if start_ts else None, model_data.SimulationRun.created_at <= end_ts if end_ts else None]:
         if condition is not None:

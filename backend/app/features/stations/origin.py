@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 @router.post("/gnss/fetch-live-origin")
 async def fetch_live_gnss_origin(
     request_data: dict,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
         topic = request_data.get('topic')

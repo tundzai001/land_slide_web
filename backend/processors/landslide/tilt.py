@@ -109,6 +109,7 @@ class TiltAnalysisMixin:
             
             return {
                 "status": "success",
+                "station_id": station_id,
                 "analysis": {
                     "total_tilt_change_deg": round(total_tilt_change, 2),
                     "avg_rate_deg_per_day": round(avg_rate_deg_per_day, 4),

@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 async def download_export_excel(
     task_id: str,
     background_tasks: BackgroundTasks,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Tải file ZIP đã xuất xong."""
     if task_id not in EXPORT_TASKS:
@@ -54,7 +54,7 @@ async def download_export_excel(
 @router.get("/db/export-excel/{task_id}/progress")
 async def get_export_progress(
     task_id: str,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Lấy tiến độ của tác vụ xuất."""
     if task_id not in EXPORT_TASKS:
@@ -66,7 +66,7 @@ async def get_export_progress(
 async def start_export_database_excel(
     request: ExportExcelRequest,
     background_tasks: BackgroundTasks,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Bắt đầu tác vụ xuất Excel chạy ngầm."""
     allowed = {'projects', 'stations', 'devices', 'sensor_data', 'gnss_adjustments', 'alerts', 'simulations'}

@@ -42,7 +42,7 @@ class SensorPersistenceMixin:
 
     async def _save_processed_data(
         self,
-        info: dict,
+        _info: dict,
         raw_payload: str,
         processed_data: dict,
         alert: dict | None,

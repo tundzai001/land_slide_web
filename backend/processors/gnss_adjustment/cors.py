@@ -373,7 +373,7 @@ class RoundRobinCorsMixin:
     def _cors_stream_is_managed_by_adjustment(
         self,
         serial: str,
-        server_id: int,
+        _server_id: int,
     ) -> bool:
         target_serial = str(serial or "").strip().casefold()
         # Even a single-stream hold owns a full configure-service document.

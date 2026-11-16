@@ -74,7 +74,7 @@ class MQTTTransportMixin:
             logger.error(f"❌ [FORWARD] Failed to connect to external broker {host}:{port}: {e}")
             return None
 
-    def on_connect(self, client, userdata, flags, rc, properties=None):
+    def on_connect(self, client, userdata, _flags, rc, _properties=None):
         if not isinstance(userdata, tuple) or len(userdata) < 5:
             # Default client
             if rc == 0:
@@ -94,7 +94,7 @@ class MQTTTransportMixin:
         else:
             logger.error(f"❌ MQTT Connection to {broker_key[0]}:{broker_key[1]} failed: rc={rc}")
 
-    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+    def on_disconnect(self, _client, userdata, _disconnect_flags, reason_code, _properties):
         if isinstance(userdata, tuple) and len(userdata) >= 5:
             host, port = userdata[:2]
         else:
@@ -105,7 +105,7 @@ class MQTTTransportMixin:
         else:
             logger.info("MQTT disconnected from %s:%s", host, port)
 
-    def on_connect_fail(self, client, userdata):
+    def on_connect_fail(self, _client, userdata):
         if isinstance(userdata, tuple) and len(userdata) >= 5:
             host, port = userdata[:2]
         else:
@@ -156,7 +156,7 @@ class MQTTTransportMixin:
         except UnicodeDecodeError:
             return None
 
-    def on_message(self, client, userdata, msg):
+    def on_message(self, _client, userdata, msg):
         try:
             topic = msg.topic
             if topic.startswith("command/ntrip/"):

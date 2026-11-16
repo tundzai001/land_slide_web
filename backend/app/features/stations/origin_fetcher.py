@@ -100,7 +100,7 @@ class GNSSLiveFetcher:
 
         return match.group(0).decode('ascii', errors='ignore').strip()
 
-    def _on_connect(self, client, userdata, flags, rc, properties=None):
+    def _on_connect(self, client, userdata, _flags, rc, _properties=None):
         if rc == 0:
             self.is_connected = True
             logger.info(f"[GNSSLiveFetcher] Connected to broker, subscribing to {userdata['topic']}")
@@ -108,7 +108,7 @@ class GNSSLiveFetcher:
         else:
             logger.error(f"[GNSSLiveFetcher] Connect failed with code {rc}")
 
-    def _on_message(self, client, userdata, msg):
+    def _on_message(self, client, _userdata, msg):
         try:
             payload = self._extract_gngga(msg.payload)
             if not payload:

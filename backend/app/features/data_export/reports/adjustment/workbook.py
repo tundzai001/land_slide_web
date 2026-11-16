@@ -7,7 +7,7 @@ class AdjustmentReportMixin:
         project_id: int,
         timestamp: int,
         data: dict,
-        raw_payload: str,
+        _raw_payload: str,
         *,
         output_stream,
     ):

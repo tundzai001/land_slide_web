@@ -84,7 +84,7 @@ async def login(
 
 @router.post("/api/auth/logout")
 async def logout(response: Response,
-                 current_user: model_auth.User = Depends(auth.get_current_user),
+                 _user: model_auth.User = Depends(auth.get_current_user),
                  token: str = Depends(auth.oauth2_scheme)):
     jti = auth.decode_access_token(token)["jti"]
     try:

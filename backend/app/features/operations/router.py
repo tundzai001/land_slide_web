@@ -27,19 +27,19 @@ admin = auth.require_permission(auth.Permission.MANAGE_DATABASE)
 async def logs(kind: Literal['audit_log', 'operation_log'] = 'audit_log', offset: int = Query(0, ge=0),
                limit: int = Query(50, ge=1, le=200), action: str = '', username: str = '',
                start: int = Query(0, ge=0), end: int = Query(0, ge=0),
-               method: str = Query('', pattern=r'^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)?$'), user=Depends(admin)):
+               method: str = Query('', pattern=r'^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)?$'), _user=Depends(admin)):
     return await asyncio.to_thread(store.query, kind, offset, limit, action, username, start, end, method)
 
 
 @router.get('/log-options')
-async def log_options(user=Depends(admin), db=Depends(get_auth_db)):
+async def log_options(_user=Depends(admin), db=Depends(get_auth_db)):
     accounts = (await db.execute(select(User.username, User.full_name, User.is_active).order_by(User.username))).mappings().all()
     return {'accounts': [dict(row) for row in accounts],
             'journals': await asyncio.to_thread(store.log_options)}
 
 
 @router.get('/backups')
-async def list_backups(user=Depends(admin)):
+async def list_backups(_user=Depends(admin)):
     return {'backups': await asyncio.to_thread(backups.list_backups),
             'schedule': await asyncio.to_thread(store.get_setting, 'backup_schedule', {'frequency': 'disabled'}),
             'recovery_mode': 'isolated',
@@ -48,7 +48,7 @@ async def list_backups(user=Depends(admin)):
 
 
 @router.post('/backups')
-async def start_backup(tasks: BackgroundTasks, user=Depends(admin)):
+async def start_backup(tasks: BackgroundTasks, _user=Depends(admin)):
     identifier = uuid.uuid4().hex
     await asyncio.to_thread(backups.job, identifier, kind='backup', status='pending')
     tasks.add_task(backups.create, identifier)
@@ -56,7 +56,7 @@ async def start_backup(tasks: BackgroundTasks, user=Depends(admin)):
 
 
 @router.get('/jobs/{identifier}')
-async def job_status(identifier: str, user=Depends(admin)):
+async def job_status(identifier: str, _user=Depends(admin)):
     try:
         backups.backup_path(identifier)
     except ValueError as exc:
@@ -68,7 +68,7 @@ async def job_status(identifier: str, user=Depends(admin)):
 
 
 @router.get('/backups/{identifier}/download')
-async def download_backup(identifier: str, user=Depends(admin)):
+async def download_backup(identifier: str, _user=Depends(admin)):
     try:
         path = backups.backup_path(identifier)
     except ValueError as exc:
@@ -79,7 +79,7 @@ async def download_backup(identifier: str, user=Depends(admin)):
 
 
 @router.post('/backups/upload')
-async def upload_backup(file: UploadFile, user=Depends(admin)):
+async def upload_backup(file: UploadFile, _user=Depends(admin)):
     identifier = uuid.uuid4().hex
     path = backups.backup_path(identifier)
     partial = path.with_suffix('.upload')
@@ -109,7 +109,7 @@ class RestoreRequest(BaseModel):
 
 
 @router.post('/backups/{identifier}/restore')
-async def restore_backup(identifier: str, body: RestoreRequest, tasks: BackgroundTasks, user=Depends(admin)):
+async def restore_backup(identifier: str, _body: RestoreRequest, tasks: BackgroundTasks, _user=Depends(admin)):
     try:
         path = backups.backup_path(identifier)
     except ValueError as exc:
@@ -143,19 +143,19 @@ class NTPConfig(BaseModel):
 
 
 @router.get('/ntp')
-async def get_ntp(user=Depends(admin)):
+async def get_ntp(_user=Depends(admin)):
     return {'config': NTPConfig(server=settings.NTP_SERVER).model_dump(), 'config_source': 'environment',
             'last_check': await asyncio.to_thread(store.get_setting, 'ntp_status'), 'mode': 'measurement_only',
             'system_clock': await asyncio.to_thread(system_time_status)}
 
 
 @router.put('/ntp')
-async def save_ntp(body: NTPConfig, user=Depends(admin)):
+async def save_ntp(_body: NTPConfig, _user=Depends(admin)):
     raise HTTPException(409, 'NTP server is managed by NTP_SERVER in backend/.env; restart the service after changing it')
 
 
 @router.post('/ntp/check')
-async def check_ntp(user=Depends(admin)):
+async def check_ntp(_user=Depends(admin)):
     config = NTPConfig(server=settings.NTP_SERVER).model_dump()
     try:
         result = await asyncio.to_thread(ntp_probe, config['server'])
@@ -176,20 +176,20 @@ async def check_ntp(user=Depends(admin)):
 
 
 @router.get('/ntp/chrony-config', response_class=PlainTextResponse)
-async def chrony_config(user=Depends(admin)):
+async def chrony_config(_user=Depends(admin)):
     config = NTPConfig(server=settings.NTP_SERVER).model_dump()
     return f"# Apply on the server/gateway through your OS administrator\nserver {config['server']} iburst\nmakestep 1.0 3\nrtcsync\n"
 
 
 @router.get('/devices')
-async def devices(db=Depends(get_config_db), user=Depends(admin)):
+async def devices(db=Depends(get_config_db), _user=Depends(admin)):
     rows = (await db.execute(select(Device).order_by(Device.id))).scalars().all()
     return [{'id': d.id, 'name': d.name, 'device_type': d.device_type, 'mqtt_topic': d.mqtt_topic,
              'acquisition': (d.config or {}).get('acquisition', {'protocol': 'mqtt', 'enabled': False})} for d in rows]
 
 
 @router.put('/devices/{device_id}/acquisition')
-async def acquisition(device_id: int, body: AcquisitionProfile, db=Depends(get_config_db), user=Depends(admin)):
+async def acquisition(device_id: int, body: AcquisitionProfile, db=Depends(get_config_db), _user=Depends(admin)):
     device = await db.get(Device, device_id)
     if not device:
         raise HTTPException(404, 'Device not found')
@@ -207,7 +207,7 @@ async def acquisition(device_id: int, body: AcquisitionProfile, db=Depends(get_c
 
 
 @router.get('/gateway-config')
-async def gateway_config(device_id: int = Query(..., ge=1), db=Depends(get_config_db), user=Depends(admin)):
+async def gateway_config(device_id: int = Query(..., ge=1), db=Depends(get_config_db), _user=Depends(admin)):
     rows = (await db.execute(select(Device).where(Device.is_active.is_(True), Device.id == device_id))).scalars().all()
     if not rows:
         raise HTTPException(404, 'Active device not found')
@@ -216,17 +216,17 @@ async def gateway_config(device_id: int = Query(..., ge=1), db=Depends(get_confi
 
 
 @router.get('/integration-guide', response_class=PlainTextResponse)
-async def integration_guide(user=Depends(admin)):
+async def integration_guide(_user=Depends(admin)):
     return (Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.md').read_text(encoding='utf-8')
 
 
 @router.get('/integration-guide/download')
-async def download_integration_guide(user=Depends(admin)):
+async def download_integration_guide(_user=Depends(admin)):
     path = Path(__file__).resolve().parents[4] / 'docs' / 'OPERATIONS_INTEGRATION.pdf'
     return FileResponse(path, filename='huong-dan-van-hanh-tich-hop.pdf', media_type='application/pdf')
 
 
 @router.get('/user-guide/download')
-async def download_user_guide(user=Depends(admin)):
+async def download_user_guide(_user=Depends(admin)):
     path = Path(__file__).resolve().parents[4] / 'docs' / 'USER_GUIDE.pdf'
     return FileResponse(path, filename='huong-dan-su-dung-web.pdf', media_type='application/pdf')

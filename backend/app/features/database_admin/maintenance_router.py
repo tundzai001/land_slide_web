@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 @router.post("/db/clear-table/{table_name}")
 async def clear_specific_table(
     table_name: str,
-    config_db: AsyncSession = Depends(get_config_db),
+    _config_db: AsyncSession = Depends(get_config_db),
     data_db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
@@ -99,13 +99,13 @@ async def factory_reset_database(
     except HTTPException:
         raise
     except Exception as e:
-        await config_db.rollback()
+        await _config_db.rollback()
         await data_db.rollback()
 
 
 @router.post("/db/clear-all")
 async def clear_all_database(
-    config_db: AsyncSession = Depends(get_config_db),
+    _config_db: AsyncSession = Depends(get_config_db),
     data_db: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):

@@ -19,11 +19,11 @@ from .config import settings
 _bearer_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 
-def oauth2_scheme(request: Request, bearer_token: Optional[str] = Depends(_bearer_scheme)):
+def oauth2_scheme(request: Request, _bearer_token: Optional[str] = Depends(_bearer_scheme)):
     from .browser_session import request_token
     return request_token(request)
 
-def invalidate_user_cache(username: Optional[str] = None) -> None:
+def invalidate_user_cache(_username: Optional[str] = None) -> None:
     """Compatibility hook; user authorization now reads directly from the database."""
     return None
 

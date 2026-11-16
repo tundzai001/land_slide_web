@@ -31,13 +31,13 @@ class OtherSensorPayloadMixin:
         self,
         info: dict,
         raw_payload: str,
-        public_project_id: int,
+        _public_project_id: int,
         station_id: int,
-        station_name: str,
+        _station_name: str,
         processor: Any,
         station_config: dict,
-        device_id: int,
-        adjustment_only: bool,
+        _device_id: int,
+        _adjustment_only: bool,
         current_timestamp: int,
     ) -> dict | None:
         sensor_type = info["type"]

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 @router.post("/stations/{station_code}/ntrip_route/stop")
 async def stop_ntrip_route(
     station_code: str,
-    current_admin: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+    _admin: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
     db: AsyncSession = Depends(get_config_db)
 ):
     from ...mqtt.ntrip_pusher import ntrip_manager
@@ -38,7 +38,7 @@ async def stop_ntrip_route(
 async def start_ntrip_route(
     station_code: str,
     payload: schemas.NtripRouteStart,
-    current_admin: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+    _admin: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
     db: AsyncSession = Depends(get_config_db)
 ):
     from ...mqtt.ntrip_pusher import ntrip_manager

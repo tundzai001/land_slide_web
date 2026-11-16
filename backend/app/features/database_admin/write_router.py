@@ -23,7 +23,7 @@ async def admin_update_station(
     record_id: int,
     update_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Cập nhật station record"""
     try:
@@ -60,7 +60,7 @@ async def admin_update_station(
 async def admin_delete_station(
     record_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     """Xóa station"""
     try:
@@ -90,7 +90,7 @@ async def admin_update_device(
     record_id: int,
     update_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         result = await db.execute(
@@ -118,7 +118,7 @@ async def admin_update_device(
 async def admin_delete_device(
     record_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         await db.execute(
@@ -135,7 +135,7 @@ async def admin_delete_device(
 async def admin_delete_sensor_data(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         from sqlalchemy import delete as sql_delete
@@ -153,7 +153,7 @@ async def admin_delete_sensor_data(
 async def admin_delete_alert(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE))
 ):
     try:
         from sqlalchemy import delete as sql_delete
@@ -171,7 +171,7 @@ async def admin_delete_alert(
 async def admin_delete_simulation(
     record_id: int,
     db: AsyncSession = Depends(get_data_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_DATABASE)),
 ):
     try:
         result = await db.execute(

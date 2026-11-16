@@ -24,7 +24,7 @@ async def send_audio_command(
     station_id: int,
     payload: PlayAudioRequest,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     """
     Send a 'play audio' command to the station via MQTT.

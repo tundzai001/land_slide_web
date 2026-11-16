@@ -167,7 +167,7 @@ async def update_project_dem(
 async def create_project(
     project_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         validate_project_fields(project_data, creating=True)
@@ -210,7 +210,7 @@ async def update_project(
     project_id: int,
     project_data: dict,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         result = await db.execute(
@@ -291,7 +291,7 @@ async def update_project(
 async def get_project(
     project_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         result = await db.execute(
@@ -320,7 +320,7 @@ async def get_project(
 async def delete_project(
     project_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         result = await db.execute(

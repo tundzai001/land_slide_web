@@ -157,7 +157,7 @@ async def run_cors_fixed_base_failover_daemon():
 # LIFESPAN MANAGEMENT
 # ============================================================================
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     config.settings.validate_security()
     if config.settings.MQTT_BROKER and config.settings.MQTT_PASSWORD == "":
         logger.warning("MQTT broker uses a credential present in source history; rotate the broker account and MQTT_PASSWORD together")

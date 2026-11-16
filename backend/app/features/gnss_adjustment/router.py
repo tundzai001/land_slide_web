@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/api/admin/gnss/aicaster-users")
 async def list_aicaster_users(
-    current_user: model_auth.User = Depends(
+    _user: model_auth.User = Depends(
         auth.require_permission(auth.Permission.EDIT_STATIONS)
     ),
 ):
@@ -364,7 +364,7 @@ async def start_gnss_adjustment(
 @router.get("/api/admin/gnss/adjustment/status")
 async def get_gnss_adjustment_status(
     project_id: int,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
 ):
     """Return the authoritative terminal state when a WebSocket event is missed."""
 
@@ -412,7 +412,7 @@ async def get_gnss_adjustment_status(
 @router.post("/api/admin/gnss/adjustment/pause")
 async def pause_gnss_adjustment(
     req: GnssAdjustmentControlRequest,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
 ):
     phase = str(mqtt_service.adjustment_phase.get(req.project_id) or "IDLE").upper()
     if phase not in {"COLLECTING_BASELINE", "FREE_NETWORK"}:
@@ -455,7 +455,7 @@ async def pause_gnss_adjustment(
 @router.post("/api/admin/gnss/adjustment/resume")
 async def resume_gnss_adjustment(
     req: GnssAdjustmentControlRequest,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
 ):
     if str(mqtt_service.adjustment_phase.get(req.project_id) or "").upper() != "PAUSED":
         raise HTTPException(status_code=409, detail="Phiên bình sai không ở trạng thái tạm dừng.")
@@ -497,7 +497,7 @@ async def resume_gnss_adjustment(
 @router.post("/api/admin/gnss/adjustment/stop")
 async def stop_gnss_adjustment(
     req: GnssAdjustmentStartRequest,
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     try:
         if not hasattr(mqtt_service, "active_adjustment_clusters"):

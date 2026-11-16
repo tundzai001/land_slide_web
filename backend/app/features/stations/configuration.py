@@ -239,7 +239,7 @@ async def update_station_config(
 async def reset_station_config(
     station_id: int,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         result = await db.execute(
@@ -271,7 +271,7 @@ async def reset_station_config(
 async def get_station_config(
     station_id: int,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS))
+    _current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS))
 ):
     result = await db.execute(
         select(model_config.Station).where(model_config.Station.id == station_id)

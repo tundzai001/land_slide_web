@@ -126,6 +126,8 @@ class WindowAnalysisMixin:
 
             return {
                 "available": True,
+                "station_id": station_id,
+                "configured_windows": windows,
                 "windows": window_results,
                 "acceleration_alert": acceleration_alert
             }

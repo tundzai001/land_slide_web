@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 async def delete_station(
     station_id: int,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         result = await db.execute(select(model_config.Station).where(model_config.Station.id == station_id))
@@ -47,7 +47,7 @@ async def delete_station(
 async def create_station(
     station_in: schemas.StationCreate,
     db: AsyncSession = Depends(get_config_db), # ✅ Dùng Config DB
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     # 1. Check trùng mã
     exists = await db.execute(select(model_config.Station).where(model_config.Station.station_code == station_in.station_code))

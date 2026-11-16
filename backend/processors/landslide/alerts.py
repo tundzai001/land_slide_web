@@ -6,7 +6,7 @@ from .helpers import Any, Dict, List, Optional, OrderedDict, datetime, defaultdi
 
 
 class SensorAlertAnalysisMixin:
-    def analyze_rainfall(self, station_id: int, recent_data: List[Dict], past_72h: List[Dict], config: Dict) -> Optional[Dict]:
+    def analyze_rainfall(self, station_id: int, recent_data: List[Dict], _past_72h: List[Dict], config: Dict) -> Optional[Dict]:
         if not recent_data: return None
         try:
             watch = self._get_cfg(config, 'RainAlerting', 'rain_intensity_watch_threshold', 10.0)

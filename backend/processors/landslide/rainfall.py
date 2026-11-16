@@ -30,6 +30,7 @@ class RainfallAnalysisMixin:
         result = {
             "available": False,
             "model": "slide_model",
+            "window_days": float(window_days),
             "message": ""
         }
 

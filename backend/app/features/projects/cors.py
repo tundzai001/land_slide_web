@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/api/admin/projects/cors-stations")
 async def get_admin_cors_stations(
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     try:
         return await asyncio.to_thread(_fetch_cors_base_stations_sync)
@@ -28,7 +28,7 @@ async def get_admin_cors_stations(
 
 @router.get("/api/admin/projects/cors-failover-status")
 async def get_admin_cors_failover_status(
-    current_user: model_auth.User = Depends(
+    _user: model_auth.User = Depends(
         auth.require_permission(auth.Permission.MANAGE_USERS)
     ),
 ):

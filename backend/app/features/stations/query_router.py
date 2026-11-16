@@ -158,7 +158,7 @@ async def get_mqtt_topic_availability(
     topic: str = Query(..., min_length=1, max_length=255),
     exclude_station_id: Optional[int] = None,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS)),
 ):
     normalized = normalize_mqtt_topic(topic)
     conflicts = await find_mqtt_topic_conflicts(db, [normalized], exclude_station_id)

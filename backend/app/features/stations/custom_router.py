@@ -21,7 +21,7 @@ class CustomSensorCreate(BaseModel):
 @router.get("/sensor-presets")
 async def list_sensor_presets(
     db: AsyncSession = Depends(get_config_db),
-    current_user: User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS)),
+    _user: User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS)),
 ):
     return await get_custom_sensors(db)
 
@@ -30,6 +30,6 @@ async def list_sensor_presets(
 async def add_sensor_preset(
     payload: CustomSensorCreate,
     db: AsyncSession = Depends(get_config_db),
-    current_user: User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
+    _user: User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS)),
 ):
     return await create_custom_sensor(db, payload.name, payload.description, payload.unit)

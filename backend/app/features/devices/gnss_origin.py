@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 async def reset_gnss_origin(
     station_id: int,
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.EDIT_STATIONS))
 ):
     """Calibrate device tracking offsets; survey origins remain immutable."""
     from ...runtime import mqtt_service

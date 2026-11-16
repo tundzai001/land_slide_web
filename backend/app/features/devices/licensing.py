@@ -63,7 +63,7 @@ class ProvisionDeviceRequest(BaseModel):
 @router.get("/devices/pending")
 async def get_pending_devices(
     db: AsyncSession = Depends(get_config_db),
-    current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
+    _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_USERS))
 ):
     """Return devices that are not yet assigned to a station (waiting for provisioning).
     Devices created by field units during registration are created with station_id=0.
