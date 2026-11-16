@@ -351,6 +351,80 @@ class AuthManager {
         } finally { list.removeAttribute('aria-busy'); }
     }
 
+    _updateAuthenticatedUI(authBtn) {
+        console.log('✅ [AUTH] User authenticated:', this.user.username, '| Role:', this.user.role);
+
+        const icon = document.createElement('i');
+        icon.className = 'bi bi-person-check me-1';
+        icon.setAttribute('aria-hidden', 'true');
+        authBtn.replaceChildren(icon, document.createTextNode(this.user.username));
+        authBtn.classList.remove('btn-primary');
+        authBtn.classList.add('btn-outline-danger');
+        authBtn.onclick = (e) => {
+            e.preventDefault();
+            void this.openSessions();
+        };
+
+        const userDisplay = document.getElementById('user-display');
+        if (userDisplay) {
+            userDisplay.textContent = `Hi, ${this.user.username}`;
+            userDisplay.classList.remove('d-none');
+            console.log('✅ [AUTH] Landing: User display updated');
+        }
+
+        const adminCard = document.getElementById('admin-card');
+        if (adminCard && (this.user.role === 'admin' || this.user.role === 'operator')) {
+            adminCard.classList.remove('d-none');
+            console.log('✅ [AUTH] Landing: Admin card shown');
+        }
+
+        const adminNavBtn = document.getElementById('admin-nav-btn');
+        if (adminNavBtn) {
+            const hasAdminAccess = this.user.role === 'admin' || this.user.role === 'operator';
+            adminNavBtn.style.display = hasAdminAccess ? 'inline-flex' : 'none';
+        }
+
+        const simulationBtn = document.getElementById('btn-digital-twin');
+        if (simulationBtn) simulationBtn.style.display = this.user.role === 'admin' ? 'inline-flex' : 'none';
+
+        const btnLongTerm = document.getElementById('btn-long-term');
+        if (btnLongTerm) {
+            btnLongTerm.classList.remove('d-none');
+            console.log('✅ [AUTH] Map: Data analysis buttons shown');
+        }
+    }
+
+    _updateUnauthenticatedUI(authBtn) {
+        console.log('ℹ️ [AUTH] Not authenticated');
+
+        authBtn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i> <span>Đăng nhập</span>';
+        authBtn.classList.add('btn-primary');
+        authBtn.classList.remove('btn-outline-danger');
+        authBtn.onclick = () => {
+            const currentPath = window.location.pathname;
+            const returnTo = currentPath === '/management' || currentPath === '/admin' ? '/management' : '/map';
+            window.location.href = `/login?return_to=${encodeURIComponent(returnTo)}`;
+        };
+
+        const userDisplay = document.getElementById('user-display');
+        if (userDisplay) userDisplay.classList.add('d-none');
+
+        const adminCard = document.getElementById('admin-card');
+        if (adminCard) adminCard.classList.add('d-none');
+
+        const adminNavBtn = document.getElementById('admin-nav-btn');
+        if (adminNavBtn) adminNavBtn.style.display = 'none';
+
+        const simulationBtn = document.getElementById('btn-digital-twin');
+        if (simulationBtn) simulationBtn.style.display = 'none';
+
+        const btnLongTerm = document.getElementById('btn-long-term');
+        if (btnLongTerm) {
+            btnLongTerm.classList.add('d-none');
+            console.log('🔒 [AUTH] Map: Data analysis buttons hidden (guest)');
+        }
+    }
+
     // ✅ UNIVERSAL: Works for both Landing & Map pages
     updateAuthUI() {
         console.log('🔄 [AUTH] Updating UI...');
@@ -362,101 +436,9 @@ class AuthManager {
         }
 
         if (this.isAuthenticated()) {
-            console.log('✅ [AUTH] User authenticated:', this.user.username, '| Role:', this.user.role);
-
-            // ============================================
-            // UPDATE AUTH BUTTON (All Pages)
-            // ============================================
-            const icon = document.createElement('i');
-            icon.className = 'bi bi-person-check me-1';
-            icon.setAttribute('aria-hidden', 'true');
-            authBtn.replaceChildren(icon, document.createTextNode(this.user.username));
-            authBtn.classList.remove('btn-primary');
-            authBtn.classList.add('btn-outline-danger');
-            authBtn.onclick = (e) => {
-                e.preventDefault();
-                void this.openSessions();
-            };
-
-            // ============================================
-            // LANDING PAGE SPECIFIC
-            // ============================================
-            const userDisplay = document.getElementById('user-display');
-            if (userDisplay) {
-                userDisplay.textContent = `Hi, ${this.user.username}`;
-                userDisplay.classList.remove('d-none');
-                console.log('✅ [AUTH] Landing: User display updated');
-            }
-
-            const adminCard = document.getElementById('admin-card');
-            if (adminCard && (this.user.role === 'admin' || this.user.role === 'operator')) {
-                adminCard.classList.remove('d-none');
-                console.log('✅ [AUTH] Landing: Admin card shown');
-            }
-
-            // ============================================
-            // MAP PAGE SPECIFIC
-            // ============================================
-            const adminNavBtn = document.getElementById('admin-nav-btn');
-            if (adminNavBtn) {
-                if (this.user.role === 'admin' || this.user.role === 'operator') {
-                    adminNavBtn.style.display = 'inline-flex';
-                    console.log('✅ [AUTH] Map: Admin button shown');
-                } else {
-                    adminNavBtn.style.display = 'none';
-                    console.log('🔒 [AUTH] Map: Admin button hidden (viewer)');
-                }
-            }
-
-            const simulationBtn = document.getElementById('btn-digital-twin');
-            if (simulationBtn) simulationBtn.style.display = this.user.role === 'admin' ? 'inline-flex' : 'none';
-
-            // Show data analysis buttons for authenticated users (viewer, admin, operator)
-            const btnLongTerm = document.getElementById('btn-long-term');
-            if (btnLongTerm) {
-                btnLongTerm.classList.remove('d-none');
-                console.log('✅ [AUTH] Map: Data analysis buttons shown');
-            }
-
+            this._updateAuthenticatedUI(authBtn);
         } else {
-            console.log('ℹ️ [AUTH] Not authenticated');
-
-            // Reset auth button
-            authBtn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i> <span>Đăng nhập</span>';
-            authBtn.classList.add('btn-primary');
-            authBtn.classList.remove('btn-outline-danger');
-            authBtn.onclick = () => {
-                const currentPath = window.location.pathname;
-                const returnTo = currentPath === '/management' || currentPath === '/admin' ? '/management' : '/map';
-                window.location.href = `/login?return_to=${encodeURIComponent(returnTo)}`;
-            };
-
-            // Hide user elements
-            const userDisplay = document.getElementById('user-display');
-            if (userDisplay) {
-                userDisplay.classList.add('d-none');
-            }
-
-            // Hide admin elements
-            const adminCard = document.getElementById('admin-card');
-            if (adminCard) {
-                adminCard.classList.add('d-none');
-            }
-
-            const adminNavBtn = document.getElementById('admin-nav-btn');
-            if (adminNavBtn) {
-                adminNavBtn.style.display = 'none';
-            }
-
-            const simulationBtn = document.getElementById('btn-digital-twin');
-            if (simulationBtn) simulationBtn.style.display = 'none';
-
-            // Hide data analysis buttons for unauthenticated users (guests)
-            const btnLongTerm = document.getElementById('btn-long-term');
-            if (btnLongTerm) {
-                btnLongTerm.classList.add('d-none');
-                console.log('🔒 [AUTH] Map: Data analysis buttons hidden (guest)');
-            }
+            this._updateUnauthenticatedUI(authBtn);
         }
     }
 
@@ -541,9 +523,8 @@ window.hydrateAuthenticatedImages = async function (root = document) {
     }));
 };
 
-window.downloadAuthenticatedFile = async function (url, fallbackName) {
+function resolveSafeDownloadUrl(url) {
     let safeUrl = String(url || '').trim();
-    // Auto-rewrite legacy /static/adjustments/ URLs from older DB records.
     if (safeUrl.startsWith('/static/adjustments/')) {
         const filename = safeUrl.slice('/static/adjustments/'.length);
         const idMatch = /^gnss_(?:binh_sai|adjustment)_(\d+)_/.exec(filename);
@@ -555,32 +536,33 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
     if (!safeUrl.startsWith('/api/admin/') || safeUrl.startsWith('//')) {
         throw new Error('Refusing to download a non-admin protected asset');
     }
-    const response = await window.authManager.apiFetch(safeUrl, { cache: 'no-store' });
-    if (!response?.ok) {
-        let detail = '';
-        let data = null;
+    return safeUrl;
+}
+
+async function extractDownloadErrorDetail(response) {
+    let detail = '';
+    let data = null;
+    try {
+        data = await response.json();
+        const value = data?.detail || data?.message || '';
+        detail = typeof value === 'string' ? value : JSON.stringify(value);
+    } catch {
         try {
-            data = await response.json();
-            const value = data?.detail || data?.message || '';
-            detail = typeof value === 'string' ? value : JSON.stringify(value);
-        } catch (jsonErr) {
-            console.debug('Failed to parse response JSON:', jsonErr);
-            try {
-                detail = await response.text();
-            } catch (textErr) {
-                console.debug('Failed to read response text:', textErr);
-            }
+            detail = await response.text();
+        } catch {
+            // ignore
         }
-        const phase = data?.phase_label || response.headers?.get('X-Operation-Phase');
-        const phaseCode = data?.phase && data.phase !== phase ? ` (${data.phase})` : '';
-        const requestId = data?.request_id || response.headers?.get('X-Request-ID');
-        if (phase) detail += `${detail ? ' · ' : ''}Giai đoạn: ${phase}${phaseCode}`;
-        if (requestId) detail += `${detail ? ' · ' : ''}Mã yêu cầu: ${requestId}`;
-        const errorMsg = detail ? `HTTP ${response?.status || 0}: ${detail}` : `Download HTTP ${response?.status || 0}`;
-        console.error(`[Download] Thất bại khi tải file từ ${safeUrl}:`, errorMsg, response);
-        throw new Error(errorMsg);
     }
-    const blobUrl = URL.createObjectURL(await response.blob());
+    const phase = data?.phase_label || response.headers?.get('X-Operation-Phase');
+    const phaseCode = data?.phase && data.phase !== phase ? ` (${data.phase})` : '';
+    const requestId = data?.request_id || response.headers?.get('X-Request-ID');
+    if (phase) detail += `${detail ? ' · ' : ''}Giai đoạn: ${phase}${phaseCode}`;
+    if (requestId) detail += `${detail ? ' · ' : ''}Mã yêu cầu: ${requestId}`;
+    return detail;
+}
+
+function triggerBlobDownload(blob, response, fallbackName) {
+    const blobUrl = URL.createObjectURL(blob);
     try {
         const disposition = response.headers.get('content-disposition') || '';
         const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
@@ -596,6 +578,18 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
     } finally {
         setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
     }
+}
+
+window.downloadAuthenticatedFile = async function (url, fallbackName) {
+    const safeUrl = resolveSafeDownloadUrl(url);
+    const response = await window.authManager.apiFetch(safeUrl, { cache: 'no-store' });
+    if (!response?.ok) {
+        const detail = await extractDownloadErrorDetail(response);
+        const errorMsg = detail ? `HTTP ${response?.status || 0}: ${detail}` : `Download HTTP ${response?.status || 0}`;
+        console.error(`[Download] Thất bại khi tải file từ ${safeUrl}:`, errorMsg, response);
+        throw new Error(errorMsg);
+    }
+    triggerBlobDownload(await response.blob(), response, fallbackName);
 };
 
 // ============================================

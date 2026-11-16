@@ -275,6 +275,29 @@ class AdminStationsFeature extends window.AdminManager {
         }
     }
 
+    _updateDemGeorefLabels(grid) {
+        const centerEasting = grid.xllcorner + (grid.ncols * grid.cellsize) / 2;
+        const centerNorthing = grid.yllcorner + (grid.nrows * grid.cellsize) / 2;
+        const centerWgs = window.DemGrid.utm48ToWgs84(centerEasting, centerNorthing);
+        const elOrigin = document.getElementById('dem-georef-origin');
+        const elCenter = document.getElementById('dem-georef-center');
+        const elElev = document.getElementById('dem-georef-elevation');
+        if (elOrigin) elOrigin.textContent = `X: ${grid.xllcorner.toFixed(1)}, Y: ${grid.yllcorner.toFixed(1)}`;
+        if (elCenter) elCenter.textContent = `${centerWgs.lat.toFixed(6)}°, ${centerWgs.lon.toFixed(6)}°`;
+        if (elElev) elElev.textContent = `${grid.ncols} × ${grid.nrows} ô (${grid.cellsize}m) · ${grid.min.toFixed(1)}m đến ${grid.max.toFixed(1)}m`;
+    }
+
+    _bindDemViewerActionButtons() {
+        document.querySelectorAll('[data-dem-admin-action]').forEach(button => {
+            button.onclick = () => {
+                const action = button.dataset.demAdminAction;
+                if (action === 'in') this._managementDemViewer?.zoomIn();
+                else if (action === 'out') this._managementDemViewer?.zoomOut();
+                else this._managementDemViewer?.fit();
+            };
+        });
+    }
+
     async loadProjectDem(demId = this._selectedDemId) {
         const canvas = document.getElementById('management-dem-canvas');
         if (!canvas || !window.DemGrid || !demId) return;
@@ -301,26 +324,11 @@ class AdminStationsFeature extends window.AdminManager {
             });
             if (!canvas.isConnected || requestId !== this._managementDemRequest) { viewer.destroy(); return; }
             this._managementDemViewer = viewer;
-            document.querySelectorAll('[data-dem-admin-action]').forEach(button => button.onclick = () => {
-                const action = button.dataset.demAdminAction;
-                if (action === 'in') this._managementDemViewer?.zoomIn();
-                else if (action === 'out') this._managementDemViewer?.zoomOut();
-                else this._managementDemViewer?.fit();
-            });
+            this._bindDemViewerActionButtons();
             const selector = document.getElementById('management-dem-select');
             if (selector) selector.onchange = () => this.loadProjectDem(selector.value);
             if (status) status.textContent = `${grid.ncols} × ${grid.nrows} ô · cao độ ${grid.min.toFixed(1)}–${grid.max.toFixed(1)} m · UTM 48N`;
-
-            const centerEasting = grid.xllcorner + (grid.ncols * grid.cellsize) / 2;
-            const centerNorthing = grid.yllcorner + (grid.nrows * grid.cellsize) / 2;
-            const centerWgs = window.DemGrid.utm48ToWgs84(centerEasting, centerNorthing);
-
-            const elOrigin = document.getElementById('dem-georef-origin');
-            const elCenter = document.getElementById('dem-georef-center');
-            const elElev = document.getElementById('dem-georef-elevation');
-            if (elOrigin) elOrigin.textContent = `X: ${grid.xllcorner.toFixed(1)}, Y: ${grid.yllcorner.toFixed(1)}`;
-            if (elCenter) elCenter.textContent = `${centerWgs.lat.toFixed(6)}°, ${centerWgs.lon.toFixed(6)}°`;
-            if (elElev) elElev.textContent = `${grid.ncols} × ${grid.nrows} ô (${grid.cellsize}m) · ${grid.min.toFixed(1)}m đến ${grid.max.toFixed(1)}m`;
+            this._updateDemGeorefLabels(grid);
         } catch (error) {
             if (requestId === this._managementDemRequest) {
                 if (status) status.textContent = error.message || 'Không thể đọc file DEM.';

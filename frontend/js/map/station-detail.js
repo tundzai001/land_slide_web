@@ -71,68 +71,55 @@ function updateChartsAvailability(data) {
     }
 }
 
+function _resolvePiDeviceStatuses(data) {
+    let pointDeviceStatus = 'idle';
+    let centerDeviceStatus = 'idle';
+    if (data.pi_devices && Array.isArray(data.pi_devices)) {
+        const pPoint = data.pi_devices.find(d => d.device_type === 'pi_point');
+        const pCenter = data.pi_devices.find(d => d.device_type === 'pi_center');
+        if (pPoint && !pPoint.is_online) pointDeviceStatus = 'offline';
+        if (pCenter && !pCenter.is_online) centerDeviceStatus = 'offline';
+    }
+    return { pointDeviceStatus, centerDeviceStatus };
+}
+
+function _updateSirenButtonsForAlert(centerDeviceStatus, pointDeviceStatus) {
+    document.querySelectorAll('.btn-siren-toggle').forEach(b => {
+        const target = b.dataset.target;
+        const isOffline = target === 'pi_center' ? centerDeviceStatus === 'offline' : pointDeviceStatus === 'offline';
+        if (isOffline) {
+            setSirenButtonState('offline', target);
+        } else {
+            let currentState = b.dataset.sirenState;
+            if (currentState === 'idle' || currentState === 'offline') currentState = 'alerting';
+            setSirenButtonState(currentState, target);
+        }
+    });
+}
+
 // SIREN POPUP HELPER — Dùng bởi selectStation và Track button
 // =====================================================
 function _showSirenIfAlerting(stationId, data) {
     const sirenSection = document.getElementById('siren-sidebar-section');
-
-    // Only show siren controls for admin and operator roles
     const user = window.authManager?.getUserInfo();
     const userRole = user?.role;
     if (userRole !== 'admin' && userRole !== 'operator') {
         if (sirenSection) sirenSection.style.display = 'none';
         return;
     }
-
-    // Always visible for admin/operator (grey when idle, red when alerting)
     if (sirenSection) sirenSection.style.display = '';
 
     const risk = data.risk_assessment?.overall_risk || data.risk_level;
-    // A durable unresolved alert may be old after a restart. Keep it visible
-    // as STALE, but never re-trigger a physical siren until fresh telemetry
-    // confirms the dangerous state again.
     const isAlerting = (risk === 'EXTREME' || risk === 'CRITICAL') && data.status === 'online';
-
-    // Default statuses based on pi_devices array from station detail API
-    let pointDeviceStatus = 'idle';
-    let centerDeviceStatus = 'idle';
-
-    if (data.pi_devices && Array.isArray(data.pi_devices)) {
-        const pPoint = data.pi_devices.find(d => d.device_type === 'pi_point');
-        const pCenter = data.pi_devices.find(d => d.device_type === 'pi_center');
-
-        if (pPoint && !pPoint.is_online) pointDeviceStatus = 'offline';
-        if (pCenter && !pCenter.is_online) centerDeviceStatus = 'offline';
-        // If there is no pi_point or pi_center registered for this station, maybe set to offline?
-        // But let's only override if explicitly offline to be safe.
-    }
+    const { pointDeviceStatus, centerDeviceStatus } = _resolvePiDeviceStatuses(data);
 
     if (isAlerting) {
         window.currentAlertStationId = stationId;
-        const sirenBtns = document.querySelectorAll('.btn-siren-toggle');
-        if (sirenBtns.length > 0) {
-            sirenBtns.forEach(b => {
-                const target = b.dataset.target;
-                let currentState = b.dataset.sirenState;
-
-                // Determine target default status (might be offline)
-                const isOffline = target === 'pi_center' ? centerDeviceStatus === 'offline' : pointDeviceStatus === 'offline';
-
-                if (isOffline) {
-                    setSirenButtonState('offline', target);
-                } else {
-                    // If online, transition idle to alerting, keep muted as is
-                    if (currentState === 'idle' || currentState === 'offline') currentState = 'alerting';
-                    setSirenButtonState(currentState, target);
-                }
-            });
-        }
+        _updateSirenButtonsForAlert(centerDeviceStatus, pointDeviceStatus);
     } else {
         if (window.currentAlertStationId === stationId) {
             window.currentAlertStationId = null;
         }
-
-        // Apply idle or offline if not alerting
         setSirenButtonState(centerDeviceStatus === 'offline' ? 'offline' : 'idle', 'pi_center');
         setSirenButtonState(pointDeviceStatus === 'offline' ? 'offline' : 'idle', 'pi_point');
     }
@@ -194,6 +181,48 @@ function focusMapOnStation(stationId, skipZoom = false) {
     });
 }
 
+function _setChartControlsLoading(isLoading, chartsButton, chartsPanel) {
+    if (isLoading) {
+        chartsPanel?.classList.add('station-history-loading');
+        setChartWorkspaceStatus('Đang tải lịch sử cảm biến…', 'loading');
+    } else {
+        chartsPanel?.classList.remove('station-history-loading');
+    }
+    if (chartsButton) chartsButton.disabled = isLoading;
+    document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = isLoading; });
+}
+
+function _mergeStationSensorHistory(currentData, historyPayload, sensorTypes, rangeLabel) {
+    const data = {
+        ...currentData,
+        _chartRangeLabel: rangeLabel,
+        sensors: Object.fromEntries(Object.entries(currentData.sensors).map(([type, sensor]) => [
+            type, sensorTypes.includes(type) ? { ...sensor, history: [] } : sensor
+        ])),
+    };
+    Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
+        if (!sensorTypes.includes(sensorType)) return;
+        data.sensors[sensorType] = {
+            ...data.sensors[sensorType],
+            history: sensorHistory.history || [],
+        };
+    });
+    return data;
+}
+
+function _handleStationHistoryError(error, controller, range, chartsPanel) {
+    if (stationHistoryController !== controller || controller.signal.aborted || error?.name === 'AbortError') return;
+    console.error('[MAP] Error loading station history:', error);
+    const retained = Object.values(charts).some(chart => chart.data.datasets.some(dataset => dataset.data.length));
+    let retainedMsg = '';
+    if (retained) {
+        const rangeSuffix = chartsPanel?.dataset.rangeLabel ? ` (${chartsPanel.dataset.rangeLabel})` : '';
+        retainedMsg = ` Đang giữ dữ liệu đã tải${rangeSuffix}; chưa cập nhật.`;
+    }
+    setChartWorkspaceStatus(`Không tải được dữ liệu ${range.label}.${retainedMsg} Bấm tải lại để thử tiếp.`, 'error');
+    window.toast?.error('Không tải được lịch sử biểu đồ');
+}
+
 async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, force = false } = {}) {
     const stationId = Number(currentStationData?.id || 0);
     if (!stationId) return;
@@ -213,16 +242,11 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
     stationHistoryController = controller;
     if (!force && cached && Date.now() - cached.loadedAt < STATION_HISTORY_CACHE_MS) {
         renderCharts(cached.data);
-        chartsPanel?.classList.remove('station-history-loading');
-        if (chartsButton) chartsButton.disabled = false;
-        document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = false; });
+        _setChartControlsLoading(false, chartsButton, chartsPanel);
         return;
     }
 
-    chartsPanel?.classList.add('station-history-loading');
-    setChartWorkspaceStatus('Đang tải lịch sử cảm biến…', 'loading');
-    if (chartsButton) chartsButton.disabled = true;
-    document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = true; });
+    _setChartControlsLoading(true, chartsButton, chartsPanel);
     try {
         const historyPayload = await fetchStationHistory(stationId, {
             hours: range.hours,
@@ -230,38 +254,15 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
             signal: controller.signal,
         });
         if (controller.signal.aborted || stationHistoryController !== controller || Number(currentStationData?.id || 0) !== stationId) return;
-        const data = {
-            ...currentStationData,
-            _chartRangeLabel: range.label,
-            sensors: Object.fromEntries(Object.entries(currentStationData.sensors).map(([type,sensor]) => [type, sensorTypes.includes(type) ? {...sensor, history:[]} : sensor])),
-        };
-        Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
-            if (!sensorTypes.includes(sensorType)) return;
-            data.sensors[sensorType] = {
-                ...data.sensors[sensorType],
-                history: sensorHistory.history || [],
-            };
-        });
+        const data = _mergeStationSensorHistory(currentStationData, historyPayload, sensorTypes, range.label);
         stationHistoryCache.set(cacheKey, { data, loadedAt: Date.now() });
         currentStationData = data;
         renderCharts(data);
     } catch (error) {
-        if (stationHistoryController === controller && !controller.signal.aborted && error?.name !== 'AbortError') {
-            console.error('[MAP] Error loading station history:', error);
-            const retained = Object.values(charts).some(chart => chart.data.datasets.some(dataset => dataset.data.length));
-            let retainedMsg = '';
-            if (retained) {
-                const rangeSuffix = chartsPanel?.dataset.rangeLabel ? ` (${chartsPanel.dataset.rangeLabel})` : '';
-                retainedMsg = ` Đang giữ dữ liệu đã tải${rangeSuffix}; chưa cập nhật.`;
-            }
-            setChartWorkspaceStatus(`Không tải được dữ liệu ${range.label}.${retainedMsg} Bấm tải lại để thử tiếp.`, 'error');
-            window.toast?.error('Không tải được lịch sử biểu đồ');
-        }
+        _handleStationHistoryError(error, controller, range, chartsPanel);
     } finally {
         if (stationHistoryController === controller) {
-            chartsPanel?.classList.remove('station-history-loading');
-            if (chartsButton) chartsButton.disabled = false;
-            document.querySelectorAll('[data-chart-hours]').forEach(button => { button.disabled = false; });
+            _setChartControlsLoading(false, chartsButton, chartsPanel);
         }
     }
 }
@@ -1148,13 +1149,44 @@ function buildChartTimeLabels(history) {
     });
 }
 
+function _updateChartStatsElements(id, numericValues) {
+    const elLatest = document.getElementById(`stat-${id}-latest`);
+    const elMax = document.getElementById(`stat-${id}-max`);
+    const elMin = document.getElementById(`stat-${id}-min`);
+    const elAvg = document.getElementById(`stat-${id}-avg`);
+    if (numericValues.length > 0) {
+        const maxVal = Math.max(...numericValues);
+        const minVal = Math.min(...numericValues);
+        const avgVal = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+        const latestVal = numericValues[numericValues.length - 1];
+        if (elLatest) elLatest.innerText = latestVal.toFixed(2);
+        if (elMax) elMax.innerText = maxVal.toFixed(2);
+        if (elMin) elMin.innerText = minVal.toFixed(2);
+        if (elAvg) elAvg.innerText = avgVal.toFixed(2);
+    } else {
+        if (elLatest) elLatest.innerText = '--';
+        if (elMax) elMax.innerText = '--';
+        if (elMin) elMin.innerText = '--';
+        if (elAvg) elAvg.innerText = '--';
+    }
+}
+
+function _parseHexColorRgb(color, defaultRgb = [13, 110, 253]) {
+    if (color.startsWith('#') && color.length === 7) {
+        return [
+            Number.parseInt(color.slice(1, 3), 16),
+            Number.parseInt(color.slice(3, 5), 16),
+            Number.parseInt(color.slice(5, 7), 16),
+        ];
+    }
+    return defaultRgb;
+}
+
 function renderChart(id, history, key, color, label) {
     const canvas = document.getElementById(id);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-
     const labels = buildChartTimeLabels(history);
-
     const values = (history || []).map(h => {
         const val = h.data?.[key];
         if (val === null || val === undefined || val === '') return null;
@@ -1162,34 +1194,7 @@ function renderChart(id, history, key, color, label) {
         return Number.isFinite(num) ? num : null;
     });
     const numericValues = values.filter(value => value !== null);
-
-    // Cập nhật chỉ số thống kê
-    if (numericValues.length > 0) {
-        const maxVal = Math.max(...numericValues);
-        const minVal = Math.min(...numericValues);
-        const avgVal = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
-        const latestVal = numericValues[numericValues.length - 1];
-
-        const elLatest = document.getElementById(`stat-${id}-latest`);
-        const elMax = document.getElementById(`stat-${id}-max`);
-        const elMin = document.getElementById(`stat-${id}-min`);
-        const elAvg = document.getElementById(`stat-${id}-avg`);
-
-        if (elLatest) elLatest.innerText = latestVal.toFixed(2);
-        if (elMax) elMax.innerText = maxVal.toFixed(2);
-        if (elMin) elMin.innerText = minVal.toFixed(2);
-        if (elAvg) elAvg.innerText = avgVal.toFixed(2);
-    } else {
-        const elLatest = document.getElementById(`stat-${id}-latest`);
-        const elMax = document.getElementById(`stat-${id}-max`);
-        const elMin = document.getElementById(`stat-${id}-min`);
-        const elAvg = document.getElementById(`stat-${id}-avg`);
-        
-        if (elLatest) elLatest.innerText = '--';
-        if (elMax) elMax.innerText = '--';
-        if (elMin) elMin.innerText = '--';
-        if (elAvg) elAvg.innerText = '--';
-    }
+    _updateChartStatsElements(id, numericValues);
 
     if (charts[id]) {
         charts[id].destroy();
@@ -1199,15 +1204,7 @@ function renderChart(id, history, key, color, label) {
     const isDark = document.documentElement.dataset.theme === 'dark';
     const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
     const tickColor = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
-
-    // Extract RGB from hex for gradient
-    let r = 13, g = 110, b = 253; // Default blue
-    if (color.startsWith('#') && color.length === 7) {
-        r = Number.parseInt(color.slice(1, 3), 16);
-        g = Number.parseInt(color.slice(3, 5), 16);
-        b = Number.parseInt(color.slice(5, 7), 16);
-    }
-    
+    const [r, g, b] = _parseHexColorRgb(color);
     let gradient = ctx.createLinearGradient(0, 0, 0, 300);
     gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.20)`);
     gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.0)`);

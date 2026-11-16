@@ -252,6 +252,52 @@ function updateHeatmapLegend(data) {
     if (legend) legend.hidden = !heatmapVisible;
 }
 
+async function _ensureHeatmapLibraryLoaded(btn, checkbox) {
+    if (L.heatLayer !== undefined) return true;
+    heatmapLoading = true;
+    if (btn) btn.disabled = true;
+    btn?.setAttribute('aria-busy', 'true');
+    btn?.classList.add('is-loading');
+    try {
+        await window.loadFeatureLibrary?.('heat');
+        return true;
+    } catch (err) {
+        console.debug('Failed to load heat library:', err);
+        if (checkbox) checkbox.checked = false;
+        window.toast?.error('Không thể tải lớp heatmap.');
+        return false;
+    } finally {
+        heatmapLoading = false;
+        if (btn) btn.disabled = false;
+        btn?.removeAttribute('aria-busy');
+        btn?.classList.remove('is-loading');
+    }
+}
+
+function _enableHeatmap(data, btn, checkbox) {
+    stationHeatLayer = L.heatLayer(data, {
+        radius: 35, blur: 18, maxZoom: 7, minOpacity: 0.25,
+        gradient: { 0.2: '#2196f3', 0.4: '#4caf50', 0.6: '#ffeb3b', 0.8: '#ff9800', 1: '#f44336' }
+    }).addTo(map);
+    btn?.classList.add('active');
+    btn?.setAttribute('aria-pressed', 'true');
+    if (checkbox) checkbox.checked = true;
+    setMapState({ layers: { heatmap: true } });
+    updateHeatmapLegend(data);
+}
+
+function _disableHeatmap(btn, checkbox) {
+    if (stationHeatLayer) {
+        map.removeLayer(stationHeatLayer);
+        stationHeatLayer = null;
+    }
+    btn?.classList.remove('active');
+    btn?.setAttribute('aria-pressed', 'false');
+    if (checkbox) checkbox.checked = false;
+    setMapState({ layers: { heatmap: false } });
+    updateHeatmapLegend([]);
+}
+
 async function toggleHeatmap() {
     const btn = document.getElementById('heatmap-toggle');
     const checkbox = document.getElementById('layer-heatmap');
@@ -261,23 +307,8 @@ async function toggleHeatmap() {
         window.toast?.info('Hiện không có trạm cảnh báo có tọa độ để hiển thị.');
         return;
     }
-    if (!heatmapVisible && L.heatLayer === undefined) {
-        heatmapLoading = true;
-        if (btn) btn.disabled = true;
-        btn?.setAttribute('aria-busy', 'true');
-        btn?.classList.add('is-loading');
-        try { await window.loadFeatureLibrary?.('heat'); }
-        catch (err) {
-            console.debug('Failed to load heat library:', err);
-            if (checkbox) checkbox.checked = false;
-            window.toast?.error('Không thể tải lớp heatmap.');
-            return;
-        } finally {
-            heatmapLoading = false;
-            if (btn) btn.disabled = false;
-            btn?.removeAttribute('aria-busy');
-            btn?.classList.remove('is-loading');
-        }
+    if (!heatmapVisible && !(await _ensureHeatmapLibraryLoaded(btn, checkbox))) {
+        return;
     }
     if (L.heatLayer === undefined) {
         if (checkbox) checkbox.checked = heatmapVisible;
@@ -296,25 +327,9 @@ async function toggleHeatmap() {
             window.toast?.info('Hiện không có trạm cảnh báo có tọa độ để hiển thị.');
             return;
         }
-        stationHeatLayer = L.heatLayer(data, {
-            radius: 35, blur: 18, maxZoom: 7, minOpacity: 0.25,
-            gradient: { 0.2: '#2196f3', 0.4: '#4caf50', 0.6: '#ffeb3b', 0.8: '#ff9800', 1: '#f44336' }
-        }).addTo(map);
-        btn?.classList.add('active');
-        btn?.setAttribute('aria-pressed', 'true');
-        if (checkbox) checkbox.checked = true;
-        setMapState({ layers: { heatmap: true } });
-        updateHeatmapLegend(data);
+        _enableHeatmap(data, btn, checkbox);
     } else {
-        if (stationHeatLayer) {
-            map.removeLayer(stationHeatLayer);
-            stationHeatLayer = null;
-        }
-        btn?.classList.remove('active');
-        btn?.setAttribute('aria-pressed', 'false');
-        if (checkbox) checkbox.checked = false;
-        setMapState({ layers: { heatmap: false } });
-        updateHeatmapLegend([]);
+        _disableHeatmap(btn, checkbox);
     }
 }
 

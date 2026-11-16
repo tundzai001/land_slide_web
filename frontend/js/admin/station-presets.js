@@ -399,33 +399,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
         return stationLocation;
     }
 
-    async saveStation() {
-        const code = document.getElementById('edit-code').value.trim();
-        const name = document.getElementById('edit-name').value.trim();
-        const projectId = document.getElementById('edit-project-id').value;
-
-        if (!code || !name) {
-            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
-            return;
-        }
-
-        const sensors = this._collectStationSensors();
-        if (!sensors) return;
-
-        if (typeof this.validateAllMqttTopics === 'function' && !(await this.validateAllMqttTopics())) {
-            window.toast?.error('MQTT topic đang bị trùng hoặc chưa hợp lệ');
-            return;
-        }
-        if (!this.confirmConfirmStepWarnings()) return;
-
-        const finalRainWarningConfirm = Number.parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2;
-        const finalRainCriticalConfirm = Number.parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1;
-        const finalWaterWarningConfirm = Number.parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3;
-        const finalWaterCriticalConfirm = Number.parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2;
-        const finalGnssWarningConfirm = Number.parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3;
-        const finalGnssCriticalConfirm = Number.parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2;
-        const finalImuCriticalConfirm = Number.parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1;
-
+    _buildStationConfig(finalConfirmSteps) {
         const offlineThresholds = this._collectOfflineThresholds();
         const rtkForwarding = this._collectRtkForwarding();
         const vn2000 = this._collectVn2000();
@@ -462,34 +436,34 @@ class AdminStationPresetsFeature extends window.AdminManager {
             Water: {
                 warning_threshold: Number.parseFloat(document.getElementById('cfg-water-warning')?.value || 0),
                 critical_threshold: Number.parseFloat(document.getElementById('cfg-water-critical')?.value || 0),
-                water_warning_confirm_steps: finalWaterWarningConfirm,
-                water_critical_confirm_steps: finalWaterCriticalConfirm,
-                water_confirm_steps: finalWaterWarningConfirm,
+                water_warning_confirm_steps: finalConfirmSteps.waterWarning,
+                water_critical_confirm_steps: finalConfirmSteps.waterCritical,
+                water_confirm_steps: finalConfirmSteps.waterWarning,
                 water_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-water-safe-confirm')?.value) || 3
             },
             RainAlerting: {
                 rain_intensity_watch_threshold: Number.parseFloat(document.getElementById('cfg-rain-watch')?.value || 0),
                 rain_intensity_warning_threshold: Number.parseFloat(document.getElementById('cfg-rain-warning')?.value || 0),
                 rain_intensity_critical_threshold: Number.parseFloat(document.getElementById('cfg-rain-critical')?.value || 0),
-                rain_warning_confirm_steps: finalRainWarningConfirm,
-                rain_critical_confirm_steps: finalRainCriticalConfirm,
-                rain_confirm_steps: finalRainWarningConfirm,
+                rain_warning_confirm_steps: finalConfirmSteps.rainWarning,
+                rain_critical_confirm_steps: finalConfirmSteps.rainCritical,
+                rain_confirm_steps: finalConfirmSteps.rainWarning,
                 rain_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-rain-safe-confirm')?.value) || 3
             },
             GnssAlerting: {
                 gnss_max_hdop: Number.parseFloat(document.getElementById('cfg-gnss-hdop')?.value || 4.0),
-                gnss_warning_confirm_steps: finalGnssWarningConfirm,
-                gnss_critical_confirm_steps: finalGnssCriticalConfirm,
-                gnss_confirm_steps: finalGnssWarningConfirm,
+                gnss_warning_confirm_steps: finalConfirmSteps.gnssWarning,
+                gnss_critical_confirm_steps: finalConfirmSteps.gnssCritical,
+                gnss_confirm_steps: finalConfirmSteps.gnssWarning,
                 gnss_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-gnss-safe-steps')?.value) || 5,
                 gnss_degraded_timeout: Number.parseInt(document.getElementById('cfg-gnss-timeout')?.value || 300)
             },
             ImuAlerting: {
                 tilt_critical_deg: Number.parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
                 tilt_warning_deg: Number.parseFloat(document.getElementById('cfg-imu-tilt-crit')?.value || 15.0),
-                imu_warning_confirm_steps: finalImuCriticalConfirm,
-                imu_critical_confirm_steps: finalImuCriticalConfirm,
-                imu_confirm_steps: finalImuCriticalConfirm,
+                imu_warning_confirm_steps: finalConfirmSteps.imuCritical,
+                imu_critical_confirm_steps: finalConfirmSteps.imuCritical,
+                imu_confirm_steps: finalConfirmSteps.imuCritical,
                 imu_safe_confirm_steps: Number.parseInt(document.getElementById('cfg-imu-safe-confirm')?.value) || 3,
                 shock_threshold_ms2: Number.parseFloat(document.getElementById('cfg-imu-shock')?.value || 5.0)
             },
@@ -533,7 +507,6 @@ class AdminStationPresetsFeature extends window.AdminManager {
             }
         };
 
-
         config.custom_sensors = Object.fromEntries((window.SensorCatalog || [])
             .filter(sensor => sensor.key.startsWith('custom_') && document.getElementById(`edit-${sensor.key}`)?.checked)
             .map(sensor => [sensor.key, sensor]));
@@ -543,6 +516,39 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 return [axis, value === '' || value == null ? null : Number(value)];
             }));
         }
+        return config;
+    }
+
+    async saveStation() {
+        const code = document.getElementById('edit-code').value.trim();
+        const name = document.getElementById('edit-name').value.trim();
+        const projectId = document.getElementById('edit-project-id').value;
+
+        if (!code || !name) {
+            window.toast?.warning('Vui lòng nhập mã trạm và tên trạm');
+            return;
+        }
+
+        const sensors = this._collectStationSensors();
+        if (!sensors) return;
+
+        if (typeof this.validateAllMqttTopics === 'function' && !(await this.validateAllMqttTopics())) {
+            window.toast?.error('MQTT topic đang bị trùng hoặc chưa hợp lệ');
+            return;
+        }
+        if (!this.confirmConfirmStepWarnings()) return;
+
+        const finalConfirmSteps = {
+            rainWarning: Number.parseInt(document.getElementById('cfg-rain-warning-confirm')?.value) || 2,
+            rainCritical: Number.parseInt(document.getElementById('cfg-rain-critical-confirm')?.value) || 1,
+            waterWarning: Number.parseInt(document.getElementById('cfg-water-warning-confirm')?.value) || 3,
+            waterCritical: Number.parseInt(document.getElementById('cfg-water-critical-confirm')?.value) || 2,
+            gnssWarning: Number.parseInt(document.getElementById('cfg-gnss-warning-steps')?.value) || 3,
+            gnssCritical: Number.parseInt(document.getElementById('cfg-gnss-critical-steps')?.value) || 2,
+            imuCritical: Number.parseInt(document.getElementById('cfg-imu-critical-confirm')?.value) || 1,
+        };
+
+        const config = this._buildStationConfig(finalConfirmSteps);
         const stationLocation = this._collectStationLocation();
 
         const payload = {
@@ -610,6 +616,34 @@ class AdminStationPresetsFeature extends window.AdminManager {
         }
     }
 
+    async _handleGnssHttpError(res, data, caller) {
+        if (res.status === 401) {
+            await window.authManager?.handleUnauthorizedResponse?.(caller);
+            throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại');
+        }
+        if (res.status === 403) {
+            throw new Error('Tài khoản không có quyền thực hiện thao tác này');
+        }
+        throw new Error(data.detail || `Backend trả về HTTP ${res.status}`);
+    }
+
+    _handleResetOriginTimeout(resetBtn, statusEl) {
+        if (statusEl) {
+            statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Gateway đã hết thời gian chờ; backend vẫn đang hoàn tất hiệu chuẩn…';
+            statusEl.className = 'text-warning small';
+        }
+        window.toast?.info('HTTP hết thời gian chờ, không phải lỗi hiệu chuẩn. Đang chờ kết quả realtime.');
+        setTimeout(() => {
+            if (!this._gnssCalibrationInProgress) return;
+            this._gnssCalibrationInProgress = false;
+            if (resetBtn) resetBtn.disabled = false;
+            if (statusEl) {
+                statusEl.textContent = 'Không nhận được phản hồi realtime; tải lại cấu hình trạm để kiểm tra offset đã lưu.';
+                statusEl.className = 'text-warning small';
+            }
+        }, 20_000);
+    }
+
     async resetGnssOrigin(stationId) {
         if (this._gnssOriginRelockInProgress) {
             window.toast?.warning('Đang khóa lại tọa độ gốc; hãy chờ hoàn tất');
@@ -644,30 +678,10 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 if (res.status === 504) {
                     if (this._gnssCalibrationCompleted) return;
                     awaitingRealtimeCompletion = true;
-                    if (statusEl) {
-                        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Gateway đã hết thời gian chờ; backend vẫn đang hoàn tất hiệu chuẩn…';
-                        statusEl.className = 'text-warning small';
-                    }
-                    window.toast?.info('HTTP hết thời gian chờ, không phải lỗi hiệu chuẩn. Đang chờ kết quả realtime.');
-                    setTimeout(() => {
-                        if (!this._gnssCalibrationInProgress) return;
-                        this._gnssCalibrationInProgress = false;
-                        if (resetBtn) resetBtn.disabled = false;
-                        if (statusEl) {
-                            statusEl.textContent = 'Không nhận được phản hồi realtime; tải lại cấu hình trạm để kiểm tra offset đã lưu.';
-                            statusEl.className = 'text-warning small';
-                        }
-                    }, 20_000);
+                    this._handleResetOriginTimeout(resetBtn, statusEl);
                     return;
                 }
-                if (res.status === 401) {
-                    await window.authManager?.handleUnauthorizedResponse?.('gnss-calibration');
-                    throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại');
-                }
-                if (res.status === 403) {
-                    throw new Error('Tài khoản không có quyền hiệu chuẩn trạm này');
-                }
-                throw new Error(data.detail || `Backend trả về HTTP ${res.status}`);
+                await this._handleGnssHttpError(res, data, 'gnss-calibration');
             }
 
             const calibration = data.calibrations?.[0];
@@ -689,6 +703,63 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 if (resetBtn) resetBtn.disabled = false;
             }
         }
+    }
+
+    _handleRelockOriginTimeout(stationId, statusEl, setActionButtonsDisabled) {
+        if (statusEl && Number(this.currentStationId) === Number(stationId)) {
+            statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Gateway hết thời gian chờ; backend vẫn đang khóa lại gốc…';
+            statusEl.className = 'text-warning small';
+        }
+        window.toast?.info('Đang chờ kết quả khóa lại tọa độ gốc qua realtime.');
+        setTimeout(() => {
+            if (!this._gnssOriginRelockInProgress || this._gnssOriginRelockCompleted) return;
+            this._gnssOriginRelockInProgress = false;
+            this._gnssOriginRelockStationId = null;
+            if (this.currentStationId) setActionButtonsDisabled(false);
+            if (Number(this.currentStationId) === Number(stationId)) {
+                this.updateGnssOriginRelockProgress?.({
+                    ...this._gnssOriginRelockLastProgress,
+                    phase: 'failed',
+                    message: 'Không nhận được kết quả realtime; hãy tải lại cấu hình trạm để kiểm tra tọa độ gốc.',
+                });
+            }
+            if (statusEl && Number(this.currentStationId) === Number(stationId)) {
+                statusEl.textContent = 'Chưa nhận được kết quả realtime; tải lại cấu hình trạm để kiểm tra tọa độ gốc.';
+                statusEl.className = 'text-warning small';
+            }
+        }, 130_000);
+    }
+
+    _applyRelockSuccessResult(result, stationId, statusEl) {
+        const isActiveStation = Number(this.currentStationId) === Number(stationId);
+        if (isActiveStation) {
+            this.updateGnssOriginRelockProgress?.({
+                phase: 'complete',
+                sample_count: result?.sample_count || 61,
+                minimum_samples: 61,
+                duration_s: result?.duration_s || 60,
+                minimum_duration_s: 60,
+                remaining_s: 0,
+            });
+        }
+        if (result?.origin && isActiveStation) {
+            document.getElementById('origin-lat').value = result.origin.lat;
+            document.getElementById('origin-lon').value = result.origin.lon;
+            document.getElementById('origin-h').value = result.origin.h;
+            this.renderGnssTrackingOffset([0, 0, 0], {
+                state: 'Gốc mới đã khóa',
+                source: `${result.sample_count} mẫu RTK FIXED`,
+                duration: `${Number(result.duration_s || 0).toFixed(1)} giây`,
+            });
+        }
+        this._gnssOriginRelockCompleted = true;
+        this._gnssOriginRelockInProgress = false;
+        this._gnssOriginRelockStationId = null;
+        if (statusEl && isActiveStation) {
+            statusEl.innerHTML = '<i class="bi bi-check-circle me-1" aria-hidden="true"></i>Đã khóa lại tọa độ gốc; chuyển vị tracking tính từ mốc mới.';
+            statusEl.className = 'text-success small';
+        }
+        window.toast?.success('Đã khóa lại tọa độ gốc GNSS.');
     }
 
     async relockGnssOrigin(stationId) {
@@ -747,68 +818,13 @@ class AdminStationPresetsFeature extends window.AdminManager {
                 if (res.status === 504) {
                     if (this._gnssOriginRelockCompleted) return;
                     awaitingRealtimeCompletion = true;
-                    if (statusEl && Number(this.currentStationId) === Number(stationId)) {
-                        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Gateway hết thời gian chờ; backend vẫn đang khóa lại gốc…';
-                        statusEl.className = 'text-warning small';
-                    }
-                    window.toast?.info('Đang chờ kết quả khóa lại tọa độ gốc qua realtime.');
-                    setTimeout(() => {
-                        if (!this._gnssOriginRelockInProgress || this._gnssOriginRelockCompleted) return;
-                        this._gnssOriginRelockInProgress = false;
-                        this._gnssOriginRelockStationId = null;
-                        if (this.currentStationId) setActionButtonsDisabled(false);
-                        if (Number(this.currentStationId) === Number(stationId)) {
-                            this.updateGnssOriginRelockProgress?.({
-                                ...this._gnssOriginRelockLastProgress,
-                                phase: 'failed',
-                                message: 'Không nhận được kết quả realtime; hãy tải lại cấu hình trạm để kiểm tra tọa độ gốc.',
-                            });
-                        }
-                        if (statusEl && Number(this.currentStationId) === Number(stationId)) {
-                            statusEl.textContent = 'Chưa nhận được kết quả realtime; tải lại cấu hình trạm để kiểm tra tọa độ gốc.';
-                            statusEl.className = 'text-warning small';
-                        }
-                    }, 130_000);
+                    this._handleRelockOriginTimeout(stationId, statusEl, setActionButtonsDisabled);
                     return;
                 }
-                if (res.status === 401) {
-                    await window.authManager?.handleUnauthorizedResponse?.('gnss-origin-relock');
-                    throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại');
-                }
-                if (res.status === 403) throw new Error('Tài khoản không có quyền khóa lại tọa độ trạm này');
-                throw new Error(data.detail || `Backend trả về HTTP ${res.status}`);
+                await this._handleGnssHttpError(res, data, 'gnss-origin-relock');
             }
 
-            const result = data.relock;
-            const isActiveStation = Number(this.currentStationId) === Number(stationId);
-            if (isActiveStation) {
-                this.updateGnssOriginRelockProgress?.({
-                    phase: 'complete',
-                    sample_count: result?.sample_count || 61,
-                    minimum_samples: 61,
-                    duration_s: result?.duration_s || 60,
-                    minimum_duration_s: 60,
-                    remaining_s: 0,
-                });
-            }
-            if (result?.origin && isActiveStation) {
-                document.getElementById('origin-lat').value = result.origin.lat;
-                document.getElementById('origin-lon').value = result.origin.lon;
-                document.getElementById('origin-h').value = result.origin.h;
-                this.renderGnssTrackingOffset([0, 0, 0], {
-                    state: 'Gốc mới đã khóa',
-                    source: `${result.sample_count} mẫu RTK FIXED`,
-                    duration: `${Number(result.duration_s || 0).toFixed(1)} giây`,
-                });
-            }
-            this._gnssOriginRelockCompleted = true;
-            this._gnssOriginRelockInProgress = false;
-            this._gnssOriginRelockStationId = null;
-            if (statusEl && isActiveStation) {
-                statusEl.innerHTML = '<i class="bi bi-check-circle me-1" aria-hidden="true"></i>Đã khóa lại tọa độ gốc; chuyển vị tracking tính từ mốc mới.';
-                statusEl.className = 'text-success small';
-            }
-            window.toast?.success('Đã khóa lại tọa độ gốc GNSS.');
+            this._applyRelockSuccessResult(data.relock, stationId, statusEl);
         } catch (e) {
             this._gnssOriginRelockInProgress = false;
             this._gnssOriginRelockStationId = null;
@@ -831,30 +847,11 @@ class AdminStationPresetsFeature extends window.AdminManager {
         }
     }
 
-    updateGnssOriginRelockProgress(progress = {}) {
-        const box = document.getElementById('gnss-origin-relock-progress');
-        const bar = document.getElementById('gnss-origin-relock-bar');
-        const track = bar?.parentElement;
-        if (!box || !bar || !track) return;
-
-        const phase = progress.phase || 'collecting';
-        const count = Number(progress.sample_count || 0);
-        const target = Number(progress.minimum_samples || 61);
-        const duration = Number(progress.duration_s || 0);
-        const minimum = Number(progress.minimum_duration_s || 60);
-        const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));
-        const countPercent = target > 0 ? (count / target) * 100 : 0;
-        const durationPercent = minimum > 0 ? (duration / minimum) * 100 : 100;
-        const percent = phase === 'complete' ? 100 : Math.max(0, Math.min(100, countPercent, durationPercent));
+    _updateRelockPhaseUI(phase, progress, remaining, bar) {
         const label = document.getElementById('gnss-origin-relock-label');
-        const counts = document.getElementById('gnss-origin-relock-counts');
         const detail = document.getElementById('gnss-origin-relock-detail');
         const remainingEl = document.getElementById('gnss-origin-relock-remaining');
 
-        box.hidden = false;
-        bar.style.width = `${percent.toFixed(1)}%`;
-        track.setAttribute('aria-valuenow', String(Math.round(percent)));
-        track.setAttribute('aria-valuetext', `${count} trên ${target} mẫu, ${duration.toFixed(1)} trên ${minimum} giây`);
         bar.classList.remove('bg-info', 'bg-success', 'bg-danger');
         if (phase === 'complete') {
             bar.classList.add('bg-success');
@@ -874,6 +871,32 @@ class AdminStationPresetsFeature extends window.AdminManager {
             if (detail) detail.textContent = 'Giữ RTK FIXED ổn định trong lúc thu mẫu.';
             if (remainingEl) remainingEl.textContent = `Còn khoảng ${remaining} giây`;
         }
+    }
+
+    updateGnssOriginRelockProgress(progress = {}) {
+        const box = document.getElementById('gnss-origin-relock-progress');
+        const bar = document.getElementById('gnss-origin-relock-bar');
+        const track = bar?.parentElement;
+        if (!box || !bar || !track) return;
+
+        const phase = progress.phase || 'collecting';
+        const count = Number(progress.sample_count || 0);
+        const target = Number(progress.minimum_samples || 61);
+        const duration = Number(progress.duration_s || 0);
+        const minimum = Number(progress.minimum_duration_s || 60);
+        const remaining = Math.max(0, Math.ceil(Number(progress.remaining_s || 0)));
+        const countPercent = target > 0 ? (count / target) * 100 : 0;
+        const durationPercent = minimum > 0 ? (duration / minimum) * 100 : 100;
+        const percent = phase === 'complete' ? 100 : Math.max(0, Math.min(100, countPercent, durationPercent));
+        const counts = document.getElementById('gnss-origin-relock-counts');
+
+        box.hidden = false;
+        bar.style.width = `${percent.toFixed(1)}%`;
+        track.setAttribute('aria-valuenow', String(Math.round(percent)));
+        track.setAttribute('aria-valuetext', `${count} trên ${target} mẫu, ${duration.toFixed(1)} trên ${minimum} giây`);
+
+        this._updateRelockPhaseUI(phase, progress, remaining, bar);
+
         if (counts) counts.textContent = `${count}/${target} mẫu · ${duration.toFixed(1)}/${minimum.toFixed(0)} giây`;
         this._gnssOriginRelockLastProgress = { ...progress };
     }

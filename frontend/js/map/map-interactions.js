@@ -709,59 +709,57 @@ function setupEventListeners() {
                 requestAnimationFrame(fit);
             });
         },
-        loadAdjustmentResult(result) {
-            if (!result || typeof result !== 'object') return;
-            const clusterResults = Array.isArray(result.cluster_results)
-                ? result.cluster_results
-                : [];
+        _renderClusterResults(clusterResults) {
             const clusterList = document.getElementById('gnss-cluster-results-list');
-            if (clusterList) {
-                clusterList.replaceChildren();
-                clusterList.hidden = clusterResults.length <= 1;
-                for (const clusterResult of clusterResults) {
-                    const row = document.createElement('div');
-                    row.className = 'gnss-cluster-result-row';
-                    const identity = document.createElement('div');
-                    identity.className = 'gnss-cluster-result-identity';
-                    const title = document.createElement('strong');
-                    title.textContent = String(clusterResult.cluster_name || 'Cụm GNSS');
-                    const status = document.createElement('span');
-                    status.textContent = String(
-                        clusterResult.phase
-                        || clusterResult.quality_gate?.status
-                        || clusterResult.status
-                        || 'Đang xử lý'
-                    );
-                    identity.append(title, status);
-                    const actions = document.createElement('div');
-                    actions.className = 'gnss-cluster-result-downloads';
-                    for (const [label, url, icon] of [
-                        ['Excel', clusterResult.excel_report_url, 'bi-file-earmark-spreadsheet'],
-                        ['JSON', clusterResult.audit_json_url, 'bi-filetype-json'],
-                    ]) {
-                        if (!url) continue;
-                        const button = document.createElement('button');
-                        button.type = 'button';
-                        button.className = 'btn btn-sm btn-outline-primary';
-                        button.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i> ${label}`;
-                        button.addEventListener('click', async () => {
-                            try {
-                                await window.downloadAuthenticatedFile(
-                                    url,
-                                    String(url).split('/').pop()
-                                );
-                            } catch (error) {
-                                console.error('[GNSS] Cluster report download failed:', error);
-                                const reason = error?.message ? `: ${error.message}` : '';
-                                window.toast?.error?.(`Không tải được báo cáo ${title.textContent}${reason}`);
-                            }
-                        });
-                        actions.appendChild(button);
-                    }
-                    row.append(identity, actions);
-                    clusterList.appendChild(row);
+            if (!clusterList) return;
+            clusterList.replaceChildren();
+            clusterList.hidden = clusterResults.length <= 1;
+            for (const clusterResult of clusterResults) {
+                const row = document.createElement('div');
+                row.className = 'gnss-cluster-result-row';
+                const identity = document.createElement('div');
+                identity.className = 'gnss-cluster-result-identity';
+                const title = document.createElement('strong');
+                title.textContent = String(clusterResult.cluster_name || 'Cụm GNSS');
+                const status = document.createElement('span');
+                status.textContent = String(
+                    clusterResult.phase
+                    || clusterResult.quality_gate?.status
+                    || clusterResult.status
+                    || 'Đang xử lý'
+                );
+                identity.append(title, status);
+                const actions = document.createElement('div');
+                actions.className = 'gnss-cluster-result-downloads';
+                for (const [label, url, icon] of [
+                    ['Excel', clusterResult.excel_report_url, 'bi-file-earmark-spreadsheet'],
+                    ['JSON', clusterResult.audit_json_url, 'bi-filetype-json'],
+                ]) {
+                    if (!url) continue;
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'btn btn-sm btn-outline-primary';
+                    button.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i> ${label}`;
+                    button.addEventListener('click', async () => {
+                        try {
+                            await window.downloadAuthenticatedFile(
+                                url,
+                                String(url).split('/').pop()
+                            );
+                        } catch (error) {
+                            console.error('[GNSS] Cluster report download failed:', error);
+                            const reason = error?.message ? `: ${error.message}` : '';
+                            window.toast?.error?.(`Không tải được báo cáo ${title.textContent}${reason}`);
+                        }
+                    });
+                    actions.appendChild(button);
                 }
+                row.append(identity, actions);
+                clusterList.appendChild(row);
             }
+        },
+
+        _setupAdjustmentDownloadButtons(result) {
             const downloadBtn = document.getElementById('gnss-download-results-btn');
             const auditJsonBtn = document.getElementById('gnss-download-audit-json-btn');
             const reportUrl = String(result.report_file_url || '');
@@ -811,6 +809,16 @@ function setupEventListeners() {
                     auditJsonBtn.onclick = null;
                 }
             }
+        },
+
+        loadAdjustmentResult(result) {
+            if (!result || typeof result !== 'object') return;
+            const clusterResults = Array.isArray(result.cluster_results)
+                ? result.cluster_results
+                : [];
+            this._renderClusterResults(clusterResults);
+            this._setupAdjustmentDownloadButtons(result);
+
             if (!result.points) return;
             if (!this.ctx) return;
             this.points = {};
@@ -1416,7 +1424,54 @@ function setupEventListeners() {
         }
     }
 
-        window.requestGnssAdjustment = async function(projectId, stationIds) {
+        async function _callStartAdjustmentApi(payload) {
+        if (window.authManager?.token) {
+            return await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        const res = await fetch('/api/admin/gnss/adjustment/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Bạn cần đăng nhập với quyền Quản trị viên để thực hiện tính năng này');
+        return res;
+    }
+
+    function _processAdjustmentStartResponse(startResult, resStatus) {
+        if (Array.isArray(startResult.expected_station_ids)) {
+            applyGnssAdjustmentRoster(startResult.roster);
+            syncGnssExpectedStationIds(startResult.expected_station_ids);
+        }
+        if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
+            addGnssAdjustmentDebug(
+                'ONLINE',
+                `Đã loại các trạm GNSS offline: ${startResult.skipped_offline_station_ids.join(', ')}.`,
+                'warning',
+            );
+            upsertGnssWorkflowNode('online-filter', {
+                title: 'Lọc cụm GNSS đang hoạt động',
+                detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm không có heartbeat GNSS gần đây (ID ${startResult.skipped_offline_station_ids.join(', ')}); còn ${gnssAdjustmentDebugState.expectedStationIds.length} rover ứng viên, đang chờ #AGRICA RTK Fixed để xác nhận.`,
+                status: 'warning',
+                icon: 'bi-funnel',
+            });
+        }
+        setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
+        addGnssAdjustmentDebug(
+            'API',
+            startResult.existing
+                ? `HTTP ${resStatus}: đã nối lại phiên đang chạy, không reset dữ liệu server.`
+                : `HTTP ${resStatus}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
+            'success',
+        );
+        startGnssAdjustmentStatusPolling();
+        void syncGnssAdjustmentStatus();
+    }
+
+    window.requestGnssAdjustment = async function(projectId, stationIds) {
         if (!canOperateMap()) {
             showAdjustmentError('Không có quyền', 'Chỉ operator hoặc admin được chạy bình sai GNSS.');
             return;
@@ -1462,22 +1517,7 @@ function setupEventListeners() {
                 selected_clusters: stationIds ? [stationIds] : null
             };
             
-            let res;
-            if (window.authManager?.token) {
-                res = await window.authManager.apiFetch('/api/admin/gnss/adjustment/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            } else {
-                res = await fetch('/api/admin/gnss/adjustment/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!res.ok) throw new Error('Bạn cần đăng nhập với quyền Quản trị viên để thực hiện tính năng này');
-            }
-
+            const res = await _callStartAdjustmentApi(payload);
             if (res && !res.ok) throw new Error(await readApiError(res));
             if (!res) throw new Error('Không nhận được phản hồi từ API khởi động Bình sai');
 
@@ -1488,33 +1528,7 @@ function setupEventListeners() {
                 console.debug('Failed to parse start adjustment response:', err);
                 startResult = {};
             }
-            if (Array.isArray(startResult.expected_station_ids)) {
-                applyGnssAdjustmentRoster(startResult.roster);
-                syncGnssExpectedStationIds(startResult.expected_station_ids);
-            }
-            if (Array.isArray(startResult.skipped_offline_station_ids) && startResult.skipped_offline_station_ids.length) {
-                addGnssAdjustmentDebug(
-                    'ONLINE',
-                    `Đã loại các trạm GNSS offline: ${startResult.skipped_offline_station_ids.join(', ')}.`,
-                    'warning',
-                );
-                upsertGnssWorkflowNode('online-filter', {
-                    title: 'Lọc cụm GNSS đang hoạt động',
-                    detail: `Bỏ ${startResult.skipped_offline_station_ids.length} trạm không có heartbeat GNSS gần đây (ID ${startResult.skipped_offline_station_ids.join(', ')}); còn ${gnssAdjustmentDebugState.expectedStationIds.length} rover ứng viên, đang chờ #AGRICA RTK Fixed để xác nhận.`,
-                    status: 'warning',
-                    icon: 'bi-funnel',
-                });
-            }
-            setGnssAdjustmentPhase(startResult.phase || 'COLLECTING_BASELINE', startResult.message || 'API đã khởi động phiên Bình sai.');
-            addGnssAdjustmentDebug(
-                'API',
-                startResult.existing
-                    ? `HTTP ${res.status}: đã nối lại phiên đang chạy, không reset dữ liệu server.`
-                    : `HTTP ${res.status}: đang chờ ${gnssAdjustmentDebugState.expectedStationIds.length || 'các'} trạm gửi #AGRICA hợp lệ.`,
-                'success',
-            );
-            startGnssAdjustmentStatusPolling();
-            void syncGnssAdjustmentStatus();
+            _processAdjustmentStartResponse(startResult, res.status);
             
         } catch (error) {
             console.error('Adjustment trigger error:', error);

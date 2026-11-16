@@ -1071,6 +1071,38 @@ function _appendSensorFieldChartPoint(chart, field, data, timestamp, isExtensome
     chart.update('none');
 }
 
+function _updateMonitoringSensorsAndCharts(sensorType, data, timestamp, chartsVisible) {
+    if (!stationSensorCatalog(currentStationData).some(sensor => sensor.key === sensorType && !sensor.legacy)) {
+        return;
+    }
+    renderMonitoringSensors(currentStationData);
+    const spec = stationSensorCatalog(currentStationData).find(sensor => sensor.key === sensorType);
+    const isExt = sensorType === 'extensometer';
+    const fields = isExt ? [...document.querySelectorAll('#extensometer-charts canvas')].map(canvas => canvas.dataset.point) : spec.fields;
+    if (chartsVisible && sensorType === 'accelerometer') {
+        renderAccelerometerWaveform(currentStationData.sensors.accelerometer);
+    }
+    if (chartsVisible) {
+        fields.forEach((field, index) => {
+            const chartKey = isExt ? `chart-extensometer-${index}` : `chart-${sensorType}-${field}`;
+            _appendSensorFieldChartPoint(charts[chartKey], field, data, timestamp, isExt);
+        });
+    }
+}
+
+function _dispatchRealtimeSensorType(sensorType, data, timestamp, stationId, advancedVisible, chartsVisible) {
+    if (!data) return;
+    if (sensorType === 'gnss') {
+        _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible);
+    } else if (sensorType === 'rain') {
+        _handleRealtimeRain(data, timestamp, chartsVisible);
+    } else if (sensorType === 'water') {
+        _handleRealtimeWater(data, timestamp, chartsVisible);
+    } else if (sensorType === 'imu') {
+        _handleRealtimeImu(data, stationId, timestamp, chartsVisible);
+    }
+}
+
 function updateRealtimeSensorValues(message) {
     if (message.sensor_type === 'gnss_adjusted' && message.data) {
         _handleRealtimeGnssAdjusted(message);
@@ -1096,29 +1128,8 @@ function updateRealtimeSensorValues(message) {
         return;
     }
 
-    if (stationSensorCatalog(currentStationData).some(sensor => sensor.key === sensor_type && !sensor.legacy)) {
-        renderMonitoringSensors(currentStationData);
-        const spec = stationSensorCatalog(currentStationData).find(sensor => sensor.key === sensor_type);
-        const isExt = sensor_type === 'extensometer';
-        const fields = isExt ? [...document.querySelectorAll('#extensometer-charts canvas')].map(canvas => canvas.dataset.point) : spec.fields;
-        if (chartsVisible && sensor_type === 'accelerometer') renderAccelerometerWaveform(currentStationData.sensors.accelerometer);
-        if (chartsVisible) {
-            fields.forEach((field, index) => {
-                const chartKey = isExt ? `chart-extensometer-${index}` : `chart-${sensor_type}-${field}`;
-                _appendSensorFieldChartPoint(charts[chartKey], field, data, timestamp, isExt);
-            });
-        }
-    }
-
-    if (sensor_type === 'gnss' && data) {
-        _handleRealtimeGnss(data, timestamp, advancedVisible, chartsVisible);
-    } else if (sensor_type === 'rain' && data) {
-        _handleRealtimeRain(data, timestamp, chartsVisible);
-    } else if (sensor_type === 'water' && data) {
-        _handleRealtimeWater(data, timestamp, chartsVisible);
-    } else if (sensor_type === 'imu' && data) {
-        _handleRealtimeImu(data, stationId, timestamp, chartsVisible);
-    }
+    _updateMonitoringSensorsAndCharts(sensor_type, data, timestamp, chartsVisible);
+    _dispatchRealtimeSensorType(sensor_type, data, timestamp, stationId, advancedVisible, chartsVisible);
 }
 
 function updateStationMarker(stationId, riskLevel) {

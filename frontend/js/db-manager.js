@@ -1217,20 +1217,7 @@ class DatabaseManager {
         };
     }
 
-    renderExportTaskState() {
-        const state = this.exportTaskState;
-        const active = Boolean(this.exportTaskId && state);
-        const modalEl = document.getElementById('exportExcelModal');
-        const modalVisible = Boolean(modalEl?.classList.contains('show'));
-        const pill = this.ensureExportTaskPill();
-        pill.style.display = active && !modalVisible ? 'flex' : 'none';
-        if (!active) return;
-
-        const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
-        const failed = state.status === 'error' || state.status === 'failed';
-        const completed = state.status === 'completed';
-        const statusMeta = this._getExportStatusText(state, percent);
-
+    _updateExportModalProgress(state, percent, statusMeta, failed, completed) {
         const progressContainer = document.getElementById('export-progress-container');
         const progressBar = document.getElementById('export-progress-bar');
         const progressPercent = document.getElementById('export-progress-percent');
@@ -1250,13 +1237,53 @@ class DatabaseManager {
         if (progressDetail) progressDetail.textContent = state.error || state.message || 'Đang xử lý...';
         if (startButton) startButton.disabled = !failed && !completed;
         if (retryBtn) retryBtn.style.display = failed ? 'inline-flex' : 'none';
+    }
 
+    _updateExportTaskPill(pill, state, statusMeta) {
         const pillTitle = pill.querySelector('.export-pill-title');
         const pillDetail = pill.querySelector('.export-pill-detail');
         const spinner = pill.querySelector('.export-pill-spinner');
         if (pillTitle) pillTitle.textContent = statusMeta.pill;
         if (pillDetail) pillDetail.textContent = state.error || state.message || 'Nhấn để mở chi tiết';
         if (spinner) spinner.style.animationPlayState = statusMeta.running ? 'running' : 'paused';
+    }
+
+    renderExportTaskState() {
+        const state = this.exportTaskState;
+        const active = Boolean(this.exportTaskId && state);
+        const modalEl = document.getElementById('exportExcelModal');
+        const modalVisible = Boolean(modalEl?.classList.contains('show'));
+        const pill = this.ensureExportTaskPill();
+        pill.style.display = active && !modalVisible ? 'flex' : 'none';
+        if (!active) return;
+
+        const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
+        const failed = state.status === 'error' || state.status === 'failed';
+        const completed = state.status === 'completed';
+        const statusMeta = this._getExportStatusText(state, percent);
+
+        this._updateExportModalProgress(state, percent, statusMeta, failed, completed);
+        this._updateExportTaskPill(pill, state, statusMeta);
+    }
+
+    async _handleExportPollStatus(validatedTaskId) {
+        if (this.exportTaskState.status === 'completed') {
+            clearInterval(this.exportPollTimer);
+            this.exportPollTimer = null;
+            this.exportTaskState = {
+                ...this.exportTaskState,
+                status: 'downloading',
+                message: 'File đã tạo xong, đang chuẩn bị tải xuống...'
+            };
+            this.renderExportTaskState();
+            await this.downloadCompletedExport(validatedTaskId, this.exportTaskState);
+        } else if (['error', 'failed'].includes(this.exportTaskState.status)) {
+            clearInterval(this.exportPollTimer);
+            this.exportPollTimer = null;
+            this.exportTaskId = null;
+            localStorage.removeItem('activeDatabaseExportTaskId');
+            window.toast?.error('Export thất bại: ' + (this.exportTaskState.error || 'Không rõ lỗi'));
+        }
     }
 
     startExportPolling(taskId) {
@@ -1282,23 +1309,7 @@ class DatabaseManager {
                 if (!response.ok) throw new Error(`Không đọc được tiến trình (HTTP ${response.status})`);
                 this.exportTaskState = await response.json();
                 this.renderExportTaskState();
-                if (this.exportTaskState.status === 'completed') {
-                    clearInterval(this.exportPollTimer);
-                    this.exportPollTimer = null;
-                    this.exportTaskState = {
-                        ...this.exportTaskState,
-                        status: 'downloading',
-                        message: 'File đã tạo xong, đang chuẩn bị tải xuống...'
-                    };
-                    this.renderExportTaskState();
-                    await this.downloadCompletedExport(validatedTaskId, this.exportTaskState);
-                } else if (['error', 'failed'].includes(this.exportTaskState.status)) {
-                    clearInterval(this.exportPollTimer);
-                    this.exportPollTimer = null;
-                    this.exportTaskId = null;
-                    localStorage.removeItem('activeDatabaseExportTaskId');
-                    window.toast?.error('Export thất bại: ' + (this.exportTaskState.error || 'Không rõ lỗi'));
-                }
+                await this._handleExportPollStatus(validatedTaskId);
             } catch (error) {
                 console.error('Export polling error:', error);
                 this.exportTaskState = { status: 'error', percent: 0, error: error.message };

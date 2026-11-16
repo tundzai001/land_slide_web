@@ -162,6 +162,23 @@ class AdminStationWizardFeature extends window.AdminManager {
         });
     }
 
+    _renderModalDemNotices(location) {
+        const demLocation = document.getElementById('station-dem-location');
+        if (demLocation) {
+            demLocation.hidden = !location;
+            demLocation.textContent = location
+                ? `Vị trí đã chọn · ${location.dem_name || 'DEM'} · ô ${Number(location.grid?.column) + 1}, ${Number(location.grid?.row) + 1} · cao độ ${Number(location.h).toFixed(1)} m`
+                : '';
+        }
+        const step2Notice = document.getElementById('step2-dem-location-notice');
+        if (step2Notice) {
+            step2Notice.hidden = !location;
+            step2Notice.innerHTML = location
+                ? `<i class="bi bi-geo-alt-fill text-primary me-2"></i><strong>Đã điền tọa độ từ điểm chọn trên mô hình DEM</strong>: ${location.dem_name || 'DEM'} · ô ${Number(location.grid?.column) + 1}, ${Number(location.grid?.row) + 1} (Lat: ${Number(location.lat).toFixed(6)}, Lon: ${Number(location.lon).toFixed(6)}, Cao độ: ${Number(location.h).toFixed(1)} m). Bạn có thể kiểm tra hoặc điều chỉnh.`
+                : '';
+        }
+    }
+
     openAddStationModal(options = {}) {
         this.isEditMode = false;
         this.currentStationId = null;
@@ -176,20 +193,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         }
 
         document.getElementById('stationConfigForm').reset();
-        const demLocation = document.getElementById('station-dem-location');
-        if (demLocation) {
-            demLocation.hidden = !this.pendingStationLocation;
-            demLocation.textContent = this.pendingStationLocation
-                ? `Vị trí đã chọn · ${this.pendingStationLocation.dem_name || 'DEM'} · ô ${Number(this.pendingStationLocation.grid?.column) + 1}, ${Number(this.pendingStationLocation.grid?.row) + 1} · cao độ ${Number(this.pendingStationLocation.h).toFixed(1)} m`
-                : '';
-        }
-        const step2Notice = document.getElementById('step2-dem-location-notice');
-        if (step2Notice) {
-            step2Notice.hidden = !this.pendingStationLocation;
-            step2Notice.innerHTML = this.pendingStationLocation
-                ? `<i class="bi bi-geo-alt-fill text-primary me-2"></i><strong>Đã điền tọa độ từ điểm chọn trên mô hình DEM</strong>: ${this.pendingStationLocation.dem_name || 'DEM'} · ô ${Number(this.pendingStationLocation.grid?.column) + 1}, ${Number(this.pendingStationLocation.grid?.row) + 1} (Lat: ${Number(this.pendingStationLocation.lat).toFixed(6)}, Lon: ${Number(this.pendingStationLocation.lon).toFixed(6)}, Cao độ: ${Number(this.pendingStationLocation.h).toFixed(1)} m). Bạn có thể kiểm tra hoặc điều chỉnh.`
-                : '';
-        }
+        this._renderModalDemNotices(this.pendingStationLocation);
         document.getElementById('edit-station-id').value = '';
 
         this._resetModalCustomMqtt();

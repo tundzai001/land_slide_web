@@ -590,18 +590,13 @@ function gnssWorkflowRoverFromMessage(message) {
     return match ? match[1].trim() : '';
 }
 
-function syncGnssWorkflowProgress(phase, rawMessage = '') {
-    const normalizedPhase = String(phase || 'WAITING').toUpperCase();
-    const message = String(rawMessage || '');
-    const rover = gnssWorkflowRoverFromMessage(message);
-    const group = rover ? `ROVER · ${rover}` : '';
-
+function _handleGnssWorkflowStatusPhase(normalizedPhase, message) {
     if (normalizedPhase === 'WAITING') {
         upsertGnssWorkflowNode('session', {
             title: 'Khởi tạo phiên bình sai', detail: message || 'Chuẩn bị kết nối API và WebSocket.',
             status: 'running', icon: 'bi-power',
         });
-        return;
+        return true;
     }
 
     if (normalizedPhase === 'COLLECTING_BASELINE') {
@@ -611,7 +606,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             detail: message || 'Chờ mỗi rover online gửi ít nhất một #AGRICA RTK Fixed hợp lệ.',
             status: 'running', icon: 'bi-broadcast-pin',
         });
-        return;
+        return true;
     }
 
     if (['ERROR', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED'].includes(normalizedPhase)) {
@@ -635,7 +630,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             });
         }
         renderGnssAdjustmentWorkflow();
-        return;
+        return true;
     }
 
     if (normalizedPhase === 'COMPLETED') {
@@ -646,10 +641,13 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             detail: message || 'Đã lưu kết quả và tạo báo cáo XLSX cùng hồ sơ audit JSON.',
             status: 'success', icon: 'bi-flag-fill',
         });
-        return;
+        return true;
     }
 
-    if (normalizedPhase !== 'FREE_NETWORK') return;
+    return false;
+}
+
+function _handleGnssWorkflowFreeNetworkGlobal(message) {
     finishGnssWorkflowNode('session', 'API và kênh thời gian thực đã sẵn sàng.');
     finishGnssWorkflowNode('seed');
     if (/starting round-robin|all selected rovers|remaining rovers/i.test(message)) {
@@ -667,7 +665,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             title: 'Đưa Base cố định về chế độ ngủ', detail: message,
             status: 'running', icon: 'bi-moon-stars',
         });
-        return;
+        return true;
     }
     if (/khôi phục.*base cố định|restor.*fixed base/i.test(message)) {
         finishRunningGnssWorkflowNodes(gnssAdjustmentDebugState.workflowCurrentRover ? `ROVER · ${gnssAdjustmentDebugState.workflowCurrentRover}` : null);
@@ -675,7 +673,7 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             title: 'Khôi phục stream Base cố định', detail: message,
             status: /success|thành công/i.test(message) ? 'success' : 'running', icon: 'bi-broadcast',
         });
-        return;
+        return true;
     }
     if (/aggregating repeated baselines|gom.*baseline|giải bình sai/i.test(message)) {
         finishGnssWorkflowNode('fixed-base-restore');
@@ -683,36 +681,13 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             title: 'Gom trị đo và giải bình sai', detail: message,
             status: 'running', icon: 'bi-calculator',
         });
-        return;
+        return true;
     }
-    if (!rover) return;
-    gnssAdjustmentDebugState.workflowCurrentRover = rover;
-    const key = suffix => `rover:${rover}:${suffix}`;
+    return false;
+}
 
-    if (/querying .*active aicaster/i.test(message)) {
-        finishGnssWorkflowNode('fixed-base-sleep', 'Base cố định đã ngắt luồng NTRIP để tránh xung đột nguồn hiệu chỉnh.');
-        upsertGnssWorkflowNode(key('session'), {
-            title: 'Tìm phiên điều khiển AICaster', detail: message, status: 'running', group, icon: 'bi-search',
-        });
-    } else if (/matched aicaster/i.test(message)) {
-        finishGnssWorkflowNode(key('session'), message);
-    } else if (/preflight .*mode rover/i.test(message)) {
-        finishGnssWorkflowNode(key('session'));
-        upsertGnssWorkflowNode(key('preflight'), {
-            title: 'Kiểm tra đường lệnh và MQTT ACK', detail: message, status: 'running', group, icon: 'bi-shield-check',
-        });
-    } else if (/sending set base/i.test(message)) {
-        finishGnssWorkflowNode(key('preflight'), 'MQTT đã xác nhận preflight ROVER; cho phép chuyển BASE tạm.');
-        upsertGnssWorkflowNode(key('base'), {
-            title: 'Cấu hình BASE tạm và RTCM', detail: message, status: 'running', group, icon: 'bi-antenna',
-        });
-    } else if (/set base accepted/i.test(message)) {
-        upsertGnssWorkflowNode(key('base'), {
-            title: 'Cấu hình BASE tạm và RTCM', detail: message,
-            status: /optional rtcm fallback/i.test(message) ? 'warning' : 'success',
-            group, icon: /optional rtcm fallback/i.test(message) ? 'bi-exclamation-diamond' : 'bi-check-lg',
-        });
-    } else if (/set base was not fully verified/i.test(message)) {
+function _handleGnssWorkflowRoverRecovery(message, key, group) {
+    if (/set base was not fully verified/i.test(message)) {
         upsertGnssWorkflowNode(key('base'), {
             title: 'Cấu hình BASE tạm và RTCM', detail: message,
             status: 'error', group, icon: 'bi-x-lg',
@@ -722,28 +697,42 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
             detail: 'Đang hoàn tác cấu hình BASE trước khi dừng chu kỳ.',
             status: 'running', group, icon: 'bi-life-preserver',
         });
-    } else if (/restore step \d+\/\d+/i.test(message)) {
+        return true;
+    }
+    if (/restore step \d+\/\d+/i.test(message)) {
         upsertGnssWorkflowNode(key('restore'), {
             title: 'Phục hồi ROVER an toàn', detail: message,
             status: 'running', group, icon: 'bi-arrow-counterclockwise',
         });
-    } else if (/ack received for/i.test(message)) {
+        return true;
+    }
+    if (/ack received for/i.test(message)) {
         upsertGnssWorkflowNode(key('restore'), {
             title: 'Phục hồi ROVER an toàn', detail: message,
             status: /saveconfig/i.test(message) ? 'success' : 'running',
             group, icon: 'bi-arrow-counterclockwise',
         });
-    } else if (/no ack for .*retrying/i.test(message)) {
+        return true;
+    }
+    if (/no ack for .*retrying/i.test(message)) {
         upsertGnssWorkflowNode(key('restore'), {
             title: 'Phục hồi ROVER an toàn', detail: message,
             status: 'running', group, icon: 'bi-exclamation-triangle',
         });
-    } else if (/rotation skipped after safe rover recovery/i.test(message)) {
+        return true;
+    }
+    if (/rotation skipped after safe rover recovery/i.test(message)) {
         upsertGnssWorkflowNode(key('restore'), {
             title: 'Bỏ lượt BASE, tiếp tục rover kế tiếp', detail: message,
             status: 'warning', group, icon: 'bi-skip-forward',
         });
-    } else if (/waiting 10s .*emit rtcm/i.test(message)) {
+        return true;
+    }
+    return false;
+}
+
+function _handleGnssWorkflowRoverCollection(message, key, group) {
+    if (/waiting 10s .*emit rtcm/i.test(message)) {
         finishGnssWorkflowNode(key('base'));
         upsertGnssWorkflowNode(key('warmup'), {
             title: 'Chờ bộ thu phát RTCM', detail: message, status: 'running', group, icon: 'bi-hourglass-split',
@@ -773,6 +762,52 @@ function syncGnssWorkflowProgress(phase, rawMessage = '') {
     } else if (/set rover accepted/i.test(message)) {
         finishGnssWorkflowNode(key('restore'), message);
     }
+}
+
+function _handleGnssWorkflowRoverStep(message, key, group) {
+    if (/querying .*active aicaster/i.test(message)) {
+        finishGnssWorkflowNode('fixed-base-sleep', 'Base cố định đã ngắt luồng NTRIP để tránh xung đột nguồn hiệu chỉnh.');
+        upsertGnssWorkflowNode(key('session'), {
+            title: 'Tìm phiên điều khiển AICaster', detail: message, status: 'running', group, icon: 'bi-search',
+        });
+    } else if (/matched aicaster/i.test(message)) {
+        finishGnssWorkflowNode(key('session'), message);
+    } else if (/preflight .*mode rover/i.test(message)) {
+        finishGnssWorkflowNode(key('session'));
+        upsertGnssWorkflowNode(key('preflight'), {
+            title: 'Kiểm tra đường lệnh và MQTT ACK', detail: message, status: 'running', group, icon: 'bi-shield-check',
+        });
+    } else if (/sending set base/i.test(message)) {
+        finishGnssWorkflowNode(key('preflight'), 'MQTT đã xác nhận preflight ROVER; cho phép chuyển BASE tạm.');
+        upsertGnssWorkflowNode(key('base'), {
+            title: 'Cấu hình BASE tạm và RTCM', detail: message, status: 'running', group, icon: 'bi-antenna',
+        });
+    } else if (/set base accepted/i.test(message)) {
+        upsertGnssWorkflowNode(key('base'), {
+            title: 'Cấu hình BASE tạm và RTCM', detail: message,
+            status: /optional rtcm fallback/i.test(message) ? 'warning' : 'success',
+            group, icon: /optional rtcm fallback/i.test(message) ? 'bi-exclamation-diamond' : 'bi-check-lg',
+        });
+    } else if (!_handleGnssWorkflowRoverRecovery(message, key, group)) {
+        _handleGnssWorkflowRoverCollection(message, key, group);
+    }
+}
+
+function syncGnssWorkflowProgress(phase, rawMessage = '') {
+    const normalizedPhase = String(phase || 'WAITING').toUpperCase();
+    const message = String(rawMessage || '');
+
+    if (_handleGnssWorkflowStatusPhase(normalizedPhase, message)) return;
+    if (normalizedPhase !== 'FREE_NETWORK') return;
+    if (_handleGnssWorkflowFreeNetworkGlobal(message)) return;
+
+    const rover = gnssWorkflowRoverFromMessage(message);
+    if (!rover) return;
+    gnssAdjustmentDebugState.workflowCurrentRover = rover;
+    const group = `ROVER · ${rover}`;
+    const key = suffix => `rover:${rover}:${suffix}`;
+
+    _handleGnssWorkflowRoverStep(message, key, group);
 }
 
 function syncGnssWorkflowBaseline(message) {
@@ -810,34 +845,37 @@ function syncGnssWorkflowBaseline(message) {
     }
 }
 
-function refreshGnssAdjustmentDebugUi() {
+function _updateGnssPhaseIndicator() {
     const indicator = document.getElementById('gnss-phase-indicator');
-    if (indicator) {
-        const phaseName = gnssAdjustmentDebugState.phase;
-        let phaseMsgHtml = '';
-        if (gnssAdjustmentDebugState.entries) {
-            const lastPhaseEntry = [...gnssAdjustmentDebugState.entries].reverse().find(e => e.label === 'PHASE');
-            if (lastPhaseEntry?.message) {
-                phaseMsgHtml = ` <span class="text-light ms-2 px-2 py-1 bg-dark rounded border border-secondary" style="font-size: 0.8em;">${lastPhaseEntry.message}</span>`;
-            }
+    if (!indicator) return;
+    const phaseName = gnssAdjustmentDebugState.phase;
+    let phaseMsgHtml = '';
+    if (gnssAdjustmentDebugState.entries) {
+        const lastPhaseEntry = [...gnssAdjustmentDebugState.entries].reverse().find(e => e.label === 'PHASE');
+        if (lastPhaseEntry?.message) {
+            phaseMsgHtml = ` <span class="text-light ms-2 px-2 py-1 bg-dark rounded border border-secondary" style="font-size: 0.8em;">${lastPhaseEntry.message}</span>`;
         }
-        indicator.innerHTML = `<span class="opacity-75">Phase:</span> ${phaseName}${phaseMsgHtml}`;
-        indicator.className = phaseClassForGnssAdjustment(phaseName);
     }
+    indicator.innerHTML = `<span class="opacity-75">Phase:</span> ${phaseName}${phaseMsgHtml}`;
+    indicator.className = phaseClassForGnssAdjustment(phaseName);
+}
 
+function _updateGnssRosterSummary() {
+    const rosterSummary = document.getElementById('gnss-roster-summary');
+    if (!rosterSummary) return;
     const rosterCount = gnssAdjustmentDebugState.rosterStationIds.length;
     const participantCount = gnssAdjustmentDebugState.participatingStationIds.length
         || gnssAdjustmentDebugState.expectedStationIds.length;
     const excludedCount = gnssAdjustmentDebugState.excludedStationIds.length;
-    const rosterSummary = document.getElementById('gnss-roster-summary');
-    if (rosterSummary) {
-        rosterSummary.innerHTML = `
-            <span><strong>${rosterCount || participantCount}</strong> trạm đã chọn</span>
-            <span class="is-active"><strong>${participantCount}</strong> tham gia</span>
-            <span class="${excludedCount ? 'is-warning' : ''}"><strong>${excludedCount}</strong> bỏ qua</span>
-            <small>Danh sách và vị trí hiển thị được khóa trong suốt phiên</small>
-        `;
-    }
+    rosterSummary.innerHTML = `
+        <span><strong>${rosterCount || participantCount}</strong> trạm đã chọn</span>
+        <span class="is-active"><strong>${participantCount}</strong> tham gia</span>
+        <span class="${excludedCount ? 'is-warning' : ''}"><strong>${excludedCount}</strong> bỏ qua</span>
+        <small>Danh sách và vị trí hiển thị được khóa trong suốt phiên</small>
+    `;
+}
+
+function _updateGnssControlButtons() {
     const pauseButton = document.getElementById('gnss-pause-adjustment-btn');
     const resumeButton = document.getElementById('gnss-resume-adjustment-btn');
     const stopButton = document.getElementById('gnss-stop-adjustment-btn');
@@ -851,64 +889,75 @@ function refreshGnssAdjustmentDebugUi() {
         resumeButton.disabled = phase !== 'PAUSED';
     }
     if (stopButton) stopButton.disabled = !['COLLECTING_BASELINE', 'FREE_NETWORK', 'PAUSED'].includes(phase);
+}
 
+function _updateGnssDebugSummary() {
     const summary = document.getElementById('gnss-debug-summary');
-    if (summary) {
-        const elapsed = gnssAdjustmentDebugState.startedAt
-            ? Math.floor((Date.now() - gnssAdjustmentDebugState.startedAt) / 1000)
-            : 0;
-        const expected = gnssAdjustmentDebugState.expectedStationIds.length
-            ? gnssAdjustmentDebugState.expectedStationIds.join(', ')
-            : 'chưa xác định';
-        summary.textContent = `WS: ${gnssAdjustmentDebugState.wsStatus} | Baseline: ${gnssAdjustmentDebugState.baselineCount} | Chờ trạm: ${expected} | ${elapsed}s`;
+    if (!summary) return;
+    const elapsed = gnssAdjustmentDebugState.startedAt
+        ? Math.floor((Date.now() - gnssAdjustmentDebugState.startedAt) / 1000)
+        : 0;
+    const expected = gnssAdjustmentDebugState.expectedStationIds.length
+        ? gnssAdjustmentDebugState.expectedStationIds.join(', ')
+        : 'chưa xác định';
+    summary.textContent = `WS: ${gnssAdjustmentDebugState.wsStatus} | Baseline: ${gnssAdjustmentDebugState.baselineCount} | Chờ trạm: ${expected} | ${elapsed}s`;
+}
+
+function _renderGnssDebugLogEntries(log) {
+    const revision = String(gnssAdjustmentDebugState.entriesRevision);
+    if (log.dataset.entriesRevision === revision) return;
+
+    const previousScrollTop = log.scrollTop;
+    const shouldAutoScroll = gnssAdjustmentDebugState.autoScroll;
+    const generation = String(gnssAdjustmentDebugState.entriesGeneration);
+    const lastRenderedId = Number(log.dataset.lastEntryId || 0);
+    const mustRebuild = log.dataset.entriesGeneration !== generation;
+    const entriesToRender = mustRebuild
+        ? gnssAdjustmentDebugState.entries.slice(-GNSS_DEBUG_DOM_LIMIT)
+        : gnssAdjustmentDebugState.entries.filter(entry => entry.id > lastRenderedId);
+    const fragment = document.createDocumentFragment();
+    const levelColors = {
+        error: '#ff6b6b',
+        warning: '#ffd166',
+        success: '#5eead4',
+    };
+    entriesToRender.forEach(entry => {
+        const row = document.createElement('div');
+        row.className = 'gnss-debug-row';
+        row.style.color = levelColors[entry.level] || '#93c5fd';
+        row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
+        fragment.appendChild(row);
+    });
+    if (mustRebuild) log.replaceChildren();
+    log.appendChild(fragment);
+    let removedHeight = 0;
+    while (log.childElementCount > GNSS_DEBUG_DOM_LIMIT) {
+        removedHeight += log.firstElementChild?.offsetHeight || 0;
+        log.firstElementChild?.remove();
     }
+    const newestEntry = gnssAdjustmentDebugState.entries.at(-1);
+    log.dataset.lastEntryId = String(newestEntry?.id || 0);
+    log.dataset.entriesGeneration = generation;
+    log.dataset.entriesRevision = revision;
+    if (shouldAutoScroll) {
+        log.scrollTop = log.scrollHeight;
+    } else {
+        log.scrollTop = Math.min(
+            Math.max(0, previousScrollTop - removedHeight),
+            Math.max(0, log.scrollHeight - log.clientHeight),
+        );
+    }
+}
+
+function refreshGnssAdjustmentDebugUi() {
+    _updateGnssPhaseIndicator();
+    _updateGnssRosterSummary();
+    _updateGnssControlButtons();
+    _updateGnssDebugSummary();
 
     const log = document.getElementById('gnss-debug-log');
     if (log?.offsetParent !== null) {
-        const revision = String(gnssAdjustmentDebugState.entriesRevision);
-        if (log.dataset.entriesRevision !== revision) {
-            const previousScrollTop = log.scrollTop;
-            const shouldAutoScroll = gnssAdjustmentDebugState.autoScroll;
-            const generation = String(gnssAdjustmentDebugState.entriesGeneration);
-            const lastRenderedId = Number(log.dataset.lastEntryId || 0);
-            const mustRebuild = log.dataset.entriesGeneration !== generation;
-            const entriesToRender = mustRebuild
-                ? gnssAdjustmentDebugState.entries.slice(-GNSS_DEBUG_DOM_LIMIT)
-                : gnssAdjustmentDebugState.entries.filter(entry => entry.id > lastRenderedId);
-            const fragment = document.createDocumentFragment();
-            entriesToRender.forEach(entry => {
-                const row = document.createElement('div');
-                row.className = 'gnss-debug-row';
-                const levelColors = {
-                    error: '#ff6b6b',
-                    warning: '#ffd166',
-                    success: '#5eead4',
-                };
-                const color = levelColors[entry.level] || '#93c5fd';
-                row.style.color = color;
-                row.textContent = `[${entry.time}] ${entry.label}: ${entry.message}`;
-                fragment.appendChild(row);
-            });
-            if (mustRebuild) log.replaceChildren();
-            log.appendChild(fragment);
-            let removedHeight = 0;
-            while (log.childElementCount > GNSS_DEBUG_DOM_LIMIT) {
-                removedHeight += log.firstElementChild?.offsetHeight || 0;
-                log.firstElementChild?.remove();
-            }
-            const newestEntry = gnssAdjustmentDebugState.entries.at(-1);
-            log.dataset.lastEntryId = String(newestEntry?.id || 0);
-            log.dataset.entriesGeneration = generation;
-            log.dataset.entriesRevision = revision;
-            if (shouldAutoScroll) {
-                log.scrollTop = log.scrollHeight;
-            } else {
-                log.scrollTop = Math.min(
-                    Math.max(0, previousScrollTop - removedHeight),
-                    Math.max(0, log.scrollHeight - log.clientHeight),
-                );
-            }
-        }
+        _renderGnssDebugLogEntries(log);
         const followButton = document.getElementById('gnss-debug-follow');
         if (followButton) {
             followButton.classList.toggle('btn-warning', !gnssAdjustmentDebugState.autoScroll);
@@ -920,6 +969,7 @@ function refreshGnssAdjustmentDebugUi() {
     }
     renderGnssAdjustmentWorkflow();
     refreshGnssAdjustmentRunningPill();
+    window.gnssBoardState?.draw?.(performance.now());
 }
 
 function formatGnssAdjustmentDebugOutput() {
@@ -1001,6 +1051,20 @@ function setGnssAdjustmentPhase(phase, message = '') {
     }
 }
 
+function _dispatchGnssAdjustmentFinalResult(phase, statusData) {
+    if (!statusData || !['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(phase)) return;
+    const resultMessage = {
+        sensor_type: 'gnss_adjusted',
+        timestamp: statusData.computed_at || Math.floor(Date.now() / 1000),
+        data: statusData,
+    };
+    if (phase === 'COMPLETED') {
+        updateRealtimeSensorValues(resultMessage);
+    } else {
+        renderGnssAdjustmentAuditResult(resultMessage);
+    }
+}
+
 async function syncGnssAdjustmentStatus() {
     const projectId = Number(gnssAdjustmentDebugState.projectId || 0);
     if (!gnssAdjustmentDebugState.active || !projectId) return;
@@ -1026,18 +1090,7 @@ async function syncGnssAdjustmentStatus() {
             setGnssAdjustmentPhase(phase, message || 'Đã đồng bộ trạng thái từ máy chủ.');
             addGnssAdjustmentDebug('SYNC', 'Đã khôi phục trạng thái qua API sau khi có thể bỏ lỡ WebSocket.', 'success');
         }
-        if (status.data && ['COMPLETED', 'FAILED_QUALITY_GATE', 'PARTIAL_FAILED', 'ERROR'].includes(phase)) {
-            const resultMessage = {
-                sensor_type: 'gnss_adjusted',
-                timestamp: status.data.computed_at || Math.floor(Date.now() / 1000),
-                data: status.data,
-            };
-            if (phase === 'COMPLETED') {
-                updateRealtimeSensorValues(resultMessage);
-            } else {
-                renderGnssAdjustmentAuditResult(resultMessage);
-            }
-        }
+        _dispatchGnssAdjustmentFinalResult(phase, status.data);
     } catch (error) {
         console.warn('[GNSS] Could not synchronize adjustment status:', error);
     } finally {
