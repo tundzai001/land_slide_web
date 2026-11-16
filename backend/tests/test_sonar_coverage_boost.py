@@ -959,3 +959,68 @@ class SonarCoverageBoostTests(unittest.TestCase):
         }
         _create_station_devices(db_mock, st_mock, sensors)
         self.assertEqual(db_mock.add.call_count, 1)
+
+    def test_processors_cors_helpers(self):
+        from processors.gnss_adjustment.cors import RoundRobinCorsMixin, PUBLIC_MAP_STATIONS_ENDPOINT
+
+        mixin = RoundRobinCorsMixin()
+        mixin._cors_token_sync = MagicMock(return_value="cors_token123")
+
+        path, tok = mixin._resolve_cors_path_and_token(PUBLIC_MAP_STATIONS_ENDPOINT, None)
+        self.assertEqual(path, "/api/integrations/stations")
+        self.assertEqual(tok, "cors_token123")
+
+        path2, tok2 = mixin._resolve_cors_path_and_token(PUBLIC_MAP_STATIONS_ENDPOINT, "bearer_normal")
+        self.assertEqual(path2, "/api/map/stations")
+
+        dev_path = "/api/devices/DEV1/configure-service"
+        res_dev, _ = mixin._resolve_cors_path_and_token(dev_path, "cors_token")
+        self.assertEqual(res_dev, "/api/integrations/stations/DEV1/configure-service")
+
+    def test_sensor_catalog_helpers(self):
+        from app.shared.sensor_catalog import (
+            _process_extensometer_payload,
+            _validate_fields,
+            _validate_optional_metrics,
+            _validate_metadata,
+            _validate_waveform,
+            process_monitoring_payload,
+        )
+
+        # _process_extensometer_payload invalid points
+        self.assertIsNone(_process_extensometer_payload({}, "mm"))
+        self.assertIsNone(_process_extensometer_payload({"points": "bad"}, "mm"))
+        self.assertIsNone(_process_extensometer_payload({"points": {"": 1.0}}, "mm"))
+        self.assertIsNone(_process_extensometer_payload({"points": {"k" * 81: 1.0}}, "mm"))
+        self.assertIsNone(_process_extensometer_payload({"points": {"p1": True}}, "mm"))
+        self.assertEqual(_process_extensometer_payload({"points": {"p1": 12.5}}, "mm"), {"points": {"p1": 12.5}, "unit": "mm"})
+
+        # _validate_fields invalid
+        res = {}
+        self.assertFalse(_validate_fields({"f1": "string"}, ["f1"], res))
+        self.assertTrue(_validate_fields({"f1": 10.0}, ["f1"], res))
+        self.assertEqual(res["f1"], 10.0)
+
+        # _validate_optional_metrics
+        res_opt = {}
+        self.assertFalse(_validate_optional_metrics({"opt": "bad"}, [{"field": "opt"}], res_opt))
+        self.assertTrue(_validate_optional_metrics({"opt": 5.5}, [{"field": "opt"}], res_opt))
+
+        # _validate_metadata
+        res_meta = {}
+        self.assertFalse(_validate_metadata({"measured_at": -1}, res_meta))
+        self.assertFalse(_validate_metadata({"sequence": -1}, res_meta))
+        self.assertFalse(_validate_metadata({"sequence": True}, res_meta))
+        self.assertFalse(_validate_metadata({"quality": "invalid_val"}, res_meta))
+        self.assertFalse(_validate_metadata({"model": ""}, res_meta))
+        self.assertTrue(_validate_metadata({"measured_at": 1700000000, "quality": "valid"}, res_meta))
+
+        # _validate_waveform
+        res_wave = {}
+        self.assertTrue(_validate_waveform({}, "accelerometer", res_wave))
+        self.assertFalse(_validate_waveform({"waveform": {}}, "rain", res_wave))
+        self.assertFalse(_validate_waveform({"waveform": "bad"}, "accelerometer", res_wave))
+        self.assertFalse(_validate_waveform({"waveform": {"sample_rate_hz": 0}}, "accelerometer", res_wave))
+        self.assertFalse(_validate_waveform({"waveform": {"sample_rate_hz": 50, "start_at": -1}}, "accelerometer", res_wave))
+        self.assertFalse(_validate_waveform({"waveform": {"sample_rate_hz": 50, "start_at": 1700000000, "x": [1], "y": [1, 2], "z": [1]}}, "accelerometer", res_wave))
+

@@ -18,6 +18,35 @@ logger = logging.getLogger(__name__)
 PUBLIC_MAP_STATIONS_ENDPOINT = "/api/public/map-stations"
 
 class RoundRobinCorsMixin:
+    def _resolve_cors_path_and_token(self, path: str, access_token: Optional[str]) -> tuple[str, Optional[str]]:
+        if path == PUBLIC_MAP_STATIONS_ENDPOINT:
+            access_token = access_token or self._cors_token_sync()
+            path = (
+                "/api/integrations/stations"
+                if access_token.startswith("cors_") else "/api/map/stations"
+            )
+        elif path.startswith("/api/devices/") and path.endswith("/configure-service") and access_token and access_token.startswith("cors_"):
+            path = path.replace("/api/devices/", "/api/integrations/stations/", 1)
+        return path, access_token
+
+    def _handle_cors_http_error(self, exc: urllib.error.HTTPError, method: str, path: str, payload: Optional[dict], _auth_retried: bool) -> Any:
+        if (path == "/api/map/stations" and exc.code == 401
+                and not _auth_retried and self.web_cors_api_username):
+            self._web_cors_access_token = ""
+            return self._cors_api_request_sync(
+                method, path, payload,
+                access_token=self._cors_token_sync(force_login=True),
+                _auth_retried=True,
+            )
+        with exc:
+            detail = exc.read(2048).decode("utf-8", errors="replace").strip()
+        if not detail or detail.startswith("<"):
+            detail = str(exc.reason or "HTTP request failed")
+        detail = " ".join(detail.split())[:500]
+        raise RuntimeError(
+            f"CORS API HTTP {exc.code} for {path}: {detail or exc.reason}"
+        ) from exc
+
     def _cors_api_request_sync(
         self,
         method: str,
@@ -27,14 +56,7 @@ class RoundRobinCorsMixin:
         access_token: Optional[str] = None,
         _auth_retried: bool = False,
     ) -> Any:
-        if path == PUBLIC_MAP_STATIONS_ENDPOINT:
-            access_token = access_token or self._cors_token_sync()
-            path = (
-                "/api/integrations/stations"
-                if access_token.startswith("cors_") else "/api/map/stations"
-            )
-        elif path.startswith("/api/devices/") and path.endswith("/configure-service") and access_token and access_token.startswith("cors_"):
-            path = path.replace("/api/devices/", "/api/integrations/stations/", 1)
+        path, access_token = self._resolve_cors_path_and_token(path, access_token)
         url = f"{self.web_cors_api_base_url}{path}"
         headers = {"Accept": "application/json"}
         data = None
@@ -55,23 +77,7 @@ class RoundRobinCorsMixin:
                 if response.status < 200 or response.status >= 300:
                     raise RuntimeError(f"CORS API HTTP {response.status} for {path}")
         except urllib.error.HTTPError as exc:
-            if (path == "/api/map/stations" and exc.code == 401
-                    and not _auth_retried and self.web_cors_api_username):
-                self._web_cors_access_token = ""
-                return self._cors_api_request_sync(
-                    method, path, payload,
-                    access_token=self._cors_token_sync(force_login=True),
-                    _auth_retried=True,
-                )
-            # Bound proxy responses before decoding; retain API validation details.
-            with exc:
-                detail = exc.read(2048).decode("utf-8", errors="replace").strip()
-            if not detail or detail.startswith("<"):
-                detail = str(exc.reason or "HTTP request failed")
-            detail = " ".join(detail.split())[:500]
-            raise RuntimeError(
-                f"CORS API HTTP {exc.code} for {path}: {detail or exc.reason}"
-            ) from exc
+            return self._handle_cors_http_error(exc, method, path, payload, _auth_retried)
         except urllib.error.URLError as exc:
             raise RuntimeError(f"CORS API unavailable for {path}: {exc.reason}") from exc
         if not body.strip():
