@@ -79,184 +79,193 @@ class MQTTTopicMixin:
         except Exception as e:
             logger.warning(f"Could not reset alert state for station {station_id}: {e}")
 
+    def _resolve_device_broker_config(self, device, station) -> tuple:
+        dev_cfg = device.config or {}
+        mqtt_cfg = dev_cfg.get("mqtt")
+        if not mqtt_cfg:
+            st_cfg = station.config or {}
+            mqtt_cfg = st_cfg.get("mqtt", {}) or {}
+
+        broker_host = (mqtt_cfg.get("host") or "").strip() or self.runtime_mqtt["broker"]
+        broker_port = mqtt_cfg.get("port")
+        if broker_port is not None:
+            try:
+                broker_port = int(broker_port)
+            except (ValueError, TypeError):
+                broker_port = None
+        if not broker_port:
+            broker_port = self.runtime_mqtt["port"]
+
+        broker_user = (mqtt_cfg.get("username") or "").strip() or self.runtime_mqtt["user"] or None
+        broker_pass = mqtt_cfg.get("password") or self.runtime_mqtt["password"] or None
+        broker_tls = bool(mqtt_cfg.get("use_tls", False))
+        return (broker_host, broker_port, broker_user, broker_pass, broker_tls)
+
+    def _resolve_device_processor(self, device, station, proc_key: str, device_context: str):
+        sensor_type = device.device_type
+        if proc_key not in self.processors_cache:
+            if sensor_type == 'gnss':
+                self.processors_cache[proc_key] = GNSSVelocityProcessor(
+                    device.id,
+                    ConfigSessionLocal,
+                    context_label=device_context
+                )
+            elif sensor_type == 'rain':
+                self.processors_cache[proc_key] = RainEngine()
+            elif sensor_type == 'water':
+                self.processors_cache[proc_key] = WaterEngine()
+            elif sensor_type == 'imu':
+                imu_engine = IMUEngine()
+                imu_baseline = (station.config or {}).get('ImuBaseline', {})
+                if imu_baseline.get('baseline_roll') is not None:
+                    imu_engine.set_baseline(
+                        float(imu_baseline.get('baseline_roll', 0)),
+                        float(imu_baseline.get('baseline_pitch', 0)),
+                        float(imu_baseline.get('baseline_yaw', 0))
+                    )
+                    logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
+                self.processors_cache[proc_key] = imu_engine
+            elif is_monitoring_type(sensor_type):
+                self.processors_cache[proc_key] = None
+            else:
+                logger.warning('Unsupported sensor type %s for device %s', sensor_type, device.id)
+                return False
+        elif sensor_type == 'gnss' and hasattr(self.processors_cache[proc_key], 'set_context'):
+            self.processors_cache[proc_key].set_context(device_context)
+        return True
+
+    def _stop_unused_mqtt_clients(self, new_client_topics):
+        for b_key in list(self._sub_clients.keys()):
+            if b_key not in new_client_topics:
+                logger.info(f"🔌 [DYNAMIC MQTT] Stopping client for {b_key[0]}:{b_key[1]} (no active topics)")
+                client = self._sub_clients[b_key]
+                try:
+                    client.loop_stop()
+                    client.disconnect()
+                except Exception as e:
+                    logger.error(f"Error disconnecting client {b_key[0]}:{b_key[1]}: {e}")
+                self._sub_clients.pop(b_key, None)
+                self._client_topics.pop(b_key, None)
+
+    def _create_dynamic_mqtt_client(self, b_key: tuple):
+        broker_host, broker_port, broker_user, broker_pass, broker_tls = b_key
+        logger.info(f"🔌 [DYNAMIC MQTT] Creating new subscription client for {broker_host}:{broker_port}")
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        client.user_data_set(b_key)
+        client.on_connect = self.on_connect
+        client.on_message = self.on_message
+        client.on_disconnect = self.on_disconnect
+        client.on_connect_fail = self.on_connect_fail
+
+        if broker_user:
+            client.username_pw_set(broker_user, broker_pass)
+
+        if broker_tls:
+            import ssl
+            try:
+                client.tls_set_context(ssl.create_default_context())
+                logger.info(f"🔒 Enabled TLS for client {broker_host}:{broker_port}")
+            except Exception as tls_e:
+                logger.error(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
+                return None
+
+        try:
+            client.connect_async(broker_host, broker_port, 60)
+            client.loop_start()
+            self._sub_clients[b_key] = client
+            return client
+        except Exception as conn_e:
+            logger.error(f"❌ Failed to connect dynamic client to {broker_host}:{broker_port}: {conn_e}")
+            return None
+
+    def _sync_broker_subscriptions(self, b_key: tuple, new_topics: set):
+        broker_host, broker_port, *_ = b_key
+        if b_key not in self._sub_clients:
+            if not self._create_dynamic_mqtt_client(b_key):
+                return
+
+        client = self._sub_clients[b_key]
+        current_topics = self._client_topics[b_key]
+
+        for t in new_topics - current_topics:
+            try:
+                client.subscribe(t)
+                logger.info(f"   ✓ Dynamic Subscribed to {t} on {broker_host}:{broker_port}")
+            except Exception as sub_e:
+                logger.error(f"❌ Failed to subscribe to {t} on {broker_host}:{broker_port}: {sub_e}")
+
+        for t in current_topics - new_topics:
+            try:
+                client.unsubscribe(t)
+                logger.info(f"   ✓ Dynamic Unsubscribed from {t} on {broker_host}:{broker_port}")
+            except Exception as unsub_e:
+                logger.error(f"❌ Failed to unsubscribe from {t} on {broker_host}:{broker_port}: {unsub_e}")
+
+        self._client_topics[b_key] = new_topics
+
+    async def _reload_topics_cycle(self):
+        from app.models.config import Device, Station, Project
+        from sqlalchemy import select
+
+        async with ConfigSessionLocal() as db:
+            result = await db.execute(
+                select(Device, Station, Project)
+                .join(Station, Device.station_id == Station.id)
+                .join(Project, Station.project_id == Project.id)
+                .where(Device.is_active == True)
+            )
+            devices_with_stations = result.all()
+
+        new_map = {}
+        new_client_topics = defaultdict(set)
+        new_station_brokers = {}
+
+        for device, station, project in devices_with_stations:
+            if not device.mqtt_topic or device.mqtt_topic.strip() == "":
+                continue
+
+            topic = device.mqtt_topic
+            proc_key = f"device_{device.id}"
+            device_context = (
+                f"project={project.name}({project.project_code}) "
+                f"station={station.name}({station.station_code}, id={station.id}) "
+                f"device={device.name}({device.device_code}, id={device.id}) "
+                f"topic={topic}"
+            )
+            broker_key = self._resolve_device_broker_config(device, station)
+            new_station_brokers[station.id] = broker_key
+            new_client_topics[broker_key].add(topic)
+
+            if not self._resolve_device_processor(device, station, proc_key, device_context):
+                continue
+
+            new_map[(broker_key, topic)] = {
+                "device_id": device.id,
+                "device_name": device.name,
+                "station_id": station.id,
+                "station_name": station.name,
+                "station_code": getattr(station, "station_code", None),
+                "project_id": project.id,
+                "project_gnss_clusters": project.gnss_clusters,
+                "station_origins": {},
+                "type": device.device_type,
+                "processor": self.processors_cache[proc_key],
+                "config": self._apply_runtime_defaults_to_station_config(station.config or {}),
+                "forwarding": (station.config or {}).get("gnss_rtk_forwarding", {}),
+            }
+
+        self._stop_unused_mqtt_clients(new_client_topics)
+        for b_key, new_topics in new_client_topics.items():
+            self._sync_broker_subscriptions(b_key, new_topics)
+
+        self.topic_map = new_map
+        self._station_brokers = new_station_brokers
+
     async def reload_topics_from_db(self):
         logger.info("🔄 Started Topic Auto-Reload Task")
         while True:
             try:
-                from app.models.config import Device, Station, Project
-                from sqlalchemy import select
-                
-                async with ConfigSessionLocal() as db:
-                    result = await db.execute(
-                        select(Device, Station, Project)
-                        .join(Station, Device.station_id == Station.id)
-                        .join(Project, Station.project_id == Project.id)
-                        .where(Device.is_active == True)
-                    )
-                    devices_with_stations = result.all()
-                
-                new_map = {}
-                new_client_topics = defaultdict(set)
-                new_station_brokers = {}
-                
-                for device, station, project in devices_with_stations:
-                    if not device.mqtt_topic or device.mqtt_topic.strip() == "":
-                        continue
-                    
-                    topic = device.mqtt_topic
-                    sensor_type = device.device_type
-                    proc_key = f"device_{device.id}"
-                    device_context = (
-                        f"project={project.name}({project.project_code}) "
-                        f"station={station.name}({station.station_code}, id={station.id}) "
-                        f"device={device.name}({device.device_code}, id={device.id}) "
-                        f"topic={topic}"
-                    )
-                    
-                    # Determine MQTT Broker configuration for this station/device
-                    dev_cfg = device.config or {}
-                    mqtt_cfg = dev_cfg.get("mqtt")
-                    
-                    if not mqtt_cfg:
-                        # Fallback to station config for backward compatibility
-                        st_cfg = station.config or {}
-                        mqtt_cfg = st_cfg.get("mqtt", {}) or {}
-                    
-                    broker_host = (mqtt_cfg.get("host") or "").strip() or self.runtime_mqtt["broker"]
-                    
-                    broker_port = mqtt_cfg.get("port")
-                    if broker_port is not None:
-                        try:
-                            broker_port = int(broker_port)
-                        except (ValueError, TypeError):
-                            broker_port = None
-                    if not broker_port:
-                        broker_port = self.runtime_mqtt["port"]
-                        
-                    broker_user = (mqtt_cfg.get("username") or "").strip() or self.runtime_mqtt["user"] or None
-                    broker_pass = mqtt_cfg.get("password") or self.runtime_mqtt["password"] or None
-                    broker_tls = bool(mqtt_cfg.get("use_tls", False))
-                    
-                    broker_key = (broker_host, broker_port, broker_user, broker_pass, broker_tls)
-                    new_station_brokers[station.id] = broker_key
-                    new_client_topics[broker_key].add(topic)
-                    
-                    if proc_key not in self.processors_cache:
-                        if device.device_type == 'gnss':
-                            self.processors_cache[proc_key] = GNSSVelocityProcessor(
-                                device.id,
-                                ConfigSessionLocal,
-                                context_label=device_context
-                            )
-                        elif sensor_type == 'rain':
-                            self.processors_cache[proc_key] = RainEngine()
-                        elif sensor_type == 'water':
-                            self.processors_cache[proc_key] = WaterEngine()
-                        elif sensor_type == 'imu':
-                            imu_engine = IMUEngine()
-                            # ✅ Load baseline từ station config nếu có
-                            imu_baseline = (station.config or {}).get('ImuBaseline', {})
-                            if imu_baseline.get('baseline_roll') is not None:
-                                imu_engine.set_baseline(
-                                    float(imu_baseline.get('baseline_roll', 0)),
-                                    float(imu_baseline.get('baseline_pitch', 0)),
-                                    float(imu_baseline.get('baseline_yaw', 0))
-                                )
-                                logger.info(f"🎯 [IMU] Loaded baseline for station {station.name} from config")
-                            self.processors_cache[proc_key] = imu_engine
-                        elif is_monitoring_type(sensor_type):
-                            self.processors_cache[proc_key] = None
-                        else:
-                            logger.warning('Unsupported sensor type %s for device %s', sensor_type, device.id)
-                            continue
-                    elif device.device_type == 'gnss' and hasattr(self.processors_cache[proc_key], 'set_context'):
-                        self.processors_cache[proc_key].set_context(device_context)
-                    
-                    new_map[(broker_key, topic)] = {
-                        "device_id": device.id,
-                        "device_name": device.name,
-                        "station_id": station.id,
-                        "station_name": station.name,
-                        "station_code": getattr(station, "station_code", None),
-                        "project_id": project.id,
-                        "project_gnss_clusters": project.gnss_clusters,
-                        "station_origins": {},
-                        "type": device.device_type,
-                        "processor": self.processors_cache[proc_key],
-                        "config": self._apply_runtime_defaults_to_station_config(station.config or {}),
-                        "forwarding": (station.config or {}).get("gnss_rtk_forwarding", {})
-                    }
-                
-                # 1. Terminate clients that are no longer needed
-                for b_key in list(self._sub_clients.keys()):
-                    if b_key not in new_client_topics:
-                        logger.info(f"🔌 [DYNAMIC MQTT] Stopping client for {b_key[0]}:{b_key[1]} (no active topics)")
-                        client = self._sub_clients[b_key]
-                        try:
-                            client.loop_stop()
-                            client.disconnect()
-                        except Exception as e:
-                            logger.error(f"Error disconnecting client {b_key[0]}:{b_key[1]}: {e}")
-                        self._sub_clients.pop(b_key, None)
-                        self._client_topics.pop(b_key, None)
-                
-                # 2. Add or update clients for new/active broker keys
-                for b_key, new_topics in new_client_topics.items():
-                    broker_host, broker_port, broker_user, broker_pass, broker_tls = b_key
-                    
-                    # Create client if it doesn't exist
-                    if b_key not in self._sub_clients:
-                        logger.info(f"🔌 [DYNAMIC MQTT] Creating new subscription client for {broker_host}:{broker_port}")
-                        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-                        client.user_data_set(b_key)
-                        client.on_connect = self.on_connect
-                        client.on_message = self.on_message
-                        client.on_disconnect = self.on_disconnect
-                        client.on_connect_fail = self.on_connect_fail
-                        
-                        if broker_user:
-                            client.username_pw_set(broker_user, broker_pass)
-                        
-                        if broker_tls:
-                            import ssl
-                            try:
-                                client.tls_set_context(ssl.create_default_context())
-                                logger.info(f"🔒 Enabled TLS for client {broker_host}:{broker_port}")
-                            except Exception as tls_e:
-                                logger.error(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
-                                continue
-                        
-                        try:
-                            client.connect_async(broker_host, broker_port, 60)
-                            client.loop_start()
-                            self._sub_clients[b_key] = client
-                        except Exception as conn_e:
-                            logger.error(f"❌ Failed to connect dynamic client to {broker_host}:{broker_port}: {conn_e}")
-                            continue
-                    
-                    client = self._sub_clients[b_key]
-                    current_topics = self._client_topics[b_key]
-                    
-                    # Perform diff subscribe/unsubscribe on this client
-                    for t in new_topics - current_topics:
-                        try:
-                            client.subscribe(t)
-                            logger.info(f"   ✓ Dynamic Subscribed to {t} on {broker_host}:{broker_port}")
-                        except Exception as sub_e:
-                            logger.error(f"❌ Failed to subscribe to {t} on {broker_host}:{broker_port}: {sub_e}")
-                            
-                    for t in current_topics - new_topics:
-                        try:
-                            client.unsubscribe(t)
-                            logger.info(f"   ✓ Dynamic Unsubscribed from {t} on {broker_host}:{broker_port}")
-                        except Exception as unsub_e:
-                            logger.error(f"❌ Failed to unsubscribe from {t} on {broker_host}:{broker_port}: {unsub_e}")
-                    
-                    self._client_topics[b_key] = new_topics
-                
-                self.topic_map = new_map
-                self._station_brokers = new_station_brokers
-                
+                await self._reload_topics_cycle()
             except Exception as e:
                 logger.error(f"Error reloading topics: {e}")
             await asyncio.sleep(self.topic_reload_interval)

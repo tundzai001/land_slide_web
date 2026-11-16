@@ -1060,4 +1060,45 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertEqual(st.location["lat"], 21.1)
         self.assertEqual(st.location["lon"], 105.1)
 
+    def test_topics_bridge_helpers(self):
+        from app.mqtt.bridge.topics import MQTTTopicMixin
+
+        mixin = MQTTTopicMixin()
+        mixin.runtime_mqtt = {
+            "broker": "default.broker",
+            "port": 1883,
+            "user": "defuser",
+            "password": "defpassword",
+        }
+        mixin.processors_cache = {}
+
+        # 1. _resolve_device_broker_config
+        dev = MagicMock(config={"mqtt": {"host": "custom.broker", "port": 8883, "username": "u", "password": "p", "use_tls": True}})
+        st = MagicMock(config={})
+        key = mixin._resolve_device_broker_config(dev, st)
+        self.assertEqual(key, ("custom.broker", 8883, "u", "p", True))
+
+        # Fallback to runtime_mqtt
+        dev_empty = MagicMock(config={})
+        key_def = mixin._resolve_device_broker_config(dev_empty, st)
+        self.assertEqual(key_def, ("default.broker", 1883, "defuser", "defpassword", False))
+
+        # 2. _resolve_device_processor
+        dev_rain = MagicMock(id=1, device_type="rain")
+        self.assertTrue(mixin._resolve_device_processor(dev_rain, st, "device_1", "context"))
+        self.assertIn("device_1", mixin.processors_cache)
+
+        dev_unsupported = MagicMock(id=2, device_type="nonexistent_type")
+        self.assertFalse(mixin._resolve_device_processor(dev_unsupported, st, "device_2", "context"))
+
+        # 3. _stop_unused_mqtt_clients
+        mock_client = MagicMock()
+        b_key = ("broker1", 1883, None, None, False)
+        mixin._sub_clients = {b_key: mock_client}
+        mixin._client_topics = {b_key: {"topic1"}}
+        mixin._stop_unused_mqtt_clients({})
+        mock_client.disconnect.assert_called_once()
+        self.assertNotIn(b_key, mixin._sub_clients)
+
+
 
