@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['station-panels'] = String.raw`    <!-- RIGHT DETAIL SIDEBAR -->
+window.LegacyTemplateParts['station-panels'] = `    <!-- RIGHT DETAIL SIDEBAR -->
     <div class="detail-sidebar" id="detail-sidebar" aria-hidden="true">
         <div class="sidebar-header detail-sidebar-header">
             <div class="d-flex align-items-center justify-content-between">

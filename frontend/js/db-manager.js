@@ -191,7 +191,11 @@ class DatabaseManager {
         const hasMore = hasExactTotal
             ? request.offset + rows.length < Number(totalHeader || 0)
             : res.headers.get('X-Has-More') === 'true';
-        return { ...request, rows, hasExactTotal, hasMore, total: hasExactTotal ? Number(totalHeader || 0) : request.offset + rows.length + (hasMore ? 1 : 0) };
+        let calculatedTotal = Number(totalHeader || 0);
+        if (!hasExactTotal) {
+            calculatedTotal = request.offset + rows.length + (hasMore ? 1 : 0);
+        }
+        return { ...request, rows, hasExactTotal, hasMore, total: calculatedTotal };
     }
 
     applyDatasetPage(page) {
@@ -274,7 +278,11 @@ class DatabaseManager {
 
     filterSelect(label, key, options) {
         const value = this.filters[key] ?? '';
-        return `<label class="db-filter-field"><span>${this.escapeHtml(label)}</span><select class="form-select" onchange="window.dbManager.setContextFilter('${key}', this.value)">${options.map(option => `<option value="${this.escapeHtml(option.value)}" ${String(option.value) === String(value) ? 'selected' : ''}>${this.escapeHtml(option.label)}</option>`).join('')}</select></label>`;
+        const optionsHtml = options.map(option => {
+            const selectedAttr = String(option.value) === String(value) ? 'selected' : '';
+            return `<option value="${this.escapeHtml(option.value)}" ${selectedAttr}>${this.escapeHtml(option.label)}</option>`;
+        }).join('');
+        return `<label class="db-filter-field"><span>${this.escapeHtml(label)}</span><select class="form-select" onchange="window.dbManager.setContextFilter('${key}', this.value)">${optionsHtml}</select></label>`;
     }
 
     renderContextFilters() {
@@ -287,10 +295,13 @@ class DatabaseManager {
             ...this.filterOptions.projects.flatMap(project => {
                 const projectLabel = this.projectLabel(project.id);
                 const clusters = Array.isArray(project.gnss_clusters) ? project.gnss_clusters : [];
-                return clusters.map((cluster, index) => ({
-                    value: `${project.id}:${index}`,
-                    label: `${projectLabel} · ${cluster?.name || `Cụm ${index + 1}`}`,
-                }));
+                return clusters.map((cluster, index) => {
+                    const clusterName = cluster?.name || ('Cụm ' + (index + 1));
+                    return {
+                        value: `${project.id}:${index}`,
+                        label: `${projectLabel} · ${clusterName}`,
+                    };
+                });
             }),
         ];
         const filters = {
@@ -436,7 +447,8 @@ class DatabaseManager {
         }
         if (item._table === 'sensor_data') {
             const cluster = item.data?.cluster_name || item.data?.project_code;
-            return `${String(item.sensor_type || 'sensor').toUpperCase()} · ${cluster ? `${cluster} · ` : ''}${this.stationLabel(item.station_id)}`;
+            const clusterPrefix = cluster ? (cluster + ' · ') : '';
+            return `${String(item.sensor_type || 'sensor').toUpperCase()} · ${clusterPrefix}${this.stationLabel(item.station_id)}`;
         }
         if (item._table === 'alerts') {
             return `${item.category || 'Cảnh báo'} · ${item.message || '--'}`;
@@ -536,7 +548,8 @@ class DatabaseManager {
         const entries = Object.entries(data).slice(0, 4).map(([key, value]) => {
             if (value && typeof value === 'object') {
                 const size = Array.isArray(value) ? value.length : Object.keys(value).length;
-                return `"${key}":${Array.isArray(value) ? `[${size} mục]` : `{${size} trường}`}`;
+                const sizeText = Array.isArray(value) ? `[${size} mục]` : `{${size} trường}`;
+                return `"${key}":${sizeText}`;
             }
             const text = typeof value === 'string' ? `"${value.slice(0, 42)}"` : String(value);
             return `"${key}":${text}`;
@@ -599,18 +612,34 @@ class DatabaseManager {
             : [];
         const number = value => Number.isFinite(Number(value)) ? Number(value).toFixed(4) : '--';
         const pointRows = points.map(([name, point]) => `<tr><th scope="row">${this.escapeHtml(name)}</th><td>${this.escapeHtml(point.station_id ?? '--')}</td><td>${number(point.adjusted_x ?? point.adjusted_n)}</td><td>${number(point.adjusted_y ?? point.adjusted_e)}</td><td>${number(point.adjusted_z ?? point.adjusted_u)}</td><td>${number(point.dx ?? point.correction_n)}</td><td>${number(point.dy ?? point.correction_e)}</td><td>${number(point.dz ?? point.correction_u)}</td></tr>`).join('');
-        const dataRows = Object.entries(record.data || {}).map(([key, value]) => `<tr><th scope="row">${this.escapeHtml(key)}</th><td>${this.escapeHtml(value && typeof value === 'object' ? (Array.isArray(value) ? `[${value.length} phần tử]` : `{${Object.keys(value).length} trường}`) : value)}</td></tr>`).join('');
+        const dataRows = Object.entries(record.data || {}).map(([key, value]) => {
+            let renderedValue = value;
+            if (value && typeof value === 'object') {
+                renderedValue = Array.isArray(value) ? ('[' + value.length + ' phần tử]') : ('{' + Object.keys(value).length + ' trường}');
+            }
+            return `<tr><th scope="row">${this.escapeHtml(key)}</th><td>${this.escapeHtml(renderedValue)}</td></tr>`;
+        }).join('');
         const resultTable = isAdjustment && pointRows
             ? `<div class="drawer-section-title"><span>TỌA ĐỘ SAU BÌNH SAI</span><span>${points.length} điểm</span></div><div class="adjustment-table-wrap"><table class="adjustment-result-table"><thead><tr><th>Điểm</th><th>Trạm</th><th>X (m)</th><th>Y (m)</th><th>Z (m)</th><th>ΔX</th><th>ΔY</th><th>ΔZ</th></tr></thead><tbody>${pointRows}</tbody></table></div>`
             : `<div class="drawer-section-title"><span>DỮ LIỆU DẠNG BẢNG</span></div><table class="record-detail-table"><tbody>${dataRows || '<tr><td>Không có dữ liệu</td></tr>'}</tbody></table>`;
-        document.getElementById('db-inspector-content').innerHTML = `<section class="drawer-summary"><span class="management-status ${status.className}">${this.escapeHtml(status.label)}</span><h6>${this.escapeHtml(this.getPreviewData(record))}</h6><p>${this.escapeHtml(isAdjustment ? `${record.data?.project_code || 'Dự án'} · ${record.data?.cluster_name || 'Cụm GNSS'} · ${this.getRecordTime(record)}` : this.getRecordSecondary(record))}</p></section>${resultTable}<details class="raw-json-details" ontoggle="if(this.open) window.dbManager.renderRawJson()"><summary><span><i class="bi bi-braces" aria-hidden="true"></i> JSON thô</span><small>Chỉ tạo khi mở để giữ giao diện mượt</small></summary><div id="db-raw-json"></div></details>`;
+        const subtitleText = isAdjustment
+            ? `${record.data?.project_code || 'Dự án'} · ${record.data?.cluster_name || 'Cụm GNSS'} · ${this.getRecordTime(record)}`
+            : this.getRecordSecondary(record);
+        document.getElementById('db-inspector-content').innerHTML = `<section class="drawer-summary"><span class="management-status ${status.className}">${this.escapeHtml(status.label)}</span><h6>${this.escapeHtml(this.getPreviewData(record))}</h6><p>${this.escapeHtml(subtitleText)}</p></section>${resultTable}<details class="raw-json-details" ontoggle="if(this.open) window.dbManager.renderRawJson()"><summary><span><i class="bi bi-braces" aria-hidden="true"></i> JSON thô</span><small>Chỉ tạo khi mở để giữ giao diện mượt</small></summary><div id="db-raw-json"></div></details>`;
         const editButton = ['stations', 'devices'].includes(record._table)
             ? `<button class="btn btn-primary" onclick="window.dbManager.editRecord('${record._table}', ${record.id})"><i class="bi bi-pencil me-1"></i>Chỉnh sửa</button>`
             : '';
         const simulationButton = record._table === 'simulations' ? `<button class="btn btn-primary" onclick="window.dbManager.downloadSimulation(${record.id})"><i class="bi bi-download me-1"></i>Tải báo cáo</button>` : '';
-        const adjustmentButtons = isAdjustment
-            ? `${record.data?.audit_json_url ? '<button class="btn btn-outline-primary" onclick="window.dbManager.downloadAdjustmentArtifact(\'json\')"><i class="bi bi-filetype-json me-1"></i>Tải JSON</button>' : ''}${record.data?.excel_report_url || record.data?.report_file_url ? '<button class="btn btn-primary" onclick="window.dbManager.downloadAdjustmentArtifact(\'xlsx\')"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Tải XLSX</button>' : ''}`
-            : '';
+        let adjustmentButtons = '';
+        if (isAdjustment) {
+            const jsonBtn = record.data?.audit_json_url
+                ? '<button class="btn btn-outline-primary" onclick="window.dbManager.downloadAdjustmentArtifact(\'json\')"><i class="bi bi-filetype-json me-1"></i>Tải JSON</button>'
+                : '';
+            const xlsxBtn = (record.data?.excel_report_url || record.data?.report_file_url)
+                ? '<button class="btn btn-primary" onclick="window.dbManager.downloadAdjustmentArtifact(\'xlsx\')"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Tải XLSX</button>'
+                : '';
+            adjustmentButtons = jsonBtn + xlsxBtn;
+        }
         document.getElementById('db-inspector-actions').innerHTML = `${adjustmentButtons}${simulationButton}<button class="btn btn-outline-danger" onclick="window.dbManager.deleteRecord('${record._table}', ${record.id})"><i class="bi bi-trash3 me-1"></i>Xóa</button>${editButton}`;
     }
 

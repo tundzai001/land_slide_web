@@ -556,23 +556,23 @@
 }
 
 [data-theme="dark"] .gnss-fix-badge.GNSS_RTK_FIXED {
-    color: #86efac;
-    background: rgba(34, 197, 94, 0.18);
+    color: #bbf7d0;
+    background: #14532d;
     border-color: rgba(74, 222, 128, 0.5);
 }
 
 [data-theme="dark"] .gnss-fix-badge.GNSS_RTK_FLOAT,
 [data-theme="dark"] .gnss-fix-badge.GNSS_DGPS_FLOAT {
-    color: #fde68a;
-    background: rgba(245, 158, 11, 0.18);
+    color: #fef08a;
+    background: #78350f;
     border-color: rgba(251, 191, 36, 0.5);
 }
 
 [data-theme="dark"] .gnss-fix-badge.GNSS_SINGLE,
 [data-theme="dark"] .gnss-fix-badge.GNSS_INVALID,
 [data-theme="dark"] .gnss-fix-badge.GNSS_UNKNOWN {
-    color: #fca5a5;
-    background: rgba(239, 68, 68, 0.18);
+    color: #fecaca;
+    background: #7f1d1d;
     border-color: rgba(248, 113, 113, 0.5);
 }
 

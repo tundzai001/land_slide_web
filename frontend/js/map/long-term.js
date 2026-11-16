@@ -256,7 +256,7 @@ function showSlideModelResultPopup(rainCorr) {
     overlay.querySelectorAll('.sm-model-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
 
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    const fmtDate = (d) => { if (!d) return '--'; try { const [y, m, dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
+    const fmtDate = (d) => { if (!d) return '--'; try { const [, m, dd] = d.split('-'); return `${dd}/${m}`; } catch { return d; } };
 
     if (available) {
         // === Overview tab ===

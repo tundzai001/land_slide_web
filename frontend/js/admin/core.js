@@ -317,7 +317,7 @@ class AdminManager {
         this.currentTabId = tabId;
         const url = new URL(window.location.href);
         url.searchParams.set('tab', tabId);
-        const state = { ...(history.state || {}), adminTab: tabId };
+        const state = { ...history.state, adminTab: tabId };
         if (options.replace || options.restore || previousTabId === tabId) history.replaceState(state, '', url);
         else history.pushState(state, '', url);
         if (!options.restore) linkEl?.focus?.({ preventScroll: true });
@@ -508,19 +508,20 @@ class AdminManager {
         void this.bootstrapRoleFirst();
 
         // ✅ Auto-refresh Pi Devices tab every 15s to see online status quickly
-        this._refreshIntervals.push(setInterval(() => {
-            const piTab = document.getElementById('tab-pi');
-            if (piTab?.classList.contains('active')) {
-                this.loadPiDevices(true);
-            }
-        }, 15000));
-
-        this._refreshIntervals.push(setInterval(() => {
-            const rescueTab = document.getElementById('tab-rescue');
-            if (rescueTab?.classList.contains('active')) {
-                void this.loadRescueRequests(true);
-            }
-        }, 20000));
+        this._refreshIntervals.push(
+            setInterval(() => {
+                const piTab = document.getElementById('tab-pi');
+                if (piTab?.classList.contains('active')) {
+                    this.loadPiDevices(true);
+                }
+            }, 15000),
+            setInterval(() => {
+                const rescueTab = document.getElementById('tab-rescue');
+                if (rescueTab?.classList.contains('active')) {
+                    void this.loadRescueRequests(true);
+                }
+            }, 20000)
+        );
 
         console.log('✅ [ADMIN] Initialized successfully');
     }
@@ -671,10 +672,19 @@ class AdminManager {
             const rescueTypeLabel = rescueTypeLabelMap[rescueType] || '--';
             const provinceCity = String(r.province_city || '').trim() || '--';
             const urgency = this.getRescueUrgency(r);
+            let statusBadgeClass = 'is-warning';
+            let statusBadgeText = 'Đang chờ';
+            if (r.status === 'resolved') {
+                statusBadgeClass = 'is-success';
+                statusBadgeText = 'Đã xử lý';
+            } else if (r.status === 'rejected') {
+                statusBadgeClass = 'is-secondary';
+                statusBadgeText = 'Từ chối';
+            }
             return `<article class="rescue-case ${urgency.className}" tabindex="0" onclick="window.adminManager.openRescueInspector(${r.id})" onkeydown="if(event.key==='Enter') window.adminManager.openRescueInspector(${r.id})">
                 <div class="rescue-case-priority"><span>${esc(urgency.label)}</span><small>${esc(this.formatRescueAge(r.created_at))}</small></div>
                 <div class="rescue-case-main"><div class="rescue-case-title"><strong>${esc(rescueTypeLabel)}</strong><span>#${r.id}</span></div><p>${esc(r.message || 'Không có mô tả')}</p><div class="rescue-case-meta"><span><i class="bi bi-person"></i>${esc(r.requester_name || 'Ẩn danh')}</span><span><i class="bi bi-telephone"></i>${esc(r.phone || 'Không có SĐT')}</span><span><i class="bi bi-geo-alt"></i>${esc(provinceCity)}</span></div></div>
-                <div class="rescue-case-end"><time>${esc(ts)}</time><span class="management-status ${r.status === 'resolved' ? 'is-success' : r.status === 'rejected' ? 'is-secondary' : 'is-warning'}">${r.status === 'resolved' ? 'Đã xử lý' : r.status === 'rejected' ? 'Từ chối' : 'Đang chờ'}</span><button class="management-icon-btn btn btn-outline-secondary" aria-label="Mở case #${r.id}"><i class="bi bi-chevron-right"></i></button></div>
+                <div class="rescue-case-end"><time>${esc(ts)}</time><span class="management-status ${statusBadgeClass}">${statusBadgeText}</span><button class="management-icon-btn btn btn-outline-secondary" aria-label="Mở case #${r.id}"><i class="bi bi-chevron-right"></i></button></div>
             </article>`;
         }).join('');
     }

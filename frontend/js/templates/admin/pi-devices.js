@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['pi-devices'] = String.raw`
+window.LegacyTemplateParts['pi-devices'] = `
             <!-- TAB: PI DEVICES -->
             <div class="tab-pane fade" id="tab-pi">
                 <header class="ops-page-header">

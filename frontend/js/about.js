@@ -53,7 +53,10 @@ import { renderAboutTemplate } from './templates/about-template.js';
         try {
             const probe = document.createElement('canvas');
             return Boolean(probe.getContext('webgl2') || probe.getContext('webgl'));
-        } catch (_) { return false; }
+        } catch (e) {
+            console.debug('[3D] WebGL probe error:', e);
+            return false;
+        }
     }
 
     function createRenderer(canvas) {
@@ -158,7 +161,7 @@ import { renderAboutTemplate } from './templates/about-template.js';
             let offset = 0;
             for (const item of expanded) {
                 mergedPos.set(item.pos.array, offset);
-                if (item.norm && item.norm.array.length === item.count * 3) {
+                if (item.norm?.array.length === item.count * 3) {
                     mergedNorm.set(item.norm.array, offset);
                 } else {
                     for (let i = 0; i < item.count * 3; i += 3) {
@@ -1638,7 +1641,7 @@ import { renderAboutTemplate } from './templates/about-template.js';
         let controller = null;
         if (canUse3D(canvas)) {
             try { controller = createHeroController(canvas); cleanups.push(() => controller.destroy()); }
-            catch (_) { canvas.hidden = true; }
+            catch (e) { console.debug('[HERO] Controller error:', e); canvas.hidden = true; }
         } else if (canvas) canvas.hidden = true;
         if (reducedMotion.matches) return;
         const intro = gsap.timeline({ defaults: { ease: 'power3.out' } });
@@ -1736,7 +1739,8 @@ import { renderAboutTemplate } from './templates/about-template.js';
             try {
                 controller = createStoryController(canvas, callouts);
                 cleanups.push(() => controller.destroy());
-            } catch (_) {
+            } catch (e) {
+                console.debug('[STORY] Controller error:', e);
                 canvas.hidden = true;
             }
         } else if (canvas) {

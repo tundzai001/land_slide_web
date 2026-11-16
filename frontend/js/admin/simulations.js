@@ -50,7 +50,10 @@ class AdminSimulationFeature extends window.AdminManager {
             const card = this._simulationNode('article', null, 'simulation-audit-card');
             const header = this._simulationNode('div', null, 'simulation-audit-card__header');
             const title = this._simulationNode('strong', run.display_name || `Mô phỏng #${run.id}`);
-            const status = this._simulationNode('span', `${run.status || 'unknown'} · ${Number(run.progress || 0)}%`, `management-status is-${run.status === 'completed' ? 'success' : run.status === 'failed' || run.status === 'interrupted' ? 'offline' : 'warning'}`);
+            let statusModifier = 'warning';
+            if (run.status === 'completed') statusModifier = 'success';
+            else if (run.status === 'failed' || run.status === 'interrupted') statusModifier = 'offline';
+            const status = this._simulationNode('span', `${run.status || 'unknown'} · ${Number(run.progress || 0)}%`, `management-status is-${statusModifier}`);
             header.append(title, status);
             const facts = this._simulationNode('div', null, 'simulation-audit-card__facts');
             facts.append(

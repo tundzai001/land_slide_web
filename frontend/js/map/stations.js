@@ -529,8 +529,7 @@ async function loadProjectsAndClusters() {
                         polyline.addTo(leafletMap);
                         hitbox.addTo(leafletMap);
                     }
-                    clusterPolylines.push(polyline);
-                    clusterPolylines.push(hitbox);
+                    clusterPolylines.push(polyline, hitbox);
                     if (!isTotal) colorIdx++;
                 }
             });
@@ -713,7 +712,7 @@ function ensureGlobalAlertBannerFromStations(stations) {
 async function refreshCurrentStationDetail() {
     if (!currentStationData) return;
     const sidebar = document.getElementById('detail-sidebar');
-    if (!sidebar || !sidebar.classList.contains('active')) return;
+    if (!sidebar?.classList.contains('active')) return;
 
     try {
         const res = window.authManager?.isAuthenticated?.()
@@ -751,7 +750,7 @@ function renderStationList(stations) {
     const currentIds = new Set(stations.map(st => st.id.toString()));
     
     Array.from(container.children).forEach(child => {
-        if (child.dataset && child.dataset.stationId && !currentIds.has(child.dataset.stationId)) {
+        if (child.dataset?.stationId && !currentIds.has(child.dataset.stationId)) {
             container.removeChild(child);
         }
     });

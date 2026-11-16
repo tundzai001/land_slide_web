@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['analysis'] = String.raw`            <!-- Empty State -->
+window.LegacyTemplateParts['analysis'] = `            <!-- Empty State -->
             <div class="text-center py-5" id="charts-empty-state" style="display: none;">
                 <i class="bi bi-inbox fs-1 text-muted"></i>
                 <p class="text-muted mt-2">Chưa có dữ liệu biểu đồ</p>

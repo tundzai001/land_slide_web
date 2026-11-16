@@ -498,6 +498,10 @@ function addRescueMarker(rescueRequest) {
         marker.addTo(leafletMap);
     }
 
+    const accuracyHtml = accuracy_m ? `<div><strong>Độ chính xác:</strong> ±${accuracy_m}m</div>` : '';
+    const sourceLinkHtml = safeSourceLink ? `<div><strong>Nguồn:</strong> <a href="${escapeRescueHtml(safeSourceLink)}" target="_blank" rel="noopener noreferrer">Mở link</a></div>` : '';
+    const imageHtml = protectedImageUrl ? `<div style="margin-top:8px;"><img data-auth-src="${escapeRescueHtml(protectedImageUrl)}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : '';
+
     const popupContent = `
         <div class="rescue-popup" style="min-width: 280px;">
             <h6 style="margin: 0 0 10px 0; color: #dc3545;">
@@ -510,16 +514,16 @@ function addRescueMarker(rescueRequest) {
                 <div><strong>Phân loại:</strong> ${escapeRescueHtml(rescue_type || '(Không có)')}</div>
                 <div><strong>Tỉnh/TP:</strong> ${escapeRescueHtml(province_city || '(Không có)')}</div>
                 <div><strong>Vị trí:</strong> ${latitude.toFixed(6)}, ${longitude.toFixed(6)}</div>
-                ${accuracy_m ? `<div><strong>Độ chính xác:</strong> ±${accuracy_m}m</div>` : ''}
+                ${accuracyHtml}
                 <div><strong>Thời gian:</strong> ${new Date(normalizeEpochMs(created_at)).toLocaleString('vi-VN')}</div>
-                ${safeSourceLink ? `<div><strong>Nguồn:</strong> <a href="${escapeRescueHtml(safeSourceLink)}" target="_blank" rel="noopener noreferrer">Mở link</a></div>` : ''}
+                ${sourceLinkHtml}
                 <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
                     <strong style="font-size: 12px;">Tình trạng:</strong>
                     <div style="font-size: 13px; margin-top: 4px; word-wrap: break-word;">
                         ${escapeRescueHtml(message || '(Không có mô tả)')}
                     </div>
                 </div>
-                ${protectedImageUrl ? `<div style="margin-top:8px;"><img data-auth-src="${escapeRescueHtml(protectedImageUrl)}" alt="evidence" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;border:1px solid #ddd;"></div>` : ''}
+                ${imageHtml}
                 <div style="margin-top: 15px;">
                     <a href="https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}"
                        target="_blank" rel="noopener"

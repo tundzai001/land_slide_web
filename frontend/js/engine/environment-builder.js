@@ -299,13 +299,11 @@ export class EnvironmentBuilder {
             const left = new THREE.Vector3().addVectors(p, perp);
             const right = new THREE.Vector3().subVectors(p, perp);
 
-            vertices.push(left.x, left.y, left.z);
-            vertices.push(right.x, right.y, right.z);
+            vertices.push(left.x, left.y, left.z, right.x, right.y, right.z);
 
             if (i < points.length - 1) {
                 const idx = i * 2;
-                indices.push(idx, idx + 1, idx + 2);
-                indices.push(idx + 1, idx + 3, idx + 2);
+                indices.push(idx, idx + 1, idx + 2, idx + 1, idx + 3, idx + 2);
             }
         }
 
@@ -413,8 +411,6 @@ export class EnvironmentBuilder {
                 const p2 = poles[i + 1].clone();
                 p1.x += xOff;
                 p2.x += xOff;
-                // Add sag
-                const midY = Math.min(p1.y, p2.y) - 1.5;
                 const steps = 10;
                 for (let s = 0; s <= steps; s++) {
                     const t = s / steps;

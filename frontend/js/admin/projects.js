@@ -79,7 +79,9 @@ class AdminProjectsFeature extends window.AdminManager {
                 const lat = Number(document.getElementById(`${prefix}-map-lat`).value);
                 const lon = Number(document.getElementById(`${prefix}-map-lon`).value);
                 const hasPoint = Number.isFinite(lat) && Number.isFinite(lon) && (lat !== 0 || lon !== 0);
-                const map = window.L.map(element, { scrollWheelZoom: false }).setView(hasPoint ? [lat, lon] : [21.5, 104.5], hasPoint ? 12 : 6);
+                const initialCenter = hasPoint ? [lat, lon] : [21.5, 104.5];
+                const initialZoom = hasPoint ? 12 : 6;
+                const map = window.L.map(element, { scrollWheelZoom: false }).setView(initialCenter, initialZoom);
                 window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     maxZoom: 19,
                     attribution: '&copy; OpenStreetMap',

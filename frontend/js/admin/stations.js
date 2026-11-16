@@ -87,7 +87,9 @@ class AdminStationsFeature extends window.AdminManager {
                 ${this.stationsData.map(s => {
                     const alertingDisabled = (s.config?.alerting?.enabled === false) || s.config?.alerting_enabled === false;
                     const offlineDisplayEnabled = (s.config?.offline_display?.enabled === true) || s.config?.offline_display_enabled === true;
-                    const statusAccent = s.status === 'online' ? 'success' : (s.status === 'stale' ? 'warning' : 'secondary');
+                    let statusAccent = 'secondary';
+                    if (s.status === 'online') statusAccent = 'success';
+                    else if (s.status === 'stale') statusAccent = 'warning';
                     return `
                     <div class="col-md-6 col-xl-4">
                         <article class="card station-card management-station-card h-100">

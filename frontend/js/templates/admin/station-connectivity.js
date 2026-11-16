@@ -4,8 +4,10 @@ window.monitoringSensorSection = sensor => {
     const key = sensor.key;
     const title = window.monitoringEscapeHtml(sensor.label);
     const unit = window.monitoringEscapeHtml(sensor.unit);
+    const unitSuffix = unit ? ` · ${unit}` : '';
+    const originInputs = [['lat','Vĩ độ',-90,90],['lon','Kinh độ',-180,180],['h','Cao độ (m)',-1000,10000]].map(([axis,label,min,max]) => `<div class="col-md-4"><label for="origin-${key}-${axis}">${label}</label><input class="form-control" type="number" step="any" min="${min}" max="${max}" id="origin-${key}-${axis}"></div>`).join('');
     return `<section id="mqtt-${key}-section" class="sensor-config-section" style="display:none">
-        <div class="sensor-config-header">${title}${unit ? ` · ${unit}` : ''}</div>
+        <div class="sensor-config-header">${title}${unitSuffix}</div>
         <div class="sensor-config-body">
             <label class="form-label" for="topic-${key}">MQTT Topic</label>
             <input class="form-control" id="topic-${key}" placeholder="station/ST01/${key}">
@@ -17,12 +19,12 @@ window.monitoringSensorSection = sensor => {
             </div>
             <label class="monitoring-choice"><input type="checkbox" id="cfg-${key}-mqtt-tls"> Mã hóa TLS</label>
             <div class="row g-2 mt-2">
-                ${[['lat','Vĩ độ',-90,90],['lon','Kinh độ',-180,180],['h','Cao độ (m)',-1000,10000]].map(([axis,label,min,max]) => `<div class="col-md-4"><label for="origin-${key}-${axis}">${label}</label><input class="form-control" type="number" step="any" min="${min}" max="${max}" id="origin-${key}-${axis}"></div>`).join('')}
+                ${originInputs}
             </div>
         </div>
     </section>`;
 };
-window.LegacyTemplateParts['station-connectivity'] = String.raw`                        <!-- STEP 2: MQTT & TỌA ĐỘ -->
+window.LegacyTemplateParts['station-connectivity'] = `                        <!-- STEP 2: MQTT & TỌA ĐỘ -->
                         <div class="wizard-content" data-step="2" aria-labelledby="station-connectivity-heading">
                             <div class="station-step-intro">
                                 <div>

@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['station-storage'] = String.raw`                <!-- STEP 4: LƯU DỮ LIỆU -->
+window.LegacyTemplateParts['station-storage'] = `                <!-- STEP 4: LƯU DỮ LIỆU -->
                 <div class="wizard-content" data-step="4" aria-labelledby="station-storage-heading">
                     <div class="station-step-intro">
                         <div>

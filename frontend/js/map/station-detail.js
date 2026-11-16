@@ -238,7 +238,7 @@ async function loadStationHistoryAndRenderCharts({ hours = activeChartHours, for
         Object.entries(historyPayload.sensors || {}).forEach(([sensorType, sensorHistory]) => {
             if (!sensorTypes.includes(sensorType)) return;
             data.sensors[sensorType] = {
-                ...(data.sensors[sensorType] || {}),
+                ...data.sensors[sensorType],
                 history: sensorHistory.history || [],
             };
         });
@@ -592,9 +592,16 @@ function updateGnssIntegrityStatus(payload) {
     setText('gnss-shift-spread', Number.isFinite(Number(integrity.spread_xy_m))
         ? `${metric(integrity.spread_xy_m)} / ${metric(integrity.spread_u_m)}` : '--');
     setText('gnss-shift-duration', Number.isFinite(Number(integrity.duration_s)) ? `${Number(integrity.duration_s).toFixed(1)} s` : '--');
-    setText('gnss-reference-event', integrity.reference_event_verified
-        ? `Đã xác minh${Number.isFinite(eventTs) ? ` · ${new Date(normalizeEpochMs(eventTs)).toLocaleTimeString('vi-VN')}` : ''}`
-        : integrity.possible_ground_movement ? 'Chưa xác minh · có thể là chuyển vị đất' : 'Không có');
+    let refEventText = 'Không có';
+    if (integrity.reference_event_verified) {
+        const timeSuffix = Number.isFinite(eventTs)
+            ? ` · ${new Date(normalizeEpochMs(eventTs)).toLocaleTimeString('vi-VN')}`
+            : '';
+        refEventText = `Đã xác minh${timeSuffix}`;
+    } else if (integrity.possible_ground_movement) {
+        refEventText = 'Chưa xác minh · có thể là chuyển vị đất';
+    }
+    setText('gnss-reference-event', refEventText);
 }
 
 function updateImuOfflineBadge(isOnline) {
@@ -974,7 +981,8 @@ function renderAccelerometerWaveform(sensor) {
         box.className = 'chart-box';
         const title = document.createElement('div');
         title.className = 'chart-title';
-        title.textContent = `Dạng sóng ${axis.toUpperCase()} · ${wave.sample_rate_hz} Hz${latest.event_id ? ` · ${latest.event_id}` : ''}`;
+        const eventSuffix = latest.event_id ? ` · ${latest.event_id}` : '';
+        title.textContent = `Dạng sóng ${axis.toUpperCase()} · ${wave.sample_rate_hz} Hz${eventSuffix}`;
         const summary = document.createElement('small');
         summary.textContent = `${values.length} mẫu · ${(values.length / wave.sample_rate_hz).toLocaleString('vi-VN')} s · Đỉnh |a|: ${Math.max(...values.map(Math.abs)).toLocaleString('vi-VN', {maximumFractionDigits:3})} m/s² · Bắt đầu: ${new Date(wave.start_at * 1000).toLocaleString('vi-VN')}`;
         const wrap = document.createElement('div');
@@ -1007,7 +1015,8 @@ function renderCharts(data) {
             box.dataset.customSensorChart = '';
             const title = document.createElement('div');
             title.className = 'chart-title';
-            title.textContent = `${spec.label}${spec.unit ? ` (${spec.unit})` : ''}`;
+            const unitSuffix = spec.unit ? ` (${spec.unit})` : '';
+            title.textContent = `${spec.label}${unitSuffix}`;
             const wrap = document.createElement('div');
             wrap.className = 'chart-canvas-wrap';
             const canvas = document.createElement('canvas');

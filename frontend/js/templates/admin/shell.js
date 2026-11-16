@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['shell'] = String.raw`
+window.LegacyTemplateParts['shell'] = `
 <!-- SECURITY: Block page render until auth verified -->
     
 

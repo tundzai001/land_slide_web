@@ -42,33 +42,34 @@ function renderCombinedLongTermChart(data) {
             allLabels = imu.time_series.labels;
         }
 
-        datasets.push({
-            label: 'Roll (°)',
-            data: imu.time_series.roll,
-            borderColor: '#f59e0b',
-            backgroundColor: 'transparent',
-            tension: 0.4,
-            borderWidth: 2,
-            borderDash: [5, 3],
-            fill: false,
-            pointRadius: 2,
-            pointHoverRadius: 4,
-            yAxisID: 'y-imu'
-        });
-
-        datasets.push({
-            label: 'Pitch (°)',
-            data: imu.time_series.pitch,
-            borderColor: '#8b5cf6',
-            backgroundColor: 'transparent',
-            tension: 0.4,
-            borderWidth: 2,
-            borderDash: [5, 3],
-            fill: false,
-            pointRadius: 2,
-            pointHoverRadius: 4,
-            yAxisID: 'y-imu'
-        });
+        datasets.push(
+            {
+                label: 'Roll (°)',
+                data: imu.time_series.roll,
+                borderColor: '#f59e0b',
+                backgroundColor: 'transparent',
+                tension: 0.4,
+                borderWidth: 2,
+                borderDash: [5, 3],
+                fill: false,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                yAxisID: 'y-imu'
+            },
+            {
+                label: 'Pitch (°)',
+                data: imu.time_series.pitch,
+                borderColor: '#8b5cf6',
+                backgroundColor: 'transparent',
+                tension: 0.4,
+                borderWidth: 2,
+                borderDash: [5, 3],
+                fill: false,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                yAxisID: 'y-imu'
+            }
+        );
     }
 
     if (datasets.length === 0) return;
@@ -351,7 +352,9 @@ function renderRainfallCorrelationSection(data) {
 
     // Metrics
     const corrVal = rainCorr.correlation;
-    const corrColor = Math.abs(corrVal) >= 0.6 ? 'text-danger' : Math.abs(corrVal) >= 0.4 ? 'text-warning' : 'text-info';
+    let corrColor = 'text-info';
+    if (Math.abs(corrVal) >= 0.6) corrColor = 'text-danger';
+    else if (Math.abs(corrVal) >= 0.4) corrColor = 'text-warning';
     const corrEl = document.getElementById('rain-correlation');
     if (corrEl) {
         corrEl.textContent = corrVal.toFixed(4);
@@ -366,7 +369,10 @@ function renderRainfallCorrelationSection(data) {
     if (triggerEl) {
         const tp = String(rainCorr.trigger_potential || 'LOW').toUpperCase();
         triggerEl.textContent = tp;
-        triggerEl.className = 'fs-5 fw-bold mt-1 ' + (tp === 'HIGH' ? 'text-danger' : tp === 'MEDIUM' ? 'text-warning' : 'text-success');
+        let tpClass = 'text-success';
+        if (tp === 'HIGH') tpClass = 'text-danger';
+        else if (tp === 'MEDIUM') tpClass = 'text-warning';
+        triggerEl.className = `fs-5 fw-bold mt-1 ${tpClass}`;
     }
 
     // Sensitivity
@@ -615,9 +621,13 @@ function formatLongTermVelocityDisplay(metrics) {
         ciValue = ciYear;
     }
 
+    let scaleDivisor = 1;
+    if (primary.unit.startsWith('m/')) scaleDivisor = 1000;
+    else if (primary.unit.startsWith('cm/')) scaleDivisor = 10;
+
     return {
         text: `${primary.value.toFixed(primary.decimals)} ${primary.unit}`,
-        ciText: `(Độ tin cậy xu hướng OLS: ±${Math.abs(ciValue / (primary.unit.startsWith('m/') ? 1000 : primary.unit.startsWith('cm/') ? 10 : 1)).toFixed(primary.decimals)} ${primary.unit})`
+        ciText: `(Độ tin cậy xu hướng OLS: ±${Math.abs(ciValue / scaleDivisor).toFixed(primary.decimals)} ${primary.unit})`
     };
 }
 

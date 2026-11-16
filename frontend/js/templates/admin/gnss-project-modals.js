@@ -27,7 +27,7 @@ const projectMapPositionFields = prefix => `
         <p class="text-danger small mt-2 mb-0" id="${prefix}-map-error" role="alert" hidden></p>
     </fieldset>`;
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['gnss-project-modals'] = String.raw`    <!-- MODAL GNSS VISUAL CALCULATION BOARD -->
+window.LegacyTemplateParts['gnss-project-modals'] = `    <!-- MODAL GNSS VISUAL CALCULATION BOARD -->
     <div class="modal fade" id="gnssTerminalModal" tabindex="-1">
         <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 95vw;">
             <div class="modal-content bg-dark text-light border-primary" style="height: 85vh;">

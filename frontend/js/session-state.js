@@ -43,7 +43,8 @@
                 return { status: 'anonymous', token: null, user: null };
             }
             return { status: 'unavailable', token: getToken(), user: null };
-        } catch (_) {
+        } catch (err) {
+            console.debug('[SESSION] Validation unavailable:', err);
             return { status: 'unavailable', token: getToken(), user: null };
         }
     }

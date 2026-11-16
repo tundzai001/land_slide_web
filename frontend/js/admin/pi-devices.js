@@ -72,7 +72,9 @@ class AdminPiDevicesFeature extends window.AdminManager {
     _renderPiDeviceRow(device, children) {
         const online = this._isPiOnline(device);
         const status = this._piStatus(device);
-        const typeLabel = device.device_type === 'pi_point' ? 'Pi hiện trường' : String(device.device_type || '').toLowerCase() === 'win' ? 'PC trung tâm' : 'Pi trung tâm';
+        let typeLabel = 'Pi trung tâm';
+        if (device.device_type === 'pi_point') typeLabel = 'Pi hiện trường';
+        else if (String(device.device_type || '').toLowerCase() === 'win') typeLabel = 'PC trung tâm';
         const displayName = device.status === 'assigned' ? device.station_name || device.name : device.name;
         const fallbackName = `Thiết bị #${device.id}`;
         const scope = [typeLabel, device.project_name, device.station_name && device.station_name !== displayName ? device.station_name : ''].filter(Boolean).join(' · ');

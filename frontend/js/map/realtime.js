@@ -52,7 +52,8 @@ async function setupRescueAdminSocket() {
             if (event.code === 1008) await window.authManager?.verifyToken?.();
             scheduleRescueAdminReconnect();
         };
-    } catch (_) {
+    } catch (err) {
+        console.warn('[RESCUE] Socket connection error:', err);
         if (generation === rescueSetupGeneration) {
             document.documentElement.dataset.rescueRealtime = 'degraded';
             scheduleRescueAdminReconnect();
@@ -169,6 +170,7 @@ async function setupWebSocket() {
         }, reconnectDelay);
     };
     } catch (error) {
+        console.warn('[MAP] WebSocket init error:', error);
         if (attempt.generation === wsSetupGeneration && isMapViewActive() && window.authManager?.isAuthenticated?.()) {
             wsConnection = null;
             const delay = Math.min(30000, 1000 * (2 ** Math.min(wsReconnectAttempt++, 5)));
@@ -318,8 +320,7 @@ function handleRealtimeUpdate(message) {
             if (currentAlertStationId === stationId) {
                 const banner = document.getElementById('alert-banner');
                 if (banner) {
-                    banner.classList.remove('show');
-                    banner.classList.remove('level-warning', 'level-critical');
+                    banner.classList.remove('show', 'level-warning', 'level-critical');
                 }
                 currentAlertStationId = null;
                 lastAlertKey = null; // Reset dedup để alert mới có thể hiện lại
@@ -784,7 +785,8 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
     if (['REFERENCE_TRANSITION', 'UNVERIFIED_POSITION_SHIFT', 'UNTRUSTED_GEOMETRY'].includes(integrityState)) {
         const shift2d = Number.isFinite(Number(integrity.shift_2d_m))
             ? `Δ2D ${Number(integrity.shift_2d_m).toFixed(3)} m` : '';
-        let label = `Shift chưa xác minh${shift2d ? ` · ${shift2d}` : ''}`;
+        const shiftSuffix = shift2d ? ` · ${shift2d}` : '';
+        let label = `Shift chưa xác minh${shiftSuffix}`;
         if (integrityState === 'REFERENCE_TRANSITION') {
             label = `Đang kiểm tra reference ${integrity.candidate_count || 0}/${integrity.candidate_target || 6}`;
         } else if (integrityState === 'UNTRUSTED_GEOMETRY') {
@@ -819,7 +821,9 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
         trendHtml = `<span class="gnss-eval-success fw-bold"><i class="bi bi-info-circle-fill me-1"></i>Chưa vượt ngưỡng xác nhận; có thể là nhiễu GNSS</span>`;
     }
     const velStr = velocityMmS !== null ? velocityMmS.toFixed(2) : '--';
-    const ciStr = data.velocity_confidence_95_mm_s ? `± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)}` : '';
+    const ciHtml = data.velocity_confidence_95_mm_s
+        ? `<span class="font-monospace">(± ${Number(data.velocity_confidence_95_mm_s).toFixed(2)})</span>`
+        : '';
     const zScore = Number(data.velocity_z_score);
     const zHtml = Number.isFinite(zScore)
         ? `<span class="font-monospace">z=${zScore.toFixed(2)}σ / ngưỡng ${Number(data.velocity_min_sigma || 3).toFixed(1)}σ</span>`
@@ -828,7 +832,7 @@ function _renderGnssTheilSenDetails(data, velocityMmS, advancedVisible) {
         <div class="d-flex flex-column gap-1">
             <div>${trendHtml}</div>
             <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
-                <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciStr ? `<span class="font-monospace">(${ciStr})</span>` : ''} ${zHtml}
+                <i class="bi bi-speedometer2 me-1"></i>Vận tốc 3D (ước lượng cửa sổ): <strong>${velStr} mm/s</strong> ${ciHtml} ${zHtml}
             </div>
             <div class="gnss-eval-muted fw-normal" style="font-size: 0.75rem;">
                 <i class="bi bi-funnel me-1"></i>Cửa sổ vận tốc: ${sampleCount} mẫu (${durationS}s)
@@ -1065,7 +1069,11 @@ function updateRealtimeSensorValues(message) {
             const chart = charts[sensor_type === 'extensometer' ? `chart-extensometer-${index}` : `chart-${sensor_type}-${field}`];
             if (!chart) return;
             chart.data.labels.push(new Date(normalizeEpochMs(data.measured_at || timestamp)).toLocaleTimeString('vi-VN'));
-            chart.data.datasets[0].data.push(data.quality === 'invalid' ? null : (sensor_type === 'extensometer' ? data.points?.[field] : data[field]) ?? null);
+            let sampleVal = null;
+            if (data.quality !== 'invalid') {
+                sampleVal = (sensor_type === 'extensometer' ? data.points?.[field] : data[field]) ?? null;
+            }
+            chart.data.datasets[0].data.push(sampleVal);
             if (chart.data.labels.length > 2000) {
                 chart.data.labels.shift();
                 chart.data.datasets[0].data.shift();

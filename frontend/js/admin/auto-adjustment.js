@@ -133,7 +133,7 @@ class AdminAutoAdjustmentFeature extends window.AdminManager {
     // Collect auto-adjustment config from the modal
     collectAutoAdjustmentConfig() {
         const enabledCheckbox = document.getElementById('auto-adj-enabled');
-        if (!enabledCheckbox || !enabledCheckbox.checked) {
+        if (!enabledCheckbox?.checked) {
             return { enabled: false };
         }
 

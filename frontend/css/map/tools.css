@@ -180,7 +180,7 @@
 }
 
 [data-theme="light"] .glass-modal-content .btn-check:checked+.btn-outline-info {
-    color: white !important;
+    color: #0f172a !important;
     background: #0dcaf0 !important;
 }
 
@@ -236,7 +236,7 @@
 
 .heatmap-toggle-btn.active {
     background: rgba(255, 107, 53, 0.3);
-    color: #ff6b35;
+    color: #c2410c;
     border-color: rgba(255, 107, 53, 0.4);
 }
 

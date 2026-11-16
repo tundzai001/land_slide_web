@@ -126,7 +126,9 @@ function setupMetrics() {
             const updatedAt = new Date(data.updated_at);
             const stale = !Number.isFinite(updatedAt.getTime()) || Date.now() - updatedAt.getTime() > 15 * 60 * 1000;
             const formatted = Number.isFinite(updatedAt.getTime()) ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(updatedAt) : 'không rõ thời điểm';
-            setState(stale ? 'stale' : 'ready', stale ? `Dữ liệu có thể đã cũ · ${formatted}` : `Cập nhật ${formatted}`, stale);
+            const stateName = stale ? 'stale' : 'ready';
+            const stateMsg = stale ? `Dữ liệu có thể đã cũ · ${formatted}` : `Cập nhật ${formatted}`;
+            setState(stateName, stateMsg, stale);
         } catch (error) {
             setState('error', error.name === 'AbortError' ? 'Không thể tải trạng thái mạng' : 'Mất kết nối dữ liệu trực tiếp', true);
         } finally { clearTimeout(timeout); }

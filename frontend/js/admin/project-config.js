@@ -105,7 +105,8 @@ class AdminProjectConfigFeature extends window.AdminManager {
             this.corsStationsData.forEach(st => {
                 const isSelected = (st.name === base_station_code || st.code === base_station_code) ? 'selected' : '';
                 const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
-                baseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
+                const alt = st.h ?? st.alt ?? 0;
+                baseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${alt}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${isSelected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
             });
         }
         if (base_station_code && !this.corsStationsData?.some(st => (st.name === base_station_code || st.code === base_station_code))) {
@@ -119,7 +120,8 @@ class AdminProjectConfigFeature extends window.AdminManager {
             this.corsStationsData.forEach(st => {
                 const selected = (st.name === backupBaseCode || st.code === backupBaseCode) ? 'selected' : '';
                 const online = st.is_online === true || ['online', 'active', 'connected', 'streaming'].includes(String(st.status || '').toLowerCase());
-                backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${st.h !== undefined ? st.h : (st.alt || 0)}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
+                const alt = st.h ?? st.alt ?? 0;
+                backupBaseOptionsHtml += `<option value="${escapeConfigHtml(st.name || st.code)}" data-online="${online}" data-serial="${escapeConfigHtml(st.serial || '')}" data-lat="${st.lat}" data-lon="${st.lon}" data-alt="${alt}" data-streams="${encodeURIComponent(JSON.stringify(st.streams || []))}" data-service-config="${encodeURIComponent(JSON.stringify(st.service_config || {}))}" ${selected}>${online ? '🟢' : '🔴'} ${escapeConfigHtml(st.name || st.code)} (${online ? 'ONLINE' : 'OFFLINE'})</option>`;
             });
         }
         if (backupBaseCode && !this.corsStationsData?.some(st => (st.name === backupBaseCode || st.code === backupBaseCode))) {

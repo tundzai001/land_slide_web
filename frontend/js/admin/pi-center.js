@@ -55,18 +55,22 @@ class AdminPiCenterFeature extends window.AdminManager {
                             <div class="modal-body">
                                 <p class="text-muted small mb-3">Chọn Pi Trung tâm để gán:</p>
                                 <div class="list-group list-group-flush" id="center-pick-list">
-                                    ${centers.map(c => `
+                                    ${centers.map(c => {
+                                        const stationBadge = c.station_name ? ('<small class="text-info">📍 ' + escapePiText(c.station_name) + '</small>') : '';
+                                        const statusBadge = c.status === 'assigned' ? 'bg-primary' : 'bg-success';
+                                        const statusText = c.status === 'assigned' ? '📍 Assigned' : '✅ Activated';
+                                        return `
                                         <button type="button" class="list-group-item list-group-item-action d-flex gap-3 align-items-center center-pick-item"
                                                data-center-id="${Number(c.id)}" style="cursor:pointer; background:transparent; border-color:var(--border-color)">
                                             <div class="pick-indicator"><i class="bi bi-check-lg"></i></div>
                                             <div class="text-start">
                                                 <strong>${escapePiText(c.name)}</strong>
                                                 <small class="d-block text-muted font-monospace">${escapePiText(c.serial)}</small>
-                                                ${c.station_name ? `<small class="text-info">📍 ${escapePiText(c.station_name)}</small>` : ''}
+                                                ${stationBadge}
                                             </div>
-                                            <span class="badge ${c.status === 'assigned' ? 'bg-primary' : 'bg-success'} ms-auto">${c.status === 'assigned' ? '📍 Assigned' : '✅ Activated'}</span>
+                                            <span class="badge ${statusBadge} ms-auto">${statusText}</span>
                                         </button>
-                                    `).join('')}
+                                    `;}).join('')}
                                 </div>
                             </div>
                             <div class="modal-footer">

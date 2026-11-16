@@ -260,7 +260,8 @@ class AdminStationPresetsFeature extends window.AdminManager {
         }
 
         const mqttHost = document.getElementById(`cfg-${type}-mqtt-host`)?.value?.trim() || null;
-        const mqttPort = document.getElementById(`cfg-${type}-mqtt-port`)?.value ? Number.parseInt(document.getElementById(`cfg-${type}-mqtt-port`).value) : null;
+        const mqttPortEl = document.getElementById(`cfg-${type}-mqtt-port`);
+        const mqttPort = mqttPortEl?.value ? Number.parseInt(mqttPortEl.value) : null;
         const mqttTls = !!document.getElementById(`cfg-${type}-mqtt-tls`)?.checked;
         const mqttUser = document.getElementById(`cfg-${type}-mqtt-user`)?.value?.trim() || null;
         const mqttPass = document.getElementById(`cfg-${type}-mqtt-pass`)?.value?.trim() || null;
@@ -736,7 +737,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
                         if (this.currentStationId) setActionButtonsDisabled(false);
                         if (Number(this.currentStationId) === Number(stationId)) {
                             this.updateGnssOriginRelockProgress?.({
-                                ...(this._gnssOriginRelockLastProgress || {}),
+                                ...this._gnssOriginRelockLastProgress,
                                 phase: 'failed',
                                 message: 'Không nhận được kết quả realtime; hãy tải lại cấu hình trạm để kiểm tra tọa độ gốc.',
                             });
@@ -791,7 +792,7 @@ class AdminStationPresetsFeature extends window.AdminManager {
             this._gnssOriginRelockStationId = null;
             if (Number(this.currentStationId) === Number(stationId)) {
                 this.updateGnssOriginRelockProgress?.({
-                    ...(this._gnssOriginRelockLastProgress || {}),
+                    ...this._gnssOriginRelockLastProgress,
                     phase: 'failed',
                     message: e.message,
                 });

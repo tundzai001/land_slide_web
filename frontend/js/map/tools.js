@@ -105,7 +105,7 @@ window.makeMarkerDraggable = function (marker, latInputId = 'input-lat', lngInpu
                 toast: true,
                 position: 'bottom-end'
             });
-        } else if (window.toast && window.toast.success) {
+        } else if (window.toast?.success) {
             window.toast.success(`Đã lấy vị trí: ${lat}, ${lng}`);
         } else {
             alert(`Đã cập nhật vị trí mới!\nLat: ${lat}\nLng: ${lng}`);
@@ -179,7 +179,7 @@ window.showStationQR = async function (lat, lng, stationName) {
 
 // --- FEATURE 4: PDF EXPORT (Server-side) ---
 window.exportStationPDF = async function () {
-    if (!currentStationData || !currentStationData.id) {
+    if (!currentStationData?.id) {
         // Fallback client-side
         const sidebar = document.getElementById('detail-sidebar');
         if (typeof html2pdf === 'undefined') {
@@ -341,7 +341,7 @@ function setupTimelineSlider() {
         // Filter rescue markers: hiển thị marker thuộc ngày đó
         Object.entries(rescueMarkers).forEach(([id, marker]) => {
             const req = rescueRequestsData.find(r => String(r.id) === String(id));
-            if (!req || !req.created_at) return;
+            if (!req?.created_at) return;
 
             const reqDate = new Date(normalizeEpochMs(req.created_at));
             const daysDiff = Math.floor((Date.now() - reqDate.getTime()) / (1000 * 60 * 60 * 24));

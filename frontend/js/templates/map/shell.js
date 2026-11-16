@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['shell'] = String.raw`
+window.LegacyTemplateParts['shell'] = `
 <!-- TOP NAVBAR -->
     <nav class="top-navbar">
         <div class="d-flex align-items-center gap-3">

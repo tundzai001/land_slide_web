@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['station-wizard-shell'] = String.raw`    <!-- 3. Station Config Modal - 3 STEPS WIZARD -->
+window.LegacyTemplateParts['station-wizard-shell'] = `    <!-- 3. Station Config Modal - 3 STEPS WIZARD -->
     <div class="modal fade" id="stationConfigModal" tabindex="-1" aria-labelledby="modal-title" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">

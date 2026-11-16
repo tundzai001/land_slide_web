@@ -173,7 +173,6 @@
     const mapStyles = ['/assets/map.min.css?v=__BUILD_VERSION__'];
     const adminStyles = ['/assets/admin.min.css?v=__BUILD_VERSION__'];
 
-    async function loadOrdered(items) { for (const item of items) await loadScript(item); }
     function setupAdminMobileNavigation() {
         const navigation = document.getElementById('mobile-bottom-nav');
         if (!navigation) return;

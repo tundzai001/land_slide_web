@@ -182,8 +182,6 @@ function filterStations(searchTerm) {
  *   - offline: xám đen, disabled (thiết bị Pi mất kết nối)
  */
 function setSirenButtonState(state, target = null) {
-    const sirenSection = document.getElementById('siren-sidebar-section');
-
     const btns = target
         ? document.querySelectorAll(`.btn-siren-toggle[data-target="${target}"]`)
         : document.querySelectorAll('.btn-siren-toggle');
@@ -526,8 +524,7 @@ runWhenDomReady(() => {
                 if (stationId) {
                     alertBannerSnoozeUntil[stationId] = Date.now() + 10000;
                 }
-                banner.classList.remove('show');
-                banner.classList.remove('level-warning', 'level-critical');
+                banner.classList.remove('show', 'level-warning', 'level-critical');
             }
         });
     }

@@ -174,7 +174,12 @@ class AdminOperationsFeature extends window.AdminManager {
             try {
                 const result = await (await this.operationRequest(`/jobs/${id}`)).json();
                 const labels = { pending: 'Đang chờ', running: 'Đang thực hiện', completed: 'Hoàn thành', error: 'Thất bại' };
-                document.getElementById('operations-job').textContent = `${labels[result.status] || result.status}${result.error ? ': ' + result.error : ''}${result.recovered_databases ? ' · CSDL phục hồi: ' + Object.values(result.recovered_databases).join(', ') : ''}`;
+                let jobText = labels[result.status] || result.status;
+                if (result.error) jobText += ': ' + result.error;
+                if (result.recovered_databases) {
+                    jobText += ' · CSDL phục hồi: ' + Object.values(result.recovered_databases).join(', ');
+                }
+                document.getElementById('operations-job').textContent = jobText;
                 if (['completed', 'error'].includes(result.status)) {
                     clearInterval(this.operationJobTimer);
                     sessionStorage.removeItem('operations-active-job');
@@ -236,8 +241,12 @@ class AdminOperationsFeature extends window.AdminManager {
         const kind = document.getElementById('operations-log-kind').value;
         const options = this.operationLogOptions || {};
         const journal = options.journals?.[kind] || {};
-        const accounts = new Map((options.accounts || []).map(user => [user.username,
-            `${user.username}${user.full_name ? ' · ' + user.full_name : ''}${user.is_active ? '' : ' · Đã khóa'}`]));
+        const accounts = new Map((options.accounts || []).map(user => {
+            let userLabel = user.username;
+            if (user.full_name) userLabel += ' · ' + user.full_name;
+            if (!user.is_active) userLabel += ' · Đã khóa';
+            return [user.username, userLabel];
+        }));
         for (const username of journal.usernames || []) if (!accounts.has(username)) accounts.set(username, `${username} · Tài khoản cũ`);
         for (const [field, entries, all] of [
             ['user', Array.from(accounts), 'Tất cả tài khoản'],

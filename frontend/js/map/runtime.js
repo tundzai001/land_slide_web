@@ -196,11 +196,10 @@ function setGnssAdvancedPanelOpen(sidepanel, open, { focusClose = false } = {}) 
         sidepanel.style.setProperty('max-width', `calc(100vw - ${detailWidth + 32}px)`, 'important');
     }
 
-    sidepanel.style.setProperty(
-        'transform',
-        open ? 'translate(0, 0)' : (isMobile ? 'translateY(-16px)' : 'translateX(24px)'),
-        'important',
-    );
+    let transformVal = 'translateX(24px)';
+    if (open) transformVal = 'translate(0, 0)';
+    else if (isMobile) transformVal = 'translateY(-16px)';
+    sidepanel.style.setProperty('transform', transformVal, 'important');
     sidepanel.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
     sidepanel.style.setProperty('opacity', open ? '1' : '0', 'important');
     sidepanel.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
@@ -536,7 +535,10 @@ function renderGnssAdjustmentWorkflow() {
         const marker = document.createElement('span');
         marker.className = 'gnss-flow-marker';
         const markerIcon = document.createElement('i');
-        markerIcon.className = `bi ${node.status === 'success' ? 'bi-check-lg' : node.status === 'error' ? 'bi-x-lg' : node.icon}`;
+        let iconClass = node.icon;
+        if (node.status === 'success') iconClass = 'bi-check-lg';
+        else if (node.status === 'error') iconClass = 'bi-x-lg';
+        markerIcon.className = `bi ${iconClass}`;
         marker.appendChild(markerIcon);
         rail.appendChild(marker);
 
@@ -811,12 +813,14 @@ function refreshGnssAdjustmentDebugUi() {
     const indicator = document.getElementById('gnss-phase-indicator');
     if (indicator) {
         const phaseName = gnssAdjustmentDebugState.phase;
-        let phaseMsg = '';
+        let phaseMsgHtml = '';
         if (gnssAdjustmentDebugState.entries) {
             const lastPhaseEntry = [...gnssAdjustmentDebugState.entries].reverse().find(e => e.label === 'PHASE');
-            if (lastPhaseEntry?.message) phaseMsg = lastPhaseEntry.message;
+            if (lastPhaseEntry?.message) {
+                phaseMsgHtml = ` <span class="text-light ms-2 px-2 py-1 bg-dark rounded border border-secondary" style="font-size: 0.8em;">${lastPhaseEntry.message}</span>`;
+            }
         }
-        indicator.innerHTML = `<span class="opacity-75">Phase:</span> ${phaseName}${phaseMsg ? ` <span class="text-light ms-2 px-2 py-1 bg-dark rounded border border-secondary" style="font-size: 0.8em;">${phaseMsg}</span>` : ''}`;
+        indicator.innerHTML = `<span class="opacity-75">Phase:</span> ${phaseName}${phaseMsgHtml}`;
         indicator.className = phaseClassForGnssAdjustment(phaseName);
     }
 
@@ -1387,15 +1391,12 @@ function initialize() {
         toggleBtn.innerHTML = '<i class="bi bi-list"></i>';
     }
 
-    mapRefreshIntervalIds.push(setInterval(loadStations, 30000));
-    // Physical base availability and automatic S1/S2 failover can change at
-    // any time; five minutes left stale/incorrect marker states on the map.
-    mapRefreshIntervalIds.push(setInterval(loadCorsBaseStations, 15000));
-    mapRefreshIntervalIds.push(setInterval(loadRescueMarkers, 60000));
-
-    // ✅ Refresh sensor online status of currently-viewed station every 30s
-    // (handles case where a device goes offline while the sidebar is already open)
-    mapRefreshIntervalIds.push(setInterval(refreshCurrentStationDetail, 30000));
+    mapRefreshIntervalIds.push(
+        setInterval(loadStations, 30000),
+        setInterval(loadCorsBaseStations, 15000),
+        setInterval(loadRescueMarkers, 60000),
+        setInterval(refreshCurrentStationDetail, 30000)
+    );
 
     console.log('✅ [MAP] Initialization complete!');
 }

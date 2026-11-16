@@ -469,7 +469,7 @@ class AuthManager {
     }
 
     requireAdmin() {
-        if (!this.user || this.user.role !== 'admin') {
+        if (this.user?.role !== 'admin') {
             alert('Bạn không có quyền truy cập trang này');
             window.location.href = '/';
             return false;
@@ -603,7 +603,7 @@ window.downloadAuthenticatedFile = async function (url, fallbackName) {
 const originalFetch = window.fetch;
 window.fetch = async function (...args) {
     const response = await originalFetch(...args);
-    if (response.status === 401 && window.authManager && window.authManager.isAuthenticated() && !window.authManager._isVerifyingToken) {
+    if (response.status === 401 && window.authManager?.isAuthenticated() && !window.authManager._isVerifyingToken) {
         const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
         console.warn('⚠️ [AUTH] 401 detected; confirming token before logout:', requestUrl || 'unknown request');
         void window.authManager.handleUnauthorizedResponse(requestUrl || 'unknown request');

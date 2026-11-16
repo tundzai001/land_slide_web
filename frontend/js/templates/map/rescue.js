@@ -1,5 +1,5 @@
 window.LegacyTemplateParts ||= {};
-window.LegacyTemplateParts['rescue'] = String.raw`    <!-- FLOATING RESCUE FAB -->
+window.LegacyTemplateParts['rescue'] = `    <!-- FLOATING RESCUE FAB -->
     <button id="btn-guest-rescue" class="rescue-fab" aria-label="Yêu cầu cứu hộ" hidden>
         <span class="rescue-fab-icon">
             <i class="bi bi-exclamation-triangle-fill"></i>

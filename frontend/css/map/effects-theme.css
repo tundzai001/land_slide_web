@@ -441,8 +441,8 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
 }
 
 .btn-alert-dismiss {
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
+    background: #1e293b;
+    color: #ffffff;
     border: 1px solid rgba(255, 255, 255, 0.4);
     padding: 8px 12px;
     border-radius: 8px;
@@ -451,7 +451,7 @@ body.map-is-moving .btn-siren-toggle[data-siren-state="alerting"] {
 }
 
 .btn-alert-dismiss:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: #0f172a;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -36,7 +36,10 @@ class AdminStationWizardFeature extends window.AdminManager {
         input.classList.toggle('is-invalid', state === 'invalid');
         input.classList.toggle('is-valid', state === 'valid');
         input.classList.toggle('is-validating', state === 'validating');
-        input.dataset.topicValid = state === 'valid' ? 'true' : (state === 'invalid' ? 'false' : '');
+        let topicValid = '';
+        if (state === 'valid') topicValid = 'true';
+        else if (state === 'invalid') topicValid = 'false';
+        input.dataset.topicValid = topicValid;
         feedback.className = `mqtt-topic-feedback ${state}`;
         feedback.setAttribute('role', state === 'invalid' ? 'alert' : 'status');
         feedback.setAttribute('aria-live', 'polite');
@@ -949,7 +952,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             if (!btn) return;
 
             const modalEl = document.getElementById('stationConfigModal');
-            if (!modalEl || !modalEl.classList.contains('show')) return;
+            if (!modalEl?.classList.contains('show')) return;
 
             e.preventDefault();
             e.stopPropagation();

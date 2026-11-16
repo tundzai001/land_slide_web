@@ -590,8 +590,6 @@ class SimulationController {
         this._displayFoS(fos);
 
         // ── State transitions ──
-        const prevState = this.state;
-
         if (this.state === SimState.STABLE || this.state === SimState.WARNING || this.state === SimState.CRITICAL) {
             if (fos >= this.fosThresholds.warning) {
                 this.state = SimState.STABLE;
@@ -896,7 +894,8 @@ class SimulationController {
             this._chartSvg(run.time_series, 'houses_affected', 'Nhà trong vùng ảnh hưởng'),
         ].join('');
         const events = (run.events || []).map(event => `<li><time>${(Number(event.time_s) / 3600).toFixed(2)}h</time><div><strong>${this._escape(event.state)}</strong><span>${this._escape(event.label)}</span></div></li>`).join('') || '<li>Không có sự kiện chuyển trạng thái.</li>';
-        const warnings = (run.warnings || []).length ? `<section class="dt-data-warnings"><strong><i class="bi bi-database-exclamation"></i> Cảnh báo dữ liệu</strong><ul>${run.warnings.map(item => `<li>${this._escape(item)}</li>`).join('')}</ul></section>` : '';
+        const warningsList = (run.warnings || []).map(item => `<li>${this._escape(item)}</li>`).join('');
+        const warnings = warningsList ? `<section class="dt-data-warnings"><strong><i class="bi bi-database-exclamation"></i> Cảnh báo dữ liệu</strong><ul>${warningsList}</ul></section>` : '';
         const sourceRows = Object.entries(run.parameters || {}).map(([key, value]) => `<tr><th>${this._escape(key.replaceAll('_', ' '))}</th><td>${this._escape(value)}</td><td>${this._escape(run.parameter_sources?.[key] || 'Mặc định hệ thống')}</td></tr>`).join('');
         const sensors = Object.entries(run.sensor_snapshot || {});
         const sensorRows = sensors.map(([type, snapshot]) => `<tr><th>${this._escape(type)}</th><td>${snapshot.is_online && !snapshot.is_fallback ? 'Hợp lệ' : 'Không sử dụng'}</td><td>${snapshot.timestamp ? new Date(snapshot.timestamp * 1000).toLocaleString('vi-VN') : '--'}</td></tr>`).join('');
@@ -905,7 +904,8 @@ class SimulationController {
             sensorTableHtml = `<div class="dt-table-wrap"><table class="dt-provenance-table"><caption>Tình trạng dữ liệu cảm biến tại thời điểm chạy</caption><thead><tr><th>Cảm biến</th><th>Sử dụng</th><th>Thời điểm</th></tr></thead><tbody>${sensorRows}</tbody></table></div>`;
         }
         const provenance = `<section class="dt-result-section"><div class="dt-result-section-title"><h4>Dữ liệu và phương pháp</h4><span>Engine ${this._escape(run.engine_version || '--')}</span></div><div class="dt-run-meta"><span>Chế độ</span><strong>${run.mode === 'station_snapshot' ? 'Ảnh chụp dữ liệu trạm' : 'Nhập thông số'}</strong><span>Trạm</span><strong>${this._escape(run.station_name || run.station_code || 'Không gắn trạm')}</strong><span>Seed tái lập</span><strong>${this._escape(run.seed ?? '--')}</strong></div><div class="dt-table-wrap"><table class="dt-provenance-table"><caption>Nguồn của từng tham số đầu vào</caption><thead><tr><th>Tham số</th><th>Giá trị</th><th>Nguồn</th></tr></thead><tbody>${sourceRows}</tbody></table></div>${sensorTableHtml}</section>`;
-        content.innerHTML = `${incomplete}<section class="dt-result-hero"><span>KẾT LUẬN MÔ PHỎNG</span><h4>${this._escape(summary.classification || run.status)}</h4><p>Kết quả kịch bản, không phải chứng thư địa kỹ thuật.</p></section><div class="dt-result-stats">${stats.map(([label, value]) => `<div><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>`).join('')}</div><section class="dt-result-section"><div class="dt-result-section-title"><h4>Biến thiên theo thời gian</h4><span>${run.time_series?.length || 0} mẫu</span></div>${charts}</section><section class="dt-result-section"><div class="dt-result-section-title"><h4>Mặt cắt sườn dốc</h4></div>${this._profileSvg(run.terrain_profile, summary)}</section><section class="dt-result-section"><div class="dt-result-section-title"><h4>Sự kiện</h4></div><ol class="dt-event-list">${events}</ol></section>${provenance}${warnings}<div class="dt-export-bar"><button data-export="pdf"><i class="bi bi-file-earmark-pdf"></i> PDF</button><button data-export="xlsx"><i class="bi bi-file-earmark-excel"></i> XLSX</button><button data-export="json"><i class="bi bi-braces"></i> JSON</button><button class="primary" data-export="bundle"><i class="bi bi-file-zip"></i> Tải trọn bộ</button></div>`;
+        const statsHtml = stats.map(([label, value]) => `<div><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>`).join('');
+        content.innerHTML = `${incomplete}<section class="dt-result-hero"><span>KẾT LUẬN MÔ PHỎNG</span><h4>${this._escape(summary.classification || run.status)}</h4><p>Kết quả kịch bản, không phải chứng thư địa kỹ thuật.</p></section><div class="dt-result-stats">${statsHtml}</div><section class="dt-result-section"><div class="dt-result-section-title"><h4>Biến thiên theo thời gian</h4><span>${run.time_series?.length || 0} mẫu</span></div>${charts}</section><section class="dt-result-section"><div class="dt-result-section-title"><h4>Mặt cắt sườn dốc</h4></div>${this._profileSvg(run.terrain_profile, summary)}</section><section class="dt-result-section"><div class="dt-result-section-title"><h4>Sự kiện</h4></div><ol class="dt-event-list">${events}</ol></section>${provenance}${warnings}<div class="dt-export-bar"><button data-export="pdf"><i class="bi bi-file-earmark-pdf"></i> PDF</button><button data-export="xlsx"><i class="bi bi-file-earmark-excel"></i> XLSX</button><button data-export="json"><i class="bi bi-braces"></i> JSON</button><button class="primary" data-export="bundle"><i class="bi bi-file-zip"></i> Tải trọn bộ</button></div>`;
         content.querySelectorAll('[data-export]').forEach(button => button.addEventListener('click', () => this._download(button.dataset.export)));
     }
 
@@ -956,7 +956,7 @@ class SimulationController {
         // Clean up UI events if necessary (for now we just hide it to reuse)
         this.envBuilder.clear();
         
-        if (this.sceneManager && this.sceneManager.renderer) {
+        if (this.sceneManager?.renderer) {
             this.sceneManager.renderer.dispose();
             this.sceneManager.renderer.forceContextLoss();
         }

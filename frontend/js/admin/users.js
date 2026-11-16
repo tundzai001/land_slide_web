@@ -74,9 +74,13 @@ class AdminUsersFeature extends window.AdminManager {
                 projectBadges = `<br><small class="text-muted">Dự án: <span class="user-project-badge">Tất cả</span></small>`;
             }
 
+            const toggleBtnClass = u.is_active ? 'warning' : 'success';
+            const toggleTitle = u.is_active ? 'Khóa tài khoản' : 'Mở khóa';
+            const toggleLabel = u.is_active ? 'Khóa' : 'Mở khóa';
+            const toggleIcon = u.is_active ? 'lock' : 'unlock';
             const adminActions = u.username === 'admin' ? '' : `
-                        <button class="btn btn-outline-${u.is_active ? 'warning' : 'success'} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, ${!u.is_active})" title="${u.is_active ? 'Khóa tài khoản' : 'Mở khóa'}" aria-label="${u.is_active ? 'Khóa' : 'Mở khóa'} ${this.escapeUserValue(u.username)}">
-                            <i class="bi bi-${u.is_active ? 'lock' : 'unlock'}"></i>
+                        <button class="btn btn-outline-${toggleBtnClass} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, ${!u.is_active})" title="${toggleTitle}" aria-label="${toggleLabel} ${this.escapeUserValue(u.username)}">
+                            <i class="bi bi-${toggleIcon}"></i>
                         </button>
                         <button class="btn btn-outline-danger management-icon-btn" onclick="window.adminManager.deleteUser(${u.id})" title="Xóa tài khoản" aria-label="Xóa ${this.escapeUserValue(u.username)}">
                             <i class="bi bi-trash"></i>
@@ -377,6 +381,7 @@ class AdminUsersFeature extends window.AdminManager {
                 </div>
             `).join('');
         } catch (e) {
+            console.error('Error loading projects for modal:', e);
             container.innerHTML = '<span class="text-danger small" role="alert">Không tải được dự án.</span><button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="window.adminManager.loadProjectsForModal()">Thử lại</button>';
         }
     }

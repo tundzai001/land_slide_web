@@ -995,7 +995,11 @@ function setupEventListeners() {
                 ctx.fill();
                 ctx.beginPath();
                 ctx.arc(sp.x, sp.y, pt.isBase ? 8 : 6, 0, Math.PI * 2);
-                ctx.fillStyle = pt.isBase ? '#fb7185' : pt.excluded ? '#f59e0b' : pt.placeholder ? '#64748b' : '#2dd4bf';
+                let pointFill = '#2dd4bf';
+                if (pt.isBase) pointFill = '#fb7185';
+                else if (pt.excluded) pointFill = '#f59e0b';
+                else if (pt.placeholder) pointFill = '#64748b';
+                ctx.fillStyle = pointFill;
                 ctx.shadowColor = ctx.fillStyle;
                 ctx.shadowBlur = this.interactionActive ? 0 : 12;
                 ctx.fill();
@@ -1402,13 +1406,15 @@ function setupEventListeners() {
         }
         try {
             const result = await controlGnssAdjustment(action);
-            const fallbackPhase = action === 'pause' ? 'PAUSED' : action === 'resume' ? 'FREE_NETWORK' : 'STOPPED';
+            let fallbackPhase = 'STOPPED';
+            if (action === 'pause') fallbackPhase = 'PAUSED';
+            else if (action === 'resume') fallbackPhase = 'FREE_NETWORK';
             setGnssAdjustmentPhase(result.phase || fallbackPhase, result.message || 'Đã cập nhật trạng thái phiên bình sai.');
-            addGnssAdjustmentDebug('CONTROL', action === 'pause'
-                ? 'Đã yêu cầu tạm dừng tại checkpoint an toàn.'
-                : action === 'resume'
-                    ? 'Đã tiếp tục từ checkpoint đang giữ.'
-                    : 'Đã dừng hẳn và khôi phục cấu hình Base.', 'success');
+
+            let debugMsg = 'Đã dừng hẳn và khôi phục cấu hình Base.';
+            if (action === 'pause') debugMsg = 'Đã yêu cầu tạm dừng tại checkpoint an toàn.';
+            else if (action === 'resume') debugMsg = 'Đã tiếp tục từ checkpoint đang giữ.';
+            addGnssAdjustmentDebug('CONTROL', debugMsg, 'success');
         } catch (error) {
             showAdjustmentError('Không thể điều khiển phiên bình sai', error.message);
         } finally {

@@ -104,7 +104,7 @@ class AdminPiDeviceActionsFeature extends window.AdminManager {
     }
 
     async _requestPiAction(path, options, successMessage) {
-        const response = await fetch(path, { ...options, headers: { 'Authorization': `Bearer ${this.token}`, ...(options.headers || {}) } });
+        const response = await fetch(path, { ...options, headers: { 'Authorization': `Bearer ${this.token}`, ...options?.headers } });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `HTTP ${response.status}`);
         window.toast?.success(successMessage);
         await this.loadPiDevices();

@@ -8,7 +8,8 @@ async function setupGuestRescueUI() {
     try {
         const response = await fetch('/api/public/rescue-config', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
         guestRescueEnabled = response.ok && (await response.json()).enabled === true;
-    } catch (_) {
+    } catch (e) {
+        console.debug('[RESCUE] Config fetch error:', e);
         guestRescueEnabled = false;
     }
     if (!guestRescueEnabled) return;

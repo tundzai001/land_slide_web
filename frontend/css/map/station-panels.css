@@ -150,7 +150,7 @@
 
 /* Admin Button in Navbar */
 #admin-nav-btn {
-    background: linear-gradient(135deg, #06b6d4, #0891b2);
+    background: linear-gradient(135deg, #0891b2, #0e7490);
     border: none;
     color: white;
     font-weight: 600;
@@ -164,7 +164,7 @@
 }
 
 #admin-nav-btn:hover {
-    background: linear-gradient(135deg, #0891b2, #0e7490);
+    background: linear-gradient(135deg, #0e7490, #155e75);
     color: white;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
@@ -569,12 +569,12 @@ body.map-is-moving .detail-sidebar,
 }
 
 .btn-action.secondary {
-    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    background: linear-gradient(135deg, #6d28d9 0%, #5b21b6 100%);
     color: white;
 }
 
 .btn-action.secondary:hover {
-    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    background: linear-gradient(135deg, #5b21b6 0%, #4c1d95 100%);
     box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
     transform: translateY(-2px);
 }
@@ -604,7 +604,7 @@ body.map-is-moving .detail-sidebar,
 /* Tráº¡ng thÃ¡i 1: idle (xÃ¡m, disabled) â€” máº·c Ä‘á»‹nh, chÆ°a cÃ³ cáº£nh bÃ¡o */
 .btn-siren-toggle[data-siren-state="idle"],
 .btn-siren-toggle.disabled {
-    background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+    background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
     cursor: not-allowed;
     opacity: 0.65;
     box-shadow: none;
