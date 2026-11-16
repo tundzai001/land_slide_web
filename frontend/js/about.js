@@ -122,6 +122,84 @@ import { renderAboutTemplate } from './templates/about-template.js';
         'GNSS_Station_Toe_PTZCamera', 'Rain_PTZCamera'
     ]);
 
+    function _expandChildMeshGeometry(childMeshes) {
+        let totalVerts = 0;
+        const expanded = [];
+        for (const m of childMeshes) {
+            const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+            const pos = g.getAttribute('position');
+            if (!pos) continue;
+            const norm = g.getAttribute('normal');
+            const colAttr = g.getAttribute('color');
+            const baseCol = m.material?.color || new THREE.Color(0xcccccc);
+            const emCol = m.material?.emissive || new THREE.Color(0x000000);
+            const emInt = m.material?.emissiveIntensity ?? 1.0;
+            const r = Math.min(1, baseCol.r + emCol.r * emInt * 0.45);
+            const gr = Math.min(1, baseCol.g + emCol.g * emInt * 0.45);
+            const b = Math.min(1, baseCol.b + emCol.b * emInt * 0.45);
+            expanded.push({ pos, norm, colAttr, r, gr, b, count: pos.count });
+            totalVerts += pos.count;
+        }
+        return { expanded, totalVerts };
+    }
+
+    function _copyNormals(mergedNorm, item, offset) {
+        if (item.norm?.array.length === item.count * 3) {
+            mergedNorm.set(item.norm.array, offset);
+            return;
+        }
+        for (let i = 0; i < item.count * 3; i += 3) {
+            mergedNorm[offset + i + 1] = 1;
+        }
+    }
+
+    function _copyColors(mergedCol, item, offset) {
+        if (item.colAttr?.itemSize >= 3) {
+            for (let i = 0; i < item.count; i++) {
+                mergedCol[offset + i * 3] = item.colAttr.getX(i);
+                mergedCol[offset + i * 3 + 1] = item.colAttr.getY(i);
+                mergedCol[offset + i * 3 + 2] = item.colAttr.getZ(i);
+            }
+            return;
+        }
+        for (let i = 0; i < item.count * 3; i += 3) {
+            mergedCol[offset + i] = item.r;
+            mergedCol[offset + i + 1] = item.gr;
+            mergedCol[offset + i + 2] = item.b;
+        }
+    }
+
+    function _buildMergedMeshGeometry(expanded, totalVerts) {
+        const mergedPos = new Float32Array(totalVerts * 3);
+        const mergedNorm = new Float32Array(totalVerts * 3);
+        const mergedCol = new Float32Array(totalVerts * 3);
+        let offset = 0;
+        for (const item of expanded) {
+            mergedPos.set(item.pos.array, offset);
+            _copyNormals(mergedNorm, item, offset);
+            _copyColors(mergedCol, item, offset);
+            offset += item.count * 3;
+        }
+
+        const mergedGeo = new THREE.BufferGeometry();
+        mergedGeo.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
+        mergedGeo.setAttribute('normal', new THREE.BufferAttribute(mergedNorm, 3));
+        mergedGeo.setAttribute('color', new THREE.BufferAttribute(mergedCol, 3));
+        mergedGeo.computeBoundingSphere();
+        return mergedGeo;
+    }
+
+    function _mergeChildMeshesGroup(node, childMeshes, mergedVertexMat) {
+        const { expanded, totalVerts } = _expandChildMeshGeometry(childMeshes);
+        if (!totalVerts || expanded.length < 2) return;
+
+        const mergedGeo = _buildMergedMeshGeometry(expanded, totalVerts);
+        childMeshes.forEach(m => node.remove(m));
+        const singleMesh = new THREE.Mesh(mergedGeo, mergedVertexMat);
+        singleMesh.name = `${node.name}_Merged`;
+        node.add(singleMesh);
+    }
+
     function optimizeBlenderScene(scene) {
         const mergedVertexMat = new THREE.MeshLambertMaterial({ vertexColors: true });
         const groupsToMerge = [];
@@ -133,84 +211,6 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 groupsToMerge.push({ node, childMeshes });
             }
         });
-
-        function _expandChildMeshGeometry(childMeshes) {
-            let totalVerts = 0;
-            const expanded = [];
-            for (const m of childMeshes) {
-                const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
-                const pos = g.getAttribute('position');
-                if (!pos) continue;
-                const norm = g.getAttribute('normal');
-                const colAttr = g.getAttribute('color');
-                const baseCol = m.material?.color || new THREE.Color(0xcccccc);
-                const emCol = m.material?.emissive || new THREE.Color(0x000000);
-                const emInt = m.material?.emissiveIntensity ?? 1.0;
-                const r = Math.min(1, baseCol.r + emCol.r * emInt * 0.45);
-                const gr = Math.min(1, baseCol.g + emCol.g * emInt * 0.45);
-                const b = Math.min(1, baseCol.b + emCol.b * emInt * 0.45);
-                expanded.push({ pos, norm, colAttr, r, gr, b, count: pos.count });
-                totalVerts += pos.count;
-            }
-            return { expanded, totalVerts };
-        }
-
-        function _copyNormals(mergedNorm, item, offset) {
-            if (item.norm?.array.length === item.count * 3) {
-                mergedNorm.set(item.norm.array, offset);
-                return;
-            }
-            for (let i = 0; i < item.count * 3; i += 3) {
-                mergedNorm[offset + i + 1] = 1;
-            }
-        }
-
-        function _copyColors(mergedCol, item, offset) {
-            if (item.colAttr?.itemSize >= 3) {
-                for (let i = 0; i < item.count; i++) {
-                    mergedCol[offset + i * 3] = item.colAttr.getX(i);
-                    mergedCol[offset + i * 3 + 1] = item.colAttr.getY(i);
-                    mergedCol[offset + i * 3 + 2] = item.colAttr.getZ(i);
-                }
-                return;
-            }
-            for (let i = 0; i < item.count * 3; i += 3) {
-                mergedCol[offset + i] = item.r;
-                mergedCol[offset + i + 1] = item.gr;
-                mergedCol[offset + i + 2] = item.b;
-            }
-        }
-
-        function _buildMergedMeshGeometry(expanded, totalVerts) {
-            const mergedPos = new Float32Array(totalVerts * 3);
-            const mergedNorm = new Float32Array(totalVerts * 3);
-            const mergedCol = new Float32Array(totalVerts * 3);
-            let offset = 0;
-            for (const item of expanded) {
-                mergedPos.set(item.pos.array, offset);
-                _copyNormals(mergedNorm, item, offset);
-                _copyColors(mergedCol, item, offset);
-                offset += item.count * 3;
-            }
-
-            const mergedGeo = new THREE.BufferGeometry();
-            mergedGeo.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
-            mergedGeo.setAttribute('normal', new THREE.BufferAttribute(mergedNorm, 3));
-            mergedGeo.setAttribute('color', new THREE.BufferAttribute(mergedCol, 3));
-            mergedGeo.computeBoundingSphere();
-            return mergedGeo;
-        }
-
-        function _mergeChildMeshesGroup(node, childMeshes, mergedVertexMat) {
-            const { expanded, totalVerts } = _expandChildMeshGeometry(childMeshes);
-            if (!totalVerts || expanded.length < 2) return;
-
-            const mergedGeo = _buildMergedMeshGeometry(expanded, totalVerts);
-            childMeshes.forEach(m => node.remove(m));
-            const singleMesh = new THREE.Mesh(mergedGeo, mergedVertexMat);
-            singleMesh.name = `${node.name}_Merged`;
-            node.add(singleMesh);
-        }
 
         // Merge multi-primitive objects (e.g. 68-primitive satellites, drones, forest, helicopters) into 1 draw call each
         groupsToMerge.forEach(({ node, childMeshes }) => {

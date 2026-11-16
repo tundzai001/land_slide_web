@@ -42,6 +42,20 @@ const _prevValues = {};
 // Store ongoing animation frame IDs to cancel previous animations
 const _animFrames = {};
 
+function _setSensorDirectValue(el, id, text, unit, textOnly) {
+    if (textOnly) {
+        el.textContent = `${text}${unit}`;
+    } else {
+        setHTML(id, `${text}<span class="sensor-unit">${unit}</span>`);
+    }
+}
+
+function _shouldSkipSensorAnimation() {
+    const detailVisible = document.getElementById('detail-sidebar')?.classList.contains('active');
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    return !detailVisible || document.hidden || mapInteractionActive || reduceMotion;
+}
+
 /**
  * Smoothly animate a sensor value from its current displayed number to a new value.
  * Uses requestAnimationFrame for 60fps lerp interpolation.
@@ -59,27 +73,17 @@ function animateValue(id, newValue, decimals = 2, unit = '', textOnly = false) {
     const numVal = Number.parseFloat(newValue);
     if (Number.isNaN(numVal) || newValue === null || newValue === undefined) {
         // Non-numeric → direct set
-        if (textOnly) {
-            el.innerText = `--${unit}`;
-        } else {
-            el.innerHTML = `--<span class="sensor-unit">${unit}</span>`;
-        }
+        _setSensorDirectValue(el, id, '--', unit, textOnly);
         return;
     }
 
-    const detailVisible = document.getElementById('detail-sidebar')?.classList.contains('active');
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    if (!detailVisible || document.hidden || mapInteractionActive || reduceMotion) {
+    if (_shouldSkipSensorAnimation()) {
         if (_animFrames[id]) {
             cancelAnimationFrame(_animFrames[id]);
             delete _animFrames[id];
         }
         _prevValues[id] = numVal;
-        if (textOnly) {
-            el.textContent = `${numVal.toFixed(decimals)}${unit}`;
-        } else {
-            setHTML(id, `${numVal.toFixed(decimals)}<span class="sensor-unit">${unit}</span>`);
-        }
+        _setSensorDirectValue(el, id, numVal.toFixed(decimals), unit, textOnly);
         return;
     }
 
@@ -88,11 +92,7 @@ function animateValue(id, newValue, decimals = 2, unit = '', textOnly = false) {
     // If no previous value or same value, just set directly (no animation needed)
     if (prevVal === undefined || prevVal === numVal) {
         _prevValues[id] = numVal;
-        if (textOnly) {
-            el.innerText = `${numVal.toFixed(decimals)}${unit}`;
-        } else {
-            el.innerHTML = `${numVal.toFixed(decimals)}<span class="sensor-unit">${unit}</span>`;
-        }
+        _setSensorDirectValue(el, id, numVal.toFixed(decimals), unit, textOnly);
         return;
     }
 

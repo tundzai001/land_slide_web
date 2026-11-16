@@ -552,9 +552,7 @@ class SimulationController {
         }
     }
 
-    _simulationSubStep(dt) {
-
-        // ── Phase 1: Build up pore pressure from rainfall (Green-Ampt Infiltration) ──
+    _updateEffectiveRu(dt) {
         if (this.params.rainfall > 0) {
             const infiltrationRu = this.physics.calculateInfiltration(
                 this.params.rainfall, 
@@ -578,126 +576,128 @@ class SimulationController {
         } else {
             this.params._effectiveRu = this.params.porePressureRatio || 0;
         }
+    }
 
-        // ── Calculate FoS ──
-        const fos = this.physics.calculateFoS({
-            ...this.params,
-            porePressureRatio: this.params._effectiveRu || this.params.porePressureRatio
-        });
-        this._displayFoS(fos);
-
-        // ── State transitions ──
-        if (this.state === SimState.STABLE || this.state === SimState.WARNING || this.state === SimState.CRITICAL) {
-            if (fos >= this.fosThresholds.warning) {
-                this.state = SimState.STABLE;
-            } else if (fos >= this.fosThresholds.critical) {
-                this.state = SimState.WARNING;
-            } else {
-                this.state = SimState.CRITICAL;
-                // After ~2 seconds in critical → trigger sliding
-                if (!this._criticalTimer) this._criticalTimer = 0;
-                this._criticalTimer += dt;
-                if (this._criticalTimer > 2) {
-                    this.state = SimState.SLIDING;
-                    this._slideStartTime = this.simTime;
-                    this._criticalTimer = 0;
-                }
+    _evaluateFosState(fos, dt) {
+        if (this.state !== SimState.STABLE && this.state !== SimState.WARNING && this.state !== SimState.CRITICAL) {
+            return;
+        }
+        if (fos >= this.fosThresholds.warning) {
+            this.state = SimState.STABLE;
+        } else if (fos >= this.fosThresholds.critical) {
+            this.state = SimState.WARNING;
+        } else {
+            this.state = SimState.CRITICAL;
+            if (!this._criticalTimer) this._criticalTimer = 0;
+            this._criticalTimer += dt;
+            if (this._criticalTimer > 2) {
+                this.state = SimState.SLIDING;
+                this._slideStartTime = this.simTime;
+                this._criticalTimer = 0;
             }
         }
+    }
 
-        // ── Visual effects per state ──
+    _stepSlidingPhysics(dt) {
+        const slideElapsed = this.simTime - this._slideStartTime;
+        const motion = this.physics.calculateSlideMotion(this.params, slideElapsed, dt);
+
+        this.damageStats.velocity = motion.velocity;
+        this.damageStats.volume = motion.volume;
+        
+        if (!this._maxVelocity || motion.velocity > this._maxVelocity) {
+            this._maxVelocity = motion.velocity;
+        }
+        
+        // Accumulate displacement for terrain deformation
+        if (!this._totalDisplacement) this._totalDisplacement = 0;
+        this._totalDisplacement += motion.velocity * dt;
+        this.terrainGen.deformTerrain(this._totalDisplacement);
+
+        // Move debris
+        this.particles.emitDebris(motion.frontPosition, motion.velocity, dt);
+
+        // Check destruction
+        const destroyed = this.destruction.checkCollisions(
+            motion.frontPosition,
+            motion.width,
+            motion.kineticEnergy
+        );
+        this.damageStats.housesDestroyed += destroyed.houses;
+        this.damageStats.treesDestroyed += destroyed.trees;
+
+        // Dust clouds
+        if (motion.velocity > 2) {
+            this.particles.emitDust(motion.frontPosition, motion.velocity);
+        }
+
+        // Update damage display
+        document.getElementById('dmg-houses').textContent = this.damageStats.housesDestroyed;
+        document.getElementById('dmg-trees').textContent = this.damageStats.treesDestroyed;
+        document.getElementById('dmg-velocity').textContent = motion.velocity.toFixed(1);
+        document.getElementById('dmg-volume').textContent = Math.round(motion.volume);
+
+        // After debris stops or max slide time (5 min real-world)
+        if (motion.velocity < 0.1 || slideElapsed > 300) {
+            this.state = SimState.DEPOSITED;
+            this.viewport.classList.remove('camera-shake');
+        }
+    }
+
+    _showDepositedReport() {
+        if (this._reportShown) return;
+        this._reportShown = true;
+        const reportOverlay = document.getElementById('dt-report-overlay');
+        if (reportOverlay) {
+            reportOverlay.style.display = 'flex';
+            const slideElapsed = this.simTime - (this._slideStartTime || 0);
+            document.getElementById('rep-time').textContent = slideElapsed.toFixed(1);
+            document.getElementById('rep-vel').textContent = (this._maxVelocity || this.damageStats.velocity).toFixed(1);
+            document.getElementById('rep-vol').textContent = Math.round(this.damageStats.volume);
+            document.getElementById('rep-house').textContent = this.damageStats.housesDestroyed;
+            document.getElementById('rep-tree').textContent = this.damageStats.treesDestroyed;
+        }
+    }
+
+    _applyStateVisualEffects(fos, dt) {
         const warningOverlay = document.getElementById('dt-warning-overlay');
         const damageStats = document.getElementById('dt-damage-stats');
 
         if (this.state === SimState.WARNING) {
             warningOverlay.style.display = 'none';
             this.viewport.classList.remove('camera-shake');
-            // Terrain cracks (visual hint)
             this.terrainGen.setStressLevel(0.3);
-        }
-
-        if (this.state === SimState.CRITICAL) {
+        } else if (this.state === SimState.CRITICAL) {
             warningOverlay.style.display = 'flex';
             document.getElementById('dt-warning-fos').textContent = `FoS = ${fos.toFixed(2)}`;
             this.viewport.classList.add('camera-shake');
             this.terrainGen.setStressLevel(0.7);
-        }
-
-        if (this.state === SimState.SLIDING) {
+        } else if (this.state === SimState.SLIDING) {
             warningOverlay.style.display = 'none';
             damageStats.style.display = 'block';
             this.viewport.classList.add('camera-shake');
             this.terrainGen.setStressLevel(1.0);
-
-            // Run landslide physics
-            const slideElapsed = this.simTime - this._slideStartTime;
-            const motion = this.physics.calculateSlideMotion(this.params, slideElapsed, dt);
-
-            this.damageStats.velocity = motion.velocity;
-            this.damageStats.volume = motion.volume;
-            
-            if (!this._maxVelocity || motion.velocity > this._maxVelocity) {
-                this._maxVelocity = motion.velocity;
-            }
-            
-            // Accumulate displacement for terrain deformation
-            if (!this._totalDisplacement) this._totalDisplacement = 0;
-            this._totalDisplacement += motion.velocity * dt;
-            this.terrainGen.deformTerrain(this._totalDisplacement);
-
-            // Move debris
-            this.particles.emitDebris(motion.frontPosition, motion.velocity, dt);
-
-            // Check destruction
-            const destroyed = this.destruction.checkCollisions(
-                motion.frontPosition,
-                motion.width,
-                motion.kineticEnergy
-            );
-            this.damageStats.housesDestroyed += destroyed.houses;
-            this.damageStats.treesDestroyed += destroyed.trees;
-
-            // Dust clouds
-            if (motion.velocity > 2) {
-                this.particles.emitDust(motion.frontPosition, motion.velocity);
-            }
-
-            // Update damage display
-            document.getElementById('dmg-houses').textContent = this.damageStats.housesDestroyed;
-            document.getElementById('dmg-trees').textContent = this.damageStats.treesDestroyed;
-            document.getElementById('dmg-velocity').textContent = motion.velocity.toFixed(1);
-            document.getElementById('dmg-volume').textContent = Math.round(motion.volume);
-
-            // After debris stops or max slide time (5 min real-world)
-            if (motion.velocity < 0.1 || slideElapsed > 300) {
-                this.state = SimState.DEPOSITED;
-                this.viewport.classList.remove('camera-shake');
-            }
-        }
-
-        if (this.state === SimState.DEPOSITED) {
-            // Final state — keep damage stats visible
+            this._stepSlidingPhysics(dt);
+        } else if (this.state === SimState.DEPOSITED) {
             const badge = document.getElementById('sim-status-badge');
             badge.className = 'dt-status-badge';
             badge.querySelector('.dt-status-text').textContent = 'KẾT THÚC';
-
-            // Show report modal once
-            if (!this._reportShown) {
-                this._reportShown = true;
-                const reportOverlay = document.getElementById('dt-report-overlay');
-                if (reportOverlay) {
-                    reportOverlay.style.display = 'flex';
-                    const slideElapsed = this.simTime - (this._slideStartTime || 0);
-                    document.getElementById('rep-time').textContent = slideElapsed.toFixed(1);
-                    document.getElementById('rep-vel').textContent = (this._maxVelocity || this.damageStats.velocity).toFixed(1);
-                    document.getElementById('rep-vol').textContent = Math.round(this.damageStats.volume);
-                    document.getElementById('rep-house').textContent = this.damageStats.housesDestroyed;
-                    document.getElementById('rep-tree').textContent = this.damageStats.treesDestroyed;
-                }
-            }
+            this._showDepositedReport();
         }
+    }
 
-        // Reset critical timer if we're no longer critical
+    _simulationSubStep(dt) {
+        this._updateEffectiveRu(dt);
+
+        const fos = this.physics.calculateFoS({
+            ...this.params,
+            porePressureRatio: this.params._effectiveRu || this.params.porePressureRatio
+        });
+        this._displayFoS(fos);
+
+        this._evaluateFosState(fos, dt);
+        this._applyStateVisualEffects(fos, dt);
+
         if (this.state !== SimState.CRITICAL) {
             this._criticalTimer = 0;
         }

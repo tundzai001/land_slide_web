@@ -21,46 +21,45 @@ export class DestructionSystem {
         this._impactFlash = 0;
     }
 
-    /**
-     * Check collisions between debris front and environment objects
-     */
-    checkCollisions(frontPos, width, kineticEnergy) {
+    _checkHouseCollisions(frontPos, halfWidth, kineticEnergy) {
         let housesDestroyed = 0;
-        let treesDestroyed = 0;
-
-        const halfWidth = width / 2;
-
-        // Check houses
         for (const house of this.env.houses) {
             if (house.destroyed) continue;
 
             const dx = house.position.x - frontPos.x;
             const dz = Math.abs(house.position.z - frontPos.z);
 
-            if (dx > -5 && dx < 15 && dz < halfWidth) {
-                const houseStrength = 50000;
-                if (kineticEnergy > houseStrength) {
-                    this._destroyHouse(house, frontPos, kineticEnergy);
-                    housesDestroyed++;
-                }
+            if (dx > -5 && dx < 15 && dz < halfWidth && kineticEnergy > 50000) {
+                this._destroyHouse(house, frontPos, kineticEnergy);
+                housesDestroyed++;
             }
         }
+        return housesDestroyed;
+    }
 
-        // Check trees
+    _checkTreeCollisions(frontPos, halfWidth, kineticEnergy) {
+        let treesDestroyed = 0;
         for (const tree of this.env.trees) {
             if (tree.destroyed) continue;
 
             const dx = tree.position.x - frontPos.x;
             const dz = Math.abs(tree.position.z - frontPos.z);
 
-            if (dx > -3 && dx < 10 && dz < halfWidth) {
-                const treeStrength = 5000;
-                if (kineticEnergy > treeStrength) {
-                    this._destroyTree(tree, frontPos);
-                    treesDestroyed++;
-                }
+            if (dx > -3 && dx < 10 && dz < halfWidth && kineticEnergy > 5000) {
+                this._destroyTree(tree, frontPos);
+                treesDestroyed++;
             }
         }
+        return treesDestroyed;
+    }
+
+    /**
+     * Check collisions between debris front and environment objects
+     */
+    checkCollisions(frontPos, width, kineticEnergy) {
+        const halfWidth = width / 2;
+        const housesDestroyed = this._checkHouseCollisions(frontPos, halfWidth, kineticEnergy);
+        const treesDestroyed = this._checkTreeCollisions(frontPos, halfWidth, kineticEnergy);
 
         // Update existing fragments
         this._updateFragments();

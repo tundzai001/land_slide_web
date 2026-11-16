@@ -426,44 +426,36 @@ function safeNumber(value, decimals = 2, defaultValue = '--') {
     return num.toFixed(decimals);
 }
 
+function _parseWaterLevelFromDisplay(displayRaw, unitRaw) {
+    if (Number.isNaN(displayRaw)) return null;
+    if (unitRaw === 'mm') {
+        return displayRaw < 10 ? displayRaw * 100 : displayRaw / 10;
+    }
+    if (unitRaw === 'm' || unitRaw === 'meter' || unitRaw === 'meters') {
+        return displayRaw * 100;
+    }
+    if (unitRaw === 'cm') {
+        return displayRaw;
+    }
+    return null;
+}
+
+function _parseWaterLevelFallback(waterLatest) {
+    const cmRaw = Number.parseFloat(waterLatest?.water_level_cm);
+    if (!Number.isNaN(cmRaw)) return cmRaw;
+    const meterRaw = Number.parseFloat(waterLatest?.water_level ?? waterLatest?.processed_value_meters);
+    if (!Number.isNaN(meterRaw)) return meterRaw * 100;
+    return null;
+}
+
 function formatWaterLevelDisplay(waterLatest) {
-    // If sensor is offline or value is fallback, show -- immediately
     if (waterLatest?.is_fallback === true) {
         return `--<span class="sensor-unit">cm</span>`;
     }
 
     const unitRaw = String(waterLatest?.water_display_unit || '').trim().toLowerCase();
     const displayRaw = Number.parseFloat(waterLatest?.water_display_value);
-    let levelCm = null;
-
-    if (!Number.isNaN(displayRaw)) {
-        if (unitRaw === 'mm') {
-            // Sanity check: if mm unit but value < 10, likely mislabeled as m
-            if (displayRaw < 10) {
-                levelCm = displayRaw * 100;  // Treat as meters
-            } else {
-                levelCm = displayRaw / 10;   // Treat as millimeters
-            }
-        } else if (unitRaw === 'm' || unitRaw === 'meter' || unitRaw === 'meters') {
-            levelCm = displayRaw * 100;
-        } else if (unitRaw === 'cm') {
-            levelCm = displayRaw;
-        }
-    }
-
-    if (levelCm === null) {
-        const cmRaw = Number.parseFloat(waterLatest?.water_level_cm);
-        if (!Number.isNaN(cmRaw)) {
-            levelCm = cmRaw;
-        }
-    }
-
-    if (levelCm === null) {
-        const meterRaw = Number.parseFloat(waterLatest?.water_level ?? waterLatest?.processed_value_meters);
-        if (!Number.isNaN(meterRaw)) {
-            levelCm = meterRaw * 100;
-        }
-    }
+    const levelCm = _parseWaterLevelFromDisplay(displayRaw, unitRaw) ?? _parseWaterLevelFallback(waterLatest);
 
     if (levelCm === null) {
         return `--<span class="sensor-unit">cm</span>`;
@@ -907,30 +899,40 @@ function _renderBatteryStatus(imuLatest, imuOnline) {
     }
 }
 
+function _applyGnssAdjustmentSectionUI(adjCached, cacheData, elements) {
+    const { adjResultsSection, adjStatusEl, adjTimeEl, adjPointsList } = elements;
+    window.pendingGnssAdjustmentResult = cacheData;
+    const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
+    if (terminalVisible) window.gnssBoardState?.loadAdjustmentResult?.(cacheData);
+    if (adjStatusEl) {
+        adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
+    }
+    if (adjTimeEl && adjCached.latest_timestamp) {
+        adjTimeEl.textContent = new Date(normalizeEpochMs(adjCached.latest_timestamp)).toLocaleString();
+    }
+    if (adjResultsSection) adjResultsSection.style.display = 'block';
+    if (adjPointsList) _populateAdjustedPointsList(adjPointsList, cacheData.points);
+    if (terminalVisible) window.gnssBoardState?.fitToResult?.();
+}
+
+function _clearGnssAdjustmentSectionUI(elements) {
+    window.pendingGnssAdjustmentResult = null;
+    if (elements.adjResultsSection) elements.adjResultsSection.style.display = 'none';
+    if (elements.adjPointsList) elements.adjPointsList.innerHTML = '';
+}
+
 function _renderSidebarGnssAdjustedSection(data, imuLatest, imuOnline) {
-    const adjResultsSection = document.getElementById('adj-results-section');
-    const adjStatusEl = document.getElementById('adj-process-status');
-    const adjTimeEl = document.getElementById('adj-val-time');
-    const adjPointsList = document.getElementById('adj-points-list');
+    const elements = {
+        adjResultsSection: document.getElementById('adj-results-section'),
+        adjStatusEl: document.getElementById('adj-process-status'),
+        adjTimeEl: document.getElementById('adj-val-time'),
+        adjPointsList: document.getElementById('adj-points-list'),
+    };
     const adjCached = data.sensors?.gnss_adjusted;
     if (adjCached?.latest && isGnssAdjustmentResultRelevant(adjCached.latest, adjCached.latest_timestamp)) {
-        const cacheData = adjCached.latest;
-        window.pendingGnssAdjustmentResult = cacheData;
-        const terminalVisible = document.getElementById('gnssTerminalModal')?.classList.contains('show');
-        if (terminalVisible) window.gnssBoardState?.loadAdjustmentResult?.(cacheData);
-        if (adjStatusEl) {
-            adjStatusEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Bình sai thành công (Đã lưu)</span>`;
-        }
-        if (adjTimeEl && adjCached.latest_timestamp) {
-            adjTimeEl.textContent = new Date(normalizeEpochMs(adjCached.latest_timestamp)).toLocaleString();
-        }
-        if (adjResultsSection) adjResultsSection.style.display = 'block';
-        if (adjPointsList) _populateAdjustedPointsList(adjPointsList, cacheData.points);
-        if (terminalVisible) window.gnssBoardState?.fitToResult?.();
+        _applyGnssAdjustmentSectionUI(adjCached, adjCached.latest, elements);
     } else {
-        window.pendingGnssAdjustmentResult = null;
-        if (adjResultsSection) adjResultsSection.style.display = 'none';
-        if (adjPointsList) adjPointsList.innerHTML = '';
+        _clearGnssAdjustmentSectionUI(elements);
     }
 
     _renderBatteryStatus(imuLatest, imuOnline);

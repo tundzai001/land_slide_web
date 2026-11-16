@@ -67,16 +67,7 @@ async function loadLongTermAnalysis(options = {}) {
 // Store last analysis data for re-rendering on time range change
 let _lastLongTermData = null;
 
-function renderLongTermAnalysis(data) {
-    document.getElementById('longterm-loading').style.display = 'none';
-    document.getElementById('longterm-content').style.display = 'block';
-    document.getElementById('longterm-error').style.display = 'none';
-
-    _lastLongTermData = data;
-    updateRainCorrelationAiControls(data.rainfall_correlation);
-
-    // === GNSS Section ===
-    const gnss = data.gnss;
+function _renderLongTermGnssSection(gnss) {
     const sourceNoteEl = document.getElementById('lt-gnss-source-note');
     if (gnss?.status === 'success') {
         const analysis = gnss.analysis;
@@ -161,6 +152,18 @@ function renderLongTermAnalysis(data) {
         document.getElementById('cusum-badge').style.display = 'none';
         document.getElementById('cusum-message').style.display = 'none';
     }
+}
+
+function renderLongTermAnalysis(data) {
+    document.getElementById('longterm-loading').style.display = 'none';
+    document.getElementById('longterm-content').style.display = 'block';
+    document.getElementById('longterm-error').style.display = 'none';
+
+    _lastLongTermData = data;
+    updateRainCorrelationAiControls(data.rainfall_correlation);
+
+    // === GNSS Section ===
+    _renderLongTermGnssSection(data.gnss);
 
     // === IMU Section ===
     renderImuLongTermSection(data.imu);
@@ -234,18 +237,17 @@ function closeSlideModelResultPopup() {
     overlay.setAttribute('aria-hidden', 'true');
 }
 
-function showSlideModelResultPopup(rainCorr) {
-    const overlay = document.getElementById('sm-model-popup-overlay');
-    const statusEl = document.getElementById('sm-model-popup-status');
-    if (!overlay || !statusEl) return;
+function _formatSlideModelDate(d) {
+    if (!d) return '--';
+    try {
+        const [, m, dd] = d.split('-');
+        return `${dd}/${m}`;
+    } catch {
+        return d;
+    }
+}
 
-    const available = rainCorr?.available === true;
-    const corr = Number(rainCorr?.correlation);
-    const r2 = Number(rainCorr?.r_squared);
-    const lag = Number(rainCorr?.lag_days);
-    const trigger = String(rainCorr?.trigger_potential || 'LOW').toUpperCase();
-
-    // --- Tab switching ---
+function _setupSlideModelTabs(overlay) {
     overlay.querySelectorAll('.sm-model-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             overlay.querySelectorAll('.sm-model-tab').forEach(t => t.classList.remove('active'));
@@ -258,6 +260,152 @@ function showSlideModelResultPopup(rainCorr) {
     // Reset to first tab
     overlay.querySelectorAll('.sm-model-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
     overlay.querySelectorAll('.sm-model-tab-pane').forEach((p, i) => p.classList.toggle('active', i === 0));
+}
+
+function _populateSlideModelOverviewTab(rainCorr, statusEl, setVal) {
+    const corr = Number(rainCorr?.correlation);
+    const r2 = Number(rainCorr?.r_squared);
+    const lag = Number(rainCorr?.lag_days);
+    const trigger = String(rainCorr?.trigger_potential || 'LOW').toUpperCase();
+
+    setVal('sm-model-popup-r', Number.isFinite(corr) ? corr.toFixed(4) : '--');
+    setVal('sm-model-popup-r2', Number.isFinite(r2) ? r2.toFixed(4) : '--');
+    setVal('sm-model-popup-lag', Number.isFinite(lag) ? `${lag} ngày` : '--');
+    setVal('sm-model-popup-trigger', trigger);
+    setVal('sm-model-popup-strength', rainCorr?.strength || '--');
+    setVal('sm-model-popup-slope', rainCorr?.slope_mm_day_per_rain_index != null
+        ? Number(rainCorr.slope_mm_day_per_rain_index).toFixed(4) : '--');
+    setVal('sm-model-popup-message', sanitizeLongTermText(
+        rainCorr?.risk_message || rainCorr?.message || rainCorr?.assessment || 'Slide model hoàn tất.'
+    ));
+
+    // Status badge
+    if (trigger === 'HIGH') {
+        statusEl.className = 'sm-model-popup-status status-fail';
+        statusEl.textContent = '🚨 TRIGGER: HIGH';
+    } else if (trigger === 'MEDIUM') {
+        statusEl.className = 'sm-model-popup-status status-warn';
+        statusEl.textContent = '⚠️ TRIGGER: MEDIUM';
+    } else {
+        statusEl.className = 'sm-model-popup-status status-ok';
+        statusEl.textContent = '✅ TRIGGER: LOW';
+    }
+}
+
+function _populateSlideModelRainStatsTab(rainCorr, setVal) {
+    const rs = rainCorr?.rain_stats || {};
+    setVal('sm-model-rain-total', rs.total_mm != null ? `${rs.total_mm} mm` : '--');
+    setVal('sm-model-rain-max', rs.max_daily_mm != null ? `${rs.max_daily_mm} mm` : '--');
+    setVal('sm-model-rain-max-day', _formatSlideModelDate(rs.max_rain_day));
+    setVal('sm-model-rain-days', rs.rain_days != null ? `${rs.rain_days} ngày` : '--');
+    setVal('sm-model-dry-days', rs.dry_days != null ? `${rs.dry_days} ngày` : '--');
+    setVal('sm-model-rain-avg', rs.avg_rain_on_rainy_days_mm != null ? `${rs.avg_rain_on_rainy_days_mm} mm` : '--');
+    setVal('sm-model-idx-max', rs.max_slide_model_index != null ? rs.max_slide_model_index.toFixed(2) : '--');
+    setVal('sm-model-idx-mean', rs.mean_slide_model_index != null ? rs.mean_slide_model_index.toFixed(2) : '--');
+    setVal('sm-model-common-days', rainCorr?.common_days != null ? `${rainCorr.common_days} ngày` : '--');
+}
+
+function _populateSlideModelDispStatsTab(rainCorr, setVal) {
+    const ds = rainCorr?.disp_stats || {};
+    setVal('sm-model-disp-total', ds.total_mm != null ? `${ds.total_mm} mm` : '--');
+    setVal('sm-model-disp-max', ds.max_daily_mm != null ? `${ds.max_daily_mm} mm` : '--');
+    setVal('sm-model-disp-max-day', _formatSlideModelDate(ds.max_disp_day));
+    setVal('sm-model-disp-avg', ds.avg_daily_mm != null ? `${ds.avg_daily_mm} mm` : '--');
+    setVal('sm-model-disp-rain', ds.disp_during_rain_mm != null ? `${ds.disp_during_rain_mm} mm` : '--');
+    setVal('sm-model-disp-dry', ds.disp_during_dry_mm != null ? `${ds.disp_during_dry_mm} mm` : '--');
+    setVal('sm-model-accel-ratio', ds.rain_acceleration_ratio != null
+        ? `${ds.rain_acceleration_ratio}x` : '--');
+    setVal('sm-model-sensitivity', rainCorr?.sensitivity_mm_per_mm != null
+        ? `${rainCorr.sensitivity_mm_per_mm} mm/mm` : '--');
+
+    // Lag scan summary
+    const lagScan = rainCorr?.lag_scan || [];
+    if (lagScan.length > 0) {
+        const lagText = lagScan.map(l => `L${l.lag}:${l.correlation}`).join(' | ');
+        setVal('sm-model-lag-scan', lagText);
+    } else {
+        setVal('sm-model-lag-scan', '--');
+    }
+}
+
+function _populateSlideModelEventsTab(rainCorr) {
+    // === Events tab: CWD ===
+    const cwdEl = document.getElementById('sm-model-cwd-events');
+    const cwdEvents = rainCorr?.cwd_events || [];
+    if (cwdEl) {
+        if (cwdEvents.length > 0) {
+            cwdEl.innerHTML = cwdEvents.map(e => `
+                <div class="sm-model-event-item">
+                    <div class="sm-model-event-header">
+                        <span class="sm-model-event-date">${_formatSlideModelDate(e.start)} → ${_formatSlideModelDate(e.end)}</span>
+                        <span class="sm-model-event-badge">${e.days} ngày</span>
+                    </div>
+                    <div class="sm-model-event-stats">
+                        <span>🌧️ ${e.total_rain_mm} mm</span>
+                        <span>📏 ${e.displacement_mm} mm</span>
+                        <span>💧 TB ${e.avg_intensity} mm/ngày</span>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            cwdEl.innerHTML = '<div class="text-muted small">Không có đợt mưa liên tục ≥2 ngày</div>';
+        }
+    }
+
+    // === Events tab: Peak rain ===
+    const peakEl = document.getElementById('sm-model-peak-events');
+    const peakEvents = rainCorr?.peak_rain_events || [];
+    if (peakEl) {
+        if (peakEvents.length > 0) {
+            peakEl.innerHTML = peakEvents.map(e => `
+                <div class="sm-model-event-item">
+                    <div class="sm-model-event-header">
+                        <span class="sm-model-event-date">${_formatSlideModelDate(e.date)}</span>
+                        <span class="sm-model-event-badge sm-model-event-badge-danger">⚡ ${e.rain_mm} mm</span>
+                    </div>
+                    <div class="sm-model-event-stats">
+                        <span>📏 Phản hồi: ${e.disp_response_mm} mm</span>
+                        <span>📊 Index: ${e.slide_model_index}</span>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            peakEl.innerHTML = '<div class="text-muted small">Không có ngày mưa ≥20mm trong giai đoạn này</div>';
+        }
+    }
+
+    // === Risk insights tab ===
+    const riskEl = document.getElementById('sm-model-risk-insights');
+    const riskInsights = rainCorr?.risk_insights || [];
+    if (riskEl) {
+        if (riskInsights.length > 0) {
+            riskEl.innerHTML = riskInsights.map(msg => `
+                <div class="sm-model-insight-item">${msg}</div>
+            `).join('');
+        } else {
+            riskEl.innerHTML = `<div class="sm-model-insight-item sm-model-insight-ok">
+                ✅ ${rainCorr?.assessment || 'Không phát hiện yếu tố rủi ro đặc biệt từ tương quan mưa.'}
+            </div>`;
+        }
+    }
+}
+
+function _resetSlideModelPopupFields(setVal, statusEl, rainCorr) {
+    ['sm-model-popup-r', 'sm-model-popup-r2', 'sm-model-popup-lag', 'sm-model-popup-trigger',
+        'sm-model-popup-strength', 'sm-model-popup-slope'].forEach(id => setVal(id, '--'));
+    setVal('sm-model-popup-message', sanitizeLongTermText(
+        rainCorr?.message || 'Không thể tạo kết quả Slide model cho khoảng thời gian này.'
+    ));
+    statusEl.className = 'sm-model-popup-status status-warn';
+    statusEl.textContent = '⚠ CHƯA ĐỦ DỮ LIỆU';
+}
+
+function showSlideModelResultPopup(rainCorr) {
+    const overlay = document.getElementById('sm-model-popup-overlay');
+    const statusEl = document.getElementById('sm-model-popup-status');
+    if (!overlay || !statusEl) return;
+
+    _setupSlideModelTabs(overlay);
 
     const setVal = (id, val) => {
         const el = document.getElementById(id);
@@ -265,146 +413,14 @@ function showSlideModelResultPopup(rainCorr) {
             el.textContent = val;
         }
     };
-    const fmtDate = (d) => {
-        if (!d) {
-            return '--';
-        }
-        try {
-            const [, m, dd] = d.split('-');
-            return `${dd}/${m}`;
-        } catch {
-            return d;
-        }
-    };
 
-    if (available) {
-        // === Overview tab ===
-        setVal('sm-model-popup-r', Number.isFinite(corr) ? corr.toFixed(4) : '--');
-        setVal('sm-model-popup-r2', Number.isFinite(r2) ? r2.toFixed(4) : '--');
-        setVal('sm-model-popup-lag', Number.isFinite(lag) ? `${lag} ngày` : '--');
-        setVal('sm-model-popup-trigger', trigger);
-        setVal('sm-model-popup-strength', rainCorr?.strength || '--');
-        setVal('sm-model-popup-slope', rainCorr?.slope_mm_day_per_rain_index != null
-            ? Number(rainCorr.slope_mm_day_per_rain_index).toFixed(4) : '--');
-        setVal('sm-model-popup-message', sanitizeLongTermText(
-            rainCorr?.risk_message || rainCorr?.message || rainCorr?.assessment || 'Slide model hoàn tất.'
-        ));
-
-        // Status badge
-        if (trigger === 'HIGH') {
-            statusEl.className = 'sm-model-popup-status status-fail';
-            statusEl.textContent = '🚨 TRIGGER: HIGH';
-        } else if (trigger === 'MEDIUM') {
-            statusEl.className = 'sm-model-popup-status status-warn';
-            statusEl.textContent = '⚠️ TRIGGER: MEDIUM';
-        } else {
-            statusEl.className = 'sm-model-popup-status status-ok';
-            statusEl.textContent = '✅ TRIGGER: LOW';
-        }
-
-        // === Rain stats tab ===
-        const rs = rainCorr?.rain_stats || {};
-        setVal('sm-model-rain-total', rs.total_mm != null ? `${rs.total_mm} mm` : '--');
-        setVal('sm-model-rain-max', rs.max_daily_mm != null ? `${rs.max_daily_mm} mm` : '--');
-        setVal('sm-model-rain-max-day', fmtDate(rs.max_rain_day));
-        setVal('sm-model-rain-days', rs.rain_days != null ? `${rs.rain_days} ngày` : '--');
-        setVal('sm-model-dry-days', rs.dry_days != null ? `${rs.dry_days} ngày` : '--');
-        setVal('sm-model-rain-avg', rs.avg_rain_on_rainy_days_mm != null ? `${rs.avg_rain_on_rainy_days_mm} mm` : '--');
-        setVal('sm-model-idx-max', rs.max_slide_model_index != null ? rs.max_slide_model_index.toFixed(2) : '--');
-        setVal('sm-model-idx-mean', rs.mean_slide_model_index != null ? rs.mean_slide_model_index.toFixed(2) : '--');
-        setVal('sm-model-common-days', rainCorr?.common_days != null ? `${rainCorr.common_days} ngày` : '--');
-
-        // === Displacement stats tab ===
-        const ds = rainCorr?.disp_stats || {};
-        setVal('sm-model-disp-total', ds.total_mm != null ? `${ds.total_mm} mm` : '--');
-        setVal('sm-model-disp-max', ds.max_daily_mm != null ? `${ds.max_daily_mm} mm` : '--');
-        setVal('sm-model-disp-max-day', fmtDate(ds.max_disp_day));
-        setVal('sm-model-disp-avg', ds.avg_daily_mm != null ? `${ds.avg_daily_mm} mm` : '--');
-        setVal('sm-model-disp-rain', ds.disp_during_rain_mm != null ? `${ds.disp_during_rain_mm} mm` : '--');
-        setVal('sm-model-disp-dry', ds.disp_during_dry_mm != null ? `${ds.disp_during_dry_mm} mm` : '--');
-        setVal('sm-model-accel-ratio', ds.rain_acceleration_ratio != null
-            ? `${ds.rain_acceleration_ratio}x` : '--');
-        setVal('sm-model-sensitivity', rainCorr?.sensitivity_mm_per_mm != null
-            ? `${rainCorr.sensitivity_mm_per_mm} mm/mm` : '--');
-
-        // Lag scan summary
-        const lagScan = rainCorr?.lag_scan || [];
-        if (lagScan.length > 0) {
-            const lagText = lagScan.map(l => `L${l.lag}:${l.correlation}`).join(' | ');
-            setVal('sm-model-lag-scan', lagText);
-        } else {
-            setVal('sm-model-lag-scan', '--');
-        }
-
-        // === Events tab: CWD ===
-        const cwdEl = document.getElementById('sm-model-cwd-events');
-        const cwdEvents = rainCorr?.cwd_events || [];
-        if (cwdEl) {
-            if (cwdEvents.length > 0) {
-                cwdEl.innerHTML = cwdEvents.map(e => `
-                    <div class="sm-model-event-item">
-                        <div class="sm-model-event-header">
-                            <span class="sm-model-event-date">${fmtDate(e.start)} → ${fmtDate(e.end)}</span>
-                            <span class="sm-model-event-badge">${e.days} ngày</span>
-                        </div>
-                        <div class="sm-model-event-stats">
-                            <span>🌧️ ${e.total_rain_mm} mm</span>
-                            <span>📏 ${e.displacement_mm} mm</span>
-                            <span>💧 TB ${e.avg_intensity} mm/ngày</span>
-                        </div>
-                    </div>
-                `).join('');
-            } else {
-                cwdEl.innerHTML = '<div class="text-muted small">Không có đợt mưa liên tục ≥2 ngày</div>';
-            }
-        }
-
-        // === Events tab: Peak rain ===
-        const peakEl = document.getElementById('sm-model-peak-events');
-        const peakEvents = rainCorr?.peak_rain_events || [];
-        if (peakEl) {
-            if (peakEvents.length > 0) {
-                peakEl.innerHTML = peakEvents.map(e => `
-                    <div class="sm-model-event-item">
-                        <div class="sm-model-event-header">
-                            <span class="sm-model-event-date">${fmtDate(e.date)}</span>
-                            <span class="sm-model-event-badge sm-model-event-badge-danger">⚡ ${e.rain_mm} mm</span>
-                        </div>
-                        <div class="sm-model-event-stats">
-                            <span>📏 Phản hồi: ${e.disp_response_mm} mm</span>
-                            <span>📊 Index: ${e.slide_model_index}</span>
-                        </div>
-                    </div>
-                `).join('');
-            } else {
-                peakEl.innerHTML = '<div class="text-muted small">Không có ngày mưa ≥20mm trong giai đoạn này</div>';
-            }
-        }
-
-        // === Risk insights tab ===
-        const riskEl = document.getElementById('sm-model-risk-insights');
-        const riskInsights = rainCorr?.risk_insights || [];
-        if (riskEl) {
-            if (riskInsights.length > 0) {
-                riskEl.innerHTML = riskInsights.map(msg => `
-                    <div class="sm-model-insight-item">${msg}</div>
-                `).join('');
-            } else {
-                riskEl.innerHTML = `<div class="sm-model-insight-item sm-model-insight-ok">
-                    ✅ ${rainCorr?.assessment || 'Không phát hiện yếu tố rủi ro đặc biệt từ tương quan mưa.'}
-                </div>`;
-            }
-        }
-
+    if (rainCorr?.available === true) {
+        _populateSlideModelOverviewTab(rainCorr, statusEl, setVal);
+        _populateSlideModelRainStatsTab(rainCorr, setVal);
+        _populateSlideModelDispStatsTab(rainCorr, setVal);
+        _populateSlideModelEventsTab(rainCorr);
     } else {
-        // Not available — reset all
-        ['sm-model-popup-r', 'sm-model-popup-r2', 'sm-model-popup-lag', 'sm-model-popup-trigger',
-            'sm-model-popup-strength', 'sm-model-popup-slope'].forEach(id => setVal(id, '--'));
-        setVal('sm-model-popup-message', sanitizeLongTermText(
-            rainCorr?.message || 'Không thể tạo kết quả Slide model cho khoảng thời gian này.'
-        ));
-        statusEl.className = 'sm-model-popup-status status-warn';
-        statusEl.textContent = '⚠ CHƯA ĐỦ DỮ LIỆU';
+        _resetSlideModelPopupFields(setVal, statusEl, rainCorr);
     }
 
     overlay.classList.add('active');

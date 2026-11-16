@@ -259,6 +259,67 @@ class AdminStationWizardFeature extends window.AdminManager {
         window.loadCustomSensorPresets?.(this.token);
     }
 
+    _populateDeviceMqttConfig(type, dev) {
+        const section = document.getElementById(`mqtt-${type}-section`);
+        const input = document.getElementById(`topic-${type}`);
+        if (section) section.style.display = 'block';
+        if (input) input.value = dev.mqtt_topic || '';
+
+        const devConfig = dev.config || {};
+        const mqttCfg = devConfig.mqtt || {};
+
+        const hostEl = document.getElementById(`cfg-${type}-mqtt-host`);
+        const portEl = document.getElementById(`cfg-${type}-mqtt-port`);
+        const tlsEl = document.getElementById(`cfg-${type}-mqtt-tls`);
+        const userEl = document.getElementById(`cfg-${type}-mqtt-user`);
+        const passEl = document.getElementById(`cfg-${type}-mqtt-pass`);
+
+        if (hostEl) hostEl.value = mqttCfg.host || '';
+        if (portEl) portEl.value = mqttCfg.port || '';
+        if (userEl) userEl.value = mqttCfg.username || '';
+        if (passEl) passEl.value = mqttCfg.password || '';
+
+        if (tlsEl) {
+            tlsEl.checked = !!mqttCfg.use_tls;
+            const wrap = document.getElementById(`wrap-${type}-mqtt-tls`);
+            if (wrap) {
+                wrap.classList.toggle('is-on', tlsEl.checked);
+                wrap.classList.toggle('is-off', !tlsEl.checked);
+            }
+        }
+    }
+
+    _applyStationDevicesConfig(devices, sensorTypes) {
+        if (!Array.isArray(devices)) return;
+        const gnssDevice = devices.find(dev => dev.device_type === 'gnss' && dev.is_active !== false)
+            || devices.find(dev => dev.device_type === 'gnss');
+        devices.forEach(dev => {
+            const type = dev.device_type;
+            const checkbox = document.getElementById(`edit-${type}`);
+            const section = document.getElementById(`mqtt-${type}-section`);
+            if (!checkbox) return;
+
+            const isActive = dev.is_active !== false;
+            checkbox.checked = isActive;
+            if (isActive) {
+                this._populateDeviceMqttConfig(type, dev);
+            } else if (section) {
+                section.style.display = 'none';
+            }
+        });
+
+        const anyChecked = sensorTypes.some(t => document.getElementById(`edit-${t}`)?.checked);
+        const emptyState = document.getElementById('mqtt-empty-state');
+        if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
+        if (gnssDevice) {
+            this.populateGnssStationConfig(gnssDevice);
+            this.renderGnssTrackingOffset?.(gnssDevice.tracking_offset, {
+                state: gnssDevice.tracking_offset == null ? 'Chưa lưu offset' : 'Đang áp dụng',
+                source: gnssDevice.tracking_offset == null ? 'Chưa có dữ liệu runtime/DB' : 'Đọc từ runtime/DB',
+            });
+        }
+    }
+
     _populateEditStationDevices(devices) {
         const sensorTypes = (window.sensorTypes?.() || ['gnss', 'rain', 'water', 'imu']);
         sensorTypes.forEach(type => {
@@ -271,58 +332,7 @@ class AdminStationWizardFeature extends window.AdminManager {
             if (input) input.value = '';
         });
 
-        if (!Array.isArray(devices)) return;
-        const gnssDevice = devices.find(dev => dev.device_type === 'gnss' && dev.is_active !== false)
-            || devices.find(dev => dev.device_type === 'gnss');
-        devices.forEach(dev => {
-            const type = dev.device_type;
-            const checkbox = document.getElementById(`edit-${type}`);
-            const section = document.getElementById(`mqtt-${type}-section`);
-            const input = document.getElementById(`topic-${type}`);
-
-            console.log(`📋 [EDIT] Device ${type}: is_active=${dev.is_active}, topic=${dev.mqtt_topic}`);
-
-            if (checkbox && dev.is_active !== false) {
-                checkbox.checked = true;
-                if (section) section.style.display = 'block';
-                if (input) input.value = dev.mqtt_topic || '';
-                
-                const devConfig = dev.config || {};
-                const mqttCfg = devConfig.mqtt || {};
-                
-                const hostEl = document.getElementById(`cfg-${type}-mqtt-host`);
-                const portEl = document.getElementById(`cfg-${type}-mqtt-port`);
-                const tlsEl = document.getElementById(`cfg-${type}-mqtt-tls`);
-                const userEl = document.getElementById(`cfg-${type}-mqtt-user`);
-                const passEl = document.getElementById(`cfg-${type}-mqtt-pass`);
-                
-                if (hostEl) hostEl.value = mqttCfg.host || '';
-                if (portEl) portEl.value = mqttCfg.port || '';
-                if (tlsEl) {
-                    tlsEl.checked = !!mqttCfg.use_tls;
-                    const wrap = document.getElementById(`wrap-${type}-mqtt-tls`);
-                    if (wrap) {
-                        wrap.classList.toggle('is-on', tlsEl.checked);
-                        wrap.classList.toggle('is-off', !tlsEl.checked);
-                    }
-                }
-                if (userEl) userEl.value = mqttCfg.username || '';
-                if (passEl) passEl.value = mqttCfg.password || '';
-            } else if (checkbox) {
-                checkbox.checked = false;
-                if (section) section.style.display = 'none';
-            }
-        });
-
-        const anyChecked = sensorTypes.some(t => document.getElementById(`edit-${t}`)?.checked);
-        const emptyState = document.getElementById('mqtt-empty-state');
-        if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
-        if (gnssDevice) {
-            this.renderGnssTrackingOffset?.(gnssDevice.tracking_offset, {
-                state: gnssDevice.tracking_offset == null ? 'Chưa lưu offset' : 'Đang áp dụng',
-                source: gnssDevice.tracking_offset == null ? 'Chưa có dữ liệu runtime/DB' : 'Đọc từ runtime/DB',
-            });
-        }
+        this._applyStationDevicesConfig(devices, sensorTypes);
     }
 
     _populateEditSimulationAndMqtt(cfg) {
@@ -635,10 +645,7 @@ class AdminStationWizardFeature extends window.AdminManager {
         }
     }
 
-    updateWizardStep() {
-        const stationModalEl = document.getElementById('stationConfigModal');
-        const scope = stationModalEl || document;
-
+    _updateWizardIndicators(scope) {
         scope.querySelectorAll('.wizard-step').forEach(step => {
             const stepNum = Number.parseInt(step.dataset.step);
             step.classList.toggle('active', stepNum === this.currentStep);
@@ -654,12 +661,9 @@ class AdminStationWizardFeature extends window.AdminManager {
             content.style.display = isActive ? 'block' : 'none';
             content.setAttribute('aria-hidden', isActive ? 'false' : 'true');
         });
+    }
 
-        const modalBody = stationModalEl?.querySelector('.modal-body');
-        if (modalBody) {
-            modalBody.scrollTop = 0;
-        }
-
+    _updateWizardActionButtons() {
         const btnBack = document.getElementById('btn-wizard-back');
         const btnNext = document.getElementById('btn-wizard-next');
         const btnSave = document.getElementById('btn-wizard-save');
@@ -670,6 +674,20 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (btnNext) btnNext.disabled = false;
         if (btnSave) btnSave.disabled = false;
         this.ensureWizardButtonInteractivity();
+    }
+
+    updateWizardStep() {
+        const stationModalEl = document.getElementById('stationConfigModal');
+        const scope = stationModalEl || document;
+
+        this._updateWizardIndicators(scope);
+
+        const modalBody = stationModalEl?.querySelector('.modal-body');
+        if (modalBody) {
+            modalBody.scrollTop = 0;
+        }
+
+        this._updateWizardActionButtons();
 
         // When reaching step 3, load pending devices for provisioning (only if editing existing station)
         const pendingSection = document.getElementById('pending-devices-section');
@@ -733,23 +751,47 @@ class AdminStationWizardFeature extends window.AdminManager {
         if (emptyState) emptyState.style.display = anyChecked ? 'none' : 'block';
     }
 
+    _resolveDesiredAICasterBinding(selectedBinding, select) {
+        if (selectedBinding && typeof selectedBinding === 'object') return selectedBinding;
+        if (select?.value) {
+            try { return JSON.parse(select.value); }
+            catch (err) { console.debug('Cannot parse aicaster user JSON:', err); }
+        }
+        return this.currentStationConfig?.gnss_aicaster_user
+            || this.currentStationConfig?.gnss_aicaster_client
+            || {};
+    }
+
+    _buildAICasterUserOption(user, desired) {
+        const binding = {
+            username: String(user.username || '').trim(),
+            caster_host: String(user.caster_host || '').trim()
+        };
+        if (!binding.username) return null;
+        const option = document.createElement('option');
+        option.value = JSON.stringify(binding);
+        const mountpoints = Array.isArray(user.mountpoints) && user.mountpoints.length
+            ? user.mountpoints.join(', ')
+            : 'không giới hạn MP';
+        const active = user.active_client_count !== ''
+            ? ` · ${user.active_client_count} client`
+            : '';
+        option.textContent = `${binding.username} · ${mountpoints} · ${binding.caster_host}${active}`;
+        const isUserMatch = String(desired?.username || '').toLowerCase() === binding.username.toLowerCase();
+        const isHostMatch = !desired?.caster_host || String(desired.caster_host).toLowerCase() === binding.caster_host.toLowerCase();
+        if (isUserMatch && isHostMatch) {
+            option.selected = true;
+        }
+        return option;
+    }
+
     async loadAICasterUsers(selectedBinding = null) {
         const select = document.getElementById('cfg-gnss-aicaster-user');
         const statusEl = document.getElementById('aicaster-user-status');
         const refreshButton = document.getElementById('btn-refresh-aicaster-users');
         if (!select) return;
 
-        let desired = selectedBinding && typeof selectedBinding === 'object'
-            ? selectedBinding
-            : null;
-        if (!desired && select.value) {
-            try { desired = JSON.parse(select.value); } catch (err) { console.debug('Cannot parse aicaster user JSON:', err); desired = null; }
-        }
-        if (!desired) {
-            desired = this.currentStationConfig?.gnss_aicaster_user
-                || this.currentStationConfig?.gnss_aicaster_client
-                || {};
-        }
+        const desired = this._resolveDesiredAICasterBinding(selectedBinding, select);
 
         select.disabled = true;
         if (refreshButton) refreshButton.disabled = true;
@@ -769,30 +811,9 @@ class AdminStationWizardFeature extends window.AdminManager {
             select.innerHTML = '<option value="">-- Chọn user AICaster của rover --</option>';
             let matched = false;
             users.forEach(user => {
-                const binding = {
-                    username: String(user.username || '').trim(),
-                    caster_host: String(user.caster_host || '').trim()
-                };
-                if (!binding.username) return;
-                const option = document.createElement('option');
-                option.value = JSON.stringify(binding);
-                const mountpoints = Array.isArray(user.mountpoints) && user.mountpoints.length
-                    ? user.mountpoints.join(', ')
-                    : 'không giới hạn MP';
-                const active = user.active_client_count !== ''
-                    ? ` · ${user.active_client_count} client`
-                    : '';
-                option.textContent = `${binding.username} · ${mountpoints} · ${binding.caster_host}${active}`;
-                if (
-                    String(desired?.username || '').toLowerCase() === binding.username.toLowerCase()
-                    && (
-                        !desired?.caster_host
-                        || String(desired.caster_host).toLowerCase() === binding.caster_host.toLowerCase()
-                    )
-                ) {
-                    option.selected = true;
-                    matched = true;
-                }
+                const option = this._buildAICasterUserOption(user, desired);
+                if (!option) return;
+                if (option.selected) matched = true;
                 select.appendChild(option);
             });
 

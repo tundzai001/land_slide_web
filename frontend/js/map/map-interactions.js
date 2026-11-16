@@ -1,12 +1,4 @@
-function setupEventListeners() {
-    setupBasemapControls();
-    setupChartWorkspaceControls();
-    console.log('🔧 [MAP] Setting up event listeners...');
-
-    const hamburgerBtn = document.getElementById('navbar-hamburger-btn');
-    const sidebarCloseTab = document.getElementById('sidebar-close-tab');
-    const stationSidebar = document.getElementById('station-list-sidebar');
-
+function _setupSidebarNavListeners(stationSidebar, hamburgerBtn, sidebarCloseTab) {
     // Hamburger → Toggle sidebar trái
     if (hamburgerBtn && stationSidebar) {
         hamburgerBtn.addEventListener('click', (event) => {
@@ -33,7 +25,9 @@ function setupEventListeners() {
             setStationListSidebarOpen(stationSidebar, false);
         });
     }
+}
 
+function _setupLayerAndZoomControlsListeners() {
     // === Layer Toggle Switch Logic ===
     const layerModeToggle = document.getElementById('layer-mode-toggle');
     const layerStationCb = document.getElementById('layer-station');
@@ -81,11 +75,9 @@ function setupEventListeners() {
     if (zoomOutBtn && map) {
         zoomOutBtn.addEventListener('click', () => map.zoomOut());
     }
+}
 
-    // Đóng detailed sidebar
-    const closeDetailBtn = document.getElementById('close-btn');
-    const detailSidebar = document.getElementById('detail-sidebar');
-
+function _setupStationSearchAndDetailListeners(stationSidebar, detailSidebar, closeDetailBtn) {
     if (closeDetailBtn && detailSidebar) {
         closeDetailBtn.addEventListener('click', () => {
             stationSelectionSequence += 1;
@@ -113,8 +105,6 @@ function setupEventListeners() {
         });
     }
 
-    // Theme toggle - handled by theme-manager.js (do NOT add duplicate listener)
-
     // Search
     const searchInput = document.getElementById('search-station');
     if (searchInput) {
@@ -125,12 +115,9 @@ function setupEventListeners() {
     document.getElementById('station-status-filter')?.addEventListener('change', () => {
         filterStations(searchInput?.value || '');
     });
+}
 
-    // ✅ NEW: Xem biểu đồ - Mở panel giữa màn hình
-    const btnShowCharts = document.getElementById('btn-show-charts');
-    const chartsPanel = document.getElementById('charts-panel');
-    const closeChartsBtn = document.getElementById('close-charts-btn');
-
+function _setupChartsPanelListeners(stationSidebar, chartsPanel, btnShowCharts, closeChartsBtn) {
     if (btnShowCharts && chartsPanel) {
         btnShowCharts.addEventListener('click', async () => {
             try { await window.loadFeatureLibrary?.('chart'); }
@@ -173,81 +160,6 @@ function setupEventListeners() {
             await loadStationHistoryAndRenderCharts({ hours });
         });
     });
-
-
-
-    // ✅ NEW: Mở Digital Twin 3D
-    const btnDigitalTwin = document.getElementById('btn-digital-twin');
-    if (btnDigitalTwin) {
-        btnDigitalTwin.addEventListener('click', async () => {
-            if (typeof window.openDigitalTwin !== 'function') {
-                const originalContent = btnDigitalTwin.innerHTML;
-                btnDigitalTwin.disabled = true;
-                btnDigitalTwin.setAttribute('aria-busy', 'true');
-                btnDigitalTwin.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Đang tải 3D';
-                try {
-                    await window.loadFeatureLibrary?.('digital-twin');
-                } catch (error) {
-                    console.error('[DIGITAL TWIN] Load failed:', error);
-                    window.toast?.error?.('Không thể tải mô phỏng 3D.');
-                    return;
-                } finally {
-                    btnDigitalTwin.disabled = false;
-                    btnDigitalTwin.removeAttribute('aria-busy');
-                    btnDigitalTwin.innerHTML = originalContent;
-                }
-            }
-            if (currentStationData) {
-                console.log('🌋 [DIGITAL TWIN] Opening for station:', currentStationData.id);
-                const rainData = currentStationData?.sensors?.rain?.latest?.data ?? null;
-                const h24 = rainData ? (rainData.rain_24h || rainData.rain_last_24h || rainData.value || 0) : 0;
-                window.openDigitalTwin({
-                    id: currentStationData.id,
-                    name: currentStationData.name || currentStationData.station_name || currentStationData.code,
-                    code: currentStationData.code || currentStationData.station_code,
-                    rain: { h24: Number.parseFloat(h24) }
-                });
-            } else {
-                window.openDigitalTwin(null);
-            }
-        });
-    }
-
-    // Advanced GNSS Sidepanel
-    const gnssCard = document.getElementById('sensor-card-gnss');
-    const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
-    const advCloseBtn = document.getElementById('gnss-sidepanel-close');
-
-    if (gnssCard && advSidepanel) {
-        console.log('✅ [GNSS] Advanced sidepanel listener attached');
-        gnssCard.addEventListener('click', (e) => {
-            e.stopPropagation();
-            console.log('👆 [GNSS] GNSS Velocity card clicked');
-            // Remove expanded mode when just opening from card
-            advSidepanel.classList.remove('expanded');
-            setGnssAdvancedPanelOpen(advSidepanel, true);
-
-            // ✅ ĐỒNG BỘ: Đóng Station Sidebar khi mở Advanced GNSS
-            if (stationSidebar) {
-                setStationListSidebarOpen(stationSidebar, false);
-            }
-            if (window.matchMedia('(max-width: 900px)').matches) {
-                setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
-            }
-            console.log('✨ [GNSS] Sidepanel active: true');
-        });
-    } else {
-        console.warn('⚠️ [GNSS] Could not find gnssCard or advSidepanel', { gnssCard: !!gnssCard, advSidepanel: !!advSidepanel });
-    }
-
-    if (advCloseBtn && advSidepanel) {
-        advCloseBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setGnssAdvancedPanelOpen(advSidepanel, false);
-            const advColRight = advSidepanel.querySelector('.adv-column-right');
-            if (advColRight) advColRight.style.display = 'none';
-        });
-    }
 
     if (closeChartsBtn && chartsPanel) {
         closeChartsBtn.addEventListener('click', () => {
@@ -295,12 +207,84 @@ function setupEventListeners() {
             }
         });
     }
+}
 
+function _setupDigitalTwinAndGnssSidepanelListeners(stationSidebar, advSidepanel) {
+    const btnDigitalTwin = document.getElementById('btn-digital-twin');
+    if (btnDigitalTwin) {
+        btnDigitalTwin.addEventListener('click', async () => {
+            if (typeof window.openDigitalTwin !== 'function') {
+                const originalContent = btnDigitalTwin.innerHTML;
+                btnDigitalTwin.disabled = true;
+                btnDigitalTwin.setAttribute('aria-busy', 'true');
+                btnDigitalTwin.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Đang tải 3D';
+                try {
+                    await window.loadFeatureLibrary?.('digital-twin');
+                } catch (error) {
+                    console.error('[DIGITAL TWIN] Load failed:', error);
+                    window.toast?.error?.('Không thể tải mô phỏng 3D.');
+                    return;
+                } finally {
+                    btnDigitalTwin.disabled = false;
+                    btnDigitalTwin.removeAttribute('aria-busy');
+                    btnDigitalTwin.innerHTML = originalContent;
+                }
+            }
+            if (currentStationData) {
+                console.log('🌋 [DIGITAL TWIN] Opening for station:', currentStationData.id);
+                const rainData = currentStationData?.sensors?.rain?.latest?.data ?? null;
+                const h24 = rainData ? (rainData.rain_24h || rainData.rain_last_24h || rainData.value || 0) : 0;
+                window.openDigitalTwin({
+                    id: currentStationData.id,
+                    name: currentStationData.name || currentStationData.station_name || currentStationData.code,
+                    code: currentStationData.code || currentStationData.station_code,
+                    rain: { h24: Number.parseFloat(h24) }
+                });
+            } else {
+                window.openDigitalTwin(null);
+            }
+        });
+    }
+
+    // Advanced GNSS Sidepanel
+    const gnssCard = document.getElementById('sensor-card-gnss');
+    const advCloseBtn = document.getElementById('gnss-sidepanel-close');
+
+    if (gnssCard && advSidepanel) {
+        console.log('✅ [GNSS] Advanced sidepanel listener attached');
+        gnssCard.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.log('👆 [GNSS] GNSS Velocity card clicked');
+            // Remove expanded mode when just opening from card
+            advSidepanel.classList.remove('expanded');
+            setGnssAdvancedPanelOpen(advSidepanel, true);
+
+            // ✅ ĐỒNG BỘ: Đóng Station Sidebar khi mở Advanced GNSS
+            if (stationSidebar) {
+                setStationListSidebarOpen(stationSidebar, false);
+            }
+            if (window.matchMedia('(max-width: 900px)').matches) {
+                setDetailSidebarOpen(document.getElementById('detail-sidebar'), false);
+            }
+            console.log('✨ [GNSS] Sidepanel active: true');
+        });
+    } else {
+        console.warn('⚠️ [GNSS] Could not find gnssCard or advSidepanel', { gnssCard: !!gnssCard, advSidepanel: !!advSidepanel });
+    }
+
+    if (advCloseBtn && advSidepanel) {
+        advCloseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setGnssAdvancedPanelOpen(advSidepanel, false);
+            const advColRight = advSidepanel.querySelector('.adv-column-right');
+            if (advColRight) advColRight.style.display = 'none';
+        });
+    }
+}
+
+function _setupLongTermAndAdjustmentButtons(stationSidebar, advSidepanel) {
     // Analysis / Theil-Sen button -> Mở Advanced tab (Chỉ hiển thị Theil-sen, ẩn Bình sai)
     const btnLongTerm = document.getElementById('btn-long-term');
-    const longtermOverlay = document.getElementById('longterm-overlay');
-    const closeLongtermBtn = document.getElementById('close-longterm-btn');
-
     if (btnLongTerm && advSidepanel) {
         btnLongTerm.addEventListener('click', () => {
             advSidepanel.classList.remove('expanded');
@@ -352,7 +336,6 @@ function setupEventListeners() {
                 advSidepanel.classList.add('expanded');
             }
 
-            
             // Close left sidebar
             if (stationSidebar) {
                 setStationListSidebarOpen(stationSidebar, false);
@@ -365,6 +348,7 @@ function setupEventListeners() {
             }
         });
     }
+}
 
     // Quản lý trạng thái vẽ Canvas
     window.gnssBoardState = {
@@ -1497,6 +1481,9 @@ function setupEventListeners() {
         }
     };
 
+function _setupLongTermOverlayAndEventsListeners(stationSidebar) {
+    const longtermOverlay = document.getElementById('longterm-overlay');
+    const closeLongtermBtn = document.getElementById('close-longterm-btn');
     if (closeLongtermBtn && longtermOverlay) {
         closeLongtermBtn.addEventListener('click', () => {
             longtermOverlay.classList.remove('active');
@@ -1554,6 +1541,8 @@ function setupEventListeners() {
         });
     }
 
+    const layerPopover = document.getElementById('layer-popover');
+    const layerPopoverToggle = document.getElementById('layer-popover-toggle');
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             if (layerPopover && !layerPopover.hidden) {
@@ -1565,7 +1554,9 @@ function setupEventListeners() {
             setGnssAdvancedPanelOpen(document.getElementById('gnss-advanced-sidepanel'), false);
         }
     });
+}
 
+function _setupSirenControlListeners() {
     // Nút tắt/bật còi trong sidebar
     const sirenToggleBtns = document.querySelectorAll('.btn-siren-toggle');
     sirenToggleBtns.forEach(sirenToggleBtn => {
@@ -1581,7 +1572,7 @@ function setupEventListeners() {
 
             try {
                 const iconBase = target === 'pi_center' ? 'Center' : 'Point';
-                sirenToggleBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>`;
+                sirenToggleBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
 
                 if (state === 'alerting') {
                     // Đang kêu → Tắt còi
@@ -1619,6 +1610,31 @@ function setupEventListeners() {
             }
         });
     });
+}
+
+function setupEventListeners() {
+    setupBasemapControls();
+    setupChartWorkspaceControls();
+    console.log('🔧 [MAP] Setting up event listeners...');
+
+    const hamburgerBtn = document.getElementById('navbar-hamburger-btn');
+    const sidebarCloseTab = document.getElementById('sidebar-close-tab');
+    const stationSidebar = document.getElementById('station-list-sidebar');
+    const closeDetailBtn = document.getElementById('close-btn');
+    const detailSidebar = document.getElementById('detail-sidebar');
+    const btnShowCharts = document.getElementById('btn-show-charts');
+    const chartsPanel = document.getElementById('charts-panel');
+    const closeChartsBtn = document.getElementById('close-charts-btn');
+    const advSidepanel = document.getElementById('gnss-advanced-sidepanel');
+
+    _setupSidebarNavListeners(stationSidebar, hamburgerBtn, sidebarCloseTab);
+    _setupLayerAndZoomControlsListeners();
+    _setupStationSearchAndDetailListeners(stationSidebar, detailSidebar, closeDetailBtn);
+    _setupChartsPanelListeners(stationSidebar, chartsPanel, btnShowCharts, closeChartsBtn);
+    _setupDigitalTwinAndGnssSidepanelListeners(stationSidebar, advSidepanel);
+    _setupLongTermAndAdjustmentButtons(stationSidebar, advSidepanel);
+    _setupLongTermOverlayAndEventsListeners(stationSidebar);
+    _setupSirenControlListeners();
 
     console.log('✅ [MAP] All event listeners setup complete');
 }
