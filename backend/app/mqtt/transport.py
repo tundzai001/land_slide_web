@@ -156,6 +156,25 @@ class MQTTTransportMixin:
         except UnicodeDecodeError:
             return None
 
+    def _handle_gnss_message(self, info, msg, decrypted_payload, topic):
+        station_code = (info or {}).get('station_code')
+        if station_code:
+            from app.mqtt.ntrip_pusher import ntrip_manager
+            ntrip_manager.feed_data(station_code, msg.payload)
+        self.round_robin_manager.observe_gnss_payload(info, msg.payload)
+
+        if not decrypted_payload and msg.payload:
+            self._submit_threadsafe(
+                self._touch_online_heartbeat(info["device_id"], info["station_id"], int(time.time())),
+                "gnss-heartbeat",
+            )
+        elif decrypted_payload:
+            self.round_robin_manager.add_receiver_command_payload(
+                decrypted_payload,
+                info,
+                topic,
+            )
+
     def on_message(self, _client, userdata, msg):
         try:
             topic = msg.topic
@@ -170,28 +189,12 @@ class MQTTTransportMixin:
                 return
 
             sensor_type = (info or {}).get('type')
-            if sensor_type == 'gnss':
-                station_code = (info or {}).get('station_code')
-                if station_code:
-                    from app.mqtt.ntrip_pusher import ntrip_manager
-                    ntrip_manager.feed_data(station_code, msg.payload)
-                self.round_robin_manager.observe_gnss_payload(info, msg.payload)
-
             decrypted_payload = self._decode_incoming_payload(sensor_type, msg.payload)
-            if sensor_type == 'gnss' and not decrypted_payload:
-                if msg.payload:
-                    self._submit_threadsafe(
-                        self._touch_online_heartbeat(info["device_id"], info["station_id"], int(time.time())),
-                        "gnss-heartbeat",
-                    )
-                return
 
-            if sensor_type == 'gnss' and decrypted_payload:
-                self.round_robin_manager.add_receiver_command_payload(
-                    decrypted_payload,
-                    info,
-                    topic,
-                )
+            if sensor_type == 'gnss':
+                self._handle_gnss_message(info, msg, decrypted_payload, topic)
+                if not decrypted_payload:
+                    return
 
             if not decrypted_payload:
                 return

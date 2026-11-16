@@ -4,7 +4,7 @@ import os
 import re
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 if "psycopg2" not in sys.modules:
     try:
@@ -713,3 +713,220 @@ class SonarCoverageBoostTests(unittest.TestCase):
             self.assertNotIn(mock_ws, mgr.active_connections)
 
         asyncio.run(run_ws_tests())
+
+    def test_station_common_coordinate_helpers(self):
+        from app.features.stations.common import (
+            _extract_sensor_coordinates,
+            _format_computed_location,
+            calculate_station_location,
+        )
+        self.assertEqual(_extract_sensor_coordinates({}), [])
+        coords = _extract_sensor_coordinates({
+            "gnss": {"lat": 10.5, "lon": 106.5, "h": 15.0},
+            "invalid": {"lat": "bad", "lon": None},
+        })
+        self.assertEqual(len(coords), 1)
+        self.assertEqual(coords[0]["lat"], 10.5)
+
+        single_loc = _format_computed_location([{"lat": 10.5, "lon": 106.5, "h": 15.0}])
+        self.assertEqual(single_loc["source"], "Single Sensor (Auto)")
+
+        multi_loc = _format_computed_location([
+            {"lat": 10.0, "lon": 106.0, "h": 10.0},
+            {"lat": 12.0, "lon": 108.0, "h": 20.0},
+        ])
+        self.assertEqual(multi_loc["lat"], 11.0)
+        self.assertEqual(multi_loc["source"], "Average of 2 sensors")
+
+        dem_loc = {"source": "project-dem-grid", "lat": 15.0, "lon": 108.0}
+        self.assertEqual(calculate_station_location({}, dem_loc), dem_loc)
+        self.assertIsNone(calculate_station_location({}, None))
+
+    def test_origin_fetcher_parse_coordinates(self):
+        from app.features.stations.origin_fetcher import GNSSLiveFetcher
+        fetcher = GNSSLiveFetcher("127.0.0.1", 2101, "MP1", "user", "pass")
+        # Valid coordinates
+        res = fetcher._parse_coordinates("1030.0000", "N", "10630.0000", "E")
+        self.assertIsNotNone(res)
+        lat, lon = res
+        self.assertAlmostEqual(lat, 10.5)
+        self.assertAlmostEqual(lon, 106.5)
+
+        # Invalid cases
+        self.assertIsNone(fetcher._parse_coordinates("", "N", "10630.0000", "E"))
+        self.assertIsNone(fetcher._parse_coordinates("1030.0000", "X", "10630.0000", "E"))
+        self.assertIsNone(fetcher._parse_coordinates("1070.0000", "N", "10630.0000", "E"))
+
+        # GNGGA parser
+        nmea = "$GNGGA,000000.00,1030.0000,N,10630.0000,E,1,08,1.0,15.0,M,5.0,M,,*47"
+        parsed = fetcher._parse_gngga(nmea)
+        if parsed:
+            self.assertIn("lat", parsed)
+            self.assertIn("h", parsed)
+
+    def test_browser_session_token_helpers(self):
+        from app.browser_session import (
+            _extract_and_validate_claims,
+            _verify_csrf_if_cookie_mutation,
+            csrf_token,
+        )
+        from app.auth import JWTError
+
+        # Valid Bearer header
+        mock_decoder = lambda tok: {"transport": "bearer", "jti": "jti123"}
+        token, claims = _extract_and_validate_claims("Bearer mytoken", None, mock_decoder, JWTError)
+        self.assertEqual(token, "mytoken")
+
+        # Invalid Bearer format
+        with self.assertRaises(JWTError):
+            _extract_and_validate_claims("Basic auth", None, mock_decoder, JWTError)
+
+        # Bearer using cookie transport
+        cookie_decoder = lambda tok: {"transport": "cookie", "jti": "jti123"}
+        with self.assertRaises(JWTError):
+            _extract_and_validate_claims("Bearer mytoken", None, cookie_decoder, JWTError)
+
+        # Valid Cookie transport
+        token_c, claims_c = _extract_and_validate_claims(None, "cookietok", cookie_decoder, JWTError)
+        self.assertEqual(token_c, "cookietok")
+
+        # CSRF verify GET method does not raise
+        req_get = Request({"type": "http", "method": "GET", "headers": []})
+        _verify_csrf_if_cookie_mutation(req_get, True, "jti123")
+
+        # CSRF verify POST method with valid token
+        valid_csrf = csrf_token("jti123")
+        req_post = Request({
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"origin", b"https://site.example"),
+                (b"x-csrf-token", valid_csrf.encode()),
+            ],
+        })
+        with patch.object(settings, "CORS_ORIGINS", "https://site.example"):
+            _verify_csrf_if_cookie_mutation(req_post, True, "jti123")
+
+    def test_formats_excel_helpers(self):
+        import io
+        from app.features.data_export.database.formats import (
+            _format_cell_values,
+            _convert_csv_to_workbook,
+        )
+        from openpyxl import Workbook
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet("test")
+        cells = _format_cell_values(["normal", "x" * 35000], ws)
+        self.assertEqual(len(cells), 2)
+        self.assertTrue(cells[1].value.endswith("... [TRUNCATED - xem file CSV để có đầy đủ]"))
+        ws.append(cells)
+        wb.save(io.BytesIO())
+
+        csv_content = io.StringIO("col1,col2\nval1,val2\nval3,val4\n")
+        wb_res = _convert_csv_to_workbook(csv_content)
+        self.assertIsNotNone(wb_res)
+        wb_res.save(io.BytesIO())
+
+    def test_operations_backups_helpers(self):
+        import asyncio
+        from app.features.operations.backups import (
+            _run_scheduled_backup_step,
+            _run_daily_log_cleanup_step,
+            _handle_scheduler_error,
+        )
+        from app.features.operations import store
+
+        async def run_backup_helpers():
+            with patch.object(store, "claim_backup_schedule", return_value=False):
+                await _run_scheduled_backup_step(1000)
+
+            with patch.object(store, "claim_daily_log_cleanup", return_value=False):
+                await _run_daily_log_cleanup_step(1000)
+
+            with patch.object(store, "append", return_value=None):
+                await _handle_scheduler_error(ValueError("test error"))
+
+        asyncio.run(run_backup_helpers())
+
+    def test_mqtt_transport_gnss_message_handler(self):
+        from app.mqtt.transport import MQTTTransportMixin
+
+        transport = MQTTTransportMixin()
+        transport.round_robin_manager = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.payload = b"$GNGGA,000000.00,10.0,N,106.0,E,1,08,1.0,15.0,M,5.0,M,,*47"
+        info = {"station_code": "TEST01", "device_id": 1, "station_id": 2, "type": "gnss"}
+
+        # Handle with decrypted_payload
+        transport._handle_gnss_message(info, mock_msg, "$GNGGA...", "topic/gnss")
+        transport.round_robin_manager.add_receiver_command_payload.assert_called_once()
+
+    def test_rescue_router_helpers(self):
+        from app.features.rescue.router import (
+            _parse_rescue_request_payload,
+            _broadcast_rescue_request_events,
+        )
+        import asyncio
+        async def run_rescue():
+            req_json = MagicMock()
+            req_json.json = AsyncMock(return_value={
+                "requester_name": "Test",
+                "phone": "0987654321",
+                "message": "Can cuu ho",
+                "latitude": 10.5,
+                "longitude": 106.5,
+                "rescue_type": "landslide",
+            })
+            payload, img = await _parse_rescue_request_payload(req_json, "application/json")
+            self.assertEqual(payload.requester_name, "Test")
+
+            row = MagicMock(id=1, created_at=1000, requester_name="Test", phone="09", latitude=10.5, longitude=106.5, accuracy_m=1.0, status="pending")
+            incident_case = MagicMock(id=1, revision=1, version=1, project_id=1, station_id=1)
+            incident_event = MagicMock(id=1, sequence=1)
+            parsed = {"text": "msg", "rescue_type": "landslide", "province_city": "HN", "source_link": "", "image_url": ""}
+            await _broadcast_rescue_request_events(row, incident_case, incident_event, True, parsed)
+
+        asyncio.run(run_rescue())
+
+    def test_auth_validate_user_credentials(self):
+        from app.features.authentication.router import _validate_user_credentials
+        from fastapi import HTTPException
+        import asyncio
+
+        async def run_auth():
+            form = MagicMock(username="x" * 255, password="secret")
+            with self.assertRaises(HTTPException):
+                await _validate_user_credentials(form, MagicMock())
+
+            form2 = MagicMock(username="user", password="x" * 75)
+            with self.assertRaises(HTTPException):
+                await _validate_user_credentials(form2, MagicMock())
+
+        asyncio.run(run_auth())
+
+    def test_websocket_validation_helpers(self):
+        from app.features.frontend.websocket import (
+            _validate_ws_preconditions,
+            _validate_ws_payload,
+        )
+        import asyncio
+
+        async def run_ws():
+            ws = MagicMock()
+            ws.headers = {"origin": "http://disallowed.example"}
+            ws.close = AsyncMock()
+            with patch.object(settings, "CORS_ORIGINS", "http://allowed.example"):
+                self.assertIsNone(await _validate_ws_preconditions(ws))
+
+            ws2 = MagicMock()
+            ws2.headers = {}
+            ws2.url.path = "/invalid/ws"
+            ws2.close = AsyncMock()
+            self.assertIsNone(await _validate_ws_preconditions(ws2))
+
+            payload = {"sub": "user1", "channel": "operations", "purpose": "websocket", "jti": "jti123", "session_id": "s1"}
+            u, c, j, p = _validate_ws_payload(payload, "/ws/operations")
+            self.assertEqual(u, "user1")
+            self.assertEqual(c, "operations")
+
+        asyncio.run(run_ws())

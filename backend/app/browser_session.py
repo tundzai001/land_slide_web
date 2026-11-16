@@ -26,6 +26,30 @@ def require_origin(request: Request):
         raise HTTPException(403, "Request origin is not allowed")
 
 
+def _extract_and_validate_claims(header: str | None, cookie: str | None, decode_access_token, jwt_error_cls) -> tuple[str, dict]:
+    if header is not None:
+        scheme, _, token = header.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise jwt_error_cls("Invalid authorization header")
+        claims = decode_access_token(token)
+        if claims.get("transport") == "cookie":
+            raise jwt_error_cls("Cookie credentials cannot be used as bearer tokens")
+        return token, claims
+    token = cookie
+    claims = decode_access_token(token)
+    if claims.get("transport") != "cookie":
+        raise jwt_error_cls("Invalid cookie credential")
+    return token, claims
+
+
+def _verify_csrf_if_cookie_mutation(request: Request, is_cookie_auth: bool, jti: str):
+    if is_cookie_auth and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        require_origin(request)
+        supplied = request.headers.get("x-csrf-token", "")
+        if not hmac.compare_digest(supplied, csrf_token(jti)):
+            raise HTTPException(403, "Session verification failed. Reload and try again.")
+
+
 def request_token(request: Request, *, required=True):
     from .auth import decode_access_token, JWTError
     header = request.headers.get("authorization")
@@ -36,25 +60,11 @@ def request_token(request: Request, *, required=True):
             return None
         raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Bearer"})
     try:
-        if header is not None:
-            scheme, _, token = header.partition(" ")
-            if scheme.lower() != "bearer" or not token:
-                raise JWTError("Invalid authorization header")
-            claims = decode_access_token(token)
-            if claims.get("transport") == "cookie":
-                raise JWTError("Cookie credentials cannot be used as bearer tokens")
-        else:
-            token = cookie
-            claims = decode_access_token(token)
-            if claims.get("transport") != "cookie":
-                raise JWTError("Invalid cookie credential")
+        token, claims = _extract_and_validate_claims(header, cookie, decode_access_token, JWTError)
     except JWTError:
         raise HTTPException(401, "Invalid credentials", headers={"WWW-Authenticate": "Bearer"}) from None
-    if header is None and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        require_origin(request)
-        supplied = request.headers.get("x-csrf-token", "")
-        if not hmac.compare_digest(supplied, csrf_token(claims["jti"])):
-            raise HTTPException(403, "Session verification failed. Reload and try again.")
+
+    _verify_csrf_if_cookie_mutation(request, header is None, claims["jti"])
     return token
 
 

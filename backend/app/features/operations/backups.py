@@ -273,26 +273,47 @@ def recover_interrupted_jobs():
             store.set_setting(row['key'], record)
 
 
+async def _run_scheduled_backup_step(now: int):
+    if await asyncio.to_thread(store.claim_backup_schedule, now):
+        await create(uuid.uuid4().hex, trigger='scheduled')
+
+
+async def _run_daily_log_cleanup_step(now: int):
+    if not await asyncio.to_thread(store.claim_daily_log_cleanup, now):
+        return
+    retention = max(30, min(int(settings.OPERATIONS_LOG_RETENTION_DAYS), 3650))
+    cutoff = now - retention * 86400
+    removed = await asyncio.to_thread(store.prune_logs_before, cutoff)
+    old_jobs = await asyncio.to_thread(store.prune_old_jobs_before, cutoff)
+    if any(removed.values()) or old_jobs:
+        await asyncio.to_thread(
+            store.append,
+            'operation_log',
+            'operations.retention_pruned',
+            {'logs': removed, 'jobs': old_jobs, 'retention_days': retention}
+        )
+
+
+async def _handle_scheduler_error(exc: Exception):
+    try:
+        await asyncio.to_thread(
+            store.append,
+            'operation_log',
+            'backup.scheduler_error',
+            {'error': type(exc).__name__}
+        )
+    except Exception:
+        logger.exception('Backup scheduler failed and PostgreSQL logging is unavailable')
+
+
 async def daemon():
     while True:
         try:
             now = int(time.time())
-            if await asyncio.to_thread(store.claim_backup_schedule, now):
-                await create(uuid.uuid4().hex, trigger='scheduled')
-            if await asyncio.to_thread(store.claim_daily_log_cleanup, now):
-                retention = max(30, min(int(settings.OPERATIONS_LOG_RETENTION_DAYS), 3650))
-                cutoff = now - retention * 86400
-                removed = await asyncio.to_thread(store.prune_logs_before, cutoff)
-                old_jobs = await asyncio.to_thread(store.prune_old_jobs_before, cutoff)
-                if any(removed.values()) or old_jobs:
-                    await asyncio.to_thread(store.append, 'operation_log', 'operations.retention_pruned',
-                                            {'logs': removed, 'jobs': old_jobs, 'retention_days': retention})
+            await _run_scheduled_backup_step(now)
+            await _run_daily_log_cleanup_step(now)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            try:
-                await asyncio.to_thread(store.append, 'operation_log', 'backup.scheduler_error',
-                                        {'error': type(exc).__name__})
-            except Exception:
-                logger.exception('Backup scheduler failed and PostgreSQL logging is unavailable')
+            await _handle_scheduler_error(exc)
         await asyncio.sleep(30)
