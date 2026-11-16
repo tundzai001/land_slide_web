@@ -75,10 +75,7 @@ def project_dem_summary(project_id: int, models=None) -> dict:
     return {"dems": models, "has_dem": bool(models)}
 
 
-def inspect_ascii_grid(content) -> dict:
-    stream = io.BytesIO(content) if isinstance(content, bytes) else content
-    if not hasattr(stream, "read"):
-        raise HTTPException(status_code=400, detail="DEM không phải file ESRI ASCII Grid hợp lệ.")
+def _parse_ascii_grid_header(stream) -> tuple[int, int, float, float, float, float]:
     try:
         stream.seek(0)
         header_lines = [stream.readline(257) for _ in range(6)]
@@ -118,7 +115,10 @@ def inspect_ascii_grid(content) -> dict:
     if not (0 <= xll <= 1_000_000 and 0 <= yll <= 10_000_000):
         raise HTTPException(status_code=400, detail="DEM không có tọa độ UTM hợp lệ cho vùng 48N.")
 
-    expected_values = columns * rows
+    return columns, rows, cellsize, nodata, xll, yll
+
+
+def _scan_grid_elevations(stream, expected_values: int, nodata: float) -> tuple[float, float]:
     value_count = 0
     elevation_min = math.inf
     elevation_max = -math.inf
@@ -159,6 +159,17 @@ def inspect_ascii_grid(content) -> dict:
         raise HTTPException(status_code=400, detail=GRID_SIZE_MISMATCH_DETAIL)
     if math.isinf(elevation_min):
         raise HTTPException(status_code=400, detail="DEM không có ô độ cao hợp lệ.")
+
+    return elevation_min, elevation_max
+
+
+def inspect_ascii_grid(content) -> dict:
+    stream = io.BytesIO(content) if isinstance(content, bytes) else content
+    if not hasattr(stream, "read"):
+        raise HTTPException(status_code=400, detail="DEM không phải file ESRI ASCII Grid hợp lệ.")
+
+    columns, rows, cellsize, nodata, xll, yll = _parse_ascii_grid_header(stream)
+    elevation_min, elevation_max = _scan_grid_elevations(stream, columns * rows, nodata)
 
     return {
         "ncols": columns,

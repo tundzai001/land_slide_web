@@ -1024,3 +1024,40 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertFalse(_validate_waveform({"waveform": {"sample_rate_hz": 50, "start_at": -1}}, "accelerometer", res_wave))
         self.assertFalse(_validate_waveform({"waveform": {"sample_rate_hz": 50, "start_at": 1700000000, "x": [1], "y": [1, 2], "z": [1]}}, "accelerometer", res_wave))
 
+    def test_station_configuration_helpers(self):
+        from app.features.stations.configuration import (
+            _merge_station_config,
+            _auto_compute_station_location,
+        )
+
+        st = MagicMock()
+        st.id = 5
+        st.config = {
+            "gnss_origin": {"lat": 21.0, "lon": 105.0},
+            "offline_thresholds": 100,
+        }
+        user = MagicMock()
+        cfg_data = {
+            "config": {
+                "gnss_origin": {"lat": 0.0, "lon": 0.0},
+                "vn2000_params": {"zone": 48},
+                "nested": {"key": 1},
+            }
+        }
+        with patch("app.features.stations.configuration.flag_modified"):
+            _merge_station_config(st, cfg_data, user)
+        # GNSS origin locked preserved
+        self.assertEqual(st.config["gnss_origin"]["lat"], 21.0)
+        self.assertEqual(st.config["vn2000"], {"zone": 48})
+
+        # _auto_compute_station_location
+        st.location = None
+        st.config = {
+            "rain_origin": {"lat": 21.0, "lon": 105.0},
+            "piezometer_origin": {"lat": 21.2, "lon": 105.2},
+        }
+        _auto_compute_station_location(st)
+        self.assertEqual(st.location["lat"], 21.1)
+        self.assertEqual(st.location["lon"], 105.1)
+
+
