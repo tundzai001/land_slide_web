@@ -435,3 +435,281 @@ class SonarCoverageBoostTests(unittest.TestCase):
             MQTTAdjustmentMixin._compute_adjustment_phase([{"status": "COMPLETED"}]),
             "COMPLETED"
         )
+
+    def test_user_router_endpoints(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from sqlalchemy.exc import IntegrityError
+        from app.features.users.router import (
+            toggle_user_status,
+            update_user,
+            delete_user,
+            update_user_projects,
+            create_user,
+            USER_NOT_FOUND,
+        )
+        from app import schemas
+        from app.models import auth as model_auth
+
+        async def run_tests():
+            db = AsyncMock()
+            current_user = model_auth.User(id=1, username="admin_operator", role="admin")
+
+            # 1. toggle_user_status: not found
+            res_mock = MagicMock()
+            res_mock.scalar_one_or_none.return_value = None
+            db.execute.return_value = res_mock
+            with self.assertRaises(HTTPException) as ctx:
+                await toggle_user_status(999, schemas.UserStatusUpdate(is_active=False), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, USER_NOT_FOUND)
+
+            # toggle_user_status: admin user
+            admin_target = model_auth.User(id=2, username="admin", role="admin", is_active=True)
+            res_mock.scalar_one_or_none.return_value = admin_target
+            with self.assertRaises(HTTPException) as ctx:
+                await toggle_user_status(2, schemas.UserStatusUpdate(is_active=False), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Cannot change status of the admin user")
+
+            # toggle_user_status: cannot deactivate yourself
+            self_user = model_auth.User(id=1, username="admin_operator", role="admin", is_active=True)
+            res_mock.scalar_one_or_none.return_value = self_user
+            with self.assertRaises(HTTPException) as ctx:
+                await toggle_user_status(1, schemas.UserStatusUpdate(is_active=False), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Cannot deactivate yourself")
+
+            # toggle_user_status: success
+            target_user = model_auth.User(id=3, username="op1", role="operator", is_active=True)
+            res_mock.scalar_one_or_none.return_value = target_user
+            res = await toggle_user_status(3, schemas.UserStatusUpdate(is_active=False), db=db, current_user=current_user)
+            self.assertEqual(res, {"status": "success", "is_active": False})
+
+            # 2. update_user: not found
+            res_mock.scalar_one_or_none.return_value = None
+            with self.assertRaises(HTTPException) as ctx:
+                await update_user(999, schemas.UserUpdate(), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, USER_NOT_FOUND)
+
+            # update_user: invalid role
+            res_mock.scalar_one_or_none.return_value = target_user
+            target_user.role = "invalid_role"
+            with self.assertRaises(HTTPException) as ctx:
+                await update_user(3, schemas.UserUpdate(), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Invalid role")
+            target_user.role = "operator"
+
+            # update_user: cannot change primary admin role
+            res_mock.scalar_one_or_none.return_value = admin_target
+            with self.assertRaises(HTTPException) as ctx:
+                await update_user(2, schemas.UserUpdate(role="operator"), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Cannot change the primary admin role")
+
+            # update_user: cannot change own role
+            res_mock.scalar_one_or_none.return_value = self_user
+            with self.assertRaises(HTTPException) as ctx:
+                await update_user(1, schemas.UserUpdate(role="viewer"), db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Cannot change your own role")
+
+            # update_user: success (full_name, password, assigned_projects)
+            res_mock.scalar_one_or_none.return_value = target_user
+            with patch("app.auth.get_password_hash", return_value="hashed_pw"):
+                updated = await update_user(
+                    3,
+                    schemas.UserUpdate(full_name="New Name", password="ValidPassword123#", role="operator", assigned_projects=[10]),
+                    db=db,
+                    current_user=current_user
+                )
+                self.assertEqual(updated.full_name, "New Name")
+                self.assertEqual(updated.assigned_projects, [10])
+
+            # 3. delete_user: cannot delete yourself
+            with self.assertRaises(HTTPException) as ctx:
+                await delete_user(1, db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Cannot delete yourself")
+
+            # delete_user: not found
+            res_mock.scalar_one_or_none.return_value = None
+            with self.assertRaises(HTTPException) as ctx:
+                await delete_user(999, db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, USER_NOT_FOUND)
+
+            # delete_user: admin user
+            res_mock.scalar_one_or_none.return_value = admin_target
+            with self.assertRaises(HTTPException) as ctx:
+                await delete_user(2, db=db, current_user=current_user)
+            self.assertEqual(ctx.exception.detail, "Cannot delete the admin user")
+
+            # delete_user: success
+            res_mock.scalar_one_or_none.return_value = target_user
+            res_del = await delete_user(3, db=db, current_user=current_user)
+            self.assertEqual(res_del, {"status": "success"})
+
+            # 4. update_user_projects: not found
+            res_mock.scalar_one_or_none.return_value = None
+            with self.assertRaises(HTTPException) as ctx:
+                await update_user_projects(999, schemas.UserProjectsUpdate(assigned_projects=[1]), db=db, _user=current_user)
+            self.assertEqual(ctx.exception.detail, USER_NOT_FOUND)
+
+            # update_user_projects: success operator
+            res_mock.scalar_one_or_none.return_value = target_user
+            res_proj = await update_user_projects(3, schemas.UserProjectsUpdate(assigned_projects=[5, 6]), db=db, _user=current_user)
+            self.assertEqual(res_proj, {"status": "success", "assigned_projects": [5, 6]})
+
+            # 5. create_user: username exists
+            res_mock.scalar_one_or_none.return_value = target_user
+            with self.assertRaises(HTTPException) as ctx:
+                await create_user(schemas.UserCreate(username="op1", password="ValidPassword123#", role="operator"), db=db, _user=current_user)
+            self.assertEqual(ctx.exception.detail, "Username already exists")
+
+            # create_user: IntegrityError
+            res_mock.scalar_one_or_none.return_value = None
+            db.commit.side_effect = IntegrityError("dup", "params", "orig")
+            with patch("app.auth.get_password_hash", return_value="hpw"):
+                with self.assertRaises(HTTPException) as ctx:
+                    await create_user(schemas.UserCreate(username="op2", password="ValidPassword123#", role="operator"), db=db, _user=current_user)
+                self.assertEqual(ctx.exception.detail, "Username already exists")
+            db.commit.side_effect = None
+
+            # create_user: success
+            with patch("app.auth.get_password_hash", return_value="hpw"):
+                created = await create_user(schemas.UserCreate(username="op2", password="ValidPassword123#", role="operator", assigned_projects=[1]), db=db, _user=current_user)
+                self.assertEqual(created.username, "op2")
+
+        asyncio.run(run_tests())
+
+    def test_simulation_engine_extended_coverage(self):
+        from app.features.simulation.engine import (
+            normalize_parameters,
+            run_simulation,
+            _terrain_profile,
+            STATE_SLIDING,
+            STATE_DEPOSITED,
+        )
+
+        # Invalid param type
+        with self.assertRaises(ValueError):
+            normalize_parameters({"cohesion": "not_a_number"})
+
+        # Invalid param range
+        with self.assertRaises(ValueError):
+            normalize_parameters({"cohesion": -5.0})
+
+        # Invalid duration
+        with self.assertRaises(ValueError):
+            run_simulation({}, 500, 1)
+        with self.assertRaises(ValueError):
+            run_simulation({}, 700000, 1)
+
+        # Terrain profile
+        params = normalize_parameters({})
+        profile = _terrain_profile(params)
+        self.assertGreater(len(profile), 0)
+
+        # Trigger sliding scenario: steep slope, excessive rain, pore pressure
+        sliding_sim = run_simulation(
+            {
+                "slope_angle": 55.0,
+                "rainfall": 350.0,
+                "pore_pressure_ratio": 0.5,
+                "friction_angle": 15.0,
+                "cohesion": 1.0,
+                "fos_warning": 1.5,
+                "fos_critical": 1.2,
+            },
+            duration_seconds=7200,
+            seed=42,
+        )
+        self.assertIn("time_series", sliding_sim)
+        self.assertIn("summary", sliding_sim)
+        self.assertEqual(sliding_sim["summary"]["classification"], "Đã xảy ra trượt mô phỏng")
+        self.assertTrue(any(e["state"] == STATE_SLIDING for e in sliding_sim["events"]))
+
+    def test_websocket_connection_manager_coverage(self):
+        import asyncio
+        from app.websocket import (
+            ConnectionManager,
+            WS_OPERATIONS_PATH,
+            TYPE_SENSOR_DATA,
+            TYPE_STATION_STATUS,
+            TYPE_ALERT,
+        )
+
+        mgr = ConnectionManager()
+        self.assertEqual(mgr._normalize_ids([1, 2]), {1, 2})
+        self.assertEqual(mgr._normalize_ids(None), set())
+        with self.assertRaises(ValueError):
+            mgr._normalize_ids("not_a_list")
+        with self.assertRaises(ValueError):
+            mgr._normalize_ids([1, "2"])
+        with self.assertRaises(ValueError):
+            mgr._normalize_ids([-1])
+
+        # Test _should_send
+        from unittest.mock import AsyncMock
+        mock_ws = MagicMock()
+        mock_ws.url.path = "/ws/updates"
+        mock_ws.accept = AsyncMock()
+        mock_ws.send_text = AsyncMock()
+        mock_ws.send_json = AsyncMock()
+        mock_ws.close = AsyncMock()
+        mock_ws.state.ensure_authorized = None
+        mock_ws.state.authorization_failed = False
+        mock_ws.state.user_role = "admin"
+        mock_ws.state.user_project_ids = [10]
+
+        async def run_ws_tests():
+            # Connect
+            await mgr.connect(mock_ws)
+            self.assertIn(mock_ws, mgr.active_connections)
+
+            # Update subscriptions
+            import json
+            ok_invalid = await mgr.handle_client_message(mock_ws, "not-json")
+            self.assertFalse(ok_invalid)
+
+            ok_err = await mgr.handle_client_message(mock_ws, json.dumps({
+                "type": "subscribe",
+                "station_ids": ["invalid"],
+            }))
+            self.assertTrue(ok_err)
+
+            ok = await mgr.handle_client_message(mock_ws, json.dumps({
+                "type": "subscribe",
+                "station_ids": [1, 2],
+                "project_ids": [10],
+                "channels": ["sensor", "status"],
+            }))
+            self.assertTrue(ok)
+
+            # Check _should_send matching
+            msg_matching = {"station_id": 1, "project_id": 10, "type": TYPE_SENSOR_DATA}
+            self.assertTrue(mgr._should_send(mock_ws, msg_matching))
+
+            # Channel not subscribed
+            msg_other_channel = {"station_id": 1, "project_id": 10, "type": "alert"}
+            self.assertFalse(mgr._should_send(mock_ws, msg_other_channel))
+
+            # Station not subscribed
+            msg_other_station = {"station_id": 999, "project_id": 10, "type": TYPE_SENSOR_DATA}
+            self.assertFalse(mgr._should_send(mock_ws, msg_other_station))
+
+            # Operations socket check
+            ops_ws = MagicMock()
+            ops_ws.url.path = WS_OPERATIONS_PATH
+            ops_ws.state.authorization_failed = False
+            ops_ws.state.user_role = "admin"
+            ops_ws.state.user_project_ids = [10]
+            self.assertTrue(mgr._should_send(ops_ws, {"type": "incident_changed", "project_id": 10}))
+            self.assertFalse(mgr._should_send(ops_ws, {"type": TYPE_SENSOR_DATA, "station_id": 1}))
+
+            # Broadcast helpers
+            await mgr.broadcast({"station_id": 1, "sensor_type": "gnss", "type": TYPE_SENSOR_DATA})
+            await mgr.broadcast({"station_id": 1, "risk_level": "CRITICAL", "type": TYPE_STATION_STATUS})
+            await mgr.broadcast({"id": 1, "severity": "HIGH", "type": TYPE_ALERT})
+            await mgr.broadcast_admins({"type": "admin_event"})
+            await mgr.broadcast_operations({"type": "incident_changed", "project_id": 10})
+
+            # Disconnect
+            mgr.disconnect(mock_ws)
+            self.assertNotIn(mock_ws, mgr.active_connections)
+
+        asyncio.run(run_ws_tests())

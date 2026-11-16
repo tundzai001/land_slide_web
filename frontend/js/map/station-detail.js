@@ -936,6 +936,22 @@ function _renderSidebarGnssAdjustedSection(data, imuLatest, imuOnline) {
     _renderBatteryStatus(imuLatest, imuOnline);
 }
 
+function _renderStationRiskBadge(data, effectiveStatus) {
+    const riskEl = document.getElementById('st-risk');
+    if (!riskEl) return;
+    const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, effectiveStatus);
+    riskEl.className = `status-badge ${riskUi.className}`;
+    riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
+}
+
+function _resolveEffectiveStatus(data) {
+    const isOfflineDisplayEnabled = ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
+    if (data.status === 'offline' && isOfflineDisplayEnabled) {
+        return { effectiveStatus: 'stale', isOfflineDisplayEnabled };
+    }
+    return { effectiveStatus: data.status, isOfflineDisplayEnabled };
+}
+
 function updateSidebarUI(data) {
     renderMonitoringSensors(data);
     clearGnssEvaluationSummary();
@@ -943,29 +959,15 @@ function updateSidebarUI(data) {
     setText('st-name', data.name);
     setText('st-code', data.station_code);
 
-    const isOfflineDisplayEnabled = ((data.offline_display?.enabled === true) || data.offline_display_enabled === true);
-    let effectiveStatus = data.status;
-    if (effectiveStatus === 'offline' && isOfflineDisplayEnabled) {
-        effectiveStatus = 'stale';
-    }
+    const { effectiveStatus, isOfflineDisplayEnabled } = _resolveEffectiveStatus(data);
+    _renderStationRiskBadge(data, effectiveStatus);
 
-    const riskEl = document.getElementById('st-risk');
-    if (riskEl) {
-        const riskUi = getRiskPresentation(data.risk_assessment?.overall_risk || data.risk_level, effectiveStatus);
-        riskEl.className = `status-badge ${riskUi.className}`;
-        riskEl.innerHTML = `<span class="status-dot"></span> ${riskUi.display}`;
-    }
-
-    const gnssLatest = data.sensors?.gnss?.latest;
-    const imuLatest = data.sensors?.imu?.latest;
     void window.restoreGnssAdjustmentStatus?.(data.project_id);
-    const latestSensorTs = getLatestSensorTimestamp(data);
-    const mqttConnected = data.mqtt_connected !== false;
-    renderStaleInfo(data, mqttConnected, latestSensorTs);
+    renderStaleInfo(data, data.mqtt_connected !== false, getLatestSensorTimestamp(data));
 
     const onlineStates = _determineSensorOnlineStates(data, effectiveStatus, isOfflineDisplayEnabled);
-    const adv = gnssLatest?.data || gnssLatest;
-    _renderAdvancedGnssSidebar(adv, onlineStates.gnssOnline);
+    const gnssLatest = data.sensors?.gnss?.latest;
+    _renderAdvancedGnssSidebar(gnssLatest?.data || gnssLatest, onlineStates.gnssOnline);
     updateSensorOfflineBadge('rain', onlineStates.rainOnline);
     updateSensorOfflineBadge('water', onlineStates.waterOnline);
     updateImuOfflineBadge(onlineStates.imuOnline);
@@ -975,7 +977,7 @@ function updateSidebarUI(data) {
     } else {
         _renderSidebarSensorsOnline(data, onlineStates);
     }
-    _renderSidebarGnssAdjustedSection(data, imuLatest, onlineStates.imuOnline);
+    _renderSidebarGnssAdjustedSection(data, data.sensors?.imu?.latest, onlineStates.imuOnline);
 }
 
 function destroyStationCharts() {

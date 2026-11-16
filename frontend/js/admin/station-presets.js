@@ -90,58 +90,34 @@ class AdminStationPresetsFeature extends window.AdminManager {
         if (!preset) return;
 
         // ✅ ĐIỀN TỰ ĐỘNG CÁC GIÁ TRỊ VÀO FORM
-
-        // Rain/Water confirm steps - warning/critical tách riêng
-        const rainWarningConfirmEl = document.getElementById('cfg-rain-warning-confirm');
-        const rainCriticalConfirmEl = document.getElementById('cfg-rain-critical-confirm');
-        const waterWarningConfirmEl = document.getElementById('cfg-water-warning-confirm');
-        const waterCriticalConfirmEl = document.getElementById('cfg-water-critical-confirm');
-        if (rainWarningConfirmEl) rainWarningConfirmEl.value = preset.rain_warning_confirm;
-        if (rainCriticalConfirmEl) rainCriticalConfirmEl.value = preset.rain_critical_confirm;
-        if (waterWarningConfirmEl) waterWarningConfirmEl.value = preset.water_warning_confirm;
-        if (waterCriticalConfirmEl) waterCriticalConfirmEl.value = preset.water_critical_confirm;
+        const presetInputMap = [
+            ['cfg-rain-warning-confirm', 'rain_warning_confirm'],
+            ['cfg-rain-critical-confirm', 'rain_critical_confirm'],
+            ['cfg-water-warning-confirm', 'water_warning_confirm'],
+            ['cfg-water-critical-confirm', 'water_critical_confirm'],
+            ['cfg-gnss-hdop', 'gnss_hdop'],
+            ['cfg-gnss-warning-steps', 'gnss_warning_steps'],
+            ['cfg-gnss-critical-steps', 'gnss_critical_steps'],
+            ['cfg-gnss-timeout', 'gnss_timeout'],
+            ['cfg-water-warning', 'water_warning'],
+            ['cfg-water-critical', 'water_critical'],
+            ['cfg-rain-watch', 'rain_watch'],
+            ['cfg-rain-warning', 'rain_warning'],
+            ['cfg-rain-critical', 'rain_critical'],
+            ['cfg-imu-tilt-crit', 'imu_tilt_crit'],
+            ['cfg-imu-shock', 'imu_shock'],
+            ['cfg-imu-critical-confirm', 'imu_critical_confirm'],
+        ];
+        presetInputMap.forEach(([id, key]) => {
+            const el = document.getElementById(id);
+            if (el && preset[key] !== undefined) el.value = preset[key];
+        });
 
         // Cập nhật source indicator
         const rainSrc = document.getElementById('cfg-rain-confirm-source');
         const waterSrc = document.getElementById('cfg-water-confirm-source');
         if (rainSrc) { rainSrc.textContent = '🔧 Từ preset: ' + presetName; rainSrc.className = 'text-info small'; }
         if (waterSrc) { waterSrc.textContent = '🔧 Từ preset: ' + presetName; waterSrc.className = 'text-info small'; }
-
-        // GNSS Quality
-        const gnssHdopEl = document.getElementById('cfg-gnss-hdop');
-        const gnssWarningStepsEl = document.getElementById('cfg-gnss-warning-steps');
-        const gnssCriticalStepsEl = document.getElementById('cfg-gnss-critical-steps');
-        const gnssTimeoutEl = document.getElementById('cfg-gnss-timeout');
-
-        if (gnssHdopEl) gnssHdopEl.value = preset.gnss_hdop;
-        if (gnssWarningStepsEl) gnssWarningStepsEl.value = preset.gnss_warning_steps;
-        if (gnssCriticalStepsEl) gnssCriticalStepsEl.value = preset.gnss_critical_steps;
-        if (gnssTimeoutEl) gnssTimeoutEl.value = preset.gnss_timeout;
-
-        // Water
-        const waterWarningEl = document.getElementById('cfg-water-warning');
-        const waterCriticalEl = document.getElementById('cfg-water-critical');
-
-        if (waterWarningEl) waterWarningEl.value = preset.water_warning;
-        if (waterCriticalEl) waterCriticalEl.value = preset.water_critical;
-
-        // Rain
-        const rainWatchEl = document.getElementById('cfg-rain-watch');
-        const rainWarningEl = document.getElementById('cfg-rain-warning');
-        const rainCriticalEl = document.getElementById('cfg-rain-critical');
-
-        if (rainWatchEl) rainWatchEl.value = preset.rain_watch;
-        if (rainWarningEl) rainWarningEl.value = preset.rain_warning;
-        if (rainCriticalEl) rainCriticalEl.value = preset.rain_critical;
-
-        // IMU
-        const imuTiltCritEl = document.getElementById('cfg-imu-tilt-crit');
-        const imuShockEl = document.getElementById('cfg-imu-shock');
-        const imuCriticalConfirmEl = document.getElementById('cfg-imu-critical-confirm');
-
-        if (imuTiltCritEl) imuTiltCritEl.value = preset.imu_tilt_crit;
-        if (imuShockEl) imuShockEl.value = preset.imu_shock;
-        if (imuCriticalConfirmEl) imuCriticalConfirmEl.value = preset.imu_critical_confirm;
 
         // ✅ HIỆU ỨNG FLASH (để user biết đã áp dụng)
         const inputs = document.querySelectorAll('#stationConfigForm input[type="number"]');

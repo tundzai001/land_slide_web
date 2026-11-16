@@ -552,60 +552,37 @@ function _handleRealtimeGnssBaselineCollected(message) {
     }
 }
 
+function _handleRealtimeGnssAdjustmentDebug(message) {
+    const belongsToActiveRun = (
+        gnssAdjustmentDebugState.active
+        && Number(message.project_id) === gnssAdjustmentDebugState.projectId
+    );
+    if (belongsToActiveRun) {
+        const station = message.station_id ? `Trạm #${message.station_id}: ` : '';
+        addGnssAdjustmentDebug('AGRICA', `${station}${message.message || '-'}`, message.level || 'info');
+    }
+}
+
+const REALTIME_MESSAGE_HANDLERS = {
+    hello: () => syncWebSocketSubscription(),
+    subscription_ack: () => {},
+    sensor_data: (msg) => {
+        if (currentStationData && msg.station_id === currentStationData.id) {
+            scheduleRealtimeSensorUiUpdate(msg);
+        }
+    },
+    sensor_status: _handleRealtimeSensorStatus,
+    station_status: _handleRealtimeStationStatus,
+    alert: _handleRealtimeAlertMessage,
+    rescue_request: updateRescueMarkerFromWebSocket,
+    gnss_adjustment_progress: _handleRealtimeGnssAdjustmentProgress,
+    gnss_adjustment_debug: _handleRealtimeGnssAdjustmentDebug,
+    gnss_baseline_collected: _handleRealtimeGnssBaselineCollected,
+};
+
 function handleRealtimeUpdate(message) {
-    if (message.type === 'hello') {
-        syncWebSocketSubscription();
-        return;
-    }
-    if (message.type === 'subscription_ack') return;
-
-    if (message.type === 'sensor_data') {
-        if (currentStationData && message.station_id === currentStationData.id) {
-            scheduleRealtimeSensorUiUpdate(message);
-        }
-        return;
-    }
-
-    if (message.type === 'sensor_status') {
-        _handleRealtimeSensorStatus(message);
-        return;
-    }
-
-    if (message.type === 'station_status') {
-        _handleRealtimeStationStatus(message);
-        return;
-    }
-
-    if (message.type === 'alert') {
-        _handleRealtimeAlertMessage(message);
-        return;
-    }
-
-    if (message.type === 'rescue_request') {
-        updateRescueMarkerFromWebSocket(message);
-        return;
-    }
-
-    if (message.type === 'gnss_adjustment_progress') {
-        _handleRealtimeGnssAdjustmentProgress(message);
-        return;
-    }
-
-    if (message.type === 'gnss_adjustment_debug') {
-        const belongsToActiveRun = (
-            gnssAdjustmentDebugState.active
-            && Number(message.project_id) === gnssAdjustmentDebugState.projectId
-        );
-        if (belongsToActiveRun) {
-            const station = message.station_id ? `Trạm #${message.station_id}: ` : '';
-            addGnssAdjustmentDebug('AGRICA', `${station}${message.message || '-'}`, message.level || 'info');
-        }
-        return;
-    }
-
-    if (message.type === 'gnss_baseline_collected') {
-        _handleRealtimeGnssBaselineCollected(message);
-    }
+    const handler = REALTIME_MESSAGE_HANDLERS[message?.type];
+    if (handler) handler(message);
 }
 
 function getAdjustedPointCoordinates(point) {

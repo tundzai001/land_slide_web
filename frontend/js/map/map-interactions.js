@@ -811,26 +811,7 @@ function setupEventListeners() {
             }
         },
 
-        loadAdjustmentResult(result) {
-            if (!result || typeof result !== 'object') return;
-            const clusterResults = Array.isArray(result.cluster_results)
-                ? result.cluster_results
-                : [];
-            this._renderClusterResults(clusterResults);
-            this._setupAdjustmentDownloadButtons(result);
-
-            if (!result.points) return;
-            if (!this.ctx) return;
-            this.points = {};
-            this.baselines = [];
-            this.basePoint = null;
-            this.layoutMode = 'result';
-            const tbody = document.getElementById('gnss-baseline-table-body');
-            const tooltips = document.getElementById('gnss-board-tooltips');
-            if (tbody) tbody.innerHTML = '';
-            if (tooltips) tooltips.innerHTML = '';
-
-            const resultBaselines = Array.isArray(result.baselines) ? result.baselines : [];
+        _resolveBaseCoordinates(result, resultBaselines) {
             let baseXYZ = result.base?.ecef_xyz;
             if (!Array.isArray(baseXYZ)) {
                 const seed = resultBaselines.find(item => item.from === 'BASE' && result.points[item.to]);
@@ -843,8 +824,46 @@ function setupEventListeners() {
             if (!Array.isArray(baseXYZ)) {
                 baseXYZ = getAdjustedPointCoordinates(Object.values(result.points)[0]);
             }
-            baseXYZ = Array.isArray(baseXYZ) ? baseXYZ.slice(0, 3).map(Number) : null;
-            if (!baseXYZ || baseXYZ.length < 3 || !baseXYZ.every(Number.isFinite)) {
+            const parsed = Array.isArray(baseXYZ) ? baseXYZ.slice(0, 3).map(Number) : null;
+            return (parsed && parsed.length >= 3 && parsed.every(Number.isFinite)) ? parsed : null;
+        },
+
+        _populateBaselines(resultBaselines) {
+            resultBaselines.forEach(item => {
+                const vector = item.adjusted_xyz || item.adjusted_neu || item.observed_xyz || item.observed_neu;
+                if (!Array.isArray(vector) || vector.length < 3) return;
+                const normalizedVector = vector.slice(0, 3).map(Number);
+                if (!normalizedVector.every(Number.isFinite)) return;
+                this.addBaseline(item.from, item.to, {
+                    dn: normalizedVector[0],
+                    de: normalizedVector[1],
+                    dh: normalizedVector[2],
+                    full_data: item,
+                });
+            });
+        },
+
+        loadAdjustmentResult(result) {
+            if (!result || typeof result !== 'object') return;
+            const clusterResults = Array.isArray(result.cluster_results)
+                ? result.cluster_results
+                : [];
+            this._renderClusterResults(clusterResults);
+            this._setupAdjustmentDownloadButtons(result);
+
+            if (!result.points || !this.ctx) return;
+            this.points = {};
+            this.baselines = [];
+            this.basePoint = null;
+            this.layoutMode = 'result';
+            const tbody = document.getElementById('gnss-baseline-table-body');
+            const tooltips = document.getElementById('gnss-board-tooltips');
+            if (tbody) tbody.innerHTML = '';
+            if (tooltips) tooltips.innerHTML = '';
+
+            const resultBaselines = Array.isArray(result.baselines) ? result.baselines : [];
+            const baseXYZ = this._resolveBaseCoordinates(result, resultBaselines);
+            if (!baseXYZ) {
                 window.toast?.warning?.('Thiếu tọa độ mốc GNSS hợp lệ; không thể dựng sơ đồ hiệu chỉnh.');
                 return;
             }
@@ -858,18 +877,7 @@ function setupEventListeners() {
                     this.addPoint(name, coordinate[1] - baseXYZ[1], coordinate[0] - baseXYZ[0], false);
                 }
             });
-            resultBaselines.forEach(item => {
-                const vector = item.adjusted_xyz || item.adjusted_neu || item.observed_xyz || item.observed_neu;
-                if (!Array.isArray(vector) || vector.length < 3) return;
-                const normalizedVector = vector.slice(0, 3).map(Number);
-                if (!normalizedVector.every(Number.isFinite)) return;
-                this.addBaseline(item.from, item.to, {
-                    dn: normalizedVector[0],
-                    de: normalizedVector[1],
-                    dh: normalizedVector[2],
-                    full_data: item,
-                });
-            });
+            this._populateBaselines(resultBaselines);
             this.fitToResult();
         },
         draw(timestamp = performance.now()) {

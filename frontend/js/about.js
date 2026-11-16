@@ -155,6 +155,32 @@ import { renderAboutTemplate } from './templates/about-template.js';
             return { expanded, totalVerts };
         }
 
+        function _copyNormals(mergedNorm, item, offset) {
+            if (item.norm?.array.length === item.count * 3) {
+                mergedNorm.set(item.norm.array, offset);
+                return;
+            }
+            for (let i = 0; i < item.count * 3; i += 3) {
+                mergedNorm[offset + i + 1] = 1;
+            }
+        }
+
+        function _copyColors(mergedCol, item, offset) {
+            if (item.colAttr?.itemSize >= 3) {
+                for (let i = 0; i < item.count; i++) {
+                    mergedCol[offset + i * 3] = item.colAttr.getX(i);
+                    mergedCol[offset + i * 3 + 1] = item.colAttr.getY(i);
+                    mergedCol[offset + i * 3 + 2] = item.colAttr.getZ(i);
+                }
+                return;
+            }
+            for (let i = 0; i < item.count * 3; i += 3) {
+                mergedCol[offset + i] = item.r;
+                mergedCol[offset + i + 1] = item.gr;
+                mergedCol[offset + i + 2] = item.b;
+            }
+        }
+
         function _buildMergedMeshGeometry(expanded, totalVerts) {
             const mergedPos = new Float32Array(totalVerts * 3);
             const mergedNorm = new Float32Array(totalVerts * 3);
@@ -162,26 +188,8 @@ import { renderAboutTemplate } from './templates/about-template.js';
             let offset = 0;
             for (const item of expanded) {
                 mergedPos.set(item.pos.array, offset);
-                if (item.norm?.array.length === item.count * 3) {
-                    mergedNorm.set(item.norm.array, offset);
-                } else {
-                    for (let i = 0; i < item.count * 3; i += 3) {
-                        mergedNorm[offset + i + 1] = 1;
-                    }
-                }
-                if (item.colAttr?.itemSize >= 3) {
-                    for (let i = 0; i < item.count; i++) {
-                        mergedCol[offset + i * 3] = item.colAttr.getX(i);
-                        mergedCol[offset + i * 3 + 1] = item.colAttr.getY(i);
-                        mergedCol[offset + i * 3 + 2] = item.colAttr.getZ(i);
-                    }
-                } else {
-                    for (let i = 0; i < item.count * 3; i += 3) {
-                        mergedCol[offset + i] = item.r;
-                        mergedCol[offset + i + 1] = item.gr;
-                        mergedCol[offset + i + 2] = item.b;
-                    }
-                }
+                _copyNormals(mergedNorm, item, offset);
+                _copyColors(mergedCol, item, offset);
                 offset += item.count * 3;
             }
 
@@ -308,28 +316,7 @@ import { renderAboutTemplate } from './templates/about-template.js';
         return prof[i0] * (1 - frac) + prof[i1] * frac;
     }
 
-    function setupLivingTwinDynamics(nodes, options = {}) {
-        const isHero = Boolean(options.isHero);
-        // 1. 12 Moving Highway Vehicles (6 Northbound in right lane +0.21, 6 Southbound in left lane -0.21)
-        const vehicleConfigs = [
-            // Northbound (+Y_blender / -Z_three, right lane +0.21)
-            { name: 'Vehicle_01_PoliceCruiser', ry0: -4.45, laneX: 0.21, north: true, speed: 0.92, police: true },
-            { name: 'Vehicle_02_RescueBoxTruck', ry0: -2.80, laneX: 0.215, north: true, speed: 0.92, rescue: true },
-            { name: 'Vehicle_04_GeoFieldPickup', ry0: -1.15, laneX: 0.21, north: true, speed: 0.92 },
-            { name: 'Vehicle_05_TelemetryMinivan', ry0: 0.50, laneX: 0.21, north: true, speed: 0.92 },
-            { name: 'Vehicle_08_SportCoupe', ry0: 2.15, laneX: 0.21, north: true, speed: 0.92 },
-            { name: 'Vehicle_11_PatrolInterceptor', ry0: 3.80, laneX: 0.21, north: true, speed: 0.92, police: true },
-            // Southbound (-Y_blender / +Z_three, left lane -0.21)
-            { name: 'Vehicle_07_SedanDaily', ry0: -3.95, laneX: -0.21, north: false, speed: 0.86 },
-            { name: 'Vehicle_03_CivilianCharger', ry0: -2.30, laneX: -0.21, north: false, speed: 0.86 },
-            { name: 'Vehicle_10_SurveyStriped', ry0: -0.65, laneX: -0.21, north: false, speed: 0.86 },
-            { name: 'Vehicle_09_AlpineTourer', ry0: 1.00, laneX: -0.21, north: false, speed: 0.86 },
-            { name: 'Vehicle_06_EngineeringVan', ry0: 2.65, laneX: -0.21, north: false, speed: 0.86 },
-            { name: 'Vehicle_12_HeavyUtilityTruck', ry0: 4.30, laneX: -0.21, north: false, speed: 0.86, rescue: true }
-        ];
-
-        // In local car coordinates, front bumper (headlights) is at +Z.
-        // Rotating ConeGeometry by -PI/2 around X puts the apex at -Z (bumper) and flares the wide beam toward +Z (ahead of car).
+    function _buildVehicleAssets() {
         const headConeGeo = new THREE.ConeGeometry(0.14, 0.48, 12, 1, true);
         headConeGeo.rotateX(-Math.PI / 2);
         const headConeMat = new THREE.MeshBasicMaterial({
@@ -341,63 +328,44 @@ import { renderAboutTemplate } from './templates/about-template.js';
             depthWrite: false
         });
         const strobeSphereGeo = new THREE.SphereGeometry(0.042, 8, 8);
-        const redStrobeMat = new THREE.MeshBasicMaterial({
-            color: 0xff1744,
-            transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending
+        const redStrobeMat = new THREE.MeshBasicMaterial({ color: 0xff1744, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending });
+        const blueStrobeMat = new THREE.MeshBasicMaterial({ color: 0x00b0ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending });
+        const amberStrobeMat = new THREE.MeshBasicMaterial({ color: 0xffab00, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending });
+        return { headConeGeo, headConeMat, strobeSphereGeo, redStrobeMat, blueStrobeMat, amberStrobeMat };
+    }
+
+    function _createVehicleInstances(nodes, vehicleConfigs, assets) {
+        const activeVehicles = [];
+        vehicleConfigs.forEach(cfg => {
+            const obj = nodes[cfg.name];
+            if (!obj) return;
+            const beamCone = new THREE.Mesh(assets.headConeGeo, assets.headConeMat);
+            beamCone.position.set(0, 0.055, 0.46);
+            obj.add(beamCone);
+
+            let redLamp = null, blueLamp = null, amberLamp = null;
+            if (cfg.police) {
+                redLamp = new THREE.Mesh(assets.strobeSphereGeo, assets.redStrobeMat.clone());
+                redLamp.position.set(-0.06, 0.24, 0.0);
+                blueLamp = new THREE.Mesh(assets.strobeSphereGeo, assets.blueStrobeMat.clone());
+                blueLamp.position.set(0.06, 0.24, 0.0);
+                obj.add(redLamp, blueLamp);
+            } else if (cfg.rescue) {
+                amberLamp = new THREE.Mesh(assets.strobeSphereGeo, assets.amberStrobeMat.clone());
+                amberLamp.position.set(0.0, 0.31, 0.15);
+                obj.add(amberLamp);
+            }
+            activeVehicles.push({ ...cfg, obj, redLamp, blueLamp, amberLamp });
         });
-        const blueStrobeMat = new THREE.MeshBasicMaterial({
-            color: 0x00b0ff,
-            transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending
-        });
-        const amberStrobeMat = new THREE.MeshBasicMaterial({
-            color: 0xffab00,
-            transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending
-        });
+        return activeVehicles;
+    }
 
-        function _createVehicleInstances(nodes, vehicleConfigs, headConeGeo, headConeMat, strobeSphereGeo, redStrobeMat, blueStrobeMat, amberStrobeMat) {
-            const activeVehicles = [];
-            vehicleConfigs.forEach(cfg => {
-                const obj = nodes[cfg.name];
-                if (!obj) return;
-                const beamCone = new THREE.Mesh(headConeGeo, headConeMat);
-                beamCone.position.set(0, 0.055, 0.46);
-                obj.add(beamCone);
-
-                let redLamp = null, blueLamp = null, amberLamp = null;
-                if (cfg.police) {
-                    redLamp = new THREE.Mesh(strobeSphereGeo, redStrobeMat.clone());
-                    redLamp.position.set(-0.06, 0.24, 0.0);
-                    blueLamp = new THREE.Mesh(strobeSphereGeo, blueStrobeMat.clone());
-                    blueLamp.position.set(0.06, 0.24, 0.0);
-                    obj.add(redLamp, blueLamp);
-                } else if (cfg.rescue) {
-                    amberLamp = new THREE.Mesh(strobeSphereGeo, amberStrobeMat.clone());
-                    amberLamp.position.set(0.0, 0.31, 0.15);
-                    obj.add(amberLamp);
-                }
-                activeVehicles.push({ ...cfg, obj, redLamp, blueLamp, amberLamp });
-            });
-            return activeVehicles;
-        }
-
-        const activeVehicles = _createVehicleInstances(nodes, vehicleConfigs, headConeGeo, headConeMat, strobeSphereGeo, redStrobeMat, blueStrobeMat, amberStrobeMat);
-
-        // 2. Attach Volumetric Searchlight & LiDAR Scan Cones to Both Rescue Helicopters & Quadcopter Drones
+    function _setupHelicopterBeams(nodes) {
         const heli1 = nodes.Rescue_Helicopter_01;
-        const heli1Rotor = nodes.Rescue_Helicopter_01_Rotor;
-        const heli1Tail = nodes.Rescue_Helicopter_01_TailRotor;
         const heli2 = nodes.Rescue_Helicopter_02;
-        const heli2Rotor = nodes.Rescue_Helicopter_02_Rotor;
-        const heli2Tail = nodes.Rescue_Helicopter_02_TailRotor;
-
-        let heliBeam1 = null, heliBeam2 = null;
         const heliConeGeo = new THREE.ConeGeometry(0.62, 1.95, 24, 1, true);
+        let heliBeam1 = null;
+        let heliBeam2 = null;
         if (heli1) {
             const hMat1 = new THREE.MeshBasicMaterial({
                 color: 0x38bdf8,
@@ -424,10 +392,17 @@ import { renderAboutTemplate } from './templates/about-template.js';
             heliBeam2.position.set(0, -1.00, 0.18);
             heli2.add(heliBeam2);
         }
+        return {
+            h1: { mesh: heli1, rotor: nodes.Rescue_Helicopter_01_Rotor, tail: nodes.Rescue_Helicopter_01_TailRotor, beam: heliBeam1 },
+            h2: { mesh: heli2, rotor: nodes.Rescue_Helicopter_02_Rotor, tail: nodes.Rescue_Helicopter_02_TailRotor, beam: heliBeam2 },
+        };
+    }
 
+    function _setupDroneCones(nodes) {
         const drone = nodes.OpsSurveyDrone;
         const drone2 = nodes.OpsRescueDrone;
-        let lidarCone = null, lidarCone2 = null;
+        let lidarCone = null;
+        let lidarCone2 = null;
         const lidarGeo = new THREE.ConeGeometry(0.42, 1.05, 20, 1, true);
         if (drone) {
             const lidarMat = new THREE.MeshBasicMaterial({
@@ -455,6 +430,178 @@ import { renderAboutTemplate } from './templates/about-template.js';
             lidarCone2.position.set(0, -0.54, 0);
             drone2.add(lidarCone2);
         }
+        return {
+            d1: { drone, cone: lidarCone },
+            d2: { drone: drone2, cone: lidarCone2 },
+        };
+    }
+
+    function _updateTwinSensors(nodes, isHero, elapsed) {
+        if (isHero) return;
+        if (nodes.IMU_Casing) {
+            nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
+            nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
+        }
+        if (nodes.IMU_Gimbal_Roll) nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
+        if (nodes.IMU_Gimbal_Pitch) nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
+        if (nodes.IMU_Gimbal_Yaw) nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
+
+        if (nodes.Rain_TippingBucket) {
+            const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
+            nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
+        }
+        if (nodes.Rain_FallingDrops) nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
+        if (nodes.Piezo_WaterFlowParticles) nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
+        if (nodes.Piezometer_Probe) nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
+    }
+
+    function _updateTwinPackets(glbPackets, elapsed) {
+        glbPackets.forEach(pk => {
+            const t = (elapsed * pk.speed + pk.phase) % 1.0;
+            const inv = 1.0 - t;
+            pk.obj.position.set(
+                inv * inv * pk.p0.x + 2 * inv * t * pk.p1.x + t * t * pk.p2.x,
+                inv * inv * pk.p0.y + 2 * inv * t * pk.p1.y + t * t * pk.p2.y,
+                inv * inv * pk.p0.z + 2 * inv * t * pk.p1.z + t * t * pk.p2.z
+            );
+            pk.obj.rotation.y = elapsed * 2.5;
+        });
+    }
+
+    function _updateTwinVehicles(activeVehicles, elapsed, span, halfDepth) {
+        activeVehicles.forEach(v => {
+            const dir = v.north ? 1.0 : -1.0;
+            const rawRy = (((v.ry0 + 5.0 + dir * elapsed * v.speed) % span) + span) % span - 5.0;
+            const rc = 2.65 + 0.24 * Math.sin((rawRy / halfDepth) * 1.5);
+            const vx = rc + v.laneX;
+            const vz = sampleRoadElevation(rawRy) + 0.030;
+            const dxDy = 0.24 * (1.5 / halfDepth) * Math.cos((rawRy / halfDepth) * 1.5);
+            const yaw = v.north ? Math.atan2(dxDy, -1.0) : Math.atan2(-dxDy, 1.0);
+
+            v.obj.position.set(vx, vz, -rawRy);
+            v.obj.rotation.set(0, yaw, 0);
+
+            if (v.redLamp && v.blueLamp) {
+                const flash = Math.sin(elapsed * 22.0) > 0;
+                v.redLamp.scale.setScalar(flash ? 1.5 : 0.55);
+                v.blueLamp.scale.setScalar(flash ? 0.55 : 1.5);
+            }
+            if (v.amberLamp) {
+                const pulse = 0.75 + Math.abs(Math.sin(elapsed * 14.0)) * 0.80;
+                v.amberLamp.scale.setScalar(pulse);
+            }
+        });
+    }
+
+    function _updateTwinHelicopters(h1, h2, elapsed) {
+        if (h1.mesh) {
+            const hAng = elapsed * 0.38;
+            const hx = -0.35 + Math.cos(hAng) * 1.95;
+            const hy = -0.25 + Math.sin(hAng * 2.0) * 1.15;
+            const hz = 2.78 + Math.sin(hAng * 1.5) * 0.16;
+            const vx = -Math.sin(hAng) * 1.95;
+            const vzThree = -Math.cos(hAng * 2.0) * 2.30;
+            const hyaw = Math.atan2(vx, vzThree);
+            h1.mesh.position.set(hx, hz, -hy);
+            h1.mesh.rotation.set(0.09, hyaw, Math.sin(hAng) * 0.12);
+            if (h1.beam) {
+                h1.beam.material.opacity = 0.14 + Math.abs(Math.sin(elapsed * 2.8)) * 0.12;
+            }
+        }
+        if (h1.rotor) h1.rotor.rotation.y = elapsed * 24.0;
+        if (h1.tail) h1.tail.rotation.x = elapsed * 32.0;
+
+        if (h2.mesh) {
+            const hAng2 = elapsed * 0.34 + 1.2;
+            const hx2 = 4.05 + Math.sin(hAng2) * 1.10;
+            const hy2 = -0.85 + Math.cos(hAng2) * 0.95;
+            const hz2 = 2.18 + Math.cos(hAng2 * 2.0) * 0.12;
+            const vx2 = Math.cos(hAng2) * 1.10;
+            const vzThree2 = Math.sin(hAng2) * 0.95;
+            const hyaw2 = Math.atan2(vx2, vzThree2);
+            h2.mesh.position.set(hx2, hz2, -hy2);
+            h2.mesh.rotation.set(0.07, hyaw2, -Math.cos(hAng2) * 0.10);
+            if (h2.beam) {
+                h2.beam.material.opacity = 0.12 + Math.abs(Math.cos(elapsed * 2.5)) * 0.10;
+            }
+        }
+        if (h2.rotor) h2.rotor.rotation.y = -elapsed * 24.0;
+        if (h2.tail) h2.tail.rotation.x = -elapsed * 32.0;
+    }
+
+    function _updateTwinDishes(nodes, isHero, elapsed) {
+        if (nodes.OpsBeaconCore) nodes.OpsBeaconCore.rotation.y = elapsed * 2.2;
+        if (nodes.OpsTrackingDish) {
+            nodes.OpsTrackingDish.rotation.y = Math.sin(elapsed * 0.65) * 0.55;
+            nodes.OpsTrackingDish.rotation.x = Math.cos(elapsed * 0.42) * 0.08;
+        }
+        if (nodes.OpsSecondaryDish) {
+            nodes.OpsSecondaryDish.rotation.y = -Math.sin(elapsed * 0.52) * 0.48;
+            nodes.OpsSecondaryDish.rotation.x = Math.sin(elapsed * 0.38) * 0.07;
+        }
+        if (!isHero && nodes.OpsHoloTerrain) {
+            nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
+            nodes.OpsHoloTerrain.position.y = 0.51 + Math.sin(elapsed * 2.4) * 0.016;
+        }
+    }
+
+    function _updateTwinDrones(d1, d2, elapsed) {
+        if (d1.drone) {
+            const dAng = elapsed * 0.55;
+            const bx = 2.15 + Math.cos(dAng) * 2.35;
+            const by = -0.65 + Math.sin(dAng * 2.0) * 0.85;
+            const bz = 1.15 + Math.sin(dAng * 1.5) * 0.18 + (bx < 1.2 ? (1.2 - bx) * 0.25 : 0);
+            d1.drone.position.set(bx, bz, -by);
+            d1.drone.rotation.set(
+                Math.cos(dAng * 2.0) * 0.10,
+                dAng + Math.PI * 0.5,
+                Math.sin(dAng) * 0.12
+            );
+            if (d1.cone) {
+                d1.cone.material.opacity = 0.15 + Math.abs(Math.sin(elapsed * 3.5)) * 0.12;
+            }
+        }
+        if (d2.drone) {
+            const dAng2 = elapsed * 0.48 + 1.4;
+            const bx2 = -1.35 + Math.sin(dAng2) * 1.85;
+            const by2 = 0.65 + Math.cos(dAng2 * 2.0) * 0.95;
+            const bz2 = 1.55 + Math.cos(dAng2 * 1.4) * 0.16 + Math.max(0, -bx2 * 0.22);
+            d2.drone.position.set(bx2, bz2, -by2);
+            d2.drone.rotation.set(
+                Math.sin(dAng2 * 2.0) * 0.09,
+                -dAng2,
+                Math.cos(dAng2) * 0.10
+            );
+            if (d2.cone) {
+                d2.cone.material.opacity = 0.14 + Math.abs(Math.cos(elapsed * 3.2)) * 0.12;
+            }
+        }
+    }
+
+    function setupLivingTwinDynamics(nodes, options = {}) {
+        const isHero = Boolean(options.isHero);
+        // 1. 12 Moving Highway Vehicles (6 Northbound in right lane +0.21, 6 Southbound in left lane -0.21)
+        const vehicleConfigs = [
+            // Northbound (+Y_blender / -Z_three, right lane +0.21)
+            { name: 'Vehicle_01_PoliceCruiser', ry0: -4.45, laneX: 0.21, north: true, speed: 0.92, police: true },
+            { name: 'Vehicle_02_RescueBoxTruck', ry0: -2.80, laneX: 0.215, north: true, speed: 0.92, rescue: true },
+            { name: 'Vehicle_04_GeoFieldPickup', ry0: -1.15, laneX: 0.21, north: true, speed: 0.92 },
+            { name: 'Vehicle_05_TelemetryMinivan', ry0: 0.50, laneX: 0.21, north: true, speed: 0.92 },
+            { name: 'Vehicle_08_SportCoupe', ry0: 2.15, laneX: 0.21, north: true, speed: 0.92 },
+            { name: 'Vehicle_11_PatrolInterceptor', ry0: 3.80, laneX: 0.21, north: true, speed: 0.92, police: true },
+            // Southbound (-Y_blender / +Z_three, left lane -0.21)
+            { name: 'Vehicle_07_SedanDaily', ry0: -3.95, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_03_CivilianCharger', ry0: -2.30, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_10_SurveyStriped', ry0: -0.65, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_09_AlpineTourer', ry0: 1.00, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_06_EngineeringVan', ry0: 2.65, laneX: -0.21, north: false, speed: 0.86 },
+            { name: 'Vehicle_12_HeavyUtilityTruck', ry0: 4.30, laneX: -0.21, north: false, speed: 0.86, rescue: true }
+        ];
+
+        const assets = _buildVehicleAssets();
+        const activeVehicles = _createVehicleInstances(nodes, vehicleConfigs, assets);
+        const helis = _setupHelicopterBeams(nodes);
+        const drones = _setupDroneCones(nodes);
 
         // 3. Create Live Animated Grafana & WebGIS Command Center CanvasTexture (Story mode only, 512x192 scaled)
         let grafanaCanvas = null;
@@ -767,148 +914,6 @@ import { renderAboutTemplate } from './templates/about-template.js';
             }
         });
 
-        function _updateTwinSensors(nodes, isHero, elapsed) {
-            if (isHero) return;
-            if (nodes.IMU_Casing) {
-                nodes.IMU_Casing.rotation.x = Math.sin(elapsed * 3.4) * 0.14;
-                nodes.IMU_Casing.rotation.z = Math.cos(elapsed * 2.8) * 0.16;
-            }
-            if (nodes.IMU_Gimbal_Roll) nodes.IMU_Gimbal_Roll.rotation.x = Math.sin(elapsed * 3.4) * 0.35;
-            if (nodes.IMU_Gimbal_Pitch) nodes.IMU_Gimbal_Pitch.rotation.z = Math.cos(elapsed * 2.8) * 0.35;
-            if (nodes.IMU_Gimbal_Yaw) nodes.IMU_Gimbal_Yaw.rotation.y = elapsed * 1.8;
-
-            if (nodes.Rain_TippingBucket) {
-                const targetTilt = Math.sin(elapsed * 3.6) >= 0 ? 0.34 : -0.34;
-                nodes.Rain_TippingBucket.rotation.z += (targetTilt - nodes.Rain_TippingBucket.rotation.z) * 0.25;
-            }
-            if (nodes.Rain_FallingDrops) nodes.Rain_FallingDrops.position.y = -((elapsed * 1.6) % 1.0) * 0.15;
-            if (nodes.Piezo_WaterFlowParticles) nodes.Piezo_WaterFlowParticles.position.x = ((elapsed * 0.95) % 1.0 - 0.5) * 0.32;
-            if (nodes.Piezometer_Probe) nodes.Piezometer_Probe.position.y = Math.sin(elapsed * 3.0) * 0.015;
-        }
-
-        function _updateTwinPackets(glbPackets, elapsed) {
-            glbPackets.forEach(pk => {
-                const t = (elapsed * pk.speed + pk.phase) % 1.0;
-                const inv = 1.0 - t;
-                pk.obj.position.set(
-                    inv * inv * pk.p0.x + 2 * inv * t * pk.p1.x + t * t * pk.p2.x,
-                    inv * inv * pk.p0.y + 2 * inv * t * pk.p1.y + t * t * pk.p2.y,
-                    inv * inv * pk.p0.z + 2 * inv * t * pk.p1.z + t * t * pk.p2.z
-                );
-                pk.obj.rotation.y = elapsed * 2.5;
-            });
-        }
-
-        function _updateTwinVehicles(activeVehicles, elapsed, span, halfDepth) {
-            activeVehicles.forEach(v => {
-                const dir = v.north ? 1.0 : -1.0;
-                const rawRy = (((v.ry0 + 5.0 + dir * elapsed * v.speed) % span) + span) % span - 5.0;
-                const rc = 2.65 + 0.24 * Math.sin((rawRy / halfDepth) * 1.5);
-                const vx = rc + v.laneX;
-                const vz = sampleRoadElevation(rawRy) + 0.030;
-                const dxDy = 0.24 * (1.5 / halfDepth) * Math.cos((rawRy / halfDepth) * 1.5);
-                const yaw = v.north ? Math.atan2(dxDy, -1.0) : Math.atan2(-dxDy, 1.0);
-
-                v.obj.position.set(vx, vz, -rawRy);
-                v.obj.rotation.set(0, yaw, 0);
-
-                if (v.redLamp && v.blueLamp) {
-                    const flash = Math.sin(elapsed * 22.0) > 0;
-                    v.redLamp.scale.setScalar(flash ? 1.5 : 0.55);
-                    v.blueLamp.scale.setScalar(flash ? 0.55 : 1.5);
-                }
-                if (v.amberLamp) {
-                    const pulse = 0.75 + Math.abs(Math.sin(elapsed * 14.0)) * 0.80;
-                    v.amberLamp.scale.setScalar(pulse);
-                }
-            });
-        }
-
-        function _updateTwinHelicopters(heli1, heli1Rotor, heli1Tail, heliBeam1, heli2, heli2Rotor, heli2Tail, heliBeam2, elapsed) {
-            if (heli1) {
-                const hAng = elapsed * 0.38;
-                const hx = -0.35 + Math.cos(hAng) * 1.95;
-                const hy = -0.25 + Math.sin(hAng * 2.0) * 1.15;
-                const hz = 2.78 + Math.sin(hAng * 1.5) * 0.16;
-                const vx = -Math.sin(hAng) * 1.95;
-                const vzThree = -Math.cos(hAng * 2.0) * 2.30;
-                const hyaw = Math.atan2(vx, vzThree);
-                heli1.position.set(hx, hz, -hy);
-                heli1.rotation.set(0.09, hyaw, Math.sin(hAng) * 0.12);
-                if (heliBeam1) {
-                    heliBeam1.material.opacity = 0.14 + Math.abs(Math.sin(elapsed * 2.8)) * 0.12;
-                }
-            }
-            if (heli1Rotor) heli1Rotor.rotation.y = elapsed * 24.0;
-            if (heli1Tail) heli1Tail.rotation.x = elapsed * 32.0;
-
-            if (heli2) {
-                const hAng2 = elapsed * 0.34 + 1.2;
-                const hx2 = 4.05 + Math.sin(hAng2) * 1.10;
-                const hy2 = -0.85 + Math.cos(hAng2) * 0.95;
-                const hz2 = 2.18 + Math.cos(hAng2 * 2.0) * 0.12;
-                const vx2 = Math.cos(hAng2) * 1.10;
-                const vzThree2 = Math.sin(hAng2) * 0.95;
-                const hyaw2 = Math.atan2(vx2, vzThree2);
-                heli2.position.set(hx2, hz2, -hy2);
-                heli2.rotation.set(0.07, hyaw2, -Math.cos(hAng2) * 0.10);
-                if (heliBeam2) {
-                    heliBeam2.material.opacity = 0.12 + Math.abs(Math.cos(elapsed * 2.5)) * 0.10;
-                }
-            }
-            if (heli2Rotor) heli2Rotor.rotation.y = -elapsed * 24.0;
-            if (heli2Tail) heli2Tail.rotation.x = -elapsed * 32.0;
-        }
-
-        function _updateTwinDishes(nodes, isHero, elapsed) {
-            if (nodes.OpsBeaconCore) nodes.OpsBeaconCore.rotation.y = elapsed * 2.2;
-            if (nodes.OpsTrackingDish) {
-                nodes.OpsTrackingDish.rotation.y = Math.sin(elapsed * 0.65) * 0.55;
-                nodes.OpsTrackingDish.rotation.x = Math.cos(elapsed * 0.42) * 0.08;
-            }
-            if (nodes.OpsSecondaryDish) {
-                nodes.OpsSecondaryDish.rotation.y = -Math.sin(elapsed * 0.52) * 0.48;
-                nodes.OpsSecondaryDish.rotation.x = Math.sin(elapsed * 0.38) * 0.07;
-            }
-            if (!isHero && nodes.OpsHoloTerrain) {
-                nodes.OpsHoloTerrain.rotation.y = elapsed * 0.95;
-                nodes.OpsHoloTerrain.position.y = 0.51 + Math.sin(elapsed * 2.4) * 0.016;
-            }
-        }
-
-        function _updateTwinDrones(drone, lidarCone, drone2, lidarCone2, elapsed) {
-            if (drone) {
-                const dAng = elapsed * 0.55;
-                const bx = 2.15 + Math.cos(dAng) * 2.35;
-                const by = -0.65 + Math.sin(dAng * 2.0) * 0.85;
-                const bz = 1.15 + Math.sin(dAng * 1.5) * 0.18 + (bx < 1.2 ? (1.2 - bx) * 0.25 : 0);
-                drone.position.set(bx, bz, -by);
-                drone.rotation.set(
-                    Math.cos(dAng * 2.0) * 0.10,
-                    dAng + Math.PI * 0.5,
-                    Math.sin(dAng) * 0.12
-                );
-                if (lidarCone) {
-                    lidarCone.material.opacity = 0.15 + Math.abs(Math.sin(elapsed * 3.5)) * 0.12;
-                }
-            }
-            if (drone2) {
-                const dAng2 = elapsed * 0.48 + 1.4;
-                const bx2 = -1.35 + Math.sin(dAng2) * 1.85;
-                const by2 = 0.65 + Math.cos(dAng2 * 2.0) * 0.95;
-                const bz2 = 1.55 + Math.cos(dAng2 * 1.4) * 0.16 + Math.max(0, -bx2 * 0.22);
-                drone2.position.set(bx2, bz2, -by2);
-                drone2.rotation.set(
-                    Math.sin(dAng2 * 2.0) * 0.09,
-                    -dAng2,
-                    Math.cos(dAng2) * 0.10
-                );
-                if (lidarCone2) {
-                    lidarCone2.material.opacity = 0.14 + Math.abs(Math.cos(elapsed * 3.2)) * 0.12;
-                }
-            }
-        }
-
         const span = 10.0;
         const halfDepth = 5.4;
         return {
@@ -919,9 +924,9 @@ import { renderAboutTemplate } from './templates/about-template.js';
                 _updateTwinSensors(nodes, isHero, elapsed);
                 _updateTwinPackets(glbPackets, elapsed);
                 _updateTwinVehicles(activeVehicles, elapsed, span, halfDepth);
-                _updateTwinHelicopters(heli1, heli1Rotor, heli1Tail, heliBeam1, heli2, heli2Rotor, heli2Tail, heliBeam2, elapsed);
+                _updateTwinHelicopters(helis.h1, helis.h2, elapsed);
                 _updateTwinDishes(nodes, isHero, elapsed);
-                _updateTwinDrones(drone, lidarCone, drone2, lidarCone2, elapsed);
+                _updateTwinDrones(drones.d1, drones.d2, elapsed);
             }
         };
     }

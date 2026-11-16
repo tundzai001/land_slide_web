@@ -69,17 +69,39 @@ window.toggleCustomSensorForm = function() {
     if (!form.hidden) document.getElementById('custom-sensor-name')?.focus();
 };
 
+function _validateCustomSensorInputs(name, description, feedback) {
+    if (!name || !description) {
+        if (feedback) feedback.textContent = 'Nhập tên và mô tả cảm biến.';
+        document.getElementById(!name ? 'custom-sensor-name' : 'custom-sensor-description')?.focus();
+        return false;
+    }
+    return true;
+}
+
+function _onCustomSensorCreated(sensor, feedback) {
+    window.mountCustomSensorPreset(sensor);
+    const checkbox = document.getElementById(`edit-${sensor.key}`);
+    if (checkbox) {
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    for (const id of ['custom-sensor-name', 'custom-sensor-description', 'custom-sensor-unit']) {
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+    }
+    const form = document.getElementById('custom-sensor-form');
+    if (form) form.hidden = true;
+    if (feedback) feedback.textContent = '';
+}
+
 window.createCustomSensorPreset = async function() {
     const name = document.getElementById('custom-sensor-name')?.value.trim() || '';
     const description = document.getElementById('custom-sensor-description')?.value.trim() || '';
     const unit = document.getElementById('custom-sensor-unit')?.value.trim() || '';
     const feedback = document.getElementById('custom-sensor-feedback');
     const button = document.getElementById('btn-save-custom-sensor');
-    if (!name || !description) {
-        if (feedback) feedback.textContent = 'Nhập tên và mô tả cảm biến.';
-        document.getElementById(!name ? 'custom-sensor-name' : 'custom-sensor-description')?.focus();
-        return;
-    }
+    if (!_validateCustomSensorInputs(name, description, feedback)) return;
+
     if (button) button.disabled = true;
     if (feedback) feedback.textContent = 'Đang lưu cảm biến…';
     try {
@@ -93,12 +115,7 @@ window.createCustomSensorPreset = async function() {
             throw new Error(typeof body.detail === 'string' ? body.detail : 'Không lưu được cảm biến.');
         }
         const sensor = await response.json();
-        window.mountCustomSensorPreset(sensor);
-        const checkbox = document.getElementById(`edit-${sensor.key}`);
-        if (checkbox) { checkbox.checked = true; checkbox.dispatchEvent(new Event('change', {bubbles: true})); }
-        for (const id of ['custom-sensor-name', 'custom-sensor-description', 'custom-sensor-unit']) document.getElementById(id).value = '';
-        document.getElementById('custom-sensor-form').hidden = true;
-        if (feedback) feedback.textContent = '';
+        _onCustomSensorCreated(sensor, feedback);
     } catch (error) {
         if (feedback) feedback.textContent = error.message;
     } finally {
