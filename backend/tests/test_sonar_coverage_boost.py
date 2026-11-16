@@ -1100,5 +1100,17 @@ class SonarCoverageBoostTests(unittest.TestCase):
         mock_client.disconnect.assert_called_once()
         self.assertNotIn(b_key, mixin._sub_clients)
 
+    def test_query_router_advanced_payload(self):
+        from app.features.stations.query_router import _format_gnss_advanced_payload
+
+        self.assertIsNone(_format_gnss_advanced_payload(None))
+        raw = {"pos_e": 10.0, "pos_n": 20.0, "pos_u": 30.0}
+        formatted = _format_gnss_advanced_payload(raw)
+        self.assertEqual(formatted["adv_x"], 10.0)
+        self.assertEqual(formatted["adv_y"], 20.0)
+        self.assertEqual(formatted["adv_h"], 30.0)
+        self.assertEqual(formatted["adv_dx"], 0.0)
+
+
 
 

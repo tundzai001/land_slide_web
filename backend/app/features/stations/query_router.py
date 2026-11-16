@@ -492,6 +492,73 @@ async def get_station_history(
     }
 
 
+def _format_gnss_advanced_payload(latest_data: dict) -> dict:
+    if not latest_data or 'adv_x' in latest_data:
+        return latest_data
+    cloned = dict(latest_data)
+    cloned['adv_x'] = cloned.get('pos_e', cloned.get('lon', 0.0))
+    cloned['adv_y'] = cloned.get('pos_n', cloned.get('lat', 0.0))
+    cloned['adv_h'] = cloned.get('pos_u', cloned.get('h', 0.0))
+    cloned['adv_dx'] = 0.0
+    cloned['adv_dy'] = 0.0
+    cloned['adv_dh'] = 0.0
+    cloned['adv_vdx'] = 0.0
+    cloned['adv_vdy'] = 0.0
+    cloned['adv_vdh'] = 0.0
+    return cloned
+
+
+async def _fetch_device_sensor_history(db_data: AsyncSession, station_id: int, sensor_type: str, cutoff_time: int):
+    history_result = await db_data.execute(
+        select(model_data.SensorData.timestamp,
+               history_payload(model_data.SensorData.data, db_data.bind.dialect.name).label("data"))
+        .where(
+            and_(
+                model_data.SensorData.station_id == station_id,
+                model_data.SensorData.sensor_type == sensor_type,
+                model_data.SensorData.timestamp >= cutoff_time
+            )
+        )
+        .order_by(desc(model_data.SensorData.timestamp))
+        .limit(500)
+    )
+    history = history_result.all()
+    if sensor_type == 'gnss':
+        history = [
+            h for h in history
+            if isinstance(h.data, dict)
+            and (
+                h.data.get('speed_2d_mm_s') is not None
+                or (h.data.get('vel_e') is not None and h.data.get('vel_n') is not None)
+            )
+        ]
+    return history
+
+
+async def _fetch_station_pi_devices(db_config: AsyncSession, station_id: int, current_time: int) -> list:
+    pi_devices_status = []
+    try:
+        pi_result = await db_config.execute(
+            select(PiDevice).where(PiDevice.station_id == station_id)
+        )
+        pi_devs = pi_result.scalars().all()
+        PI_ONLINE_THRESHOLD = 300  # 5 phút
+        for pd in pi_devs:
+            is_online = (current_time - (pd.last_seen or 0)) < PI_ONLINE_THRESHOLD
+            pi_devices_status.append({
+                "id": pd.id,
+                "serial": pd.serial,
+                "name": pd.name,
+                "device_type": pd.device_type,
+                "is_online": is_online,
+                "last_seen": pd.last_seen,
+                "is_locked": pd.is_locked
+            })
+    except Exception as e:
+        logger.error(f"Error fetching Pi devices for station {station_id}: {e}")
+    return pi_devices_status
+
+
 @router.get("/api/stations/{station_id}/detail")
 async def get_station_detail(
     station_id: int,
@@ -593,42 +660,11 @@ async def get_station_detail(
             # Lấy lịch sử 24h
             history = []
             if include_history:
-                history_result = await db_data.execute(
-                    select(model_data.SensorData.timestamp,
-                           history_payload(model_data.SensorData.data, db_data.bind.dialect.name).label("data"))
-                    .where(
-                        and_(
-                            model_data.SensorData.station_id == station_id,
-                            model_data.SensorData.sensor_type == sensor_type,
-                            model_data.SensorData.timestamp >= cutoff_time
-                        )
-                    )
-                    .order_by(desc(model_data.SensorData.timestamp))
-                    .limit(500)
-                )
-                history = history_result.all()
-                if sensor_type == 'gnss':
-                    history = [
-                        h for h in history
-                        if isinstance(h.data, dict)
-                        and (
-                            h.data.get('speed_2d_mm_s') is not None
-                            or (h.data.get('vel_e') is not None and h.data.get('vel_n') is not None)
-                        )
-                    ]
+                history = await _fetch_device_sensor_history(db_data, station_id, sensor_type, cutoff_time)
 
             # ✅ Sửa lỗi "ảo": Tự động bù đắp dữ liệu Advanced cho trạm Offline/Dữ liệu cũ
-            if sensor_type == 'gnss' and latest_data and 'adv_x' not in latest_data:
-                latest_data = dict(latest_data) # Clone to modify
-                latest_data['adv_x'] = latest_data.get('pos_e', latest_data.get('lon', 0.0))
-                latest_data['adv_y'] = latest_data.get('pos_n', latest_data.get('lat', 0.0))
-                latest_data['adv_h'] = latest_data.get('pos_u', latest_data.get('h', 0.0))
-                latest_data['adv_dx'] = 0.0
-                latest_data['adv_dy'] = 0.0
-                latest_data['adv_dh'] = 0.0
-                latest_data['adv_vdx'] = 0.0
-                latest_data['adv_vdy'] = 0.0
-                latest_data['adv_vdh'] = 0.0
+            if sensor_type == 'gnss':
+                latest_data = _format_gnss_advanced_payload(latest_data)
 
             sensor_data[sensor_type] = {
                 "is_online": sensor_is_online,
@@ -680,26 +716,7 @@ async def get_station_detail(
         )
 
         # 4.5 Lấy Pi devices gắn với trạm (pi_point, pi_center)
-        pi_devices_status = []
-        try:
-            pi_result = await db_config.execute(
-                select(PiDevice).where(PiDevice.station_id == station_id)
-            )
-            pi_devs = pi_result.scalars().all()
-            PI_ONLINE_THRESHOLD = 300  # 5 phút
-            for pd in pi_devs:
-                is_online = (current_time - (pd.last_seen or 0)) < PI_ONLINE_THRESHOLD
-                pi_devices_status.append({
-                    "id": pd.id,
-                    "serial": pd.serial,
-                    "name": pd.name,
-                    "device_type": pd.device_type,
-                    "is_online": is_online,
-                    "last_seen": pd.last_seen,
-                    "is_locked": pd.is_locked
-                })
-        except Exception as e:
-            logger.error(f"Error fetching Pi devices for station {station_id}: {e}")
+        pi_devices_status = await _fetch_station_pi_devices(db_config, station_id, int(time.time()))
 
         # 5. Trả về response
         mqtt_connected = False
