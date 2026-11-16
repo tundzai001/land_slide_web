@@ -242,7 +242,7 @@ async def update_station_config(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"❌ Error updating station config: {e}", exc_info=True)
+        logger.exception(f"❌ Error updating station config: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi cập nhật cấu hình: {str(e)}")
 
 

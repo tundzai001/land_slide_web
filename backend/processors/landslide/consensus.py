@@ -183,5 +183,5 @@ class ConsensusAnalysisMixin:
             }
 
         except Exception as e:
-            logger.error(f"Error in cross-sensor consensus: {e}", exc_info=True)
+            logger.exception(f"Error in cross-sensor consensus: {e}")
             return {"available": False, "message": f"Lỗi: {str(e)}"}

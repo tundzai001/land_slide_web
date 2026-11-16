@@ -67,8 +67,11 @@ class IdleRoverGuardMixin:
                 )
                 await manager.restore_rover_stream(info["station_code"], client_info=client)
             except Exception as exc:
-                logger.error("Idle rover %s recovery not verified; retry after cooldown: %s",
-                             info["station_code"], exc)
+                logger.exception(
+                    "Idle rover %s recovery not verified; retry after cooldown: %s",
+                    info["station_code"],
+                    exc,
+                )
             else:
                 self._idle_rover_rtcm_seen.pop(key, None)
                 logger.info("Idle rover %s recovered: receiver ACK and fresh GGA/AGRICA verified, RTCM stopped",

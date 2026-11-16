@@ -261,7 +261,7 @@ async def create_station_in_project(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error creating station: {e}")
+        logger.exception(f"Error creating station: {e}")
         raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 
 
@@ -437,7 +437,7 @@ async def get_stations(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error loading stations: {e}", exc_info=True)
+        logger.exception(f"Error loading stations: {e}")
         raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 
 
@@ -555,7 +555,7 @@ async def _fetch_station_pi_devices(db_config: AsyncSession, station_id: int, cu
                 "is_locked": pd.is_locked
             })
     except Exception as e:
-        logger.error(f"Error fetching Pi devices for station {station_id}: {e}")
+        logger.exception(f"Error fetching Pi devices for station {station_id}: {e}")
     return pi_devices_status
 
 
@@ -745,6 +745,6 @@ async def get_station_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error loading station detail: {e}", exc_info=True)
+        logger.exception(f"Error loading station detail: {e}")
         raise HTTPException(status_code=500, detail=STATION_REQUEST_FAILED_DETAIL)
 

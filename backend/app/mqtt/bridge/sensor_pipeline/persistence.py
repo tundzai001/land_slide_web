@@ -38,7 +38,7 @@ class SensorPersistenceMixin:
         try:
             await self._upsert_latest_sensor_cache(station_id, sensor_type, current_timestamp, processed_data)
         except Exception as e:
-            logger.error(f"❌ LatestSensorCache upsert error: {e}")
+            logger.exception(f"❌ LatestSensorCache upsert error: {e}")
 
     async def _save_processed_data(
         self,
@@ -159,4 +159,4 @@ class SensorPersistenceMixin:
                     )
 
         except Exception as e:
-            logger.error(f"❌ DB Error: {e}")
+            logger.exception(f"❌ DB Error: {e}")

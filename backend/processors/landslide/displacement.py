@@ -281,5 +281,5 @@ class DisplacementAnalysisMixin:
             return None
 
         except Exception as e:
-            logger.error(f"Error analyzing GNSS for station {station_id}: {e}")
+            logger.exception(f"Error analyzing GNSS for station {station_id}: {e}")
             return None

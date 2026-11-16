@@ -132,5 +132,5 @@ class WindowAnalysisMixin:
             }
 
         except Exception as e:
-            logger.error(f"Error in calendar interval analysis: {e}", exc_info=True)
+            logger.exception(f"Error in calendar interval analysis: {e}")
             return {"available": False, "message": f"Lỗi: {str(e)}"}

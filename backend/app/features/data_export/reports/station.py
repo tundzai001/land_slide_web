@@ -210,5 +210,5 @@ async def export_station_pdf(
         logger.exception("reportlab not installed. Run: pip install reportlab")
         raise HTTPException(status_code=500, detail="Server missing reportlab library. Ask admin to: pip install reportlab")
     except Exception as e:
-        logger.error(f"❌ PDF export error: {e}", exc_info=True)
+        logger.exception(f"❌ PDF export error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

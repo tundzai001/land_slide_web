@@ -331,7 +331,7 @@ class AlertPersistenceMixin:
                 "stale_count": stale_count,
             }
         except Exception as e:
-            logger.error(f"❌ Error reading active alert summary for station {station_id}: {e}")
+            logger.exception(f"❌ Error reading active alert summary for station {station_id}: {e}")
             # Database uncertainty is not a safe reading.  Callers must keep
             # the last durable siren/alert state and avoid auto-stop actions.
             return {"risk_level": "UNKNOWN", "unresolved_count": 0, "degraded": True}

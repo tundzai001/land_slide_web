@@ -89,7 +89,7 @@ async def get_pending_devices(
 
         return out
     except Exception as e:
-        logger.error(f"Error fetching pending devices: {e}")
+        logger.exception(f"Error fetching pending devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -155,7 +155,7 @@ async def generate_license_for_device(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating license: {e}")
+        logger.exception(f"Error generating license: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -197,7 +197,7 @@ async def provision_device(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error provisioning device: {e}")
+        logger.exception(f"Error provisioning device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

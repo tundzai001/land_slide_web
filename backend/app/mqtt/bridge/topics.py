@@ -143,7 +143,7 @@ class MQTTTopicMixin:
                     client.loop_stop()
                     client.disconnect()
                 except Exception as e:
-                    logger.error(f"Error disconnecting client {b_key[0]}:{b_key[1]}: {e}")
+                    logger.exception(f"Error disconnecting client {b_key[0]}:{b_key[1]}: {e}")
                 self._sub_clients.pop(b_key, None)
                 self._client_topics.pop(b_key, None)
 
@@ -166,7 +166,7 @@ class MQTTTopicMixin:
                 client.tls_set_context(ssl.create_default_context())
                 logger.info(f"🔒 Enabled TLS for client {broker_host}:{broker_port}")
             except Exception as tls_e:
-                logger.error(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
+                logger.exception(f"❌ Failed to set TLS for {broker_host}:{broker_port}: {tls_e}")
                 return None
 
         try:
@@ -175,7 +175,7 @@ class MQTTTopicMixin:
             self._sub_clients[b_key] = client
             return client
         except Exception as conn_e:
-            logger.error(f"❌ Failed to connect dynamic client to {broker_host}:{broker_port}: {conn_e}")
+            logger.exception(f"❌ Failed to connect dynamic client to {broker_host}:{broker_port}: {conn_e}")
             return None
 
     def _sync_broker_subscriptions(self, b_key: tuple, new_topics: set):
@@ -192,7 +192,7 @@ class MQTTTopicMixin:
                 client.subscribe(t)
                 logger.info(f"   ✓ Dynamic Subscribed to {t} on {broker_host}:{broker_port}")
             except Exception as sub_e:
-                logger.error(f"❌ Failed to subscribe to {t} on {broker_host}:{broker_port}: {sub_e}")
+                logger.exception(f"❌ Failed to subscribe to {t} on {broker_host}:{broker_port}: {sub_e}")
 
         for t in current_topics - new_topics:
             try:
@@ -267,5 +267,5 @@ class MQTTTopicMixin:
             try:
                 await self._reload_topics_cycle()
             except Exception as e:
-                logger.error(f"Error reloading topics: {e}")
+                logger.exception(f"Error reloading topics: {e}")
             await asyncio.sleep(self.topic_reload_interval)

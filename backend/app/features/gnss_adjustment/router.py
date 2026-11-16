@@ -322,7 +322,7 @@ async def start_gnss_adjustment(
             "message": "Both rover streams now use the selected physical base; waiting for verified baseline collection.",
         }
     except Exception as e:
-        logger.error(f"Failed to start GNSS adjustment cycle: {e}")
+        logger.exception(f"Failed to start GNSS adjustment cycle: {e}")
         if (
             str(req.source or "manual") != "automatic_scheduler"
             and "project" in locals()
@@ -568,7 +568,7 @@ async def stop_gnss_adjustment(
         })
         return {"status": "success", "phase": "STOPPED", "message": "Adjustment cycle stopped; fixed Base topology restored"}
     except Exception as e:
-        logger.error(f"Failed to stop GNSS adjustment cycle: {e}")
+        logger.exception(f"Failed to stop GNSS adjustment cycle: {e}")
         if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=500, detail=str(e))
 

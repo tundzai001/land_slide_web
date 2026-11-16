@@ -1790,7 +1790,7 @@ class RoundRobinCycleMixin:
                         f"Khôi phục Base cố định {mp} thành công; chế độ stream ban đầu đã được áp dụng.",
                     )
                 except Exception as e:
-                    logger.error("Failed to restore fixed base %s in finally block: %s", mp, e)
+                    logger.exception("Failed to restore fixed base %s in finally block: %s", mp, e)
                     restore_errors.append(f"{mp}: {e}")
             for snapshot in reversed(list(disabled_conflict_bases.values())):
                 try:
@@ -1809,7 +1809,7 @@ class RoundRobinCycleMixin:
             try:
                 await self.restore_common_fixed_base_topology(project_id)
             except Exception as e:
-                logger.error(
+                logger.exception(
                     "Failed to restore common fixed-base topology for project %s: %s",
                     project_id,
                     e,
@@ -1877,7 +1877,7 @@ class RoundRobinCycleMixin:
                     if inspect.isawaitable(callback_result):
                         await callback_result
         except Exception as exc:
-            logger.error("Network adjustment failed for project %s: %s", project_id, exc)
+            logger.exception("Network adjustment failed for project %s: %s", project_id, exc)
             if self.error_callback:
                 callback_result = self.error_callback(project_id, str(exc))
                 if inspect.isawaitable(callback_result):

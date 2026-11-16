@@ -250,5 +250,5 @@ async def run_gnss_daily_rollup_daemon():
             logger.info("🛑 GNSS rollup daemon cancelled")
             raise
         except Exception as e:
-            logger.error(f"❌ GNSS rollup daemon error: {e}", exc_info=True)
+            logger.exception(f"❌ GNSS rollup daemon error: {e}")
             await asyncio.sleep(30)

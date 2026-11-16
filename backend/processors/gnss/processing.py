@@ -744,7 +744,7 @@ class GNSSProcessingMixin:
                         res_h_shift=float(vn_cfg.get("res_h_shift", 0.0))
                     )
                 except Exception as e:
-                    logger.error(f"Error parsing VN2000 custom params for device {self.device_id}: {e}")
+                    logger.exception(f"Error parsing VN2000 custom params for device {self.device_id}: {e}")
 
         # Calculate VN2000 NEH
         if forwarding_enabled:

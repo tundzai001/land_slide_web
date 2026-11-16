@@ -262,7 +262,7 @@ async def run_scheduled_adjustment(project_id: int):
                 refresh(int(project_id))
 
     except Exception as e:
-        logger.error(f"Error in scheduled auto-adjustment for project {project_id}: {e}", exc_info=True)
+        logger.exception(f"Error in scheduled auto-adjustment for project {project_id}: {e}")
         # Clean up any STARTING contexts that were registered before the failure
         if 'cluster_runs' in locals() and 'mqtt_service' in locals():
             for cluster_run in cluster_runs:

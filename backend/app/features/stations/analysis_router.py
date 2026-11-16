@@ -637,7 +637,7 @@ async def get_long_term_analysis(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in long-term analysis: {e}", exc_info=True)
+        logger.exception(f"Error in long-term analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -680,7 +680,7 @@ async def get_gnss_daily_summary(
             ]
         }
     except Exception as e:
-        logger.error(f"Error fetching GNSS daily summary: {e}", exc_info=True)
+        logger.exception(f"Error fetching GNSS daily summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -723,7 +723,7 @@ async def get_gnss_weekly_summary(
             ]
         }
     except Exception as e:
-        logger.error(f"Error fetching GNSS weekly summary: {e}", exc_info=True)
+        logger.exception(f"Error fetching GNSS weekly summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

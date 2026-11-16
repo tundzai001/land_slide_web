@@ -151,7 +151,7 @@ class MQTTAdjustmentMixin:
             )
         except Exception as exc:
             message = f"Bình sai đã tính xong nhưng không thể lưu bằng chứng GNSS: {exc}"
-            logger.error("Project %s run %s: %s", public_project_id, run_id, message, exc_info=True)
+            logger.exception("Project %s run %s: %s", public_project_id, run_id, message)
             await self._handle_round_robin_adjustment_error(run_id, message)
             return
         quality_gate = adjustment.get("quality_gate") or {}
@@ -305,7 +305,7 @@ class MQTTAdjustmentMixin:
         try:
             await self.round_robin_manager.restore_common_fixed_base_topology(run_id)
         except Exception as restore_exc:
-            logger.error(
+            logger.exception(
                 "Could not restore fixed-base topology for run %s: %s",
                 run_id,
                 restore_exc,

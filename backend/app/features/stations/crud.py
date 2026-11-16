@@ -39,7 +39,7 @@ async def delete_station(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"❌ Error deleting station: {e}", exc_info=True)
+        logger.exception(f"❌ Error deleting station: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi khi xóa trạm: {str(e)}")
 
 

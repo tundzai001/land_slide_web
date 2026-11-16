@@ -75,7 +75,7 @@ class SensorAlertAnalysisMixin:
 
             return None
         except Exception as e:
-            logger.error(f"Error analyzing RAIN for station {station_id}: {e}", exc_info=True)
+            logger.exception(f"Error analyzing RAIN for station {station_id}: {e}")
             return None
 
     def analyze_water_level(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
@@ -157,7 +157,7 @@ class SensorAlertAnalysisMixin:
 
             return None
         except Exception as e:
-            logger.error(f"Error analyzing WATER for station {station_id}: {e}", exc_info=True)
+            logger.exception(f"Error analyzing WATER for station {station_id}: {e}")
             return None
 
     def analyze_tilt(self, station_id: int, recent_data: List[Dict], config: Dict) -> Optional[Dict]:
@@ -261,5 +261,5 @@ class SensorAlertAnalysisMixin:
 
             return None
         except Exception as e:
-            logger.error(f"Error analyzing IMU for station {station_id}: {e}", exc_info=True)
+            logger.exception(f"Error analyzing IMU for station {station_id}: {e}")
             return None

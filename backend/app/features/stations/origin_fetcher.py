@@ -120,7 +120,7 @@ class GNSSLiveFetcher:
             else:
                 logger.warning(f"[GNSSLiveFetcher] Parse failed or invalid fix_quality: {parsed}")
         except Exception as e:
-            logger.error(f"[GNSSLiveFetcher] Exception processing message: {e}")
+            logger.exception(f"[GNSSLiveFetcher] Exception processing message: {e}")
 
     async def fetch_origin(self, topic: str, timeout: int = 30) -> Optional[dict]:
         try:
@@ -151,5 +151,5 @@ class GNSSLiveFetcher:
             client.loop_stop()
             return self.received_data
         except Exception as e:
-            logger.error(f"Error in fetch_origin: {e}")
+            logger.exception(f"Error in fetch_origin: {e}")
             return None

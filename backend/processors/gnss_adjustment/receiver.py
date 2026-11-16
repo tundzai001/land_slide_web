@@ -725,7 +725,7 @@ class RoundRobinReceiverMixin:
                 try:
                     await self._stop_ntrip_route(rover_code)
                 except Exception as exc:
-                    logger.error("Could not stop temporary NTRIP route for %s: %s", rover_code, exc)
+                    logger.exception("Could not stop temporary NTRIP route for %s: %s", rover_code, exc)
 
             if before_rover_restore:
                 try:
@@ -744,7 +744,7 @@ class RoundRobinReceiverMixin:
                         f"Could not restore fixed BASE before returning {rover_code} "
                         f"to ROVER: {str(wake_exc) or wake_exc.__class__.__name__}"
                     )
-                    logger.error(restore_error)
+                    logger.exception(restore_error)
 
             # A temporary base must never be left in BASE mode. Restore the
             # receiver without FRESET so its persistent NTRIP setup and baud
@@ -771,7 +771,7 @@ class RoundRobinReceiverMixin:
                         f"Could not restore {rover_code} to ROVER mode: "
                         f"{str(restore_exc) or restore_exc.__class__.__name__}"
                     )
-                    logger.error(restore_error)
+                    logger.exception(restore_error)
             if restored:
                 await self._emit_progress(
                     project_id,
@@ -788,7 +788,7 @@ class RoundRobinReceiverMixin:
                             f"not return to Sleep: "
                             f"{str(sleep_exc) or sleep_exc.__class__.__name__}"
                         )
-                        logger.error(restore_error)
+                        logger.exception(restore_error)
             await asyncio.sleep(5)
         if restore_error:
             raise RuntimeError(restore_error) from operation_error

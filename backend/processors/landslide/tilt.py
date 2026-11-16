@@ -129,5 +129,5 @@ class TiltAnalysisMixin:
             }
             
         except Exception as e:
-            logger.error(f"Error in long-term tilt analysis: {e}", exc_info=True)
+            logger.exception(f"Error in long-term tilt analysis: {e}")
             return {"status": "error", "message": f"Lỗi: {str(e)}"}

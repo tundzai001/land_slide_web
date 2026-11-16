@@ -396,6 +396,6 @@ class RainfallAnalysisMixin:
             return result
 
         except Exception as e:
-            logger.error(f"Error in rainfall-displacement correlation: {e}", exc_info=True)
+            logger.exception(f"Error in rainfall-displacement correlation: {e}")
             result["message"] = f"Lỗi: {str(e)}"
             return result

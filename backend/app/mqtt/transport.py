@@ -204,7 +204,7 @@ class MQTTTransportMixin:
                 "sensor-pipeline",
             )
         except Exception as e:
-            logger.error(f"Error in on_message: {e}")
+            logger.exception(f"Error in on_message: {e}")
 
     def _handle_ntrip_command(self, msg):
         try:
@@ -255,7 +255,7 @@ class MQTTTransportMixin:
                             "ntrip-route-stop",
                         )
         except Exception as e:
-            logger.error(f"[NTRIP COMMAND] Error processing command: {e}")
+            logger.exception(f"[NTRIP COMMAND] Error processing command: {e}")
 
     async def _start_round_robin_ntrip_route(
         self,
@@ -317,7 +317,7 @@ class MQTTTransportMixin:
         try:
             await ntrip_manager.wait_for_rtcm(station_code, timeout=timeout)
         except Exception:
-            logger.error(
+            logger.exception(
                 "[Round-Robin RTCM] station=%s fanout verification failed diagnostics=%s",
                 station_code,
                 ntrip_manager.get_diagnostics(station_code),
@@ -353,7 +353,7 @@ class MQTTTransportMixin:
             self.client.loop_start()
             logger.info("MQTT network loop started for %s:%s; awaiting broker connection", self.runtime_mqtt["broker"], self.runtime_mqtt["port"])
         except Exception as e:
-            logger.error(f"❌ Failed to start MQTT Bridge: {e}")
+            logger.exception(f"❌ Failed to start MQTT Bridge: {e}")
 
     async def stop(self):
         logger.info("🛑 Stopping MQTT Bridge...")

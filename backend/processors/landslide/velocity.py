@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from .helpers import Any, Dict, List, Optional, OrderedDict, datetime, defaultdict, deque, logger, math, np, time
 
+MM_DAY = "mm/day"
+MM_YEAR = "mm/year"
+M_YEAR = "m/year"
+M_MONTH = "m/month"
+M_MINUTE = "m/min"
+MM_MINUTE = "mm/min"
+M_DAY = "m/day"
+CM_DAY = "cm/day"
+CM_YEAR = "cm/year"
+
 
 class VelocityAnalysisMixin:
     def analyze_long_term_velocity(
@@ -187,7 +197,7 @@ class VelocityAnalysisMixin:
             }
 
         except Exception as e:
-            logger.error(f"Error in long-term analysis: {e}", exc_info=True)
+            logger.exception(f"Error in long-term analysis: {e}")
             return {"status": "error", "message": f"Lỗi: {str(e)}"}
 
     def _classify_velocity_extended(
@@ -203,17 +213,17 @@ class VelocityAnalysisMixin:
             u = str(raw_unit or 'mm/s').strip().lower().replace(' ', '')
             aliases = {
                 'mm/s': 'mm/s', 'mmps': 'mm/s', 'mm/sec': 'mm/s', 'mm/second': 'mm/s', 'mm/giây': 'mm/s',
-                'mm/day': 'mm/day', 'mm/d': 'mm/day', 'mm/ngày': 'mm/day',
-                'mm/year': 'mm/year', 'mm/y': 'mm/year', 'mm/năm': 'mm/year',
-                'm/year': 'm/year', 'm/y': 'm/year', 'm/năm': 'm/year',
-                'm/month': 'm/month', 'm/mo': 'm/month', 'm/tháng': 'm/month',
+                'mm/day': MM_DAY, 'mm/d': MM_DAY, 'mm/ngày': MM_DAY,
+                'mm/year': MM_YEAR, 'mm/y': MM_YEAR, 'mm/năm': MM_YEAR,
+                'm/year': M_YEAR, 'm/y': M_YEAR, 'm/năm': M_YEAR,
+                'm/month': M_MONTH, 'm/mo': M_MONTH, 'm/tháng': M_MONTH,
                 'm/hr': 'm/hr', 'm/h': 'm/hr', 'm/hour': 'm/hr', 'm/giờ': 'm/hr',
-                'm/min': 'm/min', 'm/phút': 'm/min',
-                'mm/min': 'mm/min', 'mm/phút': 'mm/min',
+                'm/min': M_MINUTE, 'm/phút': M_MINUTE,
+                'mm/min': MM_MINUTE, 'mm/phút': MM_MINUTE,
                 'm/s': 'm/s', 'm/sec': 'm/s', 'm/giây': 'm/s',
-                'm/day': 'm/day', 'm/d': 'm/day', 'm/ngày': 'm/day',
-                'cm/day': 'cm/day', 'cm/ngày': 'cm/day',
-                'cm/year': 'cm/year', 'cm/năm': 'cm/year',
+                'm/day': M_DAY, 'm/d': M_DAY, 'm/ngày': M_DAY,
+                'cm/day': CM_DAY, 'cm/ngày': CM_DAY,
+                'cm/year': CM_YEAR, 'cm/năm': CM_YEAR,
             }
             return aliases.get(u, u)
 
@@ -222,11 +232,11 @@ class VelocityAnalysisMixin:
             if not d:
                 return None
             if 'mm/year' in d or 'mm/y' in d or 'mm/n' in d:
-                return 'mm/year'
+                return MM_YEAR
             if 'm/year' in d or 'm/y' in d or 'm/n' in d:
-                return 'm/year'
+                return M_YEAR
             if 'm/month' in d or 'm/mo' in d or 'm/th' in d:
-                return 'm/month'
+                return M_MONTH
             if 'm/hour' in d or 'm/hr' in d or 'm/h' in d or 'm/gi' in d:
                 return 'm/hr'
             # IMPORTANT: check mm/s BEFORE m/s (because 'mm/s' contains 'm/s')
@@ -234,15 +244,15 @@ class VelocityAnalysisMixin:
                 return 'mm/s'
             # Check mm/min before m/min
             if 'mm/min' in d or 'mm/ph' in d:
-                return 'mm/min'
+                return MM_MINUTE
             if 'm/min' in d or 'm/ph' in d:
-                return 'm/min'
+                return M_MINUTE
             if 'm/s' in d:
                 return 'm/s'
             if 'mm/day' in d or 'mm/ng' in d:
-                return 'mm/day'
+                return MM_DAY
             if 'm/day' in d or 'm/ng' in d:
-                return 'm/day'
+                return M_DAY
             return None
 
         # Bảng Cruden & Varnes chuẩn (hardcoded) — luôn đúng
@@ -258,18 +268,18 @@ class VelocityAnalysisMixin:
 
         def _convert_threshold_to_mm_s(thresh: float, unit: str) -> float:
             """Chuyển đổi threshold về mm/s để so sánh thống nhất."""
-            if unit == 'mm/year':   return thresh / 31536000
+            if unit == MM_YEAR:   return thresh / 31536000
             if unit == 'mm/month':  return thresh / (30 * 86400)
-            if unit == 'mm/day':    return thresh / 86400
-            if unit == 'm/year':    return (thresh * 1000) / 31536000
-            if unit == 'm/month':   return (thresh * 1000) / (30 * 86400)
-            if unit == 'm/day':     return (thresh * 1000) / 86400
+            if unit == MM_DAY:    return thresh / 86400
+            if unit == M_YEAR:    return (thresh * 1000) / 31536000
+            if unit == M_MONTH:   return (thresh * 1000) / (30 * 86400)
+            if unit == M_DAY:     return (thresh * 1000) / 86400
             if unit == 'm/hr':      return (thresh * 1000) / 3600
-            if (unit == 'm/min'):     return (thresh * 1000) / 60
-            if (unit == 'mm/min'):    return thresh / 60
+            if unit == M_MINUTE:     return (thresh * 1000) / 60
+            if unit == MM_MINUTE:    return thresh / 60
             if (unit == 'm/s'):       return thresh * 1000
-            if unit == 'cm/day':    return (thresh * 10) / 86400
-            if unit == 'cm/year':   return (thresh * 10) / 31536000
+            if unit == CM_DAY:    return (thresh * 10) / 86400
+            if unit == CM_YEAR:   return (thresh * 10) / 31536000
             if unit == 'mm/s':      return thresh
             return thresh
 
@@ -488,7 +498,7 @@ class VelocityAnalysisMixin:
             return round(ci_95_year, 2)
             
         except Exception as e:
-            logger.error(f"Error calculating OLS CI: {e}")
+            logger.exception(f"Error calculating OLS CI: {e}")
             return 0.0
 
     def _detect_cusum_change_points(self, sorted_data: List[Dict]) -> Dict:
@@ -554,7 +564,7 @@ class VelocityAnalysisMixin:
             return {"has_change": False, "message": ""}
             
         except Exception as e:
-            logger.error(f"Error in CUSUM: {e}")
+            logger.exception(f"Error in CUSUM: {e}")
             return {"has_change": False, "message": ""}
 
     def _inverse_velocity_analysis(self, sorted_data: List[Dict], window_days: float = 3.0) -> Dict[str, Any]:
@@ -659,6 +669,6 @@ class VelocityAnalysisMixin:
             return result
 
         except Exception as e:
-            logger.error(f"Error in inverse velocity analysis: {e}", exc_info=True)
+            logger.exception(f"Error in inverse velocity analysis: {e}")
             result["message"] = f"Lỗi phân tích: {str(e)}"
             return result

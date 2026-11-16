@@ -293,7 +293,7 @@ class GNSSRuntimeMixin:
                 await db.commit()
             return True
         except Exception as exc:
-            logger.error(f"[{self._log_prefix()}] Failed to persist GNSS runtime state: {exc}")
+            logger.exception(f"[{self._log_prefix()}] Failed to persist GNSS runtime state: {exc}")
             return False
 
     async def _runtime_state_save_loop(self):

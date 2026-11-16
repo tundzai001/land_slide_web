@@ -384,7 +384,7 @@ class MQTTPointClient:
                 if cmd == 'reset':
                     is_continuous_alert = False
                     light_off()
-        except:
+        except Exception:
             pass
 
     def _handle_install_license(self, data):
@@ -403,7 +403,7 @@ class MQTTPointClient:
                     import requests
                     requests.post(f"{BACKEND_URL}/api/field/pi-devices/{data.get('device_id')}/confirm", 
                         json={"activated": True, "serial": local_code}, timeout=5)
-                except: pass
+                except Exception: pass
             else:
                 logger.warning("❌ License mismatch")
         except Exception as e:
@@ -429,7 +429,7 @@ class MQTTPointClient:
             self.client.subscribe(self.topic_alert)
             self.client.subscribe(self.topic_command)
             logger.info(f"🔄 Point moved to station {new_station}")
-        except: pass
+        except Exception: pass
 
     def _handle_reset(self):
         if LOCAL_CONFIG.exists(): LOCAL_CONFIG.unlink()
@@ -444,14 +444,14 @@ class MQTTPointClient:
                 with open(LOCAL_CONFIG, 'r') as f: cfg = json.load(f)
             cfg['is_locked'] = locked
             with open(LOCAL_CONFIG, 'w') as f: json.dump(cfg, f)
-        except: pass
+        except Exception: pass
 
     def _load_lock_state(self):
         try:
             if LOCAL_CONFIG.exists():
                 with open(LOCAL_CONFIG, 'r') as f:
                     self.is_locked = json.load(f).get('is_locked', False)
-        except: pass
+        except Exception: pass
         
     def _on_disconnect(self, client, userdata, rc):
         pass

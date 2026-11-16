@@ -38,7 +38,7 @@ class GNSSOriginMixin:
                 logger.warning(f"⚠️ Device {self.device_id}: Init outside event loop, origin will be collected manually.")
                 self._initialization_complete = True
         except Exception as e:
-            logger.error(f"❌ Device {self.device_id}: Error scheduling DB load: {e}")
+            logger.exception(f"❌ Device {self.device_id}: Error scheduling DB load: {e}")
             self._initialization_complete = True
 
     async def _async_load_origin_task(self):
@@ -225,7 +225,7 @@ class GNSSOriginMixin:
                     })
                 
         except Exception as e:
-            logger.error(f"❌ Error saving origin to DB: {e}", exc_info=True)
+            logger.exception(f"❌ Error saving origin to DB: {e}")
 
     async def relock_origin(
         self,
@@ -536,7 +536,7 @@ class GNSSOriginMixin:
                     return True
                 return False
         except Exception as e:
-            logger.error(f"❌ Error persisting tracking offset for device {self.device_id}: {e}")
+            logger.exception(f"❌ Error persisting tracking offset for device {self.device_id}: {e}")
             return False
 
     async def recalibrate_tracking_offset(

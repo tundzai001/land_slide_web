@@ -620,7 +620,7 @@ async def _export_excel_task(task_id: str, request: ExportExcelRequest, selected
         EXPORT_TASKS[task_id]["filename"] = filename
 
     except Exception as e:
-        logger.error(f"Excel full export background task failed: {e}", exc_info=True)
+        logger.exception(f"Excel full export background task failed: {e}")
         EXPORT_TASKS[task_id]["status"] = "error"
         EXPORT_TASKS[task_id]["error"] = str(e)
         EXPORT_TASKS[task_id]["message"] = "Xuất dữ liệu thất bại"
