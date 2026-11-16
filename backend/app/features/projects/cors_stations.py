@@ -146,6 +146,37 @@ def _normalize_cors_base_stations(raw_stations: Any) -> List[Dict[str, Any]]:
     return sorted(stations, key=lambda station: station["name"])
 
 
+def _should_return_cached_cors(managed_key_url: bool, cache_age: float) -> bool:
+    return (
+        not managed_key_url
+        and _cors_base_stations_cache_has_value
+        and cache_age <= CORS_BASE_STATIONS_CACHE_TTL_SECONDS
+    )
+
+
+def _check_cors_retry_cooldown(managed_key_url: bool, since_last_attempt: float, cache_age: float) -> bool:
+    if managed_key_url or since_last_attempt >= CORS_BASE_STATIONS_RETRY_SECONDS:
+        return False
+    if _cors_base_stations_cache_has_value and cache_age <= CORS_BASE_STATIONS_STALE_TTL_SECONDS:
+        return True
+    if _cors_base_stations_last_error is not None:
+        raise requests.ConnectionError("CORS refresh retry cooldown is active") from _cors_base_stations_last_error
+    return False
+
+
+def _handle_cors_fetch_exception(exc: requests.RequestException, managed_key_url: bool, cache_age: float):
+    global _cors_base_stations_cache, _cors_base_stations_cache_has_value, _cors_base_stations_last_error
+    _cors_base_stations_last_error = exc
+    if isinstance(exc, requests.HTTPError) and exc.response is not None and exc.response.status_code in (401, 403):
+        _cors_base_stations_cache = []
+        _cors_base_stations_cache_has_value = False
+        raise exc
+    if not managed_key_url and _cors_base_stations_cache_has_value and cache_age <= CORS_BASE_STATIONS_STALE_TTL_SECONDS:
+        logger.warning("CORS base station refresh failed; serving %.1fs stale cache: %s", cache_age, exc)
+        return copy.deepcopy(_cors_base_stations_cache)
+    raise exc
+
+
 def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
     global _cors_base_stations_cache
     global _cors_base_stations_cache_has_value
@@ -162,24 +193,12 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
         now = time.monotonic()
         cache_age = now - _cors_base_stations_cache_updated_monotonic
         managed_key_url = "/api/integrations/stations" in CORS_BASE_STATIONS_URL
-        if (
-            not managed_key_url
-            and _cors_base_stations_cache_has_value
-            and cache_age <= CORS_BASE_STATIONS_CACHE_TTL_SECONDS
-        ):
+        if _should_return_cached_cors(managed_key_url, cache_age):
             return copy.deepcopy(_cors_base_stations_cache)
 
         since_last_attempt = now - _cors_base_stations_last_attempt_monotonic
-        if not managed_key_url and since_last_attempt < CORS_BASE_STATIONS_RETRY_SECONDS:
-            if (
-                _cors_base_stations_cache_has_value
-                and cache_age <= CORS_BASE_STATIONS_STALE_TTL_SECONDS
-            ):
-                return copy.deepcopy(_cors_base_stations_cache)
-            if _cors_base_stations_last_error is not None:
-                raise requests.ConnectionError(
-                    "CORS refresh retry cooldown is active"
-                ) from _cors_base_stations_last_error
+        if _check_cors_retry_cooldown(managed_key_url, since_last_attempt, cache_age):
+            return copy.deepcopy(_cors_base_stations_cache)
 
         _cors_base_stations_last_attempt_monotonic = now
         try:
@@ -193,24 +212,7 @@ def _fetch_cors_base_stations_sync() -> List[Dict[str, Any]]:
             raw_stations = payload.get("value") if isinstance(payload, dict) else payload
             stations = _normalize_cors_base_stations(raw_stations)
         except requests.RequestException as exc:
-            _cors_base_stations_last_error = exc
-            if (isinstance(exc, requests.HTTPError) and exc.response is not None
-                    and exc.response.status_code in (401, 403)):
-                _cors_base_stations_cache = []
-                _cors_base_stations_cache_has_value = False
-                raise
-            if (
-                not managed_key_url
-                and _cors_base_stations_cache_has_value
-                and cache_age <= CORS_BASE_STATIONS_STALE_TTL_SECONDS
-            ):
-                logger.warning(
-                    "CORS base station refresh failed; serving %.1fs stale cache: %s",
-                    cache_age,
-                    exc,
-                )
-                return copy.deepcopy(_cors_base_stations_cache)
-            raise
+            return _handle_cors_fetch_exception(exc, managed_key_url, cache_age)
 
         _cors_base_stations_cache = copy.deepcopy(stations)
         _cors_base_stations_cache_has_value = True

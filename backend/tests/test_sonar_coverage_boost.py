@@ -930,3 +930,20 @@ class SonarCoverageBoostTests(unittest.TestCase):
             self.assertEqual(c, "operations")
 
         asyncio.run(run_ws())
+
+    def test_cors_stations_helpers(self):
+        from app.features.projects.cors_stations import (
+            _should_return_cached_cors,
+            _check_cors_retry_cooldown,
+            _handle_cors_fetch_exception,
+        )
+        import requests
+
+        self.assertFalse(_should_return_cached_cors(True, 10.0))
+        self.assertFalse(_check_cors_retry_cooldown(True, 5.0, 10.0))
+
+        # Check HTTPError 401 raises
+        mock_resp = MagicMock(status_code=401)
+        http_err = requests.HTTPError(response=mock_resp)
+        with self.assertRaises(requests.HTTPError):
+            _handle_cors_fetch_exception(http_err, False, 10.0)
