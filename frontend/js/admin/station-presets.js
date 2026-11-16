@@ -280,9 +280,9 @@ class AdminStationPresetsFeature extends window.AdminManager {
         const h = document.getElementById(`${prefix}-h`)?.value;
 
         if (lat && lon) {
-            cfg.lat = parseFloat(lat);
-            cfg.lon = parseFloat(lon);
-            cfg.h = parseFloat(h) || 0;
+            cfg.lat = Number.parseFloat(lat);
+            cfg.lon = Number.parseFloat(lon);
+            cfg.h = Number.parseFloat(h) || 0;
         }
         return { config: cfg };
     }
