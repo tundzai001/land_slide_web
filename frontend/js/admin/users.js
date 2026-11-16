@@ -78,6 +78,9 @@ class AdminUsersFeature extends window.AdminManager {
             const toggleTitle = u.is_active ? 'Khóa tài khoản' : 'Mở khóa';
             const toggleLabel = u.is_active ? 'Khóa' : 'Mở khóa';
             const toggleIcon = u.is_active ? 'lock' : 'unlock';
+            const statusClass = u.is_active ? 'is-active' : 'is-locked';
+            const statusIcon = u.is_active ? 'check-circle' : 'lock';
+            const statusText = u.is_active ? 'Hoạt động' : 'Đã khóa';
             const adminActions = u.username === 'admin' ? '' : `
                         <button class="btn btn-outline-${toggleBtnClass} management-icon-btn" onclick="window.adminManager.toggleUserStatus(${u.id}, ${!u.is_active})" title="${toggleTitle}" aria-label="${toggleLabel} ${this.escapeUserValue(u.username)}">
                             <i class="bi bi-${toggleIcon}"></i>
@@ -94,9 +97,9 @@ class AdminUsersFeature extends window.AdminManager {
                 <td>${roleBadge(u.role)}${projectBadges}</td>
                 <td>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="management-status ${u.is_active ? 'is-active' : 'is-locked'}">
-                            <i class="bi bi-${u.is_active ? 'check-circle' : 'lock'}" aria-hidden="true"></i>
-                            ${u.is_active ? 'Hoạt động' : 'Đã khóa'}
+                        <span class="management-status ${statusClass}">
+                            <i class="bi bi-${statusIcon}" aria-hidden="true"></i>
+                            ${statusText}
                         </span>
                     </div>
                 </td>

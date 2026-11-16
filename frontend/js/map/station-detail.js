@@ -475,9 +475,15 @@ function formatImuDelta(val, axis) {
     const sign = dispMm > 0 ? '+' : '';
     // Ưu tiên cm; chỉ dùng mm khi |giá trị| < 1 cm
     const absMm = Math.abs(dispMm);
-    const [displayVal, unit] = absMm >= 10
-        ? [(dispMm / 10).toFixed(2), 'cm']
-        : [dispMm.toFixed(1), 'mm'];
+    let displayVal;
+    let unit;
+    if (absMm >= 10) {
+        displayVal = (dispMm / 10).toFixed(2);
+        unit = 'cm';
+    } else {
+        displayVal = dispMm.toFixed(1);
+        unit = 'mm';
+    }
     const threshold = unit === 'cm' ? 0.05 : 0.5;
     const positiveArrows = { roll: ' →', pitch: ' ↑', yaw: ' ↻' };
     const negativeArrows = { roll: ' ←', pitch: ' ↓', yaw: ' ↺' };
