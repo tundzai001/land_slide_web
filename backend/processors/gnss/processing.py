@@ -141,6 +141,67 @@ class GNSSProcessingMixin:
             samples.clear()
         samples.append({"ts": float(timestamp), "wgs": dict(point["wgs"])})
 
+    def _evaluate_origin_candidates(self) -> Optional[dict]:
+        if len(self.origin_candidates) < self.required_points:
+            return None
+        lats = [p['lat'] for p in self.origin_candidates]
+        lons = [p['lon'] for p in self.origin_candidates]
+        hs = [p['h'] for p in self.origin_candidates]
+
+        center_lat = float(np.median(lats))
+        center_lon = float(np.median(lons))
+        center_h = float(np.median(hs))
+
+        max_dist_xy = max(
+            haversine_2d(center_lat, center_lon, p['lat'], p['lon'])
+            for p in self.origin_candidates
+        )
+        max_dist_u = max(
+            abs(p['h'] - center_h)
+            for p in self.origin_candidates
+        )
+
+        max_xy = getattr(self, 'origin_max_xy_spread_m', getattr(self, 'max_spread_m', 0.5))
+        max_u = getattr(self, 'origin_max_u_spread_m', 1.0)
+
+        if max_dist_xy <= max_xy and max_dist_u <= max_u:
+            self.origin = {
+                'lat': center_lat,
+                'lon': center_lon,
+                'h': center_h,
+                'R': self._get_rotation_matrix(center_lat, center_lon),
+                'ecef': self._gngga_to_ecef(center_lat, center_lon, center_h)
+            }
+            self.state = "ORIGIN_LOCKED"
+            self._needs_boot_anchor = True
+            logger.info(
+                f"ORIGIN LOCKED (Device {self.device_id}): ({center_lat:.6f}, {center_lon:.6f}, {center_h:.3f}m), "
+                f"Spread XY: {max_dist_xy:.3f}m (max={max_xy}m), U: {max_dist_u:.3f}m (max={max_u}m)"
+            )
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._save_origin_to_db())
+            except RuntimeError:
+                logger.warning("Cannot save origin: No running event loop")
+
+            return {
+                "type": "origin_locked",
+                "data": {
+                    'lat': float(center_lat),
+                    'lon': float(center_lon),
+                    'h': float(center_h)
+                }
+            }
+
+        self.origin_candidates.clear()
+        self._last_origin_candidate_ts = None
+        self.stats['origin_resets'] += 1
+        return {
+            "type": "origin_reset",
+            "message": f"Spread too high (XY={max_dist_xy:.3f}m > {max_xy}m, U={max_dist_u:.3f}m > {max_u}m)"
+        }
+
     def _handle_origin_collection(self, gngga_string, fix_quality, station_config: Dict = None):
         # Origin candidates must be one uninterrupted RTK-quality acquisition epoch.
         required_fix = getattr(self, "min_fix_quality", 4)
@@ -188,66 +249,9 @@ class GNSSProcessingMixin:
         self._last_origin_candidate_ts = candidate_ts
         self.origin_candidates.append(point['wgs'])
         
-        if len(self.origin_candidates) >= self.required_points:
-            lats = [p['lat'] for p in self.origin_candidates]
-            lons = [p['lon'] for p in self.origin_candidates]
-            hs = [p['h'] for p in self.origin_candidates]
-            
-            center_lat = float(np.median(lats))
-            center_lon = float(np.median(lons))
-            center_h = float(np.median(hs))
-            
-            max_dist_xy = max(
-                haversine_2d(center_lat, center_lon, p['lat'], p['lon']) 
-                for p in self.origin_candidates
-            )
-            max_dist_u = max(
-                abs(p['h'] - center_h)
-                for p in self.origin_candidates
-            )
-
-            max_xy = getattr(self, 'origin_max_xy_spread_m', getattr(self, 'max_spread_m', 0.5))
-            max_u = getattr(self, 'origin_max_u_spread_m', 1.0)
-
-            if max_dist_xy <= max_xy and max_dist_u <= max_u:
-                self.origin = {
-                    'lat': center_lat, 
-                    'lon': center_lon, 
-                    'h': center_h, 
-                    'R': self._get_rotation_matrix(center_lat, center_lon),
-                    'ecef': self._gngga_to_ecef(center_lat, center_lon, center_h)
-                }
-                self.state = "ORIGIN_LOCKED"
-                self._needs_boot_anchor = True
-                logger.info(
-                    f"ORIGIN LOCKED (Device {self.device_id}): ({center_lat:.6f}, {center_lon:.6f}, {center_h:.3f}m), "
-                    f"Spread XY: {max_dist_xy:.3f}m (max={max_xy}m), U: {max_dist_u:.3f}m (max={max_u}m)"
-                )
-                
-                # ✅ Save Async
-                import asyncio
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self._save_origin_to_db())
-                except RuntimeError:
-                    logger.warning("Cannot save origin: No running event loop")
-                
-                return {
-                    "type": "origin_locked",
-                    "data": {
-                        'lat': float(center_lat),
-                        'lon': float(center_lon),
-                        'h': float(center_h)
-                    }
-                }
-            else:
-                self.origin_candidates.clear()
-                self._last_origin_candidate_ts = None
-                self.stats['origin_resets'] += 1
-                return {
-                    "type": "origin_reset",
-                    "message": f"Spread too high (XY={max_dist_xy:.3f}m > {max_xy}m, U={max_dist_u:.3f}m > {max_u}m)"
-                }
+        eval_res = self._evaluate_origin_candidates()
+        if eval_res is not None:
+            return eval_res
         
         return {
             "type": "origin_collecting",

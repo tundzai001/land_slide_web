@@ -167,6 +167,29 @@ class RoundRobinCorsMixin:
         return str(parsed.hostname or raw).strip().lower().rstrip(".")
 
 
+    def _match_cors_station_servers(
+        self, station: dict, target: str, target_host: str, target_serial: str, target_server_id: Optional[int]
+    ) -> list[tuple[str, int, dict]]:
+        if not isinstance(station, dict):
+            return []
+        cfg = station.get("service_config")
+        if not isinstance(cfg, dict):
+            return []
+        station_serial = str(station.get("serial") or "").strip()
+        if target_serial and station_serial.casefold() != target_serial:
+            return []
+        matches = []
+        for sid in (1, 2):
+            if target_server_id is not None and sid != target_server_id:
+                continue
+            candidate = str(cfg.get(f"mountpoint{sid}") or "").strip().casefold()
+            candidate_host = self._normalize_stream_host(
+                cfg.get(f"serverhost{sid}") or cfg.get(f"server{sid}_host")
+            )
+            if candidate and candidate == target and (not target_host or candidate_host == target_host):
+                matches.append((station_serial, sid, cfg))
+        return matches
+
     def _find_cors_station_sync(
         self,
         mountpoint: str,
@@ -188,27 +211,9 @@ class RoundRobinCorsMixin:
             target_server_id = None
         matches = []
         for station in stations or []:
-            if not isinstance(station, dict):
-                continue
-            cfg = station.get("service_config")
-            if not isinstance(cfg, dict):
-                continue
-            station_serial = str(station.get("serial") or "").strip()
-            if target_serial and station_serial.casefold() != target_serial:
-                continue
-            for sid in (1, 2):
-                if target_server_id is not None and sid != target_server_id:
-                    continue
-                candidate = str(cfg.get(f"mountpoint{sid}") or "").strip().casefold()
-                candidate_host = self._normalize_stream_host(
-                    cfg.get(f"serverhost{sid}") or cfg.get(f"server{sid}_host")
-                )
-                if (
-                    candidate
-                    and candidate == target
-                    and (not target_host or candidate_host == target_host)
-                ):
-                    matches.append((station_serial, sid, cfg))
+            matches.extend(self._match_cors_station_servers(
+                station, target, target_host, target_serial, target_server_id
+            ))
         if len(matches) != 1 or not matches[0][0]:
             raise RuntimeError(
                 f"WEB CORS host={selected_host!r} mountpoint={mountpoint!r} "
@@ -403,55 +408,72 @@ class RoundRobinCorsMixin:
 
 
     @staticmethod
+    def _apply_stream_to_cors_cfg(cfg: dict, stream: dict, position: int) -> None:
+        if not isinstance(stream, dict):
+            return
+        raw_server_id = stream.get("server_id")
+        if raw_server_id in (None, ""):
+            digits = "".join(char for char in str(stream.get("stream_id") or "") if char.isdigit())
+            raw_server_id = digits or position
+        try:
+            server_id = int(raw_server_id)
+        except (TypeError, ValueError):
+            return
+        if server_id not in (1, 2):
+            return
+        mountpoint = str(stream.get("mountpoint") or "").strip()
+        host = str(stream.get("host") or stream.get("server_host") or "").strip()
+        if mountpoint:
+            cfg[f"mountpoint{server_id}"] = mountpoint
+        if host:
+            cfg[f"serverhost{server_id}"] = host
+        if stream.get("port") not in (None, ""):
+            cfg[f"serverport{server_id}"] = stream["port"]
+        if isinstance(stream.get("enabled"), bool):
+            cfg[f"server{server_id}_enabled"] = stream["enabled"]
+
+    @classmethod
     def _cors_effective_service_config(
+        cls,
         station: dict,
         fallback: Optional[dict] = None,
     ) -> dict:
-        """Combine saved config with the live per-stream map representation.
-
-        Newer CORS map payloads expose part of S1/S2 in ``streams`` while older
-        payloads put everything in ``service_config``.  The adjustment used to
-        inspect only the latter, which could reject a healthy dual-output base.
-        Live stream metadata takes precedence over the project snapshot, while
-        explicit service-config fields remain authoritative.
-        """
-
+        """Combine saved config with the live per-stream map representation."""
         cfg = copy.deepcopy(fallback or {})
         for position, stream in enumerate(
             station.get("streams") if isinstance(station.get("streams"), list) else [],
             start=1,
         ):
-            if not isinstance(stream, dict):
-                continue
-            raw_server_id = stream.get("server_id")
-            if raw_server_id in (None, ""):
-                digits = "".join(
-                    char for char in str(stream.get("stream_id") or "") if char.isdigit()
-                )
-                raw_server_id = digits or position
-            try:
-                server_id = int(raw_server_id)
-            except (TypeError, ValueError):
-                continue
-            if server_id not in (1, 2):
-                continue
-
-            mountpoint = str(stream.get("mountpoint") or "").strip()
-            host = str(stream.get("host") or stream.get("server_host") or "").strip()
-            if mountpoint:
-                cfg[f"mountpoint{server_id}"] = mountpoint
-            if host:
-                cfg[f"serverhost{server_id}"] = host
-            if stream.get("port") not in (None, ""):
-                cfg[f"serverport{server_id}"] = stream["port"]
-            if isinstance(stream.get("enabled"), bool):
-                cfg[f"server{server_id}_enabled"] = stream["enabled"]
+            cls._apply_stream_to_cors_cfg(cfg, stream, position)
 
         live_config = station.get("service_config")
         if isinstance(live_config, dict):
             cfg.update(copy.deepcopy(live_config))
         return cfg
 
+    def _match_station_candidate_servers(
+        self, station: dict, target_server_id: int, target_host: str, target_mountpoint: str
+    ) -> list[tuple[dict, int]]:
+        config = self._cors_effective_service_config(station)
+        if not config:
+            return []
+        matches = []
+        for candidate_server_id in (1, 2):
+            if target_server_id and candidate_server_id != target_server_id:
+                continue
+            candidate_host = self._normalize_stream_host(
+                config.get(f"serverhost{candidate_server_id}")
+                or config.get(f"server{candidate_server_id}_host")
+            )
+            candidate_mountpoint = str(
+                config.get(f"mountpoint{candidate_server_id}") or ""
+            ).strip().casefold()
+            if target_host and candidate_host != target_host:
+                continue
+            if target_mountpoint and candidate_mountpoint != target_mountpoint:
+                continue
+            matches.append((station, candidate_server_id))
+        return matches
 
     def _cors_failover_stream(
         self,
@@ -484,24 +506,9 @@ class RoundRobinCorsMixin:
                     continue
             elif target_name and candidate_name != target_name:
                 continue
-            config = self._cors_effective_service_config(station)
-            if not config:
-                continue
-            for candidate_server_id in (1, 2):
-                if target_server_id and candidate_server_id != target_server_id:
-                    continue
-                candidate_host = self._normalize_stream_host(
-                    config.get(f"serverhost{candidate_server_id}")
-                    or config.get(f"server{candidate_server_id}_host")
-                )
-                candidate_mountpoint = str(
-                    config.get(f"mountpoint{candidate_server_id}") or ""
-                ).strip().casefold()
-                if target_host and candidate_host != target_host:
-                    continue
-                if target_mountpoint and candidate_mountpoint != target_mountpoint:
-                    continue
-                matches.append((station, candidate_server_id))
+            matches.extend(self._match_station_candidate_servers(
+                station, target_server_id, target_host, target_mountpoint
+            ))
         return matches[0] if len(matches) == 1 else None
 
 

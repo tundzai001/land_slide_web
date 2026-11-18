@@ -113,6 +113,41 @@ class GNSSVelocityMixin:
             'duration_s': float(times[-1] - times[0]),
         }
 
+    @staticmethod
+    def _parse_velocity_confirmation_config(config: dict) -> tuple[int, float, float, float, float]:
+        try:
+            required_samples = max(int(config.get('velocity_confirmation_samples', 3)), 2)
+        except (TypeError, ValueError):
+            required_samples = 3
+        try:
+            required_duration_s = max(float(config.get('velocity_confirmation_duration_s', 30.0)), 5.0)
+        except (TypeError, ValueError):
+            required_duration_s = 30.0
+        try:
+            direction_threshold = min(max(float(config.get('velocity_confirmation_direction_cosine', 0.70)), 0.0), 1.0)
+        except (TypeError, ValueError):
+            direction_threshold = 0.70
+        try:
+            minimum_gap_s = max(float(config.get('velocity_confirmation_min_gap_s', 15.0)), 1.0)
+        except (TypeError, ValueError):
+            minimum_gap_s = 15.0
+        try:
+            max_gap_s = max(float(config.get('velocity_confirmation_max_gap_s', max(required_duration_s, minimum_gap_s * 2.0))), minimum_gap_s)
+        except (TypeError, ValueError):
+            max_gap_s = max(required_duration_s, minimum_gap_s * 2.0)
+        return required_samples, required_duration_s, direction_threshold, minimum_gap_s, max_gap_s
+
+    @staticmethod
+    def _is_valid_motion(ts: float, vector: np.ndarray, statistically_significant: bool, reliable: bool) -> bool:
+        return bool(
+            math.isfinite(ts)
+            and vector.size == 3
+            and np.all(np.isfinite(vector))
+            and np.linalg.norm(vector) > 0.0
+            and statistically_significant
+            and reliable
+        )
+
     def _update_velocity_confirmation(
         self,
         timestamp: float,
@@ -130,44 +165,13 @@ class GNSSVelocityMixin:
         sampled at least once per velocity window.
         """
         config = config if isinstance(config, dict) else {}
-        try:
-            required_samples = max(
-                int(config.get('velocity_confirmation_samples', 3)),
-                2,
-            )
-        except (TypeError, ValueError):
-            required_samples = 3
-        try:
-            required_duration_s = max(
-                float(config.get('velocity_confirmation_duration_s', 30.0)),
-                5.0,
-            )
-        except (TypeError, ValueError):
-            required_duration_s = 30.0
-        try:
-            direction_threshold = min(
-                max(float(config.get('velocity_confirmation_direction_cosine', 0.70)), 0.0),
-                1.0,
-            )
-        except (TypeError, ValueError):
-            direction_threshold = 0.70
-        try:
-            minimum_gap_s = max(
-                float(config.get('velocity_confirmation_min_gap_s', 15.0)),
-                1.0,
-            )
-        except (TypeError, ValueError):
-            minimum_gap_s = 15.0
-        try:
-            max_gap_s = max(
-                float(config.get(
-                    'velocity_confirmation_max_gap_s',
-                    max(required_duration_s, minimum_gap_s * 2.0),
-                )),
-                minimum_gap_s,
-            )
-        except (TypeError, ValueError):
-            max_gap_s = max(required_duration_s, minimum_gap_s * 2.0)
+        (
+            required_samples,
+            required_duration_s,
+            direction_threshold,
+            minimum_gap_s,
+            max_gap_s,
+        ) = self._parse_velocity_confirmation_config(config)
 
         evidence = getattr(self, '_velocity_confirmation_history', None)
         if not isinstance(evidence, deque):
@@ -223,14 +227,7 @@ class GNSSVelocityMixin:
             evidence.clear()
             return empty_result()
 
-        if (
-            not math.isfinite(ts)
-            or vector.size != 3
-            or not np.all(np.isfinite(vector))
-            or np.linalg.norm(vector) <= 0.0
-            or not statistically_significant
-            or not reliable
-        ):
+        if not self._is_valid_motion(ts, vector, statistically_significant, reliable):
             evidence.clear()
             return empty_result()
 

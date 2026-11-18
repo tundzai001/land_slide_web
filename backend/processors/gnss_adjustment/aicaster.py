@@ -172,113 +172,88 @@ class RoundRobinAicasterMixin:
         )
 
 
-    def _observation_matches_active_base(
-        self,
-        cluster: dict,
-        active_base: str,
-        observation: Any,
-    ) -> tuple[bool, str]:
-        """Verify AGRICA's reported base coordinate before assigning an edge."""
-
-        reported = observation.base_llh
+    def _resolve_active_base_expected_llh(
+        self, cluster: dict, active_base: str, observation: Any
+    ) -> tuple[Optional[tuple], Optional[str]]:
         if active_base == "BASE":
             selected_candidate = cluster.get("selected_fixed_base_candidate")
             if not isinstance(selected_candidate, dict):
-                selected_candidate, selection_diagnostic = (
-                    self._identify_fixed_base_candidate(cluster, observation)
+                selected_candidate, selection_diagnostic = self._identify_fixed_base_candidate(
+                    cluster, observation
                 )
                 if selected_candidate is None:
-                    return False, selection_diagnostic
-                self._lock_fixed_base_candidate(
-                    cluster,
-                    selected_candidate,
-                    selection_diagnostic,
-                )
+                    return None, selection_diagnostic
+                self._lock_fixed_base_candidate(cluster, selected_candidate, selection_diagnostic)
                 logger.info(
                     "Fixed-base failover selection cluster=%s: %s",
                     cluster.get("name"),
                     selection_diagnostic,
                 )
             try:
-                expected = self._cluster_base_llh(cluster)
+                return self._cluster_base_llh(cluster), None
             except ValueError as exc:
-                return False, f"cannot verify fixed BASE: {exc}"
-        else:
-            cached = (
-                cluster.get("temporary_base_llh_by_rover", {}).get(active_base)
-                or self.rover_llh_cache.get(active_base)
-            )
-            if not cached:
-                return False, f"cannot verify temporary base {active_base}: LLH cache is unavailable"
-            expected = (
-                float(cached["lat"]),
-                float(cached["lon"]),
-                float(cached["alt"]),
-            )
+                return None, f"cannot verify fixed BASE: {exc}"
 
-        if not _is_usable_llh(reported):
-            if active_base == "BASE":
-                # Several UM980 rover profiles emit zeroes for BASE_lat/lon/h.
-                # Never treat that as proof that the correction source is the
-                # configured fixed base: after a temporary-base route closes,
-                # the receiver can retain a Fixed solution from that old RTCM
-                # stream for tens of seconds. Verify the baseline length against
-                # the configured fixed-base-to-rover geometry instead.
-                rover_llh = getattr(observation, "rover_llh", None)
-                baseline_neu = getattr(observation, "baseline_neu", None)
-                if not rover_llh or not baseline_neu:
-                    return False, (
-                        f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
-                        "and missing rover_llh or baseline_neu to verify configured fixed BASE"
-                    )
-                rover_to_fixed_dist = _llh_horizontal_distance_m(rover_llh, expected)
-                baseline_horiz_len = math.hypot(baseline_neu[0], baseline_neu[1])
-                fixed_error = abs(rover_to_fixed_dist - baseline_horiz_len)
-                if fixed_error > self.BASE_IDENTITY_TOLERANCE_M:
-                    return False, (
-                        f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
-                        f"and baseline length ({baseline_horiz_len:.1f} m) does not match "
-                        f"distance to configured fixed BASE ({rover_to_fixed_dist:.1f} m; "
-                        f"error {fixed_error:.2f} m). The receiver may still hold the "
-                        "previous temporary-base Fixed solution"
-                    )
-                return True, (
-                    "AGRICA has no usable base_llh; baseline geometry matches configured "
-                    f"fixed BASE (error {fixed_error:.2f} m)"
-                )
-            rover_llh = getattr(observation, "rover_llh", None)
-            baseline_neu = getattr(observation, "baseline_neu", None)
-            if not rover_llh or not baseline_neu:
+        cached = (
+            cluster.get("temporary_base_llh_by_rover", {}).get(active_base)
+            or self.rover_llh_cache.get(active_base)
+        )
+        if not cached:
+            return None, f"cannot verify temporary base {active_base}: LLH cache is unavailable"
+        return (float(cached["lat"]), float(cached["lon"]), float(cached["alt"])), None
+
+    def _verify_unusable_base_llh(
+        self, cluster: dict, active_base: str, observation: Any, expected: tuple
+    ) -> tuple[bool, str]:
+        rover_llh = getattr(observation, "rover_llh", None)
+        baseline_neu = getattr(observation, "baseline_neu", None)
+        if not rover_llh or not baseline_neu:
+            return False, (
+                f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
+                f"and missing rover_llh or baseline_neu to verify {'configured fixed BASE' if active_base == 'BASE' else 'expected base'}"
+            )
+        baseline_horiz_len = math.hypot(baseline_neu[0], baseline_neu[1])
+        if active_base == "BASE":
+            rover_to_fixed_dist = _llh_horizontal_distance_m(rover_llh, expected)
+            fixed_error = abs(rover_to_fixed_dist - baseline_horiz_len)
+            if fixed_error > self.BASE_IDENTITY_TOLERANCE_M:
                 return False, (
                     f"rejected {observation.rover_name}: AGRICA has no usable base_llh, "
-                    f"and missing rover_llh or baseline_neu to verify expected base"
+                    f"and baseline length ({baseline_horiz_len:.1f} m) does not match "
+                    f"distance to configured fixed BASE ({rover_to_fixed_dist:.1f} m; "
+                    f"error {fixed_error:.2f} m). The receiver may still hold the "
+                    "previous temporary-base Fixed solution"
                 )
-            
-            rover_to_expected_dist = _llh_horizontal_distance_m(rover_llh, expected)
-            baseline_horiz_len = math.hypot(baseline_neu[0], baseline_neu[1])
-            fixed_base = self._cluster_base_llh(cluster)
-            rover_to_fixed_dist = _llh_horizontal_distance_m(rover_llh, fixed_base)
-            expected_error = abs(rover_to_expected_dist - baseline_horiz_len)
-            fixed_error = abs(rover_to_fixed_dist - baseline_horiz_len)
-
-            if fixed_error + 1.0 < expected_error:
-                return False, (
-                    f"rejected {observation.rover_name}: baseline vector still matches fixed BASE; "
-                    f"fixed-BASE error={fixed_error:.2f} m, temporary-base error={expected_error:.2f} m"
-                )
-            
-            if expected_error > self.BASE_IDENTITY_TOLERANCE_M:
-                return False, (
-                    f"rejected {observation.rover_name}: missing base_llh, and baseline length "
-                    f"({baseline_horiz_len:.1f} m) does not match distance to expected base {active_base} "
-                    f"({rover_to_expected_dist:.1f} m)"
-                )
-
             return True, (
-                f"baseline vector matches temporary base {active_base} "
-                f"(error {expected_error:.2f} m; fixed-BASE error={fixed_error:.2f} m)"
+                "AGRICA has no usable base_llh; baseline geometry matches configured "
+                f"fixed BASE (error {fixed_error:.2f} m)"
             )
 
+        rover_to_expected_dist = _llh_horizontal_distance_m(rover_llh, expected)
+        fixed_base = self._cluster_base_llh(cluster)
+        rover_to_fixed_dist = _llh_horizontal_distance_m(rover_llh, fixed_base)
+        expected_error = abs(rover_to_expected_dist - baseline_horiz_len)
+        fixed_error = abs(rover_to_fixed_dist - baseline_horiz_len)
+
+        if fixed_error + 1.0 < expected_error:
+            return False, (
+                f"rejected {observation.rover_name}: baseline vector still matches fixed BASE; "
+                f"fixed-BASE error={fixed_error:.2f} m, temporary-base error={expected_error:.2f} m"
+            )
+        if expected_error > self.BASE_IDENTITY_TOLERANCE_M:
+            return False, (
+                f"rejected {observation.rover_name}: missing base_llh, and baseline length "
+                f"({baseline_horiz_len:.1f} m) does not match distance to expected base {active_base} "
+                f"({rover_to_expected_dist:.1f} m)"
+            )
+        return True, (
+            f"baseline vector matches temporary base {active_base} "
+            f"(error {expected_error:.2f} m; fixed-BASE error={fixed_error:.2f} m)"
+        )
+
+    def _verify_usable_base_llh(
+        self, cluster: dict, active_base: str, observation: Any, reported: tuple, expected: tuple
+    ) -> tuple[bool, str]:
         separation = _llh_horizontal_distance_m(reported, expected)
         height_delta = abs(float(reported[2]) - float(expected[2]))
         if active_base != "BASE":
@@ -301,11 +276,6 @@ class RoundRobinAicasterMixin:
                 "correction source has not switched yet or this is a transition fragment"
             )
 
-        # A matching BASE_lat/lon alone is not enough during a caster handover:
-        # a receiver can briefly combine a new/stale metadata sentence with a
-        # baseline vector from the previous correction stream. Independently
-        # estimate the horizontal base-to-rover distance and require the AGRICA
-        # N/E vector length to agree before admitting this epoch to the seed.
         geometry_diagnostic = ""
         if active_base == "BASE" and cluster.get("require_fixed_base_length_check"):
             rover_llh = getattr(observation, "rover_llh", None)
@@ -317,10 +287,7 @@ class RoundRobinAicasterMixin:
                     "baseline-length handover check"
                 )
             estimated_length = _llh_horizontal_distance_m(expected, rover_llh)
-            measured_length = math.hypot(
-                float(baseline_neu[0]),
-                float(baseline_neu[1]),
-            )
+            measured_length = math.hypot(float(baseline_neu[0]), float(baseline_neu[1]))
             length_error = abs(estimated_length - measured_length)
             if length_error > self.FIXED_BASE_LENGTH_TOLERANCE_M:
                 return False, (
@@ -339,6 +306,22 @@ class RoundRobinAicasterMixin:
             f"verified base {active_base} (horizontal delta {separation:.2f} m, "
             f"height delta {height_delta:.2f} m{geometry_diagnostic})"
         )
+
+    def _observation_matches_active_base(
+        self,
+        cluster: dict,
+        active_base: str,
+        observation: Any,
+    ) -> tuple[bool, str]:
+        """Verify AGRICA's reported base coordinate before assigning an edge."""
+        expected, err_diag = self._resolve_active_base_expected_llh(cluster, active_base, observation)
+        if expected is None:
+            return False, err_diag
+
+        reported = observation.base_llh
+        if not _is_usable_llh(reported):
+            return self._verify_unusable_base_llh(cluster, active_base, observation, expected)
+        return self._verify_usable_base_llh(cluster, active_base, observation, reported, expected)
 
 
     def _clear_cluster_fragment_buffers(self, project_id: int, cluster: dict) -> None:
