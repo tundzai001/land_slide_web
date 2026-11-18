@@ -1356,9 +1356,12 @@ class RoundRobinCycleMixin:
                             current_cluster["current_stable_window_index"] = None
                             self._clear_cluster_fragment_buffers(project_id, current_cluster)
 
-                        def collection_status() -> dict:
-                            monitoring = monitoring_records()
-                            solver_eligible = eligible_attempt_records()
+                        def collection_status(
+                            _monitoring_fn=monitoring_records,
+                            _eligible_fn=eligible_attempt_records,
+                        ) -> dict:
+                            monitoring = _monitoring_fn()
+                            solver_eligible = _eligible_fn()
 
                             def epoch_map(records: list) -> Dict[str, set[int]]:
                                 result: Dict[str, set[int]] = {}

@@ -80,6 +80,61 @@ class RoundRobinObservationMixin:
                 self._command_ack_waiters.pop(key, None)
 
 
+    @staticmethod
+    def _process_framed_command_line(waiter: _CommandAckWaiter, line: str, incoming_topic: str) -> Optional[dict]:
+        framed = _COMMAND_RESPONSE_RE.search(line)
+        if not framed:
+            return None
+        framed_command = framed.group("command").strip()
+        framed_response = framed.group("response").strip()
+        expected_command = _normalized_receiver_command(waiter.command)
+        actual_command = _normalized_receiver_command(framed_command)
+        expected_key = expected_command.split(" ", 1)[0]
+        actual_key = actual_command.split(" ", 1)[0]
+
+        if actual_command == expected_command:
+            waiter.echo_seen = True
+            waiter.topic = incoming_topic
+        elif not (waiter.echo_seen and waiter.topic == incoming_topic and actual_key == expected_key):
+            return None
+
+        accepted = _receiver_response_result(framed_response)
+        if accepted is not None:
+            return {
+                "accepted": accepted,
+                "response": framed_response,
+                "raw_response": line[framed.start():].strip(),
+                "topic": incoming_topic,
+                "command": waiter.command,
+            }
+        return None
+
+    @staticmethod
+    def _process_unframed_command_line(waiter: _CommandAckWaiter, line: str, incoming_topic: str) -> Optional[dict]:
+        if not waiter.echo_seen:
+            if _normalized_receiver_command(line) == _normalized_receiver_command(waiter.command):
+                waiter.echo_seen = True
+                waiter.topic = incoming_topic
+                logger.info(
+                    "MQTT receiver command echo station=%s topic=%s command=%s",
+                    waiter.station_code,
+                    waiter.topic,
+                    waiter.command,
+                )
+            return None
+        if waiter.topic != incoming_topic:
+            return None
+        accepted = _receiver_response_result(line)
+        if accepted is not None:
+            return {
+                "accepted": accepted,
+                "response": line,
+                "raw_response": line,
+                "topic": incoming_topic,
+                "command": waiter.command,
+            }
+        return None
+
     def add_receiver_command_payload(
         self,
         raw_payload: str,
@@ -117,72 +172,13 @@ class RoundRobinObservationMixin:
                 if line.strip()
             ]
             for line in lines:
-                framed = _COMMAND_RESPONSE_RE.search(line)
-                if framed:
-                    framed_command = framed.group("command").strip()
-                    framed_response = framed.group("response").strip()
-                    expected_command = _normalized_receiver_command(waiter.command)
-                    actual_command = _normalized_receiver_command(framed_command)
-                    expected_key = expected_command.split(" ", 1)[0]
-                    actual_key = actual_command.split(" ", 1)[0]
-
-                    # A full command in $COMMAND can establish identity itself.
-                    # A key-only response (for example "$COMMAND,MODE,...") is
-                    # accepted only after this topic emitted the exact command.
-                    if actual_command == expected_command:
-                        waiter.echo_seen = True
-                        waiter.topic = incoming_topic
-                    elif not (
-                        waiter.echo_seen
-                        and waiter.topic == incoming_topic
-                        and actual_key == expected_key
-                    ):
-                        continue
-
-                    accepted = _receiver_response_result(framed_response)
-                    if accepted is not None:
-                        result = {
-                            "accepted": accepted,
-                            "response": framed_response,
-                            "raw_response": line[framed.start():].strip(),
-                            "topic": incoming_topic,
-                            "command": waiter.command,
-                        }
-                        break
-
-                if not waiter.echo_seen:
-                    if _normalized_receiver_command(line) != _normalized_receiver_command(waiter.command):
-                        continue
-                    waiter.echo_seen = True
-                    waiter.topic = incoming_topic
-                    logger.info(
-                        "MQTT receiver command echo station=%s topic=%s command=%s",
-                        waiter.station_code,
-                        waiter.topic,
-                        waiter.command,
-                    )
-                    continue
-
-                if waiter.topic != incoming_topic:
-                    continue
-                accepted = _receiver_response_result(line)
-                if accepted is True:
-                    result = {
-                        "accepted": True,
-                        "response": line,
-                        "raw_response": line,
-                        "topic": incoming_topic,
-                        "command": waiter.command,
-                    }
+                framed_res = self._process_framed_command_line(waiter, line, incoming_topic)
+                if framed_res is not None:
+                    result = framed_res
                     break
-                if accepted is False:
-                    result = {
-                        "accepted": False,
-                        "response": line,
-                        "raw_response": line,
-                        "topic": incoming_topic,
-                        "command": waiter.command,
-                    }
+                unframed_res = self._process_unframed_command_line(waiter, line, incoming_topic)
+                if unframed_res is not None:
+                    result = unframed_res
                     break
 
             if result is not None:
@@ -290,16 +286,8 @@ class RoundRobinObservationMixin:
         )
         return state
 
-
-    def get_adjustment_diagnostics(self, project_id: int) -> Dict[str, Any]:
-        """Return JSON-safe runtime evidence for a failed adjustment run."""
-        session = self._sessions.get(int(project_id)) or {}
-        rover_codes = list(dict.fromkeys(
-            str(rover).strip()
-            for cluster in session.get("clusters", [])
-            for rover in cluster.get("rovers", [])
-            if str(rover).strip()
-        ))
+    @staticmethod
+    def _collect_diagnostics_raw_gnss(session: dict) -> list[dict]:
         raw_gnss = []
         seen_raw = set()
         for cluster in session.get("clusters", []):
@@ -330,6 +318,18 @@ class RoundRobinObservationMixin:
                     "reason": report.get("reason"),
                     "raw_payload": raw_payload,
                 })
+        return raw_gnss
+
+    def get_adjustment_diagnostics(self, project_id: int) -> Dict[str, Any]:
+        """Return JSON-safe runtime evidence for a failed adjustment run."""
+        session = self._sessions.get(int(project_id)) or {}
+        rover_codes = list(dict.fromkeys(
+            str(rover).strip()
+            for cluster in session.get("clusters", [])
+            for rover in cluster.get("rovers", [])
+            if str(rover).strip()
+        ))
+        raw_gnss = self._collect_diagnostics_raw_gnss(session)
         return {
             "run_id": int(project_id),
             "captured_at": int(time.time()),
@@ -350,6 +350,71 @@ class RoundRobinObservationMixin:
             "raw_gnss": raw_gnss,
         }
 
+
+    async def _heal_unready_rover(
+        self,
+        project_id: int,
+        rover_code: str,
+        before: dict,
+        verify_seconds: float,
+        allow_unavailable: bool,
+    ) -> dict:
+        reasons = []
+        if not before["payload_recent"]:
+            reasons.append("no recent GNSS payload")
+        if not before["agrica_recent"]:
+            reasons.append("AGRICA missing")
+        if not before["gga_recent"]:
+            reasons.append("GGA missing")
+        if before["rtcm_recent"]:
+            reasons.append("RTCM detected (receiver is in/still logging BASE output)")
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: preflight found {', '.join(reasons)}; restoring the verified ROVER output profile.",
+        )
+
+        client_info = await self._find_client_info(
+            rover_code,
+            project_id=project_id,
+            log_missing=not allow_unavailable,
+        )
+        if not client_info or not str(client_info.get("Mountpoint") or "").strip():
+            if allow_unavailable:
+                reason = (
+                    f"{rover_code}: no active AICaster control session/mountpoint; "
+                    "station is excluded from this run without changing the receiver"
+                )
+                await self._emit_progress(project_id, reason)
+                return {
+                    "station_code": rover_code,
+                    "status": "excluded_no_control_session",
+                    "reconfigured": False,
+                    "reason": reason,
+                    "observed": {
+                        "agrica": bool(before["agrica_recent"]),
+                        "gga": bool(before["gga_recent"]),
+                        "rtcm": bool(before["rtcm_recent"]),
+                    },
+                }
+            raise RuntimeError(
+                f"{rover_code}: cannot self-heal receiver because no active "
+                "AICaster control session/mountpoint was found"
+            )
+        await self.restore_rover_stream(
+            rover_code, client_info=client_info,
+            project_id=project_id, verify_seconds=verify_seconds,
+        )
+        await self._emit_progress(
+            project_id,
+            f"{rover_code}: live stream verified as ROVER (fresh GGA + AGRICA, RTCM stopped).",
+        )
+        return {
+            "station_code": rover_code,
+            "status": "recovered",
+            "reconfigured": True,
+            "reason": reasons,
+            "observed": {"agrica": True, "gga": True, "rtcm": False},
+        }
 
     async def ensure_rover_streams_ready(
         self,
@@ -396,63 +461,10 @@ class RoundRobinObservationMixin:
                 })
                 continue
 
-            reasons = []
-            if not before["payload_recent"]:
-                reasons.append("no recent GNSS payload")
-            if not before["agrica_recent"]:
-                reasons.append("AGRICA missing")
-            if not before["gga_recent"]:
-                reasons.append("GGA missing")
-            if before["rtcm_recent"]:
-                reasons.append("RTCM detected (receiver is in/still logging BASE output)")
-            await self._emit_progress(
-                project_id,
-                f"{rover_code}: preflight found {', '.join(reasons)}; restoring the verified ROVER output profile.",
+            outcome = await self._heal_unready_rover(
+                project_id, rover_code, before, verify_seconds, allow_unavailable
             )
-
-            client_info = await self._find_client_info(
-                rover_code,
-                project_id=project_id,
-                log_missing=not allow_unavailable,
-            )
-            if not client_info or not str(client_info.get("Mountpoint") or "").strip():
-                if allow_unavailable:
-                    reason = (
-                        f"{rover_code}: no active AICaster control session/mountpoint; "
-                        "station is excluded from this run without changing the receiver"
-                    )
-                    outcomes.append({
-                        "station_code": rover_code,
-                        "status": "excluded_no_control_session",
-                        "reconfigured": False,
-                        "reason": reason,
-                        "observed": {
-                            "agrica": bool(before["agrica_recent"]),
-                            "gga": bool(before["gga_recent"]),
-                            "rtcm": bool(before["rtcm_recent"]),
-                        },
-                    })
-                    await self._emit_progress(project_id, reason)
-                    continue
-                raise RuntimeError(
-                    f"{rover_code}: cannot self-heal receiver because no active "
-                    "AICaster control session/mountpoint was found"
-                )
-            await self.restore_rover_stream(
-                rover_code, client_info=client_info,
-                project_id=project_id, verify_seconds=verify_seconds,
-            )
-            outcomes.append({
-                "station_code": rover_code,
-                "status": "recovered",
-                "reconfigured": True,
-                "reason": reasons,
-                "observed": {"agrica": True, "gga": True, "rtcm": False},
-            })
-            await self._emit_progress(
-                project_id,
-                f"{rover_code}: live stream verified as ROVER (fresh GGA + AGRICA, RTCM stopped).",
-            )
+            outcomes.append(outcome)
         return outcomes
 
     async def restore_rover_stream(
@@ -551,18 +563,8 @@ class RoundRobinObservationMixin:
         )
 
 
-    def _update_rover_llh_from_observation(self, observation: Any) -> None:
-        """Cache an ellipsoidal temporary-base coordinate from AGRICA.
-
-        Field receivers report AGRICA ``lat/lon/alt`` with an MSL-like height,
-        while AGRICA ECEF is WGS84 and therefore yields ellipsoidal height. The
-        UM980 ``MODE BASE lat lon height`` coordinate must stay in one datum.
-        Prefer the ECEF-derived LLH only after its horizontal position agrees
-        with the reported LLH; malformed ECEF then cannot poison the cache.
-        """
-
-        rover_llh = getattr(observation, "rover_llh", None)
-        rover_ecef = getattr(observation, "rover_ecef", None)
+    @staticmethod
+    def _resolve_observation_best_llh(rover_llh: Any, rover_ecef: Any) -> Optional[tuple]:
         selected = rover_llh
         if rover_ecef and len(rover_ecef) == 3:
             try:
@@ -572,13 +574,36 @@ class RoundRobinObservationMixin:
                     and _vector_length(ecef_values) > 1_000_000.0
                 ):
                     ecef_llh = _ecef_to_llh(*ecef_values)
-                    if (
-                        not rover_llh
-                        or _llh_horizontal_distance_m(ecef_llh, rover_llh) <= 5.0
-                    ):
+                    if not rover_llh or _llh_horizontal_distance_m(ecef_llh, rover_llh) <= 5.0:
                         selected = ecef_llh
             except (TypeError, ValueError, OverflowError):
                 pass
+        return selected
+
+    @staticmethod
+    def _populate_rover_llh_cache_metadata(cache: dict, observation: Any, rover_llh: Any, selected: tuple) -> None:
+        full_data = getattr(observation, "full_data", None) or {}
+        undulation = full_data.get("undulation")
+        try:
+            undulation_value = float(undulation)
+        except (TypeError, ValueError):
+            undulation_value = None
+        if undulation_value is not None and math.isfinite(undulation_value):
+            cache["undulation"] = undulation_value
+        if rover_llh and len(rover_llh) == 3:
+            try:
+                orthometric_height = float(rover_llh[2])
+            except (TypeError, ValueError):
+                orthometric_height = None
+            if orthometric_height is not None and math.isfinite(orthometric_height):
+                cache["orthometric_alt"] = orthometric_height
+        cache["ellipsoid_alt"] = float(selected[2])
+
+    def _update_rover_llh_from_observation(self, observation: Any) -> None:
+        """Cache an ellipsoidal temporary-base coordinate from AGRICA."""
+        rover_llh = getattr(observation, "rover_llh", None)
+        rover_ecef = getattr(observation, "rover_ecef", None)
+        selected = self._resolve_observation_best_llh(rover_llh, rover_ecef)
         if selected:
             self.update_rover_llh(
                 observation.rover_name,
@@ -587,22 +612,7 @@ class RoundRobinObservationMixin:
                 float(selected[2]),
             )
             cache = self.rover_llh_cache.get(observation.rover_name) or {}
-            full_data = getattr(observation, "full_data", None) or {}
-            undulation = full_data.get("undulation")
-            try:
-                undulation_value = float(undulation)
-            except (TypeError, ValueError):
-                undulation_value = None
-            if undulation_value is not None and math.isfinite(undulation_value):
-                cache["undulation"] = undulation_value
-            if rover_llh and len(rover_llh) == 3:
-                try:
-                    orthometric_height = float(rover_llh[2])
-                except (TypeError, ValueError):
-                    orthometric_height = None
-                if orthometric_height is not None and math.isfinite(orthometric_height):
-                    cache["orthometric_alt"] = orthometric_height
-            cache["ellipsoid_alt"] = float(selected[2])
+            self._populate_rover_llh_cache_metadata(cache, observation, rover_llh, selected)
             self.rover_llh_cache[observation.rover_name] = cache
 
 
@@ -610,52 +620,43 @@ class RoundRobinObservationMixin:
         return (int(project_id), int(station_id)) in self._agrica_fragment_buffers
 
 
+    @staticmethod
+    def _extract_agrica_complete_and_tail(pending: str) -> tuple[list[str], str]:
+        complete_matches = list(re.finditer(r"#AGRICA[^*]*\*[0-9A-Fa-f]*", pending, re.DOTALL))
+        if not complete_matches:
+            return [], pending
+        completed = [match.group(0) for match in complete_matches]
+        tail = pending[complete_matches[-1].end():]
+        tail_marker = tail.find(AGRICA_HEADER)
+        tail = tail[tail_marker:] if tail_marker >= 0 else ""
+        return completed, tail
+
     def _consume_agrica_fragments(
         self,
         project_id: int,
         station_id: int,
         raw_payload: str,
     ) -> tuple[list[str], int]:
-        """Return complete AGRICA sentences and retain an unfinished tail.
-
-        The sentence is only released after its eight-digit CRC arrives.  This
-        prevents a partial payload such as ``#AGRICA,...,0.0`` from being parsed
-        as a complete observation.
-        """
-
+        """Return complete AGRICA sentences and retain an unfinished tail."""
         key = (int(project_id), int(station_id))
         payload = str(raw_payload or "").replace("\x00", "")
         pending = self._agrica_fragment_buffers.get(key, "")
         marker_index = payload.find(AGRICA_HEADER)
         if marker_index >= 0:
-            # A fresh AGRICA header supersedes an incomplete stale sentence.
             pending = payload[marker_index:]
         elif pending:
             pending += payload
         else:
             return [], 0
 
-        # A valid UM980 message ends in * followed by eight hexadecimal CRC
-        # characters. However, if the payload is truncated by hardware buffers,
-        # we still process it as long as the * is reached, since all GNSS data
-        # is before the asterisk.
-        complete_matches = list(re.finditer(r"#AGRICA[^*]*\*[0-9A-Fa-f]*", pending, re.DOTALL))
-        if complete_matches:
-            completed = [match.group(0) for match in complete_matches]
-            tail = pending[complete_matches[-1].end():]
-            tail_marker = tail.find(AGRICA_HEADER)
-            if tail_marker >= 0:
-                tail = tail[tail_marker:]
-            else:
-                tail = ""
+        completed, tail = self._extract_agrica_complete_and_tail(pending)
+        if completed:
             if tail:
                 self._agrica_fragment_buffers[key] = tail
             else:
                 self._agrica_fragment_buffers.pop(key, None)
             return completed, len(tail)
 
-        # Protect the service from an indefinitely growing corrupt buffer.  If
-        # another AGRICA header is present keep only the newest sentence start.
         if len(pending) > 8192:
             newest_marker = pending.rfind(AGRICA_HEADER)
             pending = pending[newest_marker:] if newest_marker >= 0 else ""
@@ -665,6 +666,86 @@ class RoundRobinObservationMixin:
             self._agrica_fragment_buffers.pop(key, None)
         return [], len(pending)
 
+
+    def _admit_agrica_observation(
+        self,
+        session: dict,
+        observation: Any,
+        project_id: int,
+        station_id: int,
+        cluster_index: Optional[int],
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Return (is_valid, accepted_diagnostic, ignored_reason)."""
+        if observation.position_type not in (4, 7):
+            reason = f"position_type={observation.position_type}; requires RTK Fixed (4) or Input Fixed (7)"
+            if cluster_index is not None:
+                session["seed_station_reports"][int(observation.station_id)]["reason"] = reason
+            return False, None, reason
+
+        if cluster_index is None:
+            return False, None, "station is not included in the active GNSS cluster"
+
+        active_base = session["active_bases"].get(cluster_index, "BASE")
+        if active_base == observation.rover_name:
+            return False, None, "ignored self-observation while this rover is the temporary base"
+
+        cluster = session["clusters"][cluster_index]
+        base_matches, base_diagnostic = self._observation_matches_active_base(
+            cluster, active_base, observation
+        )
+        if not base_matches:
+            session["clusters"][cluster_index]["observations"].append(
+                _CollectedObservation(
+                    active_base,
+                    observation,
+                    solver_eligible=False,
+                    quality_flags=("EXCLUDE_UNCONFIRMED_SOURCE",),
+                    source_diagnostic=base_diagnostic,
+                    rotation_index=cluster.get("current_rotation_index", 0),
+                    stable_window_index=None,
+                )
+            )
+            session["seed_station_reports"][int(observation.station_id)]["reason"] = base_diagnostic
+            warning_key = (int(project_id), int(cluster_index), int(station_id))
+            now_monotonic = time.monotonic()
+            last_logged = self._ingest_warning_last_logged.get(warning_key, 0.0)
+            if (now_monotonic - last_logged) >= 30.0:
+                self._ingest_warning_last_logged[warning_key] = now_monotonic
+                logger.warning(
+                    "Round-Robin project=%s cluster=%s station=%s: %s",
+                    project_id, cluster_index, station_id, base_diagnostic,
+                )
+            return False, None, base_diagnostic
+
+        session["seed_station_reports"][int(observation.station_id)].update({
+            "base_identity_verified": True,
+            "base_identity_diagnostic": base_diagnostic,
+        })
+        session["clusters"][cluster_index]["observations"].append(
+            _CollectedObservation(
+                active_base,
+                observation,
+                rotation_index=cluster.get("current_rotation_index", 0),
+                stable_window_index=cluster.get("current_stable_window_index", 0),
+            )
+        )
+        if max(float(value) for value in observation.std_neu) > _BASELINE_STD_REJECTION_THRESHOLD_M:
+            reason = "baseline STD exceeds 0.1 m; stored for RAW_AUDIT but excluded from solver"
+            session["seed_station_reports"][int(observation.station_id)]["reason"] = reason
+            if observation.rover_llh or observation.rover_ecef:
+                self._update_rover_llh_from_observation(observation)
+            return False, None, reason
+
+        session["seed_station_reports"][int(observation.station_id)].update({
+            "solver_eligible": True,
+            "reason": "RTK Fixed baseline accepted",
+        })
+        self._update_online_baseline_state(session, cluster_index, active_base, observation)
+        if active_base == "BASE":
+            session["seed_collection_steps"].add(int(observation.epoch_ts or time.time()))
+        if observation.rover_llh or observation.rover_ecef:
+            self._update_rover_llh_from_observation(observation)
+        return True, base_diagnostic, None
 
     def add_agrica_payload(self, raw_payload: str, info: Dict[str, Any]) -> List[Any]:
         """Store valid AGRICA measurements in the active project's cluster only."""
@@ -739,108 +820,15 @@ class RoundRobinObservationMixin:
                     "solver_eligible": False,
                     "reason": "awaiting baseline validation",
                 }
-            if observation.position_type not in (4, 7):
-                reason = (
-                    f"position_type={observation.position_type}; requires RTK "
-                    "Fixed (4) or Input Fixed (7)"
-                )
-                ignored_reasons.append(reason)
-                if cluster_index is not None:
-                    session["seed_station_reports"][
-                        int(observation.station_id)
-                    ]["reason"] = reason
-                continue
-            if cluster_index is None:
-                ignored_reasons.append("station is not included in the active GNSS cluster")
-                continue
-            active_base = session["active_bases"].get(cluster_index, "BASE")
-            if active_base == observation.rover_name:
-                ignored_reasons.append("ignored self-observation while this rover is the temporary base")
-                continue
-            cluster = session["clusters"][cluster_index]
-            base_matches, base_diagnostic = self._observation_matches_active_base(
-                cluster,
-                active_base,
-                observation,
+            is_valid, accepted_diag, ignored_reason = self._admit_agrica_observation(
+                session, observation, project_id, station_id, cluster_index
             )
-            if not base_matches:
-                # Preserve the receiver evidence under the source label that
-                # was active in the controller, but quarantine it permanently.
-                # Similarity to another edge is not authority to relabel it.
-                session["clusters"][cluster_index]["observations"].append(
-                    _CollectedObservation(
-                        active_base,
-                        observation,
-                        solver_eligible=False,
-                        quality_flags=("EXCLUDE_UNCONFIRMED_SOURCE",),
-                        source_diagnostic=base_diagnostic,
-                        rotation_index=cluster.get("current_rotation_index", 0),
-                        stable_window_index=None,
-                    )
-                )
-                session["seed_station_reports"][
-                    int(observation.station_id)
-                ]["reason"] = base_diagnostic
-                ignored_reasons.append(base_diagnostic)
-                warning_key = (int(project_id), int(cluster_index), int(station_id))
-                now_monotonic = time.monotonic()
-                last_logged = self._ingest_warning_last_logged.get(warning_key, 0.0)
-                if (now_monotonic - last_logged) >= 30.0:
-                    self._ingest_warning_last_logged[warning_key] = now_monotonic
-                    logger.warning(
-                        "Round-Robin project=%s cluster=%s station=%s: %s",
-                        project_id,
-                        cluster_index,
-                        station_id,
-                        base_diagnostic,
-                    )
-                continue
-            session["seed_station_reports"][int(observation.station_id)].update({
-                "base_identity_verified": True,
-                "base_identity_diagnostic": base_diagnostic,
-            })
-            session["clusters"][cluster_index]["observations"].append(
-                _CollectedObservation(
-                    active_base,
-                    observation,
-                    rotation_index=cluster.get("current_rotation_index", 0),
-                    stable_window_index=cluster.get("current_stable_window_index", 0),
-                )
-            )
-            if max(float(value) for value in observation.std_neu) > _BASELINE_STD_REJECTION_THRESHOLD_M:
-                reason = (
-                    "baseline STD exceeds 0.1 m; stored for RAW_AUDIT but "
-                    "excluded from solver"
-                )
-                ignored_reasons.append(reason)
-                session["seed_station_reports"][
-                    int(observation.station_id)
-                ]["reason"] = reason
-                if observation.rover_llh or observation.rover_ecef:
-                    self._update_rover_llh_from_observation(observation)
-                continue
-            valid_observations.append(observation)
-            session["seed_station_reports"][int(observation.station_id)].update({
-                "solver_eligible": True,
-                "reason": "RTK Fixed baseline accepted",
-            })
-            self._update_online_baseline_state(
-                session,
-                cluster_index,
-                active_base,
-                observation,
-            )
-            accepted_diagnostics.append(base_diagnostic)
-            if active_base == "BASE":
-                # Count GNSS epochs, not server wall-clock seconds. MQTT can
-                # deliver many buffered observations in one burst; wall-clock
-                # counting made a healthy 10 Hz/1 Hz stream appear stuck at
-                # step 1-4 and delayed exclusion of a genuinely silent rover.
-                session["seed_collection_steps"].add(
-                    int(observation.epoch_ts or time.time())
-                )
-            if observation.rover_llh or observation.rover_ecef:
-                self._update_rover_llh_from_observation(observation)
+            if is_valid:
+                valid_observations.append(observation)
+                if accepted_diag:
+                    accepted_diagnostics.append(accepted_diag)
+            elif ignored_reason:
+                ignored_reasons.append(ignored_reason)
         if valid_observations:
             rejection_note = (
                 f" Rejected: {'; '.join(dict.fromkeys(ignored_reasons))}."
@@ -891,6 +879,276 @@ class RoundRobinObservationMixin:
         return session.get("active_bases", {}).get(cluster_index, "BASE")
 
 
+    def _evaluate_seed_cluster_status(
+        self,
+        session: dict,
+        index: int,
+        cluster: dict,
+    ) -> dict:
+        fixed_base_llh = self._cluster_base_llh(cluster)
+        source_valid_indexed = [
+            (record_index, record)
+            for record_index, record in enumerate(cluster["observations"])
+            if record.base_name == "BASE"
+            and "EXCLUDE_UNCONFIRMED_SOURCE"
+            not in tuple(getattr(record, "quality_flags", ()) or ())
+            and max(
+                float(value) for value in record.observation.std_neu
+            ) <= _BASELINE_STD_REJECTION_THRESHOLD_M
+            and _vector_length(
+                self._baseline_ecef(record.observation, fixed_base_llh)
+            ) >= 1.0
+        ]
+        epochs_by_station: Dict[int, set[int]] = {}
+        vectors_by_station: Dict[int, list[tuple[int, tuple[float, float, float]]]] = {}
+        for _record_index, record in source_valid_indexed:
+            station_id = int(record.observation.station_id)
+            epoch = int(record.observation.epoch_ts)
+            epochs_by_station.setdefault(station_id, set()).add(epoch)
+            vectors_by_station.setdefault(station_id, []).append((
+                epoch,
+                tuple(float(value) for value in record.observation.baseline_neu),
+            ))
+        online_states = session.setdefault("online_baseline_states", {})
+        for station_id, rover_code in zip(
+            cluster["stations"], cluster["rovers"], strict=True
+        ):
+            online_state = online_states.get(self._online_baseline_key(
+                index, "BASE", rover_code
+            ))
+            if online_state is not None:
+                vectors_by_station[int(station_id)] = online_state.recent_samples()
+
+        expected = set(cluster["stations"])
+        observed = set(epochs_by_station)
+        station_reports = session.setdefault("seed_station_reports", {})
+        latest_position_type_by_station = {
+            station_id: station_reports.get(station_id, {}).get("position_type")
+            for station_id in sorted(expected)
+        }
+        invalid_fix_station_ids = sorted(
+            station_id
+            for station_id in expected - observed
+            if latest_position_type_by_station.get(station_id) not in (None, 4, 7)
+        )
+        silent_station_ids = sorted(
+            station_id
+            for station_id in expected - observed
+            if latest_position_type_by_station.get(station_id) is None
+        )
+        sample_counts_by_station = {
+            station_id: len(epochs_by_station.get(station_id, ()))
+            for station_id in expected
+        }
+        durations_by_station = {
+            station_id: (
+                max(epochs_by_station[station_id])
+                - min(epochs_by_station[station_id])
+                if epochs_by_station.get(station_id) else 0
+            )
+            for station_id in expected
+        }
+        warmup_ready_by_station = {
+            station_id: bool(
+                sample_counts_by_station[station_id]
+                >= self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
+                and durations_by_station[station_id]
+                >= self.SEED_COLLECTION_MIN_DURATION_SECONDS
+            )
+            for station_id in expected
+        }
+        stability_by_station = {
+            station_id: _rolling_mean_stability(
+                vectors_by_station.get(station_id, ()),
+                window_seconds=self.STABILITY_WINDOW_SECONDS,
+                min_samples_per_window=(
+                    self.STABILITY_MIN_SAMPLES_PER_WINDOW
+                ),
+                max_sample_gap_seconds=(
+                    self.STABILITY_MAX_SAMPLE_GAP_SECONDS
+                ),
+                horizontal_component_limit_m=(
+                    self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
+                ),
+                up_component_limit_m=self.STABILITY_UP_COMPONENT_LIMIT_M,
+                horizontal_std_limit_m=self.STABILITY_HORIZONTAL_STD_LIMIT_M,
+                up_std_limit_m=self.STABILITY_UP_STD_LIMIT_M,
+                horizontal_slope_limit_mps=(
+                    self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
+                ),
+                up_slope_limit_mps=self.STABILITY_UP_SLOPE_LIMIT_MPS,
+                ewma_fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                ewma_slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                ewma_horizontal_limit_m=(
+                    self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                ),
+                ewma_up_limit_m=self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
+            )
+            for station_id in expected
+        }
+        window_states = session.setdefault("seed_window_states", {})
+
+        def quarantine_seed_window(
+            station_id: int,
+            start_index: int,
+            flag: str,
+            diagnostic_message: str,
+        ) -> None:
+            for record_index, record in source_valid_indexed:
+                if (
+                    record_index < start_index
+                    or int(record.observation.station_id) != station_id
+                    or not getattr(record, "solver_eligible", True)
+                ):
+                    continue
+                flags = tuple(dict.fromkeys((
+                    *tuple(getattr(record, "quality_flags", ()) or ()),
+                    flag,
+                )))
+                record.solver_eligible = False
+                record.quality_flags = flags
+                record.source_diagnostic = diagnostic_message
+
+        ready = set()
+        solver_counts_by_station: Dict[int, int] = {}
+        solver_durations_by_station: Dict[int, int] = {}
+        window_open_by_station: Dict[int, bool] = {}
+        reset_counts_by_station: Dict[int, int] = {}
+        drift_failure_counts_by_station: Dict[int, int] = {}
+        for station_id in expected:
+            diagnostic = stability_by_station[station_id]
+            state_key = (index, station_id)
+            state = window_states.setdefault(state_key, {
+                "open": False,
+                "solver_start_index": 0,
+                "reset_count": 0,
+                "drift_failure_count": 0,
+                "last_drift_evaluation_epoch": None,
+            })
+            state.setdefault("drift_failure_count", 0)
+            state.setdefault("last_drift_evaluation_epoch", None)
+            latest_epoch = diagnostic.get("latest_epoch")
+            abort_exceeded = _rolling_drift_exceeds_abort_limits(
+                diagnostic,
+                horizontal_component_limit_m=(
+                    self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
+                ),
+                up_component_limit_m=(
+                    self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
+                ),
+            )
+            if (
+                state["open"]
+                and latest_epoch is not None
+                and latest_epoch != state.get("last_drift_evaluation_epoch")
+            ):
+                state["last_drift_evaluation_epoch"] = latest_epoch
+                state["drift_failure_count"] = (
+                    int(state.get("drift_failure_count") or 0) + 1
+                    if abort_exceeded else 0
+                )
+            if (
+                state["open"]
+                and int(state.get("drift_failure_count") or 0)
+                >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
+            ):
+                quarantine_seed_window(
+                    station_id,
+                    int(state.get("solver_start_index") or 0),
+                    "EXCLUDE_STABILITY_LOST",
+                    "Fixed-BASE solver session lost stationarity according to "
+                    "the rolling-window/EWMA abort envelope; the complete "
+                    "continuous seed session was reset.",
+                )
+                state["solver_start_index"] = len(cluster["observations"])
+                state["reset_count"] = int(state.get("reset_count") or 0) + 1
+                state["drift_failure_count"] = 0
+                state["last_drift_evaluation_epoch"] = latest_epoch
+
+            if (
+                not state["open"]
+                and warmup_ready_by_station[station_id]
+            ):
+                state["open"] = True
+                state["drift_failure_count"] = 0
+                state["last_drift_evaluation_epoch"] = latest_epoch
+
+            solver_epochs = {
+                int(record.observation.epoch_ts)
+                for record_index, record in enumerate(cluster["observations"])
+                if record_index >= int(state["solver_start_index"])
+                and record.base_name == "BASE"
+                and int(record.observation.station_id) == station_id
+                and getattr(record, "solver_eligible", True)
+                and max(float(value) for value in record.observation.std_neu)
+                <= _BASELINE_STD_REJECTION_THRESHOLD_M
+            }
+            solver_count = len(solver_epochs)
+            solver_duration = (
+                max(solver_epochs) - min(solver_epochs) if solver_epochs else 0
+            )
+            solver_counts_by_station[station_id] = solver_count
+            solver_durations_by_station[station_id] = solver_duration
+            window_open_by_station[station_id] = bool(state["open"])
+            reset_counts_by_station[station_id] = int(state.get("reset_count") or 0)
+            drift_failure_counts_by_station[station_id] = int(
+                state.get("drift_failure_count") or 0
+            )
+            if (
+                state["open"]
+                and solver_count >= self.SEED_SOLVER_MIN_DISTINCT_EPOCHS
+                and solver_duration >= self.SEED_SOLVER_MIN_DURATION_SECONDS
+            ):
+                ready.add(station_id)
+
+        missing = sorted(expected - observed)
+        available = sorted(expected & observed)
+        warming = sorted((expected & observed) - ready)
+        ready_station_ids = sorted(expected & ready)
+        not_ready_station_ids = sorted(expected - ready)
+
+        status_dict = {
+            "index": index,
+            "missing_station_ids": missing,
+            "silent_station_ids": silent_station_ids,
+            "invalid_fix_station_ids": invalid_fix_station_ids,
+            "latest_position_type_by_station": latest_position_type_by_station,
+            "warming_station_ids": warming,
+            "available_station_ids": available,
+            "ready_station_ids": ready_station_ids,
+            "not_ready_station_ids": not_ready_station_ids,
+            "sample_counts_by_station": {
+                station_id: sample_counts_by_station[station_id]
+                for station_id in sorted(expected)
+            },
+            "durations_by_station_seconds": {
+                station_id: durations_by_station[station_id]
+                for station_id in sorted(expected)
+            },
+            "warmup_ready_by_station": warmup_ready_by_station,
+            "rolling_stability_by_station": {
+                station_id: stability_by_station[station_id]
+                for station_id in sorted(expected)
+            },
+            "solver_window_open_by_station": window_open_by_station,
+            "solver_sample_counts_by_station": solver_counts_by_station,
+            "solver_durations_by_station_seconds": solver_durations_by_station,
+            "solver_window_reset_counts_by_station": reset_counts_by_station,
+            "solver_drift_failure_counts_by_station": (
+                drift_failure_counts_by_station
+            ),
+        }
+        return {
+            "status_dict": status_dict,
+            "missing": missing,
+            "silent_station_ids": silent_station_ids,
+            "invalid_fix_station_ids": invalid_fix_station_ids,
+            "warming": warming,
+            "ready_station_ids": ready_station_ids,
+            "not_ready_station_ids": not_ready_station_ids,
+            "available": available,
+        }
+
     def get_seed_collection_status(self, project_id: int) -> dict:
         """Return fixed-base window readiness and offline-rover fallback state."""
         session = self._sessions.get(project_id)
@@ -917,280 +1175,21 @@ class RoundRobinObservationMixin:
         complete = True
         can_continue = True
         for index, cluster in enumerate(session["clusters"]):
-            fixed_base_llh = self._cluster_base_llh(cluster)
-            source_valid_indexed = [
-                (record_index, record)
-                for record_index, record in enumerate(cluster["observations"])
-                if record.base_name == "BASE"
-                and "EXCLUDE_UNCONFIRMED_SOURCE"
-                not in tuple(getattr(record, "quality_flags", ()) or ())
-                and max(
-                    float(value) for value in record.observation.std_neu
-                ) <= _BASELINE_STD_REJECTION_THRESHOLD_M
-                and _vector_length(
-                    self._baseline_ecef(record.observation, fixed_base_llh)
-                ) >= 1.0
-            ]
-            epochs_by_station: Dict[int, set[int]] = {}
-            vectors_by_station: Dict[int, list[tuple[int, tuple[float, float, float]]]] = {}
-            for _record_index, record in source_valid_indexed:
-                station_id = int(record.observation.station_id)
-                epoch = int(record.observation.epoch_ts)
-                epochs_by_station.setdefault(station_id, set()).add(epoch)
-                vectors_by_station.setdefault(station_id, []).append((
-                    epoch,
-                    tuple(float(value) for value in record.observation.baseline_neu),
-                ))
-            online_states = session.setdefault("online_baseline_states", {})
-            for station_id, rover_code in zip(
-                cluster["stations"], cluster["rovers"], strict=True
-            ):
-                online_state = online_states.get(self._online_baseline_key(
-                    index, "BASE", rover_code
-                ))
-                if online_state is not None:
-                    vectors_by_station[int(station_id)] = online_state.recent_samples()
-
-            expected = set(cluster["stations"])
-            observed = set(epochs_by_station)
-            station_reports = session.setdefault("seed_station_reports", {})
-            latest_position_type_by_station = {
-                station_id: station_reports.get(station_id, {}).get("position_type")
-                for station_id in sorted(expected)
-            }
-            invalid_fix_station_ids = sorted(
-                station_id
-                for station_id in expected - observed
-                if latest_position_type_by_station.get(station_id) not in (None, 4, 7)
-            )
-            silent_station_ids = sorted(
-                station_id
-                for station_id in expected - observed
-                if latest_position_type_by_station.get(station_id) is None
-            )
-            sample_counts_by_station = {
-                station_id: len(epochs_by_station.get(station_id, ()))
-                for station_id in expected
-            }
-            durations_by_station = {
-                station_id: (
-                    max(epochs_by_station[station_id])
-                    - min(epochs_by_station[station_id])
-                    if epochs_by_station.get(station_id) else 0
-                )
-                for station_id in expected
-            }
-            warmup_ready_by_station = {
-                station_id: bool(
-                    sample_counts_by_station[station_id]
-                    >= self.SEED_COLLECTION_MIN_DISTINCT_EPOCHS
-                    and durations_by_station[station_id]
-                    >= self.SEED_COLLECTION_MIN_DURATION_SECONDS
-                )
-                for station_id in expected
-            }
-            stability_by_station = {
-                station_id: _rolling_mean_stability(
-                    vectors_by_station.get(station_id, ()),
-                    window_seconds=self.STABILITY_WINDOW_SECONDS,
-                    min_samples_per_window=(
-                        self.STABILITY_MIN_SAMPLES_PER_WINDOW
-                    ),
-                    max_sample_gap_seconds=(
-                        self.STABILITY_MAX_SAMPLE_GAP_SECONDS
-                    ),
-                    horizontal_component_limit_m=(
-                        self.STABILITY_HORIZONTAL_COMPONENT_LIMIT_M
-                    ),
-                    up_component_limit_m=self.STABILITY_UP_COMPONENT_LIMIT_M,
-                    horizontal_std_limit_m=self.STABILITY_HORIZONTAL_STD_LIMIT_M,
-                    up_std_limit_m=self.STABILITY_UP_STD_LIMIT_M,
-                    horizontal_slope_limit_mps=(
-                        self.STABILITY_HORIZONTAL_SLOPE_LIMIT_MPS
-                    ),
-                    up_slope_limit_mps=self.STABILITY_UP_SLOPE_LIMIT_MPS,
-                    ewma_fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
-                    ewma_slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                    ewma_horizontal_limit_m=(
-                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
-                    ),
-                    ewma_up_limit_m=self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M,
-                )
-                for station_id in expected
-            }
-            window_states = session.setdefault("seed_window_states", {})
-
-            def quarantine_seed_window(
-                station_id: int,
-                start_index: int,
-                flag: str,
-                diagnostic_message: str,
-            ) -> None:
-                for record_index, record in source_valid_indexed:
-                    if (
-                        record_index < start_index
-                        or int(record.observation.station_id) != station_id
-                        or not getattr(record, "solver_eligible", True)
-                    ):
-                        continue
-                    flags = tuple(dict.fromkeys((
-                        *tuple(getattr(record, "quality_flags", ()) or ()),
-                        flag,
-                    )))
-                    record.solver_eligible = False
-                    record.quality_flags = flags
-                    record.source_diagnostic = diagnostic_message
-
-            ready = set()
-            solver_counts_by_station: Dict[int, int] = {}
-            solver_durations_by_station: Dict[int, int] = {}
-            window_open_by_station: Dict[int, bool] = {}
-            reset_counts_by_station: Dict[int, int] = {}
-            drift_failure_counts_by_station: Dict[int, int] = {}
-            for station_id in expected:
-                diagnostic = stability_by_station[station_id]
-                state_key = (index, station_id)
-                state = window_states.setdefault(state_key, {
-                    "open": False,
-                    "solver_start_index": 0,
-                    "reset_count": 0,
-                    "drift_failure_count": 0,
-                    "last_drift_evaluation_epoch": None,
-                })
-                state.setdefault("drift_failure_count", 0)
-                state.setdefault("last_drift_evaluation_epoch", None)
-                latest_epoch = diagnostic.get("latest_epoch")
-                abort_exceeded = _rolling_drift_exceeds_abort_limits(
-                    diagnostic,
-                    horizontal_component_limit_m=(
-                        self.STABILITY_ABORT_HORIZONTAL_COMPONENT_LIMIT_M
-                    ),
-                    up_component_limit_m=(
-                        self.STABILITY_ABORT_UP_COMPONENT_LIMIT_M
-                    ),
-                )
-                if (
-                    state["open"]
-                    and latest_epoch is not None
-                    and latest_epoch != state.get("last_drift_evaluation_epoch")
-                ):
-                    state["last_drift_evaluation_epoch"] = latest_epoch
-                    state["drift_failure_count"] = (
-                        int(state.get("drift_failure_count") or 0) + 1
-                        if abort_exceeded else 0
-                    )
-                if (
-                    state["open"]
-                    and int(state.get("drift_failure_count") or 0)
-                    >= self.STABILITY_ABORT_CONSECUTIVE_EPOCHS
-                ):
-                    quarantine_seed_window(
-                        station_id,
-                        int(state.get("solver_start_index") or 0),
-                        "EXCLUDE_STABILITY_LOST",
-                        "Fixed-BASE solver session lost stationarity according to "
-                        "the rolling-window/EWMA abort envelope; the complete "
-                        "continuous seed session was reset.",
-                    )
-                    state["solver_start_index"] = len(cluster["observations"])
-                    state["reset_count"] = int(state.get("reset_count") or 0) + 1
-                    state["drift_failure_count"] = 0
-                    state["last_drift_evaluation_epoch"] = latest_epoch
-                # There is no correction-source handover during fixed-base
-                # collection: source identity and gross geometry were already
-                # verified when each AGRICA record was accepted. Natural RTK
-                # millimetre-level wander must not prevent the solver window
-                # from ever opening. Rolling N/E/U remains an audit diagnostic;
-                # only epoch/time warm-up controls this transition.
-                if (
-                    not state["open"]
-                    and warmup_ready_by_station[station_id]
-                ):
-                    # Source identity and gross BASE geometry were already
-                    # verified before records reached this state. Reuse the
-                    # warm-up epochs in the same independent seed session;
-                    # restarting here doubled field collection time and gave
-                    # no statistical independence benefit.
-                    state["open"] = True
-                    state["drift_failure_count"] = 0
-                    state["last_drift_evaluation_epoch"] = latest_epoch
-
-                solver_epochs = {
-                    int(record.observation.epoch_ts)
-                    for record_index, record in enumerate(cluster["observations"])
-                    if record_index >= int(state["solver_start_index"])
-                    and record.base_name == "BASE"
-                    and int(record.observation.station_id) == station_id
-                    and getattr(record, "solver_eligible", True)
-                    and max(float(value) for value in record.observation.std_neu)
-                    <= _BASELINE_STD_REJECTION_THRESHOLD_M
-                }
-                solver_count = len(solver_epochs)
-                solver_duration = (
-                    max(solver_epochs) - min(solver_epochs) if solver_epochs else 0
-                )
-                solver_counts_by_station[station_id] = solver_count
-                solver_durations_by_station[station_id] = solver_duration
-                window_open_by_station[station_id] = bool(state["open"])
-                reset_counts_by_station[station_id] = int(state.get("reset_count") or 0)
-                drift_failure_counts_by_station[station_id] = int(
-                    state.get("drift_failure_count") or 0
-                )
-                if (
-                    state["open"]
-                    and solver_count >= self.SEED_SOLVER_MIN_DISTINCT_EPOCHS
-                    and solver_duration >= self.SEED_SOLVER_MIN_DURATION_SECONDS
-                ):
-                    ready.add(station_id)
-            missing = sorted(expected - observed)
-            available = sorted(expected & observed)
-            warming = sorted((expected & observed) - ready)
-            ready_station_ids = sorted(expected & ready)
-            not_ready_station_ids = sorted(expected - ready)
-            if missing or warming:
+            c_res = self._evaluate_seed_cluster_status(session, index, cluster)
+            if c_res["missing"] or c_res["warming"]:
                 complete = False
-                missing_all.extend(missing)
-                silent_all.extend(silent_station_ids)
-                invalid_fix_all.extend(invalid_fix_station_ids)
-                warming_all.extend(warming)
-            if elapsed_timeout and not_ready_station_ids:
-                if len(ready_station_ids) >= 2:
-                    timeout_skippable_all.extend(not_ready_station_ids)
+                missing_all.extend(c_res["missing"])
+                silent_all.extend(c_res["silent_station_ids"])
+                invalid_fix_all.extend(c_res["invalid_fix_station_ids"])
+                warming_all.extend(c_res["warming"])
+            if elapsed_timeout and c_res["not_ready_station_ids"]:
+                if len(c_res["ready_station_ids"]) >= 2:
+                    timeout_skippable_all.extend(c_res["not_ready_station_ids"])
                 else:
                     timeout_fallback_blocked = True
-            if len(available) < 2:
+            if len(c_res["available"]) < 2:
                 can_continue = False
-            cluster_statuses.append({
-                "index": index,
-                "missing_station_ids": missing,
-                "silent_station_ids": silent_station_ids,
-                "invalid_fix_station_ids": invalid_fix_station_ids,
-                "latest_position_type_by_station": latest_position_type_by_station,
-                "warming_station_ids": warming,
-                "available_station_ids": available,
-                "ready_station_ids": ready_station_ids,
-                "not_ready_station_ids": not_ready_station_ids,
-                "sample_counts_by_station": {
-                    station_id: sample_counts_by_station[station_id]
-                    for station_id in sorted(expected)
-                },
-                "durations_by_station_seconds": {
-                    station_id: durations_by_station[station_id]
-                    for station_id in sorted(expected)
-                },
-                "warmup_ready_by_station": warmup_ready_by_station,
-                "rolling_stability_by_station": {
-                    station_id: stability_by_station[station_id]
-                    for station_id in sorted(expected)
-                },
-                "solver_window_open_by_station": window_open_by_station,
-                "solver_sample_counts_by_station": solver_counts_by_station,
-                "solver_durations_by_station_seconds": solver_durations_by_station,
-                "solver_window_reset_counts_by_station": reset_counts_by_station,
-                "solver_drift_failure_counts_by_station": (
-                    drift_failure_counts_by_station
-                ),
-            })
+            cluster_statuses.append(c_res["status_dict"])
 
         stability_timeout = not complete and elapsed_timeout
         timeout_fallback_ready = (

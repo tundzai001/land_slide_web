@@ -1268,6 +1268,205 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertFalse(asyncio.run(mixin._process_spool_envelope(valid_env)))
         self.assertEqual(mixin._ingest_metrics["spool_retries"], 1)
 
+    def test_landslide_alerts_helpers(self):
+        import time
+        from processors.landslide.alerts import (
+            _init_alert_counter,
+            _step_alert_counter,
+            _handle_safe_deassertion,
+        )
+
+        counter = {}
+        _init_alert_counter(counter)
+        self.assertIsNone(counter["latched_level"])
+        self.assertEqual(counter["safe_count"], 0)
+
+        # Step counter with new level
+        counter["last_level"] = None
+        self.assertFalse(_step_alert_counter(counter, "WARNING", required_steps=2))
+        self.assertEqual(counter["count"], 1)
+        self.assertEqual(counter["last_level"], "WARNING")
+
+        # Step counter again to latch
+        self.assertTrue(_step_alert_counter(counter, "WARNING", required_steps=2))
+        self.assertEqual(counter["latched_level"], "WARNING")
+
+        # Already latched level returns False
+        self.assertFalse(_step_alert_counter(counter, "WARNING", required_steps=2))
+
+        # Level change resets count
+        self.assertFalse(_step_alert_counter(counter, "CRITICAL", required_steps=2))
+        self.assertEqual(counter["count"], 1)
+        self.assertEqual(counter["last_level"], "CRITICAL")
+
+        # Deassertion with pending safe count
+        pending = _handle_safe_deassertion(counter, safe_confirm_steps=3, station_id=1, label="TILT")
+        self.assertEqual(pending, {"level": "PENDING"})
+        self.assertEqual(counter["safe_count"], 1)
+
+        # Reach safe confirm steps resets counter
+        _handle_safe_deassertion(counter, safe_confirm_steps=2, station_id=1, label="TILT")
+        self.assertIsNone(counter["latched_level"])
+        self.assertEqual(counter["count"], 0)
+
+        # Deassertion with timeout > 900s
+        counter["latched_level"] = "WARNING"
+        counter["latched_time"] = time.time() - 1000
+        res = _handle_safe_deassertion(counter, safe_confirm_steps=3, station_id=1, label="TILT")
+        self.assertIsNone(res)
+        self.assertIsNone(counter["latched_level"])
+
+        # Deassertion without latched level decrements count
+        counter["count"] = 2
+        _handle_safe_deassertion(counter, safe_confirm_steps=3, station_id=1, label="TILT")
+        self.assertEqual(counter["count"], 1)
+        _handle_safe_deassertion(counter, safe_confirm_steps=3, station_id=1, label="TILT")
+        self.assertEqual(counter["count"], 0)
+        self.assertIsNone(counter["last_level"])
+
+    def test_gnss_velocity_helpers(self):
+        import numpy as np
+        from processors.gnss.velocity import GNSSVelocityMixin
+
+        # Config parsing with defaults
+        cfg = GNSSVelocityMixin._parse_velocity_confirmation_config({})
+        self.assertEqual(cfg, (3, 30.0, 0.70, 15.0, 30.0))
+
+        # Config parsing with invalid types
+        cfg2 = GNSSVelocityMixin._parse_velocity_confirmation_config({
+            "velocity_confirmation_samples": "invalid",
+            "velocity_confirmation_duration_s": None,
+            "velocity_confirmation_direction_cosine": "abc",
+            "velocity_confirmation_min_gap_s": {},
+            "velocity_confirmation_max_gap_s": [],
+        })
+        self.assertEqual(cfg2, (3, 30.0, 0.70, 15.0, 30.0))
+
+        # Valid motion checks
+        vec = np.array([1.0, 0.0, 0.0])
+        self.assertTrue(GNSSVelocityMixin._is_valid_motion(100.0, vec, True, True))
+        self.assertFalse(GNSSVelocityMixin._is_valid_motion(float("nan"), vec, True, True))
+        self.assertFalse(GNSSVelocityMixin._is_valid_motion(100.0, np.array([0.0, 0.0, 0.0]), True, True))
+        self.assertFalse(GNSSVelocityMixin._is_valid_motion(100.0, vec, False, True))
+        self.assertFalse(GNSSVelocityMixin._is_valid_motion(100.0, vec, True, False))
+
+    def test_cors_refactored_helpers(self):
+        # _apply_stream_to_cors_cfg
+        cfg = {}
+        stream = {
+            "server_id": 1,
+            "mountpoint": "TEST1",
+            "host": "cors.example.com",
+            "port": 2101,
+            "format": "RTCM3",
+            "carrier": "2",
+            "lat": 21.0,
+            "lon": 105.0,
+            "alt": 10.0,
+        }
+        RoundRobinCorsMixin._apply_stream_to_cors_cfg(cfg, stream, 1)
+        self.assertEqual(cfg["mountpoint1"], "TEST1")
+        self.assertEqual(cfg["serverhost1"], "cors.example.com")
+        self.assertEqual(cfg["serverport1"], 2101)
+
+        # _match_cors_station_servers
+        mixin = RoundRobinCorsMixin()
+        station_entry = {
+            "serial": "SN123",
+            "service_config": {
+                "mountpoint1": "ALPHA",
+                "serverhost1": "cors.example.com",
+            },
+        }
+        res_matches = mixin._match_cors_station_servers(
+            station_entry, "alpha", "cors.example.com", "sn123", 1
+        )
+        self.assertEqual(len(res_matches), 1)
+        self.assertEqual(res_matches[0][0], "SN123")
+        self.assertEqual(res_matches[0][1], 1)
+
+        # _match_station_candidate_servers
+        station_cand = {
+            "service_config": {
+                "mountpoint1": "HANOI",
+                "serverhost1": "cors.example.com",
+            }
+        }
+        cand_matches = mixin._match_station_candidate_servers(
+            station_cand, 1, "cors.example.com", "hanoi"
+        )
+        self.assertEqual(len(cand_matches), 1)
+        self.assertEqual(cand_matches[0][1], 1)
+
+    def test_observation_refactored_helpers(self):
+        import asyncio
+        from processors.gnss_adjustment.observation import (
+            RoundRobinObservationMixin,
+            _CommandAckWaiter,
+        )
+
+        # _collect_diagnostics_raw_gnss
+        fake_rec = MagicMock()
+        fake_rec.base_name = "BASE"
+        fake_rec.observation = MagicMock(epoch_ts=100.0, station_id=1, raw="$RAW")
+        fake_session = {
+            "clusters": [
+                {"observations": [fake_rec]}
+            ]
+        }
+        res = RoundRobinObservationMixin._collect_diagnostics_raw_gnss(fake_session)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["station_id"], 1)
+
+        # _extract_agrica_complete_and_tail
+        records, tail = RoundRobinObservationMixin._extract_agrica_complete_and_tail(
+            "#AGRICA,1,2*45\r\n#AGRICA,3,4*56\r\npartial_tail"
+        )
+        self.assertEqual(records, ["#AGRICA,1,2*45", "#AGRICA,3,4*56"])
+        self.assertEqual(tail, "")
+
+        # _resolve_observation_best_llh
+        self.assertEqual(
+            RoundRobinObservationMixin._resolve_observation_best_llh(
+                (21.0, 105.0, 50.0), None
+            ),
+            (21.0, 105.0, 50.0),
+        )
+
+        # _populate_rover_llh_cache_metadata
+        mock_obs = MagicMock()
+        mock_obs.rover_llh = (21.0, 105.0, 50.0)
+        mock_obs.rover_ecef = None
+        mock_obs.rover_name = "ROV1"
+        mock_obs.full_data = {"undulation": 2.5}
+        cache_entry = {}
+        RoundRobinObservationMixin._populate_rover_llh_cache_metadata(
+            cache_entry, mock_obs, (21.0, 105.0, 50.0), (21.0, 105.0, 50.0)
+        )
+        self.assertEqual(cache_entry["undulation"], 2.5)
+
+        # _process_framed_command_line
+        waiter = _CommandAckWaiter("STA1", "MODE ROVER", MagicMock())
+        res = RoundRobinObservationMixin._process_framed_command_line(
+            waiter, "$COMMAND,MODE ROVER,RESPONSE:OK*12", "topic/cmd"
+        )
+        self.assertIsNotNone(res)
+        self.assertTrue(res["accepted"])
+
+        # Unframed line
+        waiter2 = _CommandAckWaiter("STA1", "UNLOGALL", MagicMock())
+        res_echo = RoundRobinObservationMixin._process_unframed_command_line(
+            waiter2, "UNLOGALL", "topic/cmd"
+        )
+        self.assertIsNone(res_echo)
+        self.assertTrue(waiter2.echo_seen)
+        res_ok = RoundRobinObservationMixin._process_unframed_command_line(
+            waiter2, "OK", "topic/cmd"
+        )
+        self.assertIsNotNone(res_ok)
+        self.assertTrue(res_ok["accepted"])
+
+
 
 
 
