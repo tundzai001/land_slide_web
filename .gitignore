@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 
 # Local virtual environments and runtime logs
+.env
+.env.*
+*.env
 .venv/
 venv/
 node_modules/
