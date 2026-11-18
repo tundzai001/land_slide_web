@@ -312,6 +312,64 @@ def parse_station_bbox(value: str) -> tuple[float, float, float, float]:
     return west, south, east, north
 
 
+def _build_all_stations_stmt(project_filter_ids, project_id, q, sort):
+    stmt = select(model_config.Station)
+    if project_filter_ids is not None:
+        stmt = stmt.where(model_config.Station.project_id.in_(project_filter_ids))
+    if project_id is not None:
+        stmt = stmt.where(model_config.Station.project_id == project_id)
+    term = (q or "").strip()
+    if term:
+        stmt = stmt.where(
+            model_config.Station.name.icontains(term, autoescape=True)
+            | model_config.Station.station_code.icontains(term, autoescape=True)
+        )
+    sort_fields = {
+        "name": model_config.Station.name,
+        "station_code": model_config.Station.station_code,
+        "created_at": model_config.Station.created_at,
+        "updated_at": model_config.Station.updated_at,
+    }
+    sort_value = (sort or "").strip()
+    descending = sort_value.startswith("-")
+    sort_name = sort_value.lstrip("-")
+    if sort_value and sort_name not in sort_fields:
+        raise HTTPException(status_code=422, detail="Unsupported sort field")
+    if sort_name:
+        column = sort_fields[sort_name]
+        stmt = stmt.order_by(column.desc() if descending else column.asc())
+    return stmt
+
+
+def _matches_station_bbox(location: dict, west: float, south: float, east: float, north: float) -> bool:
+    try:
+        lat = float(location["lat"])
+        lon = float(location.get("lon", location.get("lng")))
+        return west <= lon <= east and south <= lat <= north
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _filter_station_rows(stations_with_status: list, status: Optional[str], risk: Optional[str], bbox_bounds) -> list:
+    rows = stations_with_status
+    normalized_status = (status or "").strip().lower()
+    if normalized_status:
+        if normalized_status not in {"online", "offline", "stale"}:
+            raise HTTPException(status_code=422, detail="Unsupported status filter")
+        rows = [r for r in rows if r["status"] == normalized_status]
+
+    normalized_risk = (risk or "").strip().upper()
+    if normalized_risk:
+        if normalized_risk not in {"LOW", "MEDIUM", "WARNING", "HIGH", "CRITICAL", "EXTREME"}:
+            raise HTTPException(status_code=422, detail="Unsupported risk filter")
+        rows = [r for r in rows if r["risk_level"] == normalized_risk]
+
+    if bbox_bounds:
+        west, south, east, north = bbox_bounds
+        rows = [r for r in rows if _matches_station_bbox(r.get("location") or {}, west, south, east, north)]
+    return rows
+
+
 @router.get("/api/stations", responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}, 500: {"description": "Internal Server Error"}})
 async def get_stations(
     request: Request,
@@ -337,36 +395,11 @@ async def get_stations(
         project_filter_ids = user_project_filter_ids(current_user)
 
         page_offset, page_limit = normalize_page(offset, limit)
-        stmt = select(model_config.Station)
-        if project_filter_ids is not None:
-            if not project_filter_ids:
-                set_pagination_headers(response, total=0, offset=page_offset, limit=page_limit)
-                return []
-            stmt = stmt.where(model_config.Station.project_id.in_(project_filter_ids))
-        if project_id is not None:
-            stmt = stmt.where(model_config.Station.project_id == project_id)
-        term = (q or "").strip()
-        if term:
-            stmt = stmt.where(
-                model_config.Station.name.icontains(term, autoescape=True)
-                | model_config.Station.station_code.icontains(term, autoescape=True)
-            )
+        if project_filter_ids is not None and not project_filter_ids:
+            set_pagination_headers(response, total=0, offset=page_offset, limit=page_limit)
+            return []
 
-        sort_fields = {
-            "name": model_config.Station.name,
-            "station_code": model_config.Station.station_code,
-            "created_at": model_config.Station.created_at,
-            "updated_at": model_config.Station.updated_at,
-        }
-        sort_value = (sort or "").strip()
-        descending = sort_value.startswith("-")
-        sort_name = sort_value.lstrip("-")
-        if sort_value and sort_name not in sort_fields:
-            raise HTTPException(status_code=422, detail="Unsupported sort field")
-        if sort_name:
-            column = sort_fields[sort_name]
-            stmt = stmt.order_by(column.desc() if descending else column.asc())
-
+        stmt = _build_all_stations_stmt(project_filter_ids, project_id, q, sort)
         result = await db_config.execute(stmt)
         stations = result.scalars().all()
         devices_by_station, latest_by_key, alerts_by_station = await _load_station_runtime_maps(
@@ -374,27 +407,10 @@ async def get_stations(
         )
 
         current_time = int(time.time())
-
         stations_with_status = []
         for station in stations:
             devices = devices_by_station[int(station.id)]
-            # ✅ Chỉ lấy devices ACTIVE
-            # Kiểm tra status cho từng sensor type
-            station_online = False
-
-            for device in devices:
-                sensor_type = device.device_type
-                threshold = get_offline_threshold(station.config, sensor_type)
-
-                # ✅ Ưu tiên lấy từ latest_sensor_cache (luôn cập nhật mỗi lần MQTT nhận data)
-                latest_ts = latest_by_key.get((int(station.id), str(sensor_type)), 0)
-
-                # Nếu có ít nhất 1 sensor online -> station online
-                if latest_ts and (current_time - latest_ts) < threshold:
-                    station_online = True
-                    break
-
-            # ✅ Tính risk_level thực tế từ alerts (không hardcode LOW nữa)
+            station_online = _compute_station_online(station, devices, latest_by_key, current_time)
             risk_assessment = _summarize_station_alerts(
                 alerts_by_station[int(station.id)], station.config
             )
@@ -413,30 +429,11 @@ async def get_stations(
                 "last_update": station.last_update,
                 "risk_level": computed_risk
             })
-        normalized_status = (status or "").strip().lower()
-        if normalized_status:
-            if normalized_status not in {"online", "offline", "stale"}:
-                raise HTTPException(status_code=422, detail="Unsupported status filter")
-            stations_with_status = [row for row in stations_with_status if row["status"] == normalized_status]
-        normalized_risk = (risk or "").strip().upper()
-        if normalized_risk:
-            if normalized_risk not in {"LOW", "MEDIUM", "WARNING", "HIGH", "CRITICAL", "EXTREME"}:
-                raise HTTPException(status_code=422, detail="Unsupported risk filter")
-            stations_with_status = [row for row in stations_with_status if row["risk_level"] == normalized_risk]
-        if bbox_bounds:
-            west, south, east, north = bbox_bounds
-            def in_bbox(row):
-                location = row.get("location") or {}
-                try:
-                    lat, lon = float(location["lat"]), float(location.get("lon", location.get("lng")))
-                    return west <= lon <= east and south <= lat <= north
-                except (KeyError, TypeError, ValueError):
-                    return False
-            stations_with_status = [row for row in stations_with_status if in_bbox(row)]
 
-        total = len(stations_with_status)
+        filtered_rows = _filter_station_rows(stations_with_status, status, risk, bbox_bounds)
+        total = len(filtered_rows)
         set_pagination_headers(response, total=total, offset=page_offset, limit=page_limit)
-        return slice_rows(stations_with_status, page_offset, page_limit)
+        return slice_rows(filtered_rows, page_offset, page_limit)
 
     except HTTPException:
         raise
@@ -563,6 +560,94 @@ async def _fetch_station_pi_devices(db_config: AsyncSession, station_id: int, cu
     return pi_devices_status
 
 
+async def _fetch_sensor_latest_and_timestamp(db_data, station_id, sensor_type, cached):
+    if cached:
+        return cached.data, cached.timestamp
+    latest_result = await db_data.execute(
+        select(model_data.SensorData)
+        .where(
+            and_(
+                model_data.SensorData.station_id == station_id,
+                model_data.SensorData.sensor_type == sensor_type,
+            )
+        )
+        .order_by(desc(model_data.SensorData.timestamp))
+        .limit(1)
+    )
+    latest_row = latest_result.scalar_one_or_none()
+    if latest_row:
+        return latest_row.data, latest_row.timestamp
+    return None, None
+
+
+async def _build_station_sensor_data_map(
+    db_data, station, devices, latest_cache_by_type, include_history, cutoff_time, current_time
+):
+    sensor_data = {}
+    has_recent_data = False
+    latest_data_timestamp = 0
+    station_online = False
+
+    for device in devices:
+        sensor_type = device.device_type
+        cached = latest_cache_by_type.get(sensor_type)
+        latest_data, latest_ts = await _fetch_sensor_latest_and_timestamp(
+            db_data, station.id, sensor_type, cached
+        )
+        threshold = get_offline_threshold(station.config, sensor_type)
+        received_ts = max(int(latest_ts or 0), _device_activity_timestamp(device))
+        sensor_is_online = bool(received_ts and current_time - received_ts < threshold)
+        station_online = station_online or sensor_is_online
+
+        if latest_ts and (current_time - latest_ts) < threshold:
+            has_recent_data = True
+            if latest_ts > latest_data_timestamp:
+                latest_data_timestamp = latest_ts
+
+        history = []
+        if include_history:
+            history = await _fetch_device_sensor_history(db_data, station.id, sensor_type, cutoff_time)
+
+        if sensor_type == 'gnss':
+            latest_data = _format_gnss_advanced_payload(latest_data)
+
+        sensor_data[sensor_type] = {
+            "is_online": sensor_is_online,
+            "latest": latest_data,
+            "latest_timestamp": latest_ts,
+            "last_received_timestamp": received_ts or None,
+            "history": [{"timestamp": h.timestamp, "data": h.data} for h in reversed(history)],
+        }
+
+    return sensor_data, station_online, has_recent_data, latest_data_timestamp
+
+
+async def _fetch_gnss_adjusted_cached(db_data, station_id, include_adjustment_observations):
+    try:
+        adj_cache_res = await db_data.execute(
+            select(model_data.LatestSensorCache)
+            .where(
+                and_(
+                    model_data.LatestSensorCache.station_id == station_id,
+                    model_data.LatestSensorCache.sensor_type == 'gnss_adjusted'
+                )
+            )
+        )
+        adj_cached = adj_cache_res.scalar_one_or_none()
+        if adj_cached:
+            return {
+                "is_online": True,
+                "latest": _station_detail_adjustment_latest(
+                    adj_cached.data, include_adjustment_observations
+                ),
+                "latest_timestamp": adj_cached.timestamp,
+                "history": []
+            }
+    except Exception as adj_load_e:
+        logger.error("Error loading cached gnss_adjusted for station %s: %s", station_id, adj_load_e)
+    return None
+
+
 @router.get("/api/stations/{station_id}/detail", responses={403: {"description": "Forbidden"}, 500: {"description": "Internal Server Error"}})
 async def get_station_detail(
     station_id: int,
@@ -617,96 +702,14 @@ async def get_station_detail(
             latest_cache_by_type = {
                 row.sensor_type: row for row in cache_rows_result.scalars().all()
             }
-        has_recent_data = False
-        latest_data_timestamp = 0
-        station_online = False  # Flag để kiểm tra trạm có online không
+        current_time = int(time.time())
+        sensor_data, station_online, has_recent_data, latest_data_timestamp = await _build_station_sensor_data_map(
+            db_data, station, devices, latest_cache_by_type, include_history, cutoff_time, current_time
+        )
 
-        for device in devices:
-            sensor_type = device.device_type
-
-            # ✅ Ưu tiên lấy từ latest_sensor_cache (luôn cập nhật mỗi lần MQTT nhận data)
-            cached = latest_cache_by_type.get(sensor_type)
-
-            # Fallback: nếu cache chưa có (server mới khởi động) thì lấy từ sensor_data
-            if not cached:
-                latest_result = await db_data.execute(
-                    select(model_data.SensorData)
-                    .where(
-                        and_(
-                            model_data.SensorData.station_id == station_id,
-                            model_data.SensorData.sensor_type == sensor_type
-                        )
-                    )
-                    .order_by(desc(model_data.SensorData.timestamp))
-                    .limit(1)
-                )
-                latest_row = latest_result.scalar_one_or_none()
-                latest_data = latest_row.data if latest_row else None
-                latest_ts = latest_row.timestamp if latest_row else None
-            else:
-                latest_data = cached.data
-                latest_ts = cached.timestamp
-
-            # ✅ Lấy offline threshold riêng cho sensor này
-            threshold = get_offline_threshold(station.config, sensor_type)
-            current_time = int(time.time())
-
-            received_ts = max(int(latest_ts or 0), _device_activity_timestamp(device))
-            sensor_is_online = bool(received_ts and current_time - received_ts < threshold)
-            station_online = station_online or sensor_is_online
-
-            # Measurement freshness is separate from device activity.
-            if latest_ts and (current_time - latest_ts) < threshold:
-                has_recent_data = True
-                if latest_ts > latest_data_timestamp:
-                    latest_data_timestamp = latest_ts
-
-            # Lấy lịch sử 24h
-            history = []
-            if include_history:
-                history = await _fetch_device_sensor_history(db_data, station_id, sensor_type, cutoff_time)
-
-            # ✅ Sửa lỗi "ảo": Tự động bù đắp dữ liệu Advanced cho trạm Offline/Dữ liệu cũ
-            if sensor_type == 'gnss':
-                latest_data = _format_gnss_advanced_payload(latest_data)
-
-            sensor_data[sensor_type] = {
-                "is_online": sensor_is_online,
-                "latest": latest_data,
-                "latest_timestamp": latest_ts,
-                "last_received_timestamp": received_ts or None,
-                "history": [
-                    {
-                        "timestamp": h.timestamp,
-                        "data": h.data
-                    }
-                    for h in reversed(history)
-                ]
-            }
-
-        # 3.5. Fetch latest gnss_adjusted data from LatestSensorCache
-        try:
-            adj_cache_res = await db_data.execute(
-                select(model_data.LatestSensorCache)
-                .where(
-                    and_(
-                        model_data.LatestSensorCache.station_id == station_id,
-                        model_data.LatestSensorCache.sensor_type == 'gnss_adjusted'
-                    )
-                )
-            )
-            adj_cached = adj_cache_res.scalar_one_or_none()
-            if adj_cached:
-                sensor_data["gnss_adjusted"] = {
-                    "is_online": True,
-                    "latest": _station_detail_adjustment_latest(
-                        adj_cached.data, include_adjustment_observations
-                    ),
-                    "latest_timestamp": adj_cached.timestamp,
-                    "history": []
-                }
-        except Exception as adj_load_e:
-            logger.error(f"Error loading cached gnss_adjusted for station {station_id}: {adj_load_e}")
+        adj_data = await _fetch_gnss_adjusted_cached(db_data, station_id, include_adjustment_observations)
+        if adj_data:
+            sensor_data["gnss_adjusted"] = adj_data
 
         # ✅ Tính status dựa trên offline threshold tùy chỉnh
         offline_display_enabled = is_offline_display_enabled(station.config)

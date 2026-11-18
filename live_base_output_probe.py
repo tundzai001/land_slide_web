@@ -162,8 +162,8 @@ def print_stats(station: str, stats: TopicStats) -> None:
     print(f"  last48 ={stats.last_hex or '-'}")
 
 
-async def wait_for_llh(feed: LiveFeed, station: str, timeout: float = 15.0):
-    deadline = time.monotonic() + timeout
+async def wait_for_llh(feed: LiveFeed, station: str, max_wait_seconds: float = 15.0):
+    deadline = time.monotonic() + max_wait_seconds
     while time.monotonic() < deadline:
         llh = feed.latest_llh(station)
         if llh and all(value is not None for value in llh):
@@ -172,8 +172,8 @@ async def wait_for_llh(feed: LiveFeed, station: str, timeout: float = 15.0):
     raise RuntimeError(f"No complete AGRICA LLH received for {station}")
 
 
-async def _wait_for_rover_restored(feed: LiveFeed, station: str, restore_started: float, timeout: float = 15.0) -> None:
-    deadline = restore_started + timeout
+async def _wait_for_rover_restored(feed: LiveFeed, station: str, restore_started: float, max_wait_seconds: float = 15.0) -> None:
+    deadline = restore_started + max_wait_seconds
     while time.monotonic() < deadline:
         if feed.latest_agrica_time(station) >= restore_started:
             print(f"{station}: ROVER restore verified by fresh AGRICA output.")
@@ -246,7 +246,7 @@ async def probe_station(
                 project_id=None,
             )
             restore_started = time.monotonic()
-            await _wait_for_rover_restored(feed, station, restore_started, timeout=15.0)
+            await _wait_for_rover_restored(feed, station, restore_started, max_wait_seconds=15.0)
         except Exception:
             logging.exception("CRITICAL: ROVER restoration failed for %s", station)
             if base_applied:

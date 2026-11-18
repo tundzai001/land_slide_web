@@ -59,23 +59,23 @@ def _validate_optional_metrics(payload, optional_metrics, result):
     return True
 
 
+def _validate_metadata_field(field: str, value: Any) -> bool:
+    if field == 'measured_at':
+        return bool(_number(value) and 0 < value < 253402300800)
+    if field == 'sequence':
+        return not isinstance(value, bool) and isinstance(value, int) and value >= 0
+    if field == 'quality':
+        return value in ('valid', 'suspect', 'invalid', 'unknown')
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= 160
+
+
 def _validate_metadata(payload, result):
     for field in METADATA_FIELDS:
-        if field not in payload:
-            continue
-        value = payload[field]
-        if field == 'measured_at':
-            if not _number(value) or not 0 < value < 253402300800:
+        if field in payload:
+            value = payload[field]
+            if not _validate_metadata_field(field, value):
                 return False
-        elif field == 'sequence':
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                return False
-        elif field == 'quality':
-            if value not in ('valid', 'suspect', 'invalid', 'unknown'):
-                return False
-        elif not isinstance(value, str) or not value.strip() or len(value) > 160:
-            return False
-        result[field] = value
+            result[field] = value
     return True
 
 

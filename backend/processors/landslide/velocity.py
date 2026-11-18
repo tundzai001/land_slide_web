@@ -262,8 +262,8 @@ class VelocityAnalysisMixin:
             {"name": "Rapid",           "threshold": 1.8, "unit": "m/hr"},     # > 1.8 m/hr
             {"name": "Moderate",        "threshold": 13, "unit": "m/month"},   # > 13 m/month
             {"name": "Slow",            "threshold": 1.6, "unit": "m/year"},   # > 1.6 m/year
-            {"name": "Very Slow",       "threshold": 16, "unit": "mm/year"},   # > 16 mm/year
-            {"name": "Extremely Slow",  "threshold": 0, "unit": "mm/year"}     # < 16 mm/year
+            {"name": "Very Slow",       "threshold": 16, "unit": MM_YEAR},   # > 16 mm/year
+            {"name": "Extremely Slow",  "threshold": 0, "unit": MM_YEAR}     # < 16 mm/year
         ]
 
         def _convert_threshold_to_mm_s(thresh: float, unit: str) -> float:

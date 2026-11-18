@@ -82,7 +82,7 @@ class IdleRoverGuardMixin:
     async def _check_idle_rover_streams(self) -> None:
         manager = self.round_robin_manager
         checked = set()
-        for info in list(self.topic_map.values()):
+        for info in self.topic_map.values():
             if info.get("type") != "gnss" or not info.get("station_code"):
                 continue
             key = str(info["station_code"]).strip().casefold()

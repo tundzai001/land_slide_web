@@ -18,6 +18,30 @@ from ..utils import clean_null_bytes
 
 logger = logging.getLogger(__name__)
 
+async def _resolve_suppression_incidents(db_data, alert_ids: list[int]) -> list:
+    incident_events = []
+    if not alert_ids:
+        return incident_events
+    incident_rows = (await db_data.execute(
+        select(model_data.IncidentCase).where(
+            model_data.IncidentCase.source_kind == "SENSOR_ALERT",
+            model_data.IncidentCase.source_id.in_(alert_ids),
+        ).with_for_update()
+    )).scalars().all()
+    for incident_case in incident_rows:
+        if incident_case.status in {"resolved", "dismissed"}:
+            continue
+        incident_case.signal_state = "RETURNED"
+        incident_case.status = "resolved"
+        incident_case.resolved_at = int(time.time())
+        incident_case.version += 1
+        incident_events.append((incident_case, await append_event(
+            db_data, incident_case, "signal_returned",
+            payload={"signal_state": "RETURNED", "status": "resolved", "reason": "alerting_disabled"},
+        )))
+    return incident_events
+
+
 class AlertPersistenceMixin:
     async def _save_alert_immediate(self, device_id: int, station_id: int, sensor_record: dict, alert: dict, current_timestamp: int):
         """Ghi trực tiếp xuống DB ngay lập tức khi có alert (không qua buffer)."""
@@ -202,25 +226,7 @@ class AlertPersistenceMixin:
                     ))
                     .values(is_resolved=True)
                 )
-                incident_events = []
-                if alert_ids:
-                    incident_rows = (await db_data.execute(
-                        select(model_data.IncidentCase).where(
-                            model_data.IncidentCase.source_kind == "SENSOR_ALERT",
-                            model_data.IncidentCase.source_id.in_(alert_ids),
-                        ).with_for_update()
-                    )).scalars().all()
-                    for incident_case in incident_rows:
-                        if incident_case.status in {"resolved", "dismissed"}:
-                            continue
-                        incident_case.signal_state = "RETURNED"
-                        incident_case.status = "resolved"
-                        incident_case.resolved_at = int(time.time())
-                        incident_case.version += 1
-                        incident_events.append((incident_case, await append_event(
-                            db_data, incident_case, "signal_returned",
-                            payload={"signal_state": "RETURNED", "status": "resolved", "reason": "alerting_disabled"},
-                        )))
+                incident_events = await _resolve_suppression_incidents(db_data, alert_ids)
                 if res.rowcount > 0:
                     await db_data.commit()
                     for incident_case, incident_event in incident_events:

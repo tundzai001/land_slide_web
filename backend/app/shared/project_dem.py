@@ -75,6 +75,23 @@ def project_dem_summary(project_id: int, models=None) -> dict:
     return {"dems": models, "has_dem": bool(models)}
 
 
+def _validate_grid_geometry(
+    columns: int, rows: int, cellsize: float, nodata: float,
+    x_origin: float, y_origin: float, x_key: str, y_key: str
+) -> tuple[float, float]:
+    if columns <= 0 or rows <= 0 or columns * rows > MAX_DEM_CELLS:
+        raise HTTPException(status_code=400, detail="Kích thước lưới DEM không hợp lệ hoặc quá lớn.")
+    if not all(math.isfinite(value) for value in (cellsize, nodata, x_origin, y_origin)) or cellsize <= 0:
+        raise HTTPException(status_code=400, detail="Tọa độ hoặc kích thước ô DEM không hợp lệ.")
+    # The project DEM workflow uses WGS84 / UTM zone 48N, whose projected
+    # coordinates fall within these broad bounds.
+    xll = x_origin - (cellsize / 2 if x_key.endswith("center") else 0)
+    yll = y_origin - (cellsize / 2 if y_key.endswith("center") else 0)
+    if not (0 <= xll <= 1_000_000 and 0 <= yll <= 10_000_000):
+        raise HTTPException(status_code=400, detail="DEM không có tọa độ UTM hợp lệ cho vùng 48N.")
+    return xll, yll
+
+
 def _parse_ascii_grid_header(stream) -> tuple[int, int, float, float, float, float]:
     try:
         stream.seek(0)
@@ -104,18 +121,25 @@ def _parse_ascii_grid_header(stream) -> tuple[int, int, float, float, float, flo
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Tiêu đề DEM thiếu hoặc sai thông số lưới.") from exc
 
-    if columns <= 0 or rows <= 0 or columns * rows > MAX_DEM_CELLS:
-        raise HTTPException(status_code=400, detail="Kích thước lưới DEM không hợp lệ hoặc quá lớn.")
-    if not all(math.isfinite(value) for value in (cellsize, nodata, x_origin, y_origin)) or cellsize <= 0:
-        raise HTTPException(status_code=400, detail="Tọa độ hoặc kích thước ô DEM không hợp lệ.")
-    # The project DEM workflow uses WGS84 / UTM zone 48N, whose projected
-    # coordinates fall within these broad bounds.
-    xll = x_origin - (cellsize / 2 if x_key.endswith("center") else 0)
-    yll = y_origin - (cellsize / 2 if y_key.endswith("center") else 0)
-    if not (0 <= xll <= 1_000_000 and 0 <= yll <= 10_000_000):
-        raise HTTPException(status_code=400, detail="DEM không có tọa độ UTM hợp lệ cho vùng 48N.")
-
+    xll, yll = _validate_grid_geometry(columns, rows, cellsize, nodata, x_origin, y_origin, x_key, y_key)
     return columns, rows, cellsize, nodata, xll, yll
+
+
+def _process_chunk_tokens(chunk: bytes, token: bytes, consume_value) -> bytes:
+    parts = re.split(rb"[ \t\r\n\v\f]+", chunk)
+    if chunk[:1] not in (b" ", b"\t", b"\r", b"\n", b"\v", b"\f") and token:
+        parts[0] = token + parts[0]
+    elif token:
+        consume_value(token)
+    token = b""
+    if chunk[-1:] not in (b" ", b"\t", b"\r", b"\n", b"\v", b"\f"):
+        token = parts.pop()
+    for raw_value in parts:
+        if raw_value:
+            consume_value(raw_value)
+    if len(token) > 64:
+        raise HTTPException(status_code=400, detail=INVALID_ELEVATION_DETAIL)
+    return token
 
 
 def _scan_grid_elevations(stream, expected_values: int, nodata: float) -> tuple[float, float]:
@@ -140,19 +164,8 @@ def _scan_grid_elevations(stream, expected_values: int, nodata: float) -> tuple[
             elevation_max = max(elevation_max, value)
 
     for chunk in iter(lambda: stream.read(64 * 1024), b""):
-        parts = re.split(rb"[ \t\r\n\v\f]+", chunk)
-        if chunk[:1] not in (b" ", b"\t", b"\r", b"\n", b"\v", b"\f") and token:
-            parts[0] = token + parts[0]
-        elif token:
-            consume_value(token)
-        token = b""
-        if chunk[-1:] not in (b" ", b"\t", b"\r", b"\n", b"\v", b"\f"):
-            token = parts.pop()
-        for raw_value in parts:
-            if raw_value:
-                consume_value(raw_value)
-        if len(token) > 64:
-            raise HTTPException(status_code=400, detail=INVALID_ELEVATION_DETAIL)
+        token = _process_chunk_tokens(chunk, token, consume_value)
+
     if token:
         consume_value(bytes(token))
     if value_count != expected_values:
@@ -217,6 +230,29 @@ def save_project_dem(project_id: int, name: str, content, existing_models=None) 
         return {"dem_id": dem_id, "dem": model, "models": models}
 
 
+def _rewrite_dem_asc_header(path: str, descriptor: int, temp_path: str, xllcorner: float, yllcorner: float) -> None:
+    try:
+        with open(path, "rb") as src, os.fdopen(descriptor, "wb") as dst:
+            header_count = 0
+            for line in src:
+                if header_count < 6:
+                    header_count += 1
+                    parts = line.strip().split()
+                    if parts and parts[0].lower() in (b"xllcorner", b"xllcenter"):
+                        dst.write(f"xllcorner     {float(xllcorner):.4f}\n".encode("ascii"))
+                        continue
+                    elif parts and parts[0].lower() in (b"yllcorner", b"yllcenter"):
+                        dst.write(f"yllcorner     {float(yllcorner):.4f}\n".encode("ascii"))
+                        continue
+                dst.write(line)
+            dst.flush()
+            os.fsync(dst.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
 def update_project_dem_metadata(
     project_id: int,
     dem_id: str,
@@ -247,26 +283,7 @@ def update_project_dem_metadata(
 
         # Update the header lines in the .asc file
         descriptor, temp_path = tempfile.mkstemp(prefix=f"project-{project_id}-", suffix=".tmp", dir=PROJECT_DEM_DIR)
-        try:
-            with open(path, "rb") as src, os.fdopen(descriptor, "wb") as dst:
-                header_count = 0
-                for line in src:
-                    if header_count < 6:
-                        header_count += 1
-                        parts = line.strip().split()
-                        if parts and parts[0].lower() in (b"xllcorner", b"xllcenter"):
-                            dst.write(f"xllcorner     {float(xllcorner):.4f}\n".encode("ascii"))
-                            continue
-                        elif parts and parts[0].lower() in (b"yllcorner", b"yllcenter"):
-                            dst.write(f"yllcorner     {float(yllcorner):.4f}\n".encode("ascii"))
-                            continue
-                    dst.write(line)
-                dst.flush()
-                os.fsync(dst.fileno())
-            os.replace(temp_path, path)
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+        _rewrite_dem_asc_header(path, descriptor, temp_path, xllcorner, yllcorner)
 
         updated_models = [target if m.get("id") == dem_id else m for m in models]
         _write_manifest(project_id, updated_models)

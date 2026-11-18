@@ -47,53 +47,65 @@ def _resolve_cors_online_status(item: dict, status_text: str) -> bool:
     return bool(item.get("ntrip_connected"))
 
 
+def _parse_cors_stream_entry(raw_stream: dict, position: int) -> Optional[dict]:
+    if not isinstance(raw_stream, dict):
+        return None
+    stream = {key: raw_stream[key] for key in (
+        "server_id", "stream_id", "host", "port", "mountpoint", "enabled"
+    ) if key in raw_stream}
+    raw_server_id = stream.get("server_id")
+    if raw_server_id in (None, ""):
+        stream_token = str(stream.get("stream_id") or "")
+        digits = "".join(char for char in stream_token if char.isdigit())
+        raw_server_id = digits or position
+    try:
+        stream["server_id"] = int(raw_server_id)
+    except (TypeError, ValueError):
+        return None
+    return stream
+
+
+def _extract_cors_fallback_streams(service_config: dict) -> list:
+    streams = []
+    for server_id in (1, 2):
+        host = str(
+            service_config.get(f"serverhost{server_id}")
+            or service_config.get(f"server{server_id}_host")
+            or ""
+        ).strip()
+        mountpoint = str(
+            service_config.get(f"mountpoint{server_id}") or ""
+        ).strip()
+        if not host or not mountpoint:
+            continue
+        port = (
+            service_config.get(f"serverport{server_id}")
+            or service_config.get(f"server{server_id}_port")
+            or 2101
+        )
+        streams.append({
+            "server_id": server_id,
+            "stream_id": f"s{server_id}",
+            "host": host,
+            "port": port,
+            "mountpoint": mountpoint,
+            "enabled": bool(
+                service_config.get(f"server{server_id}_enabled", True)
+            ),
+        })
+    return streams
+
+
 def _extract_cors_streams(item: dict, service_config: dict) -> list:
     streams = []
     raw_streams = item.get("streams") if isinstance(item.get("streams"), list) else []
     for position, raw_stream in enumerate(raw_streams, start=1):
-        if not isinstance(raw_stream, dict):
-            continue
-        stream = {key: raw_stream[key] for key in (
-            "server_id", "stream_id", "host", "port", "mountpoint", "enabled"
-        ) if key in raw_stream}
-        raw_server_id = stream.get("server_id")
-        if raw_server_id in (None, ""):
-            stream_token = str(stream.get("stream_id") or "")
-            digits = "".join(char for char in stream_token if char.isdigit())
-            raw_server_id = digits or position
-        try:
-            stream["server_id"] = int(raw_server_id)
-        except (TypeError, ValueError):
-            continue
-        streams.append(stream)
+        parsed = _parse_cors_stream_entry(raw_stream, position)
+        if parsed is not None:
+            streams.append(parsed)
 
     if not streams:
-        for server_id in (1, 2):
-            host = str(
-                service_config.get(f"serverhost{server_id}")
-                or service_config.get(f"server{server_id}_host")
-                or ""
-            ).strip()
-            mountpoint = str(
-                service_config.get(f"mountpoint{server_id}") or ""
-            ).strip()
-            if not host or not mountpoint:
-                continue
-            port = (
-                service_config.get(f"serverport{server_id}")
-                or service_config.get(f"server{server_id}_port")
-                or 2101
-            )
-            streams.append({
-                "server_id": server_id,
-                "stream_id": f"s{server_id}",
-                "host": host,
-                "port": port,
-                "mountpoint": mountpoint,
-                "enabled": bool(
-                    service_config.get(f"server{server_id}_enabled", True)
-                ),
-            })
+        streams = _extract_cors_fallback_streams(service_config)
     return streams
 
 

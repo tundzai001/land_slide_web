@@ -100,6 +100,88 @@ def _report_url_filter(requested_url: str):
     return or_(*url_filters)
 
 
+async def _load_evidence_for_adjustment(
+    execute: Callable,
+    mark: Callable[[str], None],
+    record: object,
+    payload: dict,
+    request_id: str,
+    project_id: int,
+) -> list[object]:
+    key = str(getattr(record, "adjustment_key", None) or payload.get("adjustment_key") or "")
+    if not key:
+        return []
+    try:
+        return await execute(
+            "load_adjustment_evidence",
+            select(model_data.GnssAdjustmentEvidence)
+            .where(model_data.GnssAdjustmentEvidence.adjustment_key == key)
+            .order_by(model_data.GnssAdjustmentEvidence.source_index.asc()),
+        )
+    except (TimeoutError, SQLAlchemyTimeoutError):
+        raise
+    except Exception:
+        # Old deployments have no evidence table yet; old rows still
+        # contain baseline_observations and remain downloadable.
+        mark("load_adjustment_evidence")
+        logger.warning(
+            "GNSS export evidence unavailable; using stored payload request_id=%s project_id=%s adjustment_key=%s",
+            request_id,
+            project_id,
+            key,
+            exc_info=True,
+        )
+        return []
+
+
+async def _query_candidate_records(
+    execute: Callable,
+    query,
+    project_id: int,
+    requested_url: str,
+    sensor_data_id: int | None,
+    request_id: str,
+) -> list[object] | None:
+    if sensor_data_id is not None:
+        records = await execute(
+            "lookup_adjustment_record",
+            query.where(model_data.SensorData.id == sensor_data_id).limit(1),
+            sensor_data_id=sensor_data_id,
+        )
+        if not records:
+            return None
+        payload = records[0].data if isinstance(records[0].data, dict) else None
+        if not payload or not matches_payload(payload, records[0], requested_url, project_id):
+            logger.warning(
+                "GNSS export selected record did not match request request_id=%s project_id=%s sensor_data_id=%s requested_url=%s",
+                request_id,
+                project_id,
+                sensor_data_id,
+                _url_path(requested_url),
+            )
+            return None
+        return records
+
+    records = await execute(
+        "lookup_indexed_adjustment",
+        query.where(
+            model_data.SensorData.adjustment_project_id == project_id,
+            model_data.SensorData.adjustment_key.is_not(None),
+        ),
+    )
+    if not records:
+        legacy_query = (
+            query.where(
+                model_data.SensorData.adjustment_project_id.is_(None),
+                _report_url_filter(requested_url),
+            )
+            .order_by(model_data.SensorData.timestamp.desc())
+            .limit(1)
+        )
+        records = await execute("lookup_legacy_adjustment", legacy_query)
+    return records
+
+
 async def find_adjustment(
     data_db: AsyncSession,
     *,
@@ -153,74 +235,19 @@ async def find_adjustment(
     query = select(model_data.SensorData).where(
         model_data.SensorData.sensor_type.in_(ADJUSTMENT_SENSOR_TYPES),
     )
-    if sensor_data_id is not None:
-        records = await execute(
-            "lookup_adjustment_record",
-            query.where(model_data.SensorData.id == sensor_data_id).limit(1),
-            sensor_data_id=sensor_data_id,
-        )
-        if not records:
-            return None
-        payload = records[0].data if isinstance(records[0].data, dict) else None
-        if not payload or not matches_payload(payload, records[0], requested_url, project_id):
-            logger.warning(
-                "GNSS export selected record did not match request request_id=%s project_id=%s sensor_data_id=%s requested_url=%s",
-                request_id,
-                project_id,
-                sensor_data_id,
-                _url_path(requested_url),
-            )
-            return None
-    else:
-        records = await execute(
-            "lookup_indexed_adjustment",
-            query.where(
-                model_data.SensorData.adjustment_project_id == project_id,
-                model_data.SensorData.adjustment_key.is_not(None),
-            ),
-        )
-    if sensor_data_id is None and not records:
-        # Keep compatibility with pre-indexed rows whose project id lives only
-        # in the JSON payload. Keep the expensive JSON predicate off the hot path.
-        legacy_query = (
-            query.where(
-                model_data.SensorData.adjustment_project_id.is_(None),
-                _report_url_filter(requested_url),
-            )
-            .order_by(model_data.SensorData.timestamp.desc())
-            .limit(1)
-        )
-        records = await execute(
-            "lookup_legacy_adjustment",
-            legacy_query,
-        )
+    records = await _query_candidate_records(
+        execute, query, project_id, requested_url, sensor_data_id, request_id
+    )
+    if not records:
+        return None
+
     for record in records:
         payload = record.data if isinstance(record.data, dict) else None
         if not payload or not matches_payload(payload, record, requested_url, project_id):
             continue
-        evidence = []
-        key = str(getattr(record, "adjustment_key", None) or payload.get("adjustment_key") or "")
-        if key:
-            try:
-                evidence = await execute(
-                    "load_adjustment_evidence",
-                    select(model_data.GnssAdjustmentEvidence)
-                    .where(model_data.GnssAdjustmentEvidence.adjustment_key == key)
-                    .order_by(model_data.GnssAdjustmentEvidence.source_index.asc()),
-                )
-            except (TimeoutError, SQLAlchemyTimeoutError):
-                raise
-            except Exception:
-                # Old deployments have no evidence table yet; old rows still
-                # contain baseline_observations and remain downloadable.
-                mark("load_adjustment_evidence")
-                logger.warning(
-                    "GNSS export evidence unavailable; using stored payload request_id=%s project_id=%s adjustment_key=%s",
-                    request_id,
-                    project_id,
-                    key,
-                    exc_info=True,
-                )
+        evidence = await _load_evidence_for_adjustment(
+            execute, mark, record, payload, request_id, project_id
+        )
         return record, payload, evidence
     logger.info(
         "GNSS export record not found request_id=%s project_id=%s requested_url=%s",

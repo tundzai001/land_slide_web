@@ -55,23 +55,27 @@ class SonarCoverageBoostTests(unittest.TestCase):
 
     def test_project_dem_error_branches(self):
         # Trigger non-numeric elevation
+        grid_nan_str = self.valid_grid.replace(b"100.0 101.5", b"not-a-number 101.5")
         with self.assertRaises(HTTPException) as ctx:
-            inspect_ascii_grid(self.valid_grid.replace(b"100.0 101.5", b"not-a-number 101.5"))
+            inspect_ascii_grid(grid_nan_str)
         self.assertEqual(ctx.exception.detail, INVALID_ELEVATION_DETAIL)
 
         # Trigger NaN non-finite elevation
+        grid_nan_float = self.valid_grid.replace(b"100.0 101.5", b"nan 101.5")
         with self.assertRaises(HTTPException) as ctx:
-            inspect_ascii_grid(self.valid_grid.replace(b"100.0 101.5", b"nan 101.5"))
+            inspect_ascii_grid(grid_nan_float)
         self.assertEqual(ctx.exception.detail, INVALID_ELEVATION_DETAIL)
 
         # Trigger extra values (size mismatch)
+        grid_extra = self.valid_grid.replace(b"98 99", b"98 99 100")
         with self.assertRaises(HTTPException) as ctx:
-            inspect_ascii_grid(self.valid_grid.replace(b"98 99", b"98 99 100"))
+            inspect_ascii_grid(grid_extra)
         self.assertEqual(ctx.exception.detail, GRID_SIZE_MISMATCH_DETAIL)
 
         # Trigger missing values
+        grid_missing = self.valid_grid.replace(b"98 99", b"98")
         with self.assertRaises(HTTPException) as ctx:
-            inspect_ascii_grid(self.valid_grid.replace(b"98 99", b"98"))
+            inspect_ascii_grid(grid_missing)
         self.assertEqual(ctx.exception.detail, GRID_SIZE_MISMATCH_DETAIL)
 
     def test_cors_endpoint_and_request_path_rewriting(self):
