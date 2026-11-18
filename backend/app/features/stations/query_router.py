@@ -1,5 +1,7 @@
 """Station listing, detail, history, and project query routes."""
 
+from __future__ import annotations
+
 import logging
 import math
 import time

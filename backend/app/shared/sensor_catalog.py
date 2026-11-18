@@ -2,10 +2,13 @@
 
 New channels accept calibrated engineering values, never raw vibrating-wire counts.
 """
+from __future__ import annotations
+
 import json
 import math
 import re
 from pathlib import Path
+from typing import Any
 
 SENSOR_CATALOG = {row['key']: row for row in json.loads(
     Path(__file__).with_suffix('.json').read_text(encoding='utf-8')
