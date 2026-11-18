@@ -92,6 +92,29 @@ class GNSSRuntimeMixin:
             raise ValueError(f"invalid {name}: {vector}")
         return vector
 
+    def _snapshot_reacquire_candidates(self):
+        candidates = []
+        for candidate in list(getattr(self, "reacquire_candidates", ()))[:10]:
+            try:
+                candidate_ts = self._normalize_epoch_timestamp(candidate["ts"])
+                candidate_position = self._validated_runtime_vector(candidate["pos_enu"], "quarantine ENU")
+                if candidate_ts is None:
+                    continue
+                candidates.append({
+                    "ts": candidate_ts,
+                    "pos_enu": candidate_position.tolist(),
+                    "fix_quality": int(candidate.get("fix_quality", self.min_fix_quality)),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        shift_started_at = self._normalize_epoch_timestamp(getattr(self, "_shift_started_at", None))
+        quarantine = (
+            {"started_at": shift_started_at, "candidates": candidates}
+            if candidates and shift_started_at is not None else None
+        )
+        return candidates, quarantine
+
     def _runtime_state_snapshot(self):
         identity = self._runtime_origin_identity()
         history = getattr(self, "history", None)
@@ -115,26 +138,7 @@ class GNSSRuntimeMixin:
         except (TypeError, ValueError):
             return None
 
-        candidates = []
-        for candidate in list(getattr(self, "reacquire_candidates", ()))[:10]:
-            try:
-                candidate_ts = self._normalize_epoch_timestamp(candidate["ts"])
-                candidate_position = self._validated_runtime_vector(candidate["pos_enu"], "quarantine ENU")
-                if candidate_ts is None:
-                    continue
-                candidates.append({
-                    "ts": candidate_ts,
-                    "pos_enu": candidate_position.tolist(),
-                    "fix_quality": int(candidate.get("fix_quality", self.min_fix_quality)),
-                })
-            except (KeyError, TypeError, ValueError):
-                continue
-
-        shift_started_at = self._normalize_epoch_timestamp(getattr(self, "_shift_started_at", None))
-        quarantine = (
-            {"started_at": shift_started_at, "candidates": candidates}
-            if candidates and shift_started_at is not None else None
-        )
+        _candidates, quarantine = self._snapshot_reacquire_candidates()
         reference_changed_at = self._normalize_epoch_timestamp(getattr(self, "_reference_changed_at", None))
         last_handled_event = self._normalize_epoch_timestamp(
             getattr(self, "_last_handled_reference_event_ts", None)
@@ -167,31 +171,62 @@ class GNSSRuntimeMixin:
             "updated_at": int(time.time()),
         }
 
+    def _validate_stored_origin_and_offset(self, value: dict) -> bool:
+        expected_origin = self._runtime_origin_identity()
+        stored_origin = value.get("origin")
+        if expected_origin is None or not isinstance(stored_origin, dict):
+            return False
+        if int(stored_origin.get("locked_at")) != expected_origin["locked_at"]:
+            return False
+        if int(stored_origin.get("id")) != expected_origin["id"]:
+            return False
+        for key, tolerance in (("lat", 1e-10), ("lon", 1e-10), ("h", 1e-4)):
+            if not math.isclose(
+                float(stored_origin.get(key)), expected_origin[key], rel_tol=0.0, abs_tol=tolerance
+            ):
+                return False
+
+        stored_offset = self._validated_tracking_offset(value.get("tracking_offset_enu"))
+        current_offset = self._validated_tracking_offset(
+            getattr(self, "tracking_offset_enu", np.zeros(3, dtype=float))
+        )
+        return bool(np.allclose(stored_offset, current_offset, rtol=0.0, atol=1e-7))
+
+    def _validate_stored_quarantine(self, quarantine, trusted_ts: float):
+        if quarantine is None:
+            return [], None
+        if not isinstance(quarantine, dict) or not isinstance(quarantine.get("candidates"), list):
+            return None
+        shift_started_at = self._normalize_epoch_timestamp(quarantine.get("started_at"))
+        if shift_started_at is None or shift_started_at < trusted_ts:
+            return None
+        restored = []
+        for candidate in quarantine["candidates"][-10:]:
+            if not isinstance(candidate, dict):
+                return None
+            candidate_ts = self._normalize_epoch_timestamp(candidate.get("ts"))
+            candidate_position = self._validated_runtime_vector(
+                candidate.get("pos_enu"), "quarantine ENU"
+            )
+            fix_quality = int(candidate.get("fix_quality"))
+            if candidate_ts is None or candidate_ts <= trusted_ts:
+                return None
+            restored.append({
+                "ts": candidate_ts,
+                "pos_enu": candidate_position,
+                "fix_quality": fix_quality,
+            })
+        if not restored:
+            return None
+        return restored, shift_started_at
+
     def _restore_runtime_state(self, value) -> bool:
         """Restore only a checkpoint tied to this exact immutable origin and offset."""
         self._needs_boot_anchor = True
         try:
             if not isinstance(value, dict) or value.get("version") != GNSS_RUNTIME_STATE_VERSION:
                 return False
-            expected_origin = self._runtime_origin_identity()
-            stored_origin = value.get("origin")
-            if expected_origin is None or not isinstance(stored_origin, dict):
-                return False
-            if int(stored_origin.get("locked_at")) != expected_origin["locked_at"]:
-                return False
-            if int(stored_origin.get("id")) != expected_origin["id"]:
-                return False
-            for key, tolerance in (("lat", 1e-10), ("lon", 1e-10), ("h", 1e-4)):
-                if not math.isclose(
-                    float(stored_origin.get(key)), expected_origin[key], rel_tol=0.0, abs_tol=tolerance
-                ):
-                    return False
-
-            stored_offset = self._validated_tracking_offset(value.get("tracking_offset_enu"))
-            current_offset = self._validated_tracking_offset(
-                getattr(self, "tracking_offset_enu", np.zeros(3, dtype=float))
-            )
-            if not np.allclose(stored_offset, current_offset, rtol=0.0, atol=1e-7):
+            if not self._validate_stored_origin_and_offset(value):
                 return False
 
             trusted = value.get("last_trusted")
@@ -222,32 +257,10 @@ class GNSSRuntimeMixin:
             if reference_source is not None and not isinstance(reference_source, str):
                 return False
 
-            restored_candidates = []
-            quarantine = value.get("quarantine")
-            shift_started_at = None
-            if quarantine is not None:
-                if not isinstance(quarantine, dict) or not isinstance(quarantine.get("candidates"), list):
-                    return False
-                shift_started_at = self._normalize_epoch_timestamp(quarantine.get("started_at"))
-                if shift_started_at is None or shift_started_at < trusted_ts:
-                    return False
-                for candidate in quarantine["candidates"][-10:]:
-                    if not isinstance(candidate, dict):
-                        return False
-                    candidate_ts = self._normalize_epoch_timestamp(candidate.get("ts"))
-                    candidate_position = self._validated_runtime_vector(
-                        candidate.get("pos_enu"), "quarantine ENU"
-                    )
-                    fix_quality = int(candidate.get("fix_quality"))
-                    if candidate_ts is None or candidate_ts <= trusted_ts:
-                        return False
-                    restored_candidates.append({
-                        "ts": candidate_ts,
-                        "pos_enu": candidate_position,
-                        "fix_quality": fix_quality,
-                    })
-                if not restored_candidates:
-                    return False
+            quarantine_res = self._validate_stored_quarantine(value.get("quarantine"), trusted_ts)
+            if quarantine_res is None:
+                return False
+            restored_candidates, shift_started_at = quarantine_res
 
             self.history.clear()
             self.history.append({"ts": trusted_ts, "pos_enu": trusted_position})

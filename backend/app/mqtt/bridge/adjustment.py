@@ -109,6 +109,69 @@ class MQTTAdjustmentMixin:
             self.adjustment_results[int(project_id)] = summary
         return phase, summary
 
+    async def _handle_adjustment_quality_failure(
+        self,
+        run_id: int,
+        public_project_id: int,
+        cluster_name: str,
+        cluster_index: int,
+        adjustment: dict,
+        adjustment_key: str,
+        current_timestamp: int,
+    ) -> None:
+        quality_gate = adjustment.get("quality_gate") or {}
+        reasons = "; ".join(quality_gate.get("reasons") or [])
+        message = (
+            "Bình sai đã tạo hồ sơ audit nhưng không đạt quality gate; "
+            "không lưu/publish tọa độ chính thức. "
+            f"{reasons or 'quality gate failed'}"
+        )
+        self.adjustment_phase[run_id] = "FAILED_QUALITY_GATE"
+        self.adjustment_message[run_id] = message
+        self.adjustment_run_contexts[run_id]["status"] = "FAILED_QUALITY_GATE"
+        self.adjustment_cluster_results[public_project_id][run_id] = adjustment
+        station_id = next(
+            (
+                int(point.get("station_id"))
+                for point in (adjustment.get("points") or {}).values()
+                if point.get("station_id")
+            ),
+            0,
+        )
+        async with self._buffer_lock:
+            self._sensor_buffer.append({
+                "station_id": station_id,
+                "timestamp": current_timestamp,
+                "sensor_type": "gnss_adjustment_failed",
+                "ingest_id": self._make_ingest_id(
+                    0,
+                    station_id,
+                    "gnss_adjustment_failed",
+                    current_timestamp,
+                    adjustment,
+                ),
+                "adjustment_key": adjustment_key,
+                "adjustment_project_id": public_project_id,
+                "adjustment_cluster_index": cluster_index,
+                "data": adjustment,
+                "value_1": None,
+                "value_2": None,
+                "value_3": None,
+                "value_4": None,
+                "value_5": None,
+            })
+        phase, summary = self._refresh_project_adjustment_state(public_project_id)
+        await manager.broadcast({
+            "type": "gnss_adjustment_progress",
+            "project_id": public_project_id,
+            "run_id": run_id,
+            "cluster_name": cluster_name,
+            "phase": phase,
+            "message": f"{cluster_name}: {message}",
+            "timestamp": current_timestamp,
+            "data": summary,
+        })
+
     async def _handle_round_robin_adjustment_result(self, project_id: int, adjustment: dict):
         """Always persist audit reports; publish coordinates only after quality PASS."""
         run_id = int(project_id)
@@ -130,8 +193,6 @@ class MQTTAdjustmentMixin:
         current_timestamp = int(time.time())
         adjustment, evidence = compact_adjustment_payload(adjustment)
         cluster_index = int(adjustment.get("cluster_index", -1))
-        # Scheduler run IDs are reused for every cycle. Keep a stable token
-        # within this session while giving the next cycle a distinct key.
         run_token = run_context.setdefault("started_at_ns", time.time_ns())
         self.adjustment_run_contexts[run_id]["started_at_ns"] = run_token
         adjustment_key = f"run:{public_project_id}:{cluster_index}:{run_id}:{run_token}"
@@ -154,60 +215,14 @@ class MQTTAdjustmentMixin:
             logger.exception("Project %s run %s: %s", public_project_id, run_id, message)
             await self._handle_round_robin_adjustment_error(run_id, message)
             return
+
         quality_gate = adjustment.get("quality_gate") or {}
         if not bool(quality_gate.get("passed")):
-            reasons = "; ".join(quality_gate.get("reasons") or [])
-            message = (
-                "Bình sai đã tạo hồ sơ audit nhưng không đạt quality gate; "
-                "không lưu/publish tọa độ chính thức. "
-                f"{reasons or 'quality gate failed'}"
+            await self._handle_adjustment_quality_failure(
+                run_id, public_project_id, cluster_name, cluster_index, adjustment, adjustment_key, current_timestamp
             )
-            self.adjustment_phase[run_id] = "FAILED_QUALITY_GATE"
-            self.adjustment_message[run_id] = message
-            self.adjustment_run_contexts[run_id]["status"] = "FAILED_QUALITY_GATE"
-            self.adjustment_cluster_results[public_project_id][run_id] = adjustment
-            station_id = next(
-                (
-                    int(point.get("station_id"))
-                    for point in (adjustment.get("points") or {}).values()
-                    if point.get("station_id")
-                ),
-                0,
-            )
-            async with self._buffer_lock:
-                self._sensor_buffer.append({
-                    "station_id": station_id,
-                    "timestamp": current_timestamp,
-                    "sensor_type": "gnss_adjustment_failed",
-                    "ingest_id": self._make_ingest_id(
-                        0,
-                        station_id,
-                        "gnss_adjustment_failed",
-                        current_timestamp,
-                        adjustment,
-                    ),
-                    "adjustment_key": adjustment_key,
-                    "adjustment_project_id": public_project_id,
-                    "adjustment_cluster_index": cluster_index,
-                    "data": adjustment,
-                    "value_1": None,
-                    "value_2": None,
-                    "value_3": None,
-                    "value_4": None,
-                    "value_5": None,
-                })
-            phase, summary = self._refresh_project_adjustment_state(public_project_id)
-            await manager.broadcast({
-                "type": "gnss_adjustment_progress",
-                "project_id": public_project_id,
-                "run_id": run_id,
-                "cluster_name": cluster_name,
-                "phase": phase,
-                "message": f"{cluster_name}: {message}",
-                "timestamp": current_timestamp,
-                "data": summary,
-            })
             return
+
         interpretation_status = str(
             quality_gate.get("interpretation_status") or "PASS"
         )

@@ -172,37 +172,42 @@ class SensorIngestPersistenceMixin:
                 self._ingest_metrics["spool_rejected"] = self._ingest_metrics.get("spool_rejected", 0) + len(chunk)
                 logger.critical("Ingest spool unavailable or full; retaining %s rows in RAM", len(chunk))
         return batch_ids
+    async def _process_spool_envelope(self, envelope: dict) -> bool:
+        if not isinstance(envelope, dict):
+            return False
+        batch_id = str(envelope.get("batch_id") or "")
+        records = list(envelope.get("records") or [])
+        if not batch_id or not records:
+            await self._get_ingest_spool().acknowledge(batch_id)
+            return True
+        try:
+            lock = getattr(self, "_sensor_db_lock", None)
+            if lock is None:
+                lock = self._sensor_db_lock = asyncio.Lock()
+            async with lock:
+                metrics = await self._persist_sensor_batch(records)
+            await self._get_ingest_spool().acknowledge(batch_id)
+            self._ingest_metrics["inserted"] += metrics["inserted"]
+            self._ingest_metrics["deduped"] += metrics["deduped"]
+            self._ingest_metrics["drained_batches"] += 1
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._ingest_metrics["spool_retries"] += 1
+            self._ingest_metrics["last_error"] = type(exc).__name__
+            logger.warning("Durable ingest spool retry deferred: %s", exc)
+            return False
+
     async def _drain_ingest_spool_loop(self):
         self._ensure_ingest_metrics()
         logger.info("Started durable ingest spool drain task")
         retry_seconds = max(1.0, float(getattr(settings, "INGEST_SPOOL_RETRY_SECONDS", 5.0)))
         while True:
             await asyncio.sleep(retry_seconds)
-            envelopes = await self._get_ingest_spool().pending(
-                limit=1
-            )
+            envelopes = await self._get_ingest_spool().pending(limit=1)
             for envelope in envelopes:
-                batch_id = str(envelope.get("batch_id") or "")
-                records = list(envelope.get("records") or [])
-                if not batch_id or not records:
-                    await self._get_ingest_spool().acknowledge(batch_id)
-                    continue
-                try:
-                    lock = getattr(self, "_sensor_db_lock", None)
-                    if lock is None:
-                        lock = self._sensor_db_lock = asyncio.Lock()
-                    async with lock:
-                        metrics = await self._persist_sensor_batch(records)
-                    await self._get_ingest_spool().acknowledge(batch_id)
-                    self._ingest_metrics["inserted"] += metrics["inserted"]
-                    self._ingest_metrics["deduped"] += metrics["deduped"]
-                    self._ingest_metrics["drained_batches"] += 1
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    self._ingest_metrics["spool_retries"] += 1
-                    self._ingest_metrics["last_error"] = type(exc).__name__
-                    logger.warning("Durable ingest spool retry deferred: %s", exc)
+                if not await self._process_spool_envelope(envelope):
                     break
     async def ingest_diagnostics(self) -> dict[str, Any]:
         metrics = dict(getattr(self, "_ingest_metrics", {}) or {})

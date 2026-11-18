@@ -1154,6 +1154,117 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertEqual(parsed["name"], "HN01")
         self.assertTrue(parsed["is_online"])
 
+    def test_query_router_stations_helpers(self):
+        import time
+        from unittest.mock import MagicMock
+        from app.features.stations.query_router import (
+            _build_stations_query,
+            _compute_station_online,
+            _serialize_station_row,
+        )
+        from fastapi import HTTPException
+
+        # _build_stations_query
+        q1 = _build_stations_query(1, "test", "name")
+        self.assertIsNotNone(q1)
+        q2 = _build_stations_query(1, None, "-created_at")
+        self.assertIsNotNone(q2)
+        with self.assertRaises(HTTPException):
+            _build_stations_query(1, None, "unsupported_field")
+
+        # _compute_station_online
+        station = MagicMock()
+        station.id = 10
+        station.config = {}
+        d1 = MagicMock(device_type="gnss")
+        self.assertFalse(_compute_station_online(station, [d1], {}, int(time.time())))
+        self.assertTrue(_compute_station_online(station, [d1], {(10, "gnss"): int(time.time())}, int(time.time())))
+
+        # _serialize_station_row
+        d1.id = 101
+        d1.device_code = "DEV01"
+        d1.name = "GNSS Dev"
+        d1.mqtt_topic = "topic/gnss"
+        station.station_code = "ST01"
+        station.name = "Station 1"
+        station.location = {}
+        station.status = "online"
+        serialized = _serialize_station_row(station, [d1], True, include_runtime=True)
+        self.assertEqual(serialized["id"], 10)
+        self.assertEqual(serialized["status"], "online")
+        self.assertEqual(len(serialized["devices"]), 1)
+
+    def test_gnss_runtime_validation_helpers(self):
+        import numpy as np
+        from processors.gnss.runtime import GNSSRuntimeMixin
+
+        class MockRuntime(GNSSRuntimeMixin):
+            def __init__(self):
+                self.origin = {"lat": 10.0, "lon": 105.0, "h": 50.0}
+                self._origin_locked_at = 1000
+                self._origin_record_id = 1
+                self.tracking_offset_enu = np.array([0.0, 0.0, 0.0])
+                self.min_fix_quality = 4
+                self.reacquire_candidates = [{"pos_enu": [1.0, 2.0, 3.0], "fix_quality": 4, "ts": 1005}]
+
+        runtime = MockRuntime()
+        # _snapshot_reacquire_candidates
+        candidates, quarantine = runtime._snapshot_reacquire_candidates()
+        self.assertEqual(len(candidates), 1)
+
+        # _validate_stored_origin_and_offset
+        val_bad_origin = {"origin": None}
+        self.assertFalse(runtime._validate_stored_origin_and_offset(val_bad_origin))
+        val_good = {
+            "origin": {"id": 1, "lat": 10.0, "lon": 105.0, "h": 50.0, "locked_at": 1000},
+            "tracking_offset_enu": [0.0, 0.0, 0.0],
+        }
+        self.assertTrue(runtime._validate_stored_origin_and_offset(val_good))
+
+        # _validate_stored_quarantine
+        self.assertEqual(runtime._validate_stored_quarantine(None, 1000.0), ([], None))
+        self.assertIsNone(runtime._validate_stored_quarantine({"started_at": 999}, 1000.0))
+        valid_q = {
+            "started_at": 1001,
+            "candidates": [{"pos_enu": [1.0, 2.0, 3.0], "fix_quality": 4, "ts": 1002}],
+        }
+        res = runtime._validate_stored_quarantine(valid_q, 1000.0)
+        self.assertIsNotNone(res)
+        restored, started = res
+        self.assertEqual(started, 1001.0)
+        self.assertEqual(len(restored), 1)
+
+    def test_ingest_spool_envelope(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        from app.mqtt.persistence.ingest import SensorIngestPersistenceMixin
+
+        mixin = SensorIngestPersistenceMixin()
+        mock_spool = MagicMock()
+        mock_spool.acknowledge = AsyncMock()
+        mixin._get_ingest_spool = MagicMock(return_value=mock_spool)
+        mixin._ensure_ingest_metrics()
+
+        # Non-dict envelope
+        self.assertFalse(asyncio.run(mixin._process_spool_envelope("not a dict")))
+
+        # Empty records envelope acknowledges and returns True
+        self.assertTrue(asyncio.run(mixin._process_spool_envelope({"batch_id": "b1", "records": []})))
+        mock_spool.acknowledge.assert_called_with("b1")
+
+        # Valid envelope
+        mixin._persist_sensor_batch = AsyncMock(return_value={"inserted": 5, "deduped": 1})
+        valid_env = {"batch_id": "b2", "records": [{"val": 123}]}
+        self.assertTrue(asyncio.run(mixin._process_spool_envelope(valid_env)))
+        self.assertEqual(mixin._ingest_metrics["inserted"], 5)
+        self.assertEqual(mixin._ingest_metrics["deduped"], 1)
+
+        # Failure during persistence returns False
+        mixin._persist_sensor_batch = AsyncMock(side_effect=RuntimeError("db err"))
+        self.assertFalse(asyncio.run(mixin._process_spool_envelope(valid_env)))
+        self.assertEqual(mixin._ingest_metrics["spool_retries"], 1)
+
+
 
 
 

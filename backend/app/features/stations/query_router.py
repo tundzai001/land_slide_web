@@ -50,6 +50,60 @@ def _compute_station_status(station_online: bool, offline_display_enabled: bool)
         return "stale"
     return "offline"
 
+def _build_stations_query(project_id: int, q: Optional[str], sort: Optional[str]):
+    stmt = select(model_config.Station).where(model_config.Station.project_id == project_id)
+    if q and q.strip():
+        term = q.strip()
+        stmt = stmt.where(model_config.Station.name.icontains(term, autoescape=True)
+                          | model_config.Station.station_code.icontains(term, autoescape=True))
+    sort_fields = {"name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
+    if sort:
+        field_name = sort.lstrip("-")
+        if field_name not in sort_fields:
+            raise HTTPException(status_code=422, detail="Unsupported sort field")
+        column = sort_fields[field_name]
+        stmt = stmt.order_by(column.desc() if sort.startswith("-") else column.asc())
+    return stmt
+
+
+def _compute_station_online(station, devices: list, latest_by_key: dict, current_time: int) -> bool:
+    for device in devices:
+        sensor_type = device.device_type
+        threshold = get_offline_threshold(station.config, sensor_type)
+        latest_ts = latest_by_key.get((int(station.id), str(sensor_type)), 0)
+        if latest_ts and (current_time - latest_ts) < threshold:
+            return True
+    return False
+
+
+def _serialize_station_row(station, devices: list, station_online: bool, include_runtime: bool) -> dict:
+    offline_display_enabled = is_offline_display_enabled(station.config)
+    if include_runtime:
+        computed_status = _compute_station_status(station_online, offline_display_enabled)
+    else:
+        computed_status = str(station.status or "offline")
+
+    devices_list = [
+        {
+            "id": d.id,
+            "device_code": d.device_code,
+            "name": d.name,
+            "device_type": d.device_type,
+            "mqtt_topic": d.mqtt_topic,
+        }
+        for d in devices
+    ]
+    return {
+        "id": station.id,
+        "station_code": station.station_code,
+        "name": station.name,
+        "location": station.location,
+        "status": computed_status,
+        "config": station.config,
+        "devices": devices_list,
+    }
+
+
 @router.get("/api/admin/projects/{project_id}/stations", responses={422: {"description": "Unprocessable Entity"}})
 async def get_stations_by_project(
     project_id: int,
@@ -64,22 +118,11 @@ async def get_stations_by_project(
     db_data: AsyncSession = Depends(get_data_db),
     current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.VIEW_STATIONS))
 ):
-    # Enforce operator project access
     check_operator_project_access(current_user, project_id)
-    stmt = select(model_config.Station).where(model_config.Station.project_id == project_id)
-    if q and q.strip():
-        term = q.strip()
-        stmt = stmt.where(model_config.Station.name.icontains(term, autoescape=True)
-                          | model_config.Station.station_code.icontains(term, autoescape=True))
-    sort_fields = {"name": model_config.Station.name, "station_code": model_config.Station.station_code, "created_at": model_config.Station.created_at}
-    if sort:
-        field_name = sort.lstrip("-")
-        if field_name not in sort_fields:
-            raise HTTPException(status_code=422, detail="Unsupported sort field")
-        column = sort_fields[field_name]
-        stmt = stmt.order_by(column.desc() if sort.startswith("-") else column.asc())
+    stmt = _build_stations_query(project_id, q, sort)
     result = await db_config.execute(stmt)
     stations = result.scalars().all()
+
     if include_runtime:
         devices_by_station, latest_by_key, _alerts_by_station = await _load_station_runtime_maps(
             stations, db_config, db_data
@@ -95,53 +138,14 @@ async def get_stations_by_project(
                 devices_by_station[int(device.station_id)].append(device)
         latest_by_key = {}
 
-    # Tính status động cho từng trạm
     current_time = int(time.time())
-
     stations_with_status = []
     for station in stations:
         devices = devices_by_station[int(station.id)]
-        # Lấy danh sách devices của trạm
-        # Kiểm tra status cho từng sensor type
-        station_online = False
-
-        for device in devices:
-            sensor_type = device.device_type
-            threshold = get_offline_threshold(station.config, sensor_type)
-
-            # ✅ Ưu tiên lấy từ latest_sensor_cache
-            latest_ts = latest_by_key.get((int(station.id), str(sensor_type)), 0)
-
-            # Nếu có ít nhất 1 sensor online -> station online
-            if latest_ts and (current_time - latest_ts) < threshold:
-                station_online = True
-                break
-
-        offline_display_enabled = is_offline_display_enabled(station.config)
-        if include_runtime:
-            computed_status = _compute_station_status(station_online, offline_display_enabled)
-        else:
-            computed_status = str(station.status or "offline")
-
-        devices_list = []
-        for d in devices:
-            devices_list.append({
-                "id": d.id,
-                "device_code": d.device_code,
-                "name": d.name,
-                "device_type": d.device_type,
-                "mqtt_topic": d.mqtt_topic
-            })
-
-        stations_with_status.append({
-            "id": station.id,
-            "station_code": station.station_code,
-            "name": station.name,
-            "location": station.location,
-            "status": computed_status,
-            "config": station.config,
-            "devices": devices_list
-        })
+        station_online = _compute_station_online(station, devices, latest_by_key, current_time)
+        stations_with_status.append(
+            _serialize_station_row(station, devices, station_online, include_runtime)
+        )
 
     if status:
         normalized_status = status.strip().lower()
