@@ -44,6 +44,8 @@ from .statistics import (
 
 logger = logging.getLogger(__name__)
 
+AGRICA_HEADER = "#AGRICA"
+
 class RoundRobinObservationMixin:
     @staticmethod
     def _command_station_key(station_code: Any) -> str:
@@ -624,7 +626,7 @@ class RoundRobinObservationMixin:
         key = (int(project_id), int(station_id))
         payload = str(raw_payload or "").replace("\x00", "")
         pending = self._agrica_fragment_buffers.get(key, "")
-        marker_index = payload.find("#AGRICA")
+        marker_index = payload.find(AGRICA_HEADER)
         if marker_index >= 0:
             # A fresh AGRICA header supersedes an incomplete stale sentence.
             pending = payload[marker_index:]
@@ -641,7 +643,7 @@ class RoundRobinObservationMixin:
         if complete_matches:
             completed = [match.group(0) for match in complete_matches]
             tail = pending[complete_matches[-1].end():]
-            tail_marker = tail.find("#AGRICA")
+            tail_marker = tail.find(AGRICA_HEADER)
             if tail_marker >= 0:
                 tail = tail[tail_marker:]
             else:
@@ -655,7 +657,7 @@ class RoundRobinObservationMixin:
         # Protect the service from an indefinitely growing corrupt buffer.  If
         # another AGRICA header is present keep only the newest sentence start.
         if len(pending) > 8192:
-            newest_marker = pending.rfind("#AGRICA")
+            newest_marker = pending.rfind(AGRICA_HEADER)
             pending = pending[newest_marker:] if newest_marker >= 0 else ""
         if pending:
             self._agrica_fragment_buffers[key] = pending

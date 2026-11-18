@@ -26,56 +26,75 @@ from .common import (
 )
 
 
+def _parse_gngga_height(parts: list[str]) -> float | None:
+    if len(parts) <= 9 or not parts[9]:
+        return None
+    try:
+        altitude_msl = float(parts[9])
+    except (ValueError, TypeError):
+        return None
+
+    if len(parts) <= 11 or not parts[11]:
+        return None
+    try:
+        geoid_sep = float(parts[11])
+    except (ValueError, TypeError):
+        return None
+
+    return altitude_msl + geoid_sep
+
+
+def _parse_gngga_lat_lon(parts: list[str]) -> tuple[float, float] | None:
+    lat_str, lon_str = parts[2], parts[4]
+    lat_dir = parts[3].upper() if parts[3] else ''
+    lon_dir = parts[5].upper() if parts[5] else ''
+
+    if not lat_str or not lon_str:
+        return None
+    if lat_dir not in ('N', 'S') or lon_dir not in ('E', 'W'):
+        return None
+
+    try:
+        lat_deg = int(lat_str[:2])
+        lat_min = float(lat_str[2:])
+        lon_deg = int(lon_str[:3])
+        lon_min = float(lon_str[3:])
+    except (ValueError, IndexError):
+        return None
+
+    if not (0.0 <= lat_min < 60.0 and 0.0 <= lon_min < 60.0):
+        return None
+
+    lat = float(lat_deg) + lat_min / 60.0
+    if lat_dir == 'S':
+        lat = -lat
+
+    lon = float(lon_deg) + lon_min / 60.0
+    if lon_dir == 'W':
+        lon = -lon
+
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+
+    return lat, lon
+
+
 class GNSSNmeaMixin:
     def _parse_gngga(self, gngga_string):
         try:
             parts = gngga_string.split(',')
-            if len(parts) < 10: return None
-                
-            lat_str, lon_str = parts[2], parts[4]
-            lat_dir, lon_dir = parts[3].upper() if parts[3] else '', parts[5].upper() if parts[5] else ''
-            
-            if not lat_str or not lon_str: return None
-            if lat_dir not in ('N', 'S') or lon_dir not in ('E', 'W'): return None
-
-            # Persisted origins and ECEF use ellipsoidal height.
-            if len(parts) <= 9 or not parts[9]:
-                return None
-            try:
-                altitude_msl = float(parts[9])
-            except (ValueError, TypeError):
+            if len(parts) < 10:
                 return None
 
-            # Check geoid separation (field 11): if missing or empty, reject to prevent 30m+ false jump
-            if len(parts) <= 11 or not parts[11]:
-                return None
-            try:
-                geoid_sep = float(parts[11])
-            except (ValueError, TypeError):
+            h = _parse_gngga_height(parts)
+            if h is None:
                 return None
 
-            h = altitude_msl + geoid_sep
-            
-            try:
-                lat_deg = int(lat_str[:2])
-                lat_min = float(lat_str[2:])
-                lon_deg = int(lon_str[:3])
-                lon_min = float(lon_str[3:])
-            except (ValueError, IndexError):
+            lat_lon = _parse_gngga_lat_lon(parts)
+            if lat_lon is None:
                 return None
+            lat, lon = lat_lon
 
-            if not (0.0 <= lat_min < 60.0 and 0.0 <= lon_min < 60.0):
-                return None
-
-            lat = float(lat_deg) + lat_min / 60.0
-            if lat_dir == 'S': lat = -lat
-            
-            lon = float(lon_deg) + lon_min / 60.0
-            if lon_dir == 'W': lon = -lon
-
-            if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-                return None
-                
             received_ts = time.time()
             gga_timestamp = self._gga_epoch_seconds(parts[1], received_ts) if parts[1] else None
             return {
@@ -83,9 +102,9 @@ class GNSSNmeaMixin:
                 'gga_utc': parts[1] if parts[1] else None,
                 'gga_timestamp': gga_timestamp,
                 'received_timestamp': received_ts,
-                'fix_quality': int(parts[6]) if parts[6] else 0, 
-                'num_sats': int(parts[7]) if parts[7] else 0, 
-                'hdop': float(parts[8]) if parts[8] else 99.9
+                'fix_quality': int(parts[6]) if parts[6] else 0,
+                'num_sats': int(parts[7]) if parts[7] else 0,
+                'hdop': float(parts[8]) if parts[8] else 99.9,
             }
         except (ValueError, IndexError):
             return None

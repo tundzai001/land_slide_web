@@ -27,6 +27,51 @@ from .common import (
 )
 
 
+async def _query_origin_record(db, device_id: int):
+    from app.models.config import GNSSOrigin
+    from sqlalchemy import select
+
+    try:
+        result = await db.execute(
+            select(GNSSOrigin).where(GNSSOrigin.device_id == device_id)
+        )
+        return result.scalar_one_or_none()
+    except Exception as col_err:
+        logger.warning(f"⚠️ Device {device_id}: Direct model select failed ({col_err}), attempting basic column select")
+        result = await db.execute(
+            select(
+                GNSSOrigin.lat, GNSSOrigin.lon, GNSSOrigin.h,
+                GNSSOrigin.rotation_matrix, GNSSOrigin.ecef_origin,
+                GNSSOrigin.locked_at, GNSSOrigin.id,
+            ).where(GNSSOrigin.device_id == device_id)
+        )
+        row = result.first()
+        if not row:
+            return None
+        return type('SimpleOrigin', (), {
+            'lat': row[0], 'lon': row[1], 'h': row[2],
+            'rotation_matrix': row[3], 'ecef_origin': row[4],
+            'locked_at': row[5],
+            'id': row[6],
+            'tracking_offset': None,
+        })()
+
+
+def _sync_station_origin_config(station, origin_dict: dict) -> None:
+    import copy
+    from sqlalchemy.orm.attributes import flag_modified
+
+    new_config = copy.deepcopy(station.config) if station.config else {}
+    new_config['gnss_origin'] = {
+        'lat': origin_dict['lat'],
+        'lon': origin_dict['lon'],
+        'h': origin_dict['h'],
+        'locked_at': int(time.time()),
+    }
+    station.config = new_config
+    flag_modified(station, 'config')
+
+
 class GNSSOriginMixin:
     def _schedule_load_origin(self):
         try:
@@ -41,39 +86,45 @@ class GNSSOriginMixin:
             logger.exception(f"❌ Device {self.device_id}: Error scheduling DB load: {e}")
             self._initialization_complete = True
 
+    def _apply_origin_record(self, origin_record, runtime_state):
+        if not (origin_record.rotation_matrix and origin_record.ecef_origin):
+            logger.warning(f"⚠️ Device {self.device_id}: Found origin record but matrix data is missing.")
+            return
+
+        self.origin = {
+            'lat': origin_record.lat,
+            'lon': origin_record.lon,
+            'h': origin_record.h,
+            'R': np.array(origin_record.rotation_matrix),
+            'ecef': np.array(origin_record.ecef_origin),
+        }
+        self._origin_locked_at = getattr(origin_record, 'locked_at', None)
+        self._origin_record_id = getattr(origin_record, 'id', None)
+        if getattr(origin_record, 'tracking_offset', None):
+            try:
+                self.tracking_offset_enu = self._validated_tracking_offset(origin_record.tracking_offset)
+                logger.info(f"✅ [ASYNC LOAD] Loaded tracking offset for device {self.device_id}: {self.tracking_offset_enu}")
+            except Exception as ex:
+                logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
+        self.state = "ORIGIN_LOCKED"
+        if self._restore_runtime_state(runtime_state):
+            logger.info(f"✅ [ASYNC LOAD] Restored GNSS safety checkpoint for device {self.device_id}")
+        else:
+            self._needs_boot_anchor = True
+            logger.warning(
+                f"[{self._log_prefix()}] No matching GNSS safety checkpoint; "
+                "first FIXED sample will be checked against the locked zero-ENU baseline"
+            )
+        logger.info(f"✅ [ASYNC LOAD] Loaded origin for device {self.device_id}: ({origin_record.lat}, {origin_record.lon})")
+
     async def _async_load_origin_task(self):
         try:
-            from app.models.config import GlobalConfig, GNSSOrigin
+            from app.models.config import GlobalConfig
             from sqlalchemy import select
 
             runtime_state = None
             async with self.db_session_factory() as db:
-                try:
-                    result = await db.execute(
-                        select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
-                    )
-                    origin_record = result.scalar_one_or_none()
-                except Exception as col_err:
-                    # Nếu DB chưa kịp migrate cột tracking_offset, query các cột cơ bản
-                    logger.warning(f"⚠️ Device {self.device_id}: Direct model select failed ({col_err}), attempting basic column select")
-                    result = await db.execute(
-                        select(
-                            GNSSOrigin.lat, GNSSOrigin.lon, GNSSOrigin.h,
-                            GNSSOrigin.rotation_matrix, GNSSOrigin.ecef_origin,
-                            GNSSOrigin.locked_at, GNSSOrigin.id,
-                        ).where(GNSSOrigin.device_id == self.device_id)
-                    )
-                    row = result.first()
-                    if row:
-                        origin_record = type('SimpleOrigin', (), {
-                            'lat': row[0], 'lon': row[1], 'h': row[2],
-                            'rotation_matrix': row[3], 'ecef_origin': row[4],
-                            'locked_at': row[5],
-                            'id': row[6],
-                            'tracking_offset': None
-                        })()
-                    else:
-                        origin_record = None
+                origin_record = await _query_origin_record(db, self.device_id)
 
                 try:
                     runtime_result = await db.execute(
@@ -85,85 +136,55 @@ class GNSSOriginMixin:
                     logger.warning(
                         f"[{self._log_prefix()}] GNSS runtime checkpoint unavailable: {runtime_err}"
                     )
-            
+
             if origin_record:
-                # Validate dữ liệu trước khi dùng
-                if origin_record.rotation_matrix and origin_record.ecef_origin:
-                    self.origin = {
-                        'lat': origin_record.lat,
-                        'lon': origin_record.lon,
-                        'h': origin_record.h,
-                        'R': np.array(origin_record.rotation_matrix),
-                        'ecef': np.array(origin_record.ecef_origin)
-                    }
-                    self._origin_locked_at = getattr(origin_record, 'locked_at', None)
-                    self._origin_record_id = getattr(origin_record, 'id', None)
-                    if getattr(origin_record, 'tracking_offset', None):
-                        try:
-                            self.tracking_offset_enu = self._validated_tracking_offset(origin_record.tracking_offset)
-                            logger.info(f"✅ [ASYNC LOAD] Loaded tracking offset for device {self.device_id}: {self.tracking_offset_enu}")
-                        except Exception as ex:
-                            logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
-                    self.state = "ORIGIN_LOCKED"
-                    if self._restore_runtime_state(runtime_state):
-                        logger.info(
-                            f"✅ [ASYNC LOAD] Restored GNSS safety checkpoint for device {self.device_id}"
-                        )
-                    else:
-                        self._needs_boot_anchor = True
-                        logger.warning(
-                            f"[{self._log_prefix()}] No matching GNSS safety checkpoint; "
-                            "first FIXED sample will be checked against the locked zero-ENU baseline"
-                        )
-                    logger.info(f"✅ [ASYNC LOAD] Loaded origin for device {self.device_id}: ({origin_record.lat}, {origin_record.lon})")
-                else:
-                    logger.warning(f"⚠️ Device {self.device_id}: Found origin record but matrix data is missing.")
-            
+                self._apply_origin_record(origin_record, runtime_state)
+
         except Exception as e:
             logger.error(f"❌ Device {self.device_id}: Failed to load origin from DB: {repr(e)}")
         finally:
             self._initialization_complete = True
 
+    def _preserve_existing_origin(self, existing) -> None:
+        self.origin = {
+            'lat': existing.lat,
+            'lon': existing.lon,
+            'h': existing.h,
+            'R': np.array(existing.rotation_matrix),
+            'ecef': np.array(existing.ecef_origin),
+        }
+        self._origin_locked_at = existing.locked_at
+        self._origin_record_id = existing.id
+        if getattr(existing, 'tracking_offset', None) and np.all(self.tracking_offset_enu == 0.0):
+            try:
+                self.tracking_offset_enu = self._validated_tracking_offset(existing.tracking_offset)
+            except Exception as ex:
+                logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
+        self.state = "ORIGIN_LOCKED"
+        logger.warning(
+            f"[{self._log_prefix()}] Existing locked origin preserved; candidate origin discarded"
+        )
+
     async def _save_origin_to_db(self):
         """✅ Lưu origin vào DB và đồng bộ vào Station Config"""
         try:
-            from app.models.config import GNSSOrigin, Station
-            from sqlalchemy import select, update
-            from app.websocket import manager  # WebSocket manager
-            
+            from app.models.config import GNSSOrigin, Station, Device
+            from sqlalchemy import select
+            from app.websocket import manager
+
             async with self.db_session_factory() as db:
-                # 1. Cập nhật bảng GNSSOrigin (dành cho Processor)
                 result = await db.execute(
                     select(GNSSOrigin).where(GNSSOrigin.device_id == self.device_id)
                 )
                 existing = result.scalar_one_or_none()
-                
+
                 rot_matrix = self.origin['R'].tolist() if hasattr(self.origin['R'], 'tolist') else self.origin['R']
                 ecef_origin = self.origin['ecef'].tolist() if hasattr(self.origin['ecef'], 'tolist') else self.origin['ecef']
                 tracking_offset_list = self.tracking_offset_enu.tolist() if hasattr(self.tracking_offset_enu, 'tolist') else list(self.tracking_offset_enu)
 
                 is_new_origin = False
                 if existing:
-                    # A monitoring origin is a permanent reference. Never overwrite it
-                    # from a later collection/race/restart.
-                    self.origin = {
-                        'lat': existing.lat,
-                        'lon': existing.lon,
-                        'h': existing.h,
-                        'R': np.array(existing.rotation_matrix),
-                        'ecef': np.array(existing.ecef_origin),
-                    }
-                    self._origin_locked_at = existing.locked_at
-                    self._origin_record_id = existing.id
-                    if getattr(existing, 'tracking_offset', None) and np.all(self.tracking_offset_enu == 0.0):
-                        try:
-                            self.tracking_offset_enu = self._validated_tracking_offset(existing.tracking_offset)
-                        except Exception as ex:
-                            logger.warning(f"⚠️ Device {self.device_id}: Ignored unsafe tracking offset: {ex}")
-                    self.state = "ORIGIN_LOCKED"
-                    logger.warning(
-                        f"[{self._log_prefix()}] Existing locked origin preserved; candidate origin discarded"
-                    )
+                    self._preserve_existing_origin(existing)
                 else:
                     is_new_origin = True
                     locked_at = int(time.time())
@@ -183,35 +204,21 @@ class GNSSOriginMixin:
                     db.add(new_origin)
                     await db.flush()
                     self._origin_record_id = new_origin.id
-                
-                # 2. ✅ Đồng bộ ngược vào Station.config['gnss_origin'] (dành cho UI Admin)
-                # Tìm station_id từ device_id
-                from app.models.config import Device
+
                 dev_res = await db.execute(select(Device.station_id).where(Device.id == self.device_id))
                 station_id = dev_res.scalar_one_or_none()
-                
+
                 if station_id and is_new_origin:
                     st_res = await db.execute(select(Station).where(Station.id == station_id))
                     station = st_res.scalar_one_or_none()
                     if station:
-                        import copy
-                        from sqlalchemy.orm.attributes import flag_modified
-                        new_config = copy.deepcopy(station.config) if station.config else {}
-                        new_config['gnss_origin'] = {
-                            'lat': self.origin['lat'],
-                            'lon': self.origin['lon'],
-                            'h': self.origin['h'],
-                            'locked_at': int(time.time())
-                        }
-                        station.config = new_config
-                        flag_modified(station, 'config')
+                        _sync_station_origin_config(station, self.origin)
                         logger.info(f"🔄 Synced origin to Station {station_id} config")
 
                 await db.commit()
                 if is_new_origin:
                     logger.info(f"💾 Saved NEW origin for device {self.device_id} to DB (first-time lock)")
 
-                # 3. ✅ Phát tín hiệu WebSocket để UI tự động cập nhật số mới
                 if station_id:
                     await manager.broadcast({
                         "type": "origin_locked_event",

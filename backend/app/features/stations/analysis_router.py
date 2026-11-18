@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _LONG_TERM_ANALYSIS_SEMAPHORE = asyncio.Semaphore(2)
 _LONG_TERM_ANALYSIS_CACHE: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
 _LONG_TERM_ANALYSIS_CACHE_TTL_SECONDS = 30.0
+DATE_DAY_MONTH_FORMAT = '%d/%m'
 
 async def _calculate_station_risk_assessment(
     db_data: AsyncSession,
@@ -289,7 +290,7 @@ async def get_long_term_analysis(
             displacement_series = []
             cumulative_disp = 0.0
             for row in rows:
-                labels.append(datetime.fromtimestamp(int(row.day_start_ts)).strftime('%d/%m'))
+                labels.append(datetime.fromtimestamp(int(row.day_start_ts)).strftime(DATE_DAY_MONTH_FORMAT))
                 cumulative_disp += float(row.net_displacement_mm or 0.0)
                 displacement_series.append(round(cumulative_disp, 2))
 
@@ -451,7 +452,7 @@ async def get_long_term_analysis(
                 if days < 1/24:    fmt = '%H:%M:%S'
                 elif days <= 1:    fmt = '%H:%M'
                 elif days <= 7:    fmt = '%d/%m %H:00'
-                else:              fmt = '%d/%m'
+                else:              fmt = DATE_DAY_MONTH_FORMAT
 
                 first_e, first_n, first_u = None, None, None
 
@@ -524,7 +525,7 @@ async def get_long_term_analysis(
                 elif days <= 7:
                     fmt = '%d/%m %H:00'
                 else:
-                    fmt = '%d/%m'
+                    fmt = DATE_DAY_MONTH_FORMAT
 
                 daily_imu = OrderedDict()
                 for ts, r, p in zip(imu_analysis["time_series"]["raw_timestamps"], imu_analysis["time_series"]["rolls"], imu_analysis["time_series"]["pitches"]):

@@ -45,6 +45,8 @@ from .statistics import (
 
 logger = logging.getLogger(__name__)
 
+NO_RECEIVER_RESPONSE = "no receiver response"
+
 class RoundRobinReceiverMixin:
     async def _set_rover_as_temporary_base(
         self,
@@ -1288,7 +1290,7 @@ class RoundRobinReceiverMixin:
                         f"{rover_code}: ACK received for {command_text}.",
                     )
                     break
-                detail = self._last_set_error or "no receiver response"
+                detail = self._last_set_error or NO_RECEIVER_RESPONSE
                 set_transport_failure = (
                     "mountpoint=" in detail.casefold()
                     and any(
@@ -1363,7 +1365,7 @@ class RoundRobinReceiverMixin:
                     and command_text.lower().startswith("config undulation ")
                 )
                 if is_optional_undulation:
-                    detail = self._last_set_error or "no receiver response"
+                    detail = self._last_set_error or NO_RECEIVER_RESPONSE
                     logger.warning(
                         "ROVER mode verified for %s, but optional undulation command "
                         "was not acknowledged; continuing to mandatory UNLOGALL and "
@@ -1385,7 +1387,7 @@ class RoundRobinReceiverMixin:
                     and command_text.lower() == "saveconfig"
                 )
                 if is_final_saveconfig:
-                    detail = self._last_set_error or "no receiver response"
+                    detail = self._last_set_error or NO_RECEIVER_RESPONSE
                     logger.warning(
                         "ROVER mode/output verified for %s, but saveconfig ACK was not "
                         "received after %s attempt(s); continuing because saveconfig "
@@ -1411,7 +1413,7 @@ class RoundRobinReceiverMixin:
                     )
                 raise RuntimeError(
                     f"{command_text} was not acknowledged after {attempt} attempt(s): "
-                    f"{self._last_set_error or 'no receiver response'}"
+                    f"{self._last_set_error or NO_RECEIVER_RESPONSE}"
                 )
 
 

@@ -37,15 +37,7 @@ def _run_view(run: model_data.SimulationRun, detail: bool = True) -> dict[str, A
     return payload
 
 
-async def _station_inputs(station_id: int, config_db: AsyncSession, data_db: AsyncSession) -> dict[str, Any]:
-    station = (await config_db.execute(select(model_config.Station).where(model_config.Station.id == station_id))).scalar_one_or_none()
-    if not station:
-        raise HTTPException(status_code=404, detail="Không tìm thấy trạm")
-    project = (await config_db.execute(select(model_config.Project).where(model_config.Project.id == station.project_id))).scalar_one_or_none()
-    rows = (await data_db.execute(select(model_data.LatestSensorCache).where(model_data.LatestSensorCache.station_id == station_id))).scalars().all()
-    now = int(time.time())
-    config = station.config or {}
-    profile = config.get("simulation_profile") or {}
+def _extract_profile_parameters(profile: dict) -> tuple[dict[str, Any], dict[str, str], list[str]]:
     mapping = {
         "cohesion_kpa": "cohesion", "friction_angle_deg": "friction_angle",
         "unit_weight_kn_m3": "unit_weight", "slip_depth_m": "slip_depth",
@@ -63,10 +55,13 @@ async def _station_inputs(station_id: int, config_db: AsyncSession, data_db: Asy
         else:
             sources[parameter_key] = "Mặc định hệ thống"
             warnings.append(f"Thiếu {profile_key}; dùng giá trị mặc định")
+    return parameters, sources, warnings
 
+
+def _process_sensor_snapshot(rows: list, thresholds: dict, now: int) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]:
     snapshot: dict[str, Any] = {}
     valid_data: dict[str, dict[str, Any]] = {}
-    thresholds = config.get("offline_thresholds") or {}
+    warnings: list[str] = []
     for row in rows:
         sensor_type = str(row.sensor_type).lower()
         data = row.data if isinstance(row.data, dict) else {}
@@ -78,7 +73,16 @@ async def _station_inputs(station_id: int, config_db: AsyncSession, data_db: Asy
             valid_data[sensor_type] = data
         else:
             warnings.append(f"Sensor {sensor_type} {'đã cũ/offline' if not fresh else 'đang dùng fallback'}; không áp dụng vào phép tính")
+    return snapshot, valid_data, warnings
 
+
+def _apply_sensor_overrides(
+    valid_data: dict[str, dict[str, Any]],
+    profile: dict,
+    parameters: dict[str, Any],
+    sources: dict[str, str],
+    warnings: list[str],
+) -> None:
     rain = valid_data.get("rain") or valid_data.get("rainfall")
     if rain:
         value = rain.get("intensity_mm_h", rain.get("rainfall_mm"))
@@ -99,6 +103,22 @@ async def _station_inputs(station_id: int, config_db: AsyncSession, data_db: Asy
     if imu and imu.get("ax") is not None and imu.get("ay") is not None:
         parameters["seismic_coeff"] = min(0.5, math.hypot(float(imu["ax"]), float(imu["ay"])) / 9.81)
         sources["seismic_coeff"] = "Gia tốc ngang IMU"
+
+
+async def _station_inputs(station_id: int, config_db: AsyncSession, data_db: AsyncSession) -> dict[str, Any]:
+    station = (await config_db.execute(select(model_config.Station).where(model_config.Station.id == station_id))).scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trạm")
+    project = (await config_db.execute(select(model_config.Project).where(model_config.Project.id == station.project_id))).scalar_one_or_none()
+    rows = (await data_db.execute(select(model_data.LatestSensorCache).where(model_data.LatestSensorCache.station_id == station_id))).scalars().all()
+    now = int(time.time())
+    config = station.config or {}
+    profile = config.get("simulation_profile") or {}
+
+    parameters, sources, param_warnings = _extract_profile_parameters(profile)
+    snapshot, valid_data, sensor_warnings = _process_sensor_snapshot(rows, config.get("offline_thresholds") or {}, now)
+    warnings = param_warnings + sensor_warnings
+    _apply_sensor_overrides(valid_data, profile, parameters, sources, warnings)
 
     normalized = normalize_parameters(parameters)
     return {

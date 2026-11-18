@@ -23,6 +23,8 @@ from app.shared.custom_sensors import validate_custom_sensor_selection
 router = APIRouter(prefix="/api/admin", tags=["Admin Console"])
 logger = logging.getLogger(__name__)
 
+STATION_NOT_FOUND = "Station not found"
+
 def _merge_station_config(station, config_data: dict, current_user):
     import copy
 
@@ -200,7 +202,7 @@ async def update_station_config(
         station = result.scalar_one_or_none()
 
         if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
+            raise HTTPException(status_code=404, detail=STATION_NOT_FOUND)
 
         if not config_data:
             raise HTTPException(status_code=400, detail="Config data is empty")
@@ -259,7 +261,7 @@ async def reset_station_config(
         station = result.scalar_one_or_none()
 
         if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
+            raise HTTPException(status_code=404, detail=STATION_NOT_FOUND)
 
         new_default_config = get_default_station_config()
         station.config = new_default_config
@@ -290,7 +292,7 @@ async def get_station_config(
     station = result.scalar_one_or_none()
 
     if not station:
-        raise HTTPException(status_code=404, detail="Station not found")
+        raise HTTPException(status_code=404, detail=STATION_NOT_FOUND)
 
     # Deep-merge: defaults ← station config (station wins)
     import copy
