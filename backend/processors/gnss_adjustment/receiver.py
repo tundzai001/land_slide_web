@@ -1241,6 +1241,187 @@ class RoundRobinReceiverMixin:
                 )
 
 
+    async def _handle_rover_restore_failure(
+        self,
+        *,
+        rover_code: str,
+        command_text: str,
+        command_index: int,
+        total_commands: int,
+        project_id: Optional[int],
+        attempt: int,
+        set_transport_failure: bool,
+    ) -> bool:
+        """Handle unacknowledged restore command. Returns True if execution should continue."""
+        is_optional_undulation = (
+            command_index > 1
+            and command_text.lower().startswith("config undulation ")
+        )
+        if is_optional_undulation:
+            detail = self._last_set_error or NO_RECEIVER_RESPONSE
+            logger.warning(
+                "ROVER mode verified for %s, but optional undulation command "
+                "was not acknowledged; continuing to mandatory UNLOGALL and "
+                "AGRICA recovery. detail=%s",
+                rover_code,
+                detail,
+            )
+            await self._emit_progress(
+                project_id,
+                (
+                    f"{rover_code}: optional {command_text} was not ACKed; "
+                    "continuing with mandatory BASE-log shutdown and ROVER outputs."
+                ),
+            )
+            return True
+        is_final_saveconfig = (
+            command_index == total_commands
+            and command_index > 1
+            and command_text.lower() == "saveconfig"
+        )
+        if is_final_saveconfig:
+            detail = self._last_set_error or NO_RECEIVER_RESPONSE
+            logger.warning(
+                "ROVER mode/output verified for %s, but saveconfig ACK was not "
+                "received after %s attempt(s); continuing because saveconfig "
+                "does not change receiver mode. detail=%s",
+                rover_code,
+                attempt,
+                detail,
+            )
+            await self._emit_progress(
+                project_id,
+                (
+                    f"{rover_code}: ROVER mode and AGRICA output restored; "
+                    "saveconfig was sent but its ACK was not observed. "
+                    "Continuing with the verified ROVER state."
+                ),
+            )
+            return False
+        if set_transport_failure:
+            raise RuntimeError(
+                f"AICaster SET session for {rover_code} was not ready after "
+                f"{attempt} attempt(s); {command_text} was not sent: "
+                f"{self._last_set_error or 'no Caster response'}"
+            )
+        raise RuntimeError(
+            f"{command_text} was not acknowledged after {attempt} attempt(s): "
+            f"{self._last_set_error or NO_RECEIVER_RESPONSE}"
+        )
+
+    async def _attempt_rover_restore_command(
+        self,
+        *,
+        rover_code: str,
+        mountpoint: str,
+        client_info: Dict[str, Any],
+        command: bytes,
+        command_index: int,
+        total_commands: int,
+        project_id: Optional[int],
+        safe_max_attempts: int,
+    ) -> tuple[bool, str, Dict[str, Any], int, bool]:
+        command_text = command.decode("ascii", errors="replace").strip()
+        attempt = 0
+        attempt_limit = safe_max_attempts
+        set_transport_failure = False
+        while attempt < attempt_limit:
+            attempt += 1
+            await self._emit_progress(
+                project_id,
+                (
+                    f"{rover_code}: restore step {command_index}/{total_commands} "
+                    f"{command_text} (attempt {attempt}); waiting for receiver response."
+                ),
+            )
+            acknowledged = await self._send_set_command(
+                mountpoint,
+                client_info.get("Username", rover_code),
+                client_info.get("receiverID", ""),
+                [command],
+                password=self.control_password,
+                caster_host=client_info.get("CasterHost"),
+                caster_port=client_info.get("CasterPort"),
+                wait_for_command_response=True,
+                ack_station_code=rover_code,
+            )
+            if acknowledged:
+                await self._emit_progress(
+                    project_id,
+                    f"{rover_code}: ACK received for {command_text}.",
+                )
+                return True, mountpoint, client_info, attempt, False
+            detail = self._last_set_error or NO_RECEIVER_RESPONSE
+            set_transport_failure = (
+                "mountpoint=" in detail.casefold()
+                and any(
+                    marker in detail.casefold()
+                    for marker in ("response=", "error=")
+                )
+            )
+            if set_transport_failure:
+                attempt_limit = max(
+                    safe_max_attempts,
+                    int(self.ROVER_RESTORE_TRANSPORT_ATTEMPTS),
+                )
+            else:
+                attempt_limit = safe_max_attempts
+            logger.warning(
+                "Rover restore retry rover=%s command=%s attempt=%s/%s "
+                "transport_failure=%s detail=%s",
+                rover_code,
+                command_text,
+                attempt,
+                attempt_limit,
+                set_transport_failure,
+                detail,
+            )
+            await self._emit_progress(
+                project_id,
+                (
+                    f"{rover_code}: AICaster SET session is not ready for "
+                    f"{command_text}; retrying in "
+                    f"{self.ROVER_RESTORE_RETRY_SECONDS:g}s ({detail})."
+                    if set_transport_failure
+                    else f"{rover_code}: no ACK for {command_text}; retrying in "
+                    f"{self.ROVER_RESTORE_RETRY_SECONDS:g}s ({detail})."
+                ),
+            )
+            if attempt < attempt_limit:
+                await asyncio.sleep(self.ROVER_RESTORE_RETRY_SECONDS)
+                if set_transport_failure:
+                    try:
+                        refreshed_client = await self._find_client_info(
+                            rover_code,
+                            project_id=project_id,
+                            log_missing=False,
+                        )
+                    except Exception as refresh_exc:
+                        logger.warning(
+                            "Could not refresh AICaster client session while restoring "
+                            "%s: %s",
+                            rover_code,
+                            str(refresh_exc) or refresh_exc.__class__.__name__,
+                        )
+                    else:
+                        if refreshed_client:
+                            client_info = refreshed_client
+                            refreshed_mountpoint = str(
+                                refreshed_client.get("Mountpoint") or ""
+                            ).strip()
+                            if refreshed_mountpoint:
+                                mountpoint = refreshed_mountpoint
+                            await self._emit_progress(
+                                project_id,
+                                (
+                                    f"{rover_code}: refreshed AICaster SET session "
+                                    f"username={client_info.get('Username')} "
+                                    f"receiverID={client_info.get('receiverID')} "
+                                    f"mountpoint={mountpoint}; retrying {command_text}."
+                                ),
+                            )
+        return False, mountpoint, client_info, attempt, set_transport_failure
+
     async def _restore_rover_output_sequence(
         self,
         *,
@@ -1258,163 +1439,34 @@ class RoundRobinReceiverMixin:
         a missing ACK for that final persistence-only command must not falsely
         report that the receiver is still in BASE mode.
         """
-
         safe_max_attempts = max(1, int(max_attempts))
+        total_commands = len(commands)
         for command_index, command in enumerate(commands, start=1):
             command_text = command.decode("ascii", errors="replace").strip()
-            attempt = 0
-            attempt_limit = safe_max_attempts
-            while attempt < attempt_limit:
-                attempt += 1
-                await self._emit_progress(
-                    project_id,
-                    (
-                        f"{rover_code}: restore step {command_index}/{len(commands)} "
-                        f"{command_text} (attempt {attempt}); waiting for receiver response."
-                    ),
+            ack, mountpoint, client_info, attempt, transport_fail = (
+                await self._attempt_rover_restore_command(
+                    rover_code=rover_code,
+                    mountpoint=mountpoint,
+                    client_info=client_info,
+                    command=command,
+                    command_index=command_index,
+                    total_commands=total_commands,
+                    project_id=project_id,
+                    safe_max_attempts=safe_max_attempts,
                 )
-                acknowledged = await self._send_set_command(
-                    mountpoint,
-                    client_info.get("Username", rover_code),
-                    client_info.get("receiverID", ""),
-                    [command],
-                    password=self.control_password,
-                    caster_host=client_info.get("CasterHost"),
-                    caster_port=client_info.get("CasterPort"),
-                    wait_for_command_response=True,
-                    ack_station_code=rover_code,
+            )
+            if not ack:
+                should_continue = await self._handle_rover_restore_failure(
+                    rover_code=rover_code,
+                    command_text=command_text,
+                    command_index=command_index,
+                    total_commands=total_commands,
+                    project_id=project_id,
+                    attempt=attempt,
+                    set_transport_failure=transport_fail,
                 )
-                if acknowledged:
-                    await self._emit_progress(
-                        project_id,
-                        f"{rover_code}: ACK received for {command_text}.",
-                    )
-                    break
-                detail = self._last_set_error or NO_RECEIVER_RESPONSE
-                set_transport_failure = (
-                    "mountpoint=" in detail.casefold()
-                    and any(
-                        marker in detail.casefold()
-                        for marker in ("response=", "error=")
-                    )
-                )
-                if set_transport_failure:
-                    attempt_limit = max(
-                        safe_max_attempts,
-                        int(self.ROVER_RESTORE_TRANSPORT_ATTEMPTS),
-                    )
-                else:
-                    attempt_limit = safe_max_attempts
-                logger.warning(
-                    "Rover restore retry rover=%s command=%s attempt=%s/%s "
-                    "transport_failure=%s detail=%s",
-                    rover_code,
-                    command_text,
-                    attempt,
-                    attempt_limit,
-                    set_transport_failure,
-                    detail,
-                )
-                await self._emit_progress(
-                    project_id,
-                    (
-                        f"{rover_code}: AICaster SET session is not ready for "
-                        f"{command_text}; retrying in "
-                        f"{self.ROVER_RESTORE_RETRY_SECONDS:g}s ({detail})."
-                        if set_transport_failure
-                        else f"{rover_code}: no ACK for {command_text}; retrying in "
-                        f"{self.ROVER_RESTORE_RETRY_SECONDS:g}s ({detail})."
-                    ),
-                )
-                if attempt < attempt_limit:
-                    await asyncio.sleep(self.ROVER_RESTORE_RETRY_SECONDS)
-                    if set_transport_failure:
-                        try:
-                            refreshed_client = await self._find_client_info(
-                                rover_code,
-                                project_id=project_id,
-                                log_missing=False,
-                            )
-                        except Exception as refresh_exc:
-                            logger.warning(
-                                "Could not refresh AICaster client session while restoring "
-                                "%s: %s",
-                                rover_code,
-                                str(refresh_exc) or refresh_exc.__class__.__name__,
-                            )
-                        else:
-                            if refreshed_client:
-                                client_info = refreshed_client
-                                refreshed_mountpoint = str(
-                                    refreshed_client.get("Mountpoint") or ""
-                                ).strip()
-                                if refreshed_mountpoint:
-                                    mountpoint = refreshed_mountpoint
-                                await self._emit_progress(
-                                    project_id,
-                                    (
-                                        f"{rover_code}: refreshed AICaster SET session "
-                                        f"username={client_info.get('Username')} "
-                                        f"receiverID={client_info.get('receiverID')} "
-                                        f"mountpoint={mountpoint}; retrying {command_text}."
-                                    ),
-                                )
-            else:
-                is_optional_undulation = (
-                    command_index > 1
-                    and command_text.lower().startswith("config undulation ")
-                )
-                if is_optional_undulation:
-                    detail = self._last_set_error or NO_RECEIVER_RESPONSE
-                    logger.warning(
-                        "ROVER mode verified for %s, but optional undulation command "
-                        "was not acknowledged; continuing to mandatory UNLOGALL and "
-                        "AGRICA recovery. detail=%s",
-                        rover_code,
-                        detail,
-                    )
-                    await self._emit_progress(
-                        project_id,
-                        (
-                            f"{rover_code}: optional {command_text} was not ACKed; "
-                            "continuing with mandatory BASE-log shutdown and ROVER outputs."
-                        ),
-                    )
-                    continue
-                is_final_saveconfig = (
-                    command_index == len(commands)
-                    and command_index > 1
-                    and command_text.lower() == "saveconfig"
-                )
-                if is_final_saveconfig:
-                    detail = self._last_set_error or NO_RECEIVER_RESPONSE
-                    logger.warning(
-                        "ROVER mode/output verified for %s, but saveconfig ACK was not "
-                        "received after %s attempt(s); continuing because saveconfig "
-                        "does not change receiver mode. detail=%s",
-                        rover_code,
-                        attempt,
-                        detail,
-                    )
-                    await self._emit_progress(
-                        project_id,
-                        (
-                            f"{rover_code}: ROVER mode and AGRICA output restored; "
-                            "saveconfig was sent but its ACK was not observed. "
-                            "Continuing with the verified ROVER state."
-                        ),
-                    )
+                if not should_continue:
                     return
-                if set_transport_failure:
-                    raise RuntimeError(
-                        f"AICaster SET session for {rover_code} was not ready after "
-                        f"{attempt} attempt(s); {command_text} was not sent: "
-                        f"{self._last_set_error or 'no Caster response'}"
-                    )
-                raise RuntimeError(
-                    f"{command_text} was not acknowledged after {attempt} attempt(s): "
-                    f"{self._last_set_error or NO_RECEIVER_RESPONSE}"
-                )
 
 
     def _build_unicore_base_config(

@@ -181,6 +181,272 @@ class RoundRobinResultsMixin:
         )
 
 
+    @staticmethod
+    def _filter_vector_outliers(
+        samples: List[dict],
+        min_samples: int = 5,
+        absolute_floor_m: float = 0.25,
+        sigma_multiplier: float = 8.0,
+    ) -> tuple[List[dict], List[dict]]:
+        """Reject isolated vector jumps per geometric edge without trusting reported STD."""
+        groups: Dict[tuple[str, str], List[tuple[dict, np.ndarray]]] = {}
+        for sample in samples:
+            edge, vector, _direction = _canonical_baseline(
+                sample["from"], sample["to"], sample["delta"]
+            )
+            groups.setdefault((edge[0], edge[1]), []).append(
+                (sample, np.asarray(vector, dtype=float))
+            )
+
+        rejected_ids: set[int] = set()
+        diagnostics: List[dict] = []
+        for (from_name, to_name), rows in groups.items():
+            if len(rows) < min_samples:
+                for sample, _vector in rows:
+                    diagnostics.append({
+                        "raw_index": sample.get("raw_index"),
+                        "vector_filter_status": "NOT_EVALUATED_INSUFFICIENT_GROUP",
+                    })
+                continue
+            vectors = np.vstack([vector for _sample, vector in rows])
+            center = np.median(vectors, axis=0)
+            deviations = np.linalg.norm(vectors - center, axis=1)
+            median_deviation = float(np.median(deviations))
+            mad = float(np.median(np.abs(deviations - median_deviation)))
+            robust_sigma = 1.4826 * mad
+            threshold = max(
+                absolute_floor_m,
+                median_deviation + sigma_multiplier * robust_sigma,
+            )
+            for (sample, _vector), deviation in zip(rows, deviations, strict=True):
+                is_outlier = float(deviation) > threshold
+                diagnostics.append({
+                    "raw_index": sample.get("raw_index"),
+                    "vector_deviation_from_edge_m": float(deviation),
+                    "vector_outlier_threshold_m": threshold,
+                    "vector_filter_status": "EVALUATED_OUTLIER" if is_outlier else "EVALUATED_INLIER",
+                })
+                if is_outlier:
+                    rejected_ids.add(id(sample))
+        return [sample for sample in samples if id(sample) not in rejected_ids], diagnostics
+
+    @staticmethod
+    def _filter_position_type_mixes(
+        samples: List[dict],
+    ) -> tuple[List[dict], List[dict]]:
+        """Prefer RTK Fixed (4) per edge; use Input Fixed (7) only as fallback."""
+        groups: Dict[tuple[str, str], List[dict]] = {}
+        for sample in samples:
+            edge, _vector, _direction = _canonical_baseline(
+                sample["from"], sample["to"], sample["delta"]
+            )
+            groups.setdefault(edge, []).append(sample)
+
+        rejected_ids: set[int] = set()
+        diagnostics: List[dict] = []
+        for (from_name, to_name), rows in groups.items():
+            available_types = sorted({
+                int(row["position_type"])
+                for row in rows
+                if row.get("position_type") is not None
+            })
+            if 4 not in available_types:
+                continue
+            rejected_rows = [
+                row for row in rows if int(row.get("position_type") or 0) != 4
+            ]
+            if not rejected_rows:
+                continue
+            for row in rejected_rows:
+                rejected_ids.add(id(row))
+            diagnostics.append({
+                "from": from_name,
+                "to": to_name,
+                "selected_position_type": 4,
+                "available_position_types": available_types,
+                "rejected_position_types": sorted({
+                    int(row["position_type"])
+                    for row in rejected_rows
+                }),
+                "rejected_count": len(rejected_rows),
+                "raw_indices": [row.get("raw_index") for row in rejected_rows],
+            })
+        return [
+            sample for sample in samples if id(sample) not in rejected_ids
+        ], diagnostics
+
+    def _weighted_edges(self, samples: List[dict]) -> List[dict]:
+        groups: Dict[tuple[str, str], List[dict]] = {}
+        for sample in samples:
+            key, vector, direction = _canonical_baseline(
+                sample["from"], sample["to"], sample["delta"]
+            )
+            normalized = dict(sample)
+            normalized["from"], normalized["to"] = key
+            normalized["delta"] = np.asarray(vector, dtype=float)
+            normalized["direction"] = direction
+            groups.setdefault(key, []).append(normalized)
+
+        pooled_lag_one = _pooled_lag_one_autocorrelations(groups)
+        result = []
+        for key, rows in groups.items():
+            information_state = _InformationAccumulator()
+            for row in rows:
+                information_state.add(
+                    int(row.get("observation_epoch") or 0),
+                    row["delta"],
+                    row["covariance"],
+                    fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                    slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                    retention_seconds=1,
+                )
+            mean_covariance = information_state.formal_covariance
+            mean = information_state.mean
+            if mean_covariance is None or mean is None:
+                continue
+
+            acf_effective_sample_size, ess_sessions = _edge_effective_sample_size(
+                rows,
+                pooled_lag_one,
+            )
+            contiguous_sessions = _split_effective_sample_sessions(rows)
+            effective_sample_size = float(len(contiguous_sessions))
+            session_summaries = []
+            for session_index, session_rows in enumerate(contiguous_sessions, 1):
+                session_state = _InformationAccumulator()
+                for session_row in session_rows:
+                    session_state.add(
+                        int(session_row.get("observation_epoch") or 0),
+                        session_row["delta"],
+                        session_row["covariance"],
+                        fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
+                        slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
+                        retention_seconds=1,
+                    )
+                session_mean = np.asarray(session_state.mean, dtype=float)
+                session_summary = {
+                    "session": session_index,
+                    "session_id": session_rows[0].get("session_id"),
+                    "observation_count": len(session_rows),
+                    "mean_xyz": tuple(float(value) for value in session_mean),
+                }
+                session_summaries.append(session_summary)
+
+            max_session_mean_separation = 0.0
+            max_session_mean_difference = None
+            max_session_mean_pair = None
+            for left in range(len(session_summaries)):
+                for right in range(left + 1, len(session_summaries)):
+                    difference = (
+                        np.asarray(session_summaries[right]["mean_xyz"], dtype=float)
+                        - np.asarray(session_summaries[left]["mean_xyz"], dtype=float)
+                    )
+                    separation = float(np.linalg.norm(difference))
+                    if separation > max_session_mean_separation:
+                        max_session_mean_separation = separation
+                        max_session_mean_difference = tuple(
+                            float(value) for value in difference
+                        )
+                        max_session_mean_pair = (
+                            session_summaries[left]["session_id"]
+                            or session_summaries[left]["session"],
+                            session_summaries[right]["session_id"]
+                            or session_summaries[right]["session"],
+                        )
+
+            for session_diagnostic, session_summary in zip(
+                ess_sessions, session_summaries, strict=True
+            ):
+                session_diagnostic["acf_estimated_effective_sample_size"] = (
+                    session_diagnostic.pop("effective_sample_size")
+                )
+                session_diagnostic["published_effective_sample_size"] = 1.0
+                session_diagnostic["session_id"] = session_summary["session_id"]
+                session_diagnostic["mean_xyz"] = session_summary["mean_xyz"]
+            temporal_inflation = len(rows) / effective_sample_size
+            scatter_scale = 1.0
+            if len(rows) > 1:
+                scatter = sum(
+                    float(
+                        (row["delta"] - mean).T
+                        @ _spd_solve(row["covariance"], np.eye(3, dtype=float))
+                        @ (row["delta"] - mean)
+                    )
+                    for row in rows
+                )
+                scatter_scale = max(1.0, scatter / (3.0 * (len(rows) - 1)))
+            covariance = mean_covariance * temporal_inflation * scatter_scale
+            covariance = 0.5 * (covariance + covariance.T)
+            independent_covariance = mean_covariance * scatter_scale
+            independent_covariance = 0.5 * (
+                independent_covariance + independent_covariance.T
+            )
+            position_types = sorted({
+                int(row["position_type"])
+                for row in rows
+                if row.get("position_type") is not None
+            })
+            type_means = []
+            for position_type in position_types:
+                type_rows = [
+                    row
+                    for row in rows
+                    if int(row.get("position_type") or 0) == position_type
+                ]
+                if not type_rows:
+                    continue
+                type_precision_sum = np.zeros((3, 3), dtype=float)
+                type_weighted_sum = np.zeros(3, dtype=float)
+                for row in type_rows:
+                    type_precision = _spd_solve(
+                        row["covariance"], np.eye(3, dtype=float)
+                    )
+                    type_precision_sum += type_precision
+                    type_weighted_sum += type_precision @ row["delta"]
+                type_means.append(
+                    np.linalg.solve(type_precision_sum, type_weighted_sum)
+                )
+            position_type_separation = max(
+                (
+                    float(np.linalg.norm(type_means[left] - type_means[right]))
+                    for left in range(len(type_means))
+                    for right in range(left + 1, len(type_means))
+                ),
+                default=0.0,
+            )
+            result.append({
+                "from": key[0],
+                "to": key[1],
+                "delta": tuple(float(value) for value in mean),
+                "covariance": covariance,
+                "formal_covariance": mean_covariance,
+                "session_covariance_used": covariance,
+                "independent_covariance": independent_covariance,
+                "effective_sample_size": effective_sample_size,
+                "acf_estimated_effective_sample_size": acf_effective_sample_size,
+                "temporal_scale_factor": temporal_inflation,
+                "scatter_scale_factor": scatter_scale,
+                "effective_sample_size_sessions": ess_sessions,
+                "session_count": len(session_summaries),
+                "max_session_mean_separation_m": max_session_mean_separation,
+                "max_session_mean_difference_xyz": max_session_mean_difference,
+                "max_session_mean_pair": max_session_mean_pair,
+                "pooled_lag_one_autocorrelations": pooled_lag_one,
+                "observation_count": len(rows),
+                "raw_indices": [row["raw_index"] for row in rows],
+                "directions": [row["direction"] for row in rows],
+                "position_types": position_types,
+                "position_type_mean_separation_m": position_type_separation,
+                "ratio": next((row["ratio"] for row in reversed(rows) if row["ratio"] is not None), None),
+                "velocity_up_std": (
+                    sum(row["velocity_up_std"] for row in rows if row["velocity_up_std"] is not None)
+                    / sum(row["velocity_up_std"] is not None for row in rows)
+                    if any(row["velocity_up_std"] is not None for row in rows)
+                    else None
+                ),
+            })
+        return result
+
     def _build_cluster_result(self, project_id: int, cluster_index: int, cluster: dict) -> dict:
         """Adjust one network using exactly one weighted-mean value per edge."""
 
@@ -249,269 +515,16 @@ class RoundRobinResultsMixin:
         if len(set(station_names.values())) != len(station_names):
             raise ValueError("duplicate rover name in adjustment cluster")
 
-        def filter_vector_outliers(samples: List[dict]) -> tuple[List[dict], List[dict]]:
-            """Reject isolated vector jumps per geometric edge without trusting reported STD."""
+        filter_vector_outliers = lambda samples: self._filter_vector_outliers(
+            samples,
+            min_samples=vector_outlier_min_samples,
+            absolute_floor_m=vector_outlier_absolute_floor_m,
+            sigma_multiplier=vector_outlier_sigma_multiplier,
+        )
 
-            groups: Dict[tuple[str, str], List[tuple[dict, np.ndarray]]] = {}
-            for sample in samples:
-                edge, vector, _direction = _canonical_baseline(
-                    sample["from"], sample["to"], sample["delta"]
-                )
-                groups.setdefault((edge[0], edge[1]), []).append(
-                    (sample, np.asarray(vector, dtype=float))
-                )
+        filter_position_type_mixes = self._filter_position_type_mixes
 
-            rejected_ids: set[int] = set()
-            diagnostics: List[dict] = []
-            for (from_name, to_name), rows in groups.items():
-                if len(rows) < vector_outlier_min_samples:
-                    for sample, _vector in rows:
-                        diagnostics.append({
-                            "raw_index": sample.get("raw_index"),
-                            "vector_filter_status": "NOT_EVALUATED_INSUFFICIENT_GROUP",
-                        })
-                    continue
-                vectors = np.vstack([vector for _sample, vector in rows])
-                center = np.median(vectors, axis=0)
-                deviations = np.linalg.norm(vectors - center, axis=1)
-                median_deviation = float(np.median(deviations))
-                mad = float(np.median(np.abs(deviations - median_deviation)))
-                robust_sigma = 1.4826 * mad
-                threshold = max(
-                    vector_outlier_absolute_floor_m,
-                    median_deviation + vector_outlier_sigma_multiplier * robust_sigma,
-                )
-                for (sample, _vector), deviation in zip(rows, deviations, strict=True):
-                    is_outlier = float(deviation) > threshold
-                    diagnostics.append({
-                        "raw_index": sample.get("raw_index"),
-                        "vector_deviation_from_edge_m": float(deviation),
-                        "vector_outlier_threshold_m": threshold,
-                        "vector_filter_status": "EVALUATED_OUTLIER" if is_outlier else "EVALUATED_INLIER",
-                    })
-                    if is_outlier:
-                        rejected_ids.add(id(sample))
-            return [sample for sample in samples if id(sample) not in rejected_ids], diagnostics
-
-        def filter_position_type_mixes(
-            samples: List[dict],
-        ) -> tuple[List[dict], List[dict]]:
-            """Prefer RTK Fixed (4) per edge; use Input Fixed (7) only as fallback."""
-
-            groups: Dict[tuple[str, str], List[dict]] = {}
-            for sample in samples:
-                edge, _vector, _direction = _canonical_baseline(
-                    sample["from"], sample["to"], sample["delta"]
-                )
-                groups.setdefault(edge, []).append(sample)
-
-            rejected_ids: set[int] = set()
-            diagnostics: List[dict] = []
-            for (from_name, to_name), rows in groups.items():
-                available_types = sorted({
-                    int(row["position_type"])
-                    for row in rows
-                    if row.get("position_type") is not None
-                })
-                if 4 not in available_types:
-                    continue
-                rejected_rows = [
-                    row for row in rows if int(row.get("position_type") or 0) != 4
-                ]
-                if not rejected_rows:
-                    continue
-                for row in rejected_rows:
-                    rejected_ids.add(id(row))
-                diagnostics.append({
-                    "from": from_name,
-                    "to": to_name,
-                    "selected_position_type": 4,
-                    "available_position_types": available_types,
-                    "rejected_position_types": sorted({
-                        int(row["position_type"])
-                        for row in rejected_rows
-                    }),
-                    "rejected_count": len(rejected_rows),
-                    "raw_indices": [row.get("raw_index") for row in rejected_rows],
-                })
-            return [
-                sample for sample in samples if id(sample) not in rejected_ids
-            ], diagnostics
-
-        def weighted_edges(samples: List[dict]) -> List[dict]:
-            groups: Dict[tuple[str, str], List[dict]] = {}
-            for sample in samples:
-                key, vector, direction = _canonical_baseline(
-                    sample["from"], sample["to"], sample["delta"]
-                )
-                normalized = dict(sample)
-                normalized["from"], normalized["to"] = key
-                normalized["delta"] = np.asarray(vector, dtype=float)
-                normalized["direction"] = direction
-                groups.setdefault(key, []).append(normalized)
-
-            pooled_lag_one = _pooled_lag_one_autocorrelations(groups)
-            result = []
-            for key, rows in groups.items():
-                information_state = _InformationAccumulator()
-                for row in rows:
-                    information_state.add(
-                        int(row.get("observation_epoch") or 0),
-                        row["delta"],
-                        row["covariance"],
-                        fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
-                        slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                        retention_seconds=1,
-                    )
-                mean_covariance = information_state.formal_covariance
-                mean = information_state.mean
-                if mean_covariance is None or mean is None:
-                    continue
-
-                # Samples within one uninterrupted RTK FIXED window share the
-                # same ambiguity solution and correction-source state.  Their
-                # statistical independence is therefore not established.  The
-                # published solution conservatively assigns one independent
-                # observation to each contiguous source/direction session.
-                # ACF ESS is retained for audit/sensitivity only.
-                acf_effective_sample_size, ess_sessions = _edge_effective_sample_size(
-                    rows,
-                    pooled_lag_one,
-                )
-                contiguous_sessions = _split_effective_sample_sessions(rows)
-                effective_sample_size = float(len(contiguous_sessions))
-                session_summaries = []
-                for session_index, session_rows in enumerate(contiguous_sessions, 1):
-                    session_state = _InformationAccumulator()
-                    for session_row in session_rows:
-                        session_state.add(
-                            int(session_row.get("observation_epoch") or 0),
-                            session_row["delta"],
-                            session_row["covariance"],
-                            fast_tau_seconds=self.STABILITY_EWMA_FAST_TAU_SECONDS,
-                            slow_tau_seconds=self.STABILITY_EWMA_SLOW_TAU_SECONDS,
-                            retention_seconds=1,
-                        )
-                    session_mean = np.asarray(session_state.mean, dtype=float)
-                    session_summary = {
-                        "session": session_index,
-                        "session_id": session_rows[0].get("session_id"),
-                        "observation_count": len(session_rows),
-                        "mean_xyz": tuple(float(value) for value in session_mean),
-                    }
-                    session_summaries.append(session_summary)
-
-                max_session_mean_separation = 0.0
-                max_session_mean_difference = None
-                max_session_mean_pair = None
-                for left in range(len(session_summaries)):
-                    for right in range(left + 1, len(session_summaries)):
-                        difference = (
-                            np.asarray(session_summaries[right]["mean_xyz"], dtype=float)
-                            - np.asarray(session_summaries[left]["mean_xyz"], dtype=float)
-                        )
-                        separation = float(np.linalg.norm(difference))
-                        if separation > max_session_mean_separation:
-                            max_session_mean_separation = separation
-                            max_session_mean_difference = tuple(
-                                float(value) for value in difference
-                            )
-                            max_session_mean_pair = (
-                                session_summaries[left]["session_id"]
-                                or session_summaries[left]["session"],
-                                session_summaries[right]["session_id"]
-                                or session_summaries[right]["session"],
-                            )
-
-                for session_diagnostic, session_summary in zip(
-                    ess_sessions, session_summaries, strict=True
-                ):
-                    session_diagnostic["acf_estimated_effective_sample_size"] = (
-                        session_diagnostic.pop("effective_sample_size")
-                    )
-                    session_diagnostic["published_effective_sample_size"] = 1.0
-                    session_diagnostic["session_id"] = session_summary["session_id"]
-                    session_diagnostic["mean_xyz"] = session_summary["mean_xyz"]
-                temporal_inflation = len(rows) / effective_sample_size
-                scatter_scale = 1.0
-                if len(rows) > 1:
-                    scatter = sum(
-                        float(
-                            (row["delta"] - mean).T
-                            @ _spd_solve(row["covariance"], np.eye(3, dtype=float))
-                            @ (row["delta"] - mean)
-                        )
-                        for row in rows
-                    )
-                    scatter_scale = max(1.0, scatter / (3.0 * (len(rows) - 1)))
-                covariance = mean_covariance * temporal_inflation * scatter_scale
-                covariance = 0.5 * (covariance + covariance.T)
-                independent_covariance = mean_covariance * scatter_scale
-                independent_covariance = 0.5 * (
-                    independent_covariance + independent_covariance.T
-                )
-                position_types = sorted({
-                    int(row["position_type"])
-                    for row in rows
-                    if row.get("position_type") is not None
-                })
-                type_means = []
-                for position_type in position_types:
-                    type_rows = [
-                        row for row in rows
-                        if row.get("position_type") == position_type
-                    ]
-                    type_precision_sum = np.zeros((3, 3), dtype=float)
-                    type_weighted_sum = np.zeros(3, dtype=float)
-                    for row in type_rows:
-                        type_precision = _spd_solve(
-                            row["covariance"], np.eye(3, dtype=float)
-                        )
-                        type_precision_sum += type_precision
-                        type_weighted_sum += type_precision @ row["delta"]
-                    type_means.append(
-                        np.linalg.solve(type_precision_sum, type_weighted_sum)
-                    )
-                position_type_separation = max(
-                    (
-                        float(np.linalg.norm(type_means[left] - type_means[right]))
-                        for left in range(len(type_means))
-                        for right in range(left + 1, len(type_means))
-                    ),
-                    default=0.0,
-                )
-                result.append({
-                    "from": key[0],
-                    "to": key[1],
-                    "delta": tuple(float(value) for value in mean),
-                    "covariance": covariance,
-                    "formal_covariance": mean_covariance,
-                    "session_covariance_used": covariance,
-                    "independent_covariance": independent_covariance,
-                    "effective_sample_size": effective_sample_size,
-                    "acf_estimated_effective_sample_size": acf_effective_sample_size,
-                    "temporal_scale_factor": temporal_inflation,
-                    "scatter_scale_factor": scatter_scale,
-                    "effective_sample_size_sessions": ess_sessions,
-                    "session_count": len(session_summaries),
-                    "max_session_mean_separation_m": max_session_mean_separation,
-                    "max_session_mean_difference_xyz": max_session_mean_difference,
-                    "max_session_mean_pair": max_session_mean_pair,
-                    "pooled_lag_one_autocorrelations": pooled_lag_one,
-                    "observation_count": len(rows),
-                    "raw_indices": [row["raw_index"] for row in rows],
-                    "directions": [row["direction"] for row in rows],
-                    "position_types": position_types,
-                    "position_type_mean_separation_m": position_type_separation,
-                    "ratio": next((row["ratio"] for row in reversed(rows) if row["ratio"] is not None), None),
-                    "velocity_up_std": (
-                        sum(row["velocity_up_std"] for row in rows if row["velocity_up_std"] is not None)
-                        / sum(row["velocity_up_std"] is not None for row in rows)
-                        if any(row["velocity_up_std"] is not None for row in rows)
-                        else None
-                    ),
-                })
-            return result
+        weighted_edges = self._weighted_edges
 
         seed_samples = []
         for record in records:

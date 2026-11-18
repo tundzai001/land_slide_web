@@ -1466,6 +1466,106 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertIsNotNone(res_ok)
         self.assertTrue(res_ok["accepted"])
 
+    def test_results_and_receiver_refactored_helpers(self):
+        import asyncio
+        from processors.gnss_adjustment.results import RoundRobinResultsMixin
+        from processors.gnss_adjustment.receiver import RoundRobinReceiverMixin
+
+        # 1. _filter_vector_outliers - insufficient samples
+        samples = [
+            {"from": "A", "to": "B", "delta": [1.0, 2.0, 3.0], "raw_index": 0},
+            {"from": "A", "to": "B", "delta": [1.0, 2.0, 3.0], "raw_index": 1},
+        ]
+        filtered, diags = RoundRobinResultsMixin._filter_vector_outliers(samples, min_samples=5)
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(diags[0]["vector_filter_status"], "NOT_EVALUATED_INSUFFICIENT_GROUP")
+
+        # 2. _filter_vector_outliers - with outlier
+        samples_norm = [
+            {"from": "A", "to": "B", "delta": [10.0, 20.0, 30.0], "raw_index": i}
+            for i in range(6)
+        ]
+        samples_norm.append({"from": "A", "to": "B", "delta": [100.0, 200.0, 300.0], "raw_index": 6})
+        filtered, diags = RoundRobinResultsMixin._filter_vector_outliers(
+            samples_norm, min_samples=5, absolute_floor_m=1.0, sigma_multiplier=3.0
+        )
+        self.assertEqual(len(filtered), 6)
+        self.assertEqual(diags[-1]["vector_filter_status"], "EVALUATED_OUTLIER")
+
+        # 3. _filter_position_type_mixes
+        mix_samples = [
+            {"from": "A", "to": "B", "delta": [1.0, 2.0, 3.0], "position_type": 4, "raw_index": 0},
+            {"from": "A", "to": "B", "delta": [1.0, 2.0, 3.0], "position_type": 7, "raw_index": 1},
+        ]
+        filtered_mix, diags_mix = RoundRobinResultsMixin._filter_position_type_mixes(mix_samples)
+        self.assertEqual(len(filtered_mix), 1)
+        self.assertEqual(filtered_mix[0]["position_type"], 4)
+        self.assertEqual(len(diags_mix), 1)
+
+        # 4. _weighted_edges
+        import numpy as np
+        results_inst = RoundRobinResultsMixin()
+        results_inst.STABILITY_EWMA_FAST_TAU_SECONDS = 3.0
+        results_inst.STABILITY_EWMA_SLOW_TAU_SECONDS = 30.0
+        edge_samples = [
+            {"from": "A", "to": "B", "delta": [1.0, 2.0, 3.0], "std": [0.01, 0.01, 0.01], "covariance": np.eye(3) * 0.0001, "observation_epoch": 100, "raw_index": 0, "ratio": 2.5, "velocity_up_std": 0.01},
+            {"from": "A", "to": "B", "delta": [1.01, 1.99, 3.02], "std": [0.01, 0.01, 0.01], "covariance": np.eye(3) * 0.0001, "observation_epoch": 101, "raw_index": 1, "ratio": 2.5, "velocity_up_std": 0.01},
+        ]
+        weighted = results_inst._weighted_edges(edge_samples)
+        self.assertEqual(len(weighted), 1)
+        self.assertEqual(weighted[0]["from"], "A")
+        self.assertEqual(weighted[0]["to"], "B")
+
+        # 5. _handle_rover_restore_failure in receiver
+        receiver_inst = RoundRobinReceiverMixin()
+        receiver_inst._emit_progress = AsyncMock()
+        receiver_inst._last_set_error = "test error"
+
+        res_undul = asyncio.run(receiver_inst._handle_rover_restore_failure(
+            rover_code="ROV1",
+            command_text="config undulation test",
+            command_index=2,
+            total_commands=5,
+            project_id=1,
+            attempt=1,
+            set_transport_failure=False,
+        ))
+        self.assertTrue(res_undul)
+
+        res_save = asyncio.run(receiver_inst._handle_rover_restore_failure(
+            rover_code="ROV1",
+            command_text="saveconfig",
+            command_index=5,
+            total_commands=5,
+            project_id=1,
+            attempt=1,
+            set_transport_failure=False,
+        ))
+        self.assertFalse(res_save)
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(receiver_inst._handle_rover_restore_failure(
+                rover_code="ROV1",
+                command_text="mode rover",
+                command_index=1,
+                total_commands=5,
+                project_id=1,
+                attempt=1,
+                set_transport_failure=False,
+            ))
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(receiver_inst._handle_rover_restore_failure(
+                rover_code="ROV1",
+                command_text="mode rover",
+                command_index=1,
+                total_commands=5,
+                project_id=1,
+                attempt=1,
+                set_transport_failure=True,
+            ))
+
+
 
 
 
