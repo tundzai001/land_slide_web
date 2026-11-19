@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     MQTT_BROKER: str = ""
     MQTT_PORT: int = 1883
-    MQTT_USER: str = "mqttUser"
+    MQTT_USER: str = ""
     MQTT_PASSWORD: str = ""
     TOPIC_RELOAD_INTERVAL: int = 60
 

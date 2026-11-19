@@ -1,14 +1,15 @@
+import os
 import paho.mqtt.client as mqtt
 import re
 
 # ==========================================
-# CẤU HÌNH MQTT (Bạn thay đổi thông tin tại đây)
+# CẤU HÌNH MQTT (Đọc từ biến môi trường hoặc thay đổi tại đây)
 # ==========================================
-MQTT_BROKER = "aitogy.asia"  # Thay bằng địa chỉ broker của bạn
-MQTT_PORT = 1883                   # Cổng MQTT (thường là 1883, nếu có TLS/SSL thì là 8883)
-MQTT_TOPIC = "device/DEMO_DEVICE_3/upload"     # Topic bạn cần subscribe
-MQTT_USERNAME = "mqttUser"                 # Để trống nếu không có user
-MQTT_PASSWORD = ""                 # Để trống nếu không có pass
+MQTT_BROKER = os.getenv("MQTT_BROKER", "aitogy.asia")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "device/DEMO_DEVICE/upload")
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", os.getenv("MQTT_USER", ""))
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 # Hàm phân tích chuỗi GNGGA
 def parse_gngga(data):

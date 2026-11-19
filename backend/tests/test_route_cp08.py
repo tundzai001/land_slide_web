@@ -1,10 +1,11 @@
+import os
 import paho.mqtt.client as mqtt
 import json
 
-BROKER = "aitogy.asia"
-PORT = 1883
-USER = "mqttUser"
-PASS = ""
+BROKER = os.getenv("MQTT_BROKER", "aitogy.asia")
+PORT = int(os.getenv("MQTT_PORT", "1883"))
+USER = os.getenv("MQTT_USER", "")
+PASS = os.getenv("MQTT_PASSWORD", "")
 
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:

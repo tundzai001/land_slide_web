@@ -28,10 +28,10 @@ except ImportError:
 # CẤU HÌNH
 # =====================================================
 # MQTT (CHÍNH)
-MQTT_BROKER = "aitogy.asia"              #
-MQTT_PORT = 1883                          
-MQTT_USERNAME = "mqttUser"                       
-MQTT_PASSWORD = ""                        
+MQTT_BROKER = os.getenv("MQTT_BROKER", "aitogy.asia")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", os.getenv("MQTT_USER", ""))
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")                        
 
 # WebSocket (PHỤ - Fallback)
 WEBSOCKET_BACKEND = "wss://monitoring.aitogy.com/ws/updates"  

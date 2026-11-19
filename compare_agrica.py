@@ -1,16 +1,17 @@
+import os
 import paho.mqtt.client as mqtt
 import re
 
-MQTT_BROKER = "aitogy.asia"
-MQTT_PORT = 1883
-MQTT_USERNAME = "mqttUser"
-MQTT_PASSWORD = ""
+MQTT_BROKER = os.getenv("MQTT_BROKER", "aitogy.asia")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", os.getenv("MQTT_USER", ""))
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 DEVICES = {
-    "device/DEMO_DEVICE_1/upload": "Dap1_1",
-    "device/DEMO_DEVICE_2/upload": "Dap1_2",
-    "device/DEMO_DEVICE_3/upload": "Dap1_3",
-    "device/DEMO_DEVICE_4/upload": "Dap1_4",
+    os.getenv("DEVICE_TOPIC_1", "device/DAP1_1_DEMO/upload"): "Dap1_1",
+    os.getenv("DEVICE_TOPIC_2", "device/DAP1_2_DEMO/upload"): "Dap1_2",
+    os.getenv("DEVICE_TOPIC_3", "device/DAP1_3_DEMO/upload"): "Dap1_3",
+    os.getenv("DEVICE_TOPIC_4", "device/DAP1_4_DEMO/upload"): "Dap1_4",
 }
 
 buffers = {topic: "" for topic in DEVICES}

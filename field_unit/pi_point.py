@@ -30,10 +30,10 @@ LIGHT_PIN = 17  # GPIO 17 (physical pin 11)
 ACTIVE_HIGH = True
 
 # Default MQTT
-MQTT_BROKER = "aitogy.asia"
-MQTT_PORT = 1883
-MQTT_USERNAME = "mqttUser"
-MQTT_PASSWORD = ""
+MQTT_BROKER = os.getenv("MQTT_BROKER", "aitogy.asia")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", os.getenv("MQTT_USER", ""))
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 LOCAL_CONFIG = Path.home() / ".landslide_point.json"
 BACKEND_URL = os.getenv('BACKEND_URL', 'https://monitoring.aitogy.com')
