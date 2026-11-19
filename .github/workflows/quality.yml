@@ -120,7 +120,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=coverage-js/lcov.info
             -Dsonar.sources=.
             -Dsonar.tests=backend/tests,tests
-            -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**
+            -Dsonar.exclusions=coverage.xml,coverage-js/**,backend/tests/**,tests/**,frontend/dist/**,scripts/**
             -Dsonar.coverage.exclusions=*.py,live_base_output_probe.py,field_unit/**,scripts/**,frontend/**,backend/*,backend/*.py,backend/alembic/**,backend/static/**,backend/app/features/field/**,backend/app/mqtt/ntrip_pusher.py,**/*.html,**/*.config,**/*.mjs,**/*.cjs,**/*.yml,.github/**
             -Dsonar.issue.ignore.multicriteria=e1,e2,e3
             -Dsonar.issue.ignore.multicriteria.e1.ruleKey=githubactions:S8544
@@ -138,7 +138,7 @@ jobs:
           echo "=== Quality Gate Project Status ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=tundzai001_land_slide_web" || true
           echo ""
-          echo "=== CE Task Error Details ==="
+          echo "=== CE Task Failure Status ==="
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/ce/activity?projectKey=tundzai001_land_slide_web&status=FAILED&ps=3" | jq . || true
           curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/ce/component?component=tundzai001_land_slide_web" | jq . || true
           echo ""

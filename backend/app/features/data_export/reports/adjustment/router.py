@@ -21,6 +21,8 @@ from .render import find_adjustment, json_response, missing_export, xlsx_respons
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+ADJUSTMENT_NOT_FOUND = "Adjustment report not found"
 ADJUSTMENT_REPORT_NAME = re.compile(
     r"^gnss_(?:binh_sai|adjustment)_(?P<project_id>[1-9][0-9]*)_"
     r"(?P<timestamp>[1-9][0-9]*)\.(?P<extension>xlsx|json)$"
@@ -37,7 +39,7 @@ async def _project_or_404(
         )
     ).scalar_one_or_none()
     if project is None:
-        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        raise HTTPException(status_code=404, detail=ADJUSTMENT_NOT_FOUND)
     return project
 
 
@@ -89,7 +91,7 @@ async def _download(
 ):
     match = re.search(r"\.(xlsx|json)$", filename, re.IGNORECASE)
     if not match:
-        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        raise HTTPException(status_code=404, detail=ADJUSTMENT_NOT_FOUND)
     found = await find_adjustment(
         data_db,
         project_id=project_id,
@@ -140,7 +142,7 @@ async def download_gnss_adjustment_report(
     """Download a project-scoped result rendered from the data database."""
     match = ADJUSTMENT_REPORT_NAME.fullmatch(filename)
     if not match or int(match.group("project_id")) != project_id:
-        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        raise HTTPException(status_code=404, detail=ADJUSTMENT_NOT_FOUND)
     request.state.operation_phase = "validate_report"
     await _observe_phase(
         request,
@@ -184,7 +186,7 @@ async def download_scoped_gnss_adjustment_report(
         or artifact_slug(project_code, "") != project_code
         or artifact_slug(cluster_name, "") != cluster_name
     ):
-        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        raise HTTPException(status_code=404, detail=ADJUSTMENT_NOT_FOUND)
 
     projects = await _observe_phase(
         request,
@@ -201,7 +203,7 @@ async def download_scoped_gnss_adjustment_report(
         None,
     )
     if project is None:
-        raise HTTPException(status_code=404, detail="Adjustment report not found")
+        raise HTTPException(status_code=404, detail=ADJUSTMENT_NOT_FOUND)
     request.state.operation_phase = "authorize_project"
     check_operator_project_access(current_user, int(project.id))
     return await _download(

@@ -2,6 +2,9 @@
 from sqlalchemy import Column, Integer, String, Boolean, JSON, BigInteger, Float, Index, Text, UniqueConstraint, text
 from app.database import BaseData
 
+ADJUSTMENT_KEY_NOT_NULL = 'adjustment_key IS NOT NULL'
+INGEST_ID_NOT_NULL = 'ingest_id IS NOT NULL'
+
 class SensorData(BaseData):
 
     __tablename__ = "sensor_data"
@@ -13,27 +16,27 @@ class SensorData(BaseData):
         Index(
             'ix_sensor_data_adjustment_page',
             'sensor_type', 'timestamp',
-            postgresql_where=text('adjustment_key IS NOT NULL'),
-            sqlite_where=text('adjustment_key IS NOT NULL'),
+            postgresql_where=text(ADJUSTMENT_KEY_NOT_NULL),
+            sqlite_where=text(ADJUSTMENT_KEY_NOT_NULL),
         ),
         Index(
             'ix_sensor_data_adjustment_cluster',
             'adjustment_project_id', 'adjustment_cluster_index', 'timestamp',
-            postgresql_where=text('adjustment_key IS NOT NULL'),
-            sqlite_where=text('adjustment_key IS NOT NULL'),
+            postgresql_where=text(ADJUSTMENT_KEY_NOT_NULL),
+            sqlite_where=text(ADJUSTMENT_KEY_NOT_NULL),
         ),
         Index(
             'ix_sensor_data_adjustment_key_unique',
             'adjustment_key', unique=True,
-            postgresql_where=text('adjustment_key IS NOT NULL'),
-            sqlite_where=text('adjustment_key IS NOT NULL'),
+            postgresql_where=text(ADJUSTMENT_KEY_NOT_NULL),
+            sqlite_where=text(ADJUSTMENT_KEY_NOT_NULL),
         ),
         Index(
             'ix_sensor_data_ingest_id_unique',
             'ingest_id',
             unique=True,
-            postgresql_where=text('ingest_id IS NOT NULL'),
-            sqlite_where=text('ingest_id IS NOT NULL'),
+            postgresql_where=text(INGEST_ID_NOT_NULL),
+            sqlite_where=text(INGEST_ID_NOT_NULL),
         ),
     )
 

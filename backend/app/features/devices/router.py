@@ -14,6 +14,8 @@ from ...models import config as model_config
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+STATION_NOT_FOUND = "Station not found"
+
 
 def _check_private_device_scope(user: model_auth.User, project_id: int) -> None:
     """Field-device data is private even though station metadata is public."""
@@ -40,7 +42,7 @@ async def get_station_devices(
         )
         station = station_result.scalar_one_or_none()
         if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
+            raise HTTPException(status_code=404, detail=STATION_NOT_FOUND)
         _check_private_device_scope(current_user, station.project_id)
         result = await db.execute(
             select(model_config.Device)
@@ -96,7 +98,7 @@ async def create_device_in_station(
         )
         station = result.scalar_one_or_none()
         if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
+            raise HTTPException(status_code=404, detail=STATION_NOT_FOUND)
         _check_private_device_scope(current_user, station.project_id)
 
         new_device = model_config.Device(
@@ -151,7 +153,7 @@ async def delete_device(
         )
         station = station_result.scalar_one_or_none()
         if not station:
-            raise HTTPException(status_code=404, detail="Station not found")
+            raise HTTPException(status_code=404, detail=STATION_NOT_FOUND)
         _check_private_device_scope(current_user, station.project_id)
 
         await db.delete(device)

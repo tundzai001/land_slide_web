@@ -1,5 +1,7 @@
+import asyncio
 import io
 import math
+import numpy as np
 import os
 import re
 import sys
@@ -1663,6 +1665,152 @@ class SonarCoverageBoostTests(unittest.TestCase):
         self.assertEqual(len(summaries), 1)
         sep, diff, pair = RoundRobinResultsMixin._find_max_session_mean_separation(summaries)
         self.assertEqual(sep, 0.0)
+
+    def test_sensor_pipeline_alerts_coverage(self):
+        from app.mqtt.bridge.sensor_pipeline.alerts import (
+            SensorAlertMixin,
+            _resolve_incident_cases_for_alerts,
+        )
+
+        mixin = SensorAlertMixin()
+        mock_analyzer = MagicMock()
+        mock_analyzer.analyze_gnss_displacement.return_value = {"level": 1, "message": "gnss"}
+        mock_analyzer.analyze_rainfall.return_value = {"level": 2, "message": "rain"}
+        mock_analyzer.analyze_water_level.return_value = {"level": 3, "message": "water"}
+        mock_analyzer.analyze_tilt.return_value = {"level": 4, "message": "tilt"}
+        mixin.analyzer = mock_analyzer
+
+        # Test analyzer routes
+        self.assertEqual(mixin._run_sensor_analyzer("gnss", 1, [], {})["level"], 1)
+        self.assertEqual(mixin._run_sensor_analyzer("rain", 1, [], {})["level"], 2)
+        self.assertEqual(mixin._run_sensor_analyzer("water", 1, [], {})["level"], 3)
+        self.assertEqual(mixin._run_sensor_analyzer("imu", 1, [], {})["level"], 4)
+        self.assertIsNone(mixin._run_sensor_analyzer("unknown", 1, [], {}))
+
+        # Test analyzer exception
+        mock_analyzer.analyze_gnss_displacement.side_effect = RuntimeError("fail")
+        self.assertIsNone(mixin._run_sensor_analyzer("gnss", 1, [], {}))
+
+        # Test broadcast dangerous alert
+        mock_client = MagicMock()
+        mixin._get_client_for_station = MagicMock(return_value=mock_client)
+        alert_payload = {
+            "level": 3,
+            "message": "Dangerous tilt",
+            "audio_code": "AUDIO_1",
+            "details": {"x": 1},
+        }
+        with patch("app.websocket.manager.broadcast", new_callable=AsyncMock) as mock_bcast:
+            asyncio.run(mixin._broadcast_dangerous_alert(1, "Sta1", "imu", alert_payload, 10))
+            self.assertEqual(mock_bcast.call_count, 2)
+            mock_client.publish.assert_called_once()
+
+        # Test resolve incident cases for alerts
+        self.assertEqual(asyncio.run(_resolve_incident_cases_for_alerts(None, [])), [])
+
+        mock_db = AsyncMock()
+        mock_case_active = MagicMock(status="active", version=1, revision=1, id=1, project_id=10, station_id=1)
+        mock_case_resolved = MagicMock(status="resolved")
+        mock_execute_result = MagicMock()
+        mock_execute_result.scalars.return_value.all.return_value = [mock_case_active, mock_case_resolved]
+        mock_db.execute.return_value = mock_execute_result
+
+        with patch("app.mqtt.bridge.sensor_pipeline.alerts.append_event", new_callable=AsyncMock) as mock_evt:
+            mock_evt.return_value = MagicMock(id=100, sequence=5)
+            events = asyncio.run(_resolve_incident_cases_for_alerts(mock_db, [10, 20]))
+            self.assertEqual(len(events), 1)
+            self.assertEqual(mock_case_active.status, "resolved")
+            self.assertEqual(mock_case_active.signal_state, "RETURNED")
+
+    def test_gnss_origin_coverage(self):
+        from processors.gnss.origin import (
+            GNSSOriginMixin,
+            _query_origin_record,
+            _sync_station_origin_config,
+        )
+
+        # Test _sync_station_origin_config
+        mock_station = MagicMock()
+        mock_station.config = None
+        _sync_station_origin_config(mock_station, {"lat": 21.0, "lon": 105.0, "h": 50.0})
+        self.assertIn("gnss_origin", mock_station.config)
+        self.assertEqual(mock_station.config["gnss_origin"]["lat"], 21.0)
+
+        # Test _apply_origin_record
+        mixin = GNSSOriginMixin()
+        mixin.device_id = 1
+        mock_record_incomplete = MagicMock(rotation_matrix=None, ecef_origin=None)
+        mixin._apply_origin_record(mock_record_incomplete, None)
+        self.assertFalse(hasattr(mixin, "origin"))
+
+        mock_record_complete = MagicMock(
+            lat=21.0,
+            lon=105.0,
+            h=50.0,
+            rotation_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            ecef_origin=[100.0, 200.0, 300.0],
+            locked_at=123456,
+            id=5,
+            tracking_offset=None,
+        )
+        mixin._restore_runtime_state = MagicMock(return_value=True)
+        mixin._log_prefix = MagicMock(return_value="LOG")
+        mixin._apply_origin_record(mock_record_complete, None)
+        self.assertEqual(mixin.state, "ORIGIN_LOCKED")
+        self.assertEqual(mixin.origin["lat"], 21.0)
+
+        # Test _preserve_existing_origin
+        mixin.tracking_offset_enu = np.zeros(3)
+        mixin._preserve_existing_origin(mock_record_complete)
+        self.assertEqual(mixin.state, "ORIGIN_LOCKED")
+
+    def test_project_dem_geometry_and_parser_coverage(self):
+        from app.shared.project_dem import (
+            _parse_ascii_grid_header,
+            _validate_grid_geometry,
+            list_project_dems,
+            project_dem_summary,
+        )
+        from fastapi import HTTPException
+        import io
+
+        # 1. _validate_grid_geometry
+        xll, yll = _validate_grid_geometry(
+            columns=10, rows=10, cellsize=1.0, nodata=-9999.0,
+            x_origin=500000.0, y_origin=2300000.0, x_key="xllcorner", y_key="yllcorner"
+        )
+        self.assertEqual(xll, 500000.0)
+        self.assertEqual(yll, 2300000.0)
+
+        # Invalid columns/rows
+        self.assertRaises(HTTPException, _validate_grid_geometry, 0, 10, 1.0, -9999.0, 500000.0, 2300000.0, "x", "y")
+        # Invalid coords
+        self.assertRaises(HTTPException, _validate_grid_geometry, 10, 10, -1.0, -9999.0, 500000.0, 2300000.0, "x", "y")
+        self.assertRaises(HTTPException, _validate_grid_geometry, 10, 10, 1.0, -9999.0, -5.0, 2300000.0, "x", "y")
+
+        # 2. _parse_ascii_grid_header
+        valid_asc = (
+            b"ncols 10\n"
+            b"nrows 10\n"
+            b"xllcorner 500000.0\n"
+            b"yllcorner 2300000.0\n"
+            b"cellsize 1.0\n"
+            b"NODATA_value -9999\n"
+        )
+        cols, rows, cs, nd, x, y = _parse_ascii_grid_header(io.BytesIO(valid_asc))
+        self.assertEqual(cols, 10)
+        self.assertEqual(rows, 10)
+        self.assertEqual(cs, 1.0)
+        self.assertEqual(nd, -9999.0)
+
+        # Incomplete stream
+        self.assertRaises(HTTPException, _parse_ascii_grid_header, io.BytesIO(b"ncols 10\n"))
+
+        # 3. list_project_dems and summary
+        models = [{"id": "0123456789abcdef", "name": "DEM1"}]
+        summary = project_dem_summary(999, models=[])
+        self.assertFalse(summary["has_dem"])
+        self.assertEqual(summary["dems"], [])
 
 
 

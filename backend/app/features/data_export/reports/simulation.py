@@ -11,6 +11,9 @@ from openpyxl.chart import LineChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+METRIC_LABEL = "Chỉ số"
+VALUE_LABEL = "Giá trị"
+
 
 def run_payload(run: Any) -> dict[str, Any]:
     return {
@@ -54,16 +57,16 @@ def build_xlsx(run: Any) -> bytes:
     payload = run_payload(run)
     workbook = Workbook()
     workbook.remove(workbook.active)
-    summary_rows = [["Chỉ số", "Giá trị"]] + [[key, value] for key, value in payload["summary"].items()]
+    summary_rows = [[METRIC_LABEL, VALUE_LABEL]] + [[key, value] for key, value in payload["summary"].items()]
     summary_rows += [["Trạng thái lần chạy", payload["status"]], ["Tên", payload["display_name"]], ["Cảnh báo", " | ".join(payload["warnings"])] , ["Lỗi", payload["error"] or ""]]
     _sheet_from_rows(workbook, "Tong_quan", summary_rows)
-    _sheet_from_rows(workbook, "Tham_so_dau_vao", [["Tham số", "Giá trị", "Nguồn"]] + [[key, value, payload["parameter_sources"].get(key, "manual")] for key, value in payload["parameters"].items()])
+    _sheet_from_rows(workbook, "Tham_so_dau_vao", [["Tham số", VALUE_LABEL, "Nguồn"]] + [[key, value, payload["parameter_sources"].get(key, "manual")] for key, value in payload["parameters"].items()])
     _sheet_from_rows(workbook, "Du_lieu_tram", [["Loại", "Timestamp", "Online", "Dữ liệu"]] + [[key, value.get("timestamp"), value.get("is_online"), json.dumps(value.get("data", value), ensure_ascii=False)] for key, value in payload["sensor_snapshot"].items()])
     series = payload["time_series"]
     series_headers = list(series[0].keys()) if series else ["time_s"]
     series_sheet = _sheet_from_rows(workbook, "Chuoi_thoi_gian", [series_headers] + [[row.get(key) for key in series_headers] for row in series])
     _sheet_from_rows(workbook, "Su_kien", [["Thời gian (s)", "Trạng thái", "Sự kiện"]] + [[event.get("time_s"), event.get("state"), event.get("label")] for event in payload["events"]])
-    _sheet_from_rows(workbook, "Tac_dong", [["Chỉ số", "Giá trị"], ["Nhà ảnh hưởng", payload["summary"].get("houses_affected", 0)], ["Cây ảnh hưởng", payload["summary"].get("trees_affected", 0)], ["Quãng trượt (m)", payload["summary"].get("runout_m", 0)], ["Thể tích (m³)", payload["summary"].get("final_volume_m3", 0)]])
+    _sheet_from_rows(workbook, "Tac_dong", [[METRIC_LABEL, VALUE_LABEL], ["Nhà ảnh hưởng", payload["summary"].get("houses_affected", 0)], ["Cây ảnh hưởng", payload["summary"].get("trees_affected", 0)], ["Quãng trượt (m)", payload["summary"].get("runout_m", 0)], ["Thể tích (m³)", payload["summary"].get("final_volume_m3", 0)]])
     chart_sheet = workbook.create_sheet("Bieu_do")
     chart_specs = [
         ("FoS theo thời gian", "fos"), ("Mưa tích lũy", "cumulative_rain_mm"),
@@ -82,7 +85,7 @@ def build_xlsx(run: Any) -> bytes:
         chart.add_data(Reference(series_sheet, min_col=key_col, min_row=1, max_row=len(series) + 1), titles_from_data=True)
         chart.set_categories(Reference(series_sheet, min_col=time_col, min_row=2, max_row=len(series) + 1))
         chart_sheet.add_chart(chart, f"A{1 + index * 16}")
-    metadata = [["Trường", "Giá trị"], ["schema_version", payload["schema_version"]], ["engine_version", payload["engine_version"]], ["seed", payload["seed"]], ["disclaimer", payload["disclaimer"]]]
+    metadata = [["Trường", VALUE_LABEL], ["schema_version", payload["schema_version"]], ["engine_version", payload["engine_version"]], ["seed", payload["seed"]], ["disclaimer", payload["disclaimer"]]]
     _sheet_from_rows(workbook, "Metadata", metadata)
     output = BytesIO()
     workbook.save(output)
@@ -121,11 +124,11 @@ def build_pdf(run: Any) -> bytes:
     story = [Paragraph("BÁO CÁO MÔ PHỎNG SẠT LỞ", title), Paragraph(payload["display_name"], heading), Spacer(1, 6)]
     status_text = "KHÔNG HOÀN TẤT" if payload["status"] != "completed" else "HOÀN TẤT"
     story += [Paragraph(f"Trạng thái báo cáo: {status_text}", normal), Paragraph(payload["disclaimer"], normal), Spacer(1, 12)]
-    summary_data = [["Chỉ số", "Giá trị"]] + [[str(key), str(value)] for key, value in payload["summary"].items()]
+    summary_data = [[METRIC_LABEL, VALUE_LABEL]] + [[str(key), str(value)] for key, value in payload["summary"].items()]
     summary_table = Table(summary_data, colWidths=[70 * mm, 100 * mm], repeatRows=1)
     summary_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F766E")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, -1), font), ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story += [summary_table, PageBreak(), Paragraph("THAM SỐ VÀ NGUỒN DỮ LIỆU", heading)]
-    parameter_data = [["Tham số", "Giá trị", "Nguồn"]] + [[key, str(value), payload["parameter_sources"].get(key, "manual")] for key, value in payload["parameters"].items()]
+    parameter_data = [["Tham số", VALUE_LABEL, "Nguồn"]] + [[key, str(value), payload["parameter_sources"].get(key, "manual")] for key, value in payload["parameters"].items()]
     parameter_table = Table(parameter_data, colWidths=[55 * mm, 45 * mm, 70 * mm], repeatRows=1)
     parameter_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#164E63")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, -1), font), ("FONTSIZE", (0, 0), (-1, -1), 7.5), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1"))]))
     story += [parameter_table, Spacer(1, 12), Paragraph("CẢNH BÁO VÀ LỖI", heading)]

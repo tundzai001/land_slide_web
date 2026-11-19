@@ -1,5 +1,8 @@
 """GNSS adjustment audit, Excel, and human-readable report generation."""
 
+LENGTH_M = "Length (m)"
+NOTE_LABEL = "Ghi chú"
+
 
 class AdjustmentReportMixin:
     def _append_adjustment_to_excel(
@@ -131,7 +134,7 @@ class AdjustmentReportMixin:
         append_section("CALCULATED BASELINES - BASELINE TRUNG BÌNH")
         append_header([
             "STT", "From_Point", "To_Point", "dX (m)", "dY (m)", "dZ (m)",
-            "Std_X (m)", "Std_Y (m)", "Std_Z (m)", "Length (m)", "Raw / n_eff",
+            "Std_X (m)", "Std_Y (m)", "Std_Z (m)", LENGTH_M, "Raw / n_eff",
             "Temporal_Inflation (n/n_eff)", "Scatter_Scale", "Total_Cov_Inflation",
             "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
         ])
@@ -173,7 +176,7 @@ class AdjustmentReportMixin:
             append_section("SESSION REPEATABILITY - ĐỘ LẶP GIỮA CÁC PHIÊN")
             sheet.append([
                 None,
-                "Ghi chú",
+                NOTE_LABEL,
                 (
                     "Hiệu vector là mean phiên sau trừ mean phiên trước theo hướng cạnh "
                     "ECEF chuẩn hóa; dấu phụ thuộc thứ tự phiên, còn norm không đổi. Đây là "
@@ -216,7 +219,7 @@ class AdjustmentReportMixin:
         append_section("FOUND LOOPS - VÒNG KHÉP TRƯỚC BÌNH SAI")
         append_header([
             "STT", "List of Point", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
-            "Length (m)", "fs/s",
+            LENGTH_M, "fs/s",
         ])
         for index, loop in enumerate(loops, 1):
             sheet.append([
@@ -232,7 +235,7 @@ class AdjustmentReportMixin:
         append_section("ADJUSTED BASELINES")
         append_header([
             "STT", "From_Point", "To_Point", "vX (m)", "vY (m)", "vZ (m)",
-            "Adj_X (m)", "Adj_Y (m)", "Adj_Z (m)", "Length (m)", "Raw / n_eff",
+            "Adj_X (m)", "Adj_Y (m)", "Adj_Z (m)", LENGTH_M, "Raw / n_eff",
             "Temporal_Inflation (n/n_eff)", "Scatter_Scale", "Total_Cov_Inflation",
             "Cov_XY", "Cov_XZ", "Cov_YZ", "Formal_Cov_XY", "Formal_Cov_XZ", "Formal_Cov_YZ"
         ])
@@ -267,7 +270,7 @@ class AdjustmentReportMixin:
         append_section("ADJUSTED LOOPS")
         sheet.append([
             None,
-            "Ghi chú",
+            NOTE_LABEL,
             (
                 "Chỉ liệt kê fundamental cycle basis độc lập theo topology; "
                 "các vòng phụ thuộc đã được loại. Closure sau bình sai gần 0 "
@@ -283,7 +286,7 @@ class AdjustmentReportMixin:
         )
         append_header([
             "STT", "List of Point", "fx (m)", "fy (m)", "fz (m)", "fs (m)",
-            "Length (m)", "Kết quả",
+            LENGTH_M, "Kết quả",
         ])
         for index, loop in enumerate(loops, 1):
             sheet.append([
@@ -521,7 +524,7 @@ class AdjustmentReportMixin:
         for quality_note in quality_notes:
             sheet.append([
                 None,
-                "Ghi chú",
+                NOTE_LABEL,
                 quality_note,
             ])
             note_row = sheet.max_row

@@ -19,6 +19,8 @@ from .service import _run_view, _start_worker, _station_inputs
 
 router = APIRouter(prefix="/api/simulations", tags=["Landslide simulations"])
 
+SIMULATION_NOT_FOUND = "Không tìm thấy lần mô phỏng"
+
 @router.post("/runs", status_code=202, responses={422: {"description": "Unprocessable Entity"}})
 async def create_run(payload: SimulationCreate, data_db: AsyncSession = Depends(get_data_db), config_db: AsyncSession = Depends(get_config_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     now, warnings = int(time.time()), []
@@ -76,7 +78,7 @@ async def list_runs(_response: Response, project_id: Optional[int] = None, stati
 async def get_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     run = await db.get(model_data.SimulationRun, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Không tìm thấy lần mô phỏng")
+        raise HTTPException(status_code=404, detail=SIMULATION_NOT_FOUND)
     return _run_view(run)
 
 
@@ -84,7 +86,7 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: m
 async def stop_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     run = await db.get(model_data.SimulationRun, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Không tìm thấy lần mô phỏng")
+        raise HTTPException(status_code=404, detail=SIMULATION_NOT_FOUND)
     if run.status in {"queued", "running"}:
         run.status, run.finished_at, run.updated_at = "stopped", int(time.time()), int(time.time())
         await db.commit()
@@ -95,7 +97,7 @@ async def stop_run(run_id: int, db: AsyncSession = Depends(get_data_db), _user: 
 async def rerun(run_id: int, db: AsyncSession = Depends(get_data_db), current_user: model_auth.User = Depends(auth.require_permission(auth.Permission.MANAGE_SIMULATIONS))):
     original = await db.get(model_data.SimulationRun, run_id)
     if not original:
-        raise HTTPException(status_code=404, detail="Không tìm thấy lần mô phỏng")
+        raise HTTPException(status_code=404, detail=SIMULATION_NOT_FOUND)
     now = int(time.time())
     clone = model_data.SimulationRun(display_name=f"{original.display_name} · Chạy lại", created_by_user_id=current_user.id, created_by_username=current_user.username, project_id=original.project_id, project_code=original.project_code, project_name=original.project_name, station_id=original.station_id, station_code=original.station_code, station_name=original.station_name, mode=original.mode, status="queued", progress=0, engine_version=ENGINE_VERSION, schema_version=SCHEMA_VERSION, seed=original.seed, sim_duration_seconds=original.sim_duration_seconds, parameters=original.parameters, parameter_sources=original.parameter_sources, sensor_snapshot=original.sensor_snapshot, warnings=original.warnings, created_at=now, updated_at=now)
     db.add(clone)
